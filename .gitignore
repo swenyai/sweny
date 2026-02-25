@@ -1,7 +1,10 @@
 node_modules/
-dist/
 .env
 *.tsbuildinfo
 .sweny-data/
 .github/datadog-analysis/
 .DS_Store
+
+# Ignore dist for agent package (built locally)
+packages/agent/dist/
+# Root dist/ is NOT ignored — required for GitHub Action (compiled action entry point)
