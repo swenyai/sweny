@@ -2,9 +2,9 @@ import * as core from "@actions/core";
 import * as fs from "fs";
 import * as path from "path";
 import * as exec from "@actions/exec";
+import type { TriageHistoryEntry } from "@sweny/providers/issue-tracking";
 import { ActionConfig } from "../config.js";
 import { Providers } from "../providers/index.js";
-import { TriageHistoryEntry } from "../providers/issue-tracker/types.js";
 import { installClaude, runClaude } from "../utils/claude.js";
 import { parseServiceMap } from "../utils/service-map.js";
 
@@ -90,7 +90,7 @@ async function buildKnownIssuesContext(
   // 1. Fetch recent triage Linear issues (last 30 days)
   lines.push("## Linear Issues");
   try {
-    const triageHistory: TriageHistoryEntry[] =
+    const triageHistory =
       await providers.issueTracker.listTriageHistory(
         config.linearTeamId,
         config.linearTriageLabelId,

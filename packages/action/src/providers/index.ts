@@ -1,15 +1,21 @@
+import * as core from "@actions/core";
 import { ActionConfig } from "../config.js";
-import { ObservabilityProvider } from "./observability/types.js";
-import { IssueTrackerProvider } from "./issue-tracker/types.js";
-import { NotificationProvider } from "./notification/types.js";
-import { DatadogProvider } from "./observability/datadog.js";
-import { LinearProvider } from "./issue-tracker/linear.js";
-import { GitHubSummaryProvider } from "./notification/github-summary.js";
+import { datadog } from "@sweny/providers/observability";
+import { linear } from "@sweny/providers/issue-tracking";
+import type { ObservabilityProvider } from "@sweny/providers/observability";
+import type {
+  IssueTrackingProvider,
+  PrLinkCapable,
+  TriageHistoryCapable,
+} from "@sweny/providers/issue-tracking";
+
+const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning };
+
+type ActionIssueTracker = IssueTrackingProvider & PrLinkCapable & TriageHistoryCapable;
 
 export interface Providers {
   observability: ObservabilityProvider;
-  issueTracker: IssueTrackerProvider;
-  notification: NotificationProvider;
+  issueTracker: ActionIssueTracker;
 }
 
 export function createProviders(config: ActionConfig): Providers {
@@ -17,10 +23,11 @@ export function createProviders(config: ActionConfig): Providers {
   let observability: ObservabilityProvider;
   switch (config.observabilityProvider) {
     case "datadog":
-      observability = new DatadogProvider({
+      observability = datadog({
         apiKey: config.ddApiKey,
         appKey: config.ddAppKey,
         site: config.ddSite,
+        logger: actionsLogger,
       });
       break;
     default:
@@ -30,10 +37,10 @@ export function createProviders(config: ActionConfig): Providers {
   }
 
   // Issue tracker
-  let issueTracker: IssueTrackerProvider;
+  let issueTracker: ActionIssueTracker;
   switch (config.issueTrackerProvider) {
     case "linear":
-      issueTracker = new LinearProvider({ apiKey: config.linearApiKey });
+      issueTracker = linear({ apiKey: config.linearApiKey, logger: actionsLogger });
       break;
     default:
       throw new Error(
@@ -44,22 +51,5 @@ export function createProviders(config: ActionConfig): Providers {
   return {
     observability,
     issueTracker,
-    notification: new GitHubSummaryProvider(),
   };
 }
-
-// Re-export types
-export type { ObservabilityProvider } from "./observability/types.js";
-export type {
-  LogEntry,
-  AggregateResult,
-  QueryOptions,
-} from "./observability/types.js";
-export type { IssueTrackerProvider } from "./issue-tracker/types.js";
-export type {
-  Issue,
-  IssueCreateOptions,
-  IssueSearchOptions,
-  TriageHistoryEntry,
-} from "./issue-tracker/types.js";
-export type { NotificationProvider } from "./notification/types.js";

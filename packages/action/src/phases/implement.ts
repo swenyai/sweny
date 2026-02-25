@@ -1,8 +1,8 @@
 import * as core from "@actions/core";
 import * as fs from "fs";
+import type { Issue } from "@sweny/providers/issue-tracking";
 import { ActionConfig } from "../config.js";
 import { Providers } from "../providers/index.js";
-import { Issue } from "../providers/issue-tracker/types.js";
 import { InvestigationResult } from "./investigate.js";
 import { installClaude, runClaude } from "../utils/claude.js";
 import {
@@ -67,7 +67,8 @@ export async function implement(
         const existing = await providers.issueTracker.getIssue(
           investigation.existingIssue,
         );
-        await providers.issueTracker.addOccurrence(existing.id);
+        const date = new Date().toISOString().split("T")[0];
+        await providers.issueTracker.addComment(existing.id, `+1 detected on ${date}`);
         core.info(`Added +1 occurrence to ${investigation.existingIssue}`);
       } catch (err) {
         core.warning(`Failed to add occurrence: ${err}`);
@@ -129,15 +130,16 @@ export async function implement(
     // Search for existing issue or create new one
     core.info(`Searching for existing Linear issues matching: ${issueTitle}`);
     const searchResults = await providers.issueTracker.searchIssues({
-      teamId: config.linearTeamId,
+      projectId: config.linearTeamId,
       query: issueTitle,
-      labelId: config.linearBugLabelId,
+      labels: [config.linearBugLabelId],
     });
 
     if (searchResults.length > 0) {
       // Found existing issue
       issue = searchResults[0];
-      await providers.issueTracker.addOccurrence(issue.id);
+      const date = new Date().toISOString().split("T")[0];
+      await providers.issueTracker.addComment(issue.id, `+1 detected on ${date}`);
       core.info(
         `Found existing Linear issue: ${issue.identifier} - ${issue.url}`,
       );
@@ -159,8 +161,8 @@ export async function implement(
 
       issue = await providers.issueTracker.createIssue({
         title: issueTitle,
-        teamId: config.linearTeamId,
-        labelIds,
+        projectId: config.linearTeamId,
+        labels: labelIds,
         priority: 2,
         stateId: config.linearStateBacklog,
         description,
