@@ -27,18 +27,33 @@
     "@aws-sdk/s3-request-presigner": "^3"
   },
   "peerDependenciesMeta": {
-    "@aws-sdk/client-s3": { "optional": true },
-    "@aws-sdk/credential-provider-node": { "optional": true },
-    "@aws-sdk/s3-request-presigner": { "optional": true }
+    "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "@aws-sdk/credential-provider-node": {
+      "optional": true
+    },
+    "@aws-sdk/s3-request-presigner": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.997.0",
+    "@aws-sdk/s3-request-presigner": "^3.997.0",
     "@types/express": "^5",
     "@types/node": "^22",
     "tsx": "^4",
     "typescript": "^5.6",
     "vitest": "^4"
   },
-  "keywords": ["ai", "assistant", "claude", "slack", "mcp", "agent"],
+  "keywords": [
+    "ai",
+    "assistant",
+    "claude",
+    "slack",
+    "mcp",
+    "agent"
+  ],
   "license": "MIT",
   "homepage": "https://sweny.ai",
   "repository": {

@@ -1,4 +1,4 @@
-import path from "node:path";
+import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { SwenyConfig } from "./types.js";
 import { loadEnv } from "./schema.js";

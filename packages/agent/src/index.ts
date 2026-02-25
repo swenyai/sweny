@@ -9,7 +9,7 @@ import { PluginRegistry } from "./plugins/registry.js";
 import { RateLimiter } from "./rate-limit.js";
 import { startHealthServer } from "./health.js";
 import { ConsoleAuditLogger } from "./audit/console.js";
-import { AllowAllGuard } from "./access/allow-all.js";
+import { allowAllGuard } from "./access/allow-all.js";
 import { createLogger } from "./logger.js";
 
 async function main(): Promise<void> {
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     config.rateLimit?.maxPerMinute,
     config.rateLimit?.maxPerHour,
   );
-  const accessGuard = config.accessGuard ?? new AllowAllGuard();
+  const accessGuard = config.accessGuard ?? allowAllGuard();
 
   // ─── Slack ────────────────────────────────────────────────────
   if (!config.slack?.appToken || !config.slack?.botToken || !config.slack?.signingSecret) {

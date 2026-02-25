@@ -92,8 +92,8 @@ export class S3SessionStore implements SessionStore {
       return body
         .trim()
         .split("\n")
-        .filter((line) => line.length > 0)
-        .map((line) => JSON.parse(line) as TranscriptEntry);
+        .filter((line: string) => line.length > 0)
+        .map((line: string) => JSON.parse(line) as TranscriptEntry);
     } catch (err: unknown) {
       const code = (err as { name?: string }).name;
       if (code !== "NoSuchKey" && code !== "AccessDenied") {
