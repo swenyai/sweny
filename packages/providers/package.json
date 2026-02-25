@@ -1,0 +1,81 @@
+{
+  "name": "@sweny/providers",
+  "version": "0.1.0",
+  "description": "Shared provider interfaces and implementations for SWEny",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./observability": "./dist/observability/index.js",
+    "./issue-tracking": "./dist/issue-tracking/index.js",
+    "./notification": "./dist/notification/index.js",
+    "./source-control": "./dist/source-control/index.js",
+    "./incident": "./dist/incident/index.js",
+    "./messaging": "./dist/messaging/index.js",
+    "./auth": "./dist/auth/index.js",
+    "./storage": "./dist/storage/index.js"
+  },
+  "typesVersions": {
+    "*": {
+      "observability": ["dist/observability/index.d.ts"],
+      "issue-tracking": ["dist/issue-tracking/index.d.ts"],
+      "notification": ["dist/notification/index.d.ts"],
+      "source-control": ["dist/source-control/index.d.ts"],
+      "incident": ["dist/incident/index.d.ts"],
+      "messaging": ["dist/messaging/index.d.ts"],
+      "auth": ["dist/auth/index.d.ts"],
+      "storage": ["dist/storage/index.d.ts"]
+    }
+  },
+  "dependencies": {
+    "zod": "^3.24"
+  },
+  "peerDependencies": {
+    "@actions/core": "^1.10",
+    "@aws-sdk/client-cloudwatch-logs": "^3",
+    "@aws-sdk/client-s3": "^3",
+    "@aws-sdk/credential-provider-node": "^3",
+    "@aws-sdk/s3-request-presigner": "^3"
+  },
+  "peerDependenciesMeta": {
+    "@actions/core": {
+      "optional": true
+    },
+    "@aws-sdk/client-cloudwatch-logs": {
+      "optional": true
+    },
+    "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "@aws-sdk/credential-provider-node": {
+      "optional": true
+    },
+    "@aws-sdk/s3-request-presigner": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@actions/core": "^1.10",
+    "@aws-sdk/client-cloudwatch-logs": "^3",
+    "@aws-sdk/client-s3": "^3",
+    "@aws-sdk/s3-request-presigner": "^3",
+    "@types/node": "^22",
+    "typescript": "^5.6",
+    "vitest": "^4"
+  },
+  "license": "MIT",
+  "homepage": "https://sweny.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/swenyai/sweny.git",
+    "directory": "packages/providers"
+  }
+}

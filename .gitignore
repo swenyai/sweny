@@ -5,6 +5,7 @@ node_modules/
 .github/datadog-analysis/
 .DS_Store
 
-# Ignore dist for agent package (built locally)
+# Ignore dist for library packages (built locally)
 packages/agent/dist/
+packages/providers/dist/
 # Root dist/ is NOT ignored — required for GitHub Action (compiled action entry point)
