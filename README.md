@@ -56,7 +56,7 @@ jobs:
 
       - uses: swenyai/sweny@v0.1
         with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
           dd-app-key: ${{ secrets.DD_APP_KEY }}
           linear-api-key: ${{ secrets.LINEAR_API_KEY }}
@@ -124,8 +124,10 @@ That's it. SWEny handles the rest.
 
 | Input | Description | Required |
 |-------|-------------|----------|
-| `anthropic-api-key` | Anthropic API key for Claude | One of these |
-| `claude-oauth-token` | Claude Code OAuth token | is required |
+| `claude-oauth-token` | Claude Code OAuth token (Max subscriptions) | Recommended |
+| `anthropic-api-key` | Anthropic API key (pay-per-use) | Alternative |
+
+> Most users should use `claude-oauth-token` — this is the token from Claude Max / Pro subscriptions. Set it as a repository secret named `CLAUDE_OAUTH_TOKEN`. The `anthropic-api-key` option is available for direct API billing.
 
 #### Observability Provider
 
@@ -200,7 +202,7 @@ If using cross-repo dispatch, pass a `bot-token` with `repo` and `actions` scope
 ```yaml
 - uses: swenyai/sweny@v0.1
   with:
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
     dd-app-key: ${{ secrets.DD_APP_KEY }}
     linear-api-key: ${{ secrets.LINEAR_API_KEY }}
@@ -215,7 +217,7 @@ If using cross-repo dispatch, pass a `bot-token` with `repo` and `actions` scope
 ```yaml
 - uses: swenyai/sweny@v0.1
   with:
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
     linear-api-key: ${{ secrets.LINEAR_API_KEY }}
     linear-issue: 'ENG-123'
     additional-instructions: 'Focus on the webhook handler timeout'
@@ -226,7 +228,7 @@ If using cross-repo dispatch, pass a `bot-token` with `repo` and `actions` scope
 ```yaml
 - uses: swenyai/sweny@v0.1
   with:
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
     dd-app-key: ${{ secrets.DD_APP_KEY }}
     linear-api-key: ${{ secrets.LINEAR_API_KEY }}
