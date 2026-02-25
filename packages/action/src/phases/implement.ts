@@ -1,10 +1,10 @@
 import * as core from "@actions/core";
 import * as fs from "fs";
-import { ActionConfig } from "../config";
-import { Providers } from "../providers";
-import { Issue } from "../providers/issue-tracker/types";
-import { InvestigationResult } from "./investigate";
-import { installClaude, runClaude } from "../utils/claude";
+import { ActionConfig } from "../config.js";
+import { Providers } from "../providers/index.js";
+import { Issue } from "../providers/issue-tracker/types.js";
+import { InvestigationResult } from "./investigate.js";
+import { installClaude, runClaude } from "../utils/claude.js";
 import {
   configureGit,
   createBranch,
@@ -14,12 +14,12 @@ import {
   stageAndCommit,
   getChangedFiles,
   resetWorkflowChanges,
-} from "../utils/git";
+} from "../utils/git.js";
 import {
   createPullRequest,
   findExistingPr,
   dispatchWorkflow,
-} from "../utils/github";
+} from "../utils/github.js";
 
 export interface ImplementResult {
   issueIdentifier: string;

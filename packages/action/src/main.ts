@@ -1,9 +1,9 @@
 import * as core from "@actions/core";
-import { parseInputs } from "./config";
-import { createProviders } from "./providers";
-import { investigate } from "./phases/investigate";
-import { implement } from "./phases/implement";
-import { notify } from "./phases/notify";
+import { parseInputs } from "./config.js";
+import { createProviders } from "./providers/index.js";
+import { investigate } from "./phases/investigate.js";
+import { implement } from "./phases/implement.js";
+import { notify } from "./phases/notify.js";
 
 async function run(): Promise<void> {
   try {

@@ -5,7 +5,7 @@ import {
   IssueCreateOptions,
   IssueSearchOptions,
   TriageHistoryEntry,
-} from "./types";
+} from "./types.js";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 

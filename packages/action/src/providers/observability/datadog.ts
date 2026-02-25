@@ -4,7 +4,7 @@ import {
   QueryOptions,
   LogEntry,
   AggregateResult,
-} from "./types";
+} from "./types.js";
 
 interface DatadogConfig {
   apiKey: string;

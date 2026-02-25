@@ -2,11 +2,11 @@ import * as core from "@actions/core";
 import * as fs from "fs";
 import * as path from "path";
 import * as exec from "@actions/exec";
-import { ActionConfig } from "../config";
-import { Providers } from "../providers";
-import { TriageHistoryEntry } from "../providers/issue-tracker/types";
-import { installClaude, runClaude } from "../utils/claude";
-import { parseServiceMap } from "../utils/service-map";
+import { ActionConfig } from "../config.js";
+import { Providers } from "../providers/index.js";
+import { TriageHistoryEntry } from "../providers/issue-tracker/types.js";
+import { installClaude, runClaude } from "../utils/claude.js";
+import { parseServiceMap } from "../utils/service-map.js";
 
 export interface InvestigationResult {
   issuesFound: boolean;

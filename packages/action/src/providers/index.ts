@@ -1,10 +1,10 @@
-import { ActionConfig } from "../config";
-import { ObservabilityProvider } from "./observability/types";
-import { IssueTrackerProvider } from "./issue-tracker/types";
-import { NotificationProvider } from "./notification/types";
-import { DatadogProvider } from "./observability/datadog";
-import { LinearProvider } from "./issue-tracker/linear";
-import { GitHubSummaryProvider } from "./notification/github-summary";
+import { ActionConfig } from "../config.js";
+import { ObservabilityProvider } from "./observability/types.js";
+import { IssueTrackerProvider } from "./issue-tracker/types.js";
+import { NotificationProvider } from "./notification/types.js";
+import { DatadogProvider } from "./observability/datadog.js";
+import { LinearProvider } from "./issue-tracker/linear.js";
+import { GitHubSummaryProvider } from "./notification/github-summary.js";
 
 export interface Providers {
   observability: ObservabilityProvider;
@@ -49,17 +49,17 @@ export function createProviders(config: ActionConfig): Providers {
 }
 
 // Re-export types
-export type { ObservabilityProvider } from "./observability/types";
+export type { ObservabilityProvider } from "./observability/types.js";
 export type {
   LogEntry,
   AggregateResult,
   QueryOptions,
-} from "./observability/types";
-export type { IssueTrackerProvider } from "./issue-tracker/types";
+} from "./observability/types.js";
+export type { IssueTrackerProvider } from "./issue-tracker/types.js";
 export type {
   Issue,
   IssueCreateOptions,
   IssueSearchOptions,
   TriageHistoryEntry,
-} from "./issue-tracker/types";
-export type { NotificationProvider } from "./notification/types";
+} from "./issue-tracker/types.js";
+export type { NotificationProvider } from "./notification/types.js";

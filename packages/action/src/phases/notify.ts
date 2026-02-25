@@ -1,8 +1,8 @@
 import * as core from "@actions/core";
 import * as fs from "fs";
-import { ActionConfig } from "../config";
-import { InvestigationResult } from "./investigate";
-import { ImplementResult } from "./implement";
+import { ActionConfig } from "../config.js";
+import { InvestigationResult } from "./investigate.js";
+import { ImplementResult } from "./implement.js";
 
 export async function notify(
   config: ActionConfig,

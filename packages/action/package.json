@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Autonomous SRE triage GitHub Action — monitors logs, creates issues, opens fix PRs",
   "private": true,
+  "type": "module",
   "license": "MIT",
   "scripts": {
     "build": "tsc",
@@ -16,7 +17,8 @@
     "@actions/core": "^1.10",
     "@actions/exec": "^1.1",
     "@actions/github": "^6",
-    "@actions/io": "^1.1"
+    "@actions/io": "^1.1",
+    "@sweny/providers": "*"
   },
   "devDependencies": {
     "@types/node": "^22",

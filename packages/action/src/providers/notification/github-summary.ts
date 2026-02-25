@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import { NotificationProvider } from "./types";
+import { NotificationProvider } from "./types.js";
 
 export class GitHubSummaryProvider implements NotificationProvider {
   async writeSummary(content: string): Promise<void> {
