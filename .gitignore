@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+*.tsbuildinfo
+.sweny-data/
+.github/datadog-analysis/
+.DS_Store

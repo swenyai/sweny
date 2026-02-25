@@ -1,0 +1,49 @@
+{
+  "name": "@sweny/agent",
+  "version": "0.1.0",
+  "description": "AI assistant framework powered by Claude Code SDK — Slack bot + CLI with plugin architecture",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx --env-file=.env src/index.ts",
+    "start": "node dist/index.js",
+    "cli": "tsx --env-file=.env src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^1",
+    "@slack/bolt": "^4",
+    "express": "^5",
+    "zod": "^3.24"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-s3": "^3",
+    "@aws-sdk/credential-provider-node": "^3",
+    "@aws-sdk/s3-request-presigner": "^3"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-s3": { "optional": true },
+    "@aws-sdk/credential-provider-node": { "optional": true },
+    "@aws-sdk/s3-request-presigner": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/express": "^5",
+    "@types/node": "^22",
+    "tsx": "^4",
+    "typescript": "^5.6",
+    "vitest": "^4"
+  },
+  "keywords": ["ai", "assistant", "claude", "slack", "mcp", "agent"],
+  "license": "MIT",
+  "homepage": "https://sweny.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wickdninja/sweny.git",
+    "directory": "packages/agent"
+  }
+}

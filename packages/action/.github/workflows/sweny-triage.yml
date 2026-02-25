@@ -1,0 +1,1292 @@
+name: SWEny Triage
+
+on:
+  workflow_dispatch:
+    inputs:
+      time_range:
+        description: 'Initial time range to analyze (e.g., 1h, 6h, 24h, 7d)'
+        required: false
+        default: '4d'
+      severity_focus:
+        description: 'Primary focus area (errors, warnings, all)'
+        required: false
+        default: 'errors'
+      dry_run:
+        description: 'Dry run mode - analyze only, do not create PR'
+        required: false
+        type: boolean
+        default: false
+      service_filter:
+        description: 'Service filter pattern (default: *)'
+        required: false
+        default: '*'
+      investigation_depth:
+        description: 'How deep should Claude investigate (quick, standard, thorough)'
+        required: false
+        default: 'standard'
+      linear_issue:
+        description: 'Existing Linear issue to work on (e.g., ENG-123). If provided, skips log investigation and works on this issue directly.'
+        required: false
+        default: ''
+      additional_instructions:
+        description: 'Additional instructions for Claude (e.g., "focus on the webhook handler", "this might be a race condition")'
+        required: false
+        default: ''
+      novelty_mode:
+        description: 'Only report novel issues not already tracked in Linear/GitHub'
+        required: false
+        type: boolean
+        default: true
+      dispatched_from:
+        description: 'Repo that dispatched this run (cross-repo handoff). Do not set manually.'
+        required: false
+        default: ''
+      dispatched_context:
+        description: 'Analysis context from the dispatching repo (passed automatically)'
+        required: false
+        default: ''
+  # Uncomment and customize the schedule below for automated runs:
+  # schedule:
+  #   # Example: Run twice weekly (Mon & Thu) at 6 AM UTC
+  #   - cron: '0 6 * * 1,4'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+env:
+  NODE_VERSION: '20'
+  TIME_RANGE: ${{ github.event.inputs.time_range || '24h' }}
+  SEVERITY_FOCUS: ${{ github.event.inputs.severity_focus || 'errors' }}
+  DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+  SERVICE_FILTER: ${{ github.event.inputs.service_filter || '*' }}
+  INVESTIGATION_DEPTH: ${{ github.event.inputs.investigation_depth || 'standard' }}
+  LINEAR_ISSUE: ${{ github.event.inputs.linear_issue || '' }}
+  ADDITIONAL_INSTRUCTIONS: ${{ github.event.inputs.additional_instructions || '' }}
+  NOVELTY_MODE: ${{ github.event.inputs.novelty_mode || 'true' }}
+  DISPATCHED_FROM: ${{ github.event.inputs.dispatched_from || '' }}
+  DISPATCHED_CONTEXT: ${{ github.event.inputs.dispatched_context || '' }}
+  # Provider selection (configurable via repo variables)
+  OBSERVABILITY_PROVIDER: ${{ vars.OBSERVABILITY_PROVIDER || 'datadog' }}
+  ISSUE_TRACKER_PROVIDER: ${{ vars.ISSUE_TRACKER_PROVIDER || 'linear' }}
+  # Linear configuration (from repo variables, NOT hardcoded)
+  LINEAR_TEAM_ID: ${{ vars.LINEAR_TEAM_ID }}
+  LINEAR_BUG_LABEL_ID: ${{ vars.LINEAR_BUG_LABEL_ID }}
+  LINEAR_IMPROVEMENT_LABEL_ID: ${{ vars.LINEAR_IMPROVEMENT_LABEL_ID }}
+  AGENT_TRIAGE_LABEL_ID: ${{ vars.AGENT_TRIAGE_LABEL_ID }}
+  AGENT_NEEDS_INPUT_LABEL_ID: ${{ vars.AGENT_NEEDS_INPUT_LABEL_ID }}
+  AGENT_ERROR_LABEL_ID: ${{ vars.AGENT_ERROR_LABEL_ID }}
+  HUMAN_ONLY_LABEL_ID: ${{ vars.HUMAN_ONLY_LABEL_ID }}
+  LINEAR_STATE_BACKLOG: ${{ vars.LINEAR_STATE_BACKLOG }}
+  LINEAR_STATE_IN_PROGRESS: ${{ vars.LINEAR_STATE_IN_PROGRESS }}
+  LINEAR_STATE_PEER_REVIEW: ${{ vars.LINEAR_STATE_PEER_REVIEW }}
+
+jobs:
+  investigate-and-analyze:
+    name: Investigate Production Logs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      issues_found: ${{ steps.parse-results.outputs.issues_found }}
+      best_candidate: ${{ steps.parse-results.outputs.best_candidate }}
+      recommendation: ${{ steps.parse-results.outputs.recommendation }}
+      existing_issue: ${{ steps.parse-results.outputs.existing_issue }}
+      target_repo: ${{ steps.parse-results.outputs.target_repo }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify Datadog API Access
+        id: verify-datadog
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_APP_KEY: ${{ secrets.DD_APP_KEY }}
+          DD_SITE: ${{ secrets.DD_SITE || 'datadoghq.com' }}
+        run: |
+          echo "=== Datadog Credential Check ==="
+          echo "DD_API_KEY length: ${#DD_API_KEY}"
+          echo "DD_APP_KEY length: ${#DD_APP_KEY}"
+          echo "DD_SITE: ${DD_SITE}"
+
+          if [ -z "$DD_API_KEY" ] || [ -z "$DD_APP_KEY" ]; then
+            echo "::error::Datadog credentials are missing!"
+            exit 1
+          fi
+
+          echo "=== Testing Datadog API ==="
+          RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "https://api.${DD_SITE}/api/v2/logs/analytics/aggregate" \
+            -H "Content-Type: application/json" \
+            -H "DD-API-KEY: ${DD_API_KEY}" \
+            -H "DD-APPLICATION-KEY: ${DD_APP_KEY}" \
+            -d '{"filter":{"query":"*","from":"now-5m","to":"now"},"compute":[{"type":"total","aggregation":"count"}]}')
+
+          HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Datadog API returned HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          echo "Datadog API access verified"
+
+      - name: Verify Linear API Access
+        id: verify-linear
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: |
+          echo "=== Linear API Credential Check ==="
+          echo "LINEAR_API_KEY length: ${#LINEAR_API_KEY}"
+
+          if [ -z "$LINEAR_API_KEY" ]; then
+            echo "::error::Linear API key is missing!"
+            exit 1
+          fi
+
+          echo "=== Testing Linear API ==="
+          RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "https://api.linear.app/graphql" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: ${LINEAR_API_KEY}" \
+            -d '{"query":"query { viewer { id name } }"}')
+
+          HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
+          BODY=$(echo "$RESPONSE" | grep -v "HTTP_CODE:")
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Linear API returned HTTP $HTTP_CODE"
+            echo "Response: $BODY"
+            exit 1
+          fi
+
+          # Check for authentication errors in response
+          if echo "$BODY" | grep -q '"errors"'; then
+            echo "::error::Linear API authentication failed"
+            echo "Response: $BODY"
+            exit 1
+          fi
+
+          echo "Linear API access verified"
+
+      - name: Install Linear CLI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd .github/scripts/linear-cli
+          npm install
+          npm run build
+          npm link
+
+      - name: Build Known Issues Context
+        id: known-issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_TEAM_ID: ${{ env.LINEAR_TEAM_ID }}
+          AGENT_TRIAGE_LABEL_ID: ${{ env.AGENT_TRIAGE_LABEL_ID }}
+        run: |
+          mkdir -p .github/datadog-analysis
+
+          echo "=== Building known issues context ==="
+
+          # 1. Fetch recent triage Linear issues (last 30 days)
+          TRIAGE_ISSUES=$(linear-client list-triage-history \
+            --team-id "$LINEAR_TEAM_ID" \
+            --label-id "$AGENT_TRIAGE_LABEL_ID" \
+            --days 30 2>/dev/null) || TRIAGE_ISSUES=""
+
+          ISSUES_JSON=$(echo "$TRIAGE_ISSUES" | grep "^ISSUES_JSON=" | cut -d= -f2-)
+
+          # 2. Fetch recent triage GitHub PRs
+          TRIAGE_PRS=$(gh pr list --repo "${{ github.repository }}" --label "triage" --state all --limit 30 \
+            --json number,title,state,url,mergedAt,closedAt 2>/dev/null) || TRIAGE_PRS="[]"
+
+          # 3. Generate known-issues-context.md
+          cat > .github/datadog-analysis/known-issues-context.md << 'CONTEXT_HEADER'
+          # Known Triage History (Last 30 Days)
+
+          These issues have already been identified by previous SWEny Triage runs.
+          Do NOT create new issues or propose fixes for these same problems.
+
+          CONTEXT_HEADER
+
+          # Write Linear issues section
+          echo "## Linear Issues" >> .github/datadog-analysis/known-issues-context.md
+          if [ -n "$ISSUES_JSON" ] && [ "$ISSUES_JSON" != "[]" ]; then
+            echo "$ISSUES_JSON" | jq -r '.[] | "- **\(.identifier)** [\(.state)] \(.title) — \(.url)"' \
+              >> .github/datadog-analysis/known-issues-context.md 2>/dev/null || echo "_Failed to parse Linear issues_" >> .github/datadog-analysis/known-issues-context.md
+          else
+            echo "_No triage-labeled Linear issues found in last 30 days_" >> .github/datadog-analysis/known-issues-context.md
+          fi
+
+          echo "" >> .github/datadog-analysis/known-issues-context.md
+
+          # Write GitHub PRs section
+          echo "## GitHub PRs" >> .github/datadog-analysis/known-issues-context.md
+
+          # Recently merged
+          echo "### Merged (fixed)" >> .github/datadog-analysis/known-issues-context.md
+          MERGED=$(echo "$TRIAGE_PRS" | jq -r '[.[] | select(.state == "MERGED")] | .[] | "- PR #\(.number): \(.title) — \(.url)"' 2>/dev/null)
+          if [ -n "$MERGED" ]; then
+            echo "$MERGED" >> .github/datadog-analysis/known-issues-context.md
+          else
+            echo "_None_" >> .github/datadog-analysis/known-issues-context.md
+          fi
+
+          # Open PRs
+          echo "### Open (in progress)" >> .github/datadog-analysis/known-issues-context.md
+          OPEN=$(echo "$TRIAGE_PRS" | jq -r '[.[] | select(.state == "OPEN")] | .[] | "- PR #\(.number): \(.title) — \(.url)"' 2>/dev/null)
+          if [ -n "$OPEN" ]; then
+            echo "$OPEN" >> .github/datadog-analysis/known-issues-context.md
+          else
+            echo "_None_" >> .github/datadog-analysis/known-issues-context.md
+          fi
+
+          # Closed PRs (failed attempts)
+          echo "### Closed (failed attempts)" >> .github/datadog-analysis/known-issues-context.md
+          CLOSED=$(echo "$TRIAGE_PRS" | jq -r '[.[] | select(.state == "CLOSED")] | .[] | "- PR #\(.number): \(.title) — \(.url)"' 2>/dev/null)
+          if [ -n "$CLOSED" ]; then
+            echo "$CLOSED" >> .github/datadog-analysis/known-issues-context.md
+          else
+            echo "_None_" >> .github/datadog-analysis/known-issues-context.md
+          fi
+
+          echo ""
+          echo "=== Known issues context built ==="
+          cat .github/datadog-analysis/known-issues-context.md
+
+      - name: Install Claude Code CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code
+
+      - name: Investigate with Claude
+        id: investigate
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_APP_KEY: ${{ secrets.DD_APP_KEY }}
+          DD_SITE: ${{ secrets.DD_SITE || 'datadoghq.com' }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_TEAM_KEY: ${{ vars.LINEAR_TEAM_KEY || 'ENG' }}
+          LINEAR_TEAM_ID: ${{ env.LINEAR_TEAM_ID }}
+          LINEAR_BUG_LABEL_ID: ${{ env.LINEAR_BUG_LABEL_ID }}
+        run: |
+          mkdir -p .github/datadog-analysis
+
+          # Write dynamic inputs first (these need variable expansion)
+          cat > /tmp/investigation-prompt.md << EOF
+          You are an autonomous SRE agent investigating production issues.
+          You have access to multiple tools and data sources. Your job is to investigate issues,
+          understand problems, and prepare fixes.
+
+          ## CURRENT REPO
+          You are running inside: **${GITHUB_REPOSITORY}**
+
+          ## YOUR INPUTS - REVIEW THESE FIRST
+
+          ### Linear Issue
+          ${LINEAR_ISSUE:-"(none provided)"}
+
+          ### Additional Instructions
+          ${ADDITIONAL_INSTRUCTIONS:-"(none provided)"}
+
+          ### Cross-Repo Dispatch
+          Dispatched from: ${DISPATCHED_FROM:-"(not dispatched — this is a direct run)"}
+          Context from dispatcher: ${DISPATCHED_CONTEXT:-"(none)"}
+
+          ### Investigation Parameters
+          - Service Pattern: ${SERVICE_FILTER}
+          - Time Range: ${TIME_RANGE}
+          - Focus Area: ${SEVERITY_FOCUS}
+          - Investigation Depth: ${INVESTIGATION_DEPTH}
+
+          ## DECIDE YOUR APPROACH
+          EOF
+
+          # Append static content (no variable expansion needed)
+          cat >> /tmp/investigation-prompt.md << 'PROMPT_EOF'
+
+          Based on the inputs above, decide how to proceed:
+
+          1. **If a Linear Issue is provided** (e.g., ENG-123):
+             - Fetch the issue details and comments from Linear using the API
+             - Understand what the issue is about and any context from comments
+             - You may still query Datadog for related logs if helpful
+             - Focus your investigation on this specific issue
+
+          2. **If Additional Instructions are provided**:
+             - Follow them as your primary guide
+             - They may tell you to skip log investigation, focus on specific areas, etc.
+             - Use your judgment to combine with other inputs
+
+          3. **If neither is provided** (default mode):
+             - Query Datadog for recent errors
+             - Investigate the top issues
+             - Identify the best candidate for fixing
+
+          4. **You can combine approaches** - e.g., work on a Linear issue AND check Datadog for related errors
+
+          ## AVAILABLE TOOLS
+
+          ### Datadog Logs API
+          - `DD_API_KEY` - API key (use in DD-API-KEY header)
+          - `DD_APP_KEY` - Application key (use in DD-APPLICATION-KEY header)
+          - `DD_SITE` - Datadog site (datadoghq.com)
+
+          **DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+          ## Your Mission
+
+          Investigate logs from Datadog across **BOTH production AND staging environments** to find bugs and issues.
+          You have DIRECT ACCESS to Datadog's Logs API via curl commands.
+
+          **Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
+          - Issues in staging only → Fix before users are affected
+          - Issues in both environments → Critical, affects users now
+          - Issues in production only → May be load/scale related
+
+          ## Datadog API Access
+
+          Use these environment variables in your curl commands:
+          - `DD_API_KEY` - API key (use in DD-API-KEY header)
+          - `DD_APP_KEY` - Application key (use in DD-APPLICATION-KEY header)
+          - `DD_SITE` - Datadog site (datadoghq.com)
+
+          ### Example: Get error counts by service
+          ```bash
+          curl -s -X POST "https://api.${DD_SITE}/api/v2/logs/analytics/aggregate" \
+            -H "Content-Type: application/json" \
+            -H "DD-API-KEY: ${DD_API_KEY}" \
+            -H "DD-APPLICATION-KEY: ${DD_APP_KEY}" \
+            -d '{"filter":{"query":"service:* status:error","from":"now-1h","to":"now"},"compute":[{"type":"total","aggregation":"count"}],"group_by":[{"facet":"service","limit":20,"sort":{"type":"measure","aggregation":"count","order":"desc"}}]}'
+          ```
+
+          ### Example: Get recent error logs
+          ```bash
+          curl -s -X POST "https://api.${DD_SITE}/api/v2/logs/events/search" \
+            -H "Content-Type: application/json" \
+            -H "DD-API-KEY: ${DD_API_KEY}" \
+            -H "DD-APPLICATION-KEY: ${DD_APP_KEY}" \
+            -d '{"filter":{"query":"service:* status:error","from":"now-1h","to":"now"},"sort":"-timestamp","page":{"limit":100}}'
+          ```
+
+          ### Linear CLI (linear-client)
+          The `linear-client` CLI is installed and available. Use it instead of raw curl commands.
+          The LINEAR_API_KEY environment variable is already configured.
+
+          ```bash
+          # Get issue details by identifier (e.g., ENG-123)
+          linear-client get-issue --identifier "ENG-123"
+
+          # Search for existing issues by title/keyword
+          linear-client search-issues --team-id "${LINEAR_TEAM_ID}" --query "search terms here"
+
+          # Search with label filter
+          linear-client search-issues --team-id "${LINEAR_TEAM_ID}" --query "search terms" --label-id "${LINEAR_BUG_LABEL_ID}"
+          ```
+
+          **Environment variables available:**
+          - `LINEAR_API_KEY` - API key (already configured)
+          - `LINEAR_TEAM_ID` - Team ID
+          - `LINEAR_BUG_LABEL_ID` - Bug label ID
+          - `LINEAR_TEAM_KEY` - Team key prefix
+
+          ## SERVICE OWNERSHIP MAP
+
+          Read the service map at `.github/scripts/service-map.yml` to understand which GitHub repo
+          owns which Datadog service. This is critical for cross-repo dispatch.
+
+          **You MUST determine which repo should fix the bug you find.** Look at the Datadog service
+          name in the error logs and match it against the `owns` list in the service map.
+
+          PROMPT_EOF
+
+          # Inject service map into prompt
+          if [ -f .github/scripts/service-map.yml ]; then
+            cat >> /tmp/investigation-prompt.md << 'SVCMAP_EOF'
+
+          ### Service Map Reference
+          SVCMAP_EOF
+            cat .github/scripts/service-map.yml >> /tmp/investigation-prompt.md
+          fi
+
+          # Continue with static prompt content
+          cat >> /tmp/investigation-prompt.md << 'PROMPT2_EOF'
+
+          ## TARGET REPO IDENTIFICATION
+
+          **Required**: In your `best-candidate.md` output, include these lines near the top
+          (after the TRIAGE_FINGERPRINT and RECOMMENDATION):
+
+          ```
+          TARGET_SERVICE: <service-map key, e.g., my-service>
+          TARGET_REPO: <GitHub repo, e.g., my-org/my-service>
+          ```
+
+          - If the bug belongs to **this repo**, set TARGET_REPO to the current repo.
+          - If the bug belongs to **a different repo**, set TARGET_REPO to that repo.
+            The workflow will automatically dispatch to the correct repo.
+
+          PROMPT2_EOF
+
+          # Inject known issues context
+          if [ -f .github/datadog-analysis/known-issues-context.md ]; then
+            cat >> /tmp/investigation-prompt.md << 'KNOWN_EOF'
+
+          ## KNOWN ISSUES - DO NOT DUPLICATE
+
+          The following issues and fixes have already been identified by previous triage runs.
+          Do NOT create new issues or propose fixes for the same underlying problems.
+          If the same error appears again, note it as a known issue and recommend a +1 on the existing issue instead.
+
+          KNOWN_EOF
+            cat .github/datadog-analysis/known-issues-context.md >> /tmp/investigation-prompt.md
+          fi
+
+          # Add investigation parameters
+          cat >> /tmp/investigation-prompt.md << EOF
+
+          ## Investigation Parameters
+
+          - **Service Pattern**: \`${SERVICE_FILTER}\`
+          - **Time Range**: \`${TIME_RANGE}\`
+          - **Focus Area**: \`${SEVERITY_FOCUS}\`
+          - **Investigation Depth**: \`${INVESTIGATION_DEPTH}\`
+
+          ## Output Requirements
+
+          Create these files with your findings:
+
+          ### 1. \`.github/datadog-analysis/investigation-log.md\`
+          Document your investigation process - commands run, what you found, reasoning.
+
+          ### 2. \`.github/datadog-analysis/issues-report.md\`
+          For each issue found:
+          - Severity, Environment (Production/Staging/Both), Frequency
+          - Description, Evidence (logs, stack traces)
+          - Root Cause Analysis, Impact, Suggested Fix
+          - Files to Modify, Confidence Level
+          - **Linear Status**: Check if this issue already exists in Linear
+            - If exists: Note the issue identifier (e.g., ENG-123) and URL
+            - If not found: Note as "No existing Linear issue found"
+
+          ### 3. \`.github/datadog-analysis/best-candidate.md\`
+          Select the BEST issue to fix based on impact, frequency, fixability.
+          Include full technical analysis, exact code changes, test plan, rollback plan.
+
+          **CRITICAL - Title Format**: The first \`#\` heading in this file becomes the Linear issue title and PR title.
+          Do NOT prefix it with "Best Candidate Fix:", "Best Fix Candidate:", or any boilerplate.
+          Write a concise, descriptive bug title like you would for a real bug ticket. Examples:
+          - \`# extractUserFromResult Null Guard in EmitsEvent Decorator\`
+          - \`# SQS Message Retry Storm from Unhandled TypeError in Worker\`
+          - \`# PostgreSQL Vector Cast Syntax Error in Embedding Repository\`
+          Do NOT include backticks (\\\`) in the heading — they cause shell injection in CI.
+
+          **Important**: Include Linear Status at the top showing if this issue already exists:
+          - If exists: \`**Linear Issue**: [ENG-123](url) - Issue already tracked\`
+          - If not found: \`**Linear Issue**: None found - New issue will be created\`
+
+          **Required**: Include a TRIAGE_FINGERPRINT block in an HTML comment at the very top of best-candidate.md:
+          \`\`\`
+          <!-- TRIAGE_FINGERPRINT
+          error_pattern: <the key error message or pattern>
+          service: <service name>
+          first_seen: <date>
+          run_id: <github run id if available>
+          -->
+          \`\`\`
+
+          **Required**: Include a RECOMMENDATION line near the top (after the fingerprint):
+          - \`RECOMMENDATION: implement\` - This is a novel issue worth fixing
+          - \`RECOMMENDATION: +1 existing ENG-XXX\` - Same issue as an existing ticket, add occurrence
+          - \`RECOMMENDATION: skip\` - Not worth fixing (too minor, expected behavior, etc.)
+
+          ## START NOW
+
+          1. Review your inputs above (Linear Issue, Additional Instructions, Parameters)
+          2. Decide your approach based on what was provided
+          3. Execute your investigation using the available APIs
+          4. Write the output files
+
+          **CRITICAL**: You MUST write the output files BEFORE you run out of turns.
+          Write files early and update them if needed. Do NOT keep investigating without writing files.
+
+          **If Additional Instructions tell you to do something specific, follow them.**
+          EOF
+
+          # Run Claude with full tool access
+          claude -p "$(cat /tmp/investigation-prompt.md)" \
+            --allowedTools "*" \
+            --dangerously-skip-permissions \
+            --max-turns 50
+
+      - name: Parse Analysis Results
+        id: parse-results
+        run: |
+          if [ -f .github/datadog-analysis/issues-report.md ]; then
+            echo "Issues report created"
+            echo "issues_found=true" >> $GITHUB_OUTPUT
+            ISSUE_COUNT=$(grep -c "^## Issue:" .github/datadog-analysis/issues-report.md 2>/dev/null) || ISSUE_COUNT=0
+            echo "issue_count=${ISSUE_COUNT}" >> $GITHUB_OUTPUT
+          else
+            echo "No issues report created"
+            echo "issues_found=false" >> $GITHUB_OUTPUT
+            echo "issue_count=0" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -f .github/datadog-analysis/best-candidate.md ]; then
+            echo "Best candidate analysis created"
+            echo "best_candidate=true" >> $GITHUB_OUTPUT
+
+            # Extract RECOMMENDATION from best-candidate.md
+            RECOMMENDATION=$(grep -i "^RECOMMENDATION:" .github/datadog-analysis/best-candidate.md 2>/dev/null | head -1 | sed 's/^RECOMMENDATION:[[:space:]]*//' || echo "implement")
+            echo "recommendation=$RECOMMENDATION" >> $GITHUB_OUTPUT
+            echo "Recommendation: $RECOMMENDATION"
+
+            # Extract existing issue reference from +1 recommendation
+            EXISTING_ISSUE=$(echo "$RECOMMENDATION" | sed -n 's/.*+1 existing \([A-Z]*-[0-9]*\).*/\1/p' 2>/dev/null || echo "")
+            echo "existing_issue=$EXISTING_ISSUE" >> $GITHUB_OUTPUT
+
+            # Extract TARGET_REPO for cross-repo dispatch
+            TARGET_REPO=$(grep -i "^TARGET_REPO:" .github/datadog-analysis/best-candidate.md 2>/dev/null | head -1 | sed 's/^TARGET_REPO:[[:space:]]*//' || echo "")
+            echo "target_repo=$TARGET_REPO" >> $GITHUB_OUTPUT
+            echo "Target repo: $TARGET_REPO"
+          else
+            echo "best_candidate=false" >> $GITHUB_OUTPUT
+            echo "recommendation=skip" >> $GITHUB_OUTPUT
+            echo "target_repo=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Analysis Artifacts
+        if: steps.parse-results.outputs.issues_found == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: datadog-analysis-${{ github.run_id }}
+          path: .github/datadog-analysis/
+          retention-days: 30
+
+  implement-fix:
+    name: Implement Fix
+    needs: investigate-and-analyze
+    if: |
+      needs.investigate-and-analyze.outputs.best_candidate == 'true' &&
+      github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      should_implement: ${{ steps.check-existing-prs.outputs.should_implement }}
+      issue_identifier: ${{ steps.create-linear-issue.outputs.issue_identifier }}
+      issue_url: ${{ steps.create-linear-issue.outputs.issue_url }}
+      issue_title: ${{ steps.create-linear-issue.outputs.issue_title }}
+      existing_pr_found: ${{ steps.check-existing-prs.outputs.existing_pr_found }}
+      existing_pr_url: ${{ steps.check-existing-prs.outputs.existing_pr_url }}
+      existing_pr_state: ${{ steps.check-existing-prs.outputs.existing_pr_state }}
+      pr_created: ${{ steps.create-pr.outputs.pr_url }}
+      new_pr_url: ${{ steps.create-pr.outputs.pr_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Analysis Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: datadog-analysis-${{ github.run_id }}
+          path: .github/datadog-analysis/
+
+      - name: Install Linear CLI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd .github/scripts/linear-cli
+          npm install
+          npm run build
+          npm link
+
+      - name: Check Novelty Recommendation
+        id: novelty-check
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          EXTRACTED_RECOMMENDATION: ${{ needs.investigate-and-analyze.outputs.recommendation }}
+          EXTRACTED_EXISTING_ISSUE: ${{ needs.investigate-and-analyze.outputs.existing_issue }}
+        run: |
+          RECOMMENDATION="$EXTRACTED_RECOMMENDATION"
+          EXISTING_ISSUE="$EXTRACTED_EXISTING_ISSUE"
+
+          echo "Recommendation: $RECOMMENDATION"
+          echo "Existing issue: $EXISTING_ISSUE"
+
+          if echo "$RECOMMENDATION" | grep -qi "skip"; then
+            echo "::notice::Recommendation is SKIP - no novel issues found"
+            echo "should_proceed=false" >> $GITHUB_OUTPUT
+          elif echo "$RECOMMENDATION" | grep -qi "+1 existing"; then
+            echo "::notice::Recommendation is +1 EXISTING - adding occurrence to $EXISTING_ISSUE"
+            if [ -n "$EXISTING_ISSUE" ]; then
+              # Fetch the existing issue and add occurrence
+              OUTPUT=$(linear-client get-issue --identifier "$EXISTING_ISSUE" 2>/dev/null) || true
+              ISSUE_ID=$(echo "$OUTPUT" | grep "^ISSUE_ID=" | cut -d= -f2)
+              if [ -n "$ISSUE_ID" ]; then
+                linear-client add-occurrence --issue-id "$ISSUE_ID" || true
+                echo "Added +1 occurrence to $EXISTING_ISSUE"
+              fi
+            fi
+            echo "should_proceed=false" >> $GITHUB_OUTPUT
+          else
+            echo "Recommendation is IMPLEMENT - proceeding with fix"
+            echo "should_proceed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract Issue Title from Analysis
+        id: extract-title
+        if: env.LINEAR_ISSUE == '' && steps.novelty-check.outputs.should_proceed == 'true'
+        run: |
+          if [ -f .github/datadog-analysis/best-candidate.md ]; then
+            # Strip markdown heading prefix, backticks, and "Best Candidate/Fix" boilerplate
+            TITLE=$(grep -m1 "^#" .github/datadog-analysis/best-candidate.md \
+              | sed 's/^#* *//' \
+              | sed 's/`//g' \
+              | sed -E 's/^(Best )?(Fix )?(Candidate)( Fix)?[: ]*//i' \
+              | sed 's/^[[:space:]]*//' \
+              | head -c 100)
+            if [ -z "$TITLE" ]; then
+              TITLE="SWEny Triage: Automated bug fix"
+            fi
+          else
+            TITLE="SWEny Triage: Automated bug fix"
+          fi
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+
+      - name: Get Linear Issue Details
+        id: create-linear-issue
+        if: steps.novelty-check.outputs.should_proceed == 'true'
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          EXTRACTED_TITLE: ${{ steps.extract-title.outputs.title }}
+        run: |
+          # Check if user provided a specific Linear issue to work on
+          if [ -n "${{ env.LINEAR_ISSUE }}" ]; then
+            echo "User provided Linear issue: ${{ env.LINEAR_ISSUE }}"
+            echo "Fetching issue details..."
+
+            OUTPUT=$(linear-client get-issue --identifier "${{ env.LINEAR_ISSUE }}")
+
+            echo "$OUTPUT"
+            ISSUE_ID=$(echo "$OUTPUT" | grep "^ISSUE_ID=" | cut -d= -f2)
+            ISSUE_IDENTIFIER=$(echo "$OUTPUT" | grep "^ISSUE_IDENTIFIER=" | cut -d= -f2)
+            ISSUE_URL=$(echo "$OUTPUT" | grep "^ISSUE_URL=" | cut -d= -f2)
+            ISSUE_BRANCH=$(echo "$OUTPUT" | grep "^ISSUE_BRANCH=" | cut -d= -f2)
+            ISSUE_TITLE=$(echo "$OUTPUT" | grep "^ISSUE_TITLE=" | cut -d= -f2-)
+
+            echo "issue_id=$ISSUE_ID" >> $GITHUB_OUTPUT
+            echo "issue_identifier=$ISSUE_IDENTIFIER" >> $GITHUB_OUTPUT
+            echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+            echo "issue_branch=$ISSUE_BRANCH" >> $GITHUB_OUTPUT
+            echo "issue_title=$ISSUE_TITLE" >> $GITHUB_OUTPUT
+            echo "issue_existed=true" >> $GITHUB_OUTPUT
+
+            echo "Working on Linear issue: $ISSUE_IDENTIFIER - $ISSUE_URL"
+          else
+            # No Linear issue provided - extract title from analysis and search/create
+            TITLE="$EXTRACTED_TITLE"
+
+            echo "Searching for existing Linear issues matching: $TITLE"
+            SEARCH_OUTPUT=$(linear-client search-issues \
+              --team-id "${{ env.LINEAR_TEAM_ID }}" \
+              --query "$TITLE" \
+              --label-id "${{ env.LINEAR_BUG_LABEL_ID }}")
+            SEARCH_EXIT=$?
+
+            if [ $SEARCH_EXIT -ne 0 ]; then
+              echo "::error::Linear search failed (exit $SEARCH_EXIT) - aborting to prevent duplicate issue creation"
+              exit 1
+            fi
+
+            echo "$SEARCH_OUTPUT"
+            FOUND=$(echo "$SEARCH_OUTPUT" | grep "^FOUND=" | cut -d= -f2)
+
+            if [ "$FOUND" = "true" ]; then
+            ISSUE_ID=$(echo "$SEARCH_OUTPUT" | grep "^ISSUE_ID=" | cut -d= -f2)
+            ISSUE_IDENTIFIER=$(echo "$SEARCH_OUTPUT" | grep "^ISSUE_IDENTIFIER=" | cut -d= -f2)
+            ISSUE_URL=$(echo "$SEARCH_OUTPUT" | grep "^ISSUE_URL=" | cut -d= -f2)
+            ISSUE_BRANCH=$(echo "$SEARCH_OUTPUT" | grep "^ISSUE_BRANCH=" | cut -d= -f2)
+            ISSUE_TITLE=$(echo "$SEARCH_OUTPUT" | grep "^ISSUE_TITLE=" | cut -d= -f2-)
+
+            linear-client add-occurrence --issue-id "$ISSUE_ID"
+
+            echo "issue_id=$ISSUE_ID" >> $GITHUB_OUTPUT
+            echo "issue_identifier=$ISSUE_IDENTIFIER" >> $GITHUB_OUTPUT
+            echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+            echo "issue_branch=$ISSUE_BRANCH" >> $GITHUB_OUTPUT
+            echo "issue_title=$ISSUE_TITLE" >> $GITHUB_OUTPUT
+            echo "issue_existed=true" >> $GITHUB_OUTPUT
+
+            echo "Found existing Linear issue: $ISSUE_IDENTIFIER - $ISSUE_URL"
+          else
+            echo "No existing Linear issue found, creating new one..."
+
+            DESCRIPTION=""
+            if [ -f .github/datadog-analysis/best-candidate.md ]; then
+              DESCRIPTION=$(cat .github/datadog-analysis/best-candidate.md | head -c 10000)
+            fi
+
+            OUTPUT=$(linear-client create-issue \
+              --title "$TITLE" \
+              --team-id "${{ env.LINEAR_TEAM_ID }}" \
+              --labels "${{ env.LINEAR_BUG_LABEL_ID }},${{ env.AGENT_TRIAGE_LABEL_ID }}" \
+              --priority 2 \
+              --state-id "${{ env.LINEAR_STATE_BACKLOG }}" \
+              --description "$DESCRIPTION")
+
+            echo "$OUTPUT"
+            ISSUE_ID=$(echo "$OUTPUT" | grep "^ISSUE_ID=" | cut -d= -f2)
+            ISSUE_IDENTIFIER=$(echo "$OUTPUT" | grep "^ISSUE_IDENTIFIER=" | cut -d= -f2)
+            ISSUE_URL=$(echo "$OUTPUT" | grep "^ISSUE_URL=" | cut -d= -f2)
+            ISSUE_BRANCH=$(echo "$OUTPUT" | grep "^ISSUE_BRANCH=" | cut -d= -f2)
+            ISSUE_TITLE=$(echo "$OUTPUT" | grep "^ISSUE_TITLE=" | cut -d= -f2-)
+
+            echo "issue_id=$ISSUE_ID" >> $GITHUB_OUTPUT
+            echo "issue_identifier=$ISSUE_IDENTIFIER" >> $GITHUB_OUTPUT
+            echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+            echo "issue_branch=$ISSUE_BRANCH" >> $GITHUB_OUTPUT
+            echo "issue_title=$ISSUE_TITLE" >> $GITHUB_OUTPUT
+            echo "issue_existed=false" >> $GITHUB_OUTPUT
+
+            echo "Created new Linear issue: $ISSUE_IDENTIFIER - $ISSUE_URL"
+          fi
+          fi
+
+      - name: Cross-Repo Dispatch Check
+        id: cross-repo-check
+        if: steps.novelty-check.outputs.should_proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GHA_BOT_TOKEN }}
+          TARGET_REPO: ${{ needs.investigate-and-analyze.outputs.target_repo }}
+          CURRENT_REPO: ${{ github.repository }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          ISSUE_IDENTIFIER: ${{ steps.create-linear-issue.outputs.issue_identifier }}
+          ISSUE_ID: ${{ steps.create-linear-issue.outputs.issue_id }}
+        run: |
+          # If this run was already dispatched from another repo, never re-dispatch (prevent loops)
+          if [ -n "${{ env.DISPATCHED_FROM }}" ]; then
+            echo "This run was dispatched from ${{ env.DISPATCHED_FROM }} - implementing locally"
+            echo "should_dispatch=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # If target repo is empty or matches current repo, implement locally
+          if [ -z "$TARGET_REPO" ] || [ "$TARGET_REPO" = "$CURRENT_REPO" ]; then
+            echo "Bug belongs to this repo ($CURRENT_REPO) - implementing locally"
+            echo "should_dispatch=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "::notice::Bug belongs to $TARGET_REPO (current repo: $CURRENT_REPO) - dispatching cross-repo"
+
+          # Always dispatch with the Linear issue ID (created/found in previous step)
+          gh workflow run "SWEny Triage" \
+            --repo "$TARGET_REPO" \
+            -f linear_issue="$ISSUE_IDENTIFIER" \
+            -f dispatched_from="$CURRENT_REPO" \
+            -f novelty_mode=false
+
+          echo "Dispatched to $TARGET_REPO with linear_issue=$ISSUE_IDENTIFIER"
+
+          # Add a comment to the Linear issue noting the cross-repo handoff
+          if [ -n "$ISSUE_ID" ]; then
+            linear-client update-issue \
+              --issue-id "$ISSUE_ID" \
+              --add-comment "Cross-repo dispatch: Discovered in \`$CURRENT_REPO\`, dispatched to \`$TARGET_REPO\` for implementation."
+          fi
+
+          echo "should_dispatch=true" >> $GITHUB_OUTPUT
+
+      - name: Check for Existing GitHub PRs
+        id: check-existing-prs
+        if: steps.novelty-check.outputs.should_proceed == 'true' && steps.cross-repo-check.outputs.should_dispatch != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXTRACTED_TITLE: ${{ steps.extract-title.outputs.title }}
+          EXTRACTED_ISSUE_IDENTIFIER: ${{ steps.create-linear-issue.outputs.issue_identifier }}
+        run: |
+          TITLE="$EXTRACTED_TITLE"
+          ISSUE_IDENTIFIER="$EXTRACTED_ISSUE_IDENTIFIER"
+
+          echo "Searching GitHub for existing PRs..."
+
+          FOUND_PR="false"
+          FOUND_PR_URL=""
+          FOUND_PR_STATE=""
+
+          if [ -n "$ISSUE_IDENTIFIER" ]; then
+            echo "Searching for PRs referencing $ISSUE_IDENTIFIER..."
+
+            # Search for open PRs and verify exact match
+            OPEN_PRS=$(gh pr list --state open --search "$ISSUE_IDENTIFIER" --json number,title,url,state,body --limit 10 2>/dev/null || echo "[]")
+            for pr_url in $(echo "$OPEN_PRS" | jq -r '.[].url'); do
+              PR_DATA=$(echo "$OPEN_PRS" | jq -r --arg url "$pr_url" '.[] | select(.url == $url)')
+              PR_TITLE=$(echo "$PR_DATA" | jq -r '.title')
+              PR_BODY=$(echo "$PR_DATA" | jq -r '.body // ""')
+
+              # Check for exact issue identifier match (case insensitive)
+              if echo "$PR_TITLE $PR_BODY" | grep -qi "\b${ISSUE_IDENTIFIER}\b"; then
+                FOUND_PR="true"
+                FOUND_PR_URL="$pr_url"
+                FOUND_PR_STATE="open"
+                echo "Found open PR with exact match: $FOUND_PR_URL"
+                break
+              fi
+            done
+
+            # Search for merged PRs ONLY if LINEAR_ISSUE was NOT explicitly provided
+            # If user provided linear_issue, they want to work on it regardless of past PRs
+            # Only skip if there's an OPEN PR (someone actively working on it)
+            if [ "$FOUND_PR" = "false" ] && [ -z "${{ env.LINEAR_ISSUE }}" ]; then
+              echo "No LINEAR_ISSUE provided - checking for merged PRs to avoid duplication"
+              MERGED_PRS=$(gh pr list --state merged --search "$ISSUE_IDENTIFIER" --json number,title,url,mergedAt,body --limit 10 2>/dev/null || echo "[]")
+              CUTOFF_DATE=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-30d +%Y-%m-%dT%H:%M:%SZ)
+
+              for pr_url in $(echo "$MERGED_PRS" | jq -r --arg cutoff "$CUTOFF_DATE" '.[] | select(.mergedAt > $cutoff) | .url'); do
+                PR_DATA=$(echo "$MERGED_PRS" | jq -r --arg url "$pr_url" '.[] | select(.url == $url)')
+                PR_TITLE=$(echo "$PR_DATA" | jq -r '.title')
+                PR_BODY=$(echo "$PR_DATA" | jq -r '.body // ""')
+
+                # Check for exact issue identifier match (case insensitive)
+                if echo "$PR_TITLE $PR_BODY" | grep -qi "\b${ISSUE_IDENTIFIER}\b"; then
+                  FOUND_PR="true"
+                  FOUND_PR_URL="$pr_url"
+                  FOUND_PR_STATE="merged"
+                  echo "Found merged PR with exact match: $FOUND_PR_URL"
+                  break
+                fi
+              done
+            elif [ "$FOUND_PR" = "false" ] && [ -n "${{ env.LINEAR_ISSUE }}" ]; then
+              echo "LINEAR_ISSUE explicitly provided - ignoring merged PRs (user wants fresh implementation)"
+            fi
+          fi
+
+          # Only check triage labeled PRs if LINEAR_ISSUE was NOT provided
+          if [ "$FOUND_PR" = "false" ] && [ -z "${{ env.LINEAR_ISSUE }}" ]; then
+            echo "Searching for PRs with triage label..."
+            LABELED_PRS=$(gh pr list --state all --label "triage" --json number,title,url,state,mergedAt,closedAt --limit 10 2>/dev/null || echo "[]")
+
+            TITLE_PREFIX=$(echo "$TITLE" | head -c 50)
+            MATCHING_PR=$(echo "$LABELED_PRS" | jq -r --arg prefix "$TITLE_PREFIX" '[.[] | select(.title | startswith($prefix))] | .[0].url // empty')
+            if [ -n "$MATCHING_PR" ]; then
+              FOUND_PR="true"
+              FOUND_PR_URL="$MATCHING_PR"
+              FOUND_PR_STATE=$(echo "$LABELED_PRS" | jq -r --arg url "$MATCHING_PR" '.[] | select(.url == $url) | .state')
+              echo "Found PR with matching title: $FOUND_PR_URL (state: $FOUND_PR_STATE)"
+            fi
+          fi
+
+          echo "existing_pr_found=$FOUND_PR" >> $GITHUB_OUTPUT
+          echo "existing_pr_url=$FOUND_PR_URL" >> $GITHUB_OUTPUT
+          echo "existing_pr_state=$FOUND_PR_STATE" >> $GITHUB_OUTPUT
+
+          # Decision logic:
+          # - If LINEAR_ISSUE provided: Only skip for OPEN PRs (someone actively working)
+          # - If LINEAR_ISSUE NOT provided: Skip for any PR (avoid duplication in automatic mode)
+          if [ "$FOUND_PR" = "true" ]; then
+            if [ -n "${{ env.LINEAR_ISSUE }}" ] && [ "$FOUND_PR_STATE" != "open" ]; then
+              echo "::notice::Found $FOUND_PR_STATE PR: $FOUND_PR_URL"
+              echo "::notice::LINEAR_ISSUE explicitly provided - implementing anyway (past PR may be incomplete)"
+              echo "should_implement=true" >> $GITHUB_OUTPUT
+            else
+              echo "::notice::Found existing PR: $FOUND_PR_URL (state: $FOUND_PR_STATE)"
+              echo "::notice::Skipping implementation to avoid duplication"
+              echo "should_implement=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "No existing PR found - will proceed with implementation"
+            echo "should_implement=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Git Config
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update Linear Based on Existing PR State
+        if: steps.novelty-check.outputs.should_proceed == 'true' && steps.cross-repo-check.outputs.should_dispatch != 'true' && steps.check-existing-prs.outputs.should_implement == 'false'
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: |
+          ISSUE_ID="${{ steps.create-linear-issue.outputs.issue_id }}"
+          ISSUE_IDENTIFIER="${{ steps.create-linear-issue.outputs.issue_identifier }}"
+          PR_URL="${{ steps.check-existing-prs.outputs.existing_pr_url }}"
+          PR_STATE="${{ steps.check-existing-prs.outputs.existing_pr_state }}"
+
+          echo "::notice::Skipping implementation - existing PR found"
+
+          case "$PR_STATE" in
+            "open"|"OPEN")
+              COMMENT="**Existing Open PR Found**: [$PR_URL]($PR_URL)"$'\n'"_Occurrence tracked by SWEny Triage_"
+              linear-client update-issue \
+                --issue-id "$ISSUE_ID" \
+                --state-id "${{ env.LINEAR_STATE_IN_PROGRESS }}" \
+                --add-comment "$COMMENT"
+              ;;
+            "merged"|"MERGED")
+              COMMENT="**Merged PR Found**: [$PR_URL]($PR_URL)"$'\n'"_Occurrence tracked by SWEny Triage_"
+              linear-client update-issue \
+                --issue-id "$ISSUE_ID" \
+                --state-id "${{ env.LINEAR_STATE_PEER_REVIEW }}" \
+                --add-comment "$COMMENT"
+              ;;
+            *)
+              COMMENT="**Existing PR Found**: [$PR_URL]($PR_URL) (state: $PR_STATE)"$'\n'"_Occurrence tracked by SWEny Triage_"
+              linear-client update-issue \
+                --issue-id "$ISSUE_ID" \
+                --add-comment "$COMMENT"
+              ;;
+          esac
+
+      - name: Create Fix Branch
+        if: steps.novelty-check.outputs.should_proceed == 'true' && steps.cross-repo-check.outputs.should_dispatch != 'true' && steps.check-existing-prs.outputs.should_implement == 'true'
+        id: create-branch
+        run: |
+          LINEAR_BRANCH="${{ steps.create-linear-issue.outputs.issue_branch }}"
+          if [ -n "$LINEAR_BRANCH" ]; then
+            BRANCH_NAME=$(echo "$LINEAR_BRANCH" | sed 's|^[^/]*/||')
+          else
+            BRANCH_NAME=$(echo "${{ steps.create-linear-issue.outputs.issue_identifier }}" | tr '[:upper:]' '[:lower:]')-triage-fix
+          fi
+          git checkout -b "$BRANCH_NAME"
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+          # Reset any workflow file changes to avoid permission issues on push
+          git checkout HEAD -- .github/workflows/ 2>/dev/null || true
+
+      - name: Install Claude Code CLI
+        if: steps.novelty-check.outputs.should_proceed == 'true' && steps.cross-repo-check.outputs.should_dispatch != 'true' && steps.check-existing-prs.outputs.should_implement == 'true'
+        run: |
+          npm install -g @anthropic-ai/claude-code
+
+      - name: Implement Fix with Claude
+        if: steps.novelty-check.outputs.should_proceed == 'true' && steps.cross-repo-check.outputs.should_dispatch != 'true' && steps.check-existing-prs.outputs.should_implement == 'true'
+        id: implement-fix
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          LINEAR_ID="${{ steps.create-linear-issue.outputs.issue_identifier }}"
+
+          claude -p "You are implementing a fix for an issue identified from production logs.
+
+          ## Context
+
+          Read the best candidate analysis at \`.github/datadog-analysis/best-candidate.md\`.
+          Also read \`.github/datadog-analysis/investigation-log.md\` for context.
+
+          ## Your Task
+
+          1. **Understand the issue**: Read the analysis thoroughly
+          2. **Verify the fix approach**: Check the codebase to ensure the suggested fix is valid
+          3. **Implement the fix**:
+             - Make minimal, focused changes
+             - Follow existing code patterns
+             - Add appropriate error handling
+             - Include TypeScript types
+             - Do NOT add unnecessary comments
+             - Do NOT refactor unrelated code
+
+          4. **Verify your changes**:
+             - Run \`npm run lint\` to check for issues
+             - Run \`npm run build\` to verify compilation
+
+          5. **Create a commit** with format:
+             \`\`\`
+             fix(<scope>): <brief description>
+
+             - <change 1>
+             - <change 2>
+
+             Identified by SWEny Triage
+             Linear: ${LINEAR_ID}
+             \`\`\`
+
+          ## Safety Guidelines
+
+          - If the fix is too complex or risky, create \`.github/datadog-analysis/fix-declined.md\` explaining why
+          - Do not make breaking changes
+          - Prefer defensive coding patterns
+
+          Start by reading the best-candidate.md file." \
+            --allowedTools "*" \
+            --dangerously-skip-permissions \
+            --max-turns 30
+
+      - name: Check for Code Changes
+        if: steps.novelty-check.outputs.should_proceed == 'true' && steps.cross-repo-check.outputs.should_dispatch != 'true' && steps.check-existing-prs.outputs.should_implement == 'true'
+        id: check-changes
+        run: |
+          # Check if Claude created any commits on the branch
+          COMMIT_COUNT=$(git rev-list --count HEAD ^origin/main 2>/dev/null || echo "0")
+
+          if [ "$COMMIT_COUNT" -gt 0 ]; then
+            echo "Claude created $COMMIT_COUNT commit(s)"
+            echo "has_commits=true" >> $GITHUB_OUTPUT
+            CHANGED_FILES=$(git diff --name-only origin/main..HEAD | tr '\n' ',' | sed 's/,$//')
+            echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          else
+            echo "No commits created by Claude"
+
+            # Check if there are uncommitted code changes (excluding analysis and workflow files)
+            CODE_CHANGES=$(git diff --name-only -- . ':!.github/datadog-analysis' ':!.github/workflows' 2>/dev/null || echo "")
+            STAGED_CHANGES=$(git diff --cached --name-only -- . ':!.github/datadog-analysis' ':!.github/workflows' 2>/dev/null || echo "")
+
+            if [ -n "$CODE_CHANGES" ] || [ -n "$STAGED_CHANGES" ]; then
+              echo "Found uncommitted code changes, creating fallback commit"
+
+              # Stage only code changes, not analysis or workflow files
+              git add -A -- . ':!.github/datadog-analysis' ':!.github/workflows'
+
+              LINEAR_ID="${{ steps.create-linear-issue.outputs.issue_identifier }}"
+              git commit -m "$(cat <<EOF
+          fix: automated fix from log analysis
+
+          Partial implementation by Claude (reached max turns before completion)
+
+          Identified by SWEny Triage
+          Linear: ${LINEAR_ID}
+          EOF
+          )"
+
+              echo "has_commits=true" >> $GITHUB_OUTPUT
+              CHANGED_FILES=$(git diff --name-only HEAD~1..HEAD | tr '\n' ',' | sed 's/,$//')
+              echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+            else
+              echo "No code changes to commit"
+              echo "has_commits=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Push Branch
+        if: steps.novelty-check.outputs.should_proceed == 'true' && steps.cross-repo-check.outputs.should_dispatch != 'true' && steps.check-existing-prs.outputs.should_implement == 'true' && steps.check-changes.outputs.has_commits == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GHA_BOT_TOKEN }}
+        run: |
+          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git
+          git push origin ${{ steps.create-branch.outputs.branch_name }}
+
+      - name: Generate PR Description with Claude
+        id: pr-description
+        if: steps.novelty-check.outputs.should_proceed == 'true' && steps.cross-repo-check.outputs.should_dispatch != 'true' && steps.check-existing-prs.outputs.should_implement == 'true' && steps.check-changes.outputs.has_commits == 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          LINEAR_ID="${{ steps.create-linear-issue.outputs.issue_identifier }}"
+          LINEAR_URL="${{ steps.create-linear-issue.outputs.issue_url }}"
+
+          claude -p "Generate a pull request description.
+
+          ## Context
+
+          1. Read \`.github/datadog-analysis/best-candidate.md\` for issue details
+          2. Read \`.github/datadog-analysis/investigation-log.md\` for context
+          3. Run \`git diff main..HEAD\` to see the changes made
+
+          ## Output
+
+          Create \`.github/datadog-analysis/pr-description.md\` with:
+
+          ## Summary
+          <What this PR fixes and why>
+
+          ## Issue Analysis
+          - Severity, Frequency, Services affected, Impact
+
+          ## Root Cause
+          <Technical explanation>
+
+          ## Solution
+          <Description and changes made>
+
+          ## Testing
+          - [ ] Lint passes
+          - [ ] Build passes
+          - [ ] Tests pass
+
+          ## Rollback Plan
+          <How to rollback>
+
+          ---
+          **Linear Issue**: [${LINEAR_ID}](${LINEAR_URL})
+          > Generated by SWEny Triage" \
+            --allowedTools "*" \
+            --dangerously-skip-permissions \
+            --max-turns 10
+
+      - name: Create Pull Request
+        id: create-pr
+        if: steps.novelty-check.outputs.should_proceed == 'true' && steps.cross-repo-check.outputs.should_dispatch != 'true' && steps.check-existing-prs.outputs.should_implement == 'true' && steps.check-changes.outputs.has_commits == 'true'
+        uses: actions/github-script@v7
+        env:
+          LINEAR_ISSUE_ID: ${{ steps.create-linear-issue.outputs.issue_identifier }}
+          LINEAR_ISSUE_URL: ${{ steps.create-linear-issue.outputs.issue_url }}
+          LINEAR_ISSUE_TITLE: ${{ steps.create-linear-issue.outputs.issue_title }}
+          FIX_BRANCH_NAME: ${{ steps.create-branch.outputs.branch_name }}
+        with:
+          github-token: ${{ secrets.GHA_BOT_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            const linearIssueId = process.env.LINEAR_ISSUE_ID;
+            const linearIssueUrl = process.env.LINEAR_ISSUE_URL;
+            const linearIssueTitle = process.env.LINEAR_ISSUE_TITLE;
+
+            let prBody = '';
+            try {
+              prBody = fs.readFileSync('.github/datadog-analysis/pr-description.md', 'utf8');
+            } catch (e) {
+              prBody = `## Automated Fix from SWEny Triage
+
+            This PR contains an automated fix for an issue identified in production logs.
+
+            **Linear Issue**: [${linearIssueId}](${linearIssueUrl})
+
+            > Generated by SWEny Triage workflow
+            `;
+            }
+
+            // Format title: lowercase, use Linear issue title
+            const formattedTitle = linearIssueTitle.toLowerCase();
+
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `fix(${linearIssueId}): ${formattedTitle}`,
+              head: process.env.FIX_BRANCH_NAME,
+              base: 'main',
+              body: prBody
+            });
+
+            console.log(`Created PR #${pr.data.number}: ${pr.data.html_url}`);
+            core.setOutput('pr_number', pr.data.number);
+            core.setOutput('pr_url', pr.data.html_url);
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.data.number,
+              labels: ['agent', 'triage', 'needs-review']
+            });
+
+            return pr.data.number;
+
+      - name: Link PR to Linear Issue
+        if: steps.novelty-check.outputs.should_proceed == 'true' && steps.cross-repo-check.outputs.should_dispatch != 'true' && steps.check-existing-prs.outputs.should_implement == 'true' && steps.check-changes.outputs.has_commits == 'true'
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: |
+          linear-client link-pr \
+            --issue-id "${{ steps.create-linear-issue.outputs.issue_id }}" \
+            --pr-url "${{ steps.create-pr.outputs.pr_url }}" \
+            --pr-number "${{ steps.create-pr.outputs.pr_number }}"
+
+      - name: Update Linear Issue to Peer Review
+        if: steps.novelty-check.outputs.should_proceed == 'true' && steps.cross-repo-check.outputs.should_dispatch != 'true' && steps.check-existing-prs.outputs.should_implement == 'true' && steps.check-changes.outputs.has_commits == 'true'
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: |
+          linear-client update-issue \
+            --issue-id "${{ steps.create-linear-issue.outputs.issue_id }}" \
+            --state-id "${{ env.LINEAR_STATE_PEER_REVIEW }}"
+
+  notify-results:
+    name: Create Summary
+    needs: [investigate-and-analyze, implement-fix]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Download Analysis Artifacts
+        if: needs.investigate-and-analyze.outputs.issues_found == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: datadog-analysis-${{ github.run_id }}
+          path: .github/datadog-analysis/
+        continue-on-error: true
+
+      - name: Create Summary
+        env:
+          SUMMARY_RECOMMENDATION: ${{ needs.investigate-and-analyze.outputs.recommendation }}
+          SUMMARY_TARGET_REPO: ${{ needs.investigate-and-analyze.outputs.target_repo }}
+          SUMMARY_EXISTING_PR_FOUND: ${{ needs.implement-fix.outputs.existing_pr_found }}
+          SUMMARY_EXISTING_PR_URL: ${{ needs.implement-fix.outputs.existing_pr_url }}
+          SUMMARY_ISSUE_ID: ${{ needs.implement-fix.outputs.issue_identifier }}
+          SUMMARY_ISSUE_URL: ${{ needs.implement-fix.outputs.issue_url }}
+          SUMMARY_NEW_PR_URL: ${{ needs.implement-fix.outputs.new_pr_url }}
+        run: |
+          echo "## SWEny Triage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**Service Filter**: ${{ env.SERVICE_FILTER }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Time Range**: ${{ env.TIME_RANGE }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Dry Run**: ${{ env.DRY_RUN }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Recommendation**: $SUMMARY_RECOMMENDATION" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          RECOMMENDATION="$SUMMARY_RECOMMENDATION"
+          TARGET_REPO="$SUMMARY_TARGET_REPO"
+          EXISTING_PR_FOUND="$SUMMARY_EXISTING_PR_FOUND"
+          EXISTING_PR_URL="$SUMMARY_EXISTING_PR_URL"
+          ISSUE_ID="$SUMMARY_ISSUE_ID"
+          ISSUE_URL="$SUMMARY_ISSUE_URL"
+          NEW_PR_URL="$SUMMARY_NEW_PR_URL"
+
+          if [ -n "$ISSUE_ID" ]; then
+            echo "**Linear Issue**: [$ISSUE_ID]($ISSUE_URL)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -n "$TARGET_REPO" ] && [ "$TARGET_REPO" != "${{ github.repository }}" ]; then
+            echo "> **Cross-repo dispatch**: Bug belongs to \`$TARGET_REPO\` -- dispatched for implementation" >> $GITHUB_STEP_SUMMARY
+          elif echo "$RECOMMENDATION" | grep -qi "skip"; then
+            echo "> **Skipped**: No novel issues found" >> $GITHUB_STEP_SUMMARY
+          elif echo "$RECOMMENDATION" | grep -qi "+1 existing"; then
+            echo "> **+1 Existing**: Added occurrence to existing issue" >> $GITHUB_STEP_SUMMARY
+          elif [ "$EXISTING_PR_FOUND" = "true" ]; then
+            echo "> **Skipped**: Found existing PR - $EXISTING_PR_URL" >> $GITHUB_STEP_SUMMARY
+          elif [ -n "$NEW_PR_URL" ]; then
+            echo "> **Success**: New PR created - $NEW_PR_URL" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ env.DRY_RUN }}" = "true" ]; then
+            echo "> **Dry Run**: Analysis only" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -n "${{ env.DISPATCHED_FROM }}" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Dispatched from**: \`${{ env.DISPATCHED_FROM }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f .github/datadog-analysis/investigation-log.md ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Investigation Log" >> $GITHUB_STEP_SUMMARY
+            cat .github/datadog-analysis/investigation-log.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f .github/datadog-analysis/issues-report.md ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Issues Found" >> $GITHUB_STEP_SUMMARY
+            cat .github/datadog-analysis/issues-report.md >> $GITHUB_STEP_SUMMARY
+          fi

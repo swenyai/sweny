@@ -1,0 +1,20 @@
+{
+  "name": "sweny-linear-cli",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Linear API CLI for GitHub Actions",
+  "main": "dist/linear-client.js",
+  "bin": {
+    "linear-client": "dist/linear-client.js"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  }
+}

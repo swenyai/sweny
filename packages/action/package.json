@@ -1,0 +1,14 @@
+{
+  "name": "@sweny/action",
+  "version": "0.1.0",
+  "description": "Autonomous SRE triage GitHub Action — monitors logs, creates issues, opens fix PRs",
+  "private": true,
+  "license": "MIT",
+  "keywords": ["sre", "triage", "github-action", "claude", "observability", "linear"],
+  "homepage": "https://sweny.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wickdninja/sweny.git",
+    "directory": "packages/action"
+  }
+}

@@ -1,0 +1,48 @@
+# Service Ownership Map
+#
+# Maps observability service names to the GitHub repo that owns them.
+# Used by sweny-triage.yml for:
+#   1. Cross-repo dispatch — when repo A finds a bug in repo B's code
+#   2. Per-repo service filtering — each repo scans only its own services
+#   3. Investigation context — the agent knows which repo owns which service
+#
+# "owns" lists the service names (as they appear in your observability tool's facets)
+# that this repo is responsible for.
+#
+# Copy this file to .github/scripts/service-map.yml and customize for your org.
+
+services:
+  # Example: API gateway
+  api-gateway:
+    repo: your-org/api-gateway
+    service_filter: "api-*"
+    description: "API gateway and routing"
+    owns:
+      - api-gateway
+      - api-worker
+
+  # Example: User service
+  user-service:
+    repo: your-org/user-service
+    service_filter: "user-*"
+    description: "User management and authentication"
+    owns:
+      - user-service
+      - user-worker
+
+  # Example: Billing service
+  billing-service:
+    repo: your-org/billing-service
+    service_filter: "billing-*"
+    description: "Billing, payments, subscriptions"
+    owns:
+      - billing-service
+      - billing-worker
+
+  # Example: Notification service
+  notification-service:
+    repo: your-org/notification-service
+    service_filter: "notification-*"
+    description: "Email, SMS, push notifications"
+    owns:
+      - notification-service

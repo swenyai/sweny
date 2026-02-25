@@ -1,0 +1,24 @@
+{
+  "name": "sweny",
+  "private": true,
+  "description": "SWEny — autonomous engineering tools",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev:agent": "npm run dev --workspace=packages/agent",
+    "cli:agent": "npm run cli --workspace=packages/agent"
+  },
+  "license": "MIT",
+  "homepage": "https://sweny.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wickdninja/sweny.git"
+  }
+}
