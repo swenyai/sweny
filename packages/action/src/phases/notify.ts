@@ -1,29 +1,29 @@
-import * as core from "@actions/core";
 import * as fs from "fs";
 import { ActionConfig } from "../config.js";
+import { Providers } from "../providers/index.js";
 import { InvestigationResult } from "./investigate.js";
 import { ImplementResult } from "./implement.js";
 
 export async function notify(
   config: ActionConfig,
+  providers: Providers,
   investigation: InvestigationResult,
   implementation?: ImplementResult,
 ): Promise<void> {
-  const summary = core.summary
-    .addHeading("SWEny Triage Summary", 2)
-    .addRaw(
-      `**Run Date**: ${new Date().toISOString()}\n`,
-    )
-    .addRaw(`**Service Filter**: \`${config.serviceFilter}\`\n`)
-    .addRaw(`**Time Range**: \`${config.timeRange}\`\n`)
-    .addRaw(`**Dry Run**: ${config.dryRun}\n`)
-    .addRaw(`**Recommendation**: ${investigation.recommendation}\n\n`);
+  const lines: string[] = [];
 
-  // Add implementation results — Linear issue link
+  lines.push(`**Run Date**: ${new Date().toISOString()}`);
+  lines.push(`**Service Filter**: \`${config.serviceFilter}\``);
+  lines.push(`**Time Range**: \`${config.timeRange}\``);
+  lines.push(`**Dry Run**: ${config.dryRun}`);
+  lines.push(`**Recommendation**: ${investigation.recommendation}`);
+  lines.push("");
+
   if (implementation?.issueIdentifier) {
-    summary.addRaw(
-      `**Linear Issue**: [${implementation.issueIdentifier}](${implementation.issueUrl})\n`,
+    lines.push(
+      `**Linear Issue**: [${implementation.issueIdentifier}](${implementation.issueUrl})`,
     );
+    lines.push("");
   }
 
   // Status message
@@ -31,40 +31,42 @@ export async function notify(
     investigation.targetRepo &&
     investigation.targetRepo !== config.repository
   ) {
-    summary.addQuote(
-      `**Cross-repo dispatch**: Bug belongs to \`${investigation.targetRepo}\` — dispatched for implementation`,
+    lines.push(
+      `> **Cross-repo dispatch**: Bug belongs to \`${investigation.targetRepo}\` — dispatched for implementation`,
     );
   } else if (investigation.recommendation.toLowerCase().includes("skip")) {
-    summary.addQuote("**Skipped**: No novel issues found");
+    lines.push("> **Skipped**: No novel issues found");
   } else if (
     investigation.recommendation.toLowerCase().includes("+1 existing")
   ) {
-    summary.addQuote(
-      "**+1 Existing**: Added occurrence to existing issue",
-    );
+    lines.push("> **+1 Existing**: Added occurrence to existing issue");
   } else if (implementation?.skipped && implementation.skipReason) {
-    summary.addQuote(`**Skipped**: ${implementation.skipReason}`);
+    lines.push(`> **Skipped**: ${implementation.skipReason}`);
   } else if (implementation?.prUrl) {
-    summary.addQuote(
-      `**Success**: New PR created - ${implementation.prUrl}`,
-    );
+    lines.push(`> **Success**: New PR created - ${implementation.prUrl}`);
   } else if (config.dryRun) {
-    summary.addQuote("**Dry Run**: Analysis only");
+    lines.push("> **Dry Run**: Analysis only");
   }
 
   // Append investigation log if it exists
   const investigationLog = ".github/datadog-analysis/investigation-log.md";
   if (fs.existsSync(investigationLog)) {
-    summary.addHeading("Investigation Log", 3);
-    summary.addRaw(fs.readFileSync(investigationLog, "utf-8"));
+    lines.push("");
+    lines.push("### Investigation Log");
+    lines.push(fs.readFileSync(investigationLog, "utf-8"));
   }
 
   // Append issues report if it exists
   const issuesReport = ".github/datadog-analysis/issues-report.md";
   if (fs.existsSync(issuesReport)) {
-    summary.addHeading("Issues Found", 3);
-    summary.addRaw(fs.readFileSync(issuesReport, "utf-8"));
+    lines.push("");
+    lines.push("### Issues Found");
+    lines.push(fs.readFileSync(issuesReport, "utf-8"));
   }
 
-  await summary.write();
+  await providers.notification.send({
+    title: "SWEny Triage Summary",
+    body: lines.join("\n"),
+    format: "markdown",
+  });
 }

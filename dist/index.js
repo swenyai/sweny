@@ -31866,9 +31866,10 @@ const NEVER = (/* unused pure expression or super */ null && (INVALID));
 
 ;// CONCATENATED MODULE: ../providers/dist/logger.js
 const logger_consoleLogger = {
-    info: (msg) => console.log(msg),
-    debug: (msg) => console.debug(msg),
-    warn: (msg) => console.warn(msg),
+    info: (msg, ...args) => console.log(msg, ...args),
+    debug: (msg, ...args) => console.debug(msg, ...args),
+    warn: (msg, ...args) => console.warn(msg, ...args),
+    error: (msg, ...args) => console.error(msg, ...args),
 };
 //# sourceMappingURL=logger.js.map
 ;// CONCATENATED MODULE: ../providers/dist/observability/datadog.js
@@ -32674,8 +32675,8 @@ var external_node_util_ = __nccwpck_require__(7975);
 ;// CONCATENATED MODULE: ../providers/dist/source-control/github.js
 
 
+
 const execFileAsync = (0,external_node_util_.promisify)(external_node_child_process_namespaceObject.execFile);
-const noopLogger = { info() { }, debug() { }, warn() { } };
 async function git(args, opts) {
     try {
         const { stdout } = await execFileAsync("git", args);
@@ -32706,7 +32707,7 @@ async function ghApi(method, path, token, body) {
 }
 function github(config) {
     const { token, owner, repo, baseBranch = "main" } = config;
-    const log = config.logger ?? noopLogger;
+    const log = config.logger ?? logger_consoleLogger;
     return {
         async verifyAccess() {
             await ghApi("GET", `/repos/${owner}/${repo}`, token);
@@ -32782,12 +32783,178 @@ function github(config) {
 ;// CONCATENATED MODULE: ../providers/dist/source-control/index.js
 
 //# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../providers/dist/notification/github-summary.js
+
+
+const githubSummaryConfigSchema = objectType({
+    logger: custom().optional(),
+});
+function githubSummary(config) {
+    return new GitHubSummaryProvider(config?.logger ?? logger_consoleLogger);
+}
+class GitHubSummaryProvider {
+    log;
+    constructor(logger) {
+        this.log = logger;
+    }
+    async send(payload) {
+        const core = await Promise.resolve(/* import() */).then(__nccwpck_require__.t.bind(__nccwpck_require__, 7184, 19));
+        const summary = core.summary;
+        if (payload.title) {
+            summary.addHeading(payload.title, 2);
+        }
+        summary.addRaw(payload.body);
+        await summary.write();
+        this.log.info("GitHub Action summary written");
+    }
+}
+//# sourceMappingURL=github-summary.js.map
+;// CONCATENATED MODULE: ../providers/dist/notification/slack-webhook.js
+
+
+const slackWebhookConfigSchema = objectType({
+    webhookUrl: stringType().url("Slack webhook URL is required"),
+    logger: custom().optional(),
+});
+function slackWebhook(config) {
+    const parsed = slackWebhookConfigSchema.parse(config);
+    return new SlackWebhookProvider(parsed);
+}
+class SlackWebhookProvider {
+    webhookUrl;
+    log;
+    constructor(config) {
+        this.webhookUrl = config.webhookUrl;
+        this.log = config.logger ?? consoleLogger;
+    }
+    async send(payload) {
+        const text = payload.title
+            ? `*${payload.title}*\n${payload.body}`
+            : payload.body;
+        const response = await fetch(this.webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text }),
+        });
+        if (!response.ok) {
+            throw new Error(`Slack webhook error: ${response.status} ${response.statusText}`);
+        }
+        this.log.info("Slack notification sent");
+    }
+}
+//# sourceMappingURL=slack-webhook.js.map
+;// CONCATENATED MODULE: ../providers/dist/notification/teams-webhook.js
+
+
+const teamsWebhookConfigSchema = objectType({
+    webhookUrl: stringType().url("Teams webhook URL is required"),
+    logger: custom().optional(),
+});
+function teamsWebhook(config) {
+    const parsed = teamsWebhookConfigSchema.parse(config);
+    return new TeamsWebhookProvider(parsed);
+}
+class TeamsWebhookProvider {
+    webhookUrl;
+    log;
+    constructor(config) {
+        this.webhookUrl = config.webhookUrl;
+        this.log = config.logger ?? consoleLogger;
+    }
+    async send(payload) {
+        const card = {
+            type: "message",
+            attachments: [
+                {
+                    contentType: "application/vnd.microsoft.card.adaptive",
+                    content: {
+                        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+                        type: "AdaptiveCard",
+                        version: "1.4",
+                        body: [
+                            ...(payload.title
+                                ? [
+                                    {
+                                        type: "TextBlock",
+                                        text: payload.title,
+                                        weight: "Bolder",
+                                        size: "Medium",
+                                    },
+                                ]
+                                : []),
+                            {
+                                type: "TextBlock",
+                                text: payload.body,
+                                wrap: true,
+                            },
+                        ],
+                    },
+                },
+            ],
+        };
+        const response = await fetch(this.webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(card),
+        });
+        if (!response.ok) {
+            throw new Error(`Teams webhook error: ${response.status} ${response.statusText}`);
+        }
+        this.log.info("Teams notification sent");
+    }
+}
+//# sourceMappingURL=teams-webhook.js.map
+;// CONCATENATED MODULE: ../providers/dist/notification/discord-webhook.js
+
+
+const discordWebhookConfigSchema = objectType({
+    webhookUrl: stringType().url("Discord webhook URL is required"),
+    logger: custom().optional(),
+});
+function discordWebhook(config) {
+    const parsed = discordWebhookConfigSchema.parse(config);
+    return new DiscordWebhookProvider(parsed);
+}
+class DiscordWebhookProvider {
+    webhookUrl;
+    log;
+    constructor(config) {
+        this.webhookUrl = config.webhookUrl;
+        this.log = config.logger ?? consoleLogger;
+    }
+    async send(payload) {
+        const content = payload.title
+            ? `**${payload.title}**\n${payload.body}`
+            : payload.body;
+        // Discord has a 2000 character limit per message
+        const truncated = content.length > 2000
+            ? content.slice(0, 1997) + "..."
+            : content;
+        const response = await fetch(this.webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: truncated }),
+        });
+        if (!response.ok) {
+            throw new Error(`Discord webhook error: ${response.status} ${response.statusText}`);
+        }
+        this.log.info("Discord notification sent");
+    }
+}
+//# sourceMappingURL=discord-webhook.js.map
+;// CONCATENATED MODULE: ../providers/dist/notification/index.js
+
+
+
+
+//# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ./src/providers/index.ts
 
 
 
 
-const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning };
+
+const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
 function createProviders(config) {
     // Observability
     let observability;
@@ -32821,10 +32988,13 @@ function createProviders(config) {
         repo: scRepo,
         logger: actionsLogger,
     });
+    // Notification
+    const notification = githubSummary({ logger: actionsLogger });
     return {
         observability,
         issueTracker,
         sourceControl,
+        notification,
     };
 }
 
@@ -33890,52 +34060,57 @@ Create \`.github/datadog-analysis/pr-description.md\` with:
 
 ;// CONCATENATED MODULE: ./src/phases/notify.ts
 
-
-async function notify(config, investigation, implementation) {
-    const summary = core.summary
-        .addHeading("SWEny Triage Summary", 2)
-        .addRaw(`**Run Date**: ${new Date().toISOString()}\n`)
-        .addRaw(`**Service Filter**: \`${config.serviceFilter}\`\n`)
-        .addRaw(`**Time Range**: \`${config.timeRange}\`\n`)
-        .addRaw(`**Dry Run**: ${config.dryRun}\n`)
-        .addRaw(`**Recommendation**: ${investigation.recommendation}\n\n`);
-    // Add implementation results — Linear issue link
+async function notify(config, providers, investigation, implementation) {
+    const lines = [];
+    lines.push(`**Run Date**: ${new Date().toISOString()}`);
+    lines.push(`**Service Filter**: \`${config.serviceFilter}\``);
+    lines.push(`**Time Range**: \`${config.timeRange}\``);
+    lines.push(`**Dry Run**: ${config.dryRun}`);
+    lines.push(`**Recommendation**: ${investigation.recommendation}`);
+    lines.push("");
     if (implementation?.issueIdentifier) {
-        summary.addRaw(`**Linear Issue**: [${implementation.issueIdentifier}](${implementation.issueUrl})\n`);
+        lines.push(`**Linear Issue**: [${implementation.issueIdentifier}](${implementation.issueUrl})`);
+        lines.push("");
     }
     // Status message
     if (investigation.targetRepo &&
         investigation.targetRepo !== config.repository) {
-        summary.addQuote(`**Cross-repo dispatch**: Bug belongs to \`${investigation.targetRepo}\` — dispatched for implementation`);
+        lines.push(`> **Cross-repo dispatch**: Bug belongs to \`${investigation.targetRepo}\` — dispatched for implementation`);
     }
     else if (investigation.recommendation.toLowerCase().includes("skip")) {
-        summary.addQuote("**Skipped**: No novel issues found");
+        lines.push("> **Skipped**: No novel issues found");
     }
     else if (investigation.recommendation.toLowerCase().includes("+1 existing")) {
-        summary.addQuote("**+1 Existing**: Added occurrence to existing issue");
+        lines.push("> **+1 Existing**: Added occurrence to existing issue");
     }
     else if (implementation?.skipped && implementation.skipReason) {
-        summary.addQuote(`**Skipped**: ${implementation.skipReason}`);
+        lines.push(`> **Skipped**: ${implementation.skipReason}`);
     }
     else if (implementation?.prUrl) {
-        summary.addQuote(`**Success**: New PR created - ${implementation.prUrl}`);
+        lines.push(`> **Success**: New PR created - ${implementation.prUrl}`);
     }
     else if (config.dryRun) {
-        summary.addQuote("**Dry Run**: Analysis only");
+        lines.push("> **Dry Run**: Analysis only");
     }
     // Append investigation log if it exists
     const investigationLog = ".github/datadog-analysis/investigation-log.md";
     if (external_fs_.existsSync(investigationLog)) {
-        summary.addHeading("Investigation Log", 3);
-        summary.addRaw(external_fs_.readFileSync(investigationLog, "utf-8"));
+        lines.push("");
+        lines.push("### Investigation Log");
+        lines.push(external_fs_.readFileSync(investigationLog, "utf-8"));
     }
     // Append issues report if it exists
     const issuesReport = ".github/datadog-analysis/issues-report.md";
     if (external_fs_.existsSync(issuesReport)) {
-        summary.addHeading("Issues Found", 3);
-        summary.addRaw(external_fs_.readFileSync(issuesReport, "utf-8"));
+        lines.push("");
+        lines.push("### Issues Found");
+        lines.push(external_fs_.readFileSync(issuesReport, "utf-8"));
     }
-    await summary.write();
+    await providers.notification.send({
+        title: "SWEny Triage Summary",
+        body: lines.join("\n"),
+        format: "markdown",
+    });
 }
 
 ;// CONCATENATED MODULE: ./src/main.ts
@@ -33970,7 +34145,7 @@ async function run() {
         }
         // Phase 3: Notify
         core.startGroup("Phase 3: Create Summary");
-        await notify(config, findings, implementation);
+        await notify(config, providers, findings, implementation);
         core.endGroup();
     }
     catch (error) {

@@ -35,7 +35,7 @@ async function run(): Promise<void> {
 
     // Phase 3: Notify
     core.startGroup("Phase 3: Create Summary");
-    await notify(config, findings, implementation);
+    await notify(config, providers, findings, implementation);
     core.endGroup();
   } catch (error) {
     if (error instanceof Error) {

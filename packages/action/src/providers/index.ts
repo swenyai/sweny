@@ -3,6 +3,7 @@ import { ActionConfig } from "../config.js";
 import { datadog } from "@sweny/providers/observability";
 import { linear } from "@sweny/providers/issue-tracking";
 import { github } from "@sweny/providers/source-control";
+import { githubSummary } from "@sweny/providers/notification";
 import type { ObservabilityProvider } from "@sweny/providers/observability";
 import type {
   IssueTrackingProvider,
@@ -10,6 +11,7 @@ import type {
   TriageHistoryCapable,
 } from "@sweny/providers/issue-tracking";
 import type { SourceControlProvider } from "@sweny/providers/source-control";
+import type { NotificationProvider } from "@sweny/providers/notification";
 
 const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
 
@@ -19,6 +21,7 @@ export interface Providers {
   observability: ObservabilityProvider;
   issueTracker: ActionIssueTracker;
   sourceControl: SourceControlProvider;
+  notification: NotificationProvider;
 }
 
 export function createProviders(config: ActionConfig): Providers {
@@ -61,9 +64,13 @@ export function createProviders(config: ActionConfig): Providers {
     logger: actionsLogger,
   });
 
+  // Notification
+  const notification = githubSummary({ logger: actionsLogger });
+
   return {
     observability,
     issueTracker,
     sourceControl,
+    notification,
   };
 }

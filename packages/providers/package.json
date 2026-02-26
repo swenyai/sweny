@@ -21,6 +21,7 @@
     "./incident": "./dist/incident/index.js",
     "./messaging": "./dist/messaging/index.js",
     "./auth": "./dist/auth/index.js",
+    "./access": "./dist/access/index.js",
     "./storage": "./dist/storage/index.js"
   },
   "typesVersions": {
@@ -32,6 +33,7 @@
       "incident": ["dist/incident/index.d.ts"],
       "messaging": ["dist/messaging/index.d.ts"],
       "auth": ["dist/auth/index.d.ts"],
+      "access": ["dist/access/index.d.ts"],
       "storage": ["dist/storage/index.d.ts"]
     }
   },

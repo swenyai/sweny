@@ -50,6 +50,9 @@ describe("createProviders", () => {
     expect(typeof providers.sourceControl.createBranch).toBe("function");
     expect(typeof providers.sourceControl.createPullRequest).toBe("function");
     expect(typeof providers.sourceControl.findExistingPr).toBe("function");
+    // Notification
+    expect(providers.notification).toBeDefined();
+    expect(typeof providers.notification.send).toBe("function");
   });
 
   it("issue tracker has core + capability methods", () => {
