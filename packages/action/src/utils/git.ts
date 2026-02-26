@@ -1,34 +1,4 @@
 import * as exec from "@actions/exec";
-import * as core from "@actions/core";
-
-export async function configureGit(): Promise<void> {
-  await exec.exec("git", ["config", "user.name", "github-actions[bot]"]);
-  await exec.exec("git", [
-    "config",
-    "user.email",
-    "github-actions[bot]@users.noreply.github.com",
-  ]);
-}
-
-export async function createBranch(branchName: string): Promise<void> {
-  await exec.exec("git", ["checkout", "-b", branchName]);
-  core.info(`Created branch: ${branchName}`);
-}
-
-export async function pushBranch(
-  branchName: string,
-  token: string,
-  repository: string
-): Promise<void> {
-  await exec.exec("git", [
-    "remote",
-    "set-url",
-    "origin",
-    `https://x-access-token:${token}@github.com/${repository}.git`,
-  ]);
-  await exec.exec("git", ["push", "origin", branchName]);
-  core.info(`Pushed branch: ${branchName}`);
-}
 
 export async function hasCommits(): Promise<boolean> {
   let output = "";
@@ -42,63 +12,6 @@ export async function hasCommits(): Promise<boolean> {
   });
   const count = parseInt(output.trim(), 10);
   return !isNaN(count) && count > 0;
-}
-
-export async function hasUncommittedChanges(): Promise<boolean> {
-  let output = "";
-  await exec.exec(
-    "git",
-    [
-      "diff",
-      "--name-only",
-      "--",
-      ".",
-      ":!.github/datadog-analysis",
-      ":!.github/workflows",
-    ],
-    {
-      listeners: {
-        stdout: (data) => {
-          output += data.toString();
-        },
-      },
-      ignoreReturnCode: true,
-    }
-  );
-  let staged = "";
-  await exec.exec(
-    "git",
-    [
-      "diff",
-      "--cached",
-      "--name-only",
-      "--",
-      ".",
-      ":!.github/datadog-analysis",
-      ":!.github/workflows",
-    ],
-    {
-      listeners: {
-        stdout: (data) => {
-          staged += data.toString();
-        },
-      },
-      ignoreReturnCode: true,
-    }
-  );
-  return output.trim().length > 0 || staged.trim().length > 0;
-}
-
-export async function stageAndCommit(message: string): Promise<void> {
-  await exec.exec("git", [
-    "add",
-    "-A",
-    "--",
-    ".",
-    ":!.github/datadog-analysis",
-    ":!.github/workflows",
-  ]);
-  await exec.exec("git", ["commit", "-m", message]);
 }
 
 export async function getChangedFiles(): Promise<string[]> {

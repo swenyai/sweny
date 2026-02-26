@@ -2,12 +2,14 @@ import * as core from "@actions/core";
 import { ActionConfig } from "../config.js";
 import { datadog } from "@sweny/providers/observability";
 import { linear } from "@sweny/providers/issue-tracking";
+import { github } from "@sweny/providers/source-control";
 import type { ObservabilityProvider } from "@sweny/providers/observability";
 import type {
   IssueTrackingProvider,
   PrLinkCapable,
   TriageHistoryCapable,
 } from "@sweny/providers/issue-tracking";
+import type { SourceControlProvider } from "@sweny/providers/source-control";
 
 const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning };
 
@@ -16,6 +18,7 @@ type ActionIssueTracker = IssueTrackingProvider & PrLinkCapable & TriageHistoryC
 export interface Providers {
   observability: ObservabilityProvider;
   issueTracker: ActionIssueTracker;
+  sourceControl: SourceControlProvider;
 }
 
 export function createProviders(config: ActionConfig): Providers {
@@ -48,8 +51,19 @@ export function createProviders(config: ActionConfig): Providers {
       );
   }
 
+  // Source control
+  const scToken = config.botToken || config.githubToken;
+  const [scOwner = "", scRepo = ""] = config.repository.split("/");
+  const sourceControl = github({
+    token: scToken,
+    owner: scOwner,
+    repo: scRepo,
+    logger: actionsLogger,
+  });
+
   return {
     observability,
     issueTracker,
+    sourceControl,
   };
 }

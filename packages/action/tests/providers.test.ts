@@ -38,12 +38,18 @@ function makeConfig(overrides: Partial<ActionConfig> = {}): ActionConfig {
 }
 
 describe("createProviders", () => {
-  it("creates providers with datadog + linear", () => {
+  it("creates providers with datadog + linear + github", () => {
     const providers = createProviders(makeConfig());
     expect(providers.observability).toBeDefined();
     expect(typeof providers.observability.verifyAccess).toBe("function");
     expect(typeof providers.observability.queryLogs).toBe("function");
     expect(typeof providers.observability.aggregate).toBe("function");
+    // Source control
+    expect(providers.sourceControl).toBeDefined();
+    expect(typeof providers.sourceControl.verifyAccess).toBe("function");
+    expect(typeof providers.sourceControl.createBranch).toBe("function");
+    expect(typeof providers.sourceControl.createPullRequest).toBe("function");
+    expect(typeof providers.sourceControl.findExistingPr).toBe("function");
   });
 
   it("issue tracker has core + capability methods", () => {

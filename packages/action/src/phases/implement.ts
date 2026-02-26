@@ -6,20 +6,11 @@ import { Providers } from "../providers/index.js";
 import { InvestigationResult } from "./investigate.js";
 import { installClaude, runClaude } from "../utils/claude.js";
 import {
-  configureGit,
-  createBranch,
-  pushBranch,
   hasCommits,
-  hasUncommittedChanges,
-  stageAndCommit,
   getChangedFiles,
   resetWorkflowChanges,
 } from "../utils/git.js";
-import {
-  createPullRequest,
-  findExistingPr,
-  dispatchWorkflow,
-} from "../utils/github.js";
+import { dispatchWorkflow } from "../utils/github.js";
 
 export interface ImplementResult {
   issueIdentifier: string;
@@ -223,13 +214,14 @@ export async function implement(
   // -------------------------------------------------------------------------
   core.startGroup("Check for Existing GitHub PRs");
   const skipMergedCheck = !!config.linearIssue;
-  const existingPr = await findExistingPr(
-    config.githubToken,
-    issue.identifier,
-    skipMergedCheck,
-  );
+  let existingPr = await providers.sourceControl.findExistingPr(issue.identifier);
 
-  if (existingPr.found) {
+  // If we should skip merged PRs, ignore any non-open result
+  if (existingPr && skipMergedCheck && existingPr.state !== "open") {
+    existingPr = null;
+  }
+
+  if (existingPr) {
     if (config.linearIssue && existingPr.state !== "open") {
       // User explicitly provided LINEAR_ISSUE - implement anyway if PR is not open
       core.notice(
@@ -251,9 +243,9 @@ export async function implement(
               : undefined;
 
         const comment =
-          existingPr.state === "open" || existingPr.state === "OPEN"
+          existingPr.state === "open"
             ? `**Existing Open PR Found**: [${existingPr.url}](${existingPr.url})\n_Occurrence tracked by SWEny Triage_`
-            : existingPr.state === "merged" || existingPr.state === "MERGED"
+            : existingPr.state === "merged"
               ? `**Merged PR Found**: [${existingPr.url}](${existingPr.url})\n_Occurrence tracked by SWEny Triage_`
               : `**Existing PR Found**: [${existingPr.url}](${existingPr.url}) (state: ${existingPr.state})\n_Occurrence tracked by SWEny Triage_`;
 
@@ -284,7 +276,7 @@ export async function implement(
   // 6. Create branch and configure git
   // -------------------------------------------------------------------------
   core.startGroup("Create Fix Branch");
-  await configureGit();
+  await providers.sourceControl.configureBotIdentity();
 
   let branchName: string;
   if (issue.branchName) {
@@ -294,7 +286,7 @@ export async function implement(
     branchName = `${issue.identifier.toLowerCase()}-triage-fix`;
   }
 
-  await createBranch(branchName);
+  await providers.sourceControl.createBranch(branchName);
 
   // Reset any workflow file changes to avoid permission issues on push
   await resetWorkflowChanges();
@@ -347,12 +339,12 @@ export async function implement(
 
   if (!hasCodeChanges) {
     core.info("No commits created by Claude");
-    const hasUncommitted = await hasUncommittedChanges();
+    const hasUncommitted = await providers.sourceControl.hasChanges();
     if (hasUncommitted) {
       core.info(
         "Found uncommitted code changes, creating fallback commit",
       );
-      await stageAndCommit(
+      await providers.sourceControl.stageAndCommit(
         `fix: automated fix from log analysis\n\nPartial implementation by Claude (reached max turns before completion)\n\nIdentified by SWEny Triage\nLinear: ${issue.identifier}`,
       );
       hasCodeChanges = true;
@@ -380,8 +372,7 @@ export async function implement(
   // 9. Push branch
   // -------------------------------------------------------------------------
   core.startGroup("Push Branch");
-  const pushToken = config.botToken || config.githubToken;
-  await pushBranch(branchName, pushToken, config.repository);
+  await providers.sourceControl.pushBranch(branchName);
   core.endGroup();
 
   // -------------------------------------------------------------------------
@@ -419,10 +410,8 @@ This PR contains an automated fix for an issue identified in production logs.
 
   // Format title: use Linear issue identifier and lowercase title
   const prTitle = `fix(${issue.identifier}): ${(issue.title || issueTitle).toLowerCase()}`;
-  const prToken = config.botToken || config.githubToken;
 
-  const pr = await createPullRequest({
-    token: prToken,
+  const pr = await providers.sourceControl.createPullRequest({
     title: prTitle,
     body: prBody,
     head: branchName,

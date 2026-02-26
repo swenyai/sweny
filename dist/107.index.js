@@ -13178,7 +13178,7 @@ exports.tagSymbol = tagSymbol;
 
 
 
-var utilStream = __webpack_require__(6011);
+var utilStream = __webpack_require__(8392);
 var schema = __webpack_require__(5982);
 var serde = __webpack_require__(2882);
 var protocolHttp = __webpack_require__(9752);
@@ -20389,7 +20389,7 @@ exports.fromBase64 = fromBase64;
 
 
 var fromBase64 = __webpack_require__(4654);
-var toBase64 = __webpack_require__(3528);
+var toBase64 = __webpack_require__(1147);
 
 
 
@@ -20417,7 +20417,7 @@ Object.keys(toBase64).forEach(function (k) {
 
 /***/ }),
 
-/***/ 3528:
+/***/ 1147:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -22041,7 +22041,7 @@ class Collector extends stream_1.Writable {
 
 /***/ }),
 
-/***/ 6011:
+/***/ 8392:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 

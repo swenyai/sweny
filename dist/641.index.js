@@ -142,7 +142,7 @@ exports.getCredentials = getCredentials;
 const property_provider_1 = __webpack_require__(2074);
 const protocol_http_1 = __webpack_require__(9752);
 const smithy_client_1 = __webpack_require__(8015);
-const util_stream_1 = __webpack_require__(6011);
+const util_stream_1 = __webpack_require__(8392);
 function createGetRequest(url) {
     return new protocol_http_1.HttpRequest({
         protocol: url.protocol,
