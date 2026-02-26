@@ -14,14 +14,16 @@ export type { NotificationProvider, NotificationPayload } from "./notification/i
 export { githubSummary, slackWebhook, teamsWebhook, discordWebhook } from "./notification/index.js";
 
 // Source Control
-export type { SourceControlProvider, PullRequest, PrCreateOptions } from "./source-control/index.js";
+export type { SourceControlProvider, PullRequest, PrCreateOptions, GitHubSourceControlConfig } from "./source-control/index.js";
+export { github } from "./source-control/index.js";
 
 // Incident Management
 export type { IncidentProvider, Incident, IncidentCreateOptions, OnCallEntry } from "./incident/index.js";
 export { pagerduty } from "./incident/index.js";
 
 // Messaging
-export type { MessagingProvider, ChatMessage } from "./messaging/index.js";
+export type { MessagingProvider, ChatMessage, SlackMessagingConfig } from "./messaging/index.js";
+export { slack } from "./messaging/index.js";
 
 // Auth
 export type { AuthProvider, UserIdentity, LoginField } from "./auth/index.js";

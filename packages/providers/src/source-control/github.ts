@@ -1,16 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { SourceControlProvider, PullRequest, PrCreateOptions } from "./types.js";
+import type { Logger } from "../logger.js";
+import { consoleLogger } from "../logger.js";
 
 const execFileAsync = promisify(execFile);
-
-interface Logger {
-  info(msg: string): void;
-  debug(msg: string): void;
-  warn(msg: string): void;
-}
-
-const noopLogger: Logger = { info() {}, debug() {}, warn() {} };
 
 export interface GitHubSourceControlConfig {
   token: string;
@@ -55,7 +49,7 @@ async function ghApi(
 
 export function github(config: GitHubSourceControlConfig): SourceControlProvider {
   const { token, owner, repo, baseBranch = "main" } = config;
-  const log = config.logger ?? noopLogger;
+  const log = config.logger ?? consoleLogger;
 
   return {
     async verifyAccess(): Promise<void> {

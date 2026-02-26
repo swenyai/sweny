@@ -11,7 +11,7 @@ import type {
 } from "@sweny/providers/issue-tracking";
 import type { SourceControlProvider } from "@sweny/providers/source-control";
 
-const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning };
+const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
 
 type ActionIssueTracker = IssueTrackingProvider & PrLinkCapable & TriageHistoryCapable;
 

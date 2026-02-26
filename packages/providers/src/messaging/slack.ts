@@ -1,12 +1,6 @@
 import type { ChatMessage, MessagingProvider } from "./types.js";
-
-interface Logger {
-  info(msg: string): void;
-  debug(msg: string): void;
-  warn(msg: string): void;
-}
-
-const noopLogger: Logger = { info() {}, debug() {}, warn() {} };
+import type { Logger } from "../logger.js";
+import { consoleLogger } from "../logger.js";
 
 export interface SlackMessagingConfig {
   token: string;
@@ -14,7 +8,7 @@ export interface SlackMessagingConfig {
 }
 
 export function slack(config: SlackMessagingConfig): MessagingProvider {
-  const log = config.logger ?? noopLogger;
+  const log = config.logger ?? consoleLogger;
 
   // Lazy-load @slack/web-api to keep it optional
   let clientPromise: Promise<InstanceType<typeof import("@slack/web-api").WebClient>> | null = null;

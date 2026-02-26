@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import type { PersistedSession, TranscriptEntry, SessionStore } from "../types.js";
 
 export class S3SessionStore implements SessionStore {
@@ -103,9 +103,39 @@ export class S3SessionStore implements SessionStore {
     return [];
   }
 
-  async listSessions(_userId: string): Promise<PersistedSession[]> {
-    // S3 listing requires ListObjectsV2 -- for now return empty.
-    // Full implementation would list users/{userId}/sessions/*/metadata.json
-    return [];
+  async listSessions(userId: string): Promise<PersistedSession[]> {
+    const prefix = this.prefix
+      ? `${this.prefix}/users/${userId}/sessions/`
+      : `users/${userId}/sessions/`;
+
+    const sessions: PersistedSession[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const result = await this.s3.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          Delimiter: "/",
+          ContinuationToken: continuationToken,
+        }),
+      );
+
+      if (result.CommonPrefixes) {
+        for (const cp of result.CommonPrefixes) {
+          if (!cp.Prefix) continue;
+          // Extract threadKey from prefix: .../sessions/{threadKey}/
+          const parts = cp.Prefix.replace(/\/$/, "").split("/");
+          const threadKey = parts[parts.length - 1];
+          if (!threadKey) continue;
+          const session = await this.load(userId, threadKey);
+          if (session) sessions.push(session);
+        }
+      }
+
+      continuationToken = result.NextContinuationToken;
+    } while (continuationToken);
+
+    return sessions;
   }
 }

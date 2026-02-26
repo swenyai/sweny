@@ -1,9 +1,4 @@
-export interface Logger {
-  debug(msg: string, ...args: unknown[]): void;
-  info(msg: string, ...args: unknown[]): void;
-  warn(msg: string, ...args: unknown[]): void;
-  error(msg: string, ...args: unknown[]): void;
-}
+export type { Logger } from "@sweny/providers";
 
 const LEVELS: Record<string, number> = {
   debug: 0,
@@ -12,7 +7,7 @@ const LEVELS: Record<string, number> = {
   error: 3,
 };
 
-export function createLogger(prefix: string, level?: string): Logger {
+export function createLogger(prefix: string, level?: string) {
   const threshold = LEVELS[level?.toLowerCase() ?? "info"] ?? LEVELS.info!;
   const tag = `[${prefix}]`;
 
