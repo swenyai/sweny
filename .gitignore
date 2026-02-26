@@ -8,4 +8,10 @@ node_modules/
 # Ignore dist for library packages (built locally)
 packages/agent/dist/
 packages/providers/dist/
+packages/action/dist/
+
 # Root dist/ is NOT ignored — required for GitHub Action (compiled action entry point)
+# But declaration files from ncc are not needed
+dist/**/*.d.ts
+dist/**/*.d.ts.map
+dist/package.json
