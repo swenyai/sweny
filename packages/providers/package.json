@@ -43,7 +43,8 @@
     "@aws-sdk/client-cloudwatch-logs": "^3",
     "@aws-sdk/client-s3": "^3",
     "@aws-sdk/credential-provider-node": "^3",
-    "@aws-sdk/s3-request-presigner": "^3"
+    "@aws-sdk/s3-request-presigner": "^3",
+    "@slack/web-api": "^7"
   },
   "peerDependenciesMeta": {
     "@actions/core": {
@@ -60,6 +61,9 @@
     },
     "@aws-sdk/s3-request-presigner": {
       "optional": true
+    },
+    "@slack/web-api": {
+      "optional": true
     }
   },
   "devDependencies": {
@@ -67,6 +71,7 @@
     "@aws-sdk/client-cloudwatch-logs": "^3",
     "@aws-sdk/client-s3": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
+    "@slack/web-api": "^7",
     "@types/node": "^22",
     "typescript": "^5.6",
     "vitest": "^4"
