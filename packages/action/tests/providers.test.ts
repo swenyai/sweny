@@ -57,6 +57,10 @@ describe("createProviders", () => {
     // Notification
     expect(providers.notification).toBeDefined();
     expect(typeof providers.notification.send).toBe("function");
+    // Coding agent
+    expect(providers.codingAgent).toBeDefined();
+    expect(typeof providers.codingAgent.install).toBe("function");
+    expect(typeof providers.codingAgent.run).toBe("function");
   });
 
   it("issue tracker has core + capability methods", () => {

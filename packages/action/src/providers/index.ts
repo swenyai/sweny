@@ -4,6 +4,7 @@ import { datadog } from "@sweny/providers/observability";
 import { linear } from "@sweny/providers/issue-tracking";
 import { github } from "@sweny/providers/source-control";
 import { githubSummary } from "@sweny/providers/notification";
+import { claudeCode } from "@sweny/providers/coding-agent";
 import type { ObservabilityProvider } from "@sweny/providers/observability";
 import type {
   IssueTrackingProvider,
@@ -12,6 +13,7 @@ import type {
 } from "@sweny/providers/issue-tracking";
 import type { SourceControlProvider } from "@sweny/providers/source-control";
 import type { NotificationProvider } from "@sweny/providers/notification";
+import type { CodingAgent } from "@sweny/providers/coding-agent";
 
 const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
 
@@ -22,6 +24,7 @@ export interface Providers {
   issueTracker: ActionIssueTracker;
   sourceControl: SourceControlProvider;
   notification: NotificationProvider;
+  codingAgent: CodingAgent;
 }
 
 export function createProviders(config: ActionConfig): Providers {
@@ -67,10 +70,14 @@ export function createProviders(config: ActionConfig): Providers {
   // Notification
   const notification = githubSummary({ logger: actionsLogger });
 
+  // Coding agent
+  const codingAgent = claudeCode({ logger: actionsLogger });
+
   return {
     observability,
     issueTracker,
     sourceControl,
     notification,
+    codingAgent,
   };
 }

@@ -36,3 +36,7 @@ export { AccessLevel, AccessDeniedError, allowAllGuard, roleBasedGuard } from ".
 // Storage
 export type { StorageProvider, SessionStore, PersistedSession, TranscriptEntry, MemoryStore, MemoryEntry, UserMemory, WorkspaceStore, WorkspaceFile, WorkspaceManifest } from "./storage/index.js";
 export { WORKSPACE_LIMITS } from "./storage/index.js";
+
+// Coding Agent
+export type { CodingAgent, CodingAgentRunOptions, ClaudeCodeConfig } from "./coding-agent/index.js";
+export { claudeCode } from "./coding-agent/index.js";

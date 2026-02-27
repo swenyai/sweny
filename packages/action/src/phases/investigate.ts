@@ -3,7 +3,6 @@ import * as fs from "fs";
 import * as path from "path";
 import { ActionConfig } from "../config.js";
 import { Providers } from "../providers/index.js";
-import { installClaude, runClaude } from "../utils/claude.js";
 import { parseServiceMap } from "../utils/service-map.js";
 
 export interface InvestigationResult {
@@ -22,8 +21,8 @@ export async function investigate(
   const analysisDir = ".github/datadog-analysis";
   fs.mkdirSync(analysisDir, { recursive: true });
 
-  // Install Claude
-  await installClaude();
+  // Install coding agent CLI
+  await providers.codingAgent.install();
 
   // Verify provider access
   core.startGroup("Verify provider access");
@@ -43,9 +42,9 @@ export async function investigate(
   // Build investigation prompt
   const prompt = buildInvestigationPrompt(config, knownIssuesContent);
 
-  // Run Claude investigation
-  core.startGroup("Claude investigation");
-  const claudeEnv: Record<string, string> = {
+  // Run coding agent investigation
+  core.startGroup("Coding agent investigation");
+  const agentEnv: Record<string, string> = {
     DD_API_KEY: config.ddApiKey,
     DD_APP_KEY: config.ddAppKey,
     DD_SITE: config.ddSite,
@@ -54,11 +53,11 @@ export async function investigate(
     LINEAR_BUG_LABEL_ID: config.linearBugLabelId,
   };
   if (config.anthropicApiKey)
-    claudeEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
+    agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
   if (config.claudeOauthToken)
-    claudeEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+    agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
 
-  await runClaude({ prompt, maxTurns: config.maxInvestigateTurns, env: claudeEnv });
+  await providers.codingAgent.run({ prompt, maxTurns: config.maxInvestigateTurns, env: agentEnv });
   core.endGroup();
 
   // Parse results

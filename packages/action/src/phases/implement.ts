@@ -4,7 +4,6 @@ import type { Issue } from "@sweny/providers/issue-tracking";
 import { ActionConfig } from "../config.js";
 import { Providers } from "../providers/index.js";
 import { InvestigationResult } from "./investigate.js";
-import { installClaude, runClaude } from "../utils/claude.js";
 
 export interface ImplementResult {
   issueIdentifier: string;
@@ -292,21 +291,21 @@ export async function implement(
   // -------------------------------------------------------------------------
   // 7. Install Claude and implement fix
   // -------------------------------------------------------------------------
-  core.startGroup("Implement Fix with Claude");
-  await installClaude();
+  core.startGroup("Implement Fix");
+  await providers.codingAgent.install();
 
   const implementPrompt = buildImplementPrompt(issue.identifier);
 
-  const claudeEnv: Record<string, string> = {};
+  const agentEnv: Record<string, string> = {};
   if (config.anthropicApiKey)
-    claudeEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
+    agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
   if (config.claudeOauthToken)
-    claudeEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+    agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
 
-  await runClaude({
+  await providers.codingAgent.run({
     prompt: implementPrompt,
     maxTurns: config.maxImplementTurns,
-    env: claudeEnv,
+    env: agentEnv,
   });
   core.endGroup();
 
@@ -379,10 +378,10 @@ export async function implement(
     issue.identifier,
     issue.url,
   );
-  await runClaude({
+  await providers.codingAgent.run({
     prompt: prDescPrompt,
     maxTurns: 10,
-    env: claudeEnv,
+    env: agentEnv,
   });
   core.endGroup();
 
