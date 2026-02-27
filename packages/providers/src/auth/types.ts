@@ -1,5 +1,6 @@
 export interface UserIdentity {
   userId: string;
+  tenantId?: string;
   displayName: string;
   email?: string;
   roles: string[];
@@ -19,6 +20,6 @@ export interface AuthProvider {
 
   authenticate(userId: string): Promise<UserIdentity | null>;
   login?(userId: string, credentials: Record<string, string>): Promise<UserIdentity>;
-  hasValidSession(userId: string): boolean;
-  clearSession(userId: string): void;
+  hasValidSession(userId: string): Promise<boolean>;
+  clearSession(userId: string): Promise<void>;
 }

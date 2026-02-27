@@ -12,14 +12,14 @@ describe("noAuth", () => {
     expect(user!.roles).toContain("admin");
   });
 
-  it("always has valid session", () => {
+  it("always has valid session", async () => {
     const provider = noAuth();
-    expect(provider.hasValidSession("anyone")).toBe(true);
+    expect(await provider.hasValidSession("anyone")).toBe(true);
   });
 
-  it("clearSession is a no-op", () => {
+  it("clearSession is a no-op", async () => {
     const provider = noAuth();
-    expect(() => provider.clearSession("anyone")).not.toThrow();
+    await provider.clearSession("anyone");
   });
 
   it("has displayName", () => {
@@ -70,7 +70,7 @@ describe("apiKeyAuth", () => {
 
   it("hasValidSession is true after login", async () => {
     await provider.login!("u1", { apiKey: "valid-key" });
-    expect(provider.hasValidSession("u1")).toBe(true);
+    expect(await provider.hasValidSession("u1")).toBe(true);
   });
 
   it("login throws on invalid key", async () => {
@@ -87,8 +87,8 @@ describe("apiKeyAuth", () => {
 
   it("clearSession removes the session", async () => {
     await provider.login!("u1", { apiKey: "valid-key" });
-    expect(provider.hasValidSession("u1")).toBe(true);
-    provider.clearSession("u1");
-    expect(provider.hasValidSession("u1")).toBe(false);
+    expect(await provider.hasValidSession("u1")).toBe(true);
+    await provider.clearSession("u1");
+    expect(await provider.hasValidSession("u1")).toBe(false);
   });
 });

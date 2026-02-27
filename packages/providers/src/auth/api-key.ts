@@ -41,11 +41,11 @@ export function apiKeyAuth(opts: ApiKeyAuthOpts): AuthProvider {
       return identity;
     },
 
-    hasValidSession(userId: string): boolean {
+    async hasValidSession(userId: string): Promise<boolean> {
       return sessions.has(userId);
     },
 
-    clearSession(userId: string): void {
+    async clearSession(userId: string): Promise<void> {
       sessions.delete(userId);
     },
   };

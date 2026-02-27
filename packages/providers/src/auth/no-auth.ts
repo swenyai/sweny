@@ -15,11 +15,11 @@ export function noAuth(): AuthProvider {
       return LOCAL_USER;
     },
 
-    hasValidSession(_userId: string): boolean {
+    async hasValidSession(_userId: string): Promise<boolean> {
       return true;
     },
 
-    clearSession(_userId: string): void {
+    async clearSession(_userId: string): Promise<void> {
       // nothing to clear
     },
   };

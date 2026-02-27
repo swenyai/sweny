@@ -40,3 +40,11 @@ export { WORKSPACE_LIMITS } from "./storage/index.js";
 // Coding Agent
 export type { CodingAgent, CodingAgentRunOptions, ClaudeCodeConfig } from "./coding-agent/index.js";
 export { claudeCode } from "./coding-agent/index.js";
+
+// Agent Tool
+export type { AgentTool, ToolResult } from "./agent-tool/index.js";
+export { agentTool } from "./agent-tool/index.js";
+
+// Credential Vault
+export type { CredentialVaultProvider, EnvVaultConfig } from "./credential-vault/index.js";
+export { envVault } from "./credential-vault/index.js";
