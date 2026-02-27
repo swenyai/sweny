@@ -3,6 +3,7 @@ import type { StorageProvider } from "../storage/types.js";
 import type { AccessGuard } from "../access/types.js";
 import type { ToolPlugin } from "../plugins/types.js";
 import type { AuditLogger } from "../audit/types.js";
+import type { Channel } from "../channel/types.js";
 
 export interface SwenyConfig {
   name: string;
@@ -15,6 +16,9 @@ export interface SwenyConfig {
     maxTurns?: number;
     disallowedTools?: string[];
   };
+  /** Explicit channels to run. Overrides `slack` config when set. */
+  channels?: Channel[];
+  /** @deprecated Use `channels` with `slackChannel(config)` instead. */
   slack?: {
     appToken?: string;
     botToken?: string;

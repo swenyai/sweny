@@ -4,8 +4,8 @@ export const envSchema = z
   .object({
     claudeApiKey: z.string().min(1).optional(),
     claudeOauthToken: z.string().min(1).optional(),
-    slackAppToken: z.string().startsWith("xapp-").optional(),
-    slackBotToken: z.string().startsWith("xoxb-").optional(),
+    slackAppToken: z.string().min(1).optional(),
+    slackBotToken: z.string().min(1).optional(),
     slackSigningSecret: z.string().min(1).optional(),
     logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
   })

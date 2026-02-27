@@ -1,8 +1,7 @@
 import { loadConfig } from "./config/loader.js";
-import { createSlackApp } from "./slack/app.js";
-import { registerLoginModal } from "./slack/modals.js";
-import { registerCommands } from "./slack/commands.js";
-import { registerEventHandlers } from "./slack/event-handler.js";
+import { slackChannel } from "./channel/slack.js";
+import { createStandardCommands } from "./channel/slack-commands.js";
+import { Orchestrator } from "./orchestrator.js";
 import { SessionManager } from "./session/manager.js";
 import { ClaudeRunner } from "./claude/runner.js";
 import { ClaudeCodeRunner } from "./model/claude-code.js";
@@ -12,6 +11,7 @@ import { startHealthServer } from "./health.js";
 import { ConsoleAuditLogger } from "./audit/console.js";
 import { allowAllGuard } from "./access/allow-all.js";
 import { createLogger } from "./logger.js";
+import type { Channel } from "./channel/types.js";
 
 async function main(): Promise<void> {
   const logger = createLogger("sweny");
@@ -56,42 +56,65 @@ async function main(): Promise<void> {
   );
   const accessGuard = config.accessGuard ?? allowAllGuard();
 
-  // ─── Slack ────────────────────────────────────────────────────
-  if (!config.slack?.appToken || !config.slack?.botToken || !config.slack?.signingSecret) {
-    logger.error("Slack tokens are required. Set SLACK_APP_TOKEN, SLACK_BOT_TOKEN, and SLACK_SIGNING_SECRET.");
+  // ─── Resolve channels ─────────────────────────────────────────
+  let channels: Channel[];
+
+  if (config.channels && config.channels.length > 0) {
+    channels = config.channels;
+  } else if (config.slack?.appToken && config.slack?.botToken && config.slack?.signingSecret) {
+    channels = [
+      slackChannel({
+        appToken: config.slack.appToken,
+        botToken: config.slack.botToken,
+        signingSecret: config.slack.signingSecret,
+      }),
+    ];
+  } else {
+    logger.error(
+      "No channels configured. Either set `channels` in sweny.config.ts " +
+        "or provide SLACK_APP_TOKEN, SLACK_BOT_TOKEN, and SLACK_SIGNING_SECRET.",
+    );
     process.exit(1);
   }
 
-  const app = createSlackApp({
-    appToken: config.slack.appToken,
-    botToken: config.slack.botToken,
-    signingSecret: config.slack.signingSecret,
-  });
+  // ─── Standard commands ─────────────────────────────────────────
+  const commands = createStandardCommands(sessionManager, memoryStore);
 
-  registerLoginModal(app, config.auth);
-  registerCommands(app, sessionManager, memoryStore);
-  registerEventHandlers(app, {
-    authProvider: config.auth,
-    sessionManager,
-    claudeRunner,
-    memoryStore,
-    auditLogger,
-    rateLimiter,
-    accessGuard,
-    allowedUsers: config.allowedUsers ?? [],
-  });
+  // ─── Wire each channel ─────────────────────────────────────────
+  const teardowns: Array<() => Promise<void>> = [];
+
+  for (const channel of channels) {
+    channel.registerLoginUI?.(config.auth);
+    channel.registerCommands?.(commands);
+
+    const orchestrator = new Orchestrator(channel, {
+      authProvider: config.auth,
+      sessionManager,
+      claudeRunner,
+      memoryStore,
+      auditLogger,
+      rateLimiter,
+      accessGuard,
+      allowedUsers: config.allowedUsers ?? [],
+      logger,
+    });
+
+    const teardown = await channel.start((msg) => orchestrator.handleMessage(msg));
+    teardowns.push(teardown);
+
+    logger.info(`Channel "${channel.name}" started`);
+  }
 
   startHealthServer(config.healthPort ?? 3000);
-
-  await app.start();
-  logger.info("Slack bot is running (Socket Mode)");
 
   // Graceful shutdown
   const shutdown = async (): Promise<void> => {
     logger.info("Shutting down...");
     sessionManager.destroy();
     await registry.destroy();
-    await app.stop();
+    for (const teardown of teardowns) {
+      await teardown();
+    }
     process.exit(0);
   };
 

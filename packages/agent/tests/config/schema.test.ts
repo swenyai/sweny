@@ -29,32 +29,32 @@ describe("envSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("SLACK_APP_TOKEN must start with xapp-", () => {
+  it("accepts any non-empty SLACK_APP_TOKEN", () => {
     const valid = envSchema.safeParse({
       claudeApiKey: "sk-ant-test-key",
       slackAppToken: "xapp-1-ABCDEF",
     });
     expect(valid.success).toBe(true);
 
-    const invalid = envSchema.safeParse({
+    const alsoValid = envSchema.safeParse({
       claudeApiKey: "sk-ant-test-key",
-      slackAppToken: "invalid-token",
+      slackAppToken: "any-token-format",
     });
-    expect(invalid.success).toBe(false);
+    expect(alsoValid.success).toBe(true);
   });
 
-  it("SLACK_BOT_TOKEN must start with xoxb-", () => {
+  it("accepts any non-empty SLACK_BOT_TOKEN", () => {
     const valid = envSchema.safeParse({
       claudeApiKey: "sk-ant-test-key",
       slackBotToken: "xoxb-abc-123",
     });
     expect(valid.success).toBe(true);
 
-    const invalid = envSchema.safeParse({
+    const alsoValid = envSchema.safeParse({
       claudeApiKey: "sk-ant-test-key",
-      slackBotToken: "wrong-prefix",
+      slackBotToken: "any-token-format",
     });
-    expect(invalid.success).toBe(false);
+    expect(alsoValid.success).toBe(true);
   });
 
   it("LOG_LEVEL defaults to info", () => {

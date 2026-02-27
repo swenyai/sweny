@@ -39,13 +39,14 @@ export async function loadConfig(configPath?: string): Promise<ResolvedConfig> {
     sweny = defaultConfig();
   }
 
-  // Merge env-level Slack tokens into config if not already provided
-  if (!sweny.slack) {
-    sweny.slack = {};
+  // Auto-construct slack config from env vars when not explicitly set
+  if (!sweny.slack && env.slackAppToken && env.slackBotToken && env.slackSigningSecret) {
+    sweny.slack = {
+      appToken: env.slackAppToken,
+      botToken: env.slackBotToken,
+      signingSecret: env.slackSigningSecret,
+    };
   }
-  sweny.slack.appToken ??= env.slackAppToken;
-  sweny.slack.botToken ??= env.slackBotToken;
-  sweny.slack.signingSecret ??= env.slackSigningSecret;
 
   // Merge log level from env if not set in config
   sweny.logLevel ??= env.logLevel as SwenyConfig["logLevel"];
