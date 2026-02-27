@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { SourceControlProvider, PullRequest, PrCreateOptions, DispatchWorkflowOptions } from "./types.js";
+import type { SourceControlProvider, PullRequest, PrCreateOptions, PrListOptions, DispatchWorkflowOptions } from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 
@@ -143,6 +143,65 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
       }
 
       return { number: pr.number, url: pr.html_url, state: "open", title: opts.title };
+    },
+
+    async listPullRequests(opts?: PrListOptions): Promise<PullRequest[]> {
+      const state = opts?.state ?? "open";
+      const limit = opts?.limit ?? 30;
+      const params = new URLSearchParams({
+        state: state === "merged" ? "closed" : state,
+        per_page: String(limit),
+        sort: "updated",
+        direction: "desc",
+      });
+
+      const prs = (await ghApi(
+        "GET",
+        `/repos/${owner}/${repo}/pulls?${params}`,
+        token,
+      )) as {
+        number: number;
+        html_url: string;
+        title: string;
+        state: string;
+        merged_at: string | null;
+        closed_at: string | null;
+        labels: { name: string }[];
+      }[];
+
+      const labelFilter = opts?.labels?.length
+        ? new Set(opts.labels.map((l) => l.toLowerCase()))
+        : null;
+
+      const results: PullRequest[] = [];
+      for (const pr of prs) {
+        // Determine normalized state
+        const prState: PullRequest["state"] = pr.merged_at
+          ? "merged"
+          : pr.state === "open"
+            ? "open"
+            : "closed";
+
+        // Filter by requested state (handle "merged" vs "closed")
+        if (state === "merged" && !pr.merged_at) continue;
+
+        // Filter by labels
+        if (labelFilter) {
+          const prLabels = pr.labels.map((l) => l.name.toLowerCase());
+          if (!prLabels.some((l) => labelFilter.has(l))) continue;
+        }
+
+        results.push({
+          number: pr.number,
+          url: pr.html_url,
+          state: prState,
+          title: pr.title,
+          mergedAt: pr.merged_at,
+          closedAt: pr.closed_at,
+        });
+      }
+
+      return results;
     },
 
     async findExistingPr(searchTerm: string): Promise<PullRequest | null> {

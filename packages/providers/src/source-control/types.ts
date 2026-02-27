@@ -3,6 +3,8 @@ export interface PullRequest {
   url: string;
   state: "open" | "merged" | "closed";
   title: string;
+  mergedAt?: string | null;
+  closedAt?: string | null;
 }
 
 export interface PrCreateOptions {
@@ -19,6 +21,12 @@ export interface DispatchWorkflowOptions {
   inputs?: Record<string, string>;
 }
 
+export interface PrListOptions {
+  state?: "open" | "closed" | "merged" | "all";
+  labels?: string[];
+  limit?: number;
+}
+
 export interface SourceControlProvider {
   verifyAccess(): Promise<void>;
   configureBotIdentity(): Promise<void>;
@@ -30,6 +38,7 @@ export interface SourceControlProvider {
   resetPaths(paths: string[]): Promise<void>;
   stageAndCommit(message: string): Promise<void>;
   createPullRequest(opts: PrCreateOptions): Promise<PullRequest>;
+  listPullRequests(opts?: PrListOptions): Promise<PullRequest[]>;
   findExistingPr(searchTerm: string): Promise<PullRequest | null>;
   dispatchWorkflow(opts: DispatchWorkflowOptions): Promise<void>;
 }

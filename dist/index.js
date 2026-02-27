@@ -32768,6 +32768,47 @@ function github(config) {
             }
             return { number: pr.number, url: pr.html_url, state: "open", title: opts.title };
         },
+        async listPullRequests(opts) {
+            const state = opts?.state ?? "open";
+            const limit = opts?.limit ?? 30;
+            const params = new URLSearchParams({
+                state: state === "merged" ? "closed" : state,
+                per_page: String(limit),
+                sort: "updated",
+                direction: "desc",
+            });
+            const prs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?${params}`, token));
+            const labelFilter = opts?.labels?.length
+                ? new Set(opts.labels.map((l) => l.toLowerCase()))
+                : null;
+            const results = [];
+            for (const pr of prs) {
+                // Determine normalized state
+                const prState = pr.merged_at
+                    ? "merged"
+                    : pr.state === "open"
+                        ? "open"
+                        : "closed";
+                // Filter by requested state (handle "merged" vs "closed")
+                if (state === "merged" && !pr.merged_at)
+                    continue;
+                // Filter by labels
+                if (labelFilter) {
+                    const prLabels = pr.labels.map((l) => l.name.toLowerCase());
+                    if (!prLabels.some((l) => labelFilter.has(l)))
+                        continue;
+                }
+                results.push({
+                    number: pr.number,
+                    url: pr.html_url,
+                    state: prState,
+                    title: pr.title,
+                    mergedAt: pr.merged_at,
+                    closedAt: pr.closed_at,
+                });
+            }
+            return results;
+        },
         async findExistingPr(searchTerm) {
             // Search open PRs
             const openPrs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?state=open&per_page=20`, token));
@@ -33133,7 +33174,6 @@ function findRepoForService(serviceMap, serviceName) {
 
 
 
-
 async function investigate(config, providers) {
     const analysisDir = ".github/datadog-analysis";
     external_fs_.mkdirSync(analysisDir, { recursive: true });
@@ -33203,72 +33243,49 @@ async function buildKnownIssuesContext(config, providers) {
     lines.push("");
     // 2. Fetch recent triage GitHub PRs
     lines.push("## GitHub PRs");
-    let triagePrs = [];
     try {
-        let output = "";
-        await exec.exec("gh", [
-            "pr",
-            "list",
-            "--repo",
-            config.repository,
-            "--label",
-            "triage",
-            "--state",
-            "all",
-            "--limit",
-            "30",
-            "--json",
-            "number,title,state,url,mergedAt,closedAt",
-        ], {
-            listeners: {
-                stdout: (data) => {
-                    output += data.toString();
-                },
-            },
-            env: {
-                ...process.env,
-                GH_TOKEN: config.githubToken,
-            },
-            ignoreReturnCode: true,
+        const triagePrs = await providers.sourceControl.listPullRequests({
+            state: "all",
+            labels: ["triage"],
+            limit: 30,
         });
-        triagePrs = JSON.parse(output.trim() || "[]");
+        // Merged (fixed)
+        lines.push("### Merged (fixed)");
+        const merged = triagePrs.filter((pr) => pr.state === "merged");
+        if (merged.length > 0) {
+            for (const pr of merged) {
+                lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
+            }
+        }
+        else {
+            lines.push("_None_");
+        }
+        // Open (in progress)
+        lines.push("### Open (in progress)");
+        const open = triagePrs.filter((pr) => pr.state === "open");
+        if (open.length > 0) {
+            for (const pr of open) {
+                lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
+            }
+        }
+        else {
+            lines.push("_None_");
+        }
+        // Closed (failed attempts)
+        lines.push("### Closed (failed attempts)");
+        const closed = triagePrs.filter((pr) => pr.state === "closed");
+        if (closed.length > 0) {
+            for (const pr of closed) {
+                lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
+            }
+        }
+        else {
+            lines.push("_None_");
+        }
     }
     catch {
         core.warning("Failed to fetch GitHub triage PRs");
-        triagePrs = [];
-    }
-    // Merged (fixed)
-    lines.push("### Merged (fixed)");
-    const merged = triagePrs.filter((pr) => pr.state === "MERGED");
-    if (merged.length > 0) {
-        for (const pr of merged) {
-            lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-        }
-    }
-    else {
-        lines.push("_None_");
-    }
-    // Open (in progress)
-    lines.push("### Open (in progress)");
-    const open = triagePrs.filter((pr) => pr.state === "OPEN");
-    if (open.length > 0) {
-        for (const pr of open) {
-            lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-        }
-    }
-    else {
-        lines.push("_None_");
-    }
-    // Closed (failed attempts)
-    lines.push("### Closed (failed attempts)");
-    const closed = triagePrs.filter((pr) => pr.state === "CLOSED");
-    if (closed.length > 0) {
-        for (const pr of closed) {
-            lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-        }
-    }
-    else {
-        lines.push("_None_");
+        lines.push("_Failed to fetch triage PRs_");
     }
     return lines.join("\n");
 }

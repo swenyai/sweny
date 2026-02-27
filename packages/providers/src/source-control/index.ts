@@ -2,6 +2,7 @@ export type {
   SourceControlProvider,
   PullRequest,
   PrCreateOptions,
+  PrListOptions,
   DispatchWorkflowOptions,
 } from "./types.js";
 

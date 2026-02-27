@@ -1,8 +1,6 @@
 import * as core from "@actions/core";
 import * as fs from "fs";
 import * as path from "path";
-import * as exec from "@actions/exec";
-import type { TriageHistoryEntry } from "@sweny/providers/issue-tracking";
 import { ActionConfig } from "../config.js";
 import { Providers } from "../providers/index.js";
 import { installClaude, runClaude } from "../utils/claude.js";
@@ -116,84 +114,50 @@ async function buildKnownIssuesContext(
   // 2. Fetch recent triage GitHub PRs
   lines.push("## GitHub PRs");
 
-  interface GhPr {
-    number: number;
-    title: string;
-    state: string;
-    url: string;
-    mergedAt: string | null;
-    closedAt: string | null;
-  }
-
-  let triagePrs: GhPr[] = [];
   try {
-    let output = "";
-    await exec.exec(
-      "gh",
-      [
-        "pr",
-        "list",
-        "--repo",
-        config.repository,
-        "--label",
-        "triage",
-        "--state",
-        "all",
-        "--limit",
-        "30",
-        "--json",
-        "number,title,state,url,mergedAt,closedAt",
-      ],
-      {
-        listeners: {
-          stdout: (data) => {
-            output += data.toString();
-          },
-        },
-        env: {
-          ...process.env,
-          GH_TOKEN: config.githubToken,
-        } as Record<string, string>,
-        ignoreReturnCode: true,
-      },
+    const triagePrs = await providers.sourceControl.listPullRequests({
+      state: "all",
+      labels: ["triage"],
+      limit: 30,
+    });
+
+    // Merged (fixed)
+    lines.push("### Merged (fixed)");
+    const merged = triagePrs.filter((pr) => pr.state === "merged");
+    if (merged.length > 0) {
+      for (const pr of merged) {
+        lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
+      }
+    } else {
+      lines.push("_None_");
+    }
+
+    // Open (in progress)
+    lines.push("### Open (in progress)");
+    const open = triagePrs.filter((pr) => pr.state === "open");
+    if (open.length > 0) {
+      for (const pr of open) {
+        lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
+      }
+    } else {
+      lines.push("_None_");
+    }
+
+    // Closed (failed attempts)
+    lines.push("### Closed (failed attempts)");
+    const closed = triagePrs.filter(
+      (pr) => pr.state === "closed",
     );
-    triagePrs = JSON.parse(output.trim() || "[]") as GhPr[];
+    if (closed.length > 0) {
+      for (const pr of closed) {
+        lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
+      }
+    } else {
+      lines.push("_None_");
+    }
   } catch {
     core.warning("Failed to fetch GitHub triage PRs");
-    triagePrs = [];
-  }
-
-  // Merged (fixed)
-  lines.push("### Merged (fixed)");
-  const merged = triagePrs.filter((pr) => pr.state === "MERGED");
-  if (merged.length > 0) {
-    for (const pr of merged) {
-      lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-    }
-  } else {
-    lines.push("_None_");
-  }
-
-  // Open (in progress)
-  lines.push("### Open (in progress)");
-  const open = triagePrs.filter((pr) => pr.state === "OPEN");
-  if (open.length > 0) {
-    for (const pr of open) {
-      lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-    }
-  } else {
-    lines.push("_None_");
-  }
-
-  // Closed (failed attempts)
-  lines.push("### Closed (failed attempts)");
-  const closed = triagePrs.filter((pr) => pr.state === "CLOSED");
-  if (closed.length > 0) {
-    for (const pr of closed) {
-      lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-    }
-  } else {
-    lines.push("_None_");
+    lines.push("_Failed to fetch triage PRs_");
   }
 
   return lines.join("\n");

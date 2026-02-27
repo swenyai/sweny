@@ -51,6 +51,7 @@ describe("github source-control provider", () => {
       expect(typeof provider.resetPaths).toBe("function");
       expect(typeof provider.stageAndCommit).toBe("function");
       expect(typeof provider.createPullRequest).toBe("function");
+      expect(typeof provider.listPullRequests).toBe("function");
       expect(typeof provider.findExistingPr).toBe("function");
       expect(typeof provider.dispatchWorkflow).toBe("function");
     });
@@ -256,6 +257,57 @@ describe("github source-control provider", () => {
 
       const files = await provider.getChangedFiles();
       expect(files).toEqual([]);
+    });
+  });
+
+  describe("listPullRequests", () => {
+    it("lists open PRs by default", async () => {
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse([
+          {
+            number: 1,
+            html_url: "https://github.com/acme/app/pull/1",
+            title: "Fix bug",
+            state: "open",
+            merged_at: null,
+            closed_at: null,
+            labels: [{ name: "bug" }],
+          },
+        ]),
+      );
+
+      const prs = await provider.listPullRequests();
+      expect(prs).toHaveLength(1);
+      expect(prs[0].state).toBe("open");
+      expect(prs[0].number).toBe(1);
+    });
+
+    it("filters by label", async () => {
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse([
+          { number: 1, html_url: "url1", title: "PR 1", state: "open", merged_at: null, closed_at: null, labels: [{ name: "triage" }] },
+          { number: 2, html_url: "url2", title: "PR 2", state: "open", merged_at: null, closed_at: null, labels: [{ name: "bug" }] },
+        ]),
+      );
+
+      const prs = await provider.listPullRequests({ labels: ["triage"] });
+      expect(prs).toHaveLength(1);
+      expect(prs[0].number).toBe(1);
+    });
+
+    it("returns merged PRs with mergedAt timestamp", async () => {
+      const mergedAt = new Date().toISOString();
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse([
+          { number: 5, html_url: "url5", title: "Merged PR", state: "closed", merged_at: mergedAt, closed_at: mergedAt, labels: [] },
+          { number: 6, html_url: "url6", title: "Closed PR", state: "closed", merged_at: null, closed_at: mergedAt, labels: [] },
+        ]),
+      );
+
+      const prs = await provider.listPullRequests({ state: "merged" });
+      expect(prs).toHaveLength(1);
+      expect(prs[0].state).toBe("merged");
+      expect(prs[0].mergedAt).toBe(mergedAt);
     });
   });
 
