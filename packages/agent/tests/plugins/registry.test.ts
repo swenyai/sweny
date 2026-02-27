@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { PluginRegistry } from "../../src/plugins/registry.js";
-import type { ToolPlugin, PluginContext, SdkTool } from "../../src/plugins/types.js";
+import type { AgentTool } from "@sweny/providers/agent-tool";
+import type { ToolPlugin, PluginContext } from "../../src/plugins/types.js";
 
 /** Create a minimal PluginContext stub for testing. */
 function makeFakeContext(): PluginContext {
@@ -32,9 +33,9 @@ function makeFakeContext(): PluginContext {
   };
 }
 
-/** Create a fake SdkTool object for testing. */
-function fakeTool(name: string): SdkTool {
-  return { name } as unknown as SdkTool;
+/** Create a fake AgentTool object for testing. */
+function fakeTool(name: string): AgentTool {
+  return { name, description: "", schema: {}, execute: async () => ({ content: [] }) } as AgentTool;
 }
 
 function makePlugin(overrides: Partial<ToolPlugin> & { name: string }): ToolPlugin {

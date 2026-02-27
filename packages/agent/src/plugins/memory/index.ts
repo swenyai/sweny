@@ -1,18 +1,19 @@
 import { z } from "zod";
-import { tool } from "@anthropic-ai/claude-code";
-import type { ToolPlugin, PluginContext, SdkTool } from "../types.js";
+import { agentTool } from "@sweny/providers/agent-tool";
+import type { AgentTool } from "@sweny/providers/agent-tool";
+import type { ToolPlugin, PluginContext } from "../types.js";
 
 export function memoryPlugin(): ToolPlugin {
   return {
     name: "memory",
     description: "Persistent memory tools — save, list, and remove notes across sessions.",
 
-    createTools(ctx: PluginContext): SdkTool[] {
+    createTools(ctx: PluginContext): AgentTool[] {
       const store = ctx.storage.memory;
       const userId = ctx.user.userId;
 
       return [
-        tool(
+        agentTool(
           "memory_save",
           "Save a note that persists across sessions. Use this to remember user preferences, frequently-referenced IDs, investigation context, or anything useful for future conversations.",
           {
@@ -20,7 +21,7 @@ export function memoryPlugin(): ToolPlugin {
           },
           async (args) => {
             try {
-              const entry = await store.addEntry(userId, args.text);
+              const entry = await store.addEntry(userId, args.text as string);
               return {
                 content: [{
                   type: "text" as const,
@@ -36,7 +37,7 @@ export function memoryPlugin(): ToolPlugin {
           },
         ),
 
-        tool(
+        agentTool(
           "memory_list",
           "List all saved memory notes for the current user. These persist across sessions.",
           {},
@@ -64,7 +65,7 @@ export function memoryPlugin(): ToolPlugin {
           },
         ),
 
-        tool(
+        agentTool(
           "memory_remove",
           "Remove a saved memory note by its ID.",
           {
@@ -72,7 +73,7 @@ export function memoryPlugin(): ToolPlugin {
           },
           async (args) => {
             try {
-              const removed = await store.removeEntry(userId, args.entryId);
+              const removed = await store.removeEntry(userId, args.entryId as string);
               if (!removed) {
                 return {
                   content: [{ type: "text" as const, text: `Memory not found: ${args.entryId}` }],
@@ -93,7 +94,7 @@ export function memoryPlugin(): ToolPlugin {
       ];
     },
 
-    systemPromptSection(ctx: PluginContext): string {
+    systemPromptSection(): string {
       return [
         "## Memory",
         "You have access to persistent memory tools. Use `memory_save` to remember important context,",

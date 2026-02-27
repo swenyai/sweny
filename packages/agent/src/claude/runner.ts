@@ -9,6 +9,7 @@ import { PluginRegistry } from "../plugins/registry.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { DENIED_TOOLS } from "./tool-guard.js";
 import { createLogger } from "../logger.js";
+import { toSdkTools } from "../model/adapter.js";
 
 export interface ToolCall {
   toolName: string;
@@ -77,13 +78,14 @@ export class ClaudeRunner {
       memories: opts.memories,
     });
 
-    // Build tools from plugin registry
-    const tools = await this.resources.registry.buildToolsForSession(pluginCtx);
+    // Build tools from plugin registry and convert to SDK format
+    const agentTools = await this.resources.registry.buildToolsForSession(pluginCtx);
+    const sdkTools = toSdkTools(agentTools);
 
     // Create in-process MCP server with session-specific tools
     const mcpServer = createSdkMcpServer({
       name: this.config.name,
-      tools,
+      tools: sdkTools,
     });
 
     const toolCalls: ToolCall[] = [];

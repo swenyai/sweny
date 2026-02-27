@@ -1,18 +1,19 @@
 import { z } from "zod";
-import { tool } from "@anthropic-ai/claude-code";
-import type { ToolPlugin, PluginContext, SdkTool } from "../types.js";
+import { agentTool } from "@sweny/providers/agent-tool";
+import type { AgentTool } from "@sweny/providers/agent-tool";
+import type { ToolPlugin, PluginContext } from "../types.js";
 
 export function workspacePlugin(): ToolPlugin {
   return {
     name: "workspace",
     description: "File workspace tools — read, write, list, and manage files in a per-user workspace.",
 
-    createTools(ctx: PluginContext): SdkTool[] {
+    createTools(ctx: PluginContext): AgentTool[] {
       const store = ctx.storage.workspace;
       const userId = ctx.user.userId;
 
       return [
-        tool(
+        agentTool(
           "workspace_list",
           "List all files in your workspace. Returns the full manifest with paths, sizes, and descriptions.",
           {},
@@ -26,7 +27,7 @@ export function workspacePlugin(): ToolPlugin {
           },
         ),
 
-        tool(
+        agentTool(
           "workspace_read",
           "Read the content of a file in your workspace by path.",
           {
@@ -34,7 +35,7 @@ export function workspacePlugin(): ToolPlugin {
           },
           async (args) => {
             try {
-              const content = await store.readFile(userId, args.path);
+              const content = await store.readFile(userId, args.path as string);
               return { content: [{ type: "text" as const, text: content }] };
             } catch (err) {
               return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -42,7 +43,7 @@ export function workspacePlugin(): ToolPlugin {
           },
         ),
 
-        tool(
+        agentTool(
           "workspace_write",
           "Write a file to your workspace. REQUIRES confirm=true to execute. Without confirm, returns a preview.",
           {
@@ -54,7 +55,7 @@ export function workspacePlugin(): ToolPlugin {
           async (args) => {
             try {
               if (!args.confirm) {
-                const size = Buffer.byteLength(args.content, "utf-8");
+                const size = Buffer.byteLength(args.content as string, "utf-8");
                 return {
                   content: [{
                     type: "text" as const,
@@ -67,7 +68,7 @@ export function workspacePlugin(): ToolPlugin {
                 };
               }
 
-              const file = await store.writeFile(userId, args.path, args.content, args.description);
+              const file = await store.writeFile(userId, args.path as string, args.content as string, args.description as string | undefined);
               return { content: [{ type: "text" as const, text: `Written: ${file.path} (${file.size} bytes)` }] };
             } catch (err) {
               return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -75,7 +76,7 @@ export function workspacePlugin(): ToolPlugin {
           },
         ),
 
-        tool(
+        agentTool(
           "workspace_delete",
           "Delete a file from your workspace. REQUIRES confirm=true to execute.",
           {
@@ -93,7 +94,7 @@ export function workspacePlugin(): ToolPlugin {
                 };
               }
 
-              const deleted = await store.deleteFile(userId, args.path);
+              const deleted = await store.deleteFile(userId, args.path as string);
               if (!deleted) {
                 return { content: [{ type: "text" as const, text: `File not found: ${args.path}` }], isError: true };
               }
@@ -104,7 +105,7 @@ export function workspacePlugin(): ToolPlugin {
           },
         ),
 
-        tool(
+        agentTool(
           "workspace_reset",
           "Clear your entire workspace. REQUIRES confirm=true to execute.",
           {
@@ -132,7 +133,7 @@ export function workspacePlugin(): ToolPlugin {
           },
         ),
 
-        tool(
+        agentTool(
           "workspace_download_url",
           "Get a pre-signed download URL for a workspace file (valid for 1 hour).",
           {
@@ -140,7 +141,7 @@ export function workspacePlugin(): ToolPlugin {
           },
           async (args) => {
             try {
-              const url = await store.getDownloadUrl(userId, args.path);
+              const url = await store.getDownloadUrl(userId, args.path as string);
               return { content: [{ type: "text" as const, text: url }] };
             } catch (err) {
               return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };

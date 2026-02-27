@@ -1,11 +1,10 @@
-import type { tool } from "@anthropic-ai/claude-code";
+import type { AgentTool } from "@sweny/providers/agent-tool";
 import type { UserIdentity } from "../auth/types.js";
 import type { MemoryStore } from "../storage/memory/types.js";
 import type { WorkspaceStore } from "../storage/workspace/types.js";
 import type { Logger } from "../logger.js";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type SdkTool = ReturnType<typeof tool<any>>;
+export type { AgentTool } from "@sweny/providers/agent-tool";
 
 export interface PluginContext {
   user: UserIdentity;
@@ -20,9 +19,9 @@ export interface PluginContext {
 export interface ToolPlugin {
   name: string;
   description?: string;
-  createTools(ctx: PluginContext): SdkTool[] | Promise<SdkTool[]>;
+  createTools(ctx: PluginContext): AgentTool[] | Promise<AgentTool[]>;
   systemPromptSection?(ctx: PluginContext): string;
   destroy?(): Promise<void>;
 }
 
-export type ToolPluginFn = (ctx: PluginContext) => SdkTool[] | Promise<SdkTool[]>;
+export type ToolPluginFn = (ctx: PluginContext) => AgentTool[] | Promise<AgentTool[]>;

@@ -33011,7 +33011,49 @@ class DiscordWebhookProvider {
 
 
 //# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../providers/dist/coding-agent/claude-code.js
+
+function claudeCode(config) {
+    const log = config?.logger ?? logger_consoleLogger;
+    const extraFlags = config?.cliFlags ?? [];
+    // Lazy-load @actions/exec — optional peer dep, only available in GitHub Actions
+    async function exec(cmd, args, opts) {
+        const actionsExec = await Promise.resolve(/* import() */).then(__nccwpck_require__.t.bind(__nccwpck_require__, 9192, 19));
+        return actionsExec.exec(cmd, args, {
+            env: opts?.env,
+            ignoreReturnCode: opts?.ignoreReturnCode,
+        });
+    }
+    return {
+        async install() {
+            log.info("Installing Claude Code CLI...");
+            await exec("npm", ["install", "-g", "@anthropic-ai/claude-code"]);
+            log.info("Claude Code CLI installed");
+        },
+        async run(opts) {
+            const args = [
+                "-p",
+                opts.prompt,
+                "--allowedTools",
+                "*",
+                "--dangerously-skip-permissions",
+                "--max-turns",
+                String(opts.maxTurns),
+                ...extraFlags,
+            ];
+            return exec("claude", args, {
+                env: { ...process.env, ...opts.env },
+                ignoreReturnCode: true,
+            });
+        },
+    };
+}
+//# sourceMappingURL=claude-code.js.map
+;// CONCATENATED MODULE: ../providers/dist/coding-agent/index.js
+
+//# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ./src/providers/index.ts
+
 
 
 
@@ -33053,11 +33095,14 @@ function createProviders(config) {
     });
     // Notification
     const notification = githubSummary({ logger: actionsLogger });
+    // Coding agent
+    const codingAgent = claudeCode({ logger: actionsLogger });
     return {
         observability,
         issueTracker,
         sourceControl,
         notification,
+        codingAgent,
     };
 }
 
@@ -33065,40 +33110,6 @@ function createProviders(config) {
 var external_fs_ = __nccwpck_require__(9896);
 // EXTERNAL MODULE: external "path"
 var external_path_ = __nccwpck_require__(6928);
-// EXTERNAL MODULE: ../../node_modules/@actions/exec/lib/exec.js
-var exec = __nccwpck_require__(9192);
-;// CONCATENATED MODULE: ./src/utils/claude.ts
-
-
-/**
- * Install the Claude Code CLI globally via npm.
- */
-async function installClaude() {
-    core.info("Installing Claude Code CLI...");
-    await exec.exec("npm", ["install", "-g", "@anthropic-ai/claude-code"]);
-    core.info("Claude Code CLI installed");
-}
-/**
- * Run Claude with a prompt and return exit code.
- * Streams output to Actions log.
- */
-async function runClaude(opts) {
-    const args = [
-        "-p",
-        opts.prompt,
-        "--allowedTools",
-        "*",
-        "--dangerously-skip-permissions",
-        "--max-turns",
-        String(opts.maxTurns),
-    ];
-    const exitCode = await exec.exec("claude", args, {
-        env: { ...process.env, ...opts.env },
-        ignoreReturnCode: true,
-    });
-    return exitCode;
-}
-
 ;// CONCATENATED MODULE: ./src/utils/service-map.ts
 
 
@@ -33173,12 +33184,11 @@ function findRepoForService(serviceMap, serviceName) {
 
 
 
-
 async function investigate(config, providers) {
     const analysisDir = ".github/datadog-analysis";
     external_fs_.mkdirSync(analysisDir, { recursive: true });
-    // Install Claude
-    await installClaude();
+    // Install coding agent CLI
+    await providers.codingAgent.install();
     // Verify provider access
     core.startGroup("Verify provider access");
     await providers.observability.verifyAccess();
@@ -33194,9 +33204,9 @@ async function investigate(config, providers) {
     core.endGroup();
     // Build investigation prompt
     const prompt = buildInvestigationPrompt(config, knownIssuesContent);
-    // Run Claude investigation
-    core.startGroup("Claude investigation");
-    const claudeEnv = {
+    // Run coding agent investigation
+    core.startGroup("Coding agent investigation");
+    const agentEnv = {
         DD_API_KEY: config.ddApiKey,
         DD_APP_KEY: config.ddAppKey,
         DD_SITE: config.ddSite,
@@ -33205,10 +33215,10 @@ async function investigate(config, providers) {
         LINEAR_BUG_LABEL_ID: config.linearBugLabelId,
     };
     if (config.anthropicApiKey)
-        claudeEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
+        agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
     if (config.claudeOauthToken)
-        claudeEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
-    await runClaude({ prompt, maxTurns: config.maxInvestigateTurns, env: claudeEnv });
+        agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+    await providers.codingAgent.run({ prompt, maxTurns: config.maxInvestigateTurns, env: agentEnv });
     core.endGroup();
     // Parse results
     return parseInvestigationResults(analysisDir);
@@ -33575,7 +33585,6 @@ function parseInvestigationResults(analysisDir) {
 ;// CONCATENATED MODULE: ./src/phases/implement.ts
 
 
-
 const EMPTY_RESULT = {
     issueIdentifier: "",
     issueUrl: "",
@@ -33808,18 +33817,18 @@ async function implement(config, providers, investigation) {
     // -------------------------------------------------------------------------
     // 7. Install Claude and implement fix
     // -------------------------------------------------------------------------
-    core.startGroup("Implement Fix with Claude");
-    await installClaude();
+    core.startGroup("Implement Fix");
+    await providers.codingAgent.install();
     const implementPrompt = buildImplementPrompt(issue.identifier);
-    const claudeEnv = {};
+    const agentEnv = {};
     if (config.anthropicApiKey)
-        claudeEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
+        agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
     if (config.claudeOauthToken)
-        claudeEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
-    await runClaude({
+        agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+    await providers.codingAgent.run({
         prompt: implementPrompt,
         maxTurns: config.maxImplementTurns,
-        env: claudeEnv,
+        env: agentEnv,
     });
     core.endGroup();
     // -------------------------------------------------------------------------
@@ -33879,10 +33888,10 @@ async function implement(config, providers, investigation) {
     // -------------------------------------------------------------------------
     core.startGroup("Generate PR Description");
     const prDescPrompt = buildPrDescriptionPrompt(issue.identifier, issue.url);
-    await runClaude({
+    await providers.codingAgent.run({
         prompt: prDescPrompt,
         maxTurns: 10,
-        env: claudeEnv,
+        env: agentEnv,
     });
     core.endGroup();
     // -------------------------------------------------------------------------

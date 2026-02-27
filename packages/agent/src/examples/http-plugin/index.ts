@@ -15,8 +15,9 @@
  *   });
  */
 import { z } from "zod";
-import { tool } from "@anthropic-ai/claude-code";
-import type { ToolPlugin, PluginContext, SdkTool } from "../../plugins/types.js";
+import { agentTool } from "@sweny/providers/agent-tool";
+import type { AgentTool } from "@sweny/providers/agent-tool";
+import type { ToolPlugin, PluginContext } from "../../plugins/types.js";
 
 export interface HttpPluginOpts {
   allowedHosts?: string[];
@@ -27,9 +28,9 @@ export function httpPlugin(opts: HttpPluginOpts = {}): ToolPlugin {
     name: "http",
     description: "HTTP request tool for making outbound API calls.",
 
-    createTools(_ctx: PluginContext): SdkTool[] {
+    createTools(_ctx: PluginContext): AgentTool[] {
       return [
-        tool(
+        agentTool(
           "http_request",
           "Make an HTTP request. Returns the status code, headers, and body.",
           {
@@ -40,9 +41,14 @@ export function httpPlugin(opts: HttpPluginOpts = {}): ToolPlugin {
           },
           async (args) => {
             try {
+              const urlStr = args.url as string;
+              const method = args.method as string;
+              const headers = args.headers as Record<string, string> | undefined;
+              const body = args.body as string | undefined;
+
               // Validate allowed hosts
               if (opts.allowedHosts && opts.allowedHosts.length > 0) {
-                const url = new URL(args.url);
+                const url = new URL(urlStr);
                 if (!opts.allowedHosts.includes(url.hostname)) {
                   return {
                     content: [{
@@ -54,10 +60,10 @@ export function httpPlugin(opts: HttpPluginOpts = {}): ToolPlugin {
                 }
               }
 
-              const response = await fetch(args.url, {
-                method: args.method,
-                headers: args.headers,
-                body: args.body,
+              const response = await fetch(urlStr, {
+                method,
+                headers,
+                body,
               });
 
               const responseBody = await response.text();

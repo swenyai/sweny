@@ -1,10 +1,11 @@
-import type { ToolPlugin, PluginContext, SdkTool } from "./types.js";
+import type { AgentTool } from "@sweny/providers/agent-tool";
+import type { ToolPlugin, PluginContext } from "./types.js";
 
 export class PluginRegistry {
   constructor(private plugins: ToolPlugin[]) {}
 
-  async buildToolsForSession(ctx: PluginContext): Promise<SdkTool[]> {
-    const tools: SdkTool[] = [];
+  async buildToolsForSession(ctx: PluginContext): Promise<AgentTool[]> {
+    const tools: AgentTool[] = [];
     for (const plugin of this.plugins) {
       const pluginTools = await plugin.createTools(ctx);
       tools.push(...pluginTools);
