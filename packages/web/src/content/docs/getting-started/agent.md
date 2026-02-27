@@ -18,20 +18,23 @@ The `@sweny/agent` package is an AI assistant framework powered by the Claude Co
 Create a `sweny.config.ts` in your project root:
 
 ```typescript
+import { defineConfig } from "@sweny/agent";
 import { noAuth } from "@sweny/providers/auth";
 import { fsStorage } from "@sweny/providers/storage";
 import { memoryPlugin, workspacePlugin } from "@sweny/agent";
 
-export default {
+export default defineConfig({
   name: "sweny",
   auth: noAuth(),
   storage: fsStorage({ baseDir: "./.sweny-data" }),
   plugins: [memoryPlugin(), workspacePlugin()],
-  claude: {
+  model: {
     maxTurns: 25,
   },
-};
+});
 ```
+
+See [Agent Configuration](/agent/configuration/) for the full config reference.
 
 ### Environment variables
 
@@ -64,43 +67,43 @@ The CLI uses the same config, plugins, and Claude runner as the Slack bot.
 
 ## Plugins
 
-The agent supports custom tool plugins. Each plugin can expose tools to Claude and add sections to the system prompt:
+The agent supports custom tool plugins. Each plugin can expose tools to the model and inject sections into the system prompt:
 
 ```typescript
-import { tool } from "@anthropic-ai/claude-code";
+import { z } from "zod";
+import { agentTool } from "@sweny/providers/agent-tool";
 import type { ToolPlugin } from "@sweny/agent";
 
-export const httpPlugin: ToolPlugin = {
-  name: "http",
-  description: "Make HTTP requests",
-  createTools(ctx) {
-    return [
-      tool({
-        name: "http_get",
-        description: "Fetch a URL",
-        input_schema: {
-          type: "object",
-          properties: { url: { type: "string" } },
-          required: ["url"],
-        },
-        async execute({ url }) {
-          const res = await fetch(url);
-          return { status: res.status, body: await res.text() };
-        },
-      }),
-    ];
-  },
-};
+export function httpPlugin(): ToolPlugin {
+  return {
+    name: "http",
+    description: "Make HTTP requests",
+    createTools() {
+      return [
+        agentTool(
+          "http_get",
+          "Fetch a URL and return its body",
+          { url: z.string().url() },
+          async (args) => ({
+            content: [{ type: "text", text: await (await fetch(args.url as string)).text() }],
+          }),
+        ),
+      ];
+    },
+  };
+}
 ```
 
 Add it to your config:
 
 ```typescript
-export default {
+export default defineConfig({
   // ...
-  plugins: [memoryPlugin(), workspacePlugin(), httpPlugin],
-};
+  plugins: [memoryPlugin(), workspacePlugin(), httpPlugin()],
+});
 ```
+
+See [Plugin System](/agent/plugins/) for the full API reference and [Built-in Plugins](/agent/built-in-plugins/) for the tools included out of the box.
 
 ## Storage backends
 

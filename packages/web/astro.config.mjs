@@ -24,6 +24,15 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Agent Reference',
+					items: [
+						{ label: 'Plugin System', slug: 'agent/plugins' },
+						{ label: 'Built-in Plugins', slug: 'agent/built-in-plugins' },
+						{ label: 'Model Architecture', slug: 'agent/model-architecture' },
+						{ label: 'Configuration', slug: 'agent/configuration' },
+					],
+				},
+				{
 					label: 'Action Reference',
 					items: [
 						{ label: 'Inputs', slug: 'action/inputs' },
