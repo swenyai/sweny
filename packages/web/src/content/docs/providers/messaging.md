@@ -27,7 +27,7 @@ interface ChatMessage {
 
 ```typescript
 const messenger = slack({
-  botToken: process.env.SLACK_BOT_TOKEN!,
+  token: process.env.SLACK_BOT_TOKEN!,
   logger: myLogger,
 });
 ```

@@ -52,7 +52,7 @@ const obs = sentry({
 ```typescript
 const obs = cloudwatch({
   region: "us-east-1",
-  logGroupName: "/aws/lambda/my-function",
+  logGroupPrefix: "/aws/lambda/my-function",
   logger: myLogger,
 });
 ```

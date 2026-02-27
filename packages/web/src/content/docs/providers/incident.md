@@ -24,7 +24,7 @@ interface IncidentProvider {
 ```typescript
 const incidents = pagerduty({
   routingKey: process.env.PD_ROUTING_KEY!,  // Events API v2
-  apiKey: process.env.PD_API_KEY!,          // REST API (for on-call)
+  apiToken: process.env.PD_API_KEY!,        // REST API (for on-call)
   logger: myLogger,
 });
 ```

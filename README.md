@@ -273,6 +273,12 @@ SWEny is built on a provider/plugin architecture. The core engine is provider-ag
 | **Notification** | GitHub Summary, Slack, Teams, Discord | — |
 | **Incident** | PagerDuty | OpsGenie |
 | **Messaging** | Slack | — |
+| **Auth** | No-Auth, API Key | OAuth |
+| **Access Control** | Allow-All Guard, Role-Based Guard | — |
+| **Storage** | Filesystem, S3 | — |
+| **Credential Vault** | Env Vault | AWS Secrets Manager |
+| **Coding Agent** | Claude Code | — |
+| **Agent Tool** | Agent Tool | — |
 
 Implementing a custom provider means implementing a TypeScript interface — see [`packages/providers/`](packages/providers/) for the full library and [`@sweny/providers` on npm](https://www.npmjs.com/package/@sweny/providers).
 

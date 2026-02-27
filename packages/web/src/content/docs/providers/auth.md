@@ -44,10 +44,10 @@ Validates users against a custom function:
 
 ```typescript
 const auth = apiKeyAuth({
-  validate: async (userId, apiKey) => {
+  validate: async (apiKey) => {
     // Look up the key in your database
     const user = await db.findByApiKey(apiKey);
-    if (!user) throw new Error("Invalid API key");
+    if (!user) return null;
     return {
       userId: user.id,
       displayName: user.name,

@@ -79,7 +79,7 @@ For production deployments:
 const storage = s3Storage({
   bucket: "my-sweny-bucket",
   prefix: "agent",        // optional
-  region: "us-east-1",    // optional
+  region: "us-west-2",    // optional, defaults to us-west-2
 });
 ```
 
