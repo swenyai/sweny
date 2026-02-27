@@ -32,7 +32,7 @@ Top error groups:
   3. billing-worker — Stale invoice reference — 14 occurrences
 ```
 
-SWEny passes the aggregated errors to Claude, which reads through the stack traces, identifies the highest-impact issue, and checks the codebase for context.
+SWEny passes the aggregated errors to the AI agent, which reads through the stack traces, identifies the highest-impact issue, and checks the codebase for context.
 
 ### Duplicate detection
 
@@ -46,7 +46,7 @@ If a matching issue exists, SWEny adds a "+1 occurrence" comment with the latest
 
 ## Phase 2: Implement
 
-Claude creates a branch, reads the relevant source files, and writes a fix:
+The agent creates a branch, reads the relevant source files, and writes a fix:
 
 ```
 Creating branch: sweny/fix-webhook-null-pointer-1234
@@ -107,13 +107,13 @@ A typical triage run with `investigation-depth: standard`:
 | Metric | Typical range |
 |--------|--------------|
 | Wall time | 2–8 minutes |
-| Claude turns | 5–20 per issue |
+| Agent turns | 5–20 per issue |
 | Token usage | 10k–50k tokens per issue |
 
 Costs depend on your Claude plan. With an OAuth token (Max/Pro subscription), triage runs are included. With an API key, expect ~$0.10–$0.50 per run at current Sonnet pricing.
 
 To control costs:
-- Set `max-turns` to cap Claude's iteration count (default: 50)
+- Set `max-turns` to cap the agent's iteration count (default: 50)
 - Use `service-filter` to focus on specific services
 - Use `dry-run: true` to test without creating PRs
 - Use `investigation-depth: quick` for faster, cheaper runs
@@ -125,8 +125,8 @@ To control costs:
 | `time-range` | How far back to scan | `4h`, `24h`, `7d` |
 | `severity-focus` | Error level filter | `errors`, `warnings` |
 | `service-filter` | Limit to specific services | `payment-*`, `api-gateway` |
-| `investigation-depth` | How thorough Claude's analysis is | `quick`, `standard`, `thorough` |
-| `max-turns` | Claude's iteration limit | `20`, `50` |
+| `investigation-depth` | How thorough the analysis is | `quick`, `standard`, `thorough` |
+| `max-turns` | Agent iteration limit | `20`, `50` |
 | `dry-run` | Investigate without creating PRs | `true` |
 
 See [Action Inputs](/action/inputs/) for the complete list.

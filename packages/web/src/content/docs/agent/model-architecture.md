@@ -3,13 +3,13 @@ title: Model Architecture
 description: How the SWEny agent and action delegate to coding agents through layered abstractions.
 ---
 
-SWEny runs coding agents in two different modes depending on the deployment target. The GitHub Action uses a subprocess CLI harness. The Slack agent uses an in-process SDK. Both share the same plugin and provider infrastructure.
+SWEny runs coding agents in two different modes depending on the deployment target. The GitHub Action uses a subprocess CLI harness. The interactive agent uses an in-process SDK. Both share the same plugin and provider infrastructure, and the model backend is pluggable.
 
 ## Overview
 
 ```
-GitHub Action                          Slack Agent / CLI
-─────────────                          ──────────────────
+GitHub Action                          Interactive Agent / CLI
+─────────────                          ──────────────────────
 @sweny/action                          @sweny/agent
      │                                      │
 CodingAgent                            ClaudeRunner
@@ -74,9 +74,9 @@ The factory installs the Claude Code CLI via `npm install -g @anthropic-ai/claud
 | `cliFlags` | `string[]` | `[]` | Extra CLI flags appended to every `run()` call |
 | `logger` | `Logger` | `consoleLogger` | Logger for install/run status messages |
 
-## ModelRunner (Slack Agent path)
+## ModelRunner (Interactive Agent path)
 
-The `ModelRunner` interface abstracts in-process agent SDKs for the Slack agent and CLI:
+The `ModelRunner` interface abstracts in-process agent SDKs for the interactive agent and CLI:
 
 ```typescript
 import type { ModelRunner, ModelRunOptions, RunResult } from "@sweny/agent";
@@ -152,7 +152,7 @@ This adapter and `ClaudeCodeRunner` are the **only two files** that import from 
 
 ## ClaudeRunner (orchestrator)
 
-`ClaudeRunner` sits between the Slack/CLI frontend and the `ModelRunner`. It assembles the system prompt, resolves plugins, and delegates to the injected runner:
+`ClaudeRunner` sits between the messaging/CLI frontend and the `ModelRunner`. It assembles the system prompt, resolves plugins, and delegates to the injected runner:
 
 ```typescript
 const runner = new ClaudeRunner(config, resources, modelRunner);

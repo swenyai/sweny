@@ -72,7 +72,7 @@ Trigger the workflow manually from the Actions tab, or wait for the next schedul
 
 SWEny will:
 1. Query Datadog for errors in the last 24 hours
-2. Analyze them with Claude and identify the highest-impact novel issue
+2. Analyze them and identify the highest-impact novel issue
 3. Create a Linear ticket with root cause analysis
 4. Write a fix and open a PR
 5. Post a summary to the GitHub Actions run

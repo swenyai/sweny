@@ -3,7 +3,7 @@ title: Messaging
 description: Send and update messages in chat platforms.
 ---
 
-The messaging provider sends and updates messages in chat platforms. This is used by the Slack agent to post responses in threads — it's different from the [notification provider](/providers/notification/), which sends one-shot webhook payloads.
+The messaging provider sends and updates messages in chat platforms. This is used by the interactive agent to post responses in threads — it's different from the [notification provider](/providers/notification/), which sends one-shot webhook payloads.
 
 The key difference: **messaging** supports two-way threads (send a message, then update it in-place), while **notification** is fire-and-forget.
 

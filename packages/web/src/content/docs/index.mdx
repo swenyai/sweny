@@ -1,11 +1,11 @@
 ---
 title: SWEny
-description: Autonomous engineering tools powered by Claude AI
+description: A GitHub Action and interactive agent that investigates production errors and writes fixes with AI
 template: splash
 hero:
-  tagline: Your on-call engineer that never sleeps. SWEny monitors your observability logs, investigates anomalies with Claude AI, creates tickets, and opens fix PRs — overnight, automatically.
+  tagline: "SWEny is a GitHub Action that monitors your production logs, investigates errors with AI, files tickets, and opens fix PRs — on a schedule, overnight, without waking anyone up."
   actions:
-    - text: Get Started
+    - text: Get Started in 5 Minutes
       link: /getting-started/
       icon: right-arrow
       variant: primary
@@ -17,49 +17,63 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## How it works
+## What it does
 
-SWEny Triage runs on a schedule (or manual trigger) and executes three phases:
+SWEny runs as a scheduled GitHub Action. Every time it runs, it:
 
-1. **Investigate** — Query your observability platform, analyze errors, check your issue tracker for known issues, and rank by impact
-2. **Implement** — Create or update a ticket, create a branch, have Claude write the fix, and open a PR ready for review
-3. **Notify** — Post a summary to your GitHub Actions run with the full investigation log
+1. **Queries your logs** — pulls errors from Datadog, Sentry, or CloudWatch for the last 24 hours
+2. **Checks for duplicates** — searches your issue tracker (Linear or GitHub Issues) and open PRs to avoid double-filing
+3. **Investigates** — the AI agent reads the error logs, traces root causes through your codebase, and ranks by impact
+4. **Files a ticket** — creates a detailed issue with root cause analysis, affected files, and suggested approach
+5. **Writes a fix** — creates a branch, implements the fix, and opens a PR ready for human review
+6. **Reports back** — posts a summary to your GitHub Actions run (or Slack, Teams, Discord)
 
-Before acting, SWEny searches your issue tracker and open PRs for existing matches. If the error is already tracked, SWEny adds a "+1 occurrence" comment with the latest count instead of filing a duplicate.
+No new infrastructure. No servers to run. Just a workflow file in your repo.
 
-## Built on @sweny/providers
+## See it in action
+
+Want to understand the full flow? Read the [end-to-end walkthrough](/getting-started/walkthrough/) — a real error spike from Datadog through to a merged PR.
+
+## Works with your stack
 
 <CardGrid stagger>
 	<Card title="Observability" icon="magnifier">
-		Datadog, Sentry, CloudWatch — query logs and aggregate errors from your monitoring stack.
+		**Datadog**, **Sentry**, **CloudWatch** — query logs and aggregate errors from your existing monitoring.
 	</Card>
 	<Card title="Issue Tracking" icon="list-format">
-		Linear, GitHub Issues — create tickets, search for duplicates, link PRs automatically.
+		**Linear**, **GitHub Issues** — create tickets, search for duplicates, link PRs automatically.
 	</Card>
 	<Card title="Source Control" icon="github">
-		GitHub — create branches, push commits, open PRs, dispatch cross-repo workflows.
+		**GitHub** — create branches, push commits, open PRs, dispatch cross-repo workflows.
 	</Card>
 	<Card title="Notification" icon="comment">
-		GitHub Summary, Slack, Teams, Discord — send triage results wherever your team works.
+		**GitHub Summary**, **Slack**, **Teams**, **Discord** — send results wherever your team works.
 	</Card>
 	<Card title="Incident" icon="warning">
-		PagerDuty — create incidents, acknowledge, resolve, check on-call schedules.
+		**PagerDuty** — create incidents, acknowledge, resolve, check on-call schedules.
 	</Card>
 	<Card title="Storage" icon="document">
-		Filesystem, S3 — persist sessions, memory, and workspace files for the AI agent.
+		**Filesystem**, **S3** — persist sessions, memory, and workspace files for the agent.
 	</Card>
 </CardGrid>
 
-## Install the provider library
+## Two deployment modes
 
-```bash
-npm install @sweny/providers
+**GitHub Action** — runs on a cron schedule in your CI. No servers, no infrastructure. This is the primary deployment.
+
+**Interactive Agent** — a bot your team can chat with. Ask it to investigate errors, query logs, or write fixes interactively. Currently supports Slack, with more channels planned. Deploy as a container or run locally as a CLI.
+
+## Quick install
+
+```yaml
+# .github/workflows/sweny-triage.yml
+- uses: swenyai/sweny@v0.1
+  with:
+    claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+    dd-api-key: ${{ secrets.DD_API_KEY }}
+    dd-app-key: ${{ secrets.DD_APP_KEY }}
+    linear-api-key: ${{ secrets.LINEAR_API_KEY }}
+    linear-team-id: ${{ vars.LINEAR_TEAM_ID }}
 ```
 
-```typescript
-import { datadog } from "@sweny/providers/observability";
-import { linear } from "@sweny/providers/issue-tracking";
-import { github } from "@sweny/providers/source-control";
-```
-
-Every provider follows the same pattern: import the factory function, pass your config, and use the returned object. [Build your own](/getting-started/providers/) by implementing the TypeScript interface.
+That's it. [Full setup guide →](/getting-started/)

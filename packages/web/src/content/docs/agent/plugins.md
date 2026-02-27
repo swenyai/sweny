@@ -3,7 +3,7 @@ title: Plugin System
 description: Build custom tool plugins to extend the SWEny agent with new capabilities.
 ---
 
-The agent's capabilities are defined by plugins. Each plugin provides tools that Claude can call during a conversation, plus optional system prompt sections that guide how tools are used.
+The agent's capabilities are defined by plugins. Each plugin provides tools that the model can call during a conversation, plus optional system prompt sections that guide how tools are used.
 
 ## AgentTool
 
@@ -168,7 +168,7 @@ Key patterns:
 - **Factory function** — `httpPlugin(opts)` returns a `ToolPlugin`. This lets callers pass configuration at registration time.
 - **Zod schemas** — Each parameter gets a Zod type. Use `.describe()` to document parameters for the model.
 - **Error signaling** — Return `isError: true` to tell the model something went wrong without throwing.
-- **System prompt injection** — The `systemPromptSection()` output is appended to Claude's system prompt, providing context about the tool's constraints.
+- **System prompt injection** — The `systemPromptSection()` output is appended to the model's system prompt, providing context about the tool's constraints.
 
 ## Adding to config
 
@@ -190,4 +190,4 @@ export default defineConfig({
 });
 ```
 
-Plugins are called in registration order. The `PluginRegistry` collects all tools from all plugins and passes them to Claude as a flat list.
+Plugins are called in registration order. The `PluginRegistry` collects all tools from all plugins and passes them to the model as a flat list.

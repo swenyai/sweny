@@ -1,11 +1,13 @@
 ---
 title: Deploying the Agent
-description: Run SWEny as a Slack bot or interactive CLI.
+description: Run the SWEny agent as an interactive bot or CLI.
 ---
 
-The `@sweny/agent` package is an AI assistant framework powered by the Claude Code SDK. Deploy it as a Slack bot for your team or run it locally as an interactive CLI.
+The `@sweny/agent` package is an agentic harness that runs AI coding sessions. The model backend and messaging channel are pluggable — deploy it as a Slack bot (more channels planned) or run it locally as an interactive CLI.
 
-## Slack bot
+## Slack channel
+
+The first supported channel is Slack. More channels are planned.
 
 ### Prerequisites
 
@@ -58,7 +60,7 @@ Run the agent as a local REPL without Slack:
 npm run cli
 ```
 
-The CLI uses the same config, plugins, and Claude runner as the Slack bot.
+The CLI uses the same config, plugins, and model runner as the bot.
 
 ## Plugins
 

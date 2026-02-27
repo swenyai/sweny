@@ -46,7 +46,7 @@ Zero external dependencies. Uses `child_process.execFile("git", ...)` for local 
 // Create a branch for the fix
 await sc.createBranch("sweny/fix-webhook-null-pointer-1234");
 
-// ... Claude writes the fix ...
+// ... the agent writes the fix ...
 
 // Check if anything was changed
 if (await sc.hasChanges()) {

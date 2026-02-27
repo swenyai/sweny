@@ -14,13 +14,13 @@ SWEny's duplicate detection checks your issue tracker for matching issues before
 - Check `service-filter` — a filter like `payment-*` only matches services with that prefix
 - Try `dry-run: true` with `investigation-depth: thorough` to see what SWEny finds without any skip logic
 
-### Claude runs out of turns
+### Agent runs out of turns
 
-If you see "max turns reached" in the output, Claude hit the iteration limit before finishing:
+If you see "max turns reached" in the output, the agent hit the iteration limit before finishing:
 
 - Increase `max-turns` (default: 50)
-- Use `additional-instructions` to focus Claude on a specific area
-- Check that your repo isn't too large — Claude has to read files to understand the codebase
+- Use `additional-instructions` to focus the agent on a specific area
+- Check that your repo isn't too large — the agent has to read files to understand the codebase
 
 ### Datadog returns no logs
 
@@ -84,3 +84,11 @@ With a Claude Max/Pro OAuth token, triage runs are included in your subscription
 - Use `service-filter` to focus on specific services
 - Use `investigation-depth: quick` for faster, cheaper runs
 - Run less frequently (weekly instead of twice-weekly)
+
+### Agent runs out of context
+
+If you see "context window exceeded" in the output, the codebase or error logs are too large:
+
+- Use `service-filter` to narrow the scope
+- Use `severity-focus: errors` to exclude warnings
+- Set `investigation-depth: quick` for a lighter analysis
