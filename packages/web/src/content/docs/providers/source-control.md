@@ -39,3 +39,40 @@ const sc = github({
 ```
 
 Zero external dependencies. Uses `child_process.execFile("git", ...)` for local git operations and native `fetch` for the GitHub API.
+
+### Typical triage flow
+
+```typescript
+// Create a branch for the fix
+await sc.createBranch("sweny/fix-webhook-null-pointer-1234");
+
+// ... Claude writes the fix ...
+
+// Check if anything was changed
+if (await sc.hasChanges()) {
+  await sc.stageAndCommit("fix: add null check for refund webhook payload");
+  await sc.pushBranch("sweny/fix-webhook-null-pointer-1234");
+
+  const pr = await sc.createPullRequest({
+    title: "Fix null pointer in WebhookHandler for refund webhooks",
+    body: "Closes ENG-456. Adds guard clause for undefined metadata on refund events.",
+    head: "sweny/fix-webhook-null-pointer-1234",
+    base: "main",
+  });
+  // pr.url → "https://github.com/org/repo/pull/89"
+}
+```
+
+### Cross-repo dispatch
+
+Trigger a workflow in another repository (requires a `bot-token` with `repo` and `actions` scopes):
+
+```typescript
+await sc.dispatchWorkflow({
+  owner: "your-org",
+  repo: "target-repo",
+  workflow: "sweny-triage.yml",
+  ref: "main",
+  inputs: { service: "payment-api" },
+});
+```

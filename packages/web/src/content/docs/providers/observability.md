@@ -36,6 +36,28 @@ const obs = datadog({
 
 Uses the Datadog Logs API v2. Zero external dependencies — native `fetch` only.
 
+### Querying logs
+
+```typescript
+const errors = await obs.queryLogs({
+  timeRange: "24h",
+  serviceFilter: "payment-*",
+  severity: "error",
+});
+// Returns: LogEntry[] — each with message, timestamp, service, severity, attributes
+```
+
+### Aggregating errors
+
+```typescript
+const groups = await obs.aggregate({
+  timeRange: "24h",
+  serviceFilter: "*",
+});
+// Returns: AggregateResult[] — grouped by service + error pattern with occurrence counts
+// e.g., [{ key: "payment-api::NullPointerException", count: 312, ... }]
+```
+
 ## Sentry
 
 ```typescript

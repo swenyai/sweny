@@ -47,12 +47,7 @@ CLAUDE_CODE_OAUTH_TOKEN=...  # or ANTHROPIC_API_KEY
 ### Run
 
 ```bash
-# Development
 npm run dev
-
-# Production (Docker)
-docker build -t sweny-agent .
-docker run --env-file .env sweny-agent
 ```
 
 ## Interactive CLI

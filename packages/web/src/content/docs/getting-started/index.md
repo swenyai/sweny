@@ -6,9 +6,11 @@ description: Get SWEny Triage running in your repo in 5 minutes.
 ## Prerequisites
 
 - A GitHub repository
-- A [Datadog](https://www.datadoghq.com/) account with API + App keys
-- A [Linear](https://linear.app/) account with an API key
+- An observability platform — [Datadog](https://www.datadoghq.com/), [Sentry](https://sentry.io/), or [CloudWatch](https://aws.amazon.com/cloudwatch/)
+- An issue tracker — [Linear](https://linear.app/) or GitHub Issues
 - A Claude Code OAuth token (from a Claude Max / Pro subscription) or an Anthropic API key
+
+This guide uses **Datadog + Linear**. See [Observability Providers](/providers/observability/) and [Issue Tracking Providers](/providers/issue-tracking/) for alternatives.
 
 ## Add the workflow
 
@@ -77,6 +79,7 @@ SWEny will:
 
 ## What's next?
 
+- [End-to-End Walkthrough](/getting-started/walkthrough/) — see a real triage run from error spike to merged PR
 - [Provider Architecture](/getting-started/providers/) — understand how SWEny's plugin system works
 - [Action Inputs](/action/inputs/) — configure time ranges, severity filters, investigation depth
 - [Examples](/action/examples/) — dry runs, specific issues, service filtering

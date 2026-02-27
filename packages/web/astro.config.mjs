@@ -19,8 +19,10 @@ export default defineConfig({
 					label: 'Getting Started',
 					items: [
 						{ label: 'Introduction', slug: 'getting-started' },
+						{ label: 'End-to-End Walkthrough', slug: 'getting-started/walkthrough' },
 						{ label: 'Provider Architecture', slug: 'getting-started/providers' },
 						{ label: 'Deploying the Agent', slug: 'getting-started/agent' },
+						{ label: 'Troubleshooting', slug: 'getting-started/troubleshooting' },
 					],
 				},
 				{

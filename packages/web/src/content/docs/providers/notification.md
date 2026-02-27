@@ -57,3 +57,17 @@ const notifier = discordWebhook({
   logger: myLogger,
 });
 ```
+
+## Sending a notification
+
+All providers share the same `send()` method:
+
+```typescript
+await notifier.send({
+  title: "SWEny Triage Complete",
+  body: "Found 3 novel issues. Created ENG-456, ENG-457. Opened PRs #89, #90.",
+  format: "markdown",
+});
+```
+
+The notification provider is fire-and-forget — there's no message ID or threading. For two-way conversations, see the [Messaging provider](/providers/messaging/).

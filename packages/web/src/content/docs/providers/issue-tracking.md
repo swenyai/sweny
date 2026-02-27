@@ -55,6 +55,30 @@ const tracker = linear({
 
 Supports all optional capabilities: `PrLinkCapable`, `FingerprintCapable`, `TriageHistoryCapable`.
 
+### Creating an issue
+
+```typescript
+const issue = await tracker.createIssue({
+  title: "NullPointerException in WebhookHandler.process()",
+  description: "312 occurrences in the last 24h. Root cause: missing null check on refund payload.",
+  teamId: "TEAM-UUID",
+  labelIds: ["bug-label-uuid", "triage-label-uuid"],
+  priority: 2,  // High
+});
+// issue.identifier → "ENG-456"
+// issue.url → "https://linear.app/team/issue/ENG-456"
+```
+
+### Searching for duplicates
+
+```typescript
+const existing = await tracker.searchIssues({
+  query: "NullPointerException WebhookHandler",
+  projectId: "TEAM-UUID",
+});
+// Returns matching issues — SWEny uses this for duplicate detection
+```
+
 ## GitHub Issues
 
 ```typescript

@@ -25,7 +25,7 @@ SWEny Triage runs on a schedule (or manual trigger) and executes three phases:
 2. **Implement** — Create or update a ticket, create a branch, have Claude write the fix, and open a PR ready for review
 3. **Notify** — Post a summary to your GitHub Actions run with the full investigation log
 
-The **novelty gate** ensures SWEny won't create duplicate tickets. It checks your issue tracker and GitHub for existing issues before acting, and adds "+1 occurrence" comments to known issues instead.
+Before acting, SWEny searches your issue tracker and open PRs for existing matches. If the error is already tracked, SWEny adds a "+1 occurrence" comment with the latest count instead of filing a duplicate.
 
 ## Built on @sweny/providers
 
@@ -62,4 +62,4 @@ import { linear } from "@sweny/providers/issue-tracking";
 import { github } from "@sweny/providers/source-control";
 ```
 
-Every provider follows the same pattern: a factory function with Zod-validated config. Implement the TypeScript interface to add your own.
+Every provider follows the same pattern: import the factory function, pass your config, and use the returned object. [Build your own](/getting-started/providers/) by implementing the TypeScript interface.

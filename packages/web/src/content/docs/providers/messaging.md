@@ -3,6 +3,10 @@ title: Messaging
 description: Send and update messages in chat platforms.
 ---
 
+The messaging provider sends and updates messages in chat platforms. This is used by the Slack agent to post responses in threads — it's different from the [notification provider](/providers/notification/), which sends one-shot webhook payloads.
+
+The key difference: **messaging** supports two-way threads (send a message, then update it in-place), while **notification** is fire-and-forget.
+
 ```typescript
 import { slack } from "@sweny/providers/messaging";
 ```
@@ -33,3 +37,42 @@ const messenger = slack({
 ```
 
 Requires `@slack/web-api` as a peer dependency (lazy-loaded at runtime).
+
+### Sending a message
+
+```typescript
+const { messageId } = await messenger.sendMessage({
+  channelId: "C0123ABCDEF",
+  text: "Looking into this...",
+});
+```
+
+### Updating in-place
+
+The agent uses this pattern to replace a "thinking..." message with the actual response:
+
+```typescript
+// Send placeholder
+const { messageId } = await messenger.sendMessage({
+  channelId: "C0123ABCDEF",
+  threadId: "1234567890.123456",
+  text: "Looking into this...",
+});
+
+// Replace with actual response
+await messenger.updateMessage(
+  "C0123ABCDEF",
+  messageId,
+  "Here's what I found: ...",
+);
+```
+
+### Required bot token scopes
+
+| Scope | Purpose |
+|-------|---------|
+| `chat:write` | Send messages |
+| `im:history` | Read DM history for context |
+| `im:read` | Access DM channels |
+| `im:write` | Open DM channels |
+| `app_mentions:read` | Respond to @mentions |
