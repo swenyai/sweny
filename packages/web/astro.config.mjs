@@ -3,7 +3,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-	site: 'https://sweny.ai',
+	site: 'https://docs.sweny.ai',
 	integrations: [
 		starlight({
 			title: 'SWEny',
