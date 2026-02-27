@@ -1,6 +1,6 @@
 ---
 title: Coding Agent
-description: Install and run AI coding agents to implement changes.
+description: Install and run coding agents to implement changes.
 ---
 
 ```typescript

@@ -3,7 +3,7 @@ title: Deploying the Agent
 description: Run the SWEny agent as an interactive bot or CLI.
 ---
 
-The `@sweny/agent` package is an agentic harness that runs AI coding sessions. The model backend and messaging channel are pluggable — deploy it as a Slack bot (more channels planned) or run it locally as an interactive CLI.
+The `@sweny/agent` package is an agentic harness that orchestrates coding sessions. The model backend and messaging channel are pluggable — deploy it as a Slack bot (more channels planned) or run it locally as an interactive CLI.
 
 ## Slack channel
 

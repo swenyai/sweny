@@ -1,9 +1,9 @@
 ---
 title: SWEny
-description: A GitHub Action and interactive agent that investigates production errors and writes fixes with AI
+description: A GitHub Action and interactive agent that investigates production errors and writes fixes automatically
 template: splash
 hero:
-  tagline: "SWEny is a GitHub Action that monitors your production logs, investigates errors with AI, files tickets, and opens fix PRs — on a schedule, overnight, without waking anyone up."
+  tagline: "SWEny is a GitHub Action that monitors your production logs, investigates errors, files tickets, and opens fix PRs — on a schedule, overnight, without waking anyone up."
   actions:
     - text: Get Started in 5 Minutes
       link: /getting-started/
@@ -23,7 +23,7 @@ SWEny runs as a scheduled GitHub Action. Every time it runs, it:
 
 1. **Queries your logs** — pulls errors from Datadog, Sentry, or CloudWatch for the last 24 hours
 2. **Checks for duplicates** — searches your issue tracker (Linear or GitHub Issues) and open PRs to avoid double-filing
-3. **Investigates** — the AI agent reads the error logs, traces root causes through your codebase, and ranks by impact
+3. **Investigates** — the agent reads the error logs, traces root causes through your codebase, and ranks by impact
 4. **Files a ticket** — creates a detailed issue with root cause analysis, affected files, and suggested approach
 5. **Writes a fix** — creates a branch, implements the fix, and opens a PR ready for human review
 6. **Reports back** — posts a summary to your GitHub Actions run (or Slack, Teams, Discord)

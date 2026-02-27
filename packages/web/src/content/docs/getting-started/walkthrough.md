@@ -32,7 +32,7 @@ Top error groups:
   3. billing-worker — Stale invoice reference — 14 occurrences
 ```
 
-SWEny passes the aggregated errors to the AI agent, which reads through the stack traces, identifies the highest-impact issue, and checks the codebase for context.
+SWEny passes the aggregated errors to the agent, which reads through the stack traces, identifies the highest-impact issue, and checks the codebase for context.
 
 ### Duplicate detection
 
