@@ -4,7 +4,7 @@
 
 export interface PersistedSession {
   threadKey: string;
-  claudeSessionId: string | null;
+  agentSessionId: string | null;
   userId: string;
   messageCount: number;
   createdAt: string;

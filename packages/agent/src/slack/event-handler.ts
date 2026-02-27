@@ -94,7 +94,7 @@ export function registerEventHandlers(app: App, deps: HandlerDeps): void {
         const durationMs = Date.now() - startTime;
 
         if (result.sessionId) {
-          session.claudeSessionId = result.sessionId;
+          session.agentSessionId = result.sessionId;
           session.lastActiveAt = new Date();
           session.messageCount++;
           sessionManager.persist(session);

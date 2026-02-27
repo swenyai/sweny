@@ -3,7 +3,7 @@ import type { PersistedSession, TranscriptEntry } from "../storage/session/types
 
 export interface Session {
   threadKey: string;
-  claudeSessionId: string | null;
+  agentSessionId: string | null;
   userId: string;
   createdAt: Date;
   lastActiveAt: Date;
@@ -30,7 +30,7 @@ export class SessionManager {
 
     const session: Session = {
       threadKey,
-      claudeSessionId: null,
+      agentSessionId: null,
       userId,
       createdAt: new Date(),
       lastActiveAt: new Date(),
@@ -59,7 +59,7 @@ export class SessionManager {
         if (persisted) {
           const session: Session = {
             threadKey: persisted.threadKey,
-            claudeSessionId: persisted.claudeSessionId,
+            agentSessionId: persisted.agentSessionId,
             userId: persisted.userId,
             createdAt: new Date(persisted.createdAt),
             lastActiveAt: new Date(persisted.lastActiveAt),
@@ -93,7 +93,7 @@ export class SessionManager {
 
     const persisted: PersistedSession = {
       threadKey: session.threadKey,
-      claudeSessionId: session.claudeSessionId,
+      agentSessionId: session.agentSessionId,
       userId: session.userId,
       messageCount: session.messageCount,
       createdAt: session.createdAt.toISOString(),

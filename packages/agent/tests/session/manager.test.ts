@@ -63,7 +63,7 @@ describe("SessionManager", () => {
     expect(session).toBeDefined();
     expect(session.threadKey).toBe("thread-1");
     expect(session.userId).toBe("user-a");
-    expect(session.claudeSessionId).toBeNull();
+    expect(session.agentSessionId).toBeNull();
     expect(session.messageCount).toBe(0);
     expect(session.createdAt).toBeInstanceOf(Date);
   });

@@ -16,18 +16,21 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "^1",
     "@slack/bolt": "^4",
     "@sweny/providers": "*",
     "express": "^5",
     "zod": "^3.24"
   },
   "peerDependencies": {
+    "@anthropic-ai/claude-code": "^1",
     "@aws-sdk/client-s3": "^3",
     "@aws-sdk/credential-provider-node": "^3",
     "@aws-sdk/s3-request-presigner": "^3"
   },
   "peerDependenciesMeta": {
+    "@anthropic-ai/claude-code": {
+      "optional": true
+    },
     "@aws-sdk/client-s3": {
       "optional": true
     },
@@ -39,6 +42,7 @@
     }
   },
   "devDependencies": {
+    "@anthropic-ai/claude-code": "^1",
     "@aws-sdk/client-s3": "^3.997.0",
     "@aws-sdk/s3-request-presigner": "^3.997.0",
     "@types/express": "^5",

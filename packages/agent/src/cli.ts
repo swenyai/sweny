@@ -19,6 +19,7 @@
 import { createInterface } from "node:readline/promises";
 import { loadConfig } from "./config/loader.js";
 import { ClaudeRunner } from "./claude/runner.js";
+import { ClaudeCodeRunner } from "./model/claude-code.js";
 import { PluginRegistry } from "./plugins/registry.js";
 import type { Session } from "./session/manager.js";
 import { createLogger } from "./logger.js";
@@ -42,17 +43,22 @@ async function main(): Promise<void> {
   const registry = new PluginRegistry(config.plugins);
 
   // ─── Runner ───────────────────────────────────────────────────
+  const modelRunner = new ClaudeCodeRunner({
+    apiKey: env.claudeApiKey,
+    oauthToken: env.claudeOauthToken,
+  });
   const runner = new ClaudeRunner(
     {
       name: config.name,
       basePrompt: config.systemPrompt,
-      maxTurns: config.claude.maxTurns ?? 20,
-      claude: {
+      maxTurns: config.model.maxTurns ?? 20,
+      model: {
         apiKey: env.claudeApiKey,
         oauthToken: env.claudeOauthToken,
       },
     },
     { registry, memoryStore, workspaceStore },
+    modelRunner,
   );
 
   // ─── Authenticate via AuthProvider ────────────────────────────
@@ -100,7 +106,7 @@ async function main(): Promise<void> {
     return {
       threadKey: `cli-${Date.now()}`,
       userId: CLI_USER_ID,
-      claudeSessionId: null,
+      agentSessionId: null,
       messageCount: 0,
       createdAt: new Date(),
       lastActiveAt: new Date(),
@@ -236,7 +242,7 @@ async function main(): Promise<void> {
         const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 
         if (result.sessionId) {
-          session.claudeSessionId = result.sessionId;
+          session.agentSessionId = result.sessionId;
           session.lastActiveAt = new Date();
           session.messageCount++;
         }

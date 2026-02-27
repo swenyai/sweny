@@ -9,7 +9,7 @@ export default defineConfig({
   auth: noAuth(),
   storage: fsStorage({ baseDir: "./.sweny-data" }),
   plugins: [memoryPlugin(), workspacePlugin()],
-  claude: {
+  model: {
     maxTurns: 20,
   },
 });

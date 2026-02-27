@@ -5,6 +5,7 @@ import { registerCommands } from "./slack/commands.js";
 import { registerEventHandlers } from "./slack/event-handler.js";
 import { SessionManager } from "./session/manager.js";
 import { ClaudeRunner } from "./claude/runner.js";
+import { ClaudeCodeRunner } from "./model/claude-code.js";
 import { PluginRegistry } from "./plugins/registry.js";
 import { RateLimiter } from "./rate-limit.js";
 import { startHealthServer } from "./health.js";
@@ -31,17 +32,22 @@ async function main(): Promise<void> {
 
   // ─── Runtime components ───────────────────────────────────────
   const sessionManager = new SessionManager(24, sessionStore);
+  const modelRunner = new ClaudeCodeRunner({
+    apiKey: env.claudeApiKey,
+    oauthToken: env.claudeOauthToken,
+  });
   const claudeRunner = new ClaudeRunner(
     {
       name: config.name,
       basePrompt: config.systemPrompt,
-      maxTurns: config.claude.maxTurns ?? 20,
-      claude: {
+      maxTurns: config.model.maxTurns ?? 20,
+      model: {
         apiKey: env.claudeApiKey,
         oauthToken: env.claudeOauthToken,
       },
     },
     { registry, memoryStore, workspaceStore },
+    modelRunner,
   );
   const auditLogger = config.audit ?? new ConsoleAuditLogger();
   const rateLimiter = new RateLimiter(

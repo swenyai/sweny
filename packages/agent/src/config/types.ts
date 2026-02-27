@@ -11,7 +11,7 @@ export interface SwenyConfig {
   accessGuard?: AccessGuard;
   plugins: ToolPlugin[];
   systemPrompt?: string;
-  claude: {
+  model: {
     maxTurns?: number;
     disallowedTools?: string[];
   };

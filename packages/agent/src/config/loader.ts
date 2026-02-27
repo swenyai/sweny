@@ -16,7 +16,7 @@ function defaultConfig(): SwenyConfig {
     auth: noAuth(),
     storage: undefined as unknown as SwenyConfig["storage"],
     plugins: [],
-    claude: {},
+    model: {},
   };
 }
 

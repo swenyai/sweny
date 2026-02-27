@@ -17,7 +17,7 @@ describe("FsSessionStore", () => {
   function makeSession(overrides: Partial<PersistedSession> = {}): PersistedSession {
     return {
       threadKey: "thread-1",
-      claudeSessionId: "sess-abc",
+      agentSessionId: "sess-abc",
       userId: "user-a",
       messageCount: 0,
       createdAt: new Date().toISOString(),
