@@ -101,7 +101,7 @@ export class SessionManager {
     };
 
     this.store.save(session.userId, session.threadKey, persisted)
-      .catch((err) => console.error("[session] Failed to persist session:", err));
+      .catch((err: unknown) => console.error("[session] Failed to persist session:", err));
   }
 
   /**
@@ -111,7 +111,7 @@ export class SessionManager {
     if (!this.store) return;
 
     this.store.appendTranscript(session.userId, session.threadKey, entry)
-      .catch((err) => console.error("[session] Failed to append transcript:", err));
+      .catch((err: unknown) => console.error("[session] Failed to append transcript:", err));
   }
 
   /**
