@@ -13,7 +13,9 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "dev:agent": "npm run dev --workspace=packages/agent",
-    "cli:agent": "npm run cli --workspace=packages/agent"
+    "cli:agent": "npm run cli --workspace=packages/agent",
+    "dev:web": "npm run dev --workspace=packages/web",
+    "build:web": "npm run build --workspace=packages/web"
   },
   "license": "MIT",
   "homepage": "https://sweny.ai",

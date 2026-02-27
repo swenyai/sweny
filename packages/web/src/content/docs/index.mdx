@@ -1,0 +1,65 @@
+---
+title: SWEny
+description: Autonomous engineering tools powered by Claude AI
+template: splash
+hero:
+  tagline: Your on-call engineer that never sleeps. SWEny monitors your observability logs, investigates anomalies with Claude AI, creates tickets, and opens fix PRs — overnight, automatically.
+  actions:
+    - text: Get Started
+      link: /getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/swenyai/sweny
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## How it works
+
+SWEny Triage runs on a schedule (or manual trigger) and executes three phases:
+
+1. **Investigate** — Query your observability platform, analyze errors, check your issue tracker for known issues, and rank by impact
+2. **Implement** — Create or update a ticket, create a branch, have Claude write the fix, and open a PR ready for review
+3. **Notify** — Post a summary to your GitHub Actions run with the full investigation log
+
+The **novelty gate** ensures SWEny won't create duplicate tickets. It checks your issue tracker and GitHub for existing issues before acting, and adds "+1 occurrence" comments to known issues instead.
+
+## Built on @sweny/providers
+
+<CardGrid stagger>
+	<Card title="Observability" icon="magnifier">
+		Datadog, Sentry, CloudWatch — query logs and aggregate errors from your monitoring stack.
+	</Card>
+	<Card title="Issue Tracking" icon="list-format">
+		Linear, GitHub Issues — create tickets, search for duplicates, link PRs automatically.
+	</Card>
+	<Card title="Source Control" icon="github">
+		GitHub — create branches, push commits, open PRs, dispatch cross-repo workflows.
+	</Card>
+	<Card title="Notification" icon="comment">
+		GitHub Summary, Slack, Teams, Discord — send triage results wherever your team works.
+	</Card>
+	<Card title="Incident" icon="warning">
+		PagerDuty — create incidents, acknowledge, resolve, check on-call schedules.
+	</Card>
+	<Card title="Storage" icon="document">
+		Filesystem, S3 — persist sessions, memory, and workspace files for the AI agent.
+	</Card>
+</CardGrid>
+
+## Install the provider library
+
+```bash
+npm install @sweny/providers
+```
+
+```typescript
+import { datadog } from "@sweny/providers/observability";
+import { linear } from "@sweny/providers/issue-tracking";
+import { github } from "@sweny/providers/source-control";
+```
+
+Every provider follows the same pattern: a factory function with Zod-validated config. Implement the TypeScript interface to add your own.
