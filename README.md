@@ -9,6 +9,8 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/swenyai/sweny/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/swenyai/sweny/ci.yml?style=flat-square&label=CI" /></a>
+  <a href="https://www.npmjs.com/package/@sweny/providers"><img alt="npm" src="https://img.shields.io/npm/v/@sweny/providers?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/releases"><img alt="Release" src="https://img.shields.io/github/v/release/swenyai/sweny?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/swenyai/sweny?style=flat-square" /></a>
   <a href="https://sweny.ai"><img alt="Website" src="https://img.shields.io/badge/sweny.ai-website-blue?style=flat-square" /></a>
@@ -21,6 +23,7 @@ This monorepo contains the SWEny platform:
 | Package | Description |
 |---------|-------------|
 | **[SWEny Triage](#sweny-triage)** | GitHub Action — autonomous SRE triage from observability logs |
+| **[@sweny/providers](packages/providers)** | Shared provider interfaces and implementations |
 | **[@sweny/agent](packages/agent)** | AI assistant framework — Slack bot + CLI with plugin architecture |
 | **[@sweny/web](packages/web)** | Public website — sweny.ai |
 
@@ -264,11 +267,14 @@ SWEny is built on a provider/plugin architecture. The core engine is provider-ag
 
 | Provider Type | Ships With | Planned |
 |---------------|-----------|---------|
-| **Observability** | Datadog | Sentry, New Relic, Grafana Loki |
-| **Issue Tracker** | Linear | Jira, GitHub Issues |
-| **Notification** | GitHub Summary | Slack, PagerDuty |
+| **Observability** | Datadog, Sentry, CloudWatch | New Relic, Grafana Loki |
+| **Issue Tracker** | Linear, GitHub Issues | Jira |
+| **Source Control** | GitHub | GitLab |
+| **Notification** | GitHub Summary, Slack, Teams, Discord | — |
+| **Incident** | PagerDuty | OpsGenie |
+| **Messaging** | Slack | — |
 
-Implementing a custom provider means implementing a TypeScript interface — see [`packages/action/src/providers/`](packages/action/src/providers/) for examples.
+Implementing a custom provider means implementing a TypeScript interface — see [`packages/providers/`](packages/providers/) for the full library and [`@sweny/providers` on npm](https://www.npmjs.com/package/@sweny/providers).
 
 ---
 
