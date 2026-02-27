@@ -44,6 +44,7 @@ export class ClaudeRunner {
     session: Session;
     user: UserIdentity;
     memories: MemoryEntry[];
+    formatHint?: string;
   }): Promise<RunResult> {
     const logger = createLogger(this.config.name);
 
@@ -65,6 +66,7 @@ export class ClaudeRunner {
     const systemPrompt = buildSystemPrompt({
       name: this.config.name,
       basePrompt: this.config.basePrompt,
+      formatHint: opts.formatHint,
       pluginSections,
       memories: opts.memories,
     });

@@ -131,8 +131,9 @@ export function registerEventHandlers(app: App, deps: HandlerDeps): void {
           .logTurn({
             sessionId: result.sessionId ?? "unknown",
             threadKey,
-            channelId,
-            threadTs,
+            conversationId: channelId,
+            messageId: threadTs,
+            channelName: "slack",
             userId,
             userEmail: identity.email,
             turnNumber: session.messageCount,

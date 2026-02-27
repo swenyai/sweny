@@ -1,8 +1,9 @@
 export interface AuditRecord {
   sessionId: string;
   threadKey: string;
-  channelId: string;
-  threadTs: string;
+  conversationId: string;
+  messageId: string;
+  channelName: string;
   userId: string;
   userEmail?: string;
   turnNumber: number;

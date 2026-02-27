@@ -3,18 +3,35 @@ import type { MemoryEntry } from "../storage/memory/types.js";
 export interface SystemPromptOpts {
   name: string;
   basePrompt?: string;
+  formatHint?: string;
   pluginSections: string;
   memories: MemoryEntry[];
 }
 
-const DEFAULT_BASE_PROMPT = `You are a helpful assistant. You are knowledgeable, concise, and friendly.
+export const FORMAT_HINTS: Record<string, string> = {
+  "slack-mrkdwn":
+    "Format your responses for Slack using Slack's mrkdwn syntax. Use *bold* for emphasis, `code` for inline code, and ``` for code blocks.",
+  "discord-markdown":
+    "Format your responses using Discord markdown. Use **bold** for emphasis, `code` for inline code, and ``` for code blocks.",
+  plaintext:
+    "Format your responses as plain text. Use simple indentation and dashes for lists.",
+};
+
+const DEFAULT_FORMAT_HINT = "slack-mrkdwn";
+
+const DEFAULT_CORE_PROMPT = `You are a helpful assistant. You are knowledgeable, concise, and friendly.`;
+
+function buildDefaultBasePrompt(formatHint?: string): string {
+  const key = formatHint ?? DEFAULT_FORMAT_HINT;
+  const formatting = FORMAT_HINTS[key] ?? FORMAT_HINTS[DEFAULT_FORMAT_HINT];
+  return `${DEFAULT_CORE_PROMPT}
 
 ## Formatting
-- Format your responses for Slack using Slack's mrkdwn syntax.
-- Use *bold* for emphasis, \`code\` for inline code, and \`\`\` for code blocks.
+- ${formatting}
 - Use bullet points for lists.
 - Keep responses concise and actionable.
 - If you are unsure about something, say so rather than guessing.`;
+}
 
 export function buildSystemPrompt(opts: SystemPromptOpts): string {
   const sections: string[] = [];
@@ -23,7 +40,7 @@ export function buildSystemPrompt(opts: SystemPromptOpts): string {
   sections.push(`Your name is ${opts.name}.`);
 
   // Base instructions
-  sections.push(opts.basePrompt ?? DEFAULT_BASE_PROMPT);
+  sections.push(opts.basePrompt ?? buildDefaultBasePrompt(opts.formatHint));
 
   // Plugin-provided sections
   if (opts.pluginSections.trim()) {
