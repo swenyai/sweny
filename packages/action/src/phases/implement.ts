@@ -5,12 +5,6 @@ import { ActionConfig } from "../config.js";
 import { Providers } from "../providers/index.js";
 import { InvestigationResult } from "./investigate.js";
 import { installClaude, runClaude } from "../utils/claude.js";
-import {
-  hasCommits,
-  getChangedFiles,
-  resetWorkflowChanges,
-} from "../utils/git.js";
-import { dispatchWorkflow } from "../utils/github.js";
 
 export interface ImplementResult {
   issueIdentifier: string;
@@ -173,17 +167,19 @@ export async function implement(
   const currentRepo = config.repository;
 
   if (targetRepo && targetRepo !== currentRepo) {
-    const dispatchToken = config.botToken || config.githubToken;
     core.notice(
       `Bug belongs to ${targetRepo} (current repo: ${currentRepo}) - dispatching cross-repo`,
     );
 
     try {
-      await dispatchWorkflow({
-        token: dispatchToken,
+      await providers.sourceControl.dispatchWorkflow({
         targetRepo,
-        linearIssue: issue.identifier,
-        sourceRepo: currentRepo,
+        workflow: "SWEny Triage",
+        inputs: {
+          linear_issue: issue.identifier,
+          dispatched_from: currentRepo,
+          novelty_mode: "false",
+        },
       });
 
       // Add a comment to the Linear issue noting the cross-repo handoff
@@ -289,7 +285,7 @@ export async function implement(
   await providers.sourceControl.createBranch(branchName);
 
   // Reset any workflow file changes to avoid permission issues on push
-  await resetWorkflowChanges();
+  await providers.sourceControl.resetPaths([".github/workflows/"]);
   core.info(`Created branch: ${branchName}`);
   core.endGroup();
 
@@ -335,7 +331,7 @@ export async function implement(
     };
   }
 
-  let hasCodeChanges = await hasCommits();
+  let hasCodeChanges = await providers.sourceControl.hasNewCommits();
 
   if (!hasCodeChanges) {
     core.info("No commits created by Claude");
@@ -361,7 +357,7 @@ export async function implement(
       };
     }
   } else {
-    const changedFiles = await getChangedFiles();
+    const changedFiles = await providers.sourceControl.getChangedFiles();
     core.info(
       `Claude created commits with changes to: ${changedFiles.join(", ")}`,
     );

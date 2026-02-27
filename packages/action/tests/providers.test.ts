@@ -50,6 +50,10 @@ describe("createProviders", () => {
     expect(typeof providers.sourceControl.createBranch).toBe("function");
     expect(typeof providers.sourceControl.createPullRequest).toBe("function");
     expect(typeof providers.sourceControl.findExistingPr).toBe("function");
+    expect(typeof providers.sourceControl.hasNewCommits).toBe("function");
+    expect(typeof providers.sourceControl.getChangedFiles).toBe("function");
+    expect(typeof providers.sourceControl.resetPaths).toBe("function");
+    expect(typeof providers.sourceControl.dispatchWorkflow).toBe("function");
     // Notification
     expect(providers.notification).toBeDefined();
     expect(typeof providers.notification.send).toBe("function");

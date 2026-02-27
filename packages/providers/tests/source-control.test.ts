@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { execFile as _execFile } from "node:child_process";
 import { github } from "../src/source-control/github.js";
 import type { SourceControlProvider } from "../src/source-control/types.js";
 
@@ -8,6 +9,8 @@ vi.mock("node:child_process", () => ({
     cb(null, { stdout: "", stderr: "" });
   }),
 }));
+
+const mockExecFile = vi.mocked(_execFile);
 
 // Mock global fetch
 const mockFetch = vi.fn();
@@ -28,7 +31,7 @@ describe("github source-control provider", () => {
     token: "ghp_test",
     owner: "acme",
     repo: "app",
-    logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn() },
+    logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
   };
 
   beforeEach(() => {
@@ -43,9 +46,13 @@ describe("github source-control provider", () => {
       expect(typeof provider.createBranch).toBe("function");
       expect(typeof provider.pushBranch).toBe("function");
       expect(typeof provider.hasChanges).toBe("function");
+      expect(typeof provider.hasNewCommits).toBe("function");
+      expect(typeof provider.getChangedFiles).toBe("function");
+      expect(typeof provider.resetPaths).toBe("function");
       expect(typeof provider.stageAndCommit).toBe("function");
       expect(typeof provider.createPullRequest).toBe("function");
       expect(typeof provider.findExistingPr).toBe("function");
+      expect(typeof provider.dispatchWorkflow).toBe("function");
     });
   });
 
@@ -205,6 +212,83 @@ describe("github source-control provider", () => {
 
       const pr = await provider.findExistingPr("ABC-789");
       expect(pr).toBeNull();
+    });
+  });
+
+  describe("hasNewCommits", () => {
+    it("returns true when commits exist ahead of base", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "3\n", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      const result = await provider.hasNewCommits();
+      expect(result).toBe(true);
+    });
+
+    it("returns false when no commits ahead", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "0\n", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      const result = await provider.hasNewCommits();
+      expect(result).toBe(false);
+    });
+  });
+
+  describe("getChangedFiles", () => {
+    it("returns list of changed files", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "src/index.ts\nsrc/utils.ts\n", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      const files = await provider.getChangedFiles();
+      expect(files).toEqual(["src/index.ts", "src/utils.ts"]);
+    });
+
+    it("returns empty array when no changes", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      const files = await provider.getChangedFiles();
+      expect(files).toEqual([]);
+    });
+  });
+
+  describe("dispatchWorkflow", () => {
+    it("dispatches a workflow via GitHub API", async () => {
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({}, 204));
+
+      await provider.dispatchWorkflow({
+        targetRepo: "acme/other-app",
+        workflow: "ci.yml",
+        inputs: { ref: "fix-branch" },
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.github.com/repos/acme/other-app/actions/workflows/ci.yml/dispatches",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining('"ref":"main"'),
+        }),
+      );
+    });
+
+    it("sends inputs in the request body", async () => {
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({}, 204));
+
+      await provider.dispatchWorkflow({
+        targetRepo: "acme/other-app",
+        workflow: "triage.yml",
+        inputs: { linear_issue: "ABC-123", novelty_mode: "false" },
+      });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.inputs).toEqual({ linear_issue: "ABC-123", novelty_mode: "false" });
     });
   });
 });

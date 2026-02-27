@@ -32735,6 +32735,21 @@ function github(config) {
             const staged = await git(["diff", "--cached", "--name-only", "--", ".", ":!.github/datadog-analysis", ":!.github/workflows"], { ignoreReturnCode: true });
             return unstaged.trim().length > 0 || staged.trim().length > 0;
         },
+        async hasNewCommits() {
+            const output = await git(["rev-list", "--count", `HEAD`, `^origin/${baseBranch}`], { ignoreReturnCode: true });
+            const count = parseInt(output.trim(), 10);
+            return !isNaN(count) && count > 0;
+        },
+        async getChangedFiles() {
+            const output = await git(["diff", "--name-only", `origin/${baseBranch}..HEAD`], { ignoreReturnCode: true });
+            return output.trim().split("\n").filter(Boolean);
+        },
+        async resetPaths(paths) {
+            for (const p of paths) {
+                await git(["checkout", "HEAD", "--", p], { ignoreReturnCode: true });
+            }
+            log.debug(`Reset paths: ${paths.join(", ")}`);
+        },
         async stageAndCommit(message) {
             await git(["add", "-A", "--", ".", ":!.github/datadog-analysis", ":!.github/workflows"]);
             await git(["commit", "-m", message]);
@@ -32776,6 +32791,13 @@ function github(config) {
                 }
             }
             return null;
+        },
+        async dispatchWorkflow(opts) {
+            const targetParts = opts.targetRepo.split("/");
+            const targetOwner = targetParts[0] ?? owner;
+            const targetRepoName = targetParts[1] ?? opts.targetRepo;
+            await ghApi("POST", `/repos/${targetOwner}/${targetRepoName}/actions/workflows/${encodeURIComponent(opts.workflow)}/dispatches`, token, { ref: baseBranch, inputs: opts.inputs ?? {} });
+            log.info(`Dispatched workflow "${opts.workflow}" to ${opts.targetRepo}`);
         },
     };
 }
@@ -33533,71 +33555,7 @@ function parseInvestigationResults(analysisDir) {
     };
 }
 
-;// CONCATENATED MODULE: ./src/utils/git.ts
-
-async function hasCommits() {
-    let output = "";
-    await exec.exec("git", ["rev-list", "--count", "HEAD", "^origin/main"], {
-        listeners: {
-            stdout: (data) => {
-                output += data.toString();
-            },
-        },
-        ignoreReturnCode: true,
-    });
-    const count = parseInt(output.trim(), 10);
-    return !isNaN(count) && count > 0;
-}
-async function getChangedFiles() {
-    let output = "";
-    await exec.exec("git", ["diff", "--name-only", "origin/main..HEAD"], {
-        listeners: {
-            stdout: (data) => {
-                output += data.toString();
-            },
-        },
-        ignoreReturnCode: true,
-    });
-    return output.trim().split("\n").filter(Boolean);
-}
-/**
- * Reset workflow file changes to avoid permission issues on push.
- */
-async function resetWorkflowChanges() {
-    await exec.exec("git", ["checkout", "HEAD", "--", ".github/workflows/"], {
-        ignoreReturnCode: true,
-    });
-}
-
-;// CONCATENATED MODULE: ./src/utils/github.ts
-
-
-/**
- * Dispatch a workflow to another repository (cross-repo handoff).
- */
-async function dispatchWorkflow(opts) {
-    const args = [
-        "workflow",
-        "run",
-        "SWEny Triage",
-        "--repo",
-        opts.targetRepo,
-        "-f",
-        `linear_issue=${opts.linearIssue}`,
-        "-f",
-        `dispatched_from=${opts.sourceRepo}`,
-        "-f",
-        "novelty_mode=false",
-    ];
-    await exec.exec("gh", args, {
-        env: { ...process.env, GH_TOKEN: opts.token },
-    });
-    core.info(`Dispatched workflow to ${opts.targetRepo} with linear_issue=${opts.linearIssue}`);
-}
-
 ;// CONCATENATED MODULE: ./src/phases/implement.ts
-
-
 
 
 
@@ -33728,14 +33686,16 @@ async function implement(config, providers, investigation) {
     const targetRepo = investigation.targetRepo;
     const currentRepo = config.repository;
     if (targetRepo && targetRepo !== currentRepo) {
-        const dispatchToken = config.botToken || config.githubToken;
         core.notice(`Bug belongs to ${targetRepo} (current repo: ${currentRepo}) - dispatching cross-repo`);
         try {
-            await dispatchWorkflow({
-                token: dispatchToken,
+            await providers.sourceControl.dispatchWorkflow({
                 targetRepo,
-                linearIssue: issue.identifier,
-                sourceRepo: currentRepo,
+                workflow: "SWEny Triage",
+                inputs: {
+                    linear_issue: issue.identifier,
+                    dispatched_from: currentRepo,
+                    novelty_mode: "false",
+                },
             });
             // Add a comment to the Linear issue noting the cross-repo handoff
             await providers.issueTracker.updateIssue(issue.id, {
@@ -33825,7 +33785,7 @@ async function implement(config, providers, investigation) {
     }
     await providers.sourceControl.createBranch(branchName);
     // Reset any workflow file changes to avoid permission issues on push
-    await resetWorkflowChanges();
+    await providers.sourceControl.resetPaths([".github/workflows/"]);
     core.info(`Created branch: ${branchName}`);
     core.endGroup();
     // -------------------------------------------------------------------------
@@ -33864,7 +33824,7 @@ async function implement(config, providers, investigation) {
             skipReason: `Fix declined: ${reason.slice(0, 200)}`,
         };
     }
-    let hasCodeChanges = await hasCommits();
+    let hasCodeChanges = await providers.sourceControl.hasNewCommits();
     if (!hasCodeChanges) {
         core.info("No commits created by Claude");
         const hasUncommitted = await providers.sourceControl.hasChanges();
@@ -33887,7 +33847,7 @@ async function implement(config, providers, investigation) {
         }
     }
     else {
-        const changedFiles = await getChangedFiles();
+        const changedFiles = await providers.sourceControl.getChangedFiles();
         core.info(`Claude created commits with changes to: ${changedFiles.join(", ")}`);
     }
     core.endGroup();

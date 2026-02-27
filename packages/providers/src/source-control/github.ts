@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { SourceControlProvider, PullRequest, PrCreateOptions } from "./types.js";
+import type { SourceControlProvider, PullRequest, PrCreateOptions, DispatchWorkflowOptions } from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 
@@ -89,6 +89,30 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
       return unstaged.trim().length > 0 || staged.trim().length > 0;
     },
 
+    async hasNewCommits(): Promise<boolean> {
+      const output = await git(
+        ["rev-list", "--count", `HEAD`, `^origin/${baseBranch}`],
+        { ignoreReturnCode: true },
+      );
+      const count = parseInt(output.trim(), 10);
+      return !isNaN(count) && count > 0;
+    },
+
+    async getChangedFiles(): Promise<string[]> {
+      const output = await git(
+        ["diff", "--name-only", `origin/${baseBranch}..HEAD`],
+        { ignoreReturnCode: true },
+      );
+      return output.trim().split("\n").filter(Boolean);
+    },
+
+    async resetPaths(paths: string[]): Promise<void> {
+      for (const p of paths) {
+        await git(["checkout", "HEAD", "--", p], { ignoreReturnCode: true });
+      }
+      log.debug(`Reset paths: ${paths.join(", ")}`);
+    },
+
     async stageAndCommit(message: string): Promise<void> {
       await git(["add", "-A", "--", ".", ":!.github/datadog-analysis", ":!.github/workflows"]);
       await git(["commit", "-m", message]);
@@ -162,6 +186,20 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
       }
 
       return null;
+    },
+
+    async dispatchWorkflow(opts: DispatchWorkflowOptions): Promise<void> {
+      const targetParts = opts.targetRepo.split("/");
+      const targetOwner = targetParts[0] ?? owner;
+      const targetRepoName = targetParts[1] ?? opts.targetRepo;
+
+      await ghApi(
+        "POST",
+        `/repos/${targetOwner}/${targetRepoName}/actions/workflows/${encodeURIComponent(opts.workflow)}/dispatches`,
+        token,
+        { ref: baseBranch, inputs: opts.inputs ?? {} },
+      );
+      log.info(`Dispatched workflow "${opts.workflow}" to ${opts.targetRepo}`);
     },
   };
 }

@@ -14,7 +14,7 @@ export type { NotificationProvider, NotificationPayload } from "./notification/i
 export { githubSummary, slackWebhook, teamsWebhook, discordWebhook } from "./notification/index.js";
 
 // Source Control
-export type { SourceControlProvider, PullRequest, PrCreateOptions, GitHubSourceControlConfig } from "./source-control/index.js";
+export type { SourceControlProvider, PullRequest, PrCreateOptions, DispatchWorkflowOptions, GitHubSourceControlConfig } from "./source-control/index.js";
 export { github } from "./source-control/index.js";
 
 // Incident Management
