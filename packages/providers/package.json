@@ -81,6 +81,7 @@
     "@actions/exec": "^1.1",
     "@aws-sdk/client-cloudwatch-logs": "^3",
     "@aws-sdk/client-s3": "^3",
+    "@aws-sdk/client-secrets-manager": "^3",
     "@aws-sdk/credential-provider-node": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
     "@slack/web-api": "^7"
@@ -98,6 +99,9 @@
     "@aws-sdk/client-s3": {
       "optional": true
     },
+    "@aws-sdk/client-secrets-manager": {
+      "optional": true
+    },
     "@aws-sdk/credential-provider-node": {
       "optional": true
     },
@@ -113,6 +117,7 @@
     "@actions/exec": "^1.1",
     "@aws-sdk/client-cloudwatch-logs": "^3",
     "@aws-sdk/client-s3": "^3",
+    "@aws-sdk/client-secrets-manager": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
     "@slack/web-api": "^7",
     "@types/node": "^22",
