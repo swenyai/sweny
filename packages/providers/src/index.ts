@@ -3,7 +3,7 @@ export { consoleLogger } from "./logger.js";
 
 // Observability
 export type { ObservabilityProvider, LogEntry, AggregateResult, LogQueryOptions } from "./observability/index.js";
-export { datadog, sentry, cloudwatch } from "./observability/index.js";
+export { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "./observability/index.js";
 
 // Issue Tracking
 export type {
@@ -23,6 +23,7 @@ export {
   canListTriageHistory,
   linear,
   githubIssues,
+  jira,
 } from "./issue-tracking/index.js";
 
 // Notification
@@ -37,16 +38,17 @@ export type {
   PrListOptions,
   DispatchWorkflowOptions,
   GitHubSourceControlConfig,
+  GitLabSourceControlConfig,
 } from "./source-control/index.js";
-export { github } from "./source-control/index.js";
+export { github, gitlab } from "./source-control/index.js";
 
 // Incident Management
 export type { IncidentProvider, Incident, IncidentCreateOptions, OnCallEntry } from "./incident/index.js";
-export { pagerduty } from "./incident/index.js";
+export { pagerduty, opsgenie } from "./incident/index.js";
 
 // Messaging
-export type { MessagingProvider, ChatMessage, SlackMessagingConfig } from "./messaging/index.js";
-export { slack } from "./messaging/index.js";
+export type { MessagingProvider, ChatMessage, SlackMessagingConfig, TeamsMessagingConfig } from "./messaging/index.js";
+export { slack, teams } from "./messaging/index.js";
 
 // Auth
 export type { AuthProvider, UserIdentity, LoginField } from "./auth/index.js";
@@ -68,8 +70,9 @@ export type {
   WorkspaceStore,
   WorkspaceFile,
   WorkspaceManifest,
+  CsiStorageConfig,
 } from "./storage/index.js";
-export { WORKSPACE_LIMITS } from "./storage/index.js";
+export { WORKSPACE_LIMITS, csiStorage } from "./storage/index.js";
 
 // Coding Agent
 export type { CodingAgent, CodingAgentRunOptions, ClaudeCodeConfig } from "./coding-agent/index.js";
@@ -80,5 +83,5 @@ export type { AgentTool, ToolResult } from "./agent-tool/index.js";
 export { agentTool } from "./agent-tool/index.js";
 
 // Credential Vault
-export type { CredentialVaultProvider, EnvVaultConfig } from "./credential-vault/index.js";
-export { envVault } from "./credential-vault/index.js";
+export type { CredentialVaultProvider, EnvVaultConfig, AwsSecretsManagerConfig } from "./credential-vault/index.js";
+export { envVault, awsSecretsManager } from "./credential-vault/index.js";
