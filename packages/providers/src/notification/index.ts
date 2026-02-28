@@ -5,3 +5,4 @@ export { slackWebhook, slackWebhookConfigSchema, type SlackWebhookConfig } from 
 export { teamsWebhook, teamsWebhookConfigSchema, type TeamsWebhookConfig } from "./teams-webhook.js";
 export { discordWebhook, discordWebhookConfigSchema, type DiscordWebhookConfig } from "./discord-webhook.js";
 export { email, emailConfigSchema, type EmailConfig } from "./email.js";
+export { webhook, webhookConfigSchema, type WebhookConfig } from "./webhook.js";
