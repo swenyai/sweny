@@ -97,7 +97,8 @@ export class FsWorkspaceStore implements WorkspaceStore {
     const manifest = await this.getManifest(userId);
 
     const existingIdx = manifest.files.findIndex((f) => f.path === path);
-    const existingSize = existingIdx >= 0 ? manifest.files[existingIdx]!.size : 0;
+    const existing = existingIdx >= 0 ? manifest.files[existingIdx] : undefined;
+    const existingSize = existing?.size ?? 0;
     const newTotal = manifest.totalBytes - existingSize + size;
 
     if (newTotal > WORKSPACE_LIMITS.maxTotalBytes) {
@@ -113,9 +114,8 @@ export class FsWorkspaceStore implements WorkspaceStore {
     }
 
     // Delete old blob if replacing
-    if (existingIdx >= 0) {
-      const oldBlobId = manifest.files[existingIdx]!.blobId;
-      await unlink(this.blobPath(userId, oldBlobId)).catch(() => {});
+    if (existing) {
+      await unlink(this.blobPath(userId, existing.blobId)).catch(() => {});
     }
 
     const blobId = randomUUID();
@@ -148,7 +148,8 @@ export class FsWorkspaceStore implements WorkspaceStore {
     const idx = manifest.files.findIndex((f) => f.path === path);
     if (idx < 0) return false;
 
-    const file = manifest.files[idx]!;
+    const file = manifest.files[idx];
+    if (!file) return false;
     await unlink(this.blobPath(userId, file.blobId)).catch(() => {});
 
     manifest.files.splice(idx, 1);

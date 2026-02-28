@@ -84,7 +84,7 @@ export function registerLoginModal(app: App, authProvider: AuthProvider): void {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      const firstFieldKey = fields[0]!.key;
+      const firstFieldKey = fields[0]?.key ?? "unknown";
       await ack({
         response_action: "errors",
         errors: { [`${firstFieldKey}_block`]: `Login failed: ${message}` },

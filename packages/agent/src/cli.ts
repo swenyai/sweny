@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   // ─── Channel ──────────────────────────────────────────────────
   const channel = cliChannel();
   const commands = createStandardCommands(sessionManager, memoryStore);
-  channel.registerCommands!(commands);
+  channel.registerCommands?.(commands);
 
   const orchestrator = new Orchestrator(channel, {
     authProvider: config.auth,

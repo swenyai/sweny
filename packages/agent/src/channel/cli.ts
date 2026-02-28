@@ -82,7 +82,7 @@ export function cliChannel(config?: CliChannelConfig): Channel {
         // Check registered commands
         if (trimmed.startsWith("/")) {
           const parts = trimmed.slice(1).split(/\s+/);
-          const cmdName = parts[0]!;
+          const cmdName = parts[0] ?? "";
           const cmdArgs = parts.slice(1).join(" ");
 
           const matched = commands.find((c) => c.name === cmdName);

@@ -138,9 +138,10 @@ export class Orchestrator {
         const chunks = this.channel.formatResponse(result.response);
 
         if (this.channel.editMessage && chunks.length > 0) {
-          await this.channel.editMessage(thinkingMessage, chunks[0]!);
-          for (let i = 1; i < chunks.length; i++) {
-            await this.channel.sendMessage(conversation, chunks[i]!);
+          const [first, ...rest] = chunks;
+          await this.channel.editMessage(thinkingMessage, first);
+          for (const chunk of rest) {
+            await this.channel.sendMessage(conversation, chunk);
           }
         } else {
           for (const chunk of chunks) {

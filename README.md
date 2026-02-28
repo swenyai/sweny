@@ -265,20 +265,20 @@ When SWEny finds an error in `billing-svc`, it matches it to `your-org/billing` 
 
 SWEny is built on a provider/plugin architecture. The core engine is provider-agnostic — it delegates to pluggable implementations:
 
-| Provider Type | Ships With | Planned |
-|---------------|-----------|---------|
-| **Observability** | Datadog, Sentry, CloudWatch | New Relic, Grafana Loki |
-| **Issue Tracker** | Linear, GitHub Issues | Jira |
-| **Source Control** | GitHub | GitLab |
-| **Notification** | GitHub Summary, Slack, Teams, Discord | — |
-| **Incident** | PagerDuty | OpsGenie |
-| **Messaging** | Slack | — |
-| **Auth** | No-Auth, API Key | OAuth |
-| **Access Control** | Allow-All Guard, Role-Based Guard | — |
-| **Storage** | Filesystem, S3 | — |
-| **Credential Vault** | Env Vault | AWS Secrets Manager |
-| **Coding Agent** | Claude Code | — |
-| **Agent Tool** | Agent Tool | — |
+| Provider Type | Ships With |
+|---------------|-----------|
+| **Observability** | Datadog, Sentry, CloudWatch, New Relic, Grafana Loki, Splunk, Elasticsearch |
+| **Issue Tracker** | Linear, GitHub Issues, Jira |
+| **Source Control** | GitHub, GitLab |
+| **Notification** | GitHub Summary, Slack, Teams, Discord |
+| **Incident** | PagerDuty, OpsGenie |
+| **Messaging** | Slack, Microsoft Teams |
+| **Auth** | No-Auth, API Key |
+| **Access Control** | Allow-All Guard, Role-Based Guard |
+| **Storage** | Filesystem, S3, Kubernetes CSI |
+| **Credential Vault** | Env Vars, AWS Secrets Manager |
+| **Coding Agent** | Claude Code |
+| **Agent Tool** | Agent Tool |
 
 Implementing a custom provider means implementing a TypeScript interface — see [`packages/providers/`](packages/providers/) for the full library and [`@sweny/providers` on npm](https://www.npmjs.com/package/@sweny/providers).
 
@@ -308,6 +308,8 @@ npm run package    # Produces dist/index.js via ncc
 # Run the agent locally
 npm run cli:agent
 ```
+
+> **Note:** The root `dist/` directory is committed intentionally — GitHub Actions require a compiled entry point (`dist/index.js` built via [ncc](https://github.com/vercel/ncc)). Do not remove it.
 
 ## License
 

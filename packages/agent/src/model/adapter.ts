@@ -1,6 +1,7 @@
 import { tool } from "@anthropic-ai/claude-code";
 import type { AgentTool } from "@sweny/providers/agent-tool";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK generic requires any
 type SdkTool = ReturnType<typeof tool<any>>;
 
 /**

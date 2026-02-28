@@ -87,7 +87,8 @@ class CloudWatchProvider implements ObservabilityProvider {
       }),
     );
 
-    const queryId = startResult.queryId!;
+    const queryId = startResult.queryId;
+    if (!queryId) throw new Error("CloudWatch StartQuery did not return a queryId");
 
     // Poll for results
     let results: Array<Array<{ field?: string; value?: string }>> = [];
@@ -194,7 +195,8 @@ aws logs start-query \\
       }),
     );
 
-    const queryId = startResult.queryId!;
+    const queryId = startResult.queryId;
+    if (!queryId) throw new Error("CloudWatch StartQuery did not return a queryId");
 
     let results: Array<Array<{ field?: string; value?: string }>> = [];
     for (let i = 0; i < 30; i++) {

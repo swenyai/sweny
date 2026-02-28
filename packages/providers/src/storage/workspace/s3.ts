@@ -116,7 +116,8 @@ export class S3WorkspaceStore implements WorkspaceStore {
 
     // Check if replacing existing file
     const existingIdx = manifest.files.findIndex((f) => f.path === path);
-    const existingSize = existingIdx >= 0 ? manifest.files[existingIdx]!.size : 0;
+    const existing = existingIdx >= 0 ? manifest.files[existingIdx] : undefined;
+    const existingSize = existing?.size ?? 0;
     const newTotal = manifest.totalBytes - existingSize + size;
 
     if (newTotal > WORKSPACE_LIMITS.maxTotalBytes) {
@@ -132,10 +133,9 @@ export class S3WorkspaceStore implements WorkspaceStore {
     }
 
     // Delete old blob if replacing
-    if (existingIdx >= 0) {
-      const oldBlobId = manifest.files[existingIdx]!.blobId;
+    if (existing) {
       await this.s3
-        .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, oldBlobId) }))
+        .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, existing.blobId) }))
         .catch(() => {});
     }
 
@@ -175,7 +175,8 @@ export class S3WorkspaceStore implements WorkspaceStore {
     const idx = manifest.files.findIndex((f) => f.path === path);
     if (idx < 0) return false;
 
-    const file = manifest.files[idx]!;
+    const file = manifest.files[idx];
+    if (!file) return false;
     await this.s3
       .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, file.blobId) }))
       .catch(() => {});

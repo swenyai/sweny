@@ -236,8 +236,9 @@ class ElasticProvider implements ObservabilityProvider {
     if (this.apiKey) {
       env.ELASTIC_API_KEY = this.apiKey;
     } else {
-      env.ELASTIC_USERNAME = this.username!;
-      env.ELASTIC_PASSWORD = this.password!;
+      // Zod refine guarantees username+password exist when apiKey is absent
+      env.ELASTIC_USERNAME = this.username ?? "";
+      env.ELASTIC_PASSWORD = this.password ?? "";
     }
 
     return env;

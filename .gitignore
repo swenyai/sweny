@@ -3,6 +3,7 @@ node_modules/
 *.tsbuildinfo
 .sweny-data/
 .github/triage-analysis/
+tasks/
 .DS_Store
 
 # Ignore dist for library packages (built locally)
