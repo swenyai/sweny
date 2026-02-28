@@ -456,6 +456,100 @@ describe("Orchestrator", () => {
     });
   });
 
+  describe("error resilience", () => {
+    it("handles runner returning empty response gracefully", async () => {
+      deps = buildDeps({
+        runner: makeRunner(makeRunResult({ response: "", sessionId: "s1" })),
+      });
+      orchestrator = new Orchestrator(channel, deps);
+
+      await expect(orchestrator.handleMessage(makeMessage())).resolves.not.toThrow();
+
+      expect(channel.editMessage).toHaveBeenCalled();
+    });
+
+    it("handles non-Error throw from runner", async () => {
+      deps = buildDeps();
+      (deps.runner as any).run = vi.fn(async () => {
+        throw "string error";
+      });
+      orchestrator = new Orchestrator(channel, deps);
+
+      await orchestrator.handleMessage(makeMessage());
+
+      expect(channel.editMessage).toHaveBeenCalledWith(
+        expect.anything(),
+        "Something went wrong: Unknown error",
+      );
+    });
+
+    it("handles memoryStore.getMemories() failure gracefully", async () => {
+      const memoryStore = makeMemoryStore();
+      (memoryStore as any).getMemories = vi.fn(async () => {
+        throw new Error("Memory store unavailable");
+      });
+      deps = buildDeps({ memoryStore });
+      orchestrator = new Orchestrator(channel, deps);
+
+      await orchestrator.handleMessage(makeMessage());
+
+      // Error should be caught and reported via edit
+      expect(channel.editMessage).toHaveBeenCalledWith(
+        expect.anything(),
+        "Something went wrong: Memory store unavailable",
+      );
+    });
+
+    it("handles sessionManager.getOrCreateAsync() failure gracefully", async () => {
+      const sessionManager = makeSessionManager();
+      (sessionManager as any).getOrCreateAsync = vi.fn(async () => {
+        throw new Error("Session store down");
+      });
+      deps = buildDeps({ sessionManager });
+      orchestrator = new Orchestrator(channel, deps);
+
+      await orchestrator.handleMessage(makeMessage());
+
+      expect(channel.editMessage).toHaveBeenCalledWith(
+        expect.anything(),
+        "Something went wrong: Session store down",
+      );
+    });
+
+    it("does not crash when auditLogger.logTurn() rejects", async () => {
+      const auditLogger = makeAuditLogger();
+      (auditLogger as any).logTurn = vi.fn(async () => {
+        throw new Error("Audit write failed");
+      });
+      deps = buildDeps({ auditLogger });
+      orchestrator = new Orchestrator(channel, deps);
+
+      // Should complete without throwing despite audit failure
+      await expect(orchestrator.handleMessage(makeMessage())).resolves.not.toThrow();
+
+      // Response should still be delivered
+      expect(channel.editMessage).toHaveBeenCalledWith(
+        expect.anything(),
+        "Here is the answer.",
+      );
+    });
+
+    it("rethrows non-AccessDeniedError from accessGuard", async () => {
+      deps = buildDeps({
+        accessGuard: makeAccessGuard({
+          assertCanQuery: vi.fn(() => {
+            throw new TypeError("Unexpected guard error");
+          }),
+        }),
+      });
+      orchestrator = new Orchestrator(channel, deps);
+
+      await expect(orchestrator.handleMessage(makeMessage())).rejects.toThrow(
+        "Unexpected guard error",
+      );
+    });
+  });
+
   describe("memory loading", () => {
     it("passes memories to claude runner when memoryStore is provided", async () => {
       const memoryStore = makeMemoryStore();
