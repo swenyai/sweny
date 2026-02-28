@@ -10,17 +10,144 @@ npm install @sweny/providers
 
 ## Providers
 
-| Category | Import | Implementations |
-|----------|--------|-----------------|
-| Observability | `@sweny/providers/observability` | `datadog`, `sentry`, `cloudwatch` |
-| Issue Tracking | `@sweny/providers/issue-tracking` | `linear`, `githubIssues` |
-| Notification | `@sweny/providers/notification` | `githubSummary`, `slackWebhook`, `teamsWebhook`, `discordWebhook` |
-| Source Control | `@sweny/providers/source-control` | `github` |
-| Incident | `@sweny/providers/incident` | `pagerduty` |
-| Messaging | `@sweny/providers/messaging` | `slack` |
-| Auth | `@sweny/providers/auth` | `noAuth`, `apiKeyAuth` |
-| Access | `@sweny/providers/access` | `allowAllGuard`, `roleBasedGuard` |
-| Storage | `@sweny/providers/storage` | `fsStorage`, `s3Storage` |
+### Observability (7 providers)
+
+| Provider | Factory | Config |
+|----------|---------|--------|
+| Datadog | `datadog()` | `apiKey`, `appKey`, `site` |
+| Sentry | `sentry()` | `authToken`, `organization`, `project` |
+| CloudWatch | `cloudwatch()` | `region`, `logGroupPrefix` |
+| Splunk | `splunk()` | `baseUrl`, `token`, `index` |
+| Elasticsearch | `elastic()` | `baseUrl`, `apiKey` or `username`/`password`, `index` |
+| Grafana Loki | `loki()` | `baseUrl`, `apiKey`, `orgId` |
+| New Relic | `newrelic()` | `apiKey`, `accountId`, `region` |
+
+```typescript
+import { datadog, splunk, loki } from "@sweny/providers/observability";
+```
+
+### Issue Tracking (3 providers)
+
+| Provider | Factory | Config |
+|----------|---------|--------|
+| Linear | `linear()` | `apiKey` |
+| GitHub Issues | `githubIssues()` | `token`, `owner`, `repo` |
+| Jira | `jira()` | `baseUrl`, `email`, `apiToken` |
+
+```typescript
+import { linear, githubIssues, jira } from "@sweny/providers/issue-tracking";
+```
+
+### Source Control (2 providers)
+
+| Provider | Factory | Config |
+|----------|---------|--------|
+| GitHub | `github()` | `token`, `owner`, `repo` |
+| GitLab | `gitlab()` | `token`, `projectId`, `baseUrl` |
+
+```typescript
+import { github, gitlab } from "@sweny/providers/source-control";
+```
+
+### Incident Management (2 providers)
+
+| Provider | Factory | Config |
+|----------|---------|--------|
+| PagerDuty | `pagerduty()` | `apiToken`, `routingKey` |
+| OpsGenie | `opsgenie()` | `apiKey`, `region` |
+
+```typescript
+import { pagerduty, opsgenie } from "@sweny/providers/incident";
+```
+
+### Messaging (2 providers)
+
+| Provider | Factory | Config |
+|----------|---------|--------|
+| Slack | `slack()` | `token` |
+| Microsoft Teams | `teams()` | `tenantId`, `clientId`, `clientSecret` |
+
+```typescript
+import { slack, teams } from "@sweny/providers/messaging";
+```
+
+### Notification (4 providers)
+
+| Provider | Factory |
+|----------|---------|
+| GitHub Summary | `githubSummary()` |
+| Slack Webhook | `slackWebhook()` |
+| Teams Webhook | `teamsWebhook()` |
+| Discord Webhook | `discordWebhook()` |
+
+```typescript
+import { githubSummary, slackWebhook, teamsWebhook, discordWebhook } from "@sweny/providers/notification";
+```
+
+### Storage (3 backends)
+
+| Provider | Factory | Config |
+|----------|---------|--------|
+| Filesystem | `fsStorage()` | `baseDir` |
+| AWS S3 | `s3Storage()` | `bucket`, `prefix`, `region` |
+| CSI / Kubernetes PVC | `csiStorage()` | `mountPath`, `volumeName`, `namespace` |
+
+```typescript
+import { fsStorage, s3Storage, csiStorage } from "@sweny/providers/storage";
+```
+
+### Credential Vault (2 backends)
+
+| Provider | Factory | Config |
+|----------|---------|--------|
+| Environment Variables | `envVault()` | `prefix` |
+| AWS Secrets Manager | `awsSecretsManager()` | `region`, `prefix` |
+
+```typescript
+import { envVault, awsSecretsManager } from "@sweny/providers/credential-vault";
+```
+
+### Auth (2 providers)
+
+| Provider | Factory |
+|----------|---------|
+| No Auth | `noAuth()` |
+| API Key Auth | `apiKeyAuth()` |
+
+```typescript
+import { noAuth, apiKeyAuth } from "@sweny/providers/auth";
+```
+
+### Access (2 guards)
+
+| Provider | Factory |
+|----------|---------|
+| Allow All | `allowAllGuard()` |
+| Role-Based | `roleBasedGuard()` |
+
+```typescript
+import { allowAllGuard, roleBasedGuard } from "@sweny/providers/access";
+```
+
+### Coding Agent
+
+| Provider | Factory |
+|----------|---------|
+| Claude Code | `claudeCode()` |
+
+```typescript
+import { claudeCode } from "@sweny/providers/coding-agent";
+```
+
+### Agent Tool
+
+| Provider | Factory |
+|----------|---------|
+| Agent Tool | `agentTool()` |
+
+```typescript
+import { agentTool } from "@sweny/providers/agent-tool";
+```
 
 ## Usage
 
@@ -28,16 +155,20 @@ Every provider follows the factory function pattern with Zod-validated config:
 
 ```typescript
 import { datadog } from "@sweny/providers/observability";
-import { linear } from "@sweny/providers/issue-tracking";
+import { jira } from "@sweny/providers/issue-tracking";
 import { github } from "@sweny/providers/source-control";
+import { pagerduty } from "@sweny/providers/incident";
 
 const obs = datadog({
   apiKey: process.env.DD_API_KEY!,
   appKey: process.env.DD_APP_KEY!,
+  site: "datadoghq.com",
 });
 
-const issues = linear({
-  apiKey: process.env.LINEAR_API_KEY!,
+const issues = jira({
+  baseUrl: "https://your-org.atlassian.net",
+  email: process.env.JIRA_EMAIL!,
+  apiToken: process.env.JIRA_API_TOKEN!,
 });
 
 const sc = github({
@@ -46,10 +177,16 @@ const sc = github({
   repo: "your-repo",
 });
 
+const incidents = pagerduty({
+  apiToken: process.env.PD_API_TOKEN!,
+  routingKey: process.env.PD_ROUTING_KEY!,
+});
+
 // All providers expose verifyAccess() for health checks
 await obs.verifyAccess();
 await issues.verifyAccess();
 await sc.verifyAccess();
+await incidents.verifyAccess();
 
 // Query observability logs
 const logs = await obs.queryLogs({
@@ -74,14 +211,23 @@ Heavy SDKs are optional peer dependencies. Only install what you use:
 # For S3 storage
 npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
 
+# For CSI / Kubernetes PVC storage
+npm install @kubernetes/client-node
+
 # For CloudWatch observability
 npm install @aws-sdk/client-cloudwatch-logs
+
+# For AWS Secrets Manager credential vault
+npm install @aws-sdk/client-secrets-manager
 
 # For Slack messaging
 npm install @slack/web-api
 
 # For GitHub Actions notification
 npm install @actions/core
+
+# For Microsoft Teams messaging
+npm install @azure/identity @microsoft/microsoft-graph-client
 ```
 
 ## Implementing a custom provider

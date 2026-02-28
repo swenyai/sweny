@@ -1,3 +1,6 @@
+// Errors
+export { ProviderError, ProviderAuthError, ProviderApiError, ProviderConfigError } from "./errors.js";
+
 export type { Logger } from "./logger.js";
 export { consoleLogger } from "./logger.js";
 
