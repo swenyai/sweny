@@ -54,6 +54,22 @@ function mapToTriageConfig(config: ActionConfig): TriageConfig {
     case "sentry":
       if (obsCreds.authToken) agentEnv.SENTRY_AUTH_TOKEN = obsCreds.authToken;
       break;
+    case "splunk":
+      if (obsCreds.baseUrl) agentEnv.SPLUNK_URL = obsCreds.baseUrl;
+      if (obsCreds.token) agentEnv.SPLUNK_TOKEN = obsCreds.token;
+      break;
+    case "elastic":
+      if (obsCreds.baseUrl) agentEnv.ELASTIC_URL = obsCreds.baseUrl;
+      if (obsCreds.apiKey) agentEnv.ELASTIC_API_KEY = obsCreds.apiKey;
+      break;
+    case "newrelic":
+      if (obsCreds.apiKey) agentEnv.NR_API_KEY = obsCreds.apiKey;
+      if (obsCreds.accountId) agentEnv.NR_ACCOUNT_ID = obsCreds.accountId;
+      break;
+    case "loki":
+      if (obsCreds.baseUrl) agentEnv.LOKI_URL = obsCreds.baseUrl;
+      if (obsCreds.apiKey) agentEnv.LOKI_API_KEY = obsCreds.apiKey;
+      break;
   }
 
   return {

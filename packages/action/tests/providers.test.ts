@@ -38,6 +38,13 @@ function makeConfig(overrides: Partial<ActionConfig> = {}): ActionConfig {
     serviceMapPath: ".github/service-map.yml",
     githubToken: "ghp_test",
     botToken: "",
+    sourceControlProvider: "github",
+    jiraBaseUrl: "",
+    jiraEmail: "",
+    jiraApiToken: "",
+    gitlabToken: "",
+    gitlabProjectId: "",
+    gitlabBaseUrl: "https://gitlab.com",
     repository: "org/repo",
     repositoryOwner: "org",
     ...overrides,
@@ -136,15 +143,176 @@ describe("createProviders", () => {
     expect(env.CW_LOG_GROUP_PREFIX).toBe("/ecs/my-app");
   });
 
+  it("creates providers with splunk observability", () => {
+    const registry = createProviders(
+      makeConfig({
+        observabilityProvider: "splunk",
+        observabilityCredentials: {
+          baseUrl: "https://splunk.example.com:8089",
+          token: "splunk-tok",
+          index: "main",
+        },
+      }),
+    );
+    const observability = registry.get<ObservabilityProvider>("observability");
+    expect(observability).toBeDefined();
+    expect(typeof observability.verifyAccess).toBe("function");
+    expect(typeof observability.queryLogs).toBe("function");
+    expect(typeof observability.aggregate).toBe("function");
+    expect(typeof observability.getAgentEnv).toBe("function");
+    expect(typeof observability.getPromptInstructions).toBe("function");
+
+    const env = observability.getAgentEnv();
+    expect(env.SPLUNK_URL).toBe("https://splunk.example.com:8089");
+    expect(env.SPLUNK_TOKEN).toBe("splunk-tok");
+  });
+
+  it("creates providers with elastic observability", () => {
+    const registry = createProviders(
+      makeConfig({
+        observabilityProvider: "elastic",
+        observabilityCredentials: {
+          baseUrl: "https://elastic.example.com:9200",
+          apiKey: "elastic-key",
+          index: "logs-*",
+        },
+      }),
+    );
+    const observability = registry.get<ObservabilityProvider>("observability");
+    expect(observability).toBeDefined();
+    expect(typeof observability.verifyAccess).toBe("function");
+    expect(typeof observability.queryLogs).toBe("function");
+    expect(typeof observability.aggregate).toBe("function");
+    expect(typeof observability.getAgentEnv).toBe("function");
+    expect(typeof observability.getPromptInstructions).toBe("function");
+
+    const env = observability.getAgentEnv();
+    expect(env.ELASTIC_URL).toBe("https://elastic.example.com:9200");
+    expect(env.ELASTIC_API_KEY).toBe("elastic-key");
+  });
+
+  it("creates providers with newrelic observability", () => {
+    const registry = createProviders(
+      makeConfig({
+        observabilityProvider: "newrelic",
+        observabilityCredentials: {
+          apiKey: "NRAK-test",
+          accountId: "12345",
+          region: "us",
+        },
+      }),
+    );
+    const observability = registry.get<ObservabilityProvider>("observability");
+    expect(observability).toBeDefined();
+    expect(typeof observability.verifyAccess).toBe("function");
+    expect(typeof observability.queryLogs).toBe("function");
+    expect(typeof observability.aggregate).toBe("function");
+    expect(typeof observability.getAgentEnv).toBe("function");
+    expect(typeof observability.getPromptInstructions).toBe("function");
+
+    const env = observability.getAgentEnv();
+    expect(env.NR_API_KEY).toBe("NRAK-test");
+    expect(env.NR_ACCOUNT_ID).toBe("12345");
+  });
+
+  it("creates providers with loki observability", () => {
+    const registry = createProviders(
+      makeConfig({
+        observabilityProvider: "loki",
+        observabilityCredentials: {
+          baseUrl: "https://loki.example.com",
+          apiKey: "loki-key",
+          orgId: "tenant-1",
+        },
+      }),
+    );
+    const observability = registry.get<ObservabilityProvider>("observability");
+    expect(observability).toBeDefined();
+    expect(typeof observability.verifyAccess).toBe("function");
+    expect(typeof observability.queryLogs).toBe("function");
+    expect(typeof observability.aggregate).toBe("function");
+    expect(typeof observability.getAgentEnv).toBe("function");
+    expect(typeof observability.getPromptInstructions).toBe("function");
+
+    const env = observability.getAgentEnv();
+    expect(env.LOKI_URL).toBe("https://loki.example.com");
+    expect(env.LOKI_API_KEY).toBe("loki-key");
+  });
+
+  it("creates providers with jira issue tracker", () => {
+    const registry = createProviders(
+      makeConfig({
+        issueTrackerProvider: "jira",
+        jiraBaseUrl: "https://myco.atlassian.net",
+        jiraEmail: "bot@myco.com",
+        jiraApiToken: "jira-tok",
+      }),
+    );
+    const issueTracker = registry.get<IssueTrackingProvider>("issueTracker");
+    expect(issueTracker).toBeDefined();
+    expect(typeof issueTracker.verifyAccess).toBe("function");
+    expect(typeof issueTracker.createIssue).toBe("function");
+    expect(typeof issueTracker.getIssue).toBe("function");
+    expect(typeof issueTracker.updateIssue).toBe("function");
+    expect(typeof issueTracker.searchIssues).toBe("function");
+    expect(typeof issueTracker.addComment).toBe("function");
+    expect(typeof (issueTracker as any).linkPr).toBe("function");
+  });
+
+  it("creates providers with github-issues issue tracker", () => {
+    const registry = createProviders(
+      makeConfig({
+        issueTrackerProvider: "github-issues",
+        githubToken: "ghp_test",
+      }),
+    );
+    const issueTracker = registry.get<IssueTrackingProvider>("issueTracker");
+    expect(issueTracker).toBeDefined();
+    expect(typeof issueTracker.verifyAccess).toBe("function");
+    expect(typeof issueTracker.createIssue).toBe("function");
+    expect(typeof issueTracker.getIssue).toBe("function");
+    expect(typeof issueTracker.updateIssue).toBe("function");
+    expect(typeof issueTracker.searchIssues).toBe("function");
+    expect(typeof issueTracker.addComment).toBe("function");
+    expect(typeof (issueTracker as any).linkPr).toBe("function");
+  });
+
+  it("creates providers with gitlab source control", () => {
+    const registry = createProviders(
+      makeConfig({
+        sourceControlProvider: "gitlab",
+        gitlabToken: "glpat-test",
+        gitlabProjectId: "my-group/my-project",
+        gitlabBaseUrl: "https://gitlab.com",
+      }),
+    );
+    const sourceControl = registry.get<SourceControlProvider>("sourceControl");
+    expect(sourceControl).toBeDefined();
+    expect(typeof sourceControl.verifyAccess).toBe("function");
+    expect(typeof sourceControl.createBranch).toBe("function");
+    expect(typeof sourceControl.createPullRequest).toBe("function");
+    expect(typeof sourceControl.findExistingPr).toBe("function");
+    expect(typeof sourceControl.hasNewCommits).toBe("function");
+    expect(typeof sourceControl.getChangedFiles).toBe("function");
+    expect(typeof sourceControl.resetPaths).toBe("function");
+    expect(typeof sourceControl.dispatchWorkflow).toBe("function");
+  });
+
   it("throws for unsupported observability provider", () => {
-    expect(() => createProviders(makeConfig({ observabilityProvider: "splunk" }))).toThrow(
-      "Unsupported observability provider: splunk",
+    expect(() => createProviders(makeConfig({ observabilityProvider: "prometheus" }))).toThrow(
+      "Unsupported observability provider: prometheus",
     );
   });
 
   it("throws for unsupported issue tracker provider", () => {
-    expect(() => createProviders(makeConfig({ issueTrackerProvider: "jira" }))).toThrow(
-      "Unsupported issue tracker provider: jira",
+    expect(() => createProviders(makeConfig({ issueTrackerProvider: "asana" }))).toThrow(
+      "Unsupported issue tracker provider: asana",
+    );
+  });
+
+  it("throws for unsupported source control provider", () => {
+    expect(() => createProviders(makeConfig({ sourceControlProvider: "bitbucket" }))).toThrow(
+      "Unsupported source control provider: bitbucket",
     );
   });
 });

@@ -128,4 +128,128 @@ describe("parseInputs", () => {
     expect(mockGetBooleanInput).toHaveBeenCalledWith("dry-run");
     expect(mockGetBooleanInput).toHaveBeenCalledWith("novelty-mode");
   });
+
+  it("sourceControlProvider defaults to github", () => {
+    mockGetInput.mockReturnValue("");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.sourceControlProvider).toBe("github");
+  });
+
+  it("parses splunk credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "splunk",
+      "splunk-url": "https://splunk.example.com:8089",
+      "splunk-token": "splunk-tok",
+      "splunk-index": "my-index",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("splunk");
+    expect(config.observabilityCredentials.baseUrl).toBe("https://splunk.example.com:8089");
+    expect(config.observabilityCredentials.token).toBe("splunk-tok");
+    expect(config.observabilityCredentials.index).toBe("my-index");
+  });
+
+  it("parses elastic credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "elastic",
+      "elastic-url": "https://elastic.example.com:9200",
+      "elastic-api-key": "elastic-key",
+      "elastic-index": "app-logs-*",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("elastic");
+    expect(config.observabilityCredentials.baseUrl).toBe("https://elastic.example.com:9200");
+    expect(config.observabilityCredentials.apiKey).toBe("elastic-key");
+    expect(config.observabilityCredentials.index).toBe("app-logs-*");
+  });
+
+  it("parses newrelic credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "newrelic",
+      "newrelic-api-key": "NRAK-test",
+      "newrelic-account-id": "12345",
+      "newrelic-region": "eu",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("newrelic");
+    expect(config.observabilityCredentials.apiKey).toBe("NRAK-test");
+    expect(config.observabilityCredentials.accountId).toBe("12345");
+    expect(config.observabilityCredentials.region).toBe("eu");
+  });
+
+  it("parses loki credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "loki",
+      "loki-url": "https://loki.example.com",
+      "loki-api-key": "loki-key",
+      "loki-org-id": "tenant-1",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("loki");
+    expect(config.observabilityCredentials.baseUrl).toBe("https://loki.example.com");
+    expect(config.observabilityCredentials.apiKey).toBe("loki-key");
+    expect(config.observabilityCredentials.orgId).toBe("tenant-1");
+  });
+
+  it("parses jira fields from inputs", () => {
+    const inputMap: Record<string, string> = {
+      "jira-base-url": "https://myco.atlassian.net",
+      "jira-email": "bot@myco.com",
+      "jira-api-token": "jira-tok",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.jiraBaseUrl).toBe("https://myco.atlassian.net");
+    expect(config.jiraEmail).toBe("bot@myco.com");
+    expect(config.jiraApiToken).toBe("jira-tok");
+  });
+
+  it("parses gitlab fields from inputs", () => {
+    const inputMap: Record<string, string> = {
+      "source-control-provider": "gitlab",
+      "gitlab-token": "glpat-test",
+      "gitlab-project-id": "my-group/my-project",
+      "gitlab-base-url": "https://gitlab.example.com",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.sourceControlProvider).toBe("gitlab");
+    expect(config.gitlabToken).toBe("glpat-test");
+    expect(config.gitlabProjectId).toBe("my-group/my-project");
+    expect(config.gitlabBaseUrl).toBe("https://gitlab.example.com");
+  });
+
+  it("gitlabBaseUrl defaults to https://gitlab.com", () => {
+    mockGetInput.mockReturnValue("");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.gitlabBaseUrl).toBe("https://gitlab.com");
+  });
 });

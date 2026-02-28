@@ -36,6 +36,19 @@ export interface ActionConfig {
   githubToken: string;
   botToken: string;
 
+  // Source control
+  sourceControlProvider: string;
+
+  // Jira credentials (when issue tracker = jira)
+  jiraBaseUrl: string;
+  jiraEmail: string;
+  jiraApiToken: string;
+
+  // GitLab credentials (when source control = gitlab)
+  gitlabToken: string;
+  gitlabProjectId: string;
+  gitlabBaseUrl: string;
+
   // Runtime context
   repository: string;
   repositoryOwner: string;
@@ -73,6 +86,16 @@ export function parseInputs(): ActionConfig {
     githubToken: core.getInput("github-token"),
     botToken: core.getInput("bot-token"),
 
+    sourceControlProvider: core.getInput("source-control-provider") || "github",
+
+    jiraBaseUrl: core.getInput("jira-base-url"),
+    jiraEmail: core.getInput("jira-email"),
+    jiraApiToken: core.getInput("jira-api-token"),
+
+    gitlabToken: core.getInput("gitlab-token"),
+    gitlabProjectId: core.getInput("gitlab-project-id"),
+    gitlabBaseUrl: core.getInput("gitlab-base-url") || "https://gitlab.com",
+
     repository: process.env.GITHUB_REPOSITORY || "",
     repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",
   };
@@ -97,6 +120,30 @@ function parseObservabilityCredentials(provider: string): Record<string, string>
       return {
         region: core.getInput("cloudwatch-region") || "us-east-1",
         logGroupPrefix: core.getInput("cloudwatch-log-group-prefix"),
+      };
+    case "splunk":
+      return {
+        baseUrl: core.getInput("splunk-url"),
+        token: core.getInput("splunk-token"),
+        index: core.getInput("splunk-index") || "main",
+      };
+    case "elastic":
+      return {
+        baseUrl: core.getInput("elastic-url"),
+        apiKey: core.getInput("elastic-api-key"),
+        index: core.getInput("elastic-index") || "logs-*",
+      };
+    case "newrelic":
+      return {
+        apiKey: core.getInput("newrelic-api-key"),
+        accountId: core.getInput("newrelic-account-id"),
+        region: core.getInput("newrelic-region") || "us",
+      };
+    case "loki":
+      return {
+        baseUrl: core.getInput("loki-url"),
+        apiKey: core.getInput("loki-api-key"),
+        orgId: core.getInput("loki-org-id"),
       };
     default:
       return {};
