@@ -32,4 +32,15 @@ export const triageWorkflow: Workflow<TriageConfig> = {
   ],
 };
 
-export type { TriageConfig, InvestigationResult, ImplementResult } from "./types.js";
+export type {
+  TriageConfig,
+  InvestigationResult,
+  ImplementResult,
+  BuildContextData,
+  IssueData,
+  ImplementFixData,
+  PrData,
+  CrossRepoData,
+  TriageStepDataMap,
+} from "./types.js";
+export { getStepData } from "./results.js";

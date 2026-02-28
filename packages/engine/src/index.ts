@@ -15,4 +15,15 @@ export { runWorkflow, createProviderRegistry } from "./runner.js";
 
 // Recipes
 export { triageWorkflow } from "./recipes/triage/index.js";
-export type { TriageConfig, InvestigationResult, ImplementResult } from "./recipes/triage/index.js";
+export type {
+  TriageConfig,
+  InvestigationResult,
+  ImplementResult,
+  BuildContextData,
+  IssueData,
+  ImplementFixData,
+  PrData,
+  CrossRepoData,
+  TriageStepDataMap,
+} from "./recipes/triage/index.js";
+export { getStepData } from "./recipes/triage/index.js";

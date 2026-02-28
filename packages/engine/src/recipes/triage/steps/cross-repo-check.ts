@@ -1,15 +1,16 @@
 import type { IssueTrackingProvider } from "@sweny/providers/issue-tracking";
 import type { SourceControlProvider } from "@sweny/providers/source-control";
 import type { StepResult, WorkflowContext } from "../../../types.js";
-import type { TriageConfig, InvestigationResult } from "../types.js";
+import type { TriageConfig } from "../types.js";
+import { getStepData } from "../results.js";
 
 /** If the bug belongs to a different repo, dispatch the workflow there and skip remaining act steps. */
 export async function crossRepoCheck(ctx: WorkflowContext<TriageConfig>): Promise<StepResult> {
   const config = ctx.config;
   const sourceControl = ctx.providers.get<SourceControlProvider>("sourceControl");
   const issueTracker = ctx.providers.get<IssueTrackingProvider>("issueTracker");
-  const investigation = ctx.results.get("investigate")?.data as unknown as InvestigationResult | undefined;
-  const issueData = ctx.results.get("create-issue")?.data;
+  const investigation = getStepData(ctx, "investigate");
+  const issueData = getStepData(ctx, "create-issue");
 
   const targetRepo = investigation?.targetRepo;
   const currentRepo = config.repository;
@@ -27,7 +28,7 @@ export async function crossRepoCheck(ctx: WorkflowContext<TriageConfig>): Promis
       targetRepo,
       workflow: "SWEny Triage",
       inputs: {
-        linear_issue: (issueData?.issueIdentifier as string) ?? "",
+        linear_issue: issueData?.issueIdentifier ?? "",
         dispatched_from: currentRepo,
         novelty_mode: "false",
       },
@@ -35,7 +36,7 @@ export async function crossRepoCheck(ctx: WorkflowContext<TriageConfig>): Promis
 
     // Add comment noting the cross-repo handoff
     if (issueData?.issueId) {
-      await issueTracker.updateIssue(issueData.issueId as string, {
+      await issueTracker.updateIssue(issueData.issueId, {
         comment: `Cross-repo dispatch: Discovered in \`${currentRepo}\`, dispatched to \`${targetRepo}\` for implementation.`,
       });
     }

@@ -1,11 +1,22 @@
 import type { IssueTrackingProvider } from "@sweny/providers/issue-tracking";
 import type { StepResult, WorkflowContext } from "../../../types.js";
-import type { TriageConfig, InvestigationResult } from "../types.js";
+import type { TriageConfig } from "../types.js";
+import { getStepData } from "../results.js";
 
 /** Check investigation recommendation and decide whether to proceed with implementation. */
 export async function noveltyGate(ctx: WorkflowContext<TriageConfig>): Promise<StepResult> {
   const issueTracker = ctx.providers.get<IssueTrackingProvider>("issueTracker");
-  const investigation = ctx.results.get("investigate")?.data as unknown as InvestigationResult | undefined;
+  const investigation = getStepData(ctx, "investigate");
+
+  // Dry run — skip the entire act phase
+  if (ctx.config.dryRun) {
+    ctx.logger.info("Dry run mode — skipping act phase");
+    ctx.skipPhase("act", "Dry run mode");
+    return {
+      status: "success",
+      data: { action: "dry-run", recommendation: investigation?.recommendation ?? "unknown" },
+    };
+  }
 
   if (!investigation) {
     ctx.skipPhase("act", "No investigation result");

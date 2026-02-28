@@ -5,6 +5,7 @@ import type { SourceControlProvider } from "@sweny/providers/source-control";
 import type { CodingAgent } from "@sweny/providers/coding-agent";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig } from "../types.js";
+import { getStepData } from "../results.js";
 import { buildPrDescriptionPrompt } from "../prompts.js";
 
 /** Generate PR description with Claude, create PR, link to issue, update issue state. */
@@ -13,8 +14,8 @@ export async function createPr(ctx: WorkflowContext<TriageConfig>): Promise<Step
   const sourceControl = ctx.providers.get<SourceControlProvider>("sourceControl");
   const issueTracker = ctx.providers.get<IssueTrackingProvider>("issueTracker");
   const codingAgent = ctx.providers.get<CodingAgent>("codingAgent");
-  const issueData = ctx.results.get("create-issue")?.data;
-  const implementData = ctx.results.get("implement-fix")?.data;
+  const issueData = getStepData(ctx, "create-issue");
+  const implementData = getStepData(ctx, "implement-fix");
 
   // If implement-fix was skipped, we can't create a PR
   const implementResult = ctx.results.get("implement-fix");
@@ -25,11 +26,11 @@ export async function createPr(ctx: WorkflowContext<TriageConfig>): Promise<Step
     };
   }
 
-  const issueId = issueData?.issueId as string;
-  const issueIdentifier = (issueData?.issueIdentifier as string) ?? "";
-  const issueTitle = (issueData?.issueTitle as string) ?? "";
-  const issueUrl = (issueData?.issueUrl as string) ?? "";
-  const branchName = (implementData?.branchName as string) ?? "";
+  const issueId = issueData?.issueId ?? "";
+  const issueIdentifier = issueData?.issueIdentifier ?? "";
+  const issueTitle = issueData?.issueTitle ?? "";
+  const issueUrl = issueData?.issueUrl ?? "";
+  const branchName = implementData?.branchName ?? "";
 
   // -------------------------------------------------------------------------
   // 1. Generate PR description with Claude

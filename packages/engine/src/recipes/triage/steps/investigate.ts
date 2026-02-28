@@ -4,6 +4,7 @@ import type { ObservabilityProvider } from "@sweny/providers/observability";
 import type { CodingAgent } from "@sweny/providers/coding-agent";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig, InvestigationResult } from "../types.js";
+import { getStepData } from "../results.js";
 import { buildInvestigationPrompt } from "../prompts.js";
 
 const ANALYSIS_DIR = ".github/triage-analysis";
@@ -20,7 +21,7 @@ export async function investigate(ctx: WorkflowContext<TriageConfig>): Promise<S
   await codingAgent.install();
 
   // Get known issues context from prior step
-  const knownIssuesContent = (ctx.results.get("build-context")?.data?.knownIssuesContent as string) ?? "";
+  const knownIssuesContent = getStepData(ctx, "build-context")?.knownIssuesContent ?? "";
 
   // Write known issues file for reference
   const knownIssuesPath = path.join(ANALYSIS_DIR, "known-issues-context.md");

@@ -1,16 +1,17 @@
 import * as fs from "fs";
 import type { NotificationProvider } from "@sweny/providers/notification";
 import type { StepResult, WorkflowContext } from "../../../types.js";
-import type { TriageConfig, InvestigationResult } from "../types.js";
+import type { TriageConfig } from "../types.js";
+import { getStepData } from "../results.js";
 
 /** Build summary and send notification with investigation results. */
 export async function sendNotification(ctx: WorkflowContext<TriageConfig>): Promise<StepResult> {
   const config = ctx.config;
   const notification = ctx.providers.get<NotificationProvider>("notification");
-  const investigation = ctx.results.get("investigate")?.data as unknown as InvestigationResult | undefined;
-  const prData = ctx.results.get("create-pr")?.data;
-  const issueData = ctx.results.get("create-issue")?.data;
-  const crossRepoData = ctx.results.get("cross-repo-check")?.data;
+  const investigation = getStepData(ctx, "investigate");
+  const prData = getStepData(ctx, "create-pr");
+  const issueData = getStepData(ctx, "create-issue");
+  const crossRepoData = getStepData(ctx, "cross-repo-check");
   const implementResult = ctx.results.get("implement-fix");
 
   const lines: string[] = [];
@@ -23,8 +24,8 @@ export async function sendNotification(ctx: WorkflowContext<TriageConfig>): Prom
   lines.push("");
 
   // Issue reference
-  const issueIdentifier = (prData?.issueIdentifier ?? issueData?.issueIdentifier) as string | undefined;
-  const issueUrl = (prData?.issueUrl ?? issueData?.issueUrl) as string | undefined;
+  const issueIdentifier = prData?.issueIdentifier ?? issueData?.issueIdentifier;
+  const issueUrl = prData?.issueUrl ?? issueData?.issueUrl;
   if (issueIdentifier) {
     lines.push(`**Issue**: [${issueIdentifier}](${issueUrl})`);
     lines.push("");

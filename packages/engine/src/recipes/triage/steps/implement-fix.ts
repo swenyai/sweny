@@ -3,6 +3,7 @@ import type { SourceControlProvider } from "@sweny/providers/source-control";
 import type { CodingAgent } from "@sweny/providers/coding-agent";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig } from "../types.js";
+import { getStepData } from "../results.js";
 import { buildImplementPrompt } from "../prompts.js";
 
 /** Create branch, run Claude to implement fix, check for changes, and push. */
@@ -10,10 +11,10 @@ export async function implementFix(ctx: WorkflowContext<TriageConfig>): Promise<
   const config = ctx.config;
   const sourceControl = ctx.providers.get<SourceControlProvider>("sourceControl");
   const codingAgent = ctx.providers.get<CodingAgent>("codingAgent");
-  const issueData = ctx.results.get("create-issue")?.data;
+  const issueData = getStepData(ctx, "create-issue");
 
-  const issueIdentifier = (issueData?.issueIdentifier as string) ?? "";
-  const issueBranchName = issueData?.issueBranchName as string | undefined;
+  const issueIdentifier = issueData?.issueIdentifier ?? "";
+  const issueBranchName = issueData?.issueBranchName;
 
   // -------------------------------------------------------------------------
   // 1. Check for existing PRs (duplicate check)
