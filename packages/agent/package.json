@@ -6,6 +6,11 @@
   "engines": {
     "node": ">=22.0.0"
   },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx --env-file=.env src/index.ts",
@@ -14,6 +19,45 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./channel": "./dist/channel/index.js",
+    "./orchestrator": "./dist/orchestrator.js",
+    "./plugins": "./dist/plugins/types.js",
+    "./runner": "./dist/runner/index.js",
+    "./config": "./dist/config/types.js",
+    "./auth": "./dist/auth/types.js",
+    "./session": "./dist/session/manager.js",
+    "./storage": "./dist/storage/types.js"
+  },
+  "typesVersions": {
+    "*": {
+      "channel": [
+        "dist/channel/index.d.ts"
+      ],
+      "orchestrator": [
+        "dist/orchestrator.d.ts"
+      ],
+      "plugins": [
+        "dist/plugins/types.d.ts"
+      ],
+      "runner": [
+        "dist/runner/index.d.ts"
+      ],
+      "config": [
+        "dist/config/types.d.ts"
+      ],
+      "auth": [
+        "dist/auth/types.d.ts"
+      ],
+      "session": [
+        "dist/session/manager.d.ts"
+      ],
+      "storage": [
+        "dist/storage/types.d.ts"
+      ]
+    }
   },
   "dependencies": {
     "@slack/bolt": "^4",
