@@ -166,6 +166,218 @@ describe("LinearProvider", () => {
     const provider = linear({ apiKey: "bad", logger: silentLogger });
     await expect(provider.verifyAccess()).rejects.toThrow("Linear GraphQL error: Not authorized");
   });
+
+  it("getIssue fetches issue by identifier and returns state", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          issue: {
+            id: "issue-uuid",
+            identifier: "ENG-42",
+            title: "Login broken",
+            url: "https://linear.app/issue/ENG-42",
+            branchName: "eng-42-login-broken",
+            state: { name: "In Progress" },
+          },
+        },
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const provider = linear({ apiKey: "lin_test", logger: silentLogger });
+    const issue = await provider.getIssue("ENG-42");
+
+    expect(issue.id).toBe("issue-uuid");
+    expect(issue.identifier).toBe("ENG-42");
+    expect(issue.title).toBe("Login broken");
+    expect(issue.url).toBe("https://linear.app/issue/ENG-42");
+    expect(issue.branchName).toBe("eng-42-login-broken");
+    expect(issue.state).toBe("In Progress");
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.variables.identifier).toBe("ENG-42");
+  });
+
+  it("updateIssue sends state and description mutation, then adds comment", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          issueUpdate: { success: true, issue: { id: "id1", identifier: "ENG-1", state: { name: "Done" } } },
+        },
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const provider = linear({ apiKey: "lin_test", logger: silentLogger });
+    await provider.updateIssue("id1", {
+      stateId: "state-done",
+      description: "Updated desc",
+      comment: "Resolved via PR",
+    });
+
+    // First call: issueUpdate mutation
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const updateBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(updateBody.variables.id).toBe("id1");
+    expect(updateBody.variables.input.stateId).toBe("state-done");
+    expect(updateBody.variables.input.description).toBe("Updated desc");
+
+    // Second call: commentCreate mutation (from addComment)
+    const commentBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(commentBody.variables.input.issueId).toBe("id1");
+    expect(commentBody.variables.input.body).toBe("Resolved via PR");
+  });
+
+  it("addComment sends commentCreate mutation", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: { commentCreate: { success: true } },
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const provider = linear({ apiKey: "lin_test", logger: silentLogger });
+    await provider.addComment("issue-id", "This is a comment");
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.variables.input.issueId).toBe("issue-id");
+    expect(body.variables.input.body).toBe("This is a comment");
+  });
+
+  it("linkPr creates attachment and adds comment", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: { attachmentCreate: { success: true, attachment: { id: "att-1" } } },
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const provider = linear({ apiKey: "lin_test", logger: silentLogger });
+    await provider.linkPr("issue-id", "https://github.com/org/repo/pull/7", 7);
+
+    // First call: attachmentCreate
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const attachBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(attachBody.variables.input.issueId).toBe("issue-id");
+    expect(attachBody.variables.input.url).toBe("https://github.com/org/repo/pull/7");
+    expect(attachBody.variables.input.title).toBe("GitHub PR #7");
+
+    // Second call: comment
+    const commentBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(commentBody.variables.input.issueId).toBe("issue-id");
+    expect(commentBody.variables.input.body).toContain("PR #7");
+  });
+
+  it("searchByFingerprint filters issues by description fingerprint", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          team: {
+            issues: {
+              nodes: [
+                {
+                  id: "match-1",
+                  identifier: "ENG-10",
+                  title: "NullPointer crash",
+                  url: "https://linear.app/issue/ENG-10",
+                  branchName: "eng-10-nullpointer",
+                  description: "Error details\n<!-- TRIAGE_FINGERPRINT\nnullpointer in auth-service\n-->",
+                  state: { name: "Todo", type: "unstarted" },
+                },
+                {
+                  id: "no-match",
+                  identifier: "ENG-11",
+                  title: "Other issue",
+                  url: "https://linear.app/issue/ENG-11",
+                  branchName: "eng-11-other",
+                  description: "Unrelated description",
+                  state: { name: "Todo", type: "unstarted" },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const provider = linear({ apiKey: "lin_test", logger: silentLogger });
+    const matches = await provider.searchByFingerprint("team-uuid", "nullpointer", {
+      labelId: "label-1",
+      service: "auth-service",
+    });
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0].identifier).toBe("ENG-10");
+    expect(matches[0].state).toBe("Todo");
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.variables.teamId).toBe("team-uuid");
+    expect(body.variables.filter.labels).toEqual({ id: { eq: "label-1" } });
+  });
+
+  it("listTriageHistory returns entries with fingerprint extraction", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          team: {
+            issues: {
+              nodes: [
+                {
+                  id: "t-1",
+                  identifier: "ENG-20",
+                  title: "Triage issue",
+                  url: "https://linear.app/issue/ENG-20",
+                  description: "Some desc\n<!-- TRIAGE_FINGERPRINT\nerror_hash_abc\n-->\nMore text",
+                  state: { name: "Triage", type: "triage" },
+                  createdAt: "2026-02-01T00:00:00Z",
+                  labels: { nodes: [{ name: "bug" }, { name: "triage" }] },
+                },
+                {
+                  id: "t-2",
+                  identifier: "ENG-21",
+                  title: "No fingerprint",
+                  url: "https://linear.app/issue/ENG-21",
+                  description: null,
+                  state: { name: "Backlog", type: "backlog" },
+                  createdAt: "2026-02-15T00:00:00Z",
+                  labels: { nodes: [{ name: "triage" }] },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const provider = linear({ apiKey: "lin_test", logger: silentLogger });
+    const entries = await provider.listTriageHistory("team-uuid", "label-triage", 30);
+
+    expect(entries).toHaveLength(2);
+
+    expect(entries[0].identifier).toBe("ENG-20");
+    expect(entries[0].state).toBe("Triage");
+    expect(entries[0].stateType).toBe("triage");
+    expect(entries[0].fingerprint).toBe("error_hash_abc");
+    expect(entries[0].labels).toEqual(["bug", "triage"]);
+    expect(entries[0].descriptionSnippet).toContain("Some desc");
+
+    expect(entries[1].identifier).toBe("ENG-21");
+    expect(entries[1].fingerprint).toBeNull();
+    expect(entries[1].descriptionSnippet).toBeNull();
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.variables.teamId).toBe("team-uuid");
+    expect(body.variables.filter.labels).toEqual({ id: { eq: "label-triage" } });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -245,5 +457,119 @@ describe("GitHubIssuesProvider", () => {
     expect(url).toContain("/search/issues");
     expect(url).toContain("crash");
     expect(url).toContain("repo%3Aorg%2Frepo");
+  });
+
+  it("getIssue fetches by issue number and strips # prefix", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 555,
+        number: 10,
+        title: "Auth regression",
+        html_url: "https://github.com/org/repo/issues/10",
+        state: "open",
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const provider = githubIssues({
+      token: "ghp_test",
+      owner: "org",
+      repo: "repo",
+      logger: silentLogger,
+    });
+    const issue = await provider.getIssue("#10");
+
+    expect(issue.id).toBe("555");
+    expect(issue.identifier).toBe("#10");
+    expect(issue.title).toBe("Auth regression");
+    expect(issue.branchName).toBe("fix/10");
+    expect(issue.state).toBe("open");
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toBe("https://api.github.com/repos/org/repo/issues/10");
+  });
+
+  it("updateIssue patches fields and adds comment", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 1 }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const provider = githubIssues({
+      token: "ghp_test",
+      owner: "org",
+      repo: "repo",
+      logger: silentLogger,
+    });
+    await provider.updateIssue("10", {
+      stateId: "closed",
+      description: "Updated body",
+      comment: "Fixed in PR #5",
+    });
+
+    // First call: PATCH to update issue fields
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const [patchUrl, patchOpts] = mockFetch.mock.calls[0];
+    expect(patchUrl).toBe("https://api.github.com/repos/org/repo/issues/10");
+    expect(patchOpts.method).toBe("PATCH");
+    const patchBody = JSON.parse(patchOpts.body);
+    expect(patchBody.state).toBe("closed");
+    expect(patchBody.body).toBe("Updated body");
+
+    // Second call: POST comment
+    const [commentUrl, commentOpts] = mockFetch.mock.calls[1];
+    expect(commentUrl).toBe("https://api.github.com/repos/org/repo/issues/10/comments");
+    expect(commentOpts.method).toBe("POST");
+    const commentBody = JSON.parse(commentOpts.body);
+    expect(commentBody.body).toBe("Fixed in PR #5");
+  });
+
+  it("addComment posts to issue comments endpoint", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 1 }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const provider = githubIssues({
+      token: "ghp_test",
+      owner: "org",
+      repo: "repo",
+      logger: silentLogger,
+    });
+    await provider.addComment("15", "Deploying now");
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://api.github.com/repos/org/repo/issues/15/comments");
+    expect(opts.method).toBe("POST");
+    const body = JSON.parse(opts.body);
+    expect(body.body).toBe("Deploying now");
+  });
+
+  it("linkPr adds a comment mentioning the PR", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 1 }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const provider = githubIssues({
+      token: "ghp_test",
+      owner: "org",
+      repo: "repo",
+      logger: silentLogger,
+    });
+    await provider.linkPr("20", "https://github.com/org/repo/pull/5", 5);
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://api.github.com/repos/org/repo/issues/20/comments");
+    expect(opts.method).toBe("POST");
+    const body = JSON.parse(opts.body);
+    expect(body.body).toContain("PR #5");
+    expect(body.body).toContain("https://github.com/org/repo/pull/5");
   });
 });
