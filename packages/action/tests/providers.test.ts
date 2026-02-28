@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { createProviders } from "../src/providers/index.js";
 import type { ActionConfig } from "../src/config.js";
+import type { ObservabilityProvider } from "@sweny/providers/observability";
+import type { IssueTrackingProvider } from "@sweny/providers/issue-tracking";
+import type { SourceControlProvider } from "@sweny/providers/source-control";
+import type { NotificationProvider } from "@sweny/providers/notification";
+import type { CodingAgent } from "@sweny/providers/coding-agent";
 
 function makeConfig(overrides: Partial<ActionConfig> = {}): ActionConfig {
   return {
@@ -41,45 +46,50 @@ function makeConfig(overrides: Partial<ActionConfig> = {}): ActionConfig {
 
 describe("createProviders", () => {
   it("creates providers with datadog + linear + github", () => {
-    const providers = createProviders(makeConfig());
-    expect(providers.observability).toBeDefined();
-    expect(typeof providers.observability.verifyAccess).toBe("function");
-    expect(typeof providers.observability.queryLogs).toBe("function");
-    expect(typeof providers.observability.aggregate).toBe("function");
+    const registry = createProviders(makeConfig());
+    const observability = registry.get<ObservabilityProvider>("observability");
+    expect(observability).toBeDefined();
+    expect(typeof observability.verifyAccess).toBe("function");
+    expect(typeof observability.queryLogs).toBe("function");
+    expect(typeof observability.aggregate).toBe("function");
     // Source control
-    expect(providers.sourceControl).toBeDefined();
-    expect(typeof providers.sourceControl.verifyAccess).toBe("function");
-    expect(typeof providers.sourceControl.createBranch).toBe("function");
-    expect(typeof providers.sourceControl.createPullRequest).toBe("function");
-    expect(typeof providers.sourceControl.findExistingPr).toBe("function");
-    expect(typeof providers.sourceControl.hasNewCommits).toBe("function");
-    expect(typeof providers.sourceControl.getChangedFiles).toBe("function");
-    expect(typeof providers.sourceControl.resetPaths).toBe("function");
-    expect(typeof providers.sourceControl.dispatchWorkflow).toBe("function");
+    const sourceControl = registry.get<SourceControlProvider>("sourceControl");
+    expect(sourceControl).toBeDefined();
+    expect(typeof sourceControl.verifyAccess).toBe("function");
+    expect(typeof sourceControl.createBranch).toBe("function");
+    expect(typeof sourceControl.createPullRequest).toBe("function");
+    expect(typeof sourceControl.findExistingPr).toBe("function");
+    expect(typeof sourceControl.hasNewCommits).toBe("function");
+    expect(typeof sourceControl.getChangedFiles).toBe("function");
+    expect(typeof sourceControl.resetPaths).toBe("function");
+    expect(typeof sourceControl.dispatchWorkflow).toBe("function");
     // Notification
-    expect(providers.notification).toBeDefined();
-    expect(typeof providers.notification.send).toBe("function");
+    const notification = registry.get<NotificationProvider>("notification");
+    expect(notification).toBeDefined();
+    expect(typeof notification.send).toBe("function");
     // Coding agent
-    expect(providers.codingAgent).toBeDefined();
-    expect(typeof providers.codingAgent.install).toBe("function");
-    expect(typeof providers.codingAgent.run).toBe("function");
+    const codingAgent = registry.get<CodingAgent>("codingAgent");
+    expect(codingAgent).toBeDefined();
+    expect(typeof codingAgent.install).toBe("function");
+    expect(typeof codingAgent.run).toBe("function");
   });
 
   it("issue tracker has core + capability methods", () => {
-    const providers = createProviders(makeConfig());
-    expect(typeof providers.issueTracker.verifyAccess).toBe("function");
-    expect(typeof providers.issueTracker.createIssue).toBe("function");
-    expect(typeof providers.issueTracker.getIssue).toBe("function");
-    expect(typeof providers.issueTracker.updateIssue).toBe("function");
-    expect(typeof providers.issueTracker.searchIssues).toBe("function");
-    expect(typeof providers.issueTracker.addComment).toBe("function");
+    const registry = createProviders(makeConfig());
+    const issueTracker = registry.get<IssueTrackingProvider>("issueTracker");
+    expect(typeof issueTracker.verifyAccess).toBe("function");
+    expect(typeof issueTracker.createIssue).toBe("function");
+    expect(typeof issueTracker.getIssue).toBe("function");
+    expect(typeof issueTracker.updateIssue).toBe("function");
+    expect(typeof issueTracker.searchIssues).toBe("function");
+    expect(typeof issueTracker.addComment).toBe("function");
     // Capabilities
-    expect(typeof providers.issueTracker.linkPr).toBe("function");
-    expect(typeof providers.issueTracker.listTriageHistory).toBe("function");
+    expect(typeof (issueTracker as any).linkPr).toBe("function");
+    expect(typeof (issueTracker as any).listTriageHistory).toBe("function");
   });
 
   it("creates providers with sentry observability", () => {
-    const providers = createProviders(
+    const registry = createProviders(
       makeConfig({
         observabilityProvider: "sentry",
         observabilityCredentials: {
@@ -90,20 +100,21 @@ describe("createProviders", () => {
         },
       }),
     );
-    expect(providers.observability).toBeDefined();
-    expect(typeof providers.observability.verifyAccess).toBe("function");
-    expect(typeof providers.observability.queryLogs).toBe("function");
-    expect(typeof providers.observability.aggregate).toBe("function");
-    expect(typeof providers.observability.getAgentEnv).toBe("function");
-    expect(typeof providers.observability.getPromptInstructions).toBe("function");
+    const observability = registry.get<ObservabilityProvider>("observability");
+    expect(observability).toBeDefined();
+    expect(typeof observability.verifyAccess).toBe("function");
+    expect(typeof observability.queryLogs).toBe("function");
+    expect(typeof observability.aggregate).toBe("function");
+    expect(typeof observability.getAgentEnv).toBe("function");
+    expect(typeof observability.getPromptInstructions).toBe("function");
 
-    const env = providers.observability.getAgentEnv();
+    const env = observability.getAgentEnv();
     expect(env.SENTRY_AUTH_TOKEN).toBe("sentry-tok");
     expect(env.SENTRY_ORG).toBe("my-org");
   });
 
   it("creates providers with cloudwatch observability", () => {
-    const providers = createProviders(
+    const registry = createProviders(
       makeConfig({
         observabilityProvider: "cloudwatch",
         observabilityCredentials: {
@@ -112,14 +123,15 @@ describe("createProviders", () => {
         },
       }),
     );
-    expect(providers.observability).toBeDefined();
-    expect(typeof providers.observability.verifyAccess).toBe("function");
-    expect(typeof providers.observability.queryLogs).toBe("function");
-    expect(typeof providers.observability.aggregate).toBe("function");
-    expect(typeof providers.observability.getAgentEnv).toBe("function");
-    expect(typeof providers.observability.getPromptInstructions).toBe("function");
+    const observability = registry.get<ObservabilityProvider>("observability");
+    expect(observability).toBeDefined();
+    expect(typeof observability.verifyAccess).toBe("function");
+    expect(typeof observability.queryLogs).toBe("function");
+    expect(typeof observability.aggregate).toBe("function");
+    expect(typeof observability.getAgentEnv).toBe("function");
+    expect(typeof observability.getPromptInstructions).toBe("function");
 
-    const env = providers.observability.getAgentEnv();
+    const env = observability.getAgentEnv();
     expect(env.AWS_REGION).toBe("us-west-2");
     expect(env.CW_LOG_GROUP_PREFIX).toBe("/ecs/my-app");
   });
