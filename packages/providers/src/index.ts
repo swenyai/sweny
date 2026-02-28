@@ -31,7 +31,7 @@ export {
 
 // Notification
 export type { NotificationProvider, NotificationPayload } from "./notification/index.js";
-export { githubSummary, slackWebhook, teamsWebhook, discordWebhook } from "./notification/index.js";
+export { githubSummary, slackWebhook, teamsWebhook, discordWebhook, email } from "./notification/index.js";
 
 // Source Control
 export type {
