@@ -59,9 +59,7 @@ export function teams(config: TeamsMessagingConfig): MessagingProvider {
   function parseChannelId(channelId: string): { teamId: string; channelId: string } {
     const separatorIndex = channelId.indexOf("/");
     if (separatorIndex === -1) {
-      throw new Error(
-        `Invalid channelId format: expected "teamId/channelId", got "${channelId}"`,
-      );
+      throw new Error(`Invalid channelId format: expected "teamId/channelId", got "${channelId}"`);
     }
     return {
       teamId: channelId.slice(0, separatorIndex),

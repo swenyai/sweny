@@ -184,12 +184,7 @@ export function gitlab(config: GitLabSourceControlConfig): SourceControlProvider
         params.set("labels", opts.labels.join(","));
       }
 
-      const mrs = (await glApi(
-        "GET",
-        `/projects/${projectId}/merge_requests?${params}`,
-        baseUrl,
-        token,
-      )) as {
+      const mrs = (await glApi("GET", `/projects/${projectId}/merge_requests?${params}`, baseUrl, token)) as {
         iid: number;
         web_url: string;
         title: string;
@@ -217,12 +212,7 @@ export function gitlab(config: GitLabSourceControlConfig): SourceControlProvider
         per_page: "20",
       });
 
-      const openMrs = (await glApi(
-        "GET",
-        `/projects/${projectId}/merge_requests?${openParams}`,
-        baseUrl,
-        token,
-      )) as {
+      const openMrs = (await glApi("GET", `/projects/${projectId}/merge_requests?${openParams}`, baseUrl, token)) as {
         iid: number;
         web_url: string;
         title: string;
@@ -290,9 +280,7 @@ export function gitlab(config: GitLabSourceControlConfig): SourceControlProvider
     async dispatchWorkflow(opts: DispatchWorkflowOptions): Promise<void> {
       // GitLab triggers pipelines via POST /projects/:id/pipeline
       // The targetRepo can override the project; the workflow field is used as the ref
-      const targetProjectId = opts.targetRepo
-        ? encodeURIComponent(opts.targetRepo)
-        : projectId;
+      const targetProjectId = opts.targetRepo ? encodeURIComponent(opts.targetRepo) : projectId;
 
       const variables = opts.inputs
         ? Object.entries(opts.inputs).map(([key, value]) => ({

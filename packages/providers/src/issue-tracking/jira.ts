@@ -190,10 +190,7 @@ class JiraProvider implements IssueTrackingProvider, PrLinkCapable {
   async searchIssues(opts: IssueSearchOptions): Promise<Issue[]> {
     this.log.info(`Searching Jira issues: "${opts.query}" in project ${opts.projectId}`);
 
-    const jqlParts: string[] = [
-      `project = "${opts.projectId}"`,
-      `summary ~ "${opts.query}"`,
-    ];
+    const jqlParts: string[] = [`project = "${opts.projectId}"`, `summary ~ "${opts.query}"`];
 
     if (opts.labels && opts.labels.length > 0) {
       const labelClauses = opts.labels.map((l) => `labels = "${l}"`).join(" AND ");
@@ -294,9 +291,7 @@ class JiraProvider implements IssueTrackingProvider, PrLinkCapable {
       }>;
     }>(`/issue/${encodeURIComponent(issueKeyOrId)}/transitions`);
 
-    const target = transitions.find(
-      (t) => t.to.name.toLowerCase() === targetStatusName.toLowerCase(),
-    );
+    const target = transitions.find((t) => t.to.name.toLowerCase() === targetStatusName.toLowerCase());
 
     if (!target) {
       const available = transitions.map((t) => t.to.name).join(", ");

@@ -23,8 +23,7 @@ class OpsGenieProvider implements IncidentProvider {
 
   constructor(config: OpsGenieConfig) {
     this.apiKey = config.apiKey;
-    this.baseUrl =
-      config.region === "eu" ? "https://api.eu.opsgenie.com" : "https://api.opsgenie.com";
+    this.baseUrl = config.region === "eu" ? "https://api.eu.opsgenie.com" : "https://api.opsgenie.com";
     this.log = config.logger ?? consoleLogger;
   }
 

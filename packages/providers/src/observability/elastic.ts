@@ -90,7 +90,9 @@ class ElasticProvider implements ObservabilityProvider {
   }
 
   async queryLogs(opts: LogQueryOptions): Promise<LogEntry[]> {
-    this.log.info(`Querying Elasticsearch logs (severity: ${opts.severity}, range: ${opts.timeRange}, service: ${opts.serviceFilter})`);
+    this.log.info(
+      `Querying Elasticsearch logs (severity: ${opts.severity}, range: ${opts.timeRange}, service: ${opts.serviceFilter})`,
+    );
 
     const must: Record<string, unknown>[] = [
       {
@@ -110,10 +112,7 @@ class ElasticProvider implements ObservabilityProvider {
     if (opts.serviceFilter && opts.serviceFilter !== "*") {
       must.push({
         bool: {
-          should: [
-            { match: { "service.name": opts.serviceFilter } },
-            { match: { "host.name": opts.serviceFilter } },
-          ],
+          should: [{ match: { "service.name": opts.serviceFilter } }, { match: { "host.name": opts.serviceFilter } }],
           minimum_should_match: 1,
         },
       });
@@ -139,13 +138,19 @@ class ElasticProvider implements ObservabilityProvider {
       const src = hit._source ?? {};
       const service =
         (src["service.name"] as string) ??
-        (src["service"] && typeof src["service"] === "object" ? (src["service"] as Record<string, unknown>)["name"] as string : undefined) ??
+        (src["service"] && typeof src["service"] === "object"
+          ? ((src["service"] as Record<string, unknown>)["name"] as string)
+          : undefined) ??
         (src["host.name"] as string) ??
-        (src["host"] && typeof src["host"] === "object" ? (src["host"] as Record<string, unknown>)["name"] as string : undefined) ??
+        (src["host"] && typeof src["host"] === "object"
+          ? ((src["host"] as Record<string, unknown>)["name"] as string)
+          : undefined) ??
         "unknown";
       const level =
         (src["log.level"] as string) ??
-        (src["log"] && typeof src["log"] === "object" ? (src["log"] as Record<string, unknown>)["level"] as string : undefined) ??
+        (src["log"] && typeof src["log"] === "object"
+          ? ((src["log"] as Record<string, unknown>)["level"] as string)
+          : undefined) ??
         "unknown";
 
       return {
@@ -179,10 +184,7 @@ class ElasticProvider implements ObservabilityProvider {
     if (opts.serviceFilter && opts.serviceFilter !== "*") {
       must.push({
         bool: {
-          should: [
-            { match: { "service.name": opts.serviceFilter } },
-            { match: { "host.name": opts.serviceFilter } },
-          ],
+          should: [{ match: { "service.name": opts.serviceFilter } }, { match: { "host.name": opts.serviceFilter } }],
           minimum_should_match: 1,
         },
       });

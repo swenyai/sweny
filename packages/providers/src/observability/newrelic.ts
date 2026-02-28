@@ -31,9 +31,7 @@ class NewRelicProvider implements ObservabilityProvider {
   }
 
   private get endpoint(): string {
-    return this.region === "eu"
-      ? "https://api.eu.newrelic.com/graphql"
-      : "https://api.newrelic.com/graphql";
+    return this.region === "eu" ? "https://api.eu.newrelic.com/graphql" : "https://api.newrelic.com/graphql";
   }
 
   private async nerdgraph<T>(query: string): Promise<T> {
@@ -113,9 +111,7 @@ class NewRelicProvider implements ObservabilityProvider {
       };
     });
 
-    this.log.info(
-      `Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`,
-    );
+    this.log.info(`Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`);
 
     return logs;
   }

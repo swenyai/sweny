@@ -30,11 +30,7 @@ class SplunkProvider implements ObservabilityProvider {
     this.log = config.logger ?? consoleLogger;
   }
 
-  private async request<T>(
-    method: "GET" | "POST",
-    path: string,
-    params?: Record<string, string>,
-  ): Promise<T> {
+  private async request<T>(method: "GET" | "POST", path: string, params?: Record<string, string>): Promise<T> {
     const url = new URL(path, this.baseUrl);
     url.searchParams.set("output_mode", "json");
 
@@ -133,9 +129,7 @@ class SplunkProvider implements ObservabilityProvider {
       };
     });
 
-    this.log.info(
-      `Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`,
-    );
+    this.log.info(`Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`);
 
     return logs;
   }

@@ -36,9 +36,7 @@ class AwsSecretsManagerProvider implements CredentialVaultProvider {
     const { GetSecretValueCommand } = await import("@aws-sdk/client-secrets-manager");
 
     try {
-      const result = await client.send(
-        new GetSecretValueCommand({ SecretId: this.secretName(tenantId, key) }),
-      );
+      const result = await client.send(new GetSecretValueCommand({ SecretId: this.secretName(tenantId, key) }));
       return result.SecretString ?? null;
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "ResourceNotFoundException") {
@@ -50,21 +48,15 @@ class AwsSecretsManagerProvider implements CredentialVaultProvider {
 
   async setSecret(tenantId: string, key: string, value: string): Promise<void> {
     const client = await this.getClient();
-    const { CreateSecretCommand, PutSecretValueCommand } = await import(
-      "@aws-sdk/client-secrets-manager"
-    );
+    const { CreateSecretCommand, PutSecretValueCommand } = await import("@aws-sdk/client-secrets-manager");
 
     const name = this.secretName(tenantId, key);
 
     try {
-      await client.send(
-        new CreateSecretCommand({ Name: name, SecretString: value }),
-      );
+      await client.send(new CreateSecretCommand({ Name: name, SecretString: value }));
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "ResourceExistsException") {
-        await client.send(
-          new PutSecretValueCommand({ SecretId: name, SecretString: value }),
-        );
+        await client.send(new PutSecretValueCommand({ SecretId: name, SecretString: value }));
       } else {
         throw err;
       }

@@ -151,9 +151,7 @@ class LokiProvider implements ObservabilityProvider {
       }
     }
 
-    this.log.info(
-      `Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`,
-    );
+    this.log.info(`Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`);
 
     return logs;
   }
@@ -199,12 +197,8 @@ class LokiProvider implements ObservabilityProvider {
   }
 
   getPromptInstructions(): string {
-    const authHeader = this.apiKey
-      ? `  -H "Authorization: Bearer \${LOKI_API_KEY}" \\`
-      : "";
-    const orgHeader = this.orgId
-      ? `  -H "X-Scope-OrgID: \${LOKI_ORG_ID}" \\`
-      : "";
+    const authHeader = this.apiKey ? `  -H "Authorization: Bearer \${LOKI_API_KEY}" \\` : "";
+    const orgHeader = this.orgId ? `  -H "X-Scope-OrgID: \${LOKI_ORG_ID}" \\` : "";
     const extraHeaders = [authHeader, orgHeader].filter(Boolean).join("\n");
     const curlHeaders = extraHeaders ? `\n${extraHeaders}` : "";
 
