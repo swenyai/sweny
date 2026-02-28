@@ -9,7 +9,7 @@ import type { SessionManager, Session } from "../src/session/manager.js";
 import type { AgentRunner } from "../src/runner/types.js";
 import type { RunResult } from "../src/model/types.js";
 import type { MemoryStore } from "../src/storage/memory/types.js";
-import type { AuditLogger, AuditRecord } from "../src/audit/types.js";
+import type { AuditLogger } from "../src/audit/types.js";
 import type { RateLimiter } from "../src/rate-limit.js";
 import type { Logger } from "../src/logger.js";
 

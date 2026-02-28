@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { SessionManager } from "../../src/session/manager.js";
 import type { SessionStore, PersistedSession, TranscriptEntry } from "../../src/storage/session/types.js";
 
