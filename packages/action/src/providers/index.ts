@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
 import { ActionConfig } from "../config.js";
-import { datadog } from "@sweny/providers/observability";
+import { datadog, sentry, cloudwatch } from "@sweny/providers/observability";
 import { linear } from "@sweny/providers/issue-tracking";
 import { github } from "@sweny/providers/source-control";
 import { githubSummary } from "@sweny/providers/notification";
@@ -30,12 +30,29 @@ export interface Providers {
 export function createProviders(config: ActionConfig): Providers {
   // Observability
   let observability: ObservabilityProvider;
+  const obsCreds = config.observabilityCredentials;
   switch (config.observabilityProvider) {
     case "datadog":
       observability = datadog({
-        apiKey: config.ddApiKey,
-        appKey: config.ddAppKey,
-        site: config.ddSite,
+        apiKey: obsCreds.apiKey,
+        appKey: obsCreds.appKey,
+        site: obsCreds.site,
+        logger: actionsLogger,
+      });
+      break;
+    case "sentry":
+      observability = sentry({
+        authToken: obsCreds.authToken,
+        organization: obsCreds.organization,
+        project: obsCreds.project,
+        baseUrl: obsCreds.baseUrl,
+        logger: actionsLogger,
+      });
+      break;
+    case "cloudwatch":
+      observability = cloudwatch({
+        region: obsCreds.region,
+        logGroupPrefix: obsCreds.logGroupPrefix,
         logger: actionsLogger,
       });
       break;

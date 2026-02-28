@@ -16,9 +16,11 @@ inputs:
 
   # Observability provider
   observability-provider:
-    description: 'Observability provider to use (datadog)'
+    description: 'Observability provider to use (datadog, sentry, cloudwatch)'
     required: false
     default: 'datadog'
+
+  # Datadog credentials
   dd-api-key:
     description: 'Datadog API key'
     required: false
@@ -29,6 +31,30 @@ inputs:
     description: 'Datadog site (e.g., datadoghq.com, datadoghq.eu)'
     required: false
     default: 'datadoghq.com'
+
+  # Sentry credentials
+  sentry-auth-token:
+    description: 'Sentry auth token'
+    required: false
+  sentry-org:
+    description: 'Sentry organization slug'
+    required: false
+  sentry-project:
+    description: 'Sentry project slug'
+    required: false
+  sentry-base-url:
+    description: 'Sentry base URL (default: https://sentry.io)'
+    required: false
+    default: 'https://sentry.io'
+
+  # CloudWatch credentials
+  cloudwatch-region:
+    description: 'AWS region for CloudWatch Logs'
+    required: false
+    default: 'us-east-1'
+  cloudwatch-log-group-prefix:
+    description: 'CloudWatch log group name or prefix'
+    required: false
 
   # Issue tracker provider
   issue-tracker-provider:

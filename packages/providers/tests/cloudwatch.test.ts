@@ -95,6 +95,32 @@ describe("cloudwatch factory", () => {
     expect(typeof provider.verifyAccess).toBe("function");
     expect(typeof provider.queryLogs).toBe("function");
     expect(typeof provider.aggregate).toBe("function");
+    expect(typeof provider.getAgentEnv).toBe("function");
+    expect(typeof provider.getPromptInstructions).toBe("function");
+  });
+
+  it("getAgentEnv returns AWS env vars", () => {
+    const provider = cloudwatch({
+      region: "eu-west-1",
+      logGroupPrefix: "/ecs/my-app",
+      logger: silentLogger,
+    });
+    const env = provider.getAgentEnv();
+    expect(env).toEqual({
+      AWS_REGION: "eu-west-1",
+      CW_LOG_GROUP_PREFIX: "/ecs/my-app",
+    });
+  });
+
+  it("getPromptInstructions contains CloudWatch API docs", () => {
+    const provider = cloudwatch({
+      logGroupPrefix: "/ecs/app",
+      logger: silentLogger,
+    });
+    const instructions = provider.getPromptInstructions();
+    expect(instructions).toContain("CloudWatch");
+    expect(instructions).toContain("AWS_REGION");
+    expect(instructions).toContain("aws logs");
   });
 
   it("throws on invalid config", () => {

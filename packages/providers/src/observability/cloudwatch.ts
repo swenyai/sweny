@@ -129,6 +129,56 @@ class CloudWatchProvider implements ObservabilityProvider {
     return logs;
   }
 
+  getAgentEnv(): Record<string, string> {
+    return {
+      AWS_REGION: this.region,
+      CW_LOG_GROUP_PREFIX: this.logGroupPrefix,
+    };
+  }
+
+  getPromptInstructions(): string {
+    return `### CloudWatch Logs Insights
+- \`AWS_REGION\` - AWS region (${this.region})
+- \`CW_LOG_GROUP_PREFIX\` - Log group prefix (${this.logGroupPrefix})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+Investigate logs from CloudWatch Logs across **BOTH production AND staging environments** to find bugs and issues.
+You have DIRECT ACCESS to AWS CloudWatch Logs via the AWS CLI.
+
+**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
+- Issues in staging only → Fix before users are affected
+- Issues in both environments → Critical, affects users now
+- Issues in production only → May be load/scale related
+
+AWS credentials are configured via the standard AWS credential chain (environment variables or instance profile).
+
+#### Example: Start a Logs Insights query
+\`\`\`bash
+aws logs start-query \\
+  --log-group-name "\${CW_LOG_GROUP_PREFIX}" \\
+  --start-time $(date -d '-1 hour' +%s) \\
+  --end-time $(date +%s) \\
+  --query-string 'fields @timestamp, @message | filter @message like /(?i)error/ | sort @timestamp desc | limit 100' \\
+  --region "\${AWS_REGION}"
+\`\`\`
+
+#### Example: Get query results
+\`\`\`bash
+aws logs get-query-results --query-id "<query-id>" --region "\${AWS_REGION}"
+\`\`\`
+
+#### Example: Get error counts by log stream
+\`\`\`bash
+aws logs start-query \\
+  --log-group-name "\${CW_LOG_GROUP_PREFIX}" \\
+  --start-time $(date -d '-1 hour' +%s) \\
+  --end-time $(date +%s) \\
+  --query-string 'filter @message like /(?i)error/ | stats count(*) as errorCount by @logStream | sort errorCount desc | limit 20' \\
+  --region "\${AWS_REGION}"
+\`\`\``;
+  }
+
   async aggregate(
     opts: Omit<LogQueryOptions, "severity">,
   ): Promise<AggregateResult[]> {

@@ -2,7 +2,7 @@ node_modules/
 .env
 *.tsbuildinfo
 .sweny-data/
-.github/datadog-analysis/
+.github/triage-analysis/
 .DS_Store
 
 # Ignore dist for library packages (built locally)

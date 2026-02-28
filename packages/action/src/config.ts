@@ -7,9 +7,7 @@ export interface ActionConfig {
 
   // Observability
   observabilityProvider: string;
-  ddApiKey: string;
-  ddAppKey: string;
-  ddSite: string;
+  observabilityCredentials: Record<string, string>;
 
   // Issue tracker
   issueTrackerProvider: string;
@@ -49,9 +47,9 @@ export function parseInputs(): ActionConfig {
     claudeOauthToken: core.getInput("claude-oauth-token"),
 
     observabilityProvider: core.getInput("observability-provider") || "datadog",
-    ddApiKey: core.getInput("dd-api-key"),
-    ddAppKey: core.getInput("dd-app-key"),
-    ddSite: core.getInput("dd-site") || "datadoghq.com",
+    observabilityCredentials: parseObservabilityCredentials(
+      core.getInput("observability-provider") || "datadog",
+    ),
 
     issueTrackerProvider: core.getInput("issue-tracker-provider") || "linear",
     linearApiKey: core.getInput("linear-api-key"),
@@ -80,4 +78,29 @@ export function parseInputs(): ActionConfig {
     repository: process.env.GITHUB_REPOSITORY || "",
     repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",
   };
+}
+
+function parseObservabilityCredentials(provider: string): Record<string, string> {
+  switch (provider) {
+    case "datadog":
+      return {
+        apiKey: core.getInput("dd-api-key"),
+        appKey: core.getInput("dd-app-key"),
+        site: core.getInput("dd-site") || "datadoghq.com",
+      };
+    case "sentry":
+      return {
+        authToken: core.getInput("sentry-auth-token"),
+        organization: core.getInput("sentry-org"),
+        project: core.getInput("sentry-project"),
+        baseUrl: core.getInput("sentry-base-url") || "https://sentry.io",
+      };
+    case "cloudwatch":
+      return {
+        region: core.getInput("cloudwatch-region") || "us-east-1",
+        logGroupPrefix: core.getInput("cloudwatch-log-group-prefix"),
+      };
+    default:
+      return {};
+  }
 }

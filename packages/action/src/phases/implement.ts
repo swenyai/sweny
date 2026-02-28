@@ -76,7 +76,7 @@ export async function implement(
   let issueTitle = "SWEny Triage: Automated bug fix";
 
   if (!config.linearIssue) {
-    const bestCandidatePath = ".github/datadog-analysis/best-candidate.md";
+    const bestCandidatePath = ".github/triage-analysis/best-candidate.md";
     if (fs.existsSync(bestCandidatePath)) {
       const content = fs.readFileSync(bestCandidatePath, "utf-8");
       const headingMatch = content.match(/^#\s+(.+)$/m);
@@ -131,7 +131,7 @@ export async function implement(
       // Create new issue
       core.info("No existing Linear issue found, creating new one...");
       let description = "";
-      const bestCandidatePath = ".github/datadog-analysis/best-candidate.md";
+      const bestCandidatePath = ".github/triage-analysis/best-candidate.md";
       if (fs.existsSync(bestCandidatePath)) {
         description = fs
           .readFileSync(bestCandidatePath, "utf-8")
@@ -315,7 +315,7 @@ export async function implement(
   core.startGroup("Check for Code Changes");
 
   // Check if fix was declined
-  const fixDeclinedPath = ".github/datadog-analysis/fix-declined.md";
+  const fixDeclinedPath = ".github/triage-analysis/fix-declined.md";
   if (fs.existsSync(fixDeclinedPath)) {
     const reason = fs.readFileSync(fixDeclinedPath, "utf-8").trim();
     core.notice(`Fix was declined by Claude: ${reason.slice(0, 200)}`);
@@ -390,7 +390,7 @@ export async function implement(
   // -------------------------------------------------------------------------
   core.startGroup("Create Pull Request");
   let prBody = "";
-  const prDescPath = ".github/datadog-analysis/pr-description.md";
+  const prDescPath = ".github/triage-analysis/pr-description.md";
   if (fs.existsSync(prDescPath)) {
     prBody = fs.readFileSync(prDescPath, "utf-8");
   } else {
@@ -460,8 +460,8 @@ function buildImplementPrompt(linearIdentifier: string): string {
 
 ## Context
 
-Read the best candidate analysis at \`.github/datadog-analysis/best-candidate.md\`.
-Also read \`.github/datadog-analysis/investigation-log.md\` for context.
+Read the best candidate analysis at \`.github/triage-analysis/best-candidate.md\`.
+Also read \`.github/triage-analysis/investigation-log.md\` for context.
 
 ## Your Task
 
@@ -492,7 +492,7 @@ Also read \`.github/datadog-analysis/investigation-log.md\` for context.
 
 ## Safety Guidelines
 
-- If the fix is too complex or risky, create \`.github/datadog-analysis/fix-declined.md\` explaining why
+- If the fix is too complex or risky, create \`.github/triage-analysis/fix-declined.md\` explaining why
 - Do not make breaking changes
 - Prefer defensive coding patterns
 
@@ -511,13 +511,13 @@ function buildPrDescriptionPrompt(
 
 ## Context
 
-1. Read \`.github/datadog-analysis/best-candidate.md\` for issue details
-2. Read \`.github/datadog-analysis/investigation-log.md\` for context
+1. Read \`.github/triage-analysis/best-candidate.md\` for issue details
+2. Read \`.github/triage-analysis/investigation-log.md\` for context
 3. Run \`git diff main..HEAD\` to see the changes made
 
 ## Output
 
-Create \`.github/datadog-analysis/pr-description.md\` with:
+Create \`.github/triage-analysis/pr-description.md\` with:
 
 ## Summary
 <What this PR fixes and why>

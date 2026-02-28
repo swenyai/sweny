@@ -18,7 +18,7 @@ export async function investigate(
   config: ActionConfig,
   providers: Providers,
 ): Promise<InvestigationResult> {
-  const analysisDir = ".github/datadog-analysis";
+  const analysisDir = ".github/triage-analysis";
   fs.mkdirSync(analysisDir, { recursive: true });
 
   // Install coding agent CLI
@@ -40,14 +40,12 @@ export async function investigate(
   core.endGroup();
 
   // Build investigation prompt
-  const prompt = buildInvestigationPrompt(config, knownIssuesContent);
+  const prompt = buildInvestigationPrompt(config, providers, knownIssuesContent);
 
   // Run coding agent investigation
   core.startGroup("Coding agent investigation");
   const agentEnv: Record<string, string> = {
-    DD_API_KEY: config.ddApiKey,
-    DD_APP_KEY: config.ddAppKey,
-    DD_SITE: config.ddSite,
+    ...providers.observability.getAgentEnv(),
     LINEAR_API_KEY: config.linearApiKey,
     LINEAR_TEAM_ID: config.linearTeamId,
     LINEAR_BUG_LABEL_ID: config.linearBugLabelId,
@@ -168,6 +166,7 @@ async function buildKnownIssuesContext(
 
 function buildInvestigationPrompt(
   config: ActionConfig,
+  providers: Providers,
   knownIssuesContent: string,
 ): string {
   const parts: string[] = [];
@@ -205,7 +204,7 @@ Based on the inputs above, decide how to proceed:
 1. **If a Linear Issue is provided** (e.g., ENG-123):
    - Fetch the issue details and comments from Linear using the API
    - Understand what the issue is about and any context from comments
-   - You may still query Datadog for related logs if helpful
+   - You may still query the observability provider for related logs if helpful
    - Focus your investigation on this specific issue
 
 2. **If Additional Instructions are provided**:
@@ -214,55 +213,15 @@ Based on the inputs above, decide how to proceed:
    - Use your judgment to combine with other inputs
 
 3. **If neither is provided** (default mode):
-   - Query Datadog for recent errors
+   - Query the observability provider for recent errors
    - Investigate the top issues
    - Identify the best candidate for fixing
 
-4. **You can combine approaches** - e.g., work on a Linear issue AND check Datadog for related errors
+4. **You can combine approaches** - e.g., work on a Linear issue AND check observability logs for related errors
 
 ## AVAILABLE TOOLS
 
-### Datadog Logs API
-- \`DD_API_KEY\` - API key (use in DD-API-KEY header)
-- \`DD_APP_KEY\` - Application key (use in DD-APPLICATION-KEY header)
-- \`DD_SITE\` - Datadog site (datadoghq.com)
-
-**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
-
-## Your Mission
-
-Investigate logs from Datadog across **BOTH production AND staging environments** to find bugs and issues.
-You have DIRECT ACCESS to Datadog's Logs API via curl commands.
-
-**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
-- Issues in staging only → Fix before users are affected
-- Issues in both environments → Critical, affects users now
-- Issues in production only → May be load/scale related
-
-## Datadog API Access
-
-Use these environment variables in your curl commands:
-- \`DD_API_KEY\` - API key (use in DD-API-KEY header)
-- \`DD_APP_KEY\` - Application key (use in DD-APPLICATION-KEY header)
-- \`DD_SITE\` - Datadog site (datadoghq.com)
-
-### Example: Get error counts by service
-\`\`\`bash
-curl -s -X POST "https://api.\${DD_SITE}/api/v2/logs/analytics/aggregate" \\
-  -H "Content-Type: application/json" \\
-  -H "DD-API-KEY: \${DD_API_KEY}" \\
-  -H "DD-APPLICATION-KEY: \${DD_APP_KEY}" \\
-  -d '{"filter":{"query":"service:* status:error","from":"now-1h","to":"now"},"compute":[{"type":"total","aggregation":"count"}],"group_by":[{"facet":"service","limit":20,"sort":{"type":"measure","aggregation":"count","order":"desc"}}]}'
-\`\`\`
-
-### Example: Get recent error logs
-\`\`\`bash
-curl -s -X POST "https://api.\${DD_SITE}/api/v2/logs/events/search" \\
-  -H "Content-Type: application/json" \\
-  -H "DD-API-KEY: \${DD_API_KEY}" \\
-  -H "DD-APPLICATION-KEY: \${DD_APP_KEY}" \\
-  -d '{"filter":{"query":"service:* status:error","from":"now-1h","to":"now"},"sort":"-timestamp","page":{"limit":100}}'
-\`\`\`
+${providers.observability.getPromptInstructions()}
 
 ### Linear API
 The \`LINEAR_API_KEY\` environment variable is set. Use the Linear GraphQL API directly via curl:
@@ -289,9 +248,9 @@ curl -s -X POST "https://api.linear.app/graphql" \\
 ## SERVICE OWNERSHIP MAP
 
 Read the service map at \`${config.serviceMapPath}\` to understand which GitHub repo
-owns which Datadog service. This is critical for cross-repo dispatch.
+owns which service. This is critical for cross-repo dispatch.
 
-**You MUST determine which repo should fix the bug you find.** Look at the Datadog service
+**You MUST determine which repo should fix the bug you find.** Look at the service
 name in the error logs and match it against the \`owns\` list in the service map.`);
 
   // Inject service map if it exists
@@ -346,10 +305,10 @@ ${knownIssuesContent}`);
 
 Create these files with your findings:
 
-### 1. \`.github/datadog-analysis/investigation-log.md\`
+### 1. \`.github/triage-analysis/investigation-log.md\`
 Document your investigation process - commands run, what you found, reasoning.
 
-### 2. \`.github/datadog-analysis/issues-report.md\`
+### 2. \`.github/triage-analysis/issues-report.md\`
 For each issue found:
 - Severity, Environment (Production/Staging/Both), Frequency
 - Description, Evidence (logs, stack traces)
@@ -359,7 +318,7 @@ For each issue found:
   - If exists: Note the issue identifier (e.g., ENG-123) and URL
   - If not found: Note as "No existing Linear issue found"
 
-### 3. \`.github/datadog-analysis/best-candidate.md\`
+### 3. \`.github/triage-analysis/best-candidate.md\`
 Select the BEST issue to fix based on impact, frequency, fixability.
 Include full technical analysis, exact code changes, test plan, rollback plan.
 

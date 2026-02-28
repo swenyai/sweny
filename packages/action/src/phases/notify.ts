@@ -49,7 +49,7 @@ export async function notify(
   }
 
   // Append investigation log if it exists
-  const investigationLog = ".github/datadog-analysis/investigation-log.md";
+  const investigationLog = ".github/triage-analysis/investigation-log.md";
   if (fs.existsSync(investigationLog)) {
     lines.push("");
     lines.push("### Investigation Log");
@@ -57,7 +57,7 @@ export async function notify(
   }
 
   // Append issues report if it exists
-  const issuesReport = ".github/datadog-analysis/issues-report.md";
+  const issuesReport = ".github/triage-analysis/issues-report.md";
   if (fs.existsSync(issuesReport)) {
     lines.push("");
     lines.push("### Issues Found");

@@ -69,6 +69,27 @@ describe("datadog factory", () => {
     expect(typeof provider.verifyAccess).toBe("function");
     expect(typeof provider.queryLogs).toBe("function");
     expect(typeof provider.aggregate).toBe("function");
+    expect(typeof provider.getAgentEnv).toBe("function");
+    expect(typeof provider.getPromptInstructions).toBe("function");
+  });
+
+  it("getAgentEnv returns DD_ env vars", () => {
+    const provider = datadog({ apiKey: "my-key", appKey: "my-app", site: "datadoghq.eu" });
+    const env = provider.getAgentEnv();
+    expect(env).toEqual({
+      DD_API_KEY: "my-key",
+      DD_APP_KEY: "my-app",
+      DD_SITE: "datadoghq.eu",
+    });
+  });
+
+  it("getPromptInstructions contains Datadog API docs", () => {
+    const provider = datadog({ apiKey: "k", appKey: "a", site: "datadoghq.com" });
+    const instructions = provider.getPromptInstructions();
+    expect(instructions).toContain("Datadog");
+    expect(instructions).toContain("DD_API_KEY");
+    expect(instructions).toContain("DD-API-KEY");
+    expect(instructions).toContain("curl");
   });
 
   it("throws on invalid config", () => {
@@ -83,6 +104,27 @@ describe("sentry factory", () => {
     expect(typeof provider.verifyAccess).toBe("function");
     expect(typeof provider.queryLogs).toBe("function");
     expect(typeof provider.aggregate).toBe("function");
+    expect(typeof provider.getAgentEnv).toBe("function");
+    expect(typeof provider.getPromptInstructions).toBe("function");
+  });
+
+  it("getAgentEnv returns SENTRY_ env vars", () => {
+    const provider = sentry({ authToken: "tok", organization: "my-org", project: "my-proj" });
+    const env = provider.getAgentEnv();
+    expect(env).toEqual({
+      SENTRY_AUTH_TOKEN: "tok",
+      SENTRY_ORG: "my-org",
+      SENTRY_PROJECT: "my-proj",
+      SENTRY_BASE_URL: "https://sentry.io",
+    });
+  });
+
+  it("getPromptInstructions contains Sentry API docs", () => {
+    const provider = sentry({ authToken: "t", organization: "o", project: "p" });
+    const instructions = provider.getPromptInstructions();
+    expect(instructions).toContain("Sentry");
+    expect(instructions).toContain("SENTRY_AUTH_TOKEN");
+    expect(instructions).toContain("curl");
   });
 });
 

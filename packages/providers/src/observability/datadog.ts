@@ -107,6 +107,54 @@ class DatadogProvider implements ObservabilityProvider {
     return logs;
   }
 
+  getAgentEnv(): Record<string, string> {
+    return {
+      DD_API_KEY: this.apiKey,
+      DD_APP_KEY: this.appKey,
+      DD_SITE: this.site,
+    };
+  }
+
+  getPromptInstructions(): string {
+    return `### Datadog Logs API
+- \`DD_API_KEY\` - API key (use in DD-API-KEY header)
+- \`DD_APP_KEY\` - Application key (use in DD-APPLICATION-KEY header)
+- \`DD_SITE\` - Datadog site (${this.site})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+Investigate logs from Datadog across **BOTH production AND staging environments** to find bugs and issues.
+You have DIRECT ACCESS to Datadog's Logs API via curl commands.
+
+**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
+- Issues in staging only → Fix before users are affected
+- Issues in both environments → Critical, affects users now
+- Issues in production only → May be load/scale related
+
+Use these environment variables in your curl commands:
+- \`DD_API_KEY\` - API key (use in DD-API-KEY header)
+- \`DD_APP_KEY\` - Application key (use in DD-APPLICATION-KEY header)
+- \`DD_SITE\` - Datadog site (${this.site})
+
+#### Example: Get error counts by service
+\`\`\`bash
+curl -s -X POST "https://api.\${DD_SITE}/api/v2/logs/analytics/aggregate" \\
+  -H "Content-Type: application/json" \\
+  -H "DD-API-KEY: \${DD_API_KEY}" \\
+  -H "DD-APPLICATION-KEY: \${DD_APP_KEY}" \\
+  -d '{"filter":{"query":"service:* status:error","from":"now-1h","to":"now"},"compute":[{"type":"total","aggregation":"count"}],"group_by":[{"facet":"service","limit":20,"sort":{"type":"measure","aggregation":"count","order":"desc"}}]}'
+\`\`\`
+
+#### Example: Get recent error logs
+\`\`\`bash
+curl -s -X POST "https://api.\${DD_SITE}/api/v2/logs/events/search" \\
+  -H "Content-Type: application/json" \\
+  -H "DD-API-KEY: \${DD_API_KEY}" \\
+  -H "DD-APPLICATION-KEY: \${DD_APP_KEY}" \\
+  -d '{"filter":{"query":"service:* status:error","from":"now-1h","to":"now"},"sort":"-timestamp","page":{"limit":100}}'
+\`\`\``;
+  }
+
   async aggregate(
     opts: Omit<LogQueryOptions, "severity">,
   ): Promise<AggregateResult[]> {

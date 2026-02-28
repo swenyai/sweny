@@ -123,6 +123,51 @@ class SentryProvider implements ObservabilityProvider {
     return logs;
   }
 
+  getAgentEnv(): Record<string, string> {
+    return {
+      SENTRY_AUTH_TOKEN: this.authToken,
+      SENTRY_ORG: this.org,
+      SENTRY_PROJECT: this.project,
+      SENTRY_BASE_URL: this.baseUrl,
+    };
+  }
+
+  getPromptInstructions(): string {
+    return `### Sentry Issues API
+- \`SENTRY_AUTH_TOKEN\` - Bearer token for authentication
+- \`SENTRY_ORG\` - Organization slug (${this.org})
+- \`SENTRY_PROJECT\` - Project slug (${this.project})
+- \`SENTRY_BASE_URL\` - Sentry base URL (${this.baseUrl})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+Investigate issues from Sentry across **BOTH production AND staging environments** to find bugs and issues.
+You have DIRECT ACCESS to Sentry's REST API via curl commands.
+
+**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
+- Issues in staging only → Fix before users are affected
+- Issues in both environments → Critical, affects users now
+- Issues in production only → May be load/scale related
+
+#### Example: List project issues (errors)
+\`\`\`bash
+curl -s "\${SENTRY_BASE_URL}/api/0/projects/\${SENTRY_ORG}/\${SENTRY_PROJECT}/issues/?query=level:error&statsPeriod=24h&sort=date" \\
+  -H "Authorization: Bearer \${SENTRY_AUTH_TOKEN}"
+\`\`\`
+
+#### Example: Get issue events
+\`\`\`bash
+curl -s "\${SENTRY_BASE_URL}/api/0/issues/{issue_id}/events/" \\
+  -H "Authorization: Bearer \${SENTRY_AUTH_TOKEN}"
+\`\`\`
+
+#### Example: Get issue details
+\`\`\`bash
+curl -s "\${SENTRY_BASE_URL}/api/0/issues/{issue_id}/" \\
+  -H "Authorization: Bearer \${SENTRY_AUTH_TOKEN}"
+\`\`\``;
+  }
+
   async aggregate(
     opts: Omit<LogQueryOptions, "severity">,
   ): Promise<AggregateResult[]> {

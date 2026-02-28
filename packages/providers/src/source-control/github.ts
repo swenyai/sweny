@@ -79,11 +79,11 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
 
     async hasChanges(): Promise<boolean> {
       const unstaged = await git(
-        ["diff", "--name-only", "--", ".", ":!.github/datadog-analysis", ":!.github/workflows"],
+        ["diff", "--name-only", "--", ".", ":!.github/triage-analysis", ":!.github/workflows"],
         { ignoreReturnCode: true },
       );
       const staged = await git(
-        ["diff", "--cached", "--name-only", "--", ".", ":!.github/datadog-analysis", ":!.github/workflows"],
+        ["diff", "--cached", "--name-only", "--", ".", ":!.github/triage-analysis", ":!.github/workflows"],
         { ignoreReturnCode: true },
       );
       return unstaged.trim().length > 0 || staged.trim().length > 0;
@@ -114,7 +114,7 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
     },
 
     async stageAndCommit(message: string): Promise<void> {
-      await git(["add", "-A", "--", ".", ":!.github/datadog-analysis", ":!.github/workflows"]);
+      await git(["add", "-A", "--", ".", ":!.github/triage-analysis", ":!.github/workflows"]);
       await git(["commit", "-m", message]);
     },
 

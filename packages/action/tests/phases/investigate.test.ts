@@ -39,9 +39,11 @@ function makeConfig(overrides: Partial<ActionConfig> = {}): ActionConfig {
     anthropicApiKey: "sk-test",
     claudeOauthToken: "",
     observabilityProvider: "datadog",
-    ddApiKey: "dd-api",
-    ddAppKey: "dd-app",
-    ddSite: "datadoghq.com",
+    observabilityCredentials: {
+      apiKey: "dd-api",
+      appKey: "dd-app",
+      site: "datadoghq.com",
+    },
     issueTrackerProvider: "linear",
     linearApiKey: "lin_test",
     linearTeamId: "team-1",
@@ -75,6 +77,12 @@ function makeProviders(overrides: Partial<Providers> = {}): Providers {
       verifyAccess: vi.fn().mockResolvedValue(undefined),
       queryLogs: vi.fn().mockResolvedValue([]),
       aggregate: vi.fn().mockResolvedValue([]),
+      getAgentEnv: vi.fn().mockReturnValue({
+        DD_API_KEY: "dd-api",
+        DD_APP_KEY: "dd-app",
+        DD_SITE: "datadoghq.com",
+      }),
+      getPromptInstructions: vi.fn().mockReturnValue("### Datadog Logs API\nMock instructions"),
     },
     issueTracker: {
       verifyAccess: vi.fn().mockResolvedValue(undefined),
@@ -144,7 +152,7 @@ describe("investigate", () => {
     await investigate(makeConfig(), providers);
 
     expect(fsMock.mkdirSync).toHaveBeenCalledWith(
-      ".github/datadog-analysis",
+      ".github/triage-analysis",
       { recursive: true },
     );
   });

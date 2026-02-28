@@ -30,7 +30,7 @@ describe("parseInputs", () => {
     const config = parseInputs();
 
     expect(config.observabilityProvider).toBe("datadog");
-    expect(config.ddSite).toBe("datadoghq.com");
+    expect(config.observabilityCredentials.site).toBe("datadoghq.com");
     expect(config.issueTrackerProvider).toBe("linear");
     expect(config.timeRange).toBe("24h");
     expect(config.severityFocus).toBe("errors");
@@ -62,7 +62,7 @@ describe("parseInputs", () => {
     const config = parseInputs();
 
     expect(config.observabilityProvider).toBe("grafana");
-    expect(config.ddSite).toBe("datadoghq.eu");
+    expect(config.observabilityCredentials).toEqual({});  // "grafana" is unknown, returns empty
     expect(config.issueTrackerProvider).toBe("jira");
     expect(config.timeRange).toBe("1h");
     expect(config.severityFocus).toBe("warnings");
