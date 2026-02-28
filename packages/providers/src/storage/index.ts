@@ -26,3 +26,5 @@ export { S3WorkspaceStore } from "./workspace/s3.js";
 // Factory functions
 export { fsStorage } from "./fs.js";
 export { s3Storage } from "./s3.js";
+export { csiStorage } from "./csi.js";
+export type { CsiStorageConfig } from "./csi.js";
