@@ -78,6 +78,52 @@ describe("createProviders", () => {
     expect(typeof providers.issueTracker.listTriageHistory).toBe("function");
   });
 
+  it("creates providers with sentry observability", () => {
+    const providers = createProviders(
+      makeConfig({
+        observabilityProvider: "sentry",
+        observabilityCredentials: {
+          authToken: "sentry-tok",
+          organization: "my-org",
+          project: "my-proj",
+          baseUrl: "https://sentry.io",
+        },
+      }),
+    );
+    expect(providers.observability).toBeDefined();
+    expect(typeof providers.observability.verifyAccess).toBe("function");
+    expect(typeof providers.observability.queryLogs).toBe("function");
+    expect(typeof providers.observability.aggregate).toBe("function");
+    expect(typeof providers.observability.getAgentEnv).toBe("function");
+    expect(typeof providers.observability.getPromptInstructions).toBe("function");
+
+    const env = providers.observability.getAgentEnv();
+    expect(env.SENTRY_AUTH_TOKEN).toBe("sentry-tok");
+    expect(env.SENTRY_ORG).toBe("my-org");
+  });
+
+  it("creates providers with cloudwatch observability", () => {
+    const providers = createProviders(
+      makeConfig({
+        observabilityProvider: "cloudwatch",
+        observabilityCredentials: {
+          region: "us-west-2",
+          logGroupPrefix: "/ecs/my-app",
+        },
+      }),
+    );
+    expect(providers.observability).toBeDefined();
+    expect(typeof providers.observability.verifyAccess).toBe("function");
+    expect(typeof providers.observability.queryLogs).toBe("function");
+    expect(typeof providers.observability.aggregate).toBe("function");
+    expect(typeof providers.observability.getAgentEnv).toBe("function");
+    expect(typeof providers.observability.getPromptInstructions).toBe("function");
+
+    const env = providers.observability.getAgentEnv();
+    expect(env.AWS_REGION).toBe("us-west-2");
+    expect(env.CW_LOG_GROUP_PREFIX).toBe("/ecs/my-app");
+  });
+
   it("throws for unsupported observability provider", () => {
     expect(() =>
       createProviders(makeConfig({ observabilityProvider: "splunk" })),

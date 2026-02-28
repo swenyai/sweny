@@ -129,6 +129,143 @@ describe("sentry factory", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Sentry API calls (mocked fetch)
+// ---------------------------------------------------------------------------
+
+describe("SentryProvider", () => {
+  const originalFetch = globalThis.fetch;
+  const silentLogger = { info: () => {}, debug: () => {}, warn: () => {} };
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function makeSentry() {
+    return sentry({
+      authToken: "test-token",
+      organization: "my-org",
+      project: "my-proj",
+      logger: silentLogger,
+    });
+  }
+
+  it("verifyAccess calls the organization endpoint", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: "org-id", name: "My Org" }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await makeSentry().verifyAccess();
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain("/api/0/organizations/my-org/");
+    expect(opts.headers.Authorization).toBe("Bearer test-token");
+  });
+
+  it("queryLogs returns mapped LogEntry array from Sentry issues", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          id: "123",
+          title: "TypeError: Cannot read null",
+          culprit: "auth.service",
+          level: "error",
+          firstSeen: "2026-01-01T00:00:00Z",
+          lastSeen: "2026-02-01T12:00:00Z",
+          count: "42",
+          metadata: { function: "handleLogin" },
+        },
+      ],
+    });
+    globalThis.fetch = mockFetch;
+
+    const logs = await makeSentry().queryLogs({
+      timeRange: "24h",
+      serviceFilter: "auth",
+      severity: "error",
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0].service).toBe("auth.service");
+    expect(logs[0].level).toBe("error");
+    expect(logs[0].message).toBe("TypeError: Cannot read null");
+    expect(logs[0].timestamp).toBe("2026-02-01T12:00:00Z");
+    expect(logs[0].attributes).toMatchObject({ issueId: "123", count: 42 });
+  });
+
+  it("queryLogs passes service filter as transaction query param", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    });
+    globalThis.fetch = mockFetch;
+
+    await makeSentry().queryLogs({
+      timeRange: "1h",
+      serviceFilter: "api-*",
+      severity: "warning",
+    });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("transaction%3Aapi-*");
+    expect(url).toContain("level%3Awarning");
+  });
+
+  it("queryLogs omits transaction filter when serviceFilter is *", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    });
+    globalThis.fetch = mockFetch;
+
+    await makeSentry().queryLogs({
+      timeRange: "1h",
+      serviceFilter: "*",
+      severity: "error",
+    });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).not.toContain("transaction");
+  });
+
+  it("aggregate groups issues by culprit and sums counts", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { culprit: "auth.service", count: "10" },
+        { culprit: "auth.service", count: "5" },
+        { culprit: "billing.service", count: "3" },
+      ],
+    });
+    globalThis.fetch = mockFetch;
+
+    const results = await makeSentry().aggregate({
+      timeRange: "24h",
+      serviceFilter: "*",
+    });
+
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({ service: "auth.service", count: 15 });
+    expect(results[1]).toEqual({ service: "billing.service", count: 3 });
+  });
+
+  it("throws on non-ok response", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: "Unauthorized",
+    });
+
+    await expect(makeSentry().verifyAccess()).rejects.toThrow(
+      "Sentry API error: 401 Unauthorized",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Datadog API calls (mocked fetch)
 // ---------------------------------------------------------------------------
 
