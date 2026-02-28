@@ -12,6 +12,10 @@ export const splunkConfigSchema = z.object({
 
 export type SplunkConfig = z.infer<typeof splunkConfigSchema>;
 
+function escapeSpl(value: string): string {
+  return value.replace(/["\\]/g, "\\$&");
+}
+
 export function splunk(config: SplunkConfig): ObservabilityProvider {
   const parsed = splunkConfigSchema.parse(config);
   return new SplunkProvider(parsed);
@@ -105,7 +109,7 @@ class SplunkProvider implements ObservabilityProvider {
   }
 
   async queryLogs(opts: LogQueryOptions): Promise<LogEntry[]> {
-    const spl = `search index=${this.index} host=${opts.serviceFilter} log_level=${opts.severity} earliest=-${opts.timeRange}`;
+    const spl = `search index=${this.index} host="${escapeSpl(opts.serviceFilter)}" log_level="${escapeSpl(opts.severity)}" earliest=-${opts.timeRange}`;
     this.log.info(`Querying Splunk logs: ${spl}`);
 
     const result = await this.runSearch<{
@@ -135,7 +139,7 @@ class SplunkProvider implements ObservabilityProvider {
   }
 
   async aggregate(opts: Omit<LogQueryOptions, "severity">): Promise<AggregateResult[]> {
-    const spl = `search index=${this.index} host=${opts.serviceFilter} log_level=error earliest=-${opts.timeRange} | stats count by host`;
+    const spl = `search index=${this.index} host="${escapeSpl(opts.serviceFilter)}" log_level=error earliest=-${opts.timeRange} | stats count by host`;
     this.log.info(`Aggregating Splunk errors: ${spl}`);
 
     const result = await this.runSearch<{

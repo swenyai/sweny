@@ -12,6 +12,10 @@ export const newrelicConfigSchema = z.object({
 
 export type NewRelicConfig = z.infer<typeof newrelicConfigSchema>;
 
+function escapeNrql(value: string): string {
+  return value.replace(/'/g, "''").replace(/\\/g, "\\\\");
+}
+
 export function newrelic(config: NewRelicConfig): ObservabilityProvider {
   const parsed = newrelicConfigSchema.parse(config);
   return new NewRelicProvider(parsed);
@@ -79,7 +83,7 @@ class NewRelicProvider implements ObservabilityProvider {
   }
 
   async queryLogs(opts: LogQueryOptions): Promise<LogEntry[]> {
-    const nrqlQuery = `SELECT timestamp, service, level, message FROM Log WHERE level = '${opts.severity}' AND service LIKE '%${opts.serviceFilter}%' SINCE ${opts.timeRange} ago LIMIT 100`;
+    const nrqlQuery = `SELECT timestamp, service, level, message FROM Log WHERE level = '${escapeNrql(opts.severity)}' AND service LIKE '%${escapeNrql(opts.serviceFilter)}%' SINCE ${opts.timeRange} ago LIMIT 100`;
     this.log.info(`Querying New Relic logs: ${nrqlQuery}`);
 
     const result = await this.nrql<{
@@ -117,7 +121,7 @@ class NewRelicProvider implements ObservabilityProvider {
   }
 
   async aggregate(opts: Omit<LogQueryOptions, "severity">): Promise<AggregateResult[]> {
-    const nrqlQuery = `SELECT count(*) FROM Log WHERE level = 'error' AND service LIKE '%${opts.serviceFilter}%' SINCE ${opts.timeRange} ago FACET service LIMIT 20`;
+    const nrqlQuery = `SELECT count(*) FROM Log WHERE level = 'error' AND service LIKE '%${escapeNrql(opts.serviceFilter)}%' SINCE ${opts.timeRange} ago FACET service LIMIT 20`;
     this.log.info(`Aggregating New Relic errors: ${nrqlQuery}`);
 
     const result = await this.nrql<{

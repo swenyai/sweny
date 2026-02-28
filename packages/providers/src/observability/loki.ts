@@ -12,6 +12,10 @@ export const lokiConfigSchema = z.object({
 
 export type LokiConfig = z.infer<typeof lokiConfigSchema>;
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function loki(config: LokiConfig): ObservabilityProvider {
   const parsed = lokiConfigSchema.parse(config);
   return new LokiProvider(parsed);
@@ -114,7 +118,7 @@ class LokiProvider implements ObservabilityProvider {
 
   async queryLogs(opts: LogQueryOptions): Promise<LogEntry[]> {
     const { start, end } = this.parseTimeRange(opts.timeRange);
-    const serviceFilter = opts.serviceFilter && opts.serviceFilter !== "*" ? opts.serviceFilter : ".*";
+    const serviceFilter = opts.serviceFilter && opts.serviceFilter !== "*" ? escapeRegex(opts.serviceFilter) : ".*";
     const query = `{job=~".*${serviceFilter}.*"} |= \`${opts.severity}\``;
 
     this.log.info(`Querying Loki logs: ${query} (range: ${opts.timeRange})`);
@@ -157,7 +161,7 @@ class LokiProvider implements ObservabilityProvider {
   }
 
   async aggregate(opts: Omit<LogQueryOptions, "severity">): Promise<AggregateResult[]> {
-    const serviceFilter = opts.serviceFilter && opts.serviceFilter !== "*" ? opts.serviceFilter : ".*";
+    const serviceFilter = opts.serviceFilter && opts.serviceFilter !== "*" ? escapeRegex(opts.serviceFilter) : ".*";
     const query = `sum by (job) (count_over_time({job=~".*${serviceFilter}.*"} |= "error" [${opts.timeRange}]))`;
 
     this.log.info(`Aggregating Loki errors: ${query}`);
