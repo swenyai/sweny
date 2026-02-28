@@ -1,22 +1,31 @@
+import { z } from "zod";
+import type { Logger } from "../logger.js";
+import { consoleLogger } from "../logger.js";
 import type { CredentialVaultProvider } from "./types.js";
 
-export interface AwsSecretsManagerConfig {
-  region?: string;
-  prefix?: string;
-}
+export const awsSecretsManagerConfigSchema = z.object({
+  region: z.string().default("us-east-1"),
+  prefix: z.string().default("sweny"),
+  logger: z.custom<Logger>().optional(),
+});
+
+export type AwsSecretsManagerConfig = z.infer<typeof awsSecretsManagerConfigSchema>;
 
 export function awsSecretsManager(config?: AwsSecretsManagerConfig): CredentialVaultProvider {
-  return new AwsSecretsManagerProvider(config);
+  const parsed = awsSecretsManagerConfigSchema.parse(config ?? {});
+  return new AwsSecretsManagerProvider(parsed);
 }
 
 class AwsSecretsManagerProvider implements CredentialVaultProvider {
   private readonly region: string;
   private readonly prefix: string;
-  private client: unknown;
+  private readonly log: Logger;
+  private client: import("@aws-sdk/client-secrets-manager").SecretsManagerClient | null = null;
 
-  constructor(config?: AwsSecretsManagerConfig) {
-    this.region = config?.region ?? "us-east-1";
-    this.prefix = config?.prefix ?? "sweny";
+  constructor(config: AwsSecretsManagerConfig) {
+    this.region = config.region ?? "us-east-1";
+    this.prefix = config.prefix ?? "sweny";
+    this.log = config.logger ?? consoleLogger;
   }
 
   private async getClient() {
@@ -24,7 +33,7 @@ class AwsSecretsManagerProvider implements CredentialVaultProvider {
       const { SecretsManagerClient } = await import("@aws-sdk/client-secrets-manager");
       this.client = new SecretsManagerClient({ region: this.region });
     }
-    return this.client as import("@aws-sdk/client-secrets-manager").SecretsManagerClient;
+    return this.client;
   }
 
   private secretName(tenantId: string, key: string): string {
@@ -37,6 +46,7 @@ class AwsSecretsManagerProvider implements CredentialVaultProvider {
 
     try {
       const result = await client.send(new GetSecretValueCommand({ SecretId: this.secretName(tenantId, key) }));
+      this.log.info(`Retrieved secret ${this.secretName(tenantId, key)}`);
       return result.SecretString ?? null;
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "ResourceNotFoundException") {
@@ -61,18 +71,21 @@ class AwsSecretsManagerProvider implements CredentialVaultProvider {
         throw err;
       }
     }
+    this.log.info(`Set secret ${name}`);
   }
 
   async deleteSecret(tenantId: string, key: string): Promise<void> {
     const client = await this.getClient();
     const { DeleteSecretCommand } = await import("@aws-sdk/client-secrets-manager");
 
+    const name = this.secretName(tenantId, key);
     await client.send(
       new DeleteSecretCommand({
-        SecretId: this.secretName(tenantId, key),
+        SecretId: name,
         ForceDeleteWithoutRecovery: true,
       }),
     );
+    this.log.info(`Deleted secret ${name}`);
   }
 
   async listKeys(tenantId: string): Promise<string[]> {
@@ -100,6 +113,7 @@ class AwsSecretsManagerProvider implements CredentialVaultProvider {
       nextToken = result.NextToken;
     } while (nextToken);
 
+    this.log.info(`Listed ${keys.length} keys for tenant ${tenantId}`);
     return keys;
   }
 }

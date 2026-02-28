@@ -9,5 +9,5 @@ export type {
 export { github } from "./github.js";
 export type { GitHubSourceControlConfig } from "./github.js";
 
-export { gitlab } from "./gitlab.js";
+export { gitlab, gitlabConfigSchema } from "./gitlab.js";
 export type { GitLabSourceControlConfig } from "./gitlab.js";

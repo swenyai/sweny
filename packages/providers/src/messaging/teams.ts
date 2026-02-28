@@ -1,13 +1,16 @@
+import { z } from "zod";
 import type { ChatMessage, MessagingProvider } from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 
-export interface TeamsMessagingConfig {
-  tenantId: string;
-  clientId: string;
-  clientSecret: string;
-  logger?: Logger;
-}
+export const teamsConfigSchema = z.object({
+  tenantId: z.string().min(1, "Azure AD tenant ID is required"),
+  clientId: z.string().min(1, "Azure AD client ID is required"),
+  clientSecret: z.string().min(1, "Azure AD client secret is required"),
+  logger: z.custom<Logger>().optional(),
+});
+
+export type TeamsMessagingConfig = z.infer<typeof teamsConfigSchema>;
 
 interface TokenCache {
   accessToken: string;
@@ -15,7 +18,8 @@ interface TokenCache {
 }
 
 export function teams(config: TeamsMessagingConfig): MessagingProvider {
-  const log = config.logger ?? consoleLogger;
+  const parsed = teamsConfigSchema.parse(config);
+  const log = parsed.logger ?? consoleLogger;
 
   let tokenCache: TokenCache | null = null;
 
@@ -24,11 +28,11 @@ export function teams(config: TeamsMessagingConfig): MessagingProvider {
       return tokenCache.accessToken;
     }
 
-    const tokenUrl = `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`;
+    const tokenUrl = `https://login.microsoftonline.com/${parsed.tenantId}/oauth2/v2.0/token`;
 
     const body = new URLSearchParams({
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
+      client_id: parsed.clientId,
+      client_secret: parsed.clientSecret,
       scope: "https://graph.microsoft.com/.default",
       grant_type: "client_credentials",
     });

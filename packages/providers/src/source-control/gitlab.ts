@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { z } from "zod";
 import type {
   SourceControlProvider,
   PullRequest,
@@ -12,15 +13,15 @@ import { consoleLogger } from "../logger.js";
 
 const execFileAsync = promisify(execFile);
 
-export interface GitLabSourceControlConfig {
-  token: string;
-  /** Numeric project ID or URL-encoded path like "group%2Fproject" */
-  projectId: string | number;
-  /** GitLab instance base URL (defaults to "https://gitlab.com") */
-  baseUrl?: string;
-  baseBranch?: string;
-  logger?: Logger;
-}
+export const gitlabConfigSchema = z.object({
+  token: z.string().min(1, "GitLab token is required"),
+  projectId: z.union([z.string().min(1), z.number()]),
+  baseUrl: z.string().default("https://gitlab.com"),
+  baseBranch: z.string().default("main"),
+  logger: z.custom<Logger>().optional(),
+});
+
+export type GitLabSourceControlConfig = z.infer<typeof gitlabConfigSchema>;
 
 async function git(args: string[], opts?: { ignoreReturnCode?: boolean }): Promise<string> {
   try {
@@ -77,11 +78,12 @@ function toGitLabState(state: string): string {
 }
 
 export function gitlab(config: GitLabSourceControlConfig): SourceControlProvider {
-  const { token, baseBranch = "main" } = config;
-  const baseUrl = (config.baseUrl ?? "https://gitlab.com").replace(/\/+$/, "");
+  const parsed = gitlabConfigSchema.parse(config);
+  const { token, baseBranch } = parsed;
+  const baseUrl = parsed.baseUrl.replace(/\/+$/, "");
   const projectId =
-    typeof config.projectId === "number" ? String(config.projectId) : encodeURIComponent(config.projectId);
-  const log = config.logger ?? consoleLogger;
+    typeof parsed.projectId === "number" ? String(parsed.projectId) : encodeURIComponent(parsed.projectId);
+  const log = parsed.logger ?? consoleLogger;
 
   return {
     async verifyAccess(): Promise<void> {
@@ -108,8 +110,10 @@ export function gitlab(config: GitLabSourceControlConfig): SourceControlProvider
         path_with_namespace: string;
       };
       const host = new URL(baseUrl).host;
-      await git(["remote", "set-url", "origin", `https://oauth2:${token}@${host}/${project.path_with_namespace}.git`]);
-      await git(["push", "origin", name]);
+      const remoteUrl = `https://gitlab-ci-token@${host}/${project.path_with_namespace}.git`;
+      await git(["remote", "set-url", "origin", remoteUrl]);
+      // Push using http.extraheader to provide the token without exposing it in the URL
+      await execFileAsync("git", ["-c", `http.extraheader=PRIVATE-TOKEN: ${token}`, "push", "origin", name]);
       log.info(`Pushed branch: ${name}`);
     },
 
