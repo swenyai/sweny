@@ -1,6 +1,6 @@
 import type { AuthProvider } from "./auth/types.js";
 import type { SessionManager } from "./session/manager.js";
-import type { ClaudeRunner } from "./claude/runner.js";
+import type { AgentRunner } from "./runner/types.js";
 import type { MemoryStore } from "./storage/memory/types.js";
 import type { AuditLogger } from "./audit/types.js";
 import type { AccessGuard } from "./access/types.js";
@@ -13,7 +13,7 @@ import type { Logger } from "./logger.js";
 export interface OrchestratorDeps {
   authProvider: AuthProvider;
   sessionManager: SessionManager;
-  claudeRunner: ClaudeRunner;
+  runner: AgentRunner;
   memoryStore?: MemoryStore;
   auditLogger?: AuditLogger;
   rateLimiter?: RateLimiter;
@@ -38,7 +38,7 @@ export class Orchestrator {
   ) {}
 
   async handleMessage(msg: IncomingMessage): Promise<void> {
-    const { authProvider, sessionManager, claudeRunner, memoryStore, auditLogger, rateLimiter, accessGuard, allowedUsers, logger } = this.deps;
+    const { authProvider, sessionManager, runner, memoryStore, auditLogger, rateLimiter, accessGuard, allowedUsers, logger } = this.deps;
     const { userId, text, conversation } = msg;
     const { conversationId, messageId } = conversation;
 
@@ -90,7 +90,7 @@ export class Orchestrator {
         const memories = memoryStore ? await memoryStore.getMemories(userId) : { entries: [] };
 
         const startTime = Date.now();
-        const result = await claudeRunner.run({
+        const result = await runner.run({
           prompt: text,
           session,
           user: identity,

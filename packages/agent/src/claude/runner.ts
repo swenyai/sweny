@@ -1,10 +1,8 @@
-import type { Session } from "../session/manager.js";
-import type { UserIdentity } from "../auth/types.js";
 import type { PluginContext } from "../plugins/types.js";
-import type { MemoryEntry } from "../storage/memory/types.js";
 import type { MemoryStore } from "../storage/memory/types.js";
 import type { WorkspaceStore } from "../storage/workspace/types.js";
-import type { ModelRunner, RunResult, ToolCall } from "../model/types.js";
+import type { ModelRunner } from "../model/types.js";
+import type { AgentRunner, AgentRunOpts } from "../runner/types.js";
 import { PluginRegistry } from "../plugins/registry.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { DENIED_TOOLS } from "./tool-guard.js";
@@ -28,7 +26,7 @@ export interface RunnerResources {
   workspaceStore: WorkspaceStore;
 }
 
-export class ClaudeRunner {
+export class ClaudeRunner implements AgentRunner {
   private config: RunnerConfig;
   private resources: RunnerResources;
   private modelRunner: ModelRunner;
@@ -39,13 +37,7 @@ export class ClaudeRunner {
     this.modelRunner = modelRunner;
   }
 
-  async run(opts: {
-    prompt: string;
-    session: Session;
-    user: UserIdentity;
-    memories: MemoryEntry[];
-    formatHint?: string;
-  }): Promise<RunResult> {
+  async run(opts: AgentRunOpts) {
     const logger = createLogger(this.config.name);
 
     // Build PluginContext from user identity + storage stores

@@ -90,7 +90,7 @@ async function main(): Promise<void> {
     const orchestrator = new Orchestrator(channel, {
       authProvider: config.auth,
       sessionManager,
-      claudeRunner,
+      runner: claudeRunner,
       memoryStore,
       auditLogger,
       rateLimiter,

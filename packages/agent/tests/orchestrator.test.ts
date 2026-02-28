@@ -6,7 +6,7 @@ import type { AuthProvider, UserIdentity } from "../src/auth/types.js";
 import type { AccessGuard } from "../src/access/types.js";
 import { AccessLevel, AccessDeniedError } from "../src/access/types.js";
 import type { SessionManager, Session } from "../src/session/manager.js";
-import type { ClaudeRunner } from "../src/claude/runner.js";
+import type { AgentRunner } from "../src/runner/types.js";
 import type { RunResult } from "../src/model/types.js";
 import type { MemoryStore } from "../src/storage/memory/types.js";
 import type { AuditLogger, AuditRecord } from "../src/audit/types.js";
@@ -123,10 +123,10 @@ function makeSessionManager(session?: Session): SessionManager {
   } as unknown as SessionManager;
 }
 
-function makeClaudeRunner(result?: RunResult): ClaudeRunner {
+function makeRunner(result?: RunResult): AgentRunner {
   return {
     run: vi.fn(async () => result ?? makeRunResult()),
-  } as unknown as ClaudeRunner;
+  };
 }
 
 function makeMemoryStore(): MemoryStore {
@@ -154,7 +154,7 @@ function buildDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps {
   return {
     authProvider: makeAuthProvider(),
     sessionManager: makeSessionManager(),
-    claudeRunner: makeClaudeRunner(),
+    runner: makeRunner(),
     memoryStore: makeMemoryStore(),
     auditLogger: makeAuditLogger(),
     rateLimiter: makeRateLimiter(),
@@ -182,7 +182,7 @@ describe("Orchestrator", () => {
       expect(deps.authProvider.authenticate).toHaveBeenCalledWith("user-1");
       expect(deps.accessGuard.assertCanQuery).toHaveBeenCalled();
       expect(deps.sessionManager.getOrCreateAsync).toHaveBeenCalledWith("ch-1-msg-1", "user-1");
-      expect((deps.claudeRunner as any).run).toHaveBeenCalled();
+      expect((deps.runner as any).run).toHaveBeenCalled();
       expect(channel.editMessage).toHaveBeenCalled();
     });
 
@@ -192,7 +192,7 @@ describe("Orchestrator", () => {
 
       await orchestrator.handleMessage(makeMessage());
 
-      const runCall = (deps.claudeRunner as any).run.mock.calls[0][0];
+      const runCall = (deps.runner as any).run.mock.calls[0][0];
       expect(runCall.formatHint).toBe("slack-mrkdwn");
     });
   });
@@ -210,7 +210,7 @@ describe("Orchestrator", () => {
         expect.objectContaining({ conversationId: "ch-1" }),
         "Authentication required.",
       );
-      expect((deps.claudeRunner as any).run).not.toHaveBeenCalled();
+      expect((deps.runner as any).run).not.toHaveBeenCalled();
     });
 
     it("mentions /login when loginFields exist", async () => {
@@ -248,7 +248,7 @@ describe("Orchestrator", () => {
         expect.anything(),
         "Your account does not have access to this assistant.",
       );
-      expect((deps.claudeRunner as any).run).not.toHaveBeenCalled();
+      expect((deps.runner as any).run).not.toHaveBeenCalled();
     });
   });
 
@@ -270,9 +270,9 @@ describe("Orchestrator", () => {
   describe("claude error", () => {
     it("edits thinking message with error text when claude runner throws", async () => {
       deps = buildDeps({
-        claudeRunner: makeClaudeRunner(),
+        runner: makeRunner(),
       });
-      (deps.claudeRunner as any).run = vi.fn(async () => {
+      (deps.runner as any).run = vi.fn(async () => {
         throw new Error("Model unavailable");
       });
       orchestrator = new Orchestrator(channel, deps);
@@ -288,9 +288,9 @@ describe("Orchestrator", () => {
     it("sends error via sendMessage when editMessage is not available", async () => {
       channel = makeChannel({ editMessage: undefined });
       deps = buildDeps({
-        claudeRunner: makeClaudeRunner(),
+        runner: makeRunner(),
       });
-      (deps.claudeRunner as any).run = vi.fn(async () => {
+      (deps.runner as any).run = vi.fn(async () => {
         throw new Error("Model unavailable");
       });
       orchestrator = new Orchestrator(channel, deps);
@@ -351,7 +351,7 @@ describe("Orchestrator", () => {
       let resolveFirst: () => void;
       const firstBlocked = new Promise<void>((r) => { resolveFirst = r; });
 
-      const runner = makeClaudeRunner();
+      const runner = makeRunner();
       let callCount = 0;
       (runner as any).run = vi.fn(async () => {
         callCount++;
@@ -365,7 +365,7 @@ describe("Orchestrator", () => {
         return makeRunResult();
       });
 
-      deps = buildDeps({ claudeRunner: runner });
+      deps = buildDeps({ runner });
       orchestrator = new Orchestrator(channel, deps);
 
       const msg = makeMessage();
@@ -434,7 +434,7 @@ describe("Orchestrator", () => {
       await orchestrator.handleMessage(makeMessage());
 
       expect(deps.authProvider.authenticate).toHaveBeenCalled();
-      expect((deps.claudeRunner as any).run).toHaveBeenCalled();
+      expect((deps.runner as any).run).toHaveBeenCalled();
     });
 
     it("allows all users when allowedUsers is empty", async () => {
@@ -465,7 +465,7 @@ describe("Orchestrator", () => {
       await orchestrator.handleMessage(makeMessage());
 
       expect(memoryStore.getMemories).toHaveBeenCalledWith("user-1");
-      const runCall = (deps.claudeRunner as any).run.mock.calls[0][0];
+      const runCall = (deps.runner as any).run.mock.calls[0][0];
       expect(runCall.memories).toEqual([{ id: "m1", text: "Remember this", createdAt: "2025-01-01T00:00:00Z" }]);
     });
 
@@ -475,7 +475,7 @@ describe("Orchestrator", () => {
 
       await orchestrator.handleMessage(makeMessage());
 
-      const runCall = (deps.claudeRunner as any).run.mock.calls[0][0];
+      const runCall = (deps.runner as any).run.mock.calls[0][0];
       expect(runCall.memories).toEqual([]);
     });
   });
@@ -485,7 +485,7 @@ describe("Orchestrator", () => {
       const session = makeSession({ messageCount: 5 });
       deps = buildDeps({
         sessionManager: makeSessionManager(session),
-        claudeRunner: makeClaudeRunner(makeRunResult({ sessionId: "new-session-id" })),
+        runner: makeRunner(makeRunResult({ sessionId: "new-session-id" })),
       });
       orchestrator = new Orchestrator(channel, deps);
 
@@ -498,7 +498,7 @@ describe("Orchestrator", () => {
 
     it("does not persist session when sessionId is null", async () => {
       deps = buildDeps({
-        claudeRunner: makeClaudeRunner(makeRunResult({ sessionId: null })),
+        runner: makeRunner(makeRunResult({ sessionId: null })),
       });
       orchestrator = new Orchestrator(channel, deps);
 
