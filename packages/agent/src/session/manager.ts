@@ -15,6 +15,7 @@ const defaultLogger: Logger = {
   info: () => {},
   debug: () => {},
   warn: () => {},
+  // eslint-disable-next-line no-console
   error: (...args: unknown[]) => console.error(...args),
 };
 

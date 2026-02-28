@@ -8,6 +8,7 @@ export function startHealthServer(port = 3000): void {
   });
 
   app.listen(port, () => {
+    // eslint-disable-next-line no-console
     console.log(`[sweny] Health check listening on :${port}/health`);
   });
 }

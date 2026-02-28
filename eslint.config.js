@@ -5,7 +5,7 @@ import prettier from "eslint-config-prettier";
 export default [
   // Global ignores
   {
-    ignores: ["**/dist/", "**/node_modules/", "**/.next/", "**/coverage/"],
+    ignores: ["**/dist/", "**/node_modules/", "**/.next/", "**/coverage/", "packages/web/.astro/**", ".claude/**"],
   },
 
   // TypeScript files
@@ -37,6 +37,16 @@ export default [
       // Basic TypeScript rules
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-non-null-assertion": "warn",
+    },
+  },
+
+  // Test files — relax rules that add noise without value in tests
+  {
+    files: ["**/tests/**/*.ts", "**/*.test.ts"],
+    rules: {
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unused-vars": "off",
     },
   },
 

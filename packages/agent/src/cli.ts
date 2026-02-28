@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Interactive CLI — test sweny-agent end-to-end without Slack.
  *

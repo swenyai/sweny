@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 export type { Logger } from "@sweny/providers";
 
 const LEVELS: Record<string, number> = {
@@ -8,21 +9,21 @@ const LEVELS: Record<string, number> = {
 };
 
 export function createLogger(prefix: string, level?: string) {
-  const threshold = LEVELS[level?.toLowerCase() ?? "info"] ?? LEVELS.info!;
+  const threshold = LEVELS[level?.toLowerCase() ?? "info"] ?? 1;
   const tag = `[${prefix}]`;
 
   return {
     debug(msg: string, ...args: unknown[]) {
-      if (threshold <= LEVELS.debug!) console.log(tag, msg, ...args);
+      if (threshold <= 0) console.log(tag, msg, ...args);
     },
     info(msg: string, ...args: unknown[]) {
-      if (threshold <= LEVELS.info!) console.log(tag, msg, ...args);
+      if (threshold <= 1) console.log(tag, msg, ...args);
     },
     warn(msg: string, ...args: unknown[]) {
-      if (threshold <= LEVELS.warn!) console.warn(tag, msg, ...args);
+      if (threshold <= 2) console.warn(tag, msg, ...args);
     },
     error(msg: string, ...args: unknown[]) {
-      if (threshold <= LEVELS.error!) console.error(tag, msg, ...args);
+      if (threshold <= 3) console.error(tag, msg, ...args);
     },
   };
 }

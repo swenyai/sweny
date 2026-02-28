@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import type { AuditLogger, AuditRecord } from "./types.js";
 
 export class ConsoleAuditLogger implements AuditLogger {
