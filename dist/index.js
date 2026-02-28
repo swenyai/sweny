@@ -25660,6 +25660,13 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:async_h
 
 /***/ }),
 
+/***/ 1421:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:child_process");
+
+/***/ }),
+
 /***/ 7598:
 /***/ ((module) => {
 
@@ -25702,6 +25709,20 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
 
 /***/ }),
 
+/***/ 1708:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:process");
+
+/***/ }),
+
+/***/ 1792:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:querystring");
+
+/***/ }),
+
 /***/ 7075:
 /***/ ((module) => {
 
@@ -25713,6 +25734,13 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:stream"
 /***/ ((module) => {
 
 module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:util");
+
+/***/ }),
+
+/***/ 8522:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:zlib");
 
 /***/ }),
 
@@ -25734,13 +25762,6 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("path");
 /***/ ((module) => {
 
 module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("perf_hooks");
-
-/***/ }),
-
-/***/ 932:
-/***/ ((module) => {
-
-module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("process");
 
 /***/ }),
 
@@ -25783,6 +25804,13 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("timers");
 /***/ ((module) => {
 
 module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("tls");
+
+/***/ }),
+
+/***/ 2018:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("tty");
 
 /***/ }),
 
@@ -27622,42 +27650,50 @@ var __webpack_exports__ = {};
 
 // EXTERNAL MODULE: ../../node_modules/@actions/core/lib/core.js
 var core = __nccwpck_require__(7184);
-;// CONCATENATED MODULE: ./src/config.ts
-
-function parseInputs() {
-    return {
-        anthropicApiKey: core.getInput("anthropic-api-key"),
-        claudeOauthToken: core.getInput("claude-oauth-token"),
-        observabilityProvider: core.getInput("observability-provider") || "datadog",
-        ddApiKey: core.getInput("dd-api-key"),
-        ddAppKey: core.getInput("dd-app-key"),
-        ddSite: core.getInput("dd-site") || "datadoghq.com",
-        issueTrackerProvider: core.getInput("issue-tracker-provider") || "linear",
-        linearApiKey: core.getInput("linear-api-key"),
-        linearTeamId: core.getInput("linear-team-id"),
-        linearBugLabelId: core.getInput("linear-bug-label-id"),
-        linearTriageLabelId: core.getInput("linear-triage-label-id"),
-        linearStateBacklog: core.getInput("linear-state-backlog"),
-        linearStateInProgress: core.getInput("linear-state-in-progress"),
-        linearStatePeerReview: core.getInput("linear-state-peer-review"),
-        timeRange: core.getInput("time-range") || "24h",
-        severityFocus: core.getInput("severity-focus") || "errors",
-        serviceFilter: core.getInput("service-filter") || "*",
-        investigationDepth: core.getInput("investigation-depth") || "standard",
-        maxInvestigateTurns: parseInt(core.getInput("max-investigate-turns") || "50", 10),
-        maxImplementTurns: parseInt(core.getInput("max-implement-turns") || "30", 10),
-        dryRun: core.getBooleanInput("dry-run"),
-        noveltyMode: core.getBooleanInput("novelty-mode"),
-        linearIssue: core.getInput("linear-issue"),
-        additionalInstructions: core.getInput("additional-instructions"),
-        serviceMapPath: core.getInput("service-map-path") || ".github/service-map.yml",
-        githubToken: core.getInput("github-token"),
-        botToken: core.getInput("bot-token"),
-        repository: process.env.GITHUB_REPOSITORY || "",
-        repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",
-    };
+;// CONCATENATED MODULE: ../providers/dist/errors.js
+class ProviderError extends Error {
+    provider;
+    cause;
+    constructor(message, provider, cause) {
+        super(message);
+        this.provider = provider;
+        this.cause = cause;
+        this.name = "ProviderError";
+    }
 }
-
+class ProviderAuthError extends ProviderError {
+    constructor(provider, message, cause) {
+        super(message ?? `Authentication failed for ${provider}`, provider, cause);
+        this.name = "ProviderAuthError";
+    }
+}
+class ProviderApiError extends ProviderError {
+    statusCode;
+    statusText;
+    responseBody;
+    constructor(provider, statusCode, statusText, responseBody) {
+        super(`${provider} API error: ${statusCode} ${statusText}`, provider);
+        this.statusCode = statusCode;
+        this.statusText = statusText;
+        this.responseBody = responseBody;
+        this.name = "ProviderApiError";
+    }
+}
+class ProviderConfigError extends ProviderError {
+    constructor(provider, message) {
+        super(`Invalid ${provider} configuration: ${message}`, provider);
+        this.name = "ProviderConfigError";
+    }
+}
+//# sourceMappingURL=errors.js.map
+;// CONCATENATED MODULE: ../providers/dist/logger.js
+const logger_consoleLogger = {
+    info: (msg, ...args) => console.log(msg, ...args),
+    debug: (msg, ...args) => console.debug(msg, ...args),
+    warn: (msg, ...args) => console.warn(msg, ...args),
+    error: (msg, ...args) => console.error(msg, ...args),
+};
+//# sourceMappingURL=logger.js.map
 ;// CONCATENATED MODULE: ../../node_modules/zod/v3/helpers/util.js
 var util;
 (function (util) {
@@ -31864,14 +31900,6 @@ const coerce = {
 
 const NEVER = (/* unused pure expression or super */ null && (INVALID));
 
-;// CONCATENATED MODULE: ../providers/dist/logger.js
-const logger_consoleLogger = {
-    info: (msg, ...args) => console.log(msg, ...args),
-    debug: (msg, ...args) => console.debug(msg, ...args),
-    warn: (msg, ...args) => console.warn(msg, ...args),
-    error: (msg, ...args) => console.error(msg, ...args),
-};
-//# sourceMappingURL=logger.js.map
 ;// CONCATENATED MODULE: ../providers/dist/observability/datadog.js
 
 
@@ -31938,6 +31966,52 @@ class DatadogProvider {
         this.log.info(`Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`);
         return logs;
     }
+    getAgentEnv() {
+        return {
+            DD_API_KEY: this.apiKey,
+            DD_APP_KEY: this.appKey,
+            DD_SITE: this.site,
+        };
+    }
+    getPromptInstructions() {
+        return `### Datadog Logs API
+- \`DD_API_KEY\` - API key (use in DD-API-KEY header)
+- \`DD_APP_KEY\` - Application key (use in DD-APPLICATION-KEY header)
+- \`DD_SITE\` - Datadog site (${this.site})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+Investigate logs from Datadog across **BOTH production AND staging environments** to find bugs and issues.
+You have DIRECT ACCESS to Datadog's Logs API via curl commands.
+
+**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
+- Issues in staging only → Fix before users are affected
+- Issues in both environments → Critical, affects users now
+- Issues in production only → May be load/scale related
+
+Use these environment variables in your curl commands:
+- \`DD_API_KEY\` - API key (use in DD-API-KEY header)
+- \`DD_APP_KEY\` - Application key (use in DD-APPLICATION-KEY header)
+- \`DD_SITE\` - Datadog site (${this.site})
+
+#### Example: Get error counts by service
+\`\`\`bash
+curl -s -X POST "https://api.\${DD_SITE}/api/v2/logs/analytics/aggregate" \\
+  -H "Content-Type: application/json" \\
+  -H "DD-API-KEY: \${DD_API_KEY}" \\
+  -H "DD-APPLICATION-KEY: \${DD_APP_KEY}" \\
+  -d '{"filter":{"query":"service:* status:error","from":"now-1h","to":"now"},"compute":[{"type":"total","aggregation":"count"}],"group_by":[{"facet":"service","limit":20,"sort":{"type":"measure","aggregation":"count","order":"desc"}}]}'
+\`\`\`
+
+#### Example: Get recent error logs
+\`\`\`bash
+curl -s -X POST "https://api.\${DD_SITE}/api/v2/logs/events/search" \\
+  -H "Content-Type: application/json" \\
+  -H "DD-API-KEY: \${DD_API_KEY}" \\
+  -H "DD-APPLICATION-KEY: \${DD_APP_KEY}" \\
+  -d '{"filter":{"query":"service:* status:error","from":"now-1h","to":"now"},"sort":"-timestamp","page":{"limit":100}}'
+\`\`\``;
+    }
     async aggregate(opts) {
         this.log.info(`Aggregating Datadog errors for ${opts.serviceFilter} (range: ${opts.timeRange})`);
         const result = await this.request("/api/v2/logs/analytics/aggregate", {
@@ -31989,7 +32063,7 @@ class SentryProvider {
         this.org = config.organization;
         this.project = config.project;
         this.baseUrl = config.baseUrl;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async request(path, params) {
         const url = new URL(`/api/0${path}`, this.baseUrl);
@@ -32046,6 +32120,49 @@ class SentryProvider {
         this.log.info(`Found ${logs.length} Sentry issues`);
         return logs;
     }
+    getAgentEnv() {
+        return {
+            SENTRY_AUTH_TOKEN: this.authToken,
+            SENTRY_ORG: this.org,
+            SENTRY_PROJECT: this.project,
+            SENTRY_BASE_URL: this.baseUrl,
+        };
+    }
+    getPromptInstructions() {
+        return `### Sentry Issues API
+- \`SENTRY_AUTH_TOKEN\` - Bearer token for authentication
+- \`SENTRY_ORG\` - Organization slug (${this.org})
+- \`SENTRY_PROJECT\` - Project slug (${this.project})
+- \`SENTRY_BASE_URL\` - Sentry base URL (${this.baseUrl})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+Investigate issues from Sentry across **BOTH production AND staging environments** to find bugs and issues.
+You have DIRECT ACCESS to Sentry's REST API via curl commands.
+
+**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
+- Issues in staging only → Fix before users are affected
+- Issues in both environments → Critical, affects users now
+- Issues in production only → May be load/scale related
+
+#### Example: List project issues (errors)
+\`\`\`bash
+curl -s "\${SENTRY_BASE_URL}/api/0/projects/\${SENTRY_ORG}/\${SENTRY_PROJECT}/issues/?query=level:error&statsPeriod=24h&sort=date" \\
+  -H "Authorization: Bearer \${SENTRY_AUTH_TOKEN}"
+\`\`\`
+
+#### Example: Get issue events
+\`\`\`bash
+curl -s "\${SENTRY_BASE_URL}/api/0/issues/{issue_id}/events/" \\
+  -H "Authorization: Bearer \${SENTRY_AUTH_TOKEN}"
+\`\`\`
+
+#### Example: Get issue details
+\`\`\`bash
+curl -s "\${SENTRY_BASE_URL}/api/0/issues/{issue_id}/" \\
+  -H "Authorization: Bearer \${SENTRY_AUTH_TOKEN}"
+\`\`\``;
+    }
     async aggregate(opts) {
         this.log.info(`Aggregating Sentry errors (range: ${opts.timeRange})`);
         const params = {
@@ -32099,19 +32216,19 @@ class CloudWatchProvider {
     constructor(config) {
         this.region = config.region;
         this.logGroupPrefix = config.logGroupPrefix;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async getClient() {
         if (!this.client) {
-            const { CloudWatchLogsClient } = await __nccwpck_require__.e(/* import() */ 107).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1107, 19));
+            const { CloudWatchLogsClient } = await Promise.all(/* import() */[__nccwpck_require__.e(192), __nccwpck_require__.e(107)]).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1107, 19));
             this.client = new CloudWatchLogsClient({ region: this.region });
         }
         return this.client;
     }
     async verifyAccess() {
         this.log.info(`Verifying CloudWatch access (region: ${this.region})`);
-        const client = await this.getClient();
-        const { DescribeLogGroupsCommand } = await __nccwpck_require__.e(/* import() */ 107).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1107, 19));
+        const client = (await this.getClient());
+        const { DescribeLogGroupsCommand } = await Promise.all(/* import() */[__nccwpck_require__.e(192), __nccwpck_require__.e(107)]).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1107, 19));
         await client.send(new DescribeLogGroupsCommand({
             logGroupNamePrefix: this.logGroupPrefix,
             limit: 1,
@@ -32120,13 +32237,11 @@ class CloudWatchProvider {
     }
     async queryLogs(opts) {
         this.log.info(`Querying CloudWatch logs (range: ${opts.timeRange}, severity: ${opts.severity})`);
-        const client = await this.getClient();
-        const { StartQueryCommand, GetQueryResultsCommand } = await __nccwpck_require__.e(/* import() */ 107).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1107, 19));
+        const client = (await this.getClient());
+        const { StartQueryCommand, GetQueryResultsCommand } = await Promise.all(/* import() */[__nccwpck_require__.e(192), __nccwpck_require__.e(107)]).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1107, 19));
         const endTime = Date.now();
         const startTime = endTime - parseTimeRange(opts.timeRange);
-        const serviceFilter = opts.serviceFilter && opts.serviceFilter !== "*"
-            ? `| filter @logStream like /${opts.serviceFilter}/`
-            : "";
+        const serviceFilter = opts.serviceFilter && opts.serviceFilter !== "*" ? `| filter @logStream like /${opts.serviceFilter}/` : "";
         const queryString = `fields @timestamp, @message, @logStream
       ${serviceFilter}
       | filter @message like /(?i)${opts.severity}/
@@ -32139,6 +32254,8 @@ class CloudWatchProvider {
             queryString,
         }));
         const queryId = startResult.queryId;
+        if (!queryId)
+            throw new Error("CloudWatch StartQuery did not return a queryId");
         // Poll for results
         let results = [];
         for (let i = 0; i < 30; i++) {
@@ -32162,15 +32279,61 @@ class CloudWatchProvider {
         this.log.info(`Found ${logs.length} CloudWatch log entries`);
         return logs;
     }
+    getAgentEnv() {
+        return {
+            AWS_REGION: this.region,
+            CW_LOG_GROUP_PREFIX: this.logGroupPrefix,
+        };
+    }
+    getPromptInstructions() {
+        return `### CloudWatch Logs Insights
+- \`AWS_REGION\` - AWS region (${this.region})
+- \`CW_LOG_GROUP_PREFIX\` - Log group prefix (${this.logGroupPrefix})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+Investigate logs from CloudWatch Logs across **BOTH production AND staging environments** to find bugs and issues.
+You have DIRECT ACCESS to AWS CloudWatch Logs via the AWS CLI.
+
+**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
+- Issues in staging only → Fix before users are affected
+- Issues in both environments → Critical, affects users now
+- Issues in production only → May be load/scale related
+
+AWS credentials are configured via the standard AWS credential chain (environment variables or instance profile).
+
+#### Example: Start a Logs Insights query
+\`\`\`bash
+aws logs start-query \\
+  --log-group-name "\${CW_LOG_GROUP_PREFIX}" \\
+  --start-time $(date -d '-1 hour' +%s) \\
+  --end-time $(date +%s) \\
+  --query-string 'fields @timestamp, @message | filter @message like /(?i)error/ | sort @timestamp desc | limit 100' \\
+  --region "\${AWS_REGION}"
+\`\`\`
+
+#### Example: Get query results
+\`\`\`bash
+aws logs get-query-results --query-id "<query-id>" --region "\${AWS_REGION}"
+\`\`\`
+
+#### Example: Get error counts by log stream
+\`\`\`bash
+aws logs start-query \\
+  --log-group-name "\${CW_LOG_GROUP_PREFIX}" \\
+  --start-time $(date -d '-1 hour' +%s) \\
+  --end-time $(date +%s) \\
+  --query-string 'filter @message like /(?i)error/ | stats count(*) as errorCount by @logStream | sort errorCount desc | limit 20' \\
+  --region "\${AWS_REGION}"
+\`\`\``;
+    }
     async aggregate(opts) {
         this.log.info(`Aggregating CloudWatch errors (range: ${opts.timeRange})`);
-        const client = await this.getClient();
-        const { StartQueryCommand, GetQueryResultsCommand } = await __nccwpck_require__.e(/* import() */ 107).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1107, 19));
+        const client = (await this.getClient());
+        const { StartQueryCommand, GetQueryResultsCommand } = await Promise.all(/* import() */[__nccwpck_require__.e(192), __nccwpck_require__.e(107)]).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1107, 19));
         const endTime = Date.now();
         const startTime = endTime - parseTimeRange(opts.timeRange);
-        const serviceFilter = opts.serviceFilter && opts.serviceFilter !== "*"
-            ? `| filter @logStream like /${opts.serviceFilter}/`
-            : "";
+        const serviceFilter = opts.serviceFilter && opts.serviceFilter !== "*" ? `| filter @logStream like /${opts.serviceFilter}/` : "";
         const queryString = `fields @logStream
       ${serviceFilter}
       | filter @message like /(?i)error/
@@ -32184,6 +32347,8 @@ class CloudWatchProvider {
             queryString,
         }));
         const queryId = startResult.queryId;
+        if (!queryId)
+            throw new Error("CloudWatch StartQuery did not return a queryId");
         let results = [];
         for (let i = 0; i < 30; i++) {
             await new Promise((r) => setTimeout(r, 1000));
@@ -32205,25 +32370,815 @@ class CloudWatchProvider {
     }
 }
 //# sourceMappingURL=cloudwatch.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/splunk.js
+
+
+const splunkConfigSchema = objectType({
+    baseUrl: stringType().min(1, "Splunk instance URL is required"),
+    token: stringType().min(1, "Splunk Bearer token is required"),
+    index: stringType().default("main"),
+    logger: custom().optional(),
+});
+function escapeSpl(value) {
+    return value.replace(/["\\]/g, "\\$&");
+}
+function splunk(config) {
+    const parsed = splunkConfigSchema.parse(config);
+    return new SplunkProvider(parsed);
+}
+class SplunkProvider {
+    baseUrl;
+    token;
+    index;
+    log;
+    constructor(config) {
+        this.baseUrl = config.baseUrl.replace(/\/+$/, "");
+        this.token = config.token;
+        this.index = config.index;
+        this.log = config.logger ?? consoleLogger;
+    }
+    async request(method, path, params) {
+        const url = new URL(path, this.baseUrl);
+        url.searchParams.set("output_mode", "json");
+        if (method === "GET" && params) {
+            for (const [k, v] of Object.entries(params)) {
+                url.searchParams.set(k, v);
+            }
+        }
+        const headers = {
+            Authorization: `Bearer ${this.token}`,
+        };
+        const fetchOpts = { method, headers };
+        if (method === "POST" && params) {
+            headers["Content-Type"] = "application/x-www-form-urlencoded";
+            fetchOpts.body = new URLSearchParams(params).toString();
+        }
+        const response = await fetch(url.toString(), fetchOpts);
+        if (!response.ok) {
+            throw new Error(`Splunk API error: ${response.status} ${response.statusText}`);
+        }
+        return (await response.json());
+    }
+    async runSearch(spl) {
+        this.log.debug(`Running SPL: ${spl}`);
+        // Create the search job
+        const job = await this.request("POST", "/services/search/jobs", {
+            search: spl,
+            exec_mode: "normal",
+        });
+        const sid = job.sid;
+        this.log.debug(`Search job created: ${sid}`);
+        // Poll for completion
+        for (let i = 0; i < 30; i++) {
+            await new Promise((r) => setTimeout(r, 1000));
+            const status = await this.request("GET", `/services/search/jobs/${sid}`);
+            const entry = status.entry?.[0]?.content;
+            if (entry?.isDone || entry?.dispatchState === "DONE") {
+                break;
+            }
+        }
+        // Fetch results
+        const results = await this.request("GET", `/services/search/jobs/${sid}/results`, {
+            count: "100",
+        });
+        return results;
+    }
+    async verifyAccess() {
+        this.log.info(`Verifying Splunk access (${this.baseUrl})`);
+        await this.request("GET", "/services/server/info");
+        this.log.info("Splunk API access verified");
+    }
+    async queryLogs(opts) {
+        const spl = `search index=${this.index} host="${escapeSpl(opts.serviceFilter)}" log_level="${escapeSpl(opts.severity)}" earliest=-${opts.timeRange}`;
+        this.log.info(`Querying Splunk logs: ${spl}`);
+        const result = await this.runSearch(spl);
+        const logs = (result.results || []).map((event) => {
+            const { _time, host, log_level, _raw, ...rest } = event;
+            return {
+                timestamp: _time || "",
+                service: host || "unknown",
+                level: log_level || opts.severity,
+                message: _raw || "",
+                attributes: rest,
+            };
+        });
+        this.log.info(`Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`);
+        return logs;
+    }
+    async aggregate(opts) {
+        const spl = `search index=${this.index} host="${escapeSpl(opts.serviceFilter)}" log_level=error earliest=-${opts.timeRange} | stats count by host`;
+        this.log.info(`Aggregating Splunk errors: ${spl}`);
+        const result = await this.runSearch(spl);
+        const groups = (result.results || []).map((row) => ({
+            service: row.host || "unknown",
+            count: parseInt(row.count || "0", 10),
+        }));
+        this.log.info(`Aggregated ${groups.length} service groups`);
+        return groups;
+    }
+    getAgentEnv() {
+        return {
+            SPLUNK_URL: this.baseUrl,
+            SPLUNK_TOKEN: this.token,
+            SPLUNK_INDEX: this.index,
+        };
+    }
+    getPromptInstructions() {
+        return `### Splunk REST API
+- \`SPLUNK_URL\` - Splunk instance URL (${this.baseUrl})
+- \`SPLUNK_TOKEN\` - Bearer token for authentication
+- \`SPLUNK_INDEX\` - Splunk index (${this.index})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+Investigate logs from Splunk across **BOTH production AND staging environments** to find bugs and issues.
+You have DIRECT ACCESS to Splunk's REST API via curl commands.
+
+**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
+- Issues in staging only → Fix before users are affected
+- Issues in both environments → Critical, affects users now
+- Issues in production only → May be load/scale related
+
+Use these environment variables in your curl commands:
+- \`SPLUNK_URL\` - Splunk instance URL (${this.baseUrl})
+- \`SPLUNK_TOKEN\` - Bearer token (use in Authorization: Bearer header)
+- \`SPLUNK_INDEX\` - Splunk index (${this.index})
+
+#### Example: Get error counts by host
+\`\`\`bash
+curl -s -X POST "\${SPLUNK_URL}/services/search/jobs" \\
+  -H "Authorization: Bearer \${SPLUNK_TOKEN}" \\
+  -d "search=search index=\${SPLUNK_INDEX} log_level=error earliest=-1h | stats count by host" \\
+  -d "output_mode=json" \\
+  -d "exec_mode=oneshot"
+\`\`\`
+
+#### Example: Get recent error logs
+\`\`\`bash
+curl -s -X POST "\${SPLUNK_URL}/services/search/jobs" \\
+  -H "Authorization: Bearer \${SPLUNK_TOKEN}" \\
+  -d "search=search index=\${SPLUNK_INDEX} log_level=error earliest=-1h" \\
+  -d "output_mode=json" \\
+  -d "exec_mode=oneshot"
+\`\`\`
+
+#### Example: Create a search job and poll for results
+\`\`\`bash
+# Create the search job
+SID=$(curl -s -X POST "\${SPLUNK_URL}/services/search/jobs" \\
+  -H "Authorization: Bearer \${SPLUNK_TOKEN}" \\
+  -d "search=search index=\${SPLUNK_INDEX} log_level=error earliest=-24h" \\
+  -d "output_mode=json" | jq -r '.sid')
+
+# Poll until done
+curl -s "\${SPLUNK_URL}/services/search/jobs/\${SID}?output_mode=json" \\
+  -H "Authorization: Bearer \${SPLUNK_TOKEN}"
+
+# Fetch results
+curl -s "\${SPLUNK_URL}/services/search/jobs/\${SID}/results?output_mode=json&count=100" \\
+  -H "Authorization: Bearer \${SPLUNK_TOKEN}"
+\`\`\`
+
+#### Example: Get server info (verify access)
+\`\`\`bash
+curl -s "\${SPLUNK_URL}/services/server/info?output_mode=json" \\
+  -H "Authorization: Bearer \${SPLUNK_TOKEN}"
+\`\`\``;
+    }
+}
+//# sourceMappingURL=splunk.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/elastic.js
+
+
+const elasticConfigSchema = objectType({
+    baseUrl: stringType().min(1, "Elasticsearch URL is required"),
+    apiKey: stringType().min(1).optional(),
+    username: stringType().min(1).optional(),
+    password: stringType().min(1).optional(),
+    index: stringType().default("logs-*"),
+    logger: custom().optional(),
+})
+    .refine((c) => c.apiKey || (c.username && c.password), {
+    message: "Either apiKey or both username and password must be provided",
+});
+function elastic(config) {
+    const parsed = elasticConfigSchema.parse(config);
+    return new ElasticProvider(parsed);
+}
+class ElasticProvider {
+    baseUrl;
+    apiKey;
+    username;
+    password;
+    index;
+    log;
+    constructor(config) {
+        this.baseUrl = config.baseUrl.replace(/\/+$/, "");
+        this.apiKey = config.apiKey;
+        this.username = config.username;
+        this.password = config.password;
+        this.index = config.index;
+        this.log = config.logger ?? consoleLogger;
+    }
+    authHeaders() {
+        if (this.apiKey) {
+            return { Authorization: `ApiKey ${this.apiKey}` };
+        }
+        const encoded = Buffer.from(`${this.username}:${this.password}`).toString("base64");
+        return { Authorization: `Basic ${encoded}` };
+    }
+    async request(method, path, body) {
+        const url = `${this.baseUrl}${path}`;
+        const response = await fetch(url, {
+            method,
+            headers: {
+                "Content-Type": "application/json",
+                ...this.authHeaders(),
+            },
+            ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => "");
+            throw new Error(`Elasticsearch API error: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`);
+        }
+        return (await response.json());
+    }
+    /**
+     * Convert time range strings like "1h", "24h", "7d" to Elasticsearch
+     * date math format "now-1h", "now-24h", "now-7d".
+     */
+    toElasticRange(timeRange) {
+        // Already in Elasticsearch format
+        if (timeRange.startsWith("now-")) {
+            return timeRange;
+        }
+        return `now-${timeRange}`;
+    }
+    async verifyAccess() {
+        this.log.info(`Verifying Elasticsearch access (${this.baseUrl})`);
+        const info = await this.request("GET", "/");
+        this.log.info(`Elasticsearch access verified (cluster: ${info.cluster_name ?? "unknown"}, version: ${info.version?.number ?? "unknown"})`);
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying Elasticsearch logs (severity: ${opts.severity}, range: ${opts.timeRange}, service: ${opts.serviceFilter})`);
+        const must = [
+            {
+                range: {
+                    "@timestamp": {
+                        gte: this.toElasticRange(opts.timeRange),
+                        lte: "now",
+                    },
+                },
+            },
+        ];
+        if (opts.severity && opts.severity !== "*") {
+            must.push({ match: { "log.level": opts.severity } });
+        }
+        if (opts.serviceFilter && opts.serviceFilter !== "*") {
+            must.push({
+                bool: {
+                    should: [{ match: { "service.name": opts.serviceFilter } }, { match: { "host.name": opts.serviceFilter } }],
+                    minimum_should_match: 1,
+                },
+            });
+        }
+        const result = await this.request("POST", `/${this.index}/_search`, {
+            size: 100,
+            sort: [{ "@timestamp": { order: "desc" } }],
+            query: {
+                bool: { must },
+            },
+        });
+        const hits = result.hits?.hits ?? [];
+        const logs = hits.map((hit) => {
+            const src = hit._source ?? {};
+            const service = src["service.name"] ??
+                (src["service"] && typeof src["service"] === "object"
+                    ? src["service"]["name"]
+                    : undefined) ??
+                src["host.name"] ??
+                (src["host"] && typeof src["host"] === "object"
+                    ? src["host"]["name"]
+                    : undefined) ??
+                "unknown";
+            const level = src["log.level"] ??
+                (src["log"] && typeof src["log"] === "object"
+                    ? src["log"]["level"]
+                    : undefined) ??
+                "unknown";
+            return {
+                timestamp: src["@timestamp"] ?? "",
+                service,
+                level,
+                message: src["message"] ?? "",
+                attributes: src,
+            };
+        });
+        this.log.info(`Found ${logs.length} log entries`);
+        return logs;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating Elasticsearch logs (range: ${opts.timeRange}, service: ${opts.serviceFilter})`);
+        const must = [
+            {
+                range: {
+                    "@timestamp": {
+                        gte: this.toElasticRange(opts.timeRange),
+                        lte: "now",
+                    },
+                },
+            },
+        ];
+        if (opts.serviceFilter && opts.serviceFilter !== "*") {
+            must.push({
+                bool: {
+                    should: [{ match: { "service.name": opts.serviceFilter } }, { match: { "host.name": opts.serviceFilter } }],
+                    minimum_should_match: 1,
+                },
+            });
+        }
+        const result = await this.request("POST", `/${this.index}/_search`, {
+            size: 0,
+            query: {
+                bool: { must },
+            },
+            aggs: {
+                services: {
+                    terms: {
+                        field: "service.keyword",
+                        size: 50,
+                        order: { _count: "desc" },
+                    },
+                },
+            },
+        });
+        const buckets = result.aggregations?.services?.buckets ?? [];
+        const results = buckets.map((bucket) => ({
+            service: bucket.key,
+            count: bucket.doc_count,
+        }));
+        this.log.info(`Aggregated ${results.length} service groups`);
+        return results;
+    }
+    getAgentEnv() {
+        const env = {
+            ELASTIC_URL: this.baseUrl,
+            ELASTIC_INDEX: this.index,
+        };
+        if (this.apiKey) {
+            env.ELASTIC_API_KEY = this.apiKey;
+        }
+        else {
+            // Zod refine guarantees username+password exist when apiKey is absent
+            env.ELASTIC_USERNAME = this.username ?? "";
+            env.ELASTIC_PASSWORD = this.password ?? "";
+        }
+        return env;
+    }
+    getPromptInstructions() {
+        const authHeader = this.apiKey
+            ? `-H "Authorization: ApiKey \${ELASTIC_API_KEY}"`
+            : `-u "\${ELASTIC_USERNAME}:\${ELASTIC_PASSWORD}"`;
+        return `### Elasticsearch Logs API
+- \`ELASTIC_URL\` - Elasticsearch base URL (${this.baseUrl})
+- \`ELASTIC_INDEX\` - Index pattern (${this.index})
+${this.apiKey ? "- `ELASTIC_API_KEY` - API key for authentication" : "- `ELASTIC_USERNAME` / `ELASTIC_PASSWORD` - Basic auth credentials"}
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+Investigate logs from Elasticsearch across **BOTH production AND staging environments** to find bugs and issues.
+You have DIRECT ACCESS to Elasticsearch's REST API via curl commands.
+
+**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
+- Issues in staging only -> Fix before users are affected
+- Issues in both environments -> Critical, affects users now
+- Issues in production only -> May be load/scale related
+
+#### Example: Search for error logs in the last hour
+\`\`\`bash
+curl -s -X POST "\${ELASTIC_URL}/\${ELASTIC_INDEX}/_search" \\
+  -H "Content-Type: application/json" \\
+  ${authHeader} \\
+  -d '{"size":100,"sort":[{"@timestamp":{"order":"desc"}}],"query":{"bool":{"must":[{"range":{"@timestamp":{"gte":"now-1h","lte":"now"}}},{"match":{"log.level":"error"}}]}}}'
+\`\`\`
+
+#### Example: Aggregate log counts by service
+\`\`\`bash
+curl -s -X POST "\${ELASTIC_URL}/\${ELASTIC_INDEX}/_search" \\
+  -H "Content-Type: application/json" \\
+  ${authHeader} \\
+  -d '{"size":0,"query":{"bool":{"must":[{"range":{"@timestamp":{"gte":"now-24h","lte":"now"}}}]}},"aggs":{"services":{"terms":{"field":"service.keyword","size":50,"order":{"_count":"desc"}}}}}'
+\`\`\`
+
+#### Example: Filter logs by service name
+\`\`\`bash
+curl -s -X POST "\${ELASTIC_URL}/\${ELASTIC_INDEX}/_search" \\
+  -H "Content-Type: application/json" \\
+  ${authHeader} \\
+  -d '{"size":100,"sort":[{"@timestamp":{"order":"desc"}}],"query":{"bool":{"must":[{"range":{"@timestamp":{"gte":"now-1h","lte":"now"}}},{"match":{"service.name":"my-service"}}]}}}'
+\`\`\`
+
+#### Example: Get cluster health
+\`\`\`bash
+curl -s "\${ELASTIC_URL}/_cluster/health" \\
+  ${authHeader}
+\`\`\``;
+    }
+}
+//# sourceMappingURL=elastic.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/newrelic.js
+
+
+const newrelicConfigSchema = objectType({
+    apiKey: stringType().min(1, "New Relic User API key is required"),
+    accountId: stringType().min(1, "New Relic account ID is required"),
+    region: enumType(["us", "eu"]).default("us"),
+    logger: custom().optional(),
+});
+function escapeNrql(value) {
+    return value.replace(/'/g, "''").replace(/\\/g, "\\\\");
+}
+function newrelic(config) {
+    const parsed = newrelicConfigSchema.parse(config);
+    return new NewRelicProvider(parsed);
+}
+class NewRelicProvider {
+    apiKey;
+    accountId;
+    region;
+    log;
+    constructor(config) {
+        this.apiKey = config.apiKey;
+        this.accountId = config.accountId;
+        this.region = config.region;
+        this.log = config.logger ?? consoleLogger;
+    }
+    get endpoint() {
+        return this.region === "eu" ? "https://api.eu.newrelic.com/graphql" : "https://api.newrelic.com/graphql";
+    }
+    async nerdgraph(query) {
+        const response = await fetch(this.endpoint, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "API-Key": this.apiKey,
+            },
+            body: JSON.stringify({ query }),
+        });
+        if (!response.ok) {
+            throw new Error(`New Relic NerdGraph API error: ${response.status} ${response.statusText}`);
+        }
+        const json = (await response.json());
+        if (json.errors && json.errors.length > 0) {
+            throw new Error(`New Relic NerdGraph query error: ${json.errors[0].message}`);
+        }
+        return json.data;
+    }
+    nrql(nrqlQuery) {
+        const graphql = `{ actor { account(id: ${this.accountId}) { nrql(query: "${nrqlQuery}") { results } } } }`;
+        return this.nerdgraph(graphql);
+    }
+    async verifyAccess() {
+        this.log.info(`Verifying New Relic access (account: ${this.accountId}, region: ${this.region})`);
+        const query = `{ actor { account(id: ${this.accountId}) { name } } }`;
+        const result = await this.nerdgraph(query);
+        const name = result.actor?.account?.name;
+        if (!name) {
+            throw new Error("New Relic access verification failed: could not retrieve account name");
+        }
+        this.log.info(`New Relic API access verified (account: ${name})`);
+    }
+    async queryLogs(opts) {
+        const nrqlQuery = `SELECT timestamp, service, level, message FROM Log WHERE level = '${escapeNrql(opts.severity)}' AND service LIKE '%${escapeNrql(opts.serviceFilter)}%' SINCE ${opts.timeRange} ago LIMIT 100`;
+        this.log.info(`Querying New Relic logs: ${nrqlQuery}`);
+        const result = await this.nrql(nrqlQuery);
+        const rawResults = result.actor?.account?.nrql?.results || [];
+        const logs = rawResults.map((row) => {
+            const { timestamp, service, level, message, ...rest } = row;
+            return {
+                timestamp: typeof timestamp === "number" ? new Date(timestamp).toISOString() : String(timestamp || ""),
+                service: service || "unknown",
+                level: level || opts.severity,
+                message: message || "",
+                attributes: rest,
+            };
+        });
+        this.log.info(`Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`);
+        return logs;
+    }
+    async aggregate(opts) {
+        const nrqlQuery = `SELECT count(*) FROM Log WHERE level = 'error' AND service LIKE '%${escapeNrql(opts.serviceFilter)}%' SINCE ${opts.timeRange} ago FACET service LIMIT 20`;
+        this.log.info(`Aggregating New Relic errors: ${nrqlQuery}`);
+        const result = await this.nrql(nrqlQuery);
+        const rawResults = result.actor?.account?.nrql?.results || [];
+        const groups = rawResults.map((row) => ({
+            service: row.service || "unknown",
+            count: row.count || 0,
+        }));
+        this.log.info(`Aggregated ${groups.length} service groups`);
+        return groups;
+    }
+    getAgentEnv() {
+        return {
+            NR_API_KEY: this.apiKey,
+            NR_ACCOUNT_ID: this.accountId,
+            NR_REGION: this.region,
+        };
+    }
+    getPromptInstructions() {
+        return `### New Relic NerdGraph API (NRQL)
+- \`NR_API_KEY\` - User API key (use in API-Key header)
+- \`NR_ACCOUNT_ID\` - New Relic account ID (${this.accountId})
+- \`NR_REGION\` - Region: ${this.region} (endpoint: ${this.endpoint})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+Investigate logs from New Relic across **BOTH production AND staging environments** to find bugs and issues.
+You have DIRECT ACCESS to New Relic's NerdGraph (GraphQL) API via curl commands.
+
+**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
+- Issues in staging only → Fix before users are affected
+- Issues in both environments → Critical, affects users now
+- Issues in production only → May be load/scale related
+
+Use these environment variables in your curl commands:
+- \`NR_API_KEY\` - User API key (use in API-Key header)
+- \`NR_ACCOUNT_ID\` - New Relic account ID (${this.accountId})
+- \`NR_REGION\` - Region: ${this.region}
+
+#### Example: Get error counts by service
+\`\`\`bash
+curl -s -X POST "${this.endpoint}" \\
+  -H "Content-Type: application/json" \\
+  -H "API-Key: \${NR_API_KEY}" \\
+  -d '{"query":"{ actor { account(id: '\${NR_ACCOUNT_ID}') { nrql(query: \\"SELECT count(*) FROM Log WHERE level = '"'"'error'"'"' SINCE 1 hour ago FACET service LIMIT 20\\") { results } } } }"}'
+\`\`\`
+
+#### Example: Get recent error logs
+\`\`\`bash
+curl -s -X POST "${this.endpoint}" \\
+  -H "Content-Type: application/json" \\
+  -H "API-Key: \${NR_API_KEY}" \\
+  -d '{"query":"{ actor { account(id: '\${NR_ACCOUNT_ID}') { nrql(query: \\"SELECT timestamp, service, level, message FROM Log WHERE level = '"'"'error'"'"' SINCE 1 hour ago LIMIT 100\\") { results } } } }"}'
+\`\`\`
+
+#### Example: Verify access (get account name)
+\`\`\`bash
+curl -s -X POST "${this.endpoint}" \\
+  -H "Content-Type: application/json" \\
+  -H "API-Key: \${NR_API_KEY}" \\
+  -d '{"query":"{ actor { account(id: '\${NR_ACCOUNT_ID}') { name } } }"}'
+\`\`\``;
+    }
+}
+//# sourceMappingURL=newrelic.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/loki.js
+
+
+const lokiConfigSchema = objectType({
+    baseUrl: stringType().min(1, "Loki base URL is required"),
+    apiKey: stringType().optional(),
+    orgId: stringType().optional(),
+    logger: custom().optional(),
+});
+function escapeRegex(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function loki(config) {
+    const parsed = lokiConfigSchema.parse(config);
+    return new LokiProvider(parsed);
+}
+class LokiProvider {
+    baseUrl;
+    apiKey;
+    orgId;
+    log;
+    constructor(config) {
+        this.baseUrl = config.baseUrl.replace(/\/+$/, "");
+        this.apiKey = config.apiKey;
+        this.orgId = config.orgId;
+        this.log = config.logger ?? consoleLogger;
+    }
+    buildHeaders() {
+        const headers = {};
+        if (this.apiKey) {
+            headers["Authorization"] = `Bearer ${this.apiKey}`;
+        }
+        if (this.orgId) {
+            headers["X-Scope-OrgID"] = this.orgId;
+        }
+        return headers;
+    }
+    async request(path, params) {
+        const url = new URL(path, this.baseUrl);
+        if (params) {
+            for (const [k, v] of Object.entries(params)) {
+                url.searchParams.set(k, v);
+            }
+        }
+        const response = await fetch(url.toString(), {
+            headers: this.buildHeaders(),
+        });
+        if (!response.ok) {
+            throw new Error(`Loki API error: ${response.status} ${response.statusText}`);
+        }
+        return (await response.json());
+    }
+    /**
+     * Parse a human-readable time range string (e.g. "1h", "24h", "7d") into
+     * a { start, end } pair of Unix timestamps in nanoseconds (strings), which
+     * is the format the Loki HTTP API expects.
+     */
+    parseTimeRange(timeRange) {
+        const now = Date.now();
+        const match = timeRange.match(/^(\d+)([smhdw])$/);
+        if (!match) {
+            // Fallback: treat as 1h
+            const start = (now - 3600 * 1000) * 1_000_000;
+            return { start: start.toString(), end: (now * 1_000_000).toString() };
+        }
+        const value = parseInt(match[1], 10);
+        const unit = match[2];
+        const multipliers = {
+            s: 1000,
+            m: 60 * 1000,
+            h: 3600 * 1000,
+            d: 86400 * 1000,
+            w: 7 * 86400 * 1000,
+        };
+        const durationMs = value * (multipliers[unit] || 3600 * 1000);
+        const startNs = (now - durationMs) * 1_000_000;
+        const endNs = now * 1_000_000;
+        return { start: startNs.toString(), end: endNs.toString() };
+    }
+    async verifyAccess() {
+        this.log.info(`Verifying Loki access (${this.baseUrl})`);
+        // Try /ready first; fall back to /loki/api/v1/labels
+        try {
+            const url = new URL("/ready", this.baseUrl);
+            const response = await fetch(url.toString(), {
+                headers: this.buildHeaders(),
+            });
+            if (!response.ok) {
+                throw new Error(`Loki ready check failed: ${response.status}`);
+            }
+        }
+        catch {
+            // Fall back to labels endpoint
+            await this.request("/loki/api/v1/labels");
+        }
+        this.log.info("Loki API access verified");
+    }
+    async queryLogs(opts) {
+        const { start, end } = this.parseTimeRange(opts.timeRange);
+        const serviceFilter = opts.serviceFilter && opts.serviceFilter !== "*" ? escapeRegex(opts.serviceFilter) : ".*";
+        const query = `{job=~".*${serviceFilter}.*"} |= \`${opts.severity}\``;
+        this.log.info(`Querying Loki logs: ${query} (range: ${opts.timeRange})`);
+        const result = await this.request("/loki/api/v1/query_range", {
+            query,
+            start,
+            end,
+            limit: "100",
+        });
+        const logs = [];
+        for (const stream of result.data?.result || []) {
+            const job = stream.stream?.job || stream.stream?.service || "unknown";
+            const level = stream.stream?.level || opts.severity;
+            for (const [tsNano, line] of stream.values) {
+                // Convert nanosecond timestamp to ISO string
+                const tsMs = Math.floor(parseInt(tsNano, 10) / 1_000_000);
+                logs.push({
+                    timestamp: new Date(tsMs).toISOString(),
+                    service: job,
+                    level,
+                    message: line,
+                    attributes: { ...stream.stream },
+                });
+            }
+        }
+        this.log.info(`Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`);
+        return logs;
+    }
+    async aggregate(opts) {
+        const serviceFilter = opts.serviceFilter && opts.serviceFilter !== "*" ? escapeRegex(opts.serviceFilter) : ".*";
+        const query = `sum by (job) (count_over_time({job=~".*${serviceFilter}.*"} |= "error" [${opts.timeRange}]))`;
+        this.log.info(`Aggregating Loki errors: ${query}`);
+        const result = await this.request("/loki/api/v1/query", {
+            query,
+        });
+        const groups = (result.data?.result || []).map((entry) => ({
+            service: entry.metric?.job || "unknown",
+            count: parseInt(entry.value?.[1] || "0", 10),
+        }));
+        this.log.info(`Aggregated ${groups.length} service groups`);
+        return groups;
+    }
+    getAgentEnv() {
+        const env = {
+            LOKI_URL: this.baseUrl,
+        };
+        if (this.apiKey) {
+            env.LOKI_API_KEY = this.apiKey;
+        }
+        if (this.orgId) {
+            env.LOKI_ORG_ID = this.orgId;
+        }
+        return env;
+    }
+    getPromptInstructions() {
+        const authHeader = this.apiKey ? `  -H "Authorization: Bearer \${LOKI_API_KEY}" \\` : "";
+        const orgHeader = this.orgId ? `  -H "X-Scope-OrgID: \${LOKI_ORG_ID}" \\` : "";
+        const extraHeaders = [authHeader, orgHeader].filter(Boolean).join("\n");
+        const curlHeaders = extraHeaders ? `\n${extraHeaders}` : "";
+        return `### Grafana Loki API
+- \`LOKI_URL\` - Loki base URL (${this.baseUrl})${this.apiKey ? `\n- \`LOKI_API_KEY\` - Bearer token for authentication` : ""}${this.orgId ? `\n- \`LOKI_ORG_ID\` - Tenant/org ID for multi-tenant Loki (${this.orgId})` : ""}
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+Investigate logs from Loki across **BOTH production AND staging environments** to find bugs and issues.
+You have DIRECT ACCESS to Loki's HTTP API via curl commands.
+
+**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
+- Issues in staging only \u2192 Fix before users are affected
+- Issues in both environments \u2192 Critical, affects users now
+- Issues in production only \u2192 May be load/scale related
+
+Use LogQL query language. Key patterns:
+- Stream selectors: \`{job="myservice"}\`, \`{job=~".*pattern.*"}\`
+- Line filters: \`|= "error"\`, \`|~ "(?i)error"\`, \`!= "debug"\`
+- Label filters: \`| level="error"\`
+- Metric queries: \`count_over_time({job="myservice"}[1h])\`
+
+#### Example: Query recent error logs
+\`\`\`bash
+curl -s "\${LOKI_URL}/loki/api/v1/query_range" \\${curlHeaders}
+  --data-urlencode 'query={job=~".*"} |= "error"' \\
+  --data-urlencode "start=$(date -d '1 hour ago' +%s)000000000" \\
+  --data-urlencode "end=$(date +%s)000000000" \\
+  --data-urlencode "limit=100"
+\`\`\`
+
+#### Example: Count errors by job over a time range
+\`\`\`bash
+curl -s "\${LOKI_URL}/loki/api/v1/query" \\${curlHeaders}
+  --data-urlencode 'query=sum by (job) (count_over_time({job=~".*"} |= "error" [1h]))'
+\`\`\`
+
+#### Example: Get available labels
+\`\`\`bash
+curl -s "\${LOKI_URL}/loki/api/v1/labels" \\${curlHeaders}
+\`\`\`
+
+#### Example: Get label values for a specific label
+\`\`\`bash
+curl -s "\${LOKI_URL}/loki/api/v1/label/job/values" \\${curlHeaders}
+\`\`\``;
+    }
+}
+//# sourceMappingURL=loki.js.map
 ;// CONCATENATED MODULE: ../providers/dist/observability/index.js
 
 
 
+
+
+
+
 //# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../providers/dist/issue-tracking/types.js
+// ---------------------------------------------------------------------------
+// Type guards
+// ---------------------------------------------------------------------------
+/**
+ * Type guard: checks whether the provider supports linking pull requests.
+ * @param p - Issue tracking provider to check.
+ * @returns True if the provider implements PrLinkCapable.
+ */
+function canLinkPr(p) {
+    return "linkPr" in p && typeof p.linkPr === "function";
+}
+/**
+ * Type guard: checks whether the provider supports fingerprint search.
+ * @param p - Issue tracking provider to check.
+ * @returns True if the provider implements FingerprintCapable.
+ */
+function canSearchByFingerprint(p) {
+    return "searchByFingerprint" in p && typeof p.searchByFingerprint === "function";
+}
+/**
+ * Type guard: checks whether the provider supports triage history listing.
+ * @param p - Issue tracking provider to check.
+ * @returns True if the provider implements TriageHistoryCapable.
+ */
+function canListTriageHistory(p) {
+    return "listTriageHistory" in p && typeof p.listTriageHistory === "function";
+}
+//# sourceMappingURL=types.js.map
 ;// CONCATENATED MODULE: ../providers/dist/issue-tracking/linear.js
 
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
-const DEFAULT_OPEN_STATES = [
-    "Triage",
-    "Backlog",
-    "Todo",
-    "In Progress",
-    "Peer Review",
-    "In Review",
-    "QA",
-    "Blocked",
-];
+const DEFAULT_OPEN_STATES = ["Triage", "Backlog", "Todo", "In Progress", "Peer Review", "In Review", "QA", "Blocked"];
 const linearConfigSchema = objectType({
     apiKey: stringType().min(1, "Linear API key is required"),
     logger: custom().optional(),
@@ -32464,9 +33419,7 @@ class LinearProvider {
                 state: issue.state.name,
                 stateType: issue.state.type,
                 url: issue.url,
-                descriptionSnippet: issue.description
-                    ? issue.description.slice(0, 200)
-                    : null,
+                descriptionSnippet: issue.description ? issue.description.slice(0, 200) : null,
                 fingerprint,
                 createdAt: issue.createdAt,
                 labels: issue.labels.nodes.map((l) => l.name),
@@ -32654,7 +33607,10 @@ class GitHubIssuesProvider {
         }));
     }
     async addComment(issueId, body) {
-        await this.request(`/repos/${this.owner}/${this.repo}/issues/${issueId}/comments`, { method: "POST", body: { body } });
+        await this.request(`/repos/${this.owner}/${this.repo}/issues/${issueId}/comments`, {
+            method: "POST",
+            body: { body },
+        });
         this.log.info(`Comment added to issue ${issueId}`);
     }
     async linkPr(issueId, prUrl, prNumber) {
@@ -32663,187 +33619,234 @@ class GitHubIssuesProvider {
     }
 }
 //# sourceMappingURL=github-issues.js.map
+;// CONCATENATED MODULE: ../providers/dist/issue-tracking/jira.js
+
+
+const jiraConfigSchema = objectType({
+    baseUrl: stringType()
+        .min(1, "Jira base URL is required")
+        .refine((u) => u.startsWith("https://"), "baseUrl must start with https://"),
+    email: stringType().min(1, "Jira account email is required"),
+    apiToken: stringType().min(1, "Jira API token is required"),
+    logger: custom().optional(),
+});
+function jira(config) {
+    const parsed = jiraConfigSchema.parse(config);
+    return new JiraProvider(parsed);
+}
+class JiraProvider {
+    baseUrl;
+    authHeader;
+    log;
+    constructor(config) {
+        // Strip trailing slash for consistency
+        this.baseUrl = config.baseUrl.replace(/\/+$/, "");
+        this.authHeader = `Basic ${btoa(`${config.email}:${config.apiToken}`)}`;
+        this.log = config.logger ?? consoleLogger;
+    }
+    async request(path, opts) {
+        const url = `${this.baseUrl}/rest/api/3${path}`;
+        const response = await fetch(url, {
+            method: opts?.method ?? "GET",
+            headers: {
+                Authorization: this.authHeader,
+                Accept: "application/json",
+                ...(opts?.body ? { "Content-Type": "application/json" } : {}),
+            },
+            body: opts?.body ? JSON.stringify(opts.body) : undefined,
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => "");
+            throw new Error(`Jira API error: ${response.status} ${response.statusText}${text ? ` — ${text}` : ""}`);
+        }
+        // Some endpoints (204 No Content) return no body
+        if (response.status === 204) {
+            return undefined;
+        }
+        return (await response.json());
+    }
+    // ------------------------------------------------------------------
+    // IssueTrackingProvider
+    // ------------------------------------------------------------------
+    async verifyAccess() {
+        this.log.info("Verifying Jira API access...");
+        const result = await this.request("/myself");
+        this.log.info(`Jira access verified as ${result.displayName} (${result.emailAddress})`);
+    }
+    async createIssue(opts) {
+        this.log.info(`Creating Jira issue: ${opts.title}`);
+        const fields = {
+            summary: opts.title,
+            project: { key: opts.projectId },
+            issuetype: { name: "Task" },
+        };
+        if (opts.description) {
+            fields.description = {
+                type: "doc",
+                version: 1,
+                content: [
+                    {
+                        type: "paragraph",
+                        content: [{ type: "text", text: opts.description }],
+                    },
+                ],
+            };
+        }
+        if (opts.labels && opts.labels.length > 0) {
+            fields.labels = opts.labels;
+        }
+        if (opts.priority) {
+            fields.priority = { id: String(opts.priority) };
+        }
+        if (opts.stateId) {
+            // stateId maps to a Jira status; cannot be set at creation via fields,
+            // so we transition after creation below.
+        }
+        const result = await this.request("/issue", { method: "POST", body: { fields } });
+        // If a target state was requested, attempt a transition
+        if (opts.stateId) {
+            try {
+                await this.transitionIssue(result.key, opts.stateId);
+            }
+            catch {
+                this.log.warn(`Could not transition new issue ${result.key} to state ${opts.stateId}`);
+            }
+        }
+        const issue = await this.getIssue(result.key);
+        this.log.info(`Created issue ${issue.identifier} (${issue.url})`);
+        return issue;
+    }
+    async getIssue(identifier) {
+        this.log.info(`Fetching Jira issue ${identifier}`);
+        const result = await this.request(`/issue/${encodeURIComponent(identifier)}?fields=summary,status`);
+        return {
+            id: result.id,
+            identifier: result.key,
+            title: result.fields.summary,
+            url: `${this.baseUrl}/browse/${result.key}`,
+            branchName: `fix/${result.key}`,
+            state: result.fields.status.name,
+        };
+    }
+    async updateIssue(issueId, opts) {
+        this.log.info(`Updating Jira issue ${issueId}`);
+        if (opts.description) {
+            const fields = {
+                description: {
+                    type: "doc",
+                    version: 1,
+                    content: [
+                        {
+                            type: "paragraph",
+                            content: [{ type: "text", text: opts.description }],
+                        },
+                    ],
+                },
+            };
+            await this.request(`/issue/${encodeURIComponent(issueId)}`, {
+                method: "PUT",
+                body: { fields },
+            });
+            this.log.info(`Issue ${issueId} description updated`);
+        }
+        if (opts.stateId) {
+            await this.transitionIssue(issueId, opts.stateId);
+            this.log.info(`Issue ${issueId} transitioned to ${opts.stateId}`);
+        }
+        if (opts.comment) {
+            await this.addComment(issueId, opts.comment);
+        }
+    }
+    async searchIssues(opts) {
+        this.log.info(`Searching Jira issues: "${opts.query}" in project ${opts.projectId}`);
+        const jqlParts = [`project = "${opts.projectId}"`, `summary ~ "${opts.query}"`];
+        if (opts.labels && opts.labels.length > 0) {
+            const labelClauses = opts.labels.map((l) => `labels = "${l}"`).join(" AND ");
+            jqlParts.push(`(${labelClauses})`);
+        }
+        if (opts.states && opts.states.length > 0) {
+            const stateList = opts.states.map((s) => `"${s}"`).join(", ");
+            jqlParts.push(`status IN (${stateList})`);
+        }
+        const jql = jqlParts.join(" AND ");
+        const result = await this.request(`/search?jql=${encodeURIComponent(jql)}&maxResults=10&fields=summary,status`);
+        const issues = result.issues ?? [];
+        this.log.info(`Found ${issues.length} matching issues`);
+        return issues.map((i) => ({
+            id: i.id,
+            identifier: i.key,
+            title: i.fields.summary,
+            url: `${this.baseUrl}/browse/${i.key}`,
+            branchName: `fix/${i.key}`,
+            state: i.fields.status.name,
+        }));
+    }
+    async addComment(issueId, body) {
+        await this.request(`/issue/${encodeURIComponent(issueId)}/comment`, {
+            method: "POST",
+            body: {
+                body: {
+                    type: "doc",
+                    version: 1,
+                    content: [
+                        {
+                            type: "paragraph",
+                            content: [{ type: "text", text: body }],
+                        },
+                    ],
+                },
+            },
+        });
+        this.log.info(`Comment added to issue ${issueId}`);
+    }
+    // ------------------------------------------------------------------
+    // PrLinkCapable
+    // ------------------------------------------------------------------
+    async linkPr(issueId, prUrl, prNumber) {
+        this.log.info(`Linking PR #${prNumber} to issue ${issueId}`);
+        // Add a remote link pointing to the pull request
+        await this.request(`/issue/${encodeURIComponent(issueId)}/remotelink`, {
+            method: "POST",
+            body: {
+                object: {
+                    url: prUrl,
+                    title: `Pull Request #${prNumber}`,
+                    icon: {
+                        url16x16: "https://github.githubassets.com/favicons/favicon.png",
+                        title: "GitHub PR",
+                    },
+                },
+            },
+        });
+        // Also leave a comment for visibility in the issue activity stream
+        await this.addComment(issueId, `Pull Request Created: PR #${prNumber} — ${prUrl}`);
+        this.log.info(`PR #${prNumber} linked to issue ${issueId}`);
+    }
+    // ------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------
+    /**
+     * Transition an issue to the target status name by looking up available
+     * transitions and executing the one whose `to.name` matches (case-insensitive).
+     */
+    async transitionIssue(issueKeyOrId, targetStatusName) {
+        const { transitions } = await this.request(`/issue/${encodeURIComponent(issueKeyOrId)}/transitions`);
+        const target = transitions.find((t) => t.to.name.toLowerCase() === targetStatusName.toLowerCase());
+        if (!target) {
+            const available = transitions.map((t) => t.to.name).join(", ");
+            throw new Error(`No transition to status "${targetStatusName}" for issue ${issueKeyOrId}. Available: ${available}`);
+        }
+        await this.request(`/issue/${encodeURIComponent(issueKeyOrId)}/transitions`, {
+            method: "POST",
+            body: { transition: { id: target.id } },
+        });
+    }
+}
+//# sourceMappingURL=jira.js.map
 ;// CONCATENATED MODULE: ../providers/dist/issue-tracking/index.js
 
 
 
-//# sourceMappingURL=index.js.map
-;// CONCATENATED MODULE: external "node:child_process"
-const external_node_child_process_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:child_process");
-// EXTERNAL MODULE: external "node:util"
-var external_node_util_ = __nccwpck_require__(7975);
-;// CONCATENATED MODULE: ../providers/dist/source-control/github.js
-
-
-
-const execFileAsync = (0,external_node_util_.promisify)(external_node_child_process_namespaceObject.execFile);
-async function git(args, opts) {
-    try {
-        const { stdout } = await execFileAsync("git", args);
-        return stdout;
-    }
-    catch (err) {
-        if (opts?.ignoreReturnCode)
-            return "";
-        throw err;
-    }
-}
-async function ghApi(method, path, token, body) {
-    const resp = await fetch(`https://api.github.com${path}`, {
-        method,
-        headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            ...(body ? { "Content-Type": "application/json" } : {}),
-        },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`GitHub API ${method} ${path} failed (${resp.status}): ${text}`);
-    }
-    return resp.json();
-}
-function github(config) {
-    const { token, owner, repo, baseBranch = "main" } = config;
-    const log = config.logger ?? logger_consoleLogger;
-    return {
-        async verifyAccess() {
-            await ghApi("GET", `/repos/${owner}/${repo}`, token);
-            log.info(`Verified access to ${owner}/${repo}`);
-        },
-        async configureBotIdentity() {
-            await git(["config", "user.name", "github-actions[bot]"]);
-            await git(["config", "user.email", "github-actions[bot]@users.noreply.github.com"]);
-            log.debug("Configured git bot identity");
-        },
-        async createBranch(name) {
-            await git(["checkout", "-b", name]);
-            log.info(`Created branch: ${name}`);
-        },
-        async pushBranch(name) {
-            await git([
-                "remote", "set-url", "origin",
-                `https://x-access-token:${token}@github.com/${owner}/${repo}.git`,
-            ]);
-            await git(["push", "origin", name]);
-            log.info(`Pushed branch: ${name}`);
-        },
-        async hasChanges() {
-            const unstaged = await git(["diff", "--name-only", "--", ".", ":!.github/datadog-analysis", ":!.github/workflows"], { ignoreReturnCode: true });
-            const staged = await git(["diff", "--cached", "--name-only", "--", ".", ":!.github/datadog-analysis", ":!.github/workflows"], { ignoreReturnCode: true });
-            return unstaged.trim().length > 0 || staged.trim().length > 0;
-        },
-        async hasNewCommits() {
-            const output = await git(["rev-list", "--count", `HEAD`, `^origin/${baseBranch}`], { ignoreReturnCode: true });
-            const count = parseInt(output.trim(), 10);
-            return !isNaN(count) && count > 0;
-        },
-        async getChangedFiles() {
-            const output = await git(["diff", "--name-only", `origin/${baseBranch}..HEAD`], { ignoreReturnCode: true });
-            return output.trim().split("\n").filter(Boolean);
-        },
-        async resetPaths(paths) {
-            for (const p of paths) {
-                await git(["checkout", "HEAD", "--", p], { ignoreReturnCode: true });
-            }
-            log.debug(`Reset paths: ${paths.join(", ")}`);
-        },
-        async stageAndCommit(message) {
-            await git(["add", "-A", "--", ".", ":!.github/datadog-analysis", ":!.github/workflows"]);
-            await git(["commit", "-m", message]);
-        },
-        async createPullRequest(opts) {
-            const body = {
-                title: opts.title,
-                head: opts.head,
-                base: opts.base || baseBranch,
-                body: opts.body,
-            };
-            const pr = (await ghApi("POST", `/repos/${owner}/${repo}/pulls`, token, body));
-            log.info(`Created PR #${pr.number}: ${pr.html_url}`);
-            if (opts.labels && opts.labels.length > 0) {
-                await ghApi("POST", `/repos/${owner}/${repo}/issues/${pr.number}/labels`, token, { labels: opts.labels });
-            }
-            return { number: pr.number, url: pr.html_url, state: "open", title: opts.title };
-        },
-        async listPullRequests(opts) {
-            const state = opts?.state ?? "open";
-            const limit = opts?.limit ?? 30;
-            const params = new URLSearchParams({
-                state: state === "merged" ? "closed" : state,
-                per_page: String(limit),
-                sort: "updated",
-                direction: "desc",
-            });
-            const prs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?${params}`, token));
-            const labelFilter = opts?.labels?.length
-                ? new Set(opts.labels.map((l) => l.toLowerCase()))
-                : null;
-            const results = [];
-            for (const pr of prs) {
-                // Determine normalized state
-                const prState = pr.merged_at
-                    ? "merged"
-                    : pr.state === "open"
-                        ? "open"
-                        : "closed";
-                // Filter by requested state (handle "merged" vs "closed")
-                if (state === "merged" && !pr.merged_at)
-                    continue;
-                // Filter by labels
-                if (labelFilter) {
-                    const prLabels = pr.labels.map((l) => l.name.toLowerCase());
-                    if (!prLabels.some((l) => labelFilter.has(l)))
-                        continue;
-                }
-                results.push({
-                    number: pr.number,
-                    url: pr.html_url,
-                    state: prState,
-                    title: pr.title,
-                    mergedAt: pr.merged_at,
-                    closedAt: pr.closed_at,
-                });
-            }
-            return results;
-        },
-        async findExistingPr(searchTerm) {
-            // Search open PRs
-            const openPrs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?state=open&per_page=20`, token));
-            for (const pr of openPrs) {
-                const text = `${pr.title} ${pr.body || ""}`;
-                if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
-                    log.info(`Found open PR with match: ${pr.html_url}`);
-                    return { number: pr.number, url: pr.html_url, state: "open", title: pr.title };
-                }
-            }
-            // Search recently merged PRs (last 30 days)
-            const closedPrs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?state=closed&per_page=20&sort=updated&direction=desc`, token));
-            const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-            for (const pr of closedPrs) {
-                if (pr.merged_at && new Date(pr.merged_at) > cutoff) {
-                    const text = `${pr.title} ${pr.body || ""}`;
-                    if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
-                        log.info(`Found merged PR with match: ${pr.html_url}`);
-                        return { number: pr.number, url: pr.html_url, state: "merged", title: pr.title };
-                    }
-                }
-            }
-            return null;
-        },
-        async dispatchWorkflow(opts) {
-            const targetParts = opts.targetRepo.split("/");
-            const targetOwner = targetParts[0] ?? owner;
-            const targetRepoName = targetParts[1] ?? opts.targetRepo;
-            await ghApi("POST", `/repos/${targetOwner}/${targetRepoName}/actions/workflows/${encodeURIComponent(opts.workflow)}/dispatches`, token, { ref: baseBranch, inputs: opts.inputs ?? {} });
-            log.info(`Dispatched workflow "${opts.workflow}" to ${opts.targetRepo}`);
-        },
-    };
-}
-//# sourceMappingURL=github.js.map
-;// CONCATENATED MODULE: ../providers/dist/source-control/index.js
 
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ../providers/dist/notification/github-summary.js
@@ -32891,9 +33894,7 @@ class SlackWebhookProvider {
         this.log = config.logger ?? consoleLogger;
     }
     async send(payload) {
-        const text = payload.title
-            ? `*${payload.title}*\n${payload.body}`
-            : payload.body;
+        const text = payload.title ? `*${payload.title}*\n${payload.body}` : payload.body;
         const response = await fetch(this.webhookUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -32986,13 +33987,9 @@ class DiscordWebhookProvider {
         this.log = config.logger ?? consoleLogger;
     }
     async send(payload) {
-        const content = payload.title
-            ? `**${payload.title}**\n${payload.body}`
-            : payload.body;
+        const content = payload.title ? `**${payload.title}**\n${payload.body}` : payload.body;
         // Discord has a 2000 character limit per message
-        const truncated = content.length > 2000
-            ? content.slice(0, 1997) + "..."
-            : content;
+        const truncated = content.length > 2000 ? content.slice(0, 1997) + "..." : content;
         const response = await fetch(this.webhookUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -33007,6 +34004,1682 @@ class DiscordWebhookProvider {
 //# sourceMappingURL=discord-webhook.js.map
 ;// CONCATENATED MODULE: ../providers/dist/notification/index.js
 
+
+
+
+//# sourceMappingURL=index.js.map
+// EXTERNAL MODULE: external "node:child_process"
+var external_node_child_process_ = __nccwpck_require__(1421);
+// EXTERNAL MODULE: external "node:util"
+var external_node_util_ = __nccwpck_require__(7975);
+;// CONCATENATED MODULE: ../providers/dist/source-control/github.js
+
+
+
+const execFileAsync = (0,external_node_util_.promisify)(external_node_child_process_.execFile);
+async function git(args, opts) {
+    try {
+        const { stdout } = await execFileAsync("git", args);
+        return stdout;
+    }
+    catch (err) {
+        if (opts?.ignoreReturnCode)
+            return "";
+        throw err;
+    }
+}
+async function ghApi(method, path, token, body) {
+    const resp = await fetch(`https://api.github.com${path}`, {
+        method,
+        headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`GitHub API ${method} ${path} failed (${resp.status}): ${text}`);
+    }
+    return resp.json();
+}
+function github(config) {
+    const { token, owner, repo, baseBranch = "main" } = config;
+    const log = config.logger ?? logger_consoleLogger;
+    return {
+        async verifyAccess() {
+            await ghApi("GET", `/repos/${owner}/${repo}`, token);
+            log.info(`Verified access to ${owner}/${repo}`);
+        },
+        async configureBotIdentity() {
+            await git(["config", "user.name", "github-actions[bot]"]);
+            await git(["config", "user.email", "github-actions[bot]@users.noreply.github.com"]);
+            log.debug("Configured git bot identity");
+        },
+        async createBranch(name) {
+            await git(["checkout", "-b", name]);
+            log.info(`Created branch: ${name}`);
+        },
+        async pushBranch(name) {
+            await git(["remote", "set-url", "origin", `https://x-access-token:${token}@github.com/${owner}/${repo}.git`]);
+            await git(["push", "origin", name]);
+            log.info(`Pushed branch: ${name}`);
+        },
+        async hasChanges() {
+            const unstaged = await git(["diff", "--name-only", "--", ".", ":!.github/triage-analysis", ":!.github/workflows"], { ignoreReturnCode: true });
+            const staged = await git(["diff", "--cached", "--name-only", "--", ".", ":!.github/triage-analysis", ":!.github/workflows"], { ignoreReturnCode: true });
+            return unstaged.trim().length > 0 || staged.trim().length > 0;
+        },
+        async hasNewCommits() {
+            const output = await git(["rev-list", "--count", `HEAD`, `^origin/${baseBranch}`], { ignoreReturnCode: true });
+            const count = parseInt(output.trim(), 10);
+            return !isNaN(count) && count > 0;
+        },
+        async getChangedFiles() {
+            const output = await git(["diff", "--name-only", `origin/${baseBranch}..HEAD`], { ignoreReturnCode: true });
+            return output.trim().split("\n").filter(Boolean);
+        },
+        async resetPaths(paths) {
+            for (const p of paths) {
+                await git(["checkout", "HEAD", "--", p], { ignoreReturnCode: true });
+            }
+            log.debug(`Reset paths: ${paths.join(", ")}`);
+        },
+        async stageAndCommit(message) {
+            await git(["add", "-A", "--", ".", ":!.github/triage-analysis", ":!.github/workflows"]);
+            await git(["commit", "-m", message]);
+        },
+        async createPullRequest(opts) {
+            const body = {
+                title: opts.title,
+                head: opts.head,
+                base: opts.base || baseBranch,
+                body: opts.body,
+            };
+            const pr = (await ghApi("POST", `/repos/${owner}/${repo}/pulls`, token, body));
+            log.info(`Created PR #${pr.number}: ${pr.html_url}`);
+            if (opts.labels && opts.labels.length > 0) {
+                await ghApi("POST", `/repos/${owner}/${repo}/issues/${pr.number}/labels`, token, { labels: opts.labels });
+            }
+            return { number: pr.number, url: pr.html_url, state: "open", title: opts.title };
+        },
+        async listPullRequests(opts) {
+            const state = opts?.state ?? "open";
+            const limit = opts?.limit ?? 30;
+            const params = new URLSearchParams({
+                state: state === "merged" ? "closed" : state,
+                per_page: String(limit),
+                sort: "updated",
+                direction: "desc",
+            });
+            const prs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?${params}`, token));
+            const labelFilter = opts?.labels?.length ? new Set(opts.labels.map((l) => l.toLowerCase())) : null;
+            const results = [];
+            for (const pr of prs) {
+                // Determine normalized state
+                const prState = pr.merged_at ? "merged" : pr.state === "open" ? "open" : "closed";
+                // Filter by requested state (handle "merged" vs "closed")
+                if (state === "merged" && !pr.merged_at)
+                    continue;
+                // Filter by labels
+                if (labelFilter) {
+                    const prLabels = pr.labels.map((l) => l.name.toLowerCase());
+                    if (!prLabels.some((l) => labelFilter.has(l)))
+                        continue;
+                }
+                results.push({
+                    number: pr.number,
+                    url: pr.html_url,
+                    state: prState,
+                    title: pr.title,
+                    mergedAt: pr.merged_at,
+                    closedAt: pr.closed_at,
+                });
+            }
+            return results;
+        },
+        async findExistingPr(searchTerm) {
+            // Search open PRs
+            const openPrs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?state=open&per_page=20`, token));
+            for (const pr of openPrs) {
+                const text = `${pr.title} ${pr.body || ""}`;
+                if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+                    log.info(`Found open PR with match: ${pr.html_url}`);
+                    return { number: pr.number, url: pr.html_url, state: "open", title: pr.title };
+                }
+            }
+            // Search recently merged PRs (last 30 days)
+            const closedPrs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?state=closed&per_page=20&sort=updated&direction=desc`, token));
+            const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+            for (const pr of closedPrs) {
+                if (pr.merged_at && new Date(pr.merged_at) > cutoff) {
+                    const text = `${pr.title} ${pr.body || ""}`;
+                    if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+                        log.info(`Found merged PR with match: ${pr.html_url}`);
+                        return { number: pr.number, url: pr.html_url, state: "merged", title: pr.title };
+                    }
+                }
+            }
+            return null;
+        },
+        async dispatchWorkflow(opts) {
+            const targetParts = opts.targetRepo.split("/");
+            const targetOwner = targetParts[0] ?? owner;
+            const targetRepoName = targetParts[1] ?? opts.targetRepo;
+            await ghApi("POST", `/repos/${targetOwner}/${targetRepoName}/actions/workflows/${encodeURIComponent(opts.workflow)}/dispatches`, token, { ref: baseBranch, inputs: opts.inputs ?? {} });
+            log.info(`Dispatched workflow "${opts.workflow}" to ${opts.targetRepo}`);
+        },
+    };
+}
+//# sourceMappingURL=github.js.map
+;// CONCATENATED MODULE: ../providers/dist/source-control/gitlab.js
+
+
+
+
+const gitlab_execFileAsync = (0,external_node_util_.promisify)(external_node_child_process_.execFile);
+const gitlabConfigSchema = objectType({
+    token: stringType().min(1, "GitLab token is required"),
+    projectId: unionType([stringType().min(1), numberType()]),
+    baseUrl: stringType().default("https://gitlab.com"),
+    baseBranch: stringType().default("main"),
+    logger: custom().optional(),
+});
+async function gitlab_git(args, opts) {
+    try {
+        const { stdout } = await gitlab_execFileAsync("git", args);
+        return stdout;
+    }
+    catch (err) {
+        if (opts?.ignoreReturnCode)
+            return "";
+        throw err;
+    }
+}
+async function glApi(method, path, baseUrl, token, body) {
+    const resp = await fetch(`${baseUrl}/api/v4${path}`, {
+        method,
+        headers: {
+            "PRIVATE-TOKEN": token,
+            ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`GitLab API ${method} ${path} failed (${resp.status}): ${text}`);
+    }
+    // Some endpoints (204 No Content) return no body
+    const contentLength = resp.headers.get("content-length");
+    if (resp.status === 204 || contentLength === "0")
+        return undefined;
+    return resp.json();
+}
+/** Map GitLab MR state to our normalized PullRequest state */
+function mapMrState(state, mergedAt) {
+    if (mergedAt || state === "merged")
+        return "merged";
+    if (state === "opened")
+        return "open";
+    return "closed";
+}
+/** Map our PrListOptions state to GitLab MR state query param */
+function toGitLabState(state) {
+    switch (state) {
+        case "open":
+            return "opened";
+        case "all":
+            return "all";
+        default:
+            return state; // "closed", "merged" pass through
+    }
+}
+function gitlab(config) {
+    const parsed = gitlabConfigSchema.parse(config);
+    const { token, baseBranch } = parsed;
+    const baseUrl = parsed.baseUrl.replace(/\/+$/, "");
+    const projectId = typeof parsed.projectId === "number" ? String(parsed.projectId) : encodeURIComponent(parsed.projectId);
+    const log = parsed.logger ?? consoleLogger;
+    return {
+        async verifyAccess() {
+            const project = (await glApi("GET", `/projects/${projectId}`, baseUrl, token));
+            log.info(`Verified access to ${project.path_with_namespace}`);
+        },
+        async configureBotIdentity() {
+            await gitlab_git(["config", "user.name", "gitlab-bot"]);
+            await gitlab_git(["config", "user.email", "gitlab-bot@noreply.gitlab.com"]);
+            log.debug("Configured git bot identity");
+        },
+        async createBranch(name) {
+            await gitlab_git(["checkout", "-b", name]);
+            log.info(`Created branch: ${name}`);
+        },
+        async pushBranch(name) {
+            // Retrieve the project path for constructing the remote URL
+            const project = (await glApi("GET", `/projects/${projectId}`, baseUrl, token));
+            const host = new URL(baseUrl).host;
+            const remoteUrl = `https://gitlab-ci-token@${host}/${project.path_with_namespace}.git`;
+            await gitlab_git(["remote", "set-url", "origin", remoteUrl]);
+            // Push using http.extraheader to provide the token without exposing it in the URL
+            await gitlab_execFileAsync("git", ["-c", `http.extraheader=PRIVATE-TOKEN: ${token}`, "push", "origin", name]);
+            log.info(`Pushed branch: ${name}`);
+        },
+        async hasChanges() {
+            const unstaged = await gitlab_git(["diff", "--name-only"], { ignoreReturnCode: true });
+            const staged = await gitlab_git(["diff", "--cached", "--name-only"], { ignoreReturnCode: true });
+            return unstaged.trim().length > 0 || staged.trim().length > 0;
+        },
+        async hasNewCommits() {
+            const output = await gitlab_git(["rev-list", "--count", "HEAD", `^origin/${baseBranch}`], { ignoreReturnCode: true });
+            const count = parseInt(output.trim(), 10);
+            return !isNaN(count) && count > 0;
+        },
+        async getChangedFiles() {
+            const output = await gitlab_git(["diff", "--name-only", `origin/${baseBranch}..HEAD`], { ignoreReturnCode: true });
+            return output.trim().split("\n").filter(Boolean);
+        },
+        async resetPaths(paths) {
+            for (const p of paths) {
+                await gitlab_git(["checkout", "HEAD", "--", p], { ignoreReturnCode: true });
+            }
+            log.debug(`Reset paths: ${paths.join(", ")}`);
+        },
+        async stageAndCommit(message) {
+            await gitlab_git(["add", "-A"]);
+            await gitlab_git(["commit", "-m", message]);
+        },
+        async createPullRequest(opts) {
+            const body = {
+                title: opts.title,
+                description: opts.body,
+                source_branch: opts.head,
+                target_branch: opts.base || baseBranch,
+            };
+            if (opts.labels && opts.labels.length > 0) {
+                body.labels = opts.labels.join(",");
+            }
+            const mr = (await glApi("POST", `/projects/${projectId}/merge_requests`, baseUrl, token, body));
+            log.info(`Created MR !${mr.iid}: ${mr.web_url}`);
+            return {
+                number: mr.iid,
+                url: mr.web_url,
+                state: "open",
+                title: mr.title,
+            };
+        },
+        async listPullRequests(opts) {
+            const state = opts?.state ?? "open";
+            const limit = opts?.limit ?? 30;
+            const params = new URLSearchParams({
+                state: toGitLabState(state),
+                per_page: String(limit),
+                order_by: "updated_at",
+                sort: "desc",
+            });
+            if (opts?.labels && opts.labels.length > 0) {
+                params.set("labels", opts.labels.join(","));
+            }
+            const mrs = (await glApi("GET", `/projects/${projectId}/merge_requests?${params}`, baseUrl, token));
+            return mrs.map((mr) => ({
+                number: mr.iid,
+                url: mr.web_url,
+                state: mapMrState(mr.state, mr.merged_at),
+                title: mr.title,
+                mergedAt: mr.merged_at,
+                closedAt: mr.closed_at,
+            }));
+        },
+        async findExistingPr(searchTerm) {
+            // Search open MRs
+            const openParams = new URLSearchParams({
+                state: "opened",
+                search: searchTerm,
+                per_page: "20",
+            });
+            const openMrs = (await glApi("GET", `/projects/${projectId}/merge_requests?${openParams}`, baseUrl, token));
+            for (const mr of openMrs) {
+                const text = `${mr.title} ${mr.description || ""}`;
+                if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+                    log.info(`Found open MR with match: ${mr.web_url}`);
+                    return {
+                        number: mr.iid,
+                        url: mr.web_url,
+                        state: "open",
+                        title: mr.title,
+                    };
+                }
+            }
+            // Search recently merged MRs
+            const mergedParams = new URLSearchParams({
+                state: "merged",
+                search: searchTerm,
+                order_by: "updated_at",
+                sort: "desc",
+                per_page: "20",
+            });
+            const mergedMrs = (await glApi("GET", `/projects/${projectId}/merge_requests?${mergedParams}`, baseUrl, token));
+            const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+            for (const mr of mergedMrs) {
+                if (mr.merged_at && new Date(mr.merged_at) > cutoff) {
+                    const text = `${mr.title} ${mr.description || ""}`;
+                    if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+                        log.info(`Found merged MR with match: ${mr.web_url}`);
+                        return {
+                            number: mr.iid,
+                            url: mr.web_url,
+                            state: "merged",
+                            title: mr.title,
+                            mergedAt: mr.merged_at,
+                        };
+                    }
+                }
+            }
+            return null;
+        },
+        async dispatchWorkflow(opts) {
+            // GitLab triggers pipelines via POST /projects/:id/pipeline
+            // The targetRepo can override the project; the workflow field is used as the ref
+            const targetProjectId = opts.targetRepo ? encodeURIComponent(opts.targetRepo) : projectId;
+            const variables = opts.inputs
+                ? Object.entries(opts.inputs).map(([key, value]) => ({
+                    key,
+                    value,
+                    variable_type: "env_var",
+                }))
+                : [];
+            await glApi("POST", `/projects/${targetProjectId}/pipeline`, baseUrl, token, {
+                ref: opts.workflow || baseBranch,
+                variables,
+            });
+            log.info(`Triggered pipeline on ref "${opts.workflow}" for project ${opts.targetRepo || projectId}`);
+        },
+    };
+}
+//# sourceMappingURL=gitlab.js.map
+;// CONCATENATED MODULE: ../providers/dist/source-control/index.js
+
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../providers/dist/incident/pagerduty.js
+
+
+const pagerdutyConfigSchema = objectType({
+    apiToken: stringType().min(1, "PagerDuty API token is required"),
+    routingKey: stringType().min(1, "PagerDuty routing key (integration key) is required"),
+    logger: custom().optional(),
+});
+function pagerduty(config) {
+    const parsed = pagerdutyConfigSchema.parse(config);
+    return new PagerDutyProvider(parsed);
+}
+class PagerDutyProvider {
+    apiToken;
+    routingKey;
+    log;
+    constructor(config) {
+        this.apiToken = config.apiToken;
+        this.routingKey = config.routingKey;
+        this.log = config.logger ?? consoleLogger;
+    }
+    async apiRequest(path, opts) {
+        const url = `https://api.pagerduty.com${path}`;
+        const response = await fetch(url, {
+            method: opts?.method ?? "GET",
+            headers: {
+                Authorization: `Token token=${this.apiToken}`,
+                "Content-Type": "application/json",
+                Accept: "application/vnd.pagerduty+json;version=2",
+            },
+            body: opts?.body ? JSON.stringify(opts.body) : undefined,
+        });
+        if (!response.ok) {
+            throw new Error(`PagerDuty API error: ${response.status} ${response.statusText}`);
+        }
+        return (await response.json());
+    }
+    async verifyAccess() {
+        this.log.info("Verifying PagerDuty access...");
+        await this.apiRequest("/abilities");
+        this.log.info("PagerDuty API access verified");
+    }
+    async createIncident(opts) {
+        this.log.info(`Creating PagerDuty incident: ${opts.title}`);
+        // Use Events API v2 for triggering
+        const response = await fetch("https://events.pagerduty.com/v2/enqueue", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                routing_key: this.routingKey,
+                event_action: "trigger",
+                payload: {
+                    summary: opts.title,
+                    severity: opts.urgency === "low" ? "warning" : "critical",
+                    source: "sweny",
+                    ...(opts.description ? { custom_details: { description: opts.description } } : {}),
+                },
+            }),
+        });
+        if (!response.ok) {
+            throw new Error(`PagerDuty Events API error: ${response.status} ${response.statusText}`);
+        }
+        const result = (await response.json());
+        this.log.info(`PagerDuty incident triggered (dedup_key: ${result.dedup_key})`);
+        return {
+            id: result.dedup_key,
+            title: opts.title,
+            status: "triggered",
+            urgency: opts.urgency ?? "high",
+            url: `https://app.pagerduty.com`,
+        };
+    }
+    async acknowledgeIncident(id) {
+        this.log.info(`Acknowledging PagerDuty incident ${id}`);
+        await fetch("https://events.pagerduty.com/v2/enqueue", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                routing_key: this.routingKey,
+                event_action: "acknowledge",
+                dedup_key: id,
+            }),
+        });
+        this.log.info(`PagerDuty incident ${id} acknowledged`);
+    }
+    async resolveIncident(id, resolution) {
+        this.log.info(`Resolving PagerDuty incident ${id}`);
+        await fetch("https://events.pagerduty.com/v2/enqueue", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                routing_key: this.routingKey,
+                event_action: "resolve",
+                dedup_key: id,
+                ...(resolution ? { payload: { summary: resolution, source: "sweny", severity: "info" } } : {}),
+            }),
+        });
+        this.log.info(`PagerDuty incident ${id} resolved`);
+    }
+    async getOnCall(scheduleId) {
+        this.log.info("Fetching PagerDuty on-call schedule");
+        const params = scheduleId ? `?schedule_ids[]=${scheduleId}` : "";
+        const result = await this.apiRequest(`/oncalls${params}`);
+        const entries = result.oncalls.map((oc) => ({
+            userId: oc.user.id,
+            name: oc.user.name,
+            email: oc.user.email,
+        }));
+        this.log.info(`Found ${entries.length} on-call entries`);
+        return entries;
+    }
+}
+//# sourceMappingURL=pagerduty.js.map
+;// CONCATENATED MODULE: ../providers/dist/incident/opsgenie.js
+
+
+const opsgenieConfigSchema = objectType({
+    apiKey: stringType().min(1, "OpsGenie API key is required"),
+    region: enumType(["us", "eu"]).default("us"),
+    logger: custom().optional(),
+});
+function opsgenie(config) {
+    const parsed = opsgenieConfigSchema.parse(config);
+    return new OpsGenieProvider(parsed);
+}
+class OpsGenieProvider {
+    apiKey;
+    baseUrl;
+    log;
+    constructor(config) {
+        this.apiKey = config.apiKey;
+        this.baseUrl = config.region === "eu" ? "https://api.eu.opsgenie.com" : "https://api.opsgenie.com";
+        this.log = config.logger ?? consoleLogger;
+    }
+    async apiRequest(path, opts) {
+        const url = `${this.baseUrl}${path}`;
+        const response = await fetch(url, {
+            method: opts?.method ?? "GET",
+            headers: {
+                Authorization: `GenieKey ${this.apiKey}`,
+                "Content-Type": "application/json",
+            },
+            body: opts?.body ? JSON.stringify(opts.body) : undefined,
+        });
+        if (!response.ok) {
+            throw new Error(`OpsGenie API error: ${response.status} ${response.statusText}`);
+        }
+        return (await response.json());
+    }
+    async verifyAccess() {
+        this.log.info("Verifying OpsGenie access...");
+        await this.apiRequest("/v2/account");
+        this.log.info("OpsGenie API access verified");
+    }
+    async createIncident(opts) {
+        this.log.info(`Creating OpsGenie alert: ${opts.title}`);
+        const priority = opts.urgency === "low" ? "P3" : "P1";
+        const result = await this.apiRequest("/v2/alerts", {
+            method: "POST",
+            body: {
+                message: opts.title,
+                ...(opts.description ? { description: opts.description } : {}),
+                priority,
+                ...(opts.serviceId ? { tags: [opts.serviceId] } : {}),
+            },
+        });
+        this.log.info(`OpsGenie alert created (id: ${result.data.alertId})`);
+        return {
+            id: result.data.alertId,
+            title: opts.title,
+            status: "triggered",
+            urgency: opts.urgency ?? "high",
+            url: `${this.baseUrl}/alert/detail/${result.data.alertId}`,
+            ...(opts.serviceId ? { service: opts.serviceId } : {}),
+        };
+    }
+    async acknowledgeIncident(id) {
+        this.log.info(`Acknowledging OpsGenie alert ${id}`);
+        await this.apiRequest(`/v2/alerts/${id}/acknowledge`, {
+            method: "POST",
+            body: {},
+        });
+        this.log.info(`OpsGenie alert ${id} acknowledged`);
+    }
+    async resolveIncident(id, resolution) {
+        this.log.info(`Resolving OpsGenie alert ${id}`);
+        await this.apiRequest(`/v2/alerts/${id}/close`, {
+            method: "POST",
+            body: {
+                ...(resolution ? { note: resolution } : {}),
+            },
+        });
+        this.log.info(`OpsGenie alert ${id} resolved`);
+    }
+    async getOnCall(scheduleId) {
+        this.log.info("Fetching OpsGenie on-call schedule");
+        let resolvedScheduleId = scheduleId;
+        if (!resolvedScheduleId) {
+            const schedulesResult = await this.apiRequest("/v2/schedules");
+            if (schedulesResult.data.length === 0) {
+                this.log.warn("No OpsGenie schedules found");
+                return [];
+            }
+            resolvedScheduleId = schedulesResult.data[0].id;
+            this.log.info(`Using first schedule: ${schedulesResult.data[0].name} (${resolvedScheduleId})`);
+        }
+        const result = await this.apiRequest(`/v2/schedules/${resolvedScheduleId}/on-calls`);
+        const entries = result.data.onCallParticipants.map((participant) => ({
+            userId: participant.id,
+            name: participant.name,
+        }));
+        this.log.info(`Found ${entries.length} on-call entries`);
+        return entries;
+    }
+}
+//# sourceMappingURL=opsgenie.js.map
+;// CONCATENATED MODULE: ../providers/dist/incident/index.js
+
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../providers/dist/messaging/slack.js
+
+function slack(config) {
+    const log = config.logger ?? consoleLogger;
+    // Lazy-load @slack/web-api to keep it optional
+    let clientPromise = null;
+    async function getClient() {
+        if (!clientPromise) {
+            clientPromise = __nccwpck_require__.e(/* import() */ 461).then(__nccwpck_require__.t.bind(__nccwpck_require__, 3461, 19)).then((mod) => new mod.WebClient(config.token));
+        }
+        return clientPromise;
+    }
+    return {
+        async sendMessage(msg) {
+            const client = await getClient();
+            const result = await client.chat.postMessage({
+                channel: msg.channelId,
+                text: msg.text,
+                ...(msg.threadId ? { thread_ts: msg.threadId } : {}),
+                ...(msg.format === "markdown" ? { mrkdwn: true } : {}),
+            });
+            log.debug(`Sent message to ${msg.channelId}`);
+            return { messageId: result.ts ?? "" };
+        },
+        async updateMessage(channelId, messageId, text) {
+            const client = await getClient();
+            await client.chat.update({
+                channel: channelId,
+                ts: messageId,
+                text,
+            });
+            log.debug(`Updated message ${messageId} in ${channelId}`);
+        },
+    };
+}
+//# sourceMappingURL=slack.js.map
+;// CONCATENATED MODULE: ../providers/dist/messaging/teams.js
+
+
+const teamsConfigSchema = objectType({
+    tenantId: stringType().min(1, "Azure AD tenant ID is required"),
+    clientId: stringType().min(1, "Azure AD client ID is required"),
+    clientSecret: stringType().min(1, "Azure AD client secret is required"),
+    logger: custom().optional(),
+});
+function teams(config) {
+    const parsed = teamsConfigSchema.parse(config);
+    const log = parsed.logger ?? consoleLogger;
+    let tokenCache = null;
+    async function getAccessToken() {
+        if (tokenCache && Date.now() < tokenCache.expiresAt) {
+            return tokenCache.accessToken;
+        }
+        const tokenUrl = `https://login.microsoftonline.com/${parsed.tenantId}/oauth2/v2.0/token`;
+        const body = new URLSearchParams({
+            client_id: parsed.clientId,
+            client_secret: parsed.clientSecret,
+            scope: "https://graph.microsoft.com/.default",
+            grant_type: "client_credentials",
+        });
+        const response = await fetch(tokenUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString(),
+        });
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(`Failed to acquire access token: ${response.status} ${text}`);
+        }
+        const data = (await response.json());
+        // Cache the token with a 5-minute safety margin
+        tokenCache = {
+            accessToken: data.access_token,
+            expiresAt: Date.now() + (data.expires_in - 300) * 1000,
+        };
+        log.debug("Acquired new Microsoft Graph access token");
+        return tokenCache.accessToken;
+    }
+    function parseChannelId(channelId) {
+        const separatorIndex = channelId.indexOf("/");
+        if (separatorIndex === -1) {
+            throw new Error(`Invalid channelId format: expected "teamId/channelId", got "${channelId}"`);
+        }
+        return {
+            teamId: channelId.slice(0, separatorIndex),
+            channelId: channelId.slice(separatorIndex + 1),
+        };
+    }
+    return {
+        async sendMessage(msg) {
+            const token = await getAccessToken();
+            const { teamId, channelId } = parseChannelId(msg.channelId);
+            const url = `https://graph.microsoft.com/v1.0/teams/${teamId}/channels/${channelId}/messages`;
+            const contentType = msg.format === "markdown" ? "html" : "text";
+            const payload = {
+                body: {
+                    contentType,
+                    content: msg.text,
+                },
+            };
+            if (msg.threadId) {
+                // Reply to an existing message thread
+                const replyUrl = `${url}/${msg.threadId}/replies`;
+                const response = await fetch(replyUrl, {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(payload),
+                });
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(`Failed to send reply to Teams: ${response.status} ${text}`);
+                }
+                const data = (await response.json());
+                log.debug(`Sent reply to ${msg.channelId} in thread ${msg.threadId}`);
+                return { messageId: data.id };
+            }
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Failed to send message to Teams: ${response.status} ${text}`);
+            }
+            const data = (await response.json());
+            log.debug(`Sent message to ${msg.channelId}`);
+            return { messageId: data.id };
+        },
+        async updateMessage(channelId, messageId, text) {
+            const token = await getAccessToken();
+            const { teamId, channelId: channelPart } = parseChannelId(channelId);
+            const url = `https://graph.microsoft.com/v1.0/teams/${teamId}/channels/${channelPart}/messages/${messageId}`;
+            const response = await fetch(url, {
+                method: "PATCH",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    body: {
+                        contentType: "text",
+                        content: text,
+                    },
+                }),
+            });
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Failed to update Teams message: ${response.status} ${text}`);
+            }
+            log.debug(`Updated message ${messageId} in ${channelId}`);
+        },
+    };
+}
+//# sourceMappingURL=teams.js.map
+;// CONCATENATED MODULE: ../providers/dist/messaging/index.js
+
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../providers/dist/auth/no-auth.js
+const LOCAL_USER = {
+    userId: "local",
+    displayName: "Local User",
+    roles: ["admin"],
+    metadata: {},
+};
+function noAuth() {
+    return {
+        displayName: "No Auth",
+        async authenticate(_userId) {
+            return LOCAL_USER;
+        },
+        async hasValidSession(_userId) {
+            return true;
+        },
+        async clearSession(_userId) {
+            // nothing to clear
+        },
+    };
+}
+//# sourceMappingURL=no-auth.js.map
+;// CONCATENATED MODULE: ../providers/dist/auth/index.js
+
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../providers/dist/access/types.js
+/** Permission levels ordered from least to most privileged. */
+var types_AccessLevel;
+(function (AccessLevel) {
+    /** User is not allowed any access. */
+    AccessLevel["FORBIDDEN"] = "forbidden";
+    /** User may only read / query data. */
+    AccessLevel["READ_ONLY"] = "read_only";
+    /** User may read and write / mutate data. */
+    AccessLevel["READ_WRITE"] = "read_write";
+    /** User has full administrative access. */
+    AccessLevel["ADMIN"] = "admin";
+})(types_AccessLevel || (types_AccessLevel = {}));
+/** Error thrown when a user's access level is insufficient for an operation. */
+class types_AccessDeniedError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = "AccessDeniedError";
+    }
+}
+//# sourceMappingURL=types.js.map
+;// CONCATENATED MODULE: ../providers/dist/access/allow-all.js
+
+class AllowAllGuard {
+    resolveAccessLevel(_user) {
+        return AccessLevel.READ_WRITE;
+    }
+    assertNotForbidden(_user) {
+        // all users are allowed
+    }
+    assertCanQuery(_user) {
+        // all users can query
+    }
+    assertCanMutate(_user) {
+        // all users can mutate
+    }
+}
+function allowAllGuard() {
+    return new AllowAllGuard();
+}
+//# sourceMappingURL=allow-all.js.map
+;// CONCATENATED MODULE: ../providers/dist/access/role-based.js
+
+class RoleBasedGuard {
+    mapping;
+    constructor(mapping) {
+        this.mapping = mapping;
+    }
+    resolveAccessLevel(user) {
+        const userRoles = new Set(user.roles);
+        if (this.mapping.admin?.some((r) => userRoles.has(r))) {
+            return AccessLevel.ADMIN;
+        }
+        if (this.mapping.readWrite?.some((r) => userRoles.has(r))) {
+            return AccessLevel.READ_WRITE;
+        }
+        if (this.mapping.readOnly?.some((r) => userRoles.has(r))) {
+            return AccessLevel.READ_ONLY;
+        }
+        return AccessLevel.FORBIDDEN;
+    }
+    assertNotForbidden(user) {
+        const level = this.resolveAccessLevel(user);
+        if (level === AccessLevel.FORBIDDEN) {
+            throw new AccessDeniedError(`User "${user.userId}" does not have any permitted role`);
+        }
+    }
+    assertCanQuery(user) {
+        const level = this.resolveAccessLevel(user);
+        if (level === AccessLevel.FORBIDDEN) {
+            throw new AccessDeniedError(`User "${user.userId}" does not have read access`);
+        }
+    }
+    assertCanMutate(user) {
+        const level = this.resolveAccessLevel(user);
+        if (level === AccessLevel.FORBIDDEN || level === AccessLevel.READ_ONLY) {
+            throw new AccessDeniedError(`User "${user.userId}" does not have write access`);
+        }
+    }
+}
+function roleBasedGuard(mapping) {
+    return new RoleBasedGuard(mapping);
+}
+//# sourceMappingURL=role-based.js.map
+;// CONCATENATED MODULE: ../providers/dist/access/index.js
+
+
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../providers/dist/storage/types.js
+// ---------------------------------------------------------------------------
+// Session
+// ---------------------------------------------------------------------------
+/** Hard limits for workspace storage. */
+const types_WORKSPACE_LIMITS = {
+    maxTotalBytes: 50 * 1024 * 1024,
+    maxFileBytes: 5 * 1024 * 1024,
+    maxFiles: 500,
+};
+//# sourceMappingURL=types.js.map
+// EXTERNAL MODULE: external "node:fs/promises"
+var promises_ = __nccwpck_require__(1455);
+// EXTERNAL MODULE: external "node:path"
+var external_node_path_ = __nccwpck_require__(6760);
+;// CONCATENATED MODULE: ../providers/dist/storage/session/fs.js
+
+
+
+class fs_FsSessionStore {
+    baseDir;
+    logger;
+    constructor(baseDir, logger) {
+        this.baseDir = baseDir;
+        this.logger = logger ?? consoleLogger;
+    }
+    sessionDir(userId, threadKey) {
+        return join(this.baseDir, "users", userId, "sessions", threadKey);
+    }
+    metadataPath(userId, threadKey) {
+        return join(this.sessionDir(userId, threadKey), "metadata.json");
+    }
+    transcriptPath(userId, threadKey) {
+        return join(this.sessionDir(userId, threadKey), "transcript.jsonl");
+    }
+    async load(userId, threadKey) {
+        try {
+            const data = await readFile(this.metadataPath(userId, threadKey), "utf-8");
+            return JSON.parse(data);
+        }
+        catch (err) {
+            if (err.code !== "ENOENT") {
+                this.logger.error("[session-store] Failed to load session:", err);
+            }
+        }
+        return null;
+    }
+    async save(userId, threadKey, session) {
+        const path = this.metadataPath(userId, threadKey);
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, JSON.stringify(session, null, 2), "utf-8");
+    }
+    async appendTranscript(userId, threadKey, entry) {
+        const path = this.transcriptPath(userId, threadKey);
+        await mkdir(dirname(path), { recursive: true });
+        await appendFile(path, JSON.stringify(entry) + "\n", "utf-8");
+    }
+    async getTranscript(userId, threadKey) {
+        try {
+            const data = await readFile(this.transcriptPath(userId, threadKey), "utf-8");
+            return data
+                .trim()
+                .split("\n")
+                .filter((line) => line.length > 0)
+                .map((line) => JSON.parse(line));
+        }
+        catch (err) {
+            if (err.code !== "ENOENT") {
+                this.logger.error("[session-store] Failed to read transcript:", err);
+            }
+        }
+        return [];
+    }
+    async listSessions(userId) {
+        const { readdir } = await Promise.resolve(/* import() */).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1455, 19));
+        const sessionsDir = join(this.baseDir, "users", userId, "sessions");
+        try {
+            const entries = await readdir(sessionsDir, { withFileTypes: true });
+            const sessions = [];
+            for (const entry of entries) {
+                if (entry.isDirectory()) {
+                    const session = await this.load(userId, entry.name);
+                    if (session)
+                        sessions.push(session);
+                }
+            }
+            return sessions;
+        }
+        catch (err) {
+            if (err.code !== "ENOENT") {
+                this.logger.error("[session-store] Failed to list sessions:", err);
+            }
+        }
+        return [];
+    }
+}
+//# sourceMappingURL=fs.js.map
+// EXTERNAL MODULE: external "node:crypto"
+var external_node_crypto_ = __nccwpck_require__(7598);
+;// CONCATENATED MODULE: ../providers/dist/storage/memory/fs.js
+
+
+
+
+class fs_FsMemoryStore {
+    baseDir;
+    cache = new Map();
+    logger;
+    constructor(baseDir, logger) {
+        this.baseDir = baseDir;
+        this.logger = logger ?? consoleLogger;
+    }
+    filePath(userId) {
+        return join(this.baseDir, "users", userId, "memory.json");
+    }
+    async getMemories(userId) {
+        const cached = this.cache.get(userId);
+        if (cached)
+            return cached;
+        try {
+            const data = await readFile(this.filePath(userId), "utf-8");
+            const memory = JSON.parse(data);
+            this.cache.set(userId, memory);
+            return memory;
+        }
+        catch (err) {
+            if (err.code !== "ENOENT") {
+                this.logger.error("[memory] Failed to load memories:", err);
+            }
+        }
+        const empty = { entries: [] };
+        this.cache.set(userId, empty);
+        return empty;
+    }
+    async save(userId, memory) {
+        this.cache.set(userId, memory);
+        const path = this.filePath(userId);
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, JSON.stringify(memory, null, 2), "utf-8");
+    }
+    async addEntry(userId, text) {
+        const memory = await this.getMemories(userId);
+        const entry = {
+            id: randomBytes(4).toString("hex"),
+            text,
+            createdAt: new Date().toISOString(),
+        };
+        memory.entries.push(entry);
+        await this.save(userId, memory);
+        return entry;
+    }
+    async removeEntry(userId, entryId) {
+        const memory = await this.getMemories(userId);
+        const idx = memory.entries.findIndex((e) => e.id === entryId);
+        if (idx === -1)
+            return false;
+        memory.entries.splice(idx, 1);
+        await this.save(userId, memory);
+        return true;
+    }
+    async clearMemories(userId) {
+        await this.save(userId, { entries: [] });
+    }
+}
+//# sourceMappingURL=fs.js.map
+// EXTERNAL MODULE: external "node:fs"
+var external_node_fs_ = __nccwpck_require__(3024);
+;// CONCATENATED MODULE: ../providers/dist/storage/workspace/fs.js
+
+
+
+
+
+
+function emptyManifest(userId) {
+    const now = new Date().toISOString();
+    return { userId, createdAt: now, updatedAt: now, totalBytes: 0, files: [] };
+}
+function guessMimeType(path) {
+    const ext = path.split(".").pop()?.toLowerCase() ?? "";
+    const map = {
+        json: "application/json",
+        txt: "text/plain",
+        log: "text/plain",
+        md: "text/markdown",
+        csv: "text/csv",
+        xml: "application/xml",
+        yaml: "text/yaml",
+        yml: "text/yaml",
+        ts: "text/typescript",
+        js: "text/javascript",
+        py: "text/x-python",
+        sh: "text/x-shellscript",
+        html: "text/html",
+        css: "text/css",
+        sql: "text/x-sql",
+    };
+    return map[ext] ?? "text/plain";
+}
+class fs_FsWorkspaceStore {
+    baseDir;
+    cache = new Map();
+    logger;
+    constructor(baseDir, logger) {
+        this.baseDir = baseDir;
+        this.logger = logger ?? consoleLogger;
+    }
+    manifestPath(userId) {
+        return join(this.baseDir, "users", userId, "workspace", "manifest.json");
+    }
+    blobPath(userId, blobId) {
+        return join(this.baseDir, "users", userId, "workspace", "blobs", blobId);
+    }
+    async getManifest(userId) {
+        const cached = this.cache.get(userId);
+        if (cached)
+            return cached;
+        try {
+            const data = await readFile(this.manifestPath(userId), "utf-8");
+            const manifest = JSON.parse(data);
+            this.cache.set(userId, manifest);
+            return manifest;
+        }
+        catch (err) {
+            if (err.code !== "ENOENT") {
+                this.logger.error("[workspace] Failed to load manifest:", err);
+            }
+        }
+        const empty = emptyManifest(userId);
+        this.cache.set(userId, empty);
+        return empty;
+    }
+    async saveManifest(userId, manifest) {
+        manifest.updatedAt = new Date().toISOString();
+        this.cache.set(userId, manifest);
+        const path = this.manifestPath(userId);
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, JSON.stringify(manifest, null, 2), "utf-8");
+    }
+    async readFile(userId, path) {
+        const manifest = await this.getManifest(userId);
+        const file = manifest.files.find((f) => f.path === path);
+        if (!file)
+            throw new Error(`File not found in workspace: ${path}`);
+        return readFile(this.blobPath(userId, file.blobId), "utf-8");
+    }
+    async writeFile(userId, path, content, description) {
+        const size = Buffer.byteLength(content, "utf-8");
+        if (size > WORKSPACE_LIMITS.maxFileBytes) {
+            throw new Error(`File too large (${size} bytes). Max: ${WORKSPACE_LIMITS.maxFileBytes} bytes.`);
+        }
+        const manifest = await this.getManifest(userId);
+        const existingIdx = manifest.files.findIndex((f) => f.path === path);
+        const existing = existingIdx >= 0 ? manifest.files[existingIdx] : undefined;
+        const existingSize = existing?.size ?? 0;
+        const newTotal = manifest.totalBytes - existingSize + size;
+        if (newTotal > WORKSPACE_LIMITS.maxTotalBytes) {
+            throw new Error(`Workspace full (${newTotal} bytes). Max: ${WORKSPACE_LIMITS.maxTotalBytes} bytes. Use workspace_delete to free space.`);
+        }
+        if (existingIdx < 0 && manifest.files.length >= WORKSPACE_LIMITS.maxFiles) {
+            throw new Error(`Too many files (${manifest.files.length}). Max: ${WORKSPACE_LIMITS.maxFiles}. Delete some first.`);
+        }
+        // Delete old blob if replacing
+        if (existing) {
+            await unlink(this.blobPath(userId, existing.blobId)).catch(() => { });
+        }
+        const blobId = randomUUID();
+        const blobFilePath = this.blobPath(userId, blobId);
+        await mkdir(dirname(blobFilePath), { recursive: true });
+        await writeFile(blobFilePath, content, "utf-8");
+        const file = {
+            path,
+            blobId,
+            size,
+            mimeType: guessMimeType(path),
+            createdAt: new Date().toISOString(),
+            description,
+        };
+        if (existingIdx >= 0) {
+            manifest.files[existingIdx] = file;
+        }
+        else {
+            manifest.files.push(file);
+        }
+        manifest.totalBytes = newTotal;
+        await this.saveManifest(userId, manifest);
+        return file;
+    }
+    async deleteFile(userId, path) {
+        const manifest = await this.getManifest(userId);
+        const idx = manifest.files.findIndex((f) => f.path === path);
+        if (idx < 0)
+            return false;
+        const file = manifest.files[idx];
+        if (!file)
+            return false;
+        await unlink(this.blobPath(userId, file.blobId)).catch(() => { });
+        manifest.files.splice(idx, 1);
+        manifest.totalBytes -= file.size;
+        await this.saveManifest(userId, manifest);
+        return true;
+    }
+    async reset(userId) {
+        const wsDir = join(this.baseDir, "users", userId, "workspace");
+        if (existsSync(wsDir)) {
+            await rm(wsDir, { recursive: true, force: true });
+        }
+        const empty = emptyManifest(userId);
+        this.cache.set(userId, empty);
+        await this.saveManifest(userId, empty);
+    }
+    async getDownloadUrl(userId, path) {
+        const manifest = await this.getManifest(userId);
+        const file = manifest.files.find((f) => f.path === path);
+        if (!file)
+            throw new Error(`File not found in workspace: ${path}`);
+        // For local FS, return the file path
+        return `file://${this.blobPath(userId, file.blobId)}`;
+    }
+}
+//# sourceMappingURL=fs.js.map
+;// CONCATENATED MODULE: ../providers/dist/storage/session/s3.js
+
+
+class s3_S3SessionStore {
+    s3;
+    bucket;
+    prefix;
+    logger;
+    constructor(bucket, prefix = "", region = "us-west-2", logger) {
+        this.s3 = new S3Client({ region });
+        this.bucket = bucket;
+        this.prefix = prefix;
+        this.logger = logger ?? consoleLogger;
+    }
+    baseKey(userId, threadKey) {
+        const base = `users/${userId}/sessions/${threadKey}`;
+        return this.prefix ? `${this.prefix}/${base}` : base;
+    }
+    metadataKey(userId, threadKey) {
+        return `${this.baseKey(userId, threadKey)}/metadata.json`;
+    }
+    transcriptKey(userId, threadKey) {
+        return `${this.baseKey(userId, threadKey)}/transcript.jsonl`;
+    }
+    async load(userId, threadKey) {
+        try {
+            const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.metadataKey(userId, threadKey) }));
+            const body = await result.Body?.transformToString("utf-8");
+            if (body)
+                return JSON.parse(body);
+        }
+        catch (err) {
+            const code = err.name;
+            if (code !== "NoSuchKey" && code !== "AccessDenied") {
+                this.logger.error("[session-store] Failed to load session:", err);
+            }
+        }
+        return null;
+    }
+    async save(userId, threadKey, session) {
+        await this.s3.send(new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: this.metadataKey(userId, threadKey),
+            Body: JSON.stringify(session, null, 2),
+            ContentType: "application/json",
+            ServerSideEncryption: "AES256",
+        }));
+    }
+    async appendTranscript(userId, threadKey, entry) {
+        const key = this.transcriptKey(userId, threadKey);
+        const line = JSON.stringify(entry) + "\n";
+        // Read existing transcript and append
+        let existing = "";
+        try {
+            const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+            existing = (await result.Body?.transformToString("utf-8")) ?? "";
+        }
+        catch (err) {
+            const code = err.name;
+            if (code !== "NoSuchKey" && code !== "AccessDenied") {
+                this.logger.error("[session-store] Failed to read transcript:", err);
+            }
+        }
+        await this.s3.send(new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: key,
+            Body: existing + line,
+            ContentType: "application/x-ndjson",
+            ServerSideEncryption: "AES256",
+        }));
+    }
+    async getTranscript(userId, threadKey) {
+        try {
+            const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.transcriptKey(userId, threadKey) }));
+            const body = await result.Body?.transformToString("utf-8");
+            if (!body)
+                return [];
+            return body
+                .trim()
+                .split("\n")
+                .filter((line) => line.length > 0)
+                .map((line) => JSON.parse(line));
+        }
+        catch (err) {
+            const code = err.name;
+            if (code !== "NoSuchKey" && code !== "AccessDenied") {
+                this.logger.error("[session-store] Failed to read transcript:", err);
+            }
+        }
+        return [];
+    }
+    async listSessions(userId) {
+        const prefix = this.prefix ? `${this.prefix}/users/${userId}/sessions/` : `users/${userId}/sessions/`;
+        const sessions = [];
+        let continuationToken;
+        do {
+            const result = await this.s3.send(new ListObjectsV2Command({
+                Bucket: this.bucket,
+                Prefix: prefix,
+                Delimiter: "/",
+                ContinuationToken: continuationToken,
+            }));
+            if (result.CommonPrefixes) {
+                for (const cp of result.CommonPrefixes) {
+                    if (!cp.Prefix)
+                        continue;
+                    // Extract threadKey from prefix: .../sessions/{threadKey}/
+                    const parts = cp.Prefix.replace(/\/$/, "").split("/");
+                    const threadKey = parts[parts.length - 1];
+                    if (!threadKey)
+                        continue;
+                    const session = await this.load(userId, threadKey);
+                    if (session)
+                        sessions.push(session);
+                }
+            }
+            continuationToken = result.NextContinuationToken;
+        } while (continuationToken);
+        return sessions;
+    }
+}
+//# sourceMappingURL=s3.js.map
+;// CONCATENATED MODULE: ../providers/dist/storage/memory/s3.js
+
+
+
+class s3_S3MemoryStore {
+    s3;
+    bucket;
+    prefix;
+    cache = new Map();
+    logger;
+    constructor(bucket, prefix = "", region = "us-west-2", logger) {
+        this.s3 = new S3Client({ region });
+        this.bucket = bucket;
+        this.prefix = prefix;
+        this.logger = logger ?? consoleLogger;
+    }
+    s3Key(userId) {
+        const base = `users/${userId}/memory.json`;
+        return this.prefix ? `${this.prefix}/${base}` : base;
+    }
+    async getMemories(userId) {
+        const cached = this.cache.get(userId);
+        if (cached)
+            return cached;
+        try {
+            const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.s3Key(userId) }));
+            const body = await result.Body?.transformToString("utf-8");
+            if (body) {
+                const memory = JSON.parse(body);
+                this.cache.set(userId, memory);
+                return memory;
+            }
+        }
+        catch (err) {
+            const code = err.name;
+            if (code !== "NoSuchKey" && code !== "AccessDenied") {
+                this.logger.error("[memory] Failed to load memories:", err);
+            }
+        }
+        const empty = { entries: [] };
+        this.cache.set(userId, empty);
+        return empty;
+    }
+    async save(userId, memory) {
+        this.cache.set(userId, memory);
+        await this.s3.send(new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: this.s3Key(userId),
+            Body: JSON.stringify(memory, null, 2),
+            ContentType: "application/json",
+            ServerSideEncryption: "AES256",
+        }));
+    }
+    async addEntry(userId, text) {
+        const memory = await this.getMemories(userId);
+        const entry = {
+            id: randomBytes(4).toString("hex"),
+            text,
+            createdAt: new Date().toISOString(),
+        };
+        memory.entries.push(entry);
+        await this.save(userId, memory);
+        return entry;
+    }
+    async removeEntry(userId, entryId) {
+        const memory = await this.getMemories(userId);
+        const idx = memory.entries.findIndex((e) => e.id === entryId);
+        if (idx === -1)
+            return false;
+        memory.entries.splice(idx, 1);
+        await this.save(userId, memory);
+        return true;
+    }
+    async clearMemories(userId) {
+        await this.save(userId, { entries: [] });
+    }
+}
+//# sourceMappingURL=s3.js.map
+;// CONCATENATED MODULE: ../providers/dist/storage/workspace/s3.js
+
+
+
+
+
+function s3_emptyManifest(userId) {
+    const now = new Date().toISOString();
+    return { userId, createdAt: now, updatedAt: now, totalBytes: 0, files: [] };
+}
+function s3_guessMimeType(path) {
+    const ext = path.split(".").pop()?.toLowerCase() ?? "";
+    const map = {
+        json: "application/json",
+        txt: "text/plain",
+        log: "text/plain",
+        md: "text/markdown",
+        csv: "text/csv",
+        xml: "application/xml",
+        yaml: "text/yaml",
+        yml: "text/yaml",
+        ts: "text/typescript",
+        js: "text/javascript",
+        py: "text/x-python",
+        sh: "text/x-shellscript",
+        html: "text/html",
+        css: "text/css",
+        sql: "text/x-sql",
+    };
+    return map[ext] ?? "text/plain";
+}
+class s3_S3WorkspaceStore {
+    s3;
+    bucket;
+    prefix;
+    cache = new Map();
+    logger;
+    constructor(bucket, prefix = "", region = "us-west-2", logger) {
+        this.s3 = new S3Client({ region });
+        this.bucket = bucket;
+        this.prefix = prefix;
+        this.logger = logger ?? consoleLogger;
+    }
+    manifestKey(userId) {
+        const base = `users/${userId}/workspace/manifest.json`;
+        return this.prefix ? `${this.prefix}/${base}` : base;
+    }
+    blobKey(userId, blobId) {
+        const base = `users/${userId}/workspace/blobs/${blobId}`;
+        return this.prefix ? `${this.prefix}/${base}` : base;
+    }
+    async getManifest(userId) {
+        const cached = this.cache.get(userId);
+        if (cached)
+            return cached;
+        try {
+            const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.manifestKey(userId) }));
+            const body = await result.Body?.transformToString("utf-8");
+            if (body) {
+                const manifest = JSON.parse(body);
+                this.cache.set(userId, manifest);
+                return manifest;
+            }
+        }
+        catch (err) {
+            const code = err.name;
+            if (code !== "NoSuchKey" && code !== "AccessDenied") {
+                this.logger.error("[workspace] Failed to load manifest:", err);
+            }
+        }
+        const empty = s3_emptyManifest(userId);
+        this.cache.set(userId, empty);
+        return empty;
+    }
+    async saveManifest(userId, manifest) {
+        manifest.updatedAt = new Date().toISOString();
+        this.cache.set(userId, manifest);
+        await this.s3.send(new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: this.manifestKey(userId),
+            Body: JSON.stringify(manifest, null, 2),
+            ContentType: "application/json",
+            ServerSideEncryption: "AES256",
+        }));
+    }
+    async readFile(userId, path) {
+        const manifest = await this.getManifest(userId);
+        const file = manifest.files.find((f) => f.path === path);
+        if (!file)
+            throw new Error(`File not found in workspace: ${path}`);
+        const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, file.blobId) }));
+        return (await result.Body?.transformToString("utf-8")) ?? "";
+    }
+    async writeFile(userId, path, content, description) {
+        const size = Buffer.byteLength(content, "utf-8");
+        if (size > WORKSPACE_LIMITS.maxFileBytes) {
+            throw new Error(`File too large (${size} bytes). Max: ${WORKSPACE_LIMITS.maxFileBytes} bytes.`);
+        }
+        const manifest = await this.getManifest(userId);
+        // Check if replacing existing file
+        const existingIdx = manifest.files.findIndex((f) => f.path === path);
+        const existing = existingIdx >= 0 ? manifest.files[existingIdx] : undefined;
+        const existingSize = existing?.size ?? 0;
+        const newTotal = manifest.totalBytes - existingSize + size;
+        if (newTotal > WORKSPACE_LIMITS.maxTotalBytes) {
+            throw new Error(`Workspace full (${newTotal} bytes). Max: ${WORKSPACE_LIMITS.maxTotalBytes} bytes. Use workspace_delete to free space.`);
+        }
+        if (existingIdx < 0 && manifest.files.length >= WORKSPACE_LIMITS.maxFiles) {
+            throw new Error(`Too many files (${manifest.files.length}). Max: ${WORKSPACE_LIMITS.maxFiles}. Delete some first.`);
+        }
+        // Delete old blob if replacing
+        if (existing) {
+            await this.s3
+                .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, existing.blobId) }))
+                .catch(() => { });
+        }
+        const blobId = randomUUID();
+        await this.s3.send(new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: this.blobKey(userId, blobId),
+            Body: content,
+            ContentType: s3_guessMimeType(path),
+            ServerSideEncryption: "AES256",
+        }));
+        const file = {
+            path,
+            blobId,
+            size,
+            mimeType: s3_guessMimeType(path),
+            createdAt: new Date().toISOString(),
+            description,
+        };
+        if (existingIdx >= 0) {
+            manifest.files[existingIdx] = file;
+        }
+        else {
+            manifest.files.push(file);
+        }
+        manifest.totalBytes = newTotal;
+        await this.saveManifest(userId, manifest);
+        return file;
+    }
+    async deleteFile(userId, path) {
+        const manifest = await this.getManifest(userId);
+        const idx = manifest.files.findIndex((f) => f.path === path);
+        if (idx < 0)
+            return false;
+        const file = manifest.files[idx];
+        if (!file)
+            return false;
+        await this.s3
+            .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, file.blobId) }))
+            .catch(() => { });
+        manifest.files.splice(idx, 1);
+        manifest.totalBytes -= file.size;
+        await this.saveManifest(userId, manifest);
+        return true;
+    }
+    async reset(userId) {
+        const manifest = await this.getManifest(userId);
+        // Delete all blobs
+        await Promise.all(manifest.files.map((f) => this.s3
+            .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, f.blobId) }))
+            .catch(() => { })));
+        // Reset manifest
+        const empty = s3_emptyManifest(userId);
+        await this.saveManifest(userId, empty);
+    }
+    async getDownloadUrl(userId, path) {
+        const manifest = await this.getManifest(userId);
+        const file = manifest.files.find((f) => f.path === path);
+        if (!file)
+            throw new Error(`File not found in workspace: ${path}`);
+        const command = new GetObjectCommand({
+            Bucket: this.bucket,
+            Key: this.blobKey(userId, file.blobId),
+        });
+        return getSignedUrl(this.s3, command, { expiresIn: 3600 });
+    }
+}
+//# sourceMappingURL=s3.js.map
+;// CONCATENATED MODULE: ../providers/dist/storage/fs.js
+
+
+
+function fsStorage(opts) {
+    return {
+        createSessionStore: () => new FsSessionStore(opts.baseDir),
+        createMemoryStore: () => new FsMemoryStore(opts.baseDir),
+        createWorkspaceStore: () => new FsWorkspaceStore(opts.baseDir),
+    };
+}
+//# sourceMappingURL=fs.js.map
+;// CONCATENATED MODULE: ../providers/dist/storage/s3.js
+
+
+
+function s3Storage(opts) {
+    const { bucket, prefix = "", region = "us-west-2" } = opts;
+    return {
+        createSessionStore: () => new S3SessionStore(bucket, prefix, region),
+        createMemoryStore: () => new S3MemoryStore(bucket, prefix, region),
+        createWorkspaceStore: () => new S3WorkspaceStore(bucket, prefix, region),
+    };
+}
+//# sourceMappingURL=s3.js.map
+;// CONCATENATED MODULE: ../providers/dist/storage/csi.js
+
+
+
+
+/**
+ * Creates a {@link StorageProvider} backed by a Kubernetes CSI volume.
+ *
+ * The factory validates that `mountPath` exists at creation time so
+ * mis-configurations surface early rather than at first write.
+ *
+ * @example
+ * ```ts
+ * const storage = csiStorage({
+ *   mountPath: "/data/sweny",
+ *   volumeName: "sweny-pvc",
+ *   namespace: "default",
+ * });
+ * const sessions = storage.createSessionStore();
+ * ```
+ */
+function csiStorage(config) {
+    const { mountPath, volumeName, namespace } = config;
+    if (!existsSync(mountPath)) {
+        const ctx = [
+            `mountPath="${mountPath}"`,
+            volumeName ? `volume="${volumeName}"` : null,
+            namespace ? `namespace="${namespace}"` : null,
+        ]
+            .filter(Boolean)
+            .join(", ");
+        throw new Error(`CSI mount path does not exist (${ctx}). Ensure the PersistentVolumeClaim is mounted before starting the application.`);
+    }
+    return {
+        createSessionStore: () => new FsSessionStore(mountPath),
+        createMemoryStore: () => new FsMemoryStore(mountPath),
+        createWorkspaceStore: () => new FsWorkspaceStore(mountPath),
+    };
+}
+//# sourceMappingURL=csi.js.map
+;// CONCATENATED MODULE: ../providers/dist/storage/index.js
+
+// FS implementations
+
+
+
+// S3 implementations
+
+
+
+// Factory functions
 
 
 
@@ -33052,74 +35725,354 @@ function claudeCode(config) {
 ;// CONCATENATED MODULE: ../providers/dist/coding-agent/index.js
 
 //# sourceMappingURL=index.js.map
-;// CONCATENATED MODULE: ./src/providers/index.ts
+;// CONCATENATED MODULE: ../providers/dist/credential-vault/aws-secrets-manager.js
 
 
-
-
-
-
-const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
-function createProviders(config) {
-    // Observability
-    let observability;
-    switch (config.observabilityProvider) {
-        case "datadog":
-            observability = datadog({
-                apiKey: config.ddApiKey,
-                appKey: config.ddAppKey,
-                site: config.ddSite,
-                logger: actionsLogger,
-            });
-            break;
-        default:
-            throw new Error(`Unsupported observability provider: ${config.observabilityProvider}`);
+const awsSecretsManagerConfigSchema = objectType({
+    region: stringType().default("us-east-1"),
+    prefix: stringType().default("sweny"),
+    logger: custom().optional(),
+});
+function awsSecretsManager(config) {
+    const parsed = awsSecretsManagerConfigSchema.parse(config ?? {});
+    return new AwsSecretsManagerProvider(parsed);
+}
+class AwsSecretsManagerProvider {
+    region;
+    prefix;
+    log;
+    client = null;
+    constructor(config) {
+        this.region = config.region ?? "us-east-1";
+        this.prefix = config.prefix ?? "sweny";
+        this.log = config.logger ?? consoleLogger;
     }
-    // Issue tracker
-    let issueTracker;
-    switch (config.issueTrackerProvider) {
-        case "linear":
-            issueTracker = linear({ apiKey: config.linearApiKey, logger: actionsLogger });
-            break;
-        default:
-            throw new Error(`Unsupported issue tracker provider: ${config.issueTrackerProvider}`);
+    async getClient() {
+        if (!this.client) {
+            const { SecretsManagerClient } = await Promise.all(/* import() */[__nccwpck_require__.e(192), __nccwpck_require__.e(494)]).then(__nccwpck_require__.t.bind(__nccwpck_require__, 5494, 19));
+            this.client = new SecretsManagerClient({ region: this.region });
+        }
+        return this.client;
     }
-    // Source control
-    const scToken = config.botToken || config.githubToken;
-    const [scOwner = "", scRepo = ""] = config.repository.split("/");
-    const sourceControl = github({
-        token: scToken,
-        owner: scOwner,
-        repo: scRepo,
-        logger: actionsLogger,
-    });
-    // Notification
-    const notification = githubSummary({ logger: actionsLogger });
-    // Coding agent
-    const codingAgent = claudeCode({ logger: actionsLogger });
+    secretName(tenantId, key) {
+        return `${this.prefix}/${tenantId}/${key}`;
+    }
+    async getSecret(tenantId, key) {
+        const client = await this.getClient();
+        const { GetSecretValueCommand } = await Promise.all(/* import() */[__nccwpck_require__.e(192), __nccwpck_require__.e(494)]).then(__nccwpck_require__.t.bind(__nccwpck_require__, 5494, 19));
+        try {
+            const result = await client.send(new GetSecretValueCommand({ SecretId: this.secretName(tenantId, key) }));
+            this.log.info(`Retrieved secret ${this.secretName(tenantId, key)}`);
+            return result.SecretString ?? null;
+        }
+        catch (err) {
+            if (err instanceof Error && err.name === "ResourceNotFoundException") {
+                return null;
+            }
+            throw err;
+        }
+    }
+    async setSecret(tenantId, key, value) {
+        const client = await this.getClient();
+        const { CreateSecretCommand, PutSecretValueCommand } = await Promise.all(/* import() */[__nccwpck_require__.e(192), __nccwpck_require__.e(494)]).then(__nccwpck_require__.t.bind(__nccwpck_require__, 5494, 19));
+        const name = this.secretName(tenantId, key);
+        try {
+            await client.send(new CreateSecretCommand({ Name: name, SecretString: value }));
+        }
+        catch (err) {
+            if (err instanceof Error && err.name === "ResourceExistsException") {
+                await client.send(new PutSecretValueCommand({ SecretId: name, SecretString: value }));
+            }
+            else {
+                throw err;
+            }
+        }
+        this.log.info(`Set secret ${name}`);
+    }
+    async deleteSecret(tenantId, key) {
+        const client = await this.getClient();
+        const { DeleteSecretCommand } = await Promise.all(/* import() */[__nccwpck_require__.e(192), __nccwpck_require__.e(494)]).then(__nccwpck_require__.t.bind(__nccwpck_require__, 5494, 19));
+        const name = this.secretName(tenantId, key);
+        await client.send(new DeleteSecretCommand({
+            SecretId: name,
+            ForceDeleteWithoutRecovery: true,
+        }));
+        this.log.info(`Deleted secret ${name}`);
+    }
+    async listKeys(tenantId) {
+        const client = await this.getClient();
+        const { ListSecretsCommand } = await Promise.all(/* import() */[__nccwpck_require__.e(192), __nccwpck_require__.e(494)]).then(__nccwpck_require__.t.bind(__nccwpck_require__, 5494, 19));
+        const namePrefix = `${this.prefix}/${tenantId}/`;
+        const keys = [];
+        let nextToken;
+        do {
+            const result = await client.send(new ListSecretsCommand({
+                Filters: [{ Key: "name", Values: [namePrefix] }],
+                NextToken: nextToken,
+            }));
+            for (const secret of result.SecretList ?? []) {
+                if (secret.Name?.startsWith(namePrefix)) {
+                    keys.push(secret.Name.slice(namePrefix.length));
+                }
+            }
+            nextToken = result.NextToken;
+        } while (nextToken);
+        this.log.info(`Listed ${keys.length} keys for tenant ${tenantId}`);
+        return keys;
+    }
+}
+//# sourceMappingURL=aws-secrets-manager.js.map
+;// CONCATENATED MODULE: ../providers/dist/credential-vault/index.js
+
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../providers/dist/index.js
+// Errors
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../engine/dist/registry.js
+/** Create an empty provider registry. */
+function createProviderRegistry() {
+    const store = new Map();
     return {
-        observability,
-        issueTracker,
-        sourceControl,
-        notification,
-        codingAgent,
+        get(key) {
+            if (!store.has(key)) {
+                throw new Error(`Provider "${key}" is not registered`);
+            }
+            return store.get(key);
+        },
+        has(key) {
+            return store.has(key);
+        },
+        set(key, provider) {
+            store.set(key, provider);
+        },
     };
 }
+//# sourceMappingURL=registry.js.map
+;// CONCATENATED MODULE: ../engine/dist/runner.js
 
+
+/** Phase execution order. */
+const PHASE_ORDER = ["learn", "act", "report"];
+/**
+ * Run a workflow end-to-end: learn → act → report.
+ *
+ * Steps execute in array order within their phase.
+ * If a learn step fails, the workflow is aborted (status: "failed").
+ * If an act or report step fails, remaining steps continue (status: "partial").
+ */
+async function runWorkflow(workflow, config, providers, options) {
+    const logger = options?.logger ?? logger_consoleLogger;
+    const start = Date.now();
+    const skippedPhases = new Map();
+    const results = new Map();
+    const completedSteps = [];
+    const ctx = {
+        config,
+        logger,
+        results,
+        providers,
+        skipPhase(phase, reason) {
+            skippedPhases.set(phase, reason);
+        },
+        isPhaseSkipped(phase) {
+            return skippedPhases.has(phase);
+        },
+    };
+    // Group steps by phase
+    const stepsByPhase = new Map();
+    for (const phase of PHASE_ORDER) {
+        stepsByPhase.set(phase, workflow.steps.filter((s) => s.phase === phase));
+    }
+    let hasFailed = false;
+    let failedInLearn = false;
+    for (const phase of PHASE_ORDER) {
+        // If a learn step failed, abort entirely
+        if (failedInLearn)
+            break;
+        const steps = stepsByPhase.get(phase) ?? [];
+        for (const step of steps) {
+            // Check if this phase was skipped
+            if (skippedPhases.has(phase)) {
+                const result = {
+                    status: "skipped",
+                    reason: skippedPhases.get(phase),
+                };
+                results.set(step.name, result);
+                completedSteps.push({ name: step.name, phase, result });
+                continue;
+            }
+            // beforeStep hook — return false to skip
+            if (options?.beforeStep) {
+                const proceed = await options.beforeStep(step, ctx);
+                if (proceed === false) {
+                    const result = { status: "skipped", reason: "Skipped by beforeStep hook" };
+                    results.set(step.name, result);
+                    completedSteps.push({ name: step.name, phase, result });
+                    continue;
+                }
+            }
+            let result;
+            try {
+                logger.info(`[${workflow.name}] ${phase}/${step.name}: starting`);
+                result = await step.run(ctx);
+                logger.info(`[${workflow.name}] ${phase}/${step.name}: ${result.status}`);
+            }
+            catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                logger.error(`[${workflow.name}] ${phase}/${step.name}: failed — ${message}`);
+                result = { status: "failed", reason: message };
+                hasFailed = true;
+                if (phase === "learn") {
+                    failedInLearn = true;
+                }
+            }
+            results.set(step.name, result);
+            completedSteps.push({ name: step.name, phase, result });
+            // afterStep hook
+            if (options?.afterStep) {
+                await options.afterStep(step, result, ctx);
+            }
+            // Abort remaining steps if learn phase failed
+            if (failedInLearn)
+                break;
+        }
+    }
+    const status = failedInLearn ? "failed" : hasFailed ? "partial" : "completed";
+    return {
+        status,
+        steps: completedSteps,
+        duration: Date.now() - start,
+    };
+}
+/** Re-export for convenience. */
+
+//# sourceMappingURL=runner.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/verify-access.js
+/** Verify that observability and issue tracker providers are reachable. */
+async function verifyAccess(ctx) {
+    const observability = ctx.providers.get("observability");
+    await observability.verifyAccess();
+    ctx.logger.info("Observability provider access verified");
+    const issueTracker = ctx.providers.get("issueTracker");
+    await issueTracker.verifyAccess();
+    ctx.logger.info("Issue tracker access verified");
+    return { status: "success" };
+}
+//# sourceMappingURL=verify-access.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/build-context.js
+
+/** Build known-issues context from issue tracker + source control to prevent duplicates. */
+async function buildContext(ctx) {
+    const issueTracker = ctx.providers.get("issueTracker");
+    const sourceControl = ctx.providers.get("sourceControl");
+    const config = ctx.config;
+    const lines = [];
+    lines.push("# Known Triage History (Last 30 Days)");
+    lines.push("");
+    lines.push("These issues have already been identified by previous SWEny Triage runs.");
+    lines.push("Do NOT create new issues or propose fixes for these same problems.");
+    lines.push("");
+    // 1. Fetch recent triage issues (last 30 days)
+    lines.push("## Tracked Issues");
+    try {
+        if (canListTriageHistory(issueTracker)) {
+            const triageHistory = await issueTracker.listTriageHistory(config.projectId, config.triageLabelId, 30);
+            if (triageHistory.length > 0) {
+                for (const entry of triageHistory) {
+                    lines.push(`- **${entry.identifier}** [${entry.state}] ${entry.title} — ${entry.url}`);
+                }
+            }
+            else {
+                lines.push("_No triage-labeled issues found in last 30 days_");
+            }
+        }
+        else {
+            lines.push("_Issue tracker does not support triage history_");
+        }
+    }
+    catch (err) {
+        ctx.logger.warn(`Failed to fetch triage history: ${err}`);
+        lines.push("_Failed to fetch triage history_");
+    }
+    lines.push("");
+    // 2. Fetch recent triage PRs
+    lines.push("## Pull Requests");
+    try {
+        const triagePrs = await sourceControl.listPullRequests({
+            state: "all",
+            labels: ["triage"],
+            limit: 30,
+        });
+        lines.push("### Merged (fixed)");
+        const merged = triagePrs.filter((pr) => pr.state === "merged");
+        if (merged.length > 0) {
+            for (const pr of merged) {
+                lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
+            }
+        }
+        else {
+            lines.push("_None_");
+        }
+        lines.push("### Open (in progress)");
+        const open = triagePrs.filter((pr) => pr.state === "open");
+        if (open.length > 0) {
+            for (const pr of open) {
+                lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
+            }
+        }
+        else {
+            lines.push("_None_");
+        }
+        lines.push("### Closed (failed attempts)");
+        const closed = triagePrs.filter((pr) => pr.state === "closed");
+        if (closed.length > 0) {
+            for (const pr of closed) {
+                lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
+            }
+        }
+        else {
+            lines.push("_None_");
+        }
+    }
+    catch {
+        ctx.logger.warn("Failed to fetch triage PRs");
+        lines.push("_Failed to fetch triage PRs_");
+    }
+    const knownIssuesContent = lines.join("\n");
+    return {
+        status: "success",
+        data: { knownIssuesContent },
+    };
+}
+//# sourceMappingURL=build-context.js.map
 // EXTERNAL MODULE: external "fs"
 var external_fs_ = __nccwpck_require__(9896);
 // EXTERNAL MODULE: external "path"
 var external_path_ = __nccwpck_require__(6928);
-;// CONCATENATED MODULE: ./src/utils/service-map.ts
-
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/service-map.js
 
 /**
  * Parse a service-map.yml file using simple line-based parsing.
  * Avoids YAML library dependency for ncc bundling simplicity.
  */
-function parseServiceMap(filePath) {
+function parseServiceMap(filePath, logger) {
     if (!external_fs_.existsSync(filePath)) {
-        core.warning(`Service map not found at ${filePath}`);
+        logger?.warn(`Service map not found at ${filePath}`);
         return { services: [] };
     }
     const content = external_fs_.readFileSync(filePath, "utf-8");
@@ -33167,144 +36120,15 @@ function parseServiceMap(filePath) {
         services.push(current);
     return { services };
 }
-/**
- * Find the target repo for a given Datadog service name.
- */
-function findRepoForService(serviceMap, serviceName) {
-    for (const entry of serviceMap.services) {
-        if (entry.owns.includes(serviceName)) {
-            return entry.repo;
-        }
-    }
-    return null;
-}
-
-;// CONCATENATED MODULE: ./src/phases/investigate.ts
+//# sourceMappingURL=service-map.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/prompts.js
 
 
-
-
-async function investigate(config, providers) {
-    const analysisDir = ".github/datadog-analysis";
-    external_fs_.mkdirSync(analysisDir, { recursive: true });
-    // Install coding agent CLI
-    await providers.codingAgent.install();
-    // Verify provider access
-    core.startGroup("Verify provider access");
-    await providers.observability.verifyAccess();
-    core.info("Observability provider access verified");
-    await providers.issueTracker.verifyAccess();
-    core.info("Issue tracker access verified");
-    core.endGroup();
-    // Build known issues context
-    core.startGroup("Build known issues context");
-    const knownIssuesContent = await buildKnownIssuesContext(config, providers);
-    const knownIssuesPath = external_path_.join(analysisDir, "known-issues-context.md");
-    external_fs_.writeFileSync(knownIssuesPath, knownIssuesContent);
-    core.endGroup();
-    // Build investigation prompt
-    const prompt = buildInvestigationPrompt(config, knownIssuesContent);
-    // Run coding agent investigation
-    core.startGroup("Coding agent investigation");
-    const agentEnv = {
-        DD_API_KEY: config.ddApiKey,
-        DD_APP_KEY: config.ddAppKey,
-        DD_SITE: config.ddSite,
-        LINEAR_API_KEY: config.linearApiKey,
-        LINEAR_TEAM_ID: config.linearTeamId,
-        LINEAR_BUG_LABEL_ID: config.linearBugLabelId,
-    };
-    if (config.anthropicApiKey)
-        agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
-    if (config.claudeOauthToken)
-        agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
-    await providers.codingAgent.run({ prompt, maxTurns: config.maxInvestigateTurns, env: agentEnv });
-    core.endGroup();
-    // Parse results
-    return parseInvestigationResults(analysisDir);
-}
 // ---------------------------------------------------------------------------
-// Build Known Issues Context
+// Investigation Prompt
 // ---------------------------------------------------------------------------
-async function buildKnownIssuesContext(config, providers) {
-    const lines = [];
-    lines.push("# Known Triage History (Last 30 Days)");
-    lines.push("");
-    lines.push("These issues have already been identified by previous SWEny Triage runs.");
-    lines.push("Do NOT create new issues or propose fixes for these same problems.");
-    lines.push("");
-    // 1. Fetch recent triage Linear issues (last 30 days)
-    lines.push("## Linear Issues");
-    try {
-        const triageHistory = await providers.issueTracker.listTriageHistory(config.linearTeamId, config.linearTriageLabelId, 30);
-        if (triageHistory.length > 0) {
-            for (const entry of triageHistory) {
-                lines.push(`- **${entry.identifier}** [${entry.state}] ${entry.title} — ${entry.url}`);
-            }
-        }
-        else {
-            lines.push("_No triage-labeled Linear issues found in last 30 days_");
-        }
-    }
-    catch (err) {
-        core.warning(`Failed to fetch Linear triage history: ${err}`);
-        lines.push("_Failed to fetch Linear triage history_");
-    }
-    lines.push("");
-    // 2. Fetch recent triage GitHub PRs
-    lines.push("## GitHub PRs");
-    try {
-        const triagePrs = await providers.sourceControl.listPullRequests({
-            state: "all",
-            labels: ["triage"],
-            limit: 30,
-        });
-        // Merged (fixed)
-        lines.push("### Merged (fixed)");
-        const merged = triagePrs.filter((pr) => pr.state === "merged");
-        if (merged.length > 0) {
-            for (const pr of merged) {
-                lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-            }
-        }
-        else {
-            lines.push("_None_");
-        }
-        // Open (in progress)
-        lines.push("### Open (in progress)");
-        const open = triagePrs.filter((pr) => pr.state === "open");
-        if (open.length > 0) {
-            for (const pr of open) {
-                lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-            }
-        }
-        else {
-            lines.push("_None_");
-        }
-        // Closed (failed attempts)
-        lines.push("### Closed (failed attempts)");
-        const closed = triagePrs.filter((pr) => pr.state === "closed");
-        if (closed.length > 0) {
-            for (const pr of closed) {
-                lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-            }
-        }
-        else {
-            lines.push("_None_");
-        }
-    }
-    catch {
-        core.warning("Failed to fetch GitHub triage PRs");
-        lines.push("_Failed to fetch triage PRs_");
-    }
-    return lines.join("\n");
-}
-// ---------------------------------------------------------------------------
-// Build Investigation Prompt
-// ---------------------------------------------------------------------------
-function buildInvestigationPrompt(config, knownIssuesContent) {
+function buildInvestigationPrompt(config, observability, knownIssuesContent) {
     const parts = [];
-    // Dynamic inputs section (variable expansion)
     parts.push(`You are an autonomous SRE agent investigating production issues.
 You have access to multiple tools and data sources. Your job is to investigate issues,
 understand problems, and prepare fixes.
@@ -33315,7 +36139,7 @@ You are running inside: **${config.repository}**
 ## YOUR INPUTS - REVIEW THESE FIRST
 
 ### Linear Issue
-${config.linearIssue || "(none provided)"}
+${config.issueOverride || "(none provided)"}
 
 ### Additional Instructions
 ${config.additionalInstructions || "(none provided)"}
@@ -33337,7 +36161,7 @@ Based on the inputs above, decide how to proceed:
 1. **If a Linear Issue is provided** (e.g., ENG-123):
    - Fetch the issue details and comments from Linear using the API
    - Understand what the issue is about and any context from comments
-   - You may still query Datadog for related logs if helpful
+   - You may still query the observability provider for related logs if helpful
    - Focus your investigation on this specific issue
 
 2. **If Additional Instructions are provided**:
@@ -33346,55 +36170,15 @@ Based on the inputs above, decide how to proceed:
    - Use your judgment to combine with other inputs
 
 3. **If neither is provided** (default mode):
-   - Query Datadog for recent errors
+   - Query the observability provider for recent errors
    - Investigate the top issues
    - Identify the best candidate for fixing
 
-4. **You can combine approaches** - e.g., work on a Linear issue AND check Datadog for related errors
+4. **You can combine approaches** - e.g., work on a Linear issue AND check observability logs for related errors
 
 ## AVAILABLE TOOLS
 
-### Datadog Logs API
-- \`DD_API_KEY\` - API key (use in DD-API-KEY header)
-- \`DD_APP_KEY\` - Application key (use in DD-APPLICATION-KEY header)
-- \`DD_SITE\` - Datadog site (datadoghq.com)
-
-**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
-
-## Your Mission
-
-Investigate logs from Datadog across **BOTH production AND staging environments** to find bugs and issues.
-You have DIRECT ACCESS to Datadog's Logs API via curl commands.
-
-**Key Insight**: Catching issues in staging BEFORE they hit production is extremely valuable!
-- Issues in staging only → Fix before users are affected
-- Issues in both environments → Critical, affects users now
-- Issues in production only → May be load/scale related
-
-## Datadog API Access
-
-Use these environment variables in your curl commands:
-- \`DD_API_KEY\` - API key (use in DD-API-KEY header)
-- \`DD_APP_KEY\` - Application key (use in DD-APPLICATION-KEY header)
-- \`DD_SITE\` - Datadog site (datadoghq.com)
-
-### Example: Get error counts by service
-\`\`\`bash
-curl -s -X POST "https://api.\${DD_SITE}/api/v2/logs/analytics/aggregate" \\
-  -H "Content-Type: application/json" \\
-  -H "DD-API-KEY: \${DD_API_KEY}" \\
-  -H "DD-APPLICATION-KEY: \${DD_APP_KEY}" \\
-  -d '{"filter":{"query":"service:* status:error","from":"now-1h","to":"now"},"compute":[{"type":"total","aggregation":"count"}],"group_by":[{"facet":"service","limit":20,"sort":{"type":"measure","aggregation":"count","order":"desc"}}]}'
-\`\`\`
-
-### Example: Get recent error logs
-\`\`\`bash
-curl -s -X POST "https://api.\${DD_SITE}/api/v2/logs/events/search" \\
-  -H "Content-Type: application/json" \\
-  -H "DD-API-KEY: \${DD_API_KEY}" \\
-  -H "DD-APPLICATION-KEY: \${DD_APP_KEY}" \\
-  -d '{"filter":{"query":"service:* status:error","from":"now-1h","to":"now"},"sort":"-timestamp","page":{"limit":100}}'
-\`\`\`
+${observability.getPromptInstructions()}
 
 ### Linear API
 The \`LINEAR_API_KEY\` environment variable is set. Use the Linear GraphQL API directly via curl:
@@ -33421,16 +36205,15 @@ curl -s -X POST "https://api.linear.app/graphql" \\
 ## SERVICE OWNERSHIP MAP
 
 Read the service map at \`${config.serviceMapPath}\` to understand which GitHub repo
-owns which Datadog service. This is critical for cross-repo dispatch.
+owns which service. This is critical for cross-repo dispatch.
 
-**You MUST determine which repo should fix the bug you find.** Look at the Datadog service
+**You MUST determine which repo should fix the bug you find.** Look at the service
 name in the error logs and match it against the \`owns\` list in the service map.`);
     // Inject service map if it exists
     const serviceMap = parseServiceMap(config.serviceMapPath);
     if (serviceMap.services.length > 0) {
         parts.push("");
         parts.push("### Service Map Reference");
-        // Read the raw file to include in prompt
         if (external_fs_.existsSync(config.serviceMapPath)) {
             parts.push(external_fs_.readFileSync(config.serviceMapPath, "utf-8"));
         }
@@ -33474,10 +36257,10 @@ ${knownIssuesContent}`);
 
 Create these files with your findings:
 
-### 1. \`.github/datadog-analysis/investigation-log.md\`
+### 1. \`.github/triage-analysis/investigation-log.md\`
 Document your investigation process - commands run, what you found, reasoning.
 
-### 2. \`.github/datadog-analysis/issues-report.md\`
+### 2. \`.github/triage-analysis/issues-report.md\`
 For each issue found:
 - Severity, Environment (Production/Staging/Both), Frequency
 - Description, Evidence (logs, stack traces)
@@ -33487,7 +36270,7 @@ For each issue found:
   - If exists: Note the issue identifier (e.g., ENG-123) and URL
   - If not found: Note as "No existing Linear issue found"
 
-### 3. \`.github/datadog-analysis/best-candidate.md\`
+### 3. \`.github/triage-analysis/best-candidate.md\`
 Select the BEST issue to fix based on impact, frequency, fixability.
 Include full technical analysis, exact code changes, test plan, rollback plan.
 
@@ -33532,441 +36315,15 @@ Write files early and update them if needed. Do NOT keep investigating without w
     return parts.join("\n");
 }
 // ---------------------------------------------------------------------------
-// Parse Investigation Results
-// ---------------------------------------------------------------------------
-function parseInvestigationResults(analysisDir) {
-    const issuesReportPath = external_path_.join(analysisDir, "issues-report.md");
-    const bestCandidatePath = external_path_.join(analysisDir, "best-candidate.md");
-    const issuesFound = external_fs_.existsSync(issuesReportPath);
-    const bestCandidate = external_fs_.existsSync(bestCandidatePath);
-    let recommendation = "skip";
-    let existingIssue = "";
-    let targetRepo = "";
-    if (bestCandidate) {
-        const content = external_fs_.readFileSync(bestCandidatePath, "utf-8");
-        // Extract RECOMMENDATION
-        const recMatch = content.match(/^RECOMMENDATION:\s*(.+)$/im);
-        if (recMatch) {
-            recommendation = recMatch[1].trim();
-            core.info(`Recommendation: ${recommendation}`);
-        }
-        else {
-            // Default to "implement" if best candidate exists but no explicit recommendation
-            recommendation = "implement";
-            core.info("No explicit RECOMMENDATION found in best-candidate.md, defaulting to implement");
-        }
-        // Extract existing issue reference from "+1 existing" recommendation
-        const existingMatch = recommendation.match(/\+1 existing\s+([A-Z]+-\d+)/i);
-        if (existingMatch) {
-            existingIssue = existingMatch[1];
-            core.info(`Existing issue reference: ${existingIssue}`);
-        }
-        // Extract TARGET_REPO
-        const repoMatch = content.match(/^TARGET_REPO:\s*(.+)$/im);
-        if (repoMatch) {
-            targetRepo = repoMatch[1].trim();
-            core.info(`Target repo: ${targetRepo}`);
-        }
-    }
-    else {
-        core.info("No best-candidate.md found, recommendation: skip");
-    }
-    const shouldImplement = recommendation.toLowerCase().startsWith("implement");
-    return {
-        issuesFound,
-        bestCandidate,
-        recommendation,
-        existingIssue,
-        targetRepo,
-        shouldImplement,
-    };
-}
-
-;// CONCATENATED MODULE: ./src/phases/implement.ts
-
-
-const EMPTY_RESULT = {
-    issueIdentifier: "",
-    issueUrl: "",
-    prUrl: "",
-    prNumber: 0,
-    skipped: true,
-    skipReason: "",
-};
-async function implement(config, providers, investigation) {
-    // -------------------------------------------------------------------------
-    // 1. Novelty gate
-    // -------------------------------------------------------------------------
-    core.startGroup("Check Novelty Recommendation");
-    const recommendation = investigation.recommendation;
-    core.info(`Recommendation: ${recommendation}`);
-    core.info(`Existing issue: ${investigation.existingIssue}`);
-    if (/skip/i.test(recommendation)) {
-        core.notice("Recommendation is SKIP - no novel issues found");
-        core.endGroup();
-        return { ...EMPTY_RESULT, skipReason: "Recommendation: skip" };
-    }
-    if (/\+1 existing/i.test(recommendation)) {
-        core.notice(`Recommendation is +1 EXISTING - adding occurrence to ${investigation.existingIssue}`);
-        if (investigation.existingIssue) {
-            try {
-                const existing = await providers.issueTracker.getIssue(investigation.existingIssue);
-                const date = new Date().toISOString().split("T")[0];
-                await providers.issueTracker.addComment(existing.id, `+1 detected on ${date}`);
-                core.info(`Added +1 occurrence to ${investigation.existingIssue}`);
-            }
-            catch (err) {
-                core.warning(`Failed to add occurrence: ${err}`);
-            }
-        }
-        core.endGroup();
-        return {
-            ...EMPTY_RESULT,
-            issueIdentifier: investigation.existingIssue,
-            skipReason: `+1 existing ${investigation.existingIssue}`,
-        };
-    }
-    core.info("Recommendation is IMPLEMENT - proceeding with fix");
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 2. Extract issue title from best-candidate.md
-    // -------------------------------------------------------------------------
-    core.startGroup("Extract Issue Title");
-    let issueTitle = "SWEny Triage: Automated bug fix";
-    if (!config.linearIssue) {
-        const bestCandidatePath = ".github/datadog-analysis/best-candidate.md";
-        if (external_fs_.existsSync(bestCandidatePath)) {
-            const content = external_fs_.readFileSync(bestCandidatePath, "utf-8");
-            const headingMatch = content.match(/^#\s+(.+)$/m);
-            if (headingMatch) {
-                issueTitle = headingMatch[1]
-                    // Strip backticks
-                    .replace(/`/g, "")
-                    // Strip "Best Candidate Fix:" / "Best Fix Candidate:" boilerplate
-                    .replace(/^(Best\s+)?(Fix\s+)?(Candidate)(\s+Fix)?[:\s]*/i, "")
-                    .trim()
-                    .slice(0, 100);
-            }
-            if (!issueTitle) {
-                issueTitle = "SWEny Triage: Automated bug fix";
-            }
-        }
-        core.info(`Extracted title: ${issueTitle}`);
-    }
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 3. Get or create Linear issue
-    // -------------------------------------------------------------------------
-    core.startGroup("Get Linear Issue Details");
-    let issue;
-    if (config.linearIssue) {
-        // User provided a specific Linear issue
-        core.info(`User provided Linear issue: ${config.linearIssue}`);
-        issue = await providers.issueTracker.getIssue(config.linearIssue);
-        core.info(`Working on Linear issue: ${issue.identifier} - ${issue.url}`);
-    }
-    else {
-        // Search for existing issue or create new one
-        core.info(`Searching for existing Linear issues matching: ${issueTitle}`);
-        const searchResults = await providers.issueTracker.searchIssues({
-            projectId: config.linearTeamId,
-            query: issueTitle,
-            labels: [config.linearBugLabelId],
-        });
-        if (searchResults.length > 0) {
-            // Found existing issue
-            issue = searchResults[0];
-            const date = new Date().toISOString().split("T")[0];
-            await providers.issueTracker.addComment(issue.id, `+1 detected on ${date}`);
-            core.info(`Found existing Linear issue: ${issue.identifier} - ${issue.url}`);
-        }
-        else {
-            // Create new issue
-            core.info("No existing Linear issue found, creating new one...");
-            let description = "";
-            const bestCandidatePath = ".github/datadog-analysis/best-candidate.md";
-            if (external_fs_.existsSync(bestCandidatePath)) {
-                description = external_fs_.readFileSync(bestCandidatePath, "utf-8")
-                    .slice(0, 10000);
-            }
-            const labelIds = [config.linearBugLabelId];
-            if (config.linearTriageLabelId) {
-                labelIds.push(config.linearTriageLabelId);
-            }
-            issue = await providers.issueTracker.createIssue({
-                title: issueTitle,
-                projectId: config.linearTeamId,
-                labels: labelIds,
-                priority: 2,
-                stateId: config.linearStateBacklog,
-                description,
-            });
-            core.info(`Created new Linear issue: ${issue.identifier} - ${issue.url}`);
-        }
-    }
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 4. Cross-repo dispatch check
-    // -------------------------------------------------------------------------
-    core.startGroup("Cross-Repo Dispatch Check");
-    const targetRepo = investigation.targetRepo;
-    const currentRepo = config.repository;
-    if (targetRepo && targetRepo !== currentRepo) {
-        core.notice(`Bug belongs to ${targetRepo} (current repo: ${currentRepo}) - dispatching cross-repo`);
-        try {
-            await providers.sourceControl.dispatchWorkflow({
-                targetRepo,
-                workflow: "SWEny Triage",
-                inputs: {
-                    linear_issue: issue.identifier,
-                    dispatched_from: currentRepo,
-                    novelty_mode: "false",
-                },
-            });
-            // Add a comment to the Linear issue noting the cross-repo handoff
-            await providers.issueTracker.updateIssue(issue.id, {
-                comment: `Cross-repo dispatch: Discovered in \`${currentRepo}\`, dispatched to \`${targetRepo}\` for implementation.`,
-            });
-        }
-        catch (err) {
-            core.warning(`Cross-repo dispatch failed: ${err}`);
-        }
-        core.endGroup();
-        return {
-            issueIdentifier: issue.identifier,
-            issueUrl: issue.url,
-            prUrl: "",
-            prNumber: 0,
-            skipped: true,
-            skipReason: `Cross-repo dispatch to ${targetRepo}`,
-        };
-    }
-    core.info(`Bug belongs to this repo (${currentRepo}) - implementing locally`);
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 5. Check for existing GitHub PRs (duplicate check)
-    // -------------------------------------------------------------------------
-    core.startGroup("Check for Existing GitHub PRs");
-    const skipMergedCheck = !!config.linearIssue;
-    let existingPr = await providers.sourceControl.findExistingPr(issue.identifier);
-    // If we should skip merged PRs, ignore any non-open result
-    if (existingPr && skipMergedCheck && existingPr.state !== "open") {
-        existingPr = null;
-    }
-    if (existingPr) {
-        if (config.linearIssue && existingPr.state !== "open") {
-            // User explicitly provided LINEAR_ISSUE - implement anyway if PR is not open
-            core.notice(`Found ${existingPr.state} PR: ${existingPr.url} — LINEAR_ISSUE explicitly provided, implementing anyway`);
-        }
-        else {
-            // Skip implementation to avoid duplication
-            core.notice(`Found existing PR: ${existingPr.url} (state: ${existingPr.state}) — skipping implementation`);
-            // Update Linear based on existing PR state
-            try {
-                const stateForPr = existingPr.state === "open"
-                    ? config.linearStateInProgress
-                    : existingPr.state === "merged"
-                        ? config.linearStatePeerReview
-                        : undefined;
-                const comment = existingPr.state === "open"
-                    ? `**Existing Open PR Found**: [${existingPr.url}](${existingPr.url})\n_Occurrence tracked by SWEny Triage_`
-                    : existingPr.state === "merged"
-                        ? `**Merged PR Found**: [${existingPr.url}](${existingPr.url})\n_Occurrence tracked by SWEny Triage_`
-                        : `**Existing PR Found**: [${existingPr.url}](${existingPr.url}) (state: ${existingPr.state})\n_Occurrence tracked by SWEny Triage_`;
-                await providers.issueTracker.updateIssue(issue.id, {
-                    stateId: stateForPr,
-                    comment,
-                });
-            }
-            catch (err) {
-                core.warning(`Failed to update Linear issue with PR info: ${err}`);
-            }
-            core.endGroup();
-            return {
-                issueIdentifier: issue.identifier,
-                issueUrl: issue.url,
-                prUrl: existingPr.url,
-                prNumber: 0,
-                skipped: true,
-                skipReason: `Existing PR found: ${existingPr.url}`,
-            };
-        }
-    }
-    else {
-        core.info("No existing PR found - proceeding with implementation");
-    }
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 6. Create branch and configure git
-    // -------------------------------------------------------------------------
-    core.startGroup("Create Fix Branch");
-    await providers.sourceControl.configureBotIdentity();
-    let branchName;
-    if (issue.branchName) {
-        // Linear branch names may come as "user/branch-name" — strip prefix
-        branchName = issue.branchName.replace(/^[^/]*\//, "");
-    }
-    else {
-        branchName = `${issue.identifier.toLowerCase()}-triage-fix`;
-    }
-    await providers.sourceControl.createBranch(branchName);
-    // Reset any workflow file changes to avoid permission issues on push
-    await providers.sourceControl.resetPaths([".github/workflows/"]);
-    core.info(`Created branch: ${branchName}`);
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 7. Install Claude and implement fix
-    // -------------------------------------------------------------------------
-    core.startGroup("Implement Fix");
-    await providers.codingAgent.install();
-    const implementPrompt = buildImplementPrompt(issue.identifier);
-    const agentEnv = {};
-    if (config.anthropicApiKey)
-        agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
-    if (config.claudeOauthToken)
-        agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
-    await providers.codingAgent.run({
-        prompt: implementPrompt,
-        maxTurns: config.maxImplementTurns,
-        env: agentEnv,
-    });
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 8. Check for code changes
-    // -------------------------------------------------------------------------
-    core.startGroup("Check for Code Changes");
-    // Check if fix was declined
-    const fixDeclinedPath = ".github/datadog-analysis/fix-declined.md";
-    if (external_fs_.existsSync(fixDeclinedPath)) {
-        const reason = external_fs_.readFileSync(fixDeclinedPath, "utf-8").trim();
-        core.notice(`Fix was declined by Claude: ${reason.slice(0, 200)}`);
-        core.endGroup();
-        return {
-            issueIdentifier: issue.identifier,
-            issueUrl: issue.url,
-            prUrl: "",
-            prNumber: 0,
-            skipped: true,
-            skipReason: `Fix declined: ${reason.slice(0, 200)}`,
-        };
-    }
-    let hasCodeChanges = await providers.sourceControl.hasNewCommits();
-    if (!hasCodeChanges) {
-        core.info("No commits created by Claude");
-        const hasUncommitted = await providers.sourceControl.hasChanges();
-        if (hasUncommitted) {
-            core.info("Found uncommitted code changes, creating fallback commit");
-            await providers.sourceControl.stageAndCommit(`fix: automated fix from log analysis\n\nPartial implementation by Claude (reached max turns before completion)\n\nIdentified by SWEny Triage\nLinear: ${issue.identifier}`);
-            hasCodeChanges = true;
-        }
-        else {
-            core.info("No code changes to commit");
-            core.endGroup();
-            return {
-                issueIdentifier: issue.identifier,
-                issueUrl: issue.url,
-                prUrl: "",
-                prNumber: 0,
-                skipped: true,
-                skipReason: "No code changes produced",
-            };
-        }
-    }
-    else {
-        const changedFiles = await providers.sourceControl.getChangedFiles();
-        core.info(`Claude created commits with changes to: ${changedFiles.join(", ")}`);
-    }
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 9. Push branch
-    // -------------------------------------------------------------------------
-    core.startGroup("Push Branch");
-    await providers.sourceControl.pushBranch(branchName);
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 10. Generate PR description with Claude
-    // -------------------------------------------------------------------------
-    core.startGroup("Generate PR Description");
-    const prDescPrompt = buildPrDescriptionPrompt(issue.identifier, issue.url);
-    await providers.codingAgent.run({
-        prompt: prDescPrompt,
-        maxTurns: 10,
-        env: agentEnv,
-    });
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 11. Create Pull Request
-    // -------------------------------------------------------------------------
-    core.startGroup("Create Pull Request");
-    let prBody = "";
-    const prDescPath = ".github/datadog-analysis/pr-description.md";
-    if (external_fs_.existsSync(prDescPath)) {
-        prBody = external_fs_.readFileSync(prDescPath, "utf-8");
-    }
-    else {
-        prBody = `## Automated Fix from SWEny Triage
-
-This PR contains an automated fix for an issue identified in production logs.
-
-**Linear Issue**: [${issue.identifier}](${issue.url})
-
-> Generated by SWEny Triage`;
-    }
-    // Format title: use Linear issue identifier and lowercase title
-    const prTitle = `fix(${issue.identifier}): ${(issue.title || issueTitle).toLowerCase()}`;
-    const pr = await providers.sourceControl.createPullRequest({
-        title: prTitle,
-        body: prBody,
-        head: branchName,
-        base: "main",
-        labels: ["agent", "triage", "needs-review"],
-    });
-    core.info(`Created PR #${pr.number}: ${pr.url}`);
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 12. Link PR to Linear issue
-    // -------------------------------------------------------------------------
-    core.startGroup("Link PR to Linear Issue");
-    try {
-        await providers.issueTracker.linkPr(issue.id, pr.url, pr.number);
-        core.info(`PR #${pr.number} linked to ${issue.identifier}`);
-    }
-    catch (err) {
-        core.warning(`Failed to link PR to Linear issue: ${err}`);
-    }
-    core.endGroup();
-    // -------------------------------------------------------------------------
-    // 13. Update Linear issue state to Peer Review
-    // -------------------------------------------------------------------------
-    core.startGroup("Update Linear Issue to Peer Review");
-    try {
-        await providers.issueTracker.updateIssue(issue.id, {
-            stateId: config.linearStatePeerReview,
-        });
-        core.info(`Updated ${issue.identifier} to Peer Review`);
-    }
-    catch (err) {
-        core.warning(`Failed to update Linear issue state: ${err}`);
-    }
-    core.endGroup();
-    return {
-        issueIdentifier: issue.identifier,
-        issueUrl: issue.url,
-        prUrl: pr.url,
-        prNumber: pr.number,
-        skipped: false,
-    };
-}
-// ---------------------------------------------------------------------------
 // Implementation Prompt
 // ---------------------------------------------------------------------------
-function buildImplementPrompt(linearIdentifier) {
+function buildImplementPrompt(issueIdentifier) {
     return `You are implementing a fix for an issue identified from production logs.
 
 ## Context
 
-Read the best candidate analysis at \`.github/datadog-analysis/best-candidate.md\`.
-Also read \`.github/datadog-analysis/investigation-log.md\` for context.
+Read the best candidate analysis at \`.github/triage-analysis/best-candidate.md\`.
+Also read \`.github/triage-analysis/investigation-log.md\` for context.
 
 ## Your Task
 
@@ -33992,12 +36349,12 @@ Also read \`.github/datadog-analysis/investigation-log.md\` for context.
    - <change 2>
 
    Identified by SWEny Triage
-   Linear: ${linearIdentifier}
+   Linear: ${issueIdentifier}
    \`\`\`
 
 ## Safety Guidelines
 
-- If the fix is too complex or risky, create \`.github/datadog-analysis/fix-declined.md\` explaining why
+- If the fix is too complex or risky, create \`.github/triage-analysis/fix-declined.md\` explaining why
 - Do not make breaking changes
 - Prefer defensive coding patterns
 
@@ -34006,18 +36363,18 @@ Start by reading the best-candidate.md file.`;
 // ---------------------------------------------------------------------------
 // PR Description Prompt
 // ---------------------------------------------------------------------------
-function buildPrDescriptionPrompt(linearIdentifier, linearUrl) {
+function buildPrDescriptionPrompt(issueIdentifier, issueUrl) {
     return `Generate a pull request description.
 
 ## Context
 
-1. Read \`.github/datadog-analysis/best-candidate.md\` for issue details
-2. Read \`.github/datadog-analysis/investigation-log.md\` for context
+1. Read \`.github/triage-analysis/best-candidate.md\` for issue details
+2. Read \`.github/triage-analysis/investigation-log.md\` for context
 3. Run \`git diff main..HEAD\` to see the changes made
 
 ## Output
 
-Create \`.github/datadog-analysis/pr-description.md\` with:
+Create \`.github/triage-analysis/pr-description.md\` with:
 
 ## Summary
 <What this PR fixes and why>
@@ -34040,63 +36397,687 @@ Create \`.github/datadog-analysis/pr-description.md\` with:
 <How to rollback>
 
 ---
-**Linear Issue**: [${linearIdentifier}](${linearUrl})
+**Linear Issue**: [${issueIdentifier}](${issueUrl})
 > Generated by SWEny Triage`;
 }
+//# sourceMappingURL=prompts.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/investigate.js
 
-;// CONCATENATED MODULE: ./src/phases/notify.ts
 
-async function notify(config, providers, investigation, implementation) {
+
+const ANALYSIS_DIR = ".github/triage-analysis";
+/** Run Claude coding agent to investigate production issues and parse results. */
+async function investigate(ctx) {
+    const config = ctx.config;
+    const observability = ctx.providers.get("observability");
+    const codingAgent = ctx.providers.get("codingAgent");
+    external_fs_.mkdirSync(ANALYSIS_DIR, { recursive: true });
+    // Install coding agent CLI
+    await codingAgent.install();
+    // Get known issues context from prior step
+    const knownIssuesContent = ctx.results.get("build-context")?.data?.knownIssuesContent ?? "";
+    // Write known issues file for reference
+    const knownIssuesPath = external_path_.join(ANALYSIS_DIR, "known-issues-context.md");
+    external_fs_.writeFileSync(knownIssuesPath, knownIssuesContent);
+    // Build investigation prompt
+    const prompt = buildInvestigationPrompt(config, observability, knownIssuesContent);
+    // Run coding agent investigation
+    await codingAgent.run({
+        prompt,
+        maxTurns: config.maxInvestigateTurns,
+        env: { ...config.agentEnv },
+    });
+    // Parse results
+    const result = parseInvestigationResults(ANALYSIS_DIR);
+    return {
+        status: "success",
+        data: result,
+    };
+}
+function parseInvestigationResults(analysisDir) {
+    const issuesReportPath = external_path_.join(analysisDir, "issues-report.md");
+    const bestCandidatePath = external_path_.join(analysisDir, "best-candidate.md");
+    const issuesFound = external_fs_.existsSync(issuesReportPath);
+    const bestCandidate = external_fs_.existsSync(bestCandidatePath);
+    let recommendation = "skip";
+    let existingIssue = "";
+    let targetRepo = "";
+    if (bestCandidate) {
+        const content = external_fs_.readFileSync(bestCandidatePath, "utf-8");
+        // Extract RECOMMENDATION
+        const recMatch = content.match(/^RECOMMENDATION:\s*(.+)$/im);
+        if (recMatch) {
+            recommendation = recMatch[1].trim();
+        }
+        else {
+            // Default to "implement" if best candidate exists but no explicit recommendation
+            recommendation = "implement";
+        }
+        // Extract existing issue reference from "+1 existing" recommendation
+        const existingMatch = recommendation.match(/\+1 existing\s+([A-Z]+-\d+)/i);
+        if (existingMatch) {
+            existingIssue = existingMatch[1];
+        }
+        // Extract TARGET_REPO
+        const repoMatch = content.match(/^TARGET_REPO:\s*(.+)$/im);
+        if (repoMatch) {
+            targetRepo = repoMatch[1].trim();
+        }
+    }
+    const shouldImplement = recommendation.toLowerCase().startsWith("implement");
+    return {
+        issuesFound,
+        bestCandidate,
+        recommendation,
+        existingIssue,
+        targetRepo,
+        shouldImplement,
+    };
+}
+//# sourceMappingURL=investigate.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/novelty-gate.js
+/** Check investigation recommendation and decide whether to proceed with implementation. */
+async function noveltyGate(ctx) {
+    const issueTracker = ctx.providers.get("issueTracker");
+    const investigation = ctx.results.get("investigate")?.data;
+    if (!investigation) {
+        ctx.skipPhase("act", "No investigation result");
+        return { status: "failed", reason: "No investigation result available" };
+    }
+    const recommendation = investigation.recommendation;
+    // SKIP — no novel issues
+    if (/skip/i.test(recommendation)) {
+        ctx.logger.info("Recommendation is SKIP — no novel issues found");
+        ctx.skipPhase("act", "Recommendation: skip");
+        return {
+            status: "success",
+            data: { action: "skip", recommendation },
+        };
+    }
+    // +1 EXISTING — add occurrence to existing issue
+    if (/\+1 existing/i.test(recommendation)) {
+        ctx.logger.info(`Recommendation is +1 EXISTING — adding occurrence to ${investigation.existingIssue}`);
+        if (investigation.existingIssue) {
+            try {
+                const existing = await issueTracker.getIssue(investigation.existingIssue);
+                const date = new Date().toISOString().split("T")[0];
+                await issueTracker.addComment(existing.id, `+1 detected on ${date}`);
+                ctx.logger.info(`Added +1 occurrence to ${investigation.existingIssue}`);
+            }
+            catch (err) {
+                ctx.logger.warn(`Failed to add occurrence: ${err}`);
+            }
+        }
+        ctx.skipPhase("act", `+1 existing ${investigation.existingIssue}`);
+        return {
+            status: "success",
+            data: {
+                action: "+1",
+                recommendation,
+                issueIdentifier: investigation.existingIssue,
+            },
+        };
+    }
+    // IMPLEMENT — proceed with fix
+    ctx.logger.info("Recommendation is IMPLEMENT — proceeding with fix");
+    return {
+        status: "success",
+        data: { action: "implement", recommendation },
+    };
+}
+//# sourceMappingURL=novelty-gate.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/create-issue.js
+
+/** Extract issue title from best-candidate.md, then get-or-create an issue in the tracker. */
+async function createIssue(ctx) {
+    const config = ctx.config;
+    const issueTracker = ctx.providers.get("issueTracker");
+    // -------------------------------------------------------------------------
+    // 1. Extract issue title from best-candidate.md
+    // -------------------------------------------------------------------------
+    let issueTitle = "SWEny Triage: Automated bug fix";
+    if (!config.issueOverride) {
+        const bestCandidatePath = ".github/triage-analysis/best-candidate.md";
+        if (external_fs_.existsSync(bestCandidatePath)) {
+            const content = external_fs_.readFileSync(bestCandidatePath, "utf-8");
+            const headingMatch = content.match(/^#\s+(.+)$/m);
+            if (headingMatch) {
+                issueTitle = headingMatch[1]
+                    .replace(/`/g, "")
+                    .replace(/^(Best\s+)?(Fix\s+)?(Candidate)(\s+Fix)?[:\s]*/i, "")
+                    .trim()
+                    .slice(0, 100);
+            }
+            if (!issueTitle) {
+                issueTitle = "SWEny Triage: Automated bug fix";
+            }
+        }
+        ctx.logger.info(`Extracted title: ${issueTitle}`);
+    }
+    // -------------------------------------------------------------------------
+    // 2. Get or create issue
+    // -------------------------------------------------------------------------
+    let issue;
+    if (config.issueOverride) {
+        // User provided a specific issue
+        ctx.logger.info(`User provided issue: ${config.issueOverride}`);
+        issue = await issueTracker.getIssue(config.issueOverride);
+        ctx.logger.info(`Working on issue: ${issue.identifier} - ${issue.url}`);
+    }
+    else {
+        // Search for existing issue or create new one
+        ctx.logger.info(`Searching for existing issues matching: ${issueTitle}`);
+        const searchResults = await issueTracker.searchIssues({
+            projectId: config.projectId,
+            query: issueTitle,
+            labels: [config.bugLabelId],
+        });
+        if (searchResults.length > 0) {
+            issue = searchResults[0];
+            const date = new Date().toISOString().split("T")[0];
+            await issueTracker.addComment(issue.id, `+1 detected on ${date}`);
+            ctx.logger.info(`Found existing issue: ${issue.identifier} - ${issue.url}`);
+        }
+        else {
+            ctx.logger.info("No existing issue found, creating new one...");
+            let description = "";
+            const bestCandidatePath = ".github/triage-analysis/best-candidate.md";
+            if (external_fs_.existsSync(bestCandidatePath)) {
+                description = external_fs_.readFileSync(bestCandidatePath, "utf-8").slice(0, 10000);
+            }
+            const labelIds = [config.bugLabelId];
+            if (config.triageLabelId) {
+                labelIds.push(config.triageLabelId);
+            }
+            issue = await issueTracker.createIssue({
+                title: issueTitle,
+                projectId: config.projectId,
+                labels: labelIds,
+                priority: 2,
+                stateId: config.stateBacklog,
+                description,
+            });
+            ctx.logger.info(`Created new issue: ${issue.identifier} - ${issue.url}`);
+        }
+    }
+    return {
+        status: "success",
+        data: {
+            issueId: issue.id,
+            issueIdentifier: issue.identifier,
+            issueTitle: issue.title || issueTitle,
+            issueUrl: issue.url,
+            issueBranchName: issue.branchName,
+        },
+    };
+}
+//# sourceMappingURL=create-issue.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/cross-repo-check.js
+/** If the bug belongs to a different repo, dispatch the workflow there and skip remaining act steps. */
+async function crossRepoCheck(ctx) {
+    const config = ctx.config;
+    const sourceControl = ctx.providers.get("sourceControl");
+    const issueTracker = ctx.providers.get("issueTracker");
+    const investigation = ctx.results.get("investigate")?.data;
+    const issueData = ctx.results.get("create-issue")?.data;
+    const targetRepo = investigation?.targetRepo;
+    const currentRepo = config.repository;
+    if (!targetRepo || targetRepo === currentRepo) {
+        ctx.logger.info(`Bug belongs to this repo (${currentRepo}) — implementing locally`);
+        return { status: "success", data: { dispatched: false } };
+    }
+    // Cross-repo dispatch
+    ctx.logger.info(`Bug belongs to ${targetRepo} (current: ${currentRepo}) — dispatching cross-repo`);
+    try {
+        await sourceControl.dispatchWorkflow({
+            targetRepo,
+            workflow: "SWEny Triage",
+            inputs: {
+                linear_issue: issueData?.issueIdentifier ?? "",
+                dispatched_from: currentRepo,
+                novelty_mode: "false",
+            },
+        });
+        // Add comment noting the cross-repo handoff
+        if (issueData?.issueId) {
+            await issueTracker.updateIssue(issueData.issueId, {
+                comment: `Cross-repo dispatch: Discovered in \`${currentRepo}\`, dispatched to \`${targetRepo}\` for implementation.`,
+            });
+        }
+    }
+    catch (err) {
+        ctx.logger.warn(`Cross-repo dispatch failed: ${err}`);
+    }
+    // Skip remaining act steps — implementation happens in the target repo
+    ctx.skipPhase("act", `Cross-repo dispatch to ${targetRepo}`);
+    return {
+        status: "success",
+        data: { dispatched: true, targetRepo },
+    };
+}
+//# sourceMappingURL=cross-repo-check.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/implement-fix.js
+
+
+/** Create branch, run Claude to implement fix, check for changes, and push. */
+async function implementFix(ctx) {
+    const config = ctx.config;
+    const sourceControl = ctx.providers.get("sourceControl");
+    const codingAgent = ctx.providers.get("codingAgent");
+    const issueData = ctx.results.get("create-issue")?.data;
+    const issueIdentifier = issueData?.issueIdentifier ?? "";
+    const issueBranchName = issueData?.issueBranchName;
+    // -------------------------------------------------------------------------
+    // 1. Check for existing PRs (duplicate check)
+    // -------------------------------------------------------------------------
+    const skipMergedCheck = !!config.issueOverride;
+    let existingPr = await sourceControl.findExistingPr(issueIdentifier);
+    if (existingPr && skipMergedCheck && existingPr.state !== "open") {
+        existingPr = null;
+    }
+    if (existingPr) {
+        if (config.issueOverride && existingPr.state !== "open") {
+            ctx.logger.info(`Found ${existingPr.state} PR: ${existingPr.url} — issue override provided, implementing anyway`);
+        }
+        else {
+            ctx.logger.info(`Found existing PR: ${existingPr.url} (state: ${existingPr.state}) — skipping`);
+            return {
+                status: "skipped",
+                reason: `Existing PR found: ${existingPr.url}`,
+                data: { existingPrUrl: existingPr.url },
+            };
+        }
+    }
+    // -------------------------------------------------------------------------
+    // 2. Create branch and configure git
+    // -------------------------------------------------------------------------
+    await sourceControl.configureBotIdentity();
+    let branchName;
+    if (issueBranchName) {
+        branchName = issueBranchName.replace(/^[^/]*\//, "");
+    }
+    else {
+        branchName = `${issueIdentifier.toLowerCase()}-triage-fix`;
+    }
+    await sourceControl.createBranch(branchName);
+    await sourceControl.resetPaths([".github/workflows/"]);
+    ctx.logger.info(`Created branch: ${branchName}`);
+    // -------------------------------------------------------------------------
+    // 3. Install Claude and implement fix
+    // -------------------------------------------------------------------------
+    await codingAgent.install();
+    const implementPrompt = buildImplementPrompt(issueIdentifier);
+    await codingAgent.run({
+        prompt: implementPrompt,
+        maxTurns: config.maxImplementTurns,
+        env: { ...config.agentEnv },
+    });
+    // -------------------------------------------------------------------------
+    // 4. Check for code changes
+    // -------------------------------------------------------------------------
+    // Check if fix was declined
+    const fixDeclinedPath = ".github/triage-analysis/fix-declined.md";
+    if (external_fs_.existsSync(fixDeclinedPath)) {
+        const reason = external_fs_.readFileSync(fixDeclinedPath, "utf-8").trim();
+        ctx.logger.info(`Fix was declined by Claude: ${reason.slice(0, 200)}`);
+        return {
+            status: "skipped",
+            reason: `Fix declined: ${reason.slice(0, 200)}`,
+        };
+    }
+    let hasCodeChanges = await sourceControl.hasNewCommits();
+    if (!hasCodeChanges) {
+        ctx.logger.info("No commits created by Claude");
+        const hasUncommitted = await sourceControl.hasChanges();
+        if (hasUncommitted) {
+            ctx.logger.info("Found uncommitted code changes, creating fallback commit");
+            await sourceControl.stageAndCommit(`fix: automated fix from log analysis\n\nPartial implementation by Claude (reached max turns before completion)\n\nIdentified by SWEny Triage\nLinear: ${issueIdentifier}`);
+            hasCodeChanges = true;
+        }
+        else {
+            ctx.logger.info("No code changes to commit");
+            return {
+                status: "skipped",
+                reason: "No code changes produced",
+            };
+        }
+    }
+    else {
+        const changedFiles = await sourceControl.getChangedFiles();
+        ctx.logger.info(`Claude created commits with changes to: ${changedFiles.join(", ")}`);
+    }
+    // -------------------------------------------------------------------------
+    // 5. Push branch
+    // -------------------------------------------------------------------------
+    await sourceControl.pushBranch(branchName);
+    return {
+        status: "success",
+        data: { branchName, hasCodeChanges },
+    };
+}
+//# sourceMappingURL=implement-fix.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/create-pr.js
+
+
+
+/** Generate PR description with Claude, create PR, link to issue, update issue state. */
+async function createPr(ctx) {
+    const config = ctx.config;
+    const sourceControl = ctx.providers.get("sourceControl");
+    const issueTracker = ctx.providers.get("issueTracker");
+    const codingAgent = ctx.providers.get("codingAgent");
+    const issueData = ctx.results.get("create-issue")?.data;
+    const implementData = ctx.results.get("implement-fix")?.data;
+    // If implement-fix was skipped, we can't create a PR
+    const implementResult = ctx.results.get("implement-fix");
+    if (!implementResult || implementResult.status !== "success") {
+        return {
+            status: "skipped",
+            reason: implementResult?.reason ?? "No implementation to create PR for",
+        };
+    }
+    const issueId = issueData?.issueId;
+    const issueIdentifier = issueData?.issueIdentifier ?? "";
+    const issueTitle = issueData?.issueTitle ?? "";
+    const issueUrl = issueData?.issueUrl ?? "";
+    const branchName = implementData?.branchName ?? "";
+    // -------------------------------------------------------------------------
+    // 1. Generate PR description with Claude
+    // -------------------------------------------------------------------------
+    const prDescPrompt = buildPrDescriptionPrompt(issueIdentifier, issueUrl);
+    await codingAgent.run({
+        prompt: prDescPrompt,
+        maxTurns: 10,
+        env: { ...config.agentEnv },
+    });
+    // -------------------------------------------------------------------------
+    // 2. Create Pull Request
+    // -------------------------------------------------------------------------
+    let prBody = "";
+    const prDescPath = ".github/triage-analysis/pr-description.md";
+    if (external_fs_.existsSync(prDescPath)) {
+        prBody = external_fs_.readFileSync(prDescPath, "utf-8");
+    }
+    else {
+        prBody = `## Automated Fix from SWEny Triage
+
+This PR contains an automated fix for an issue identified in production logs.
+
+**Linear Issue**: [${issueIdentifier}](${issueUrl})
+
+> Generated by SWEny Triage`;
+    }
+    const prTitle = `fix(${issueIdentifier}): ${issueTitle.toLowerCase()}`;
+    const pr = await sourceControl.createPullRequest({
+        title: prTitle,
+        body: prBody,
+        head: branchName,
+        base: "main",
+        labels: ["agent", "triage", "needs-review"],
+    });
+    ctx.logger.info(`Created PR #${pr.number}: ${pr.url}`);
+    // -------------------------------------------------------------------------
+    // 3. Link PR to issue
+    // -------------------------------------------------------------------------
+    if (issueId && canLinkPr(issueTracker)) {
+        try {
+            await issueTracker.linkPr(issueId, pr.url, pr.number);
+            ctx.logger.info(`PR #${pr.number} linked to ${issueIdentifier}`);
+        }
+        catch (err) {
+            ctx.logger.warn(`Failed to link PR to issue: ${err}`);
+        }
+    }
+    // -------------------------------------------------------------------------
+    // 4. Update issue state to Peer Review
+    // -------------------------------------------------------------------------
+    if (issueId) {
+        try {
+            await issueTracker.updateIssue(issueId, {
+                stateId: config.statePeerReview,
+            });
+            ctx.logger.info(`Updated ${issueIdentifier} to Peer Review`);
+        }
+        catch (err) {
+            ctx.logger.warn(`Failed to update issue state: ${err}`);
+        }
+    }
+    return {
+        status: "success",
+        data: {
+            issueIdentifier,
+            issueUrl,
+            prUrl: pr.url,
+            prNumber: pr.number,
+        },
+    };
+}
+//# sourceMappingURL=create-pr.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/notify.js
+
+/** Build summary and send notification with investigation results. */
+async function sendNotification(ctx) {
+    const config = ctx.config;
+    const notification = ctx.providers.get("notification");
+    const investigation = ctx.results.get("investigate")?.data;
+    const prData = ctx.results.get("create-pr")?.data;
+    const issueData = ctx.results.get("create-issue")?.data;
+    const crossRepoData = ctx.results.get("cross-repo-check")?.data;
+    const implementResult = ctx.results.get("implement-fix");
     const lines = [];
     lines.push(`**Run Date**: ${new Date().toISOString()}`);
     lines.push(`**Service Filter**: \`${config.serviceFilter}\``);
     lines.push(`**Time Range**: \`${config.timeRange}\``);
     lines.push(`**Dry Run**: ${config.dryRun}`);
-    lines.push(`**Recommendation**: ${investigation.recommendation}`);
+    lines.push(`**Recommendation**: ${investigation?.recommendation ?? "unknown"}`);
     lines.push("");
-    if (implementation?.issueIdentifier) {
-        lines.push(`**Linear Issue**: [${implementation.issueIdentifier}](${implementation.issueUrl})`);
+    // Issue reference
+    const issueIdentifier = (prData?.issueIdentifier ?? issueData?.issueIdentifier);
+    const issueUrl = (prData?.issueUrl ?? issueData?.issueUrl);
+    if (issueIdentifier) {
+        lines.push(`**Issue**: [${issueIdentifier}](${issueUrl})`);
         lines.push("");
     }
     // Status message
-    if (investigation.targetRepo &&
-        investigation.targetRepo !== config.repository) {
-        lines.push(`> **Cross-repo dispatch**: Bug belongs to \`${investigation.targetRepo}\` — dispatched for implementation`);
+    if (crossRepoData?.dispatched) {
+        lines.push(`> **Cross-repo dispatch**: Bug belongs to \`${crossRepoData.targetRepo}\` — dispatched for implementation`);
     }
-    else if (investigation.recommendation.toLowerCase().includes("skip")) {
+    else if (investigation?.recommendation?.toLowerCase().includes("skip")) {
         lines.push("> **Skipped**: No novel issues found");
     }
-    else if (investigation.recommendation.toLowerCase().includes("+1 existing")) {
+    else if (investigation?.recommendation?.toLowerCase().includes("+1 existing")) {
         lines.push("> **+1 Existing**: Added occurrence to existing issue");
     }
-    else if (implementation?.skipped && implementation.skipReason) {
-        lines.push(`> **Skipped**: ${implementation.skipReason}`);
+    else if (implementResult?.status === "skipped" && implementResult.reason) {
+        lines.push(`> **Skipped**: ${implementResult.reason}`);
     }
-    else if (implementation?.prUrl) {
-        lines.push(`> **Success**: New PR created - ${implementation.prUrl}`);
+    else if (prData?.prUrl) {
+        lines.push(`> **Success**: New PR created - ${prData.prUrl}`);
     }
     else if (config.dryRun) {
         lines.push("> **Dry Run**: Analysis only");
     }
     // Append investigation log if it exists
-    const investigationLog = ".github/datadog-analysis/investigation-log.md";
+    const investigationLog = ".github/triage-analysis/investigation-log.md";
     if (external_fs_.existsSync(investigationLog)) {
         lines.push("");
         lines.push("### Investigation Log");
         lines.push(external_fs_.readFileSync(investigationLog, "utf-8"));
     }
     // Append issues report if it exists
-    const issuesReport = ".github/datadog-analysis/issues-report.md";
+    const issuesReport = ".github/triage-analysis/issues-report.md";
     if (external_fs_.existsSync(issuesReport)) {
         lines.push("");
         lines.push("### Issues Found");
         lines.push(external_fs_.readFileSync(issuesReport, "utf-8"));
     }
-    await providers.notification.send({
+    await notification.send({
         title: "SWEny Triage Summary",
         body: lines.join("\n"),
         format: "markdown",
     });
+    return { status: "success" };
+}
+//# sourceMappingURL=notify.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/index.js
+
+
+
+
+
+
+
+
+
+/** The triage recipe — first workflow on the SWEny platform. */
+const triageWorkflow = {
+    name: "triage",
+    description: "Investigate production issues, implement fixes, and report results",
+    steps: [
+        // Learn phase — gather data
+        { name: "verify-access", phase: "learn", run: verifyAccess },
+        { name: "build-context", phase: "learn", run: buildContext },
+        { name: "investigate", phase: "learn", run: investigate },
+        // Act phase — fix the problem
+        { name: "novelty-gate", phase: "act", run: noveltyGate },
+        { name: "create-issue", phase: "act", run: createIssue },
+        { name: "cross-repo-check", phase: "act", run: crossRepoCheck },
+        { name: "implement-fix", phase: "act", run: implementFix },
+        { name: "create-pr", phase: "act", run: createPr },
+        // Report phase — notify stakeholders
+        { name: "notify", phase: "report", run: sendNotification },
+    ],
+};
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../engine/dist/index.js
+// Runtime
+
+// Recipes
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ./src/config.ts
+
+function parseInputs() {
+    return {
+        anthropicApiKey: core.getInput("anthropic-api-key"),
+        claudeOauthToken: core.getInput("claude-oauth-token"),
+        observabilityProvider: core.getInput("observability-provider") || "datadog",
+        observabilityCredentials: parseObservabilityCredentials(core.getInput("observability-provider") || "datadog"),
+        issueTrackerProvider: core.getInput("issue-tracker-provider") || "linear",
+        linearApiKey: core.getInput("linear-api-key"),
+        linearTeamId: core.getInput("linear-team-id"),
+        linearBugLabelId: core.getInput("linear-bug-label-id"),
+        linearTriageLabelId: core.getInput("linear-triage-label-id"),
+        linearStateBacklog: core.getInput("linear-state-backlog"),
+        linearStateInProgress: core.getInput("linear-state-in-progress"),
+        linearStatePeerReview: core.getInput("linear-state-peer-review"),
+        timeRange: core.getInput("time-range") || "24h",
+        severityFocus: core.getInput("severity-focus") || "errors",
+        serviceFilter: core.getInput("service-filter") || "*",
+        investigationDepth: core.getInput("investigation-depth") || "standard",
+        maxInvestigateTurns: parseInt(core.getInput("max-investigate-turns") || "50", 10),
+        maxImplementTurns: parseInt(core.getInput("max-implement-turns") || "30", 10),
+        dryRun: core.getBooleanInput("dry-run"),
+        noveltyMode: core.getBooleanInput("novelty-mode"),
+        linearIssue: core.getInput("linear-issue"),
+        additionalInstructions: core.getInput("additional-instructions"),
+        serviceMapPath: core.getInput("service-map-path") || ".github/service-map.yml",
+        githubToken: core.getInput("github-token"),
+        botToken: core.getInput("bot-token"),
+        repository: process.env.GITHUB_REPOSITORY || "",
+        repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",
+    };
+}
+function parseObservabilityCredentials(provider) {
+    switch (provider) {
+        case "datadog":
+            return {
+                apiKey: core.getInput("dd-api-key"),
+                appKey: core.getInput("dd-app-key"),
+                site: core.getInput("dd-site") || "datadoghq.com",
+            };
+        case "sentry":
+            return {
+                authToken: core.getInput("sentry-auth-token"),
+                organization: core.getInput("sentry-org"),
+                project: core.getInput("sentry-project"),
+                baseUrl: core.getInput("sentry-base-url") || "https://sentry.io",
+            };
+        case "cloudwatch":
+            return {
+                region: core.getInput("cloudwatch-region") || "us-east-1",
+                logGroupPrefix: core.getInput("cloudwatch-log-group-prefix"),
+            };
+        default:
+            return {};
+    }
+}
+
+;// CONCATENATED MODULE: ./src/providers/index.ts
+
+
+
+
+
+
+
+const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
+function createProviders(config) {
+    const registry = createProviderRegistry();
+    // Observability
+    let observability;
+    const obsCreds = config.observabilityCredentials;
+    switch (config.observabilityProvider) {
+        case "datadog":
+            observability = datadog({
+                apiKey: obsCreds.apiKey,
+                appKey: obsCreds.appKey,
+                site: obsCreds.site,
+                logger: actionsLogger,
+            });
+            break;
+        case "sentry":
+            observability = sentry({
+                authToken: obsCreds.authToken,
+                organization: obsCreds.organization,
+                project: obsCreds.project,
+                baseUrl: obsCreds.baseUrl,
+                logger: actionsLogger,
+            });
+            break;
+        case "cloudwatch":
+            observability = cloudwatch({
+                region: obsCreds.region,
+                logGroupPrefix: obsCreds.logGroupPrefix,
+                logger: actionsLogger,
+            });
+            break;
+        default:
+            throw new Error(`Unsupported observability provider: ${config.observabilityProvider}`);
+    }
+    registry.set("observability", observability);
+    // Issue tracker
+    switch (config.issueTrackerProvider) {
+        case "linear":
+            registry.set("issueTracker", linear({ apiKey: config.linearApiKey, logger: actionsLogger }));
+            break;
+        default:
+            throw new Error(`Unsupported issue tracker provider: ${config.issueTrackerProvider}`);
+    }
+    // Source control
+    const scToken = config.botToken || config.githubToken;
+    const [scOwner = "", scRepo = ""] = config.repository.split("/");
+    registry.set("sourceControl", github({
+        token: scToken,
+        owner: scOwner,
+        repo: scRepo,
+        logger: actionsLogger,
+    }));
+    // Notification
+    registry.set("notification", githubSummary({ logger: actionsLogger }));
+    // Coding agent
+    registry.set("codingAgent", claudeCode({ logger: actionsLogger }));
+    return registry;
 }
 
 ;// CONCATENATED MODULE: ./src/main.ts
@@ -34104,35 +37085,23 @@ async function notify(config, providers, investigation, implementation) {
 
 
 
-
-
+const main_actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
 async function run() {
     try {
         const config = parseInputs();
         const providers = createProviders(config);
-        // Phase 1: Investigate
-        core.startGroup("Phase 1: Investigate Production Logs");
-        const findings = await investigate(config, providers);
-        core.endGroup();
-        core.setOutput("issues-found", String(findings.issuesFound));
-        core.setOutput("recommendation", findings.recommendation);
-        // Phase 2: Implement (if applicable)
-        let implementation;
-        if (findings.shouldImplement && !config.dryRun) {
-            core.startGroup("Phase 2: Implement Fix");
-            implementation = await implement(config, providers, findings);
-            core.endGroup();
-            if (!implementation.skipped) {
-                core.setOutput("issue-identifier", implementation.issueIdentifier);
-                core.setOutput("issue-url", implementation.issueUrl);
-                core.setOutput("pr-url", implementation.prUrl);
-                core.setOutput("pr-number", String(implementation.prNumber));
-            }
-        }
-        // Phase 3: Notify
-        core.startGroup("Phase 3: Create Summary");
-        await notify(config, providers, findings, implementation);
-        core.endGroup();
+        const triageConfig = mapToTriageConfig(config);
+        const result = await runWorkflow(triageWorkflow, triageConfig, providers, {
+            logger: main_actionsLogger,
+            beforeStep: async (step) => {
+                core.startGroup(`${step.phase}: ${step.name}`);
+            },
+            afterStep: async (step, stepResult) => {
+                core.info(`${step.name}: ${stepResult.status}${stepResult.reason ? ` — ${stepResult.reason}` : ""}`);
+                core.endGroup();
+            },
+        });
+        setGitHubOutputs(result);
     }
     catch (error) {
         if (error instanceof Error) {
@@ -34141,6 +37110,76 @@ async function run() {
         else {
             core.setFailed("An unexpected error occurred");
         }
+    }
+}
+function mapToTriageConfig(config) {
+    // Build agent env vars for coding agent auth
+    const agentEnv = {
+        LINEAR_API_KEY: config.linearApiKey,
+        LINEAR_TEAM_ID: config.linearTeamId,
+        LINEAR_BUG_LABEL_ID: config.linearBugLabelId,
+    };
+    if (config.anthropicApiKey)
+        agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
+    if (config.claudeOauthToken)
+        agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+    // Add observability env vars
+    const obsCreds = config.observabilityCredentials;
+    switch (config.observabilityProvider) {
+        case "datadog":
+            if (obsCreds.apiKey)
+                agentEnv.DD_API_KEY = obsCreds.apiKey;
+            if (obsCreds.appKey)
+                agentEnv.DD_APP_KEY = obsCreds.appKey;
+            if (obsCreds.site)
+                agentEnv.DD_SITE = obsCreds.site;
+            break;
+        case "sentry":
+            if (obsCreds.authToken)
+                agentEnv.SENTRY_AUTH_TOKEN = obsCreds.authToken;
+            break;
+    }
+    return {
+        timeRange: config.timeRange,
+        severityFocus: config.severityFocus,
+        serviceFilter: config.serviceFilter,
+        investigationDepth: config.investigationDepth,
+        maxInvestigateTurns: config.maxInvestigateTurns,
+        maxImplementTurns: config.maxImplementTurns,
+        serviceMapPath: config.serviceMapPath,
+        projectId: config.linearTeamId,
+        bugLabelId: config.linearBugLabelId,
+        triageLabelId: config.linearTriageLabelId,
+        stateBacklog: config.linearStateBacklog,
+        stateInProgress: config.linearStateInProgress,
+        statePeerReview: config.linearStatePeerReview,
+        repository: config.repository,
+        dryRun: config.dryRun,
+        noveltyMode: config.noveltyMode,
+        issueOverride: config.linearIssue,
+        additionalInstructions: config.additionalInstructions,
+        agentEnv,
+    };
+}
+function setGitHubOutputs(result) {
+    // Investigation results
+    const investigateData = result.steps.find((s) => s.name === "investigate")?.result.data;
+    if (investigateData) {
+        core.setOutput("issues-found", String(investigateData.issuesFound ?? false));
+        core.setOutput("recommendation", String(investigateData.recommendation ?? "skip"));
+    }
+    // PR results
+    const prData = result.steps.find((s) => s.name === "create-pr")?.result.data;
+    const issueData = result.steps.find((s) => s.name === "create-issue")?.result.data;
+    if (prData) {
+        core.setOutput("issue-identifier", String(prData.issueIdentifier ?? ""));
+        core.setOutput("issue-url", String(prData.issueUrl ?? ""));
+        core.setOutput("pr-url", String(prData.prUrl ?? ""));
+        core.setOutput("pr-number", String(prData.prNumber ?? ""));
+    }
+    else if (issueData) {
+        core.setOutput("issue-identifier", String(issueData.issueIdentifier ?? ""));
+        core.setOutput("issue-url", String(issueData.issueUrl ?? ""));
     }
 }
 run();

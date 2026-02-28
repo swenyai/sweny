@@ -1,5 +1,5 @@
 import * as fs from "fs";
-import * as core from "@actions/core";
+import type { Logger } from "@sweny/providers";
 
 export interface ServiceEntry {
   name: string;
@@ -15,9 +15,9 @@ export interface ServiceMap {
  * Parse a service-map.yml file using simple line-based parsing.
  * Avoids YAML library dependency for ncc bundling simplicity.
  */
-export function parseServiceMap(filePath: string): ServiceMap {
+export function parseServiceMap(filePath: string, logger?: Logger): ServiceMap {
   if (!fs.existsSync(filePath)) {
-    core.warning(`Service map not found at ${filePath}`);
+    logger?.warn(`Service map not found at ${filePath}`);
     return { services: [] };
   }
 
@@ -69,16 +69,4 @@ export function parseServiceMap(filePath: string): ServiceMap {
 
   if (current) services.push(current);
   return { services };
-}
-
-/**
- * Find the target repo for a given Datadog service name.
- */
-export function findRepoForService(serviceMap: ServiceMap, serviceName: string): string | null {
-  for (const entry of serviceMap.services) {
-    if (entry.owns.includes(serviceName)) {
-      return entry.repo;
-    }
-  }
-  return null;
 }

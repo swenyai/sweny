@@ -1,156 +1,19 @@
-import * as core from "@actions/core";
 import * as fs from "fs";
-import * as path from "path";
-import { ActionConfig } from "../config.js";
-import { Providers } from "../providers/index.js";
-import { parseServiceMap } from "../utils/service-map.js";
-
-export interface InvestigationResult {
-  issuesFound: boolean;
-  bestCandidate: boolean;
-  recommendation: string; // "implement" | "+1 existing ENG-XXX" | "skip"
-  existingIssue: string; // e.g., "ENG-123" from +1 recommendation
-  targetRepo: string; // e.g., "org/repo" for cross-repo dispatch
-  shouldImplement: boolean; // recommendation starts with "implement"
-}
-
-export async function investigate(config: ActionConfig, providers: Providers): Promise<InvestigationResult> {
-  const analysisDir = ".github/triage-analysis";
-  fs.mkdirSync(analysisDir, { recursive: true });
-
-  // Install coding agent CLI
-  await providers.codingAgent.install();
-
-  // Verify provider access
-  core.startGroup("Verify provider access");
-  await providers.observability.verifyAccess();
-  core.info("Observability provider access verified");
-  await providers.issueTracker.verifyAccess();
-  core.info("Issue tracker access verified");
-  core.endGroup();
-
-  // Build known issues context
-  core.startGroup("Build known issues context");
-  const knownIssuesContent = await buildKnownIssuesContext(config, providers);
-  const knownIssuesPath = path.join(analysisDir, "known-issues-context.md");
-  fs.writeFileSync(knownIssuesPath, knownIssuesContent);
-  core.endGroup();
-
-  // Build investigation prompt
-  const prompt = buildInvestigationPrompt(config, providers, knownIssuesContent);
-
-  // Run coding agent investigation
-  core.startGroup("Coding agent investigation");
-  const agentEnv: Record<string, string> = {
-    ...providers.observability.getAgentEnv(),
-    LINEAR_API_KEY: config.linearApiKey,
-    LINEAR_TEAM_ID: config.linearTeamId,
-    LINEAR_BUG_LABEL_ID: config.linearBugLabelId,
-  };
-  if (config.anthropicApiKey) agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
-  if (config.claudeOauthToken) agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
-
-  await providers.codingAgent.run({ prompt, maxTurns: config.maxInvestigateTurns, env: agentEnv });
-  core.endGroup();
-
-  // Parse results
-  return parseInvestigationResults(analysisDir);
-}
+import type { ObservabilityProvider } from "@sweny/providers/observability";
+import type { TriageConfig } from "./types.js";
+import { parseServiceMap } from "./service-map.js";
 
 // ---------------------------------------------------------------------------
-// Build Known Issues Context
+// Investigation Prompt
 // ---------------------------------------------------------------------------
 
-async function buildKnownIssuesContext(config: ActionConfig, providers: Providers): Promise<string> {
-  const lines: string[] = [];
-
-  lines.push("# Known Triage History (Last 30 Days)");
-  lines.push("");
-  lines.push("These issues have already been identified by previous SWEny Triage runs.");
-  lines.push("Do NOT create new issues or propose fixes for these same problems.");
-  lines.push("");
-
-  // 1. Fetch recent triage Linear issues (last 30 days)
-  lines.push("## Linear Issues");
-  try {
-    const triageHistory = await providers.issueTracker.listTriageHistory(
-      config.linearTeamId,
-      config.linearTriageLabelId,
-      30,
-    );
-
-    if (triageHistory.length > 0) {
-      for (const entry of triageHistory) {
-        lines.push(`- **${entry.identifier}** [${entry.state}] ${entry.title} — ${entry.url}`);
-      }
-    } else {
-      lines.push("_No triage-labeled Linear issues found in last 30 days_");
-    }
-  } catch (err) {
-    core.warning(`Failed to fetch Linear triage history: ${err}`);
-    lines.push("_Failed to fetch Linear triage history_");
-  }
-
-  lines.push("");
-
-  // 2. Fetch recent triage GitHub PRs
-  lines.push("## GitHub PRs");
-
-  try {
-    const triagePrs = await providers.sourceControl.listPullRequests({
-      state: "all",
-      labels: ["triage"],
-      limit: 30,
-    });
-
-    // Merged (fixed)
-    lines.push("### Merged (fixed)");
-    const merged = triagePrs.filter((pr) => pr.state === "merged");
-    if (merged.length > 0) {
-      for (const pr of merged) {
-        lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-      }
-    } else {
-      lines.push("_None_");
-    }
-
-    // Open (in progress)
-    lines.push("### Open (in progress)");
-    const open = triagePrs.filter((pr) => pr.state === "open");
-    if (open.length > 0) {
-      for (const pr of open) {
-        lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-      }
-    } else {
-      lines.push("_None_");
-    }
-
-    // Closed (failed attempts)
-    lines.push("### Closed (failed attempts)");
-    const closed = triagePrs.filter((pr) => pr.state === "closed");
-    if (closed.length > 0) {
-      for (const pr of closed) {
-        lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
-      }
-    } else {
-      lines.push("_None_");
-    }
-  } catch {
-    core.warning("Failed to fetch GitHub triage PRs");
-    lines.push("_Failed to fetch triage PRs_");
-  }
-
-  return lines.join("\n");
-}
-
-// ---------------------------------------------------------------------------
-// Build Investigation Prompt
-// ---------------------------------------------------------------------------
-
-function buildInvestigationPrompt(config: ActionConfig, providers: Providers, knownIssuesContent: string): string {
+export function buildInvestigationPrompt(
+  config: TriageConfig,
+  observability: ObservabilityProvider,
+  knownIssuesContent: string,
+): string {
   const parts: string[] = [];
 
-  // Dynamic inputs section (variable expansion)
   parts.push(`You are an autonomous SRE agent investigating production issues.
 You have access to multiple tools and data sources. Your job is to investigate issues,
 understand problems, and prepare fixes.
@@ -161,7 +24,7 @@ You are running inside: **${config.repository}**
 ## YOUR INPUTS - REVIEW THESE FIRST
 
 ### Linear Issue
-${config.linearIssue || "(none provided)"}
+${config.issueOverride || "(none provided)"}
 
 ### Additional Instructions
 ${config.additionalInstructions || "(none provided)"}
@@ -200,7 +63,7 @@ Based on the inputs above, decide how to proceed:
 
 ## AVAILABLE TOOLS
 
-${providers.observability.getPromptInstructions()}
+${observability.getPromptInstructions()}
 
 ### Linear API
 The \`LINEAR_API_KEY\` environment variable is set. Use the Linear GraphQL API directly via curl:
@@ -237,7 +100,6 @@ name in the error logs and match it against the \`owns\` list in the service map
   if (serviceMap.services.length > 0) {
     parts.push("");
     parts.push("### Service Map Reference");
-    // Read the raw file to include in prompt
     if (fs.existsSync(config.serviceMapPath)) {
       parts.push(fs.readFileSync(config.serviceMapPath, "utf-8"));
     }
@@ -344,59 +206,91 @@ Write files early and update them if needed. Do NOT keep investigating without w
 }
 
 // ---------------------------------------------------------------------------
-// Parse Investigation Results
+// Implementation Prompt
 // ---------------------------------------------------------------------------
 
-function parseInvestigationResults(analysisDir: string): InvestigationResult {
-  const issuesReportPath = path.join(analysisDir, "issues-report.md");
-  const bestCandidatePath = path.join(analysisDir, "best-candidate.md");
+export function buildImplementPrompt(issueIdentifier: string): string {
+  return `You are implementing a fix for an issue identified from production logs.
 
-  const issuesFound = fs.existsSync(issuesReportPath);
-  const bestCandidate = fs.existsSync(bestCandidatePath);
+## Context
 
-  let recommendation = "skip";
-  let existingIssue = "";
-  let targetRepo = "";
+Read the best candidate analysis at \`.github/triage-analysis/best-candidate.md\`.
+Also read \`.github/triage-analysis/investigation-log.md\` for context.
 
-  if (bestCandidate) {
-    const content = fs.readFileSync(bestCandidatePath, "utf-8");
+## Your Task
 
-    // Extract RECOMMENDATION
-    const recMatch = content.match(/^RECOMMENDATION:\s*(.+)$/im);
-    if (recMatch) {
-      recommendation = recMatch[1].trim();
-      core.info(`Recommendation: ${recommendation}`);
-    } else {
-      // Default to "implement" if best candidate exists but no explicit recommendation
-      recommendation = "implement";
-      core.info("No explicit RECOMMENDATION found in best-candidate.md, defaulting to implement");
-    }
+1. **Understand the issue**: Read the analysis thoroughly
+2. **Verify the fix approach**: Check the codebase to ensure the suggested fix is valid
+3. **Implement the fix**:
+   - Make minimal, focused changes
+   - Follow existing code patterns
+   - Add appropriate error handling
+   - Include TypeScript types
+   - Do NOT add unnecessary comments
+   - Do NOT refactor unrelated code
 
-    // Extract existing issue reference from "+1 existing" recommendation
-    const existingMatch = recommendation.match(/\+1 existing\s+([A-Z]+-\d+)/i);
-    if (existingMatch) {
-      existingIssue = existingMatch[1];
-      core.info(`Existing issue reference: ${existingIssue}`);
-    }
+4. **Verify your changes**:
+   - Run \`npm run lint\` to check for issues
+   - Run \`npm run build\` to verify compilation
 
-    // Extract TARGET_REPO
-    const repoMatch = content.match(/^TARGET_REPO:\s*(.+)$/im);
-    if (repoMatch) {
-      targetRepo = repoMatch[1].trim();
-      core.info(`Target repo: ${targetRepo}`);
-    }
-  } else {
-    core.info("No best-candidate.md found, recommendation: skip");
-  }
+5. **Create a commit** with format:
+   \`\`\`
+   fix(<scope>): <brief description>
 
-  const shouldImplement = recommendation.toLowerCase().startsWith("implement");
+   - <change 1>
+   - <change 2>
 
-  return {
-    issuesFound,
-    bestCandidate,
-    recommendation,
-    existingIssue,
-    targetRepo,
-    shouldImplement,
-  };
+   Identified by SWEny Triage
+   Linear: ${issueIdentifier}
+   \`\`\`
+
+## Safety Guidelines
+
+- If the fix is too complex or risky, create \`.github/triage-analysis/fix-declined.md\` explaining why
+- Do not make breaking changes
+- Prefer defensive coding patterns
+
+Start by reading the best-candidate.md file.`;
+}
+
+// ---------------------------------------------------------------------------
+// PR Description Prompt
+// ---------------------------------------------------------------------------
+
+export function buildPrDescriptionPrompt(issueIdentifier: string, issueUrl: string): string {
+  return `Generate a pull request description.
+
+## Context
+
+1. Read \`.github/triage-analysis/best-candidate.md\` for issue details
+2. Read \`.github/triage-analysis/investigation-log.md\` for context
+3. Run \`git diff main..HEAD\` to see the changes made
+
+## Output
+
+Create \`.github/triage-analysis/pr-description.md\` with:
+
+## Summary
+<What this PR fixes and why>
+
+## Issue Analysis
+- Severity, Frequency, Services affected, Impact
+
+## Root Cause
+<Technical explanation>
+
+## Solution
+<Description and changes made>
+
+## Testing
+- [ ] Lint passes
+- [ ] Build passes
+- [ ] Tests pass
+
+## Rollback Plan
+<How to rollback>
+
+---
+**Linear Issue**: [${issueIdentifier}](${issueUrl})
+> Generated by SWEny Triage`;
 }
