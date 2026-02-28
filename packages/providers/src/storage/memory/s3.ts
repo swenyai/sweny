@@ -1,17 +1,21 @@
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { randomBytes } from "node:crypto";
 import type { MemoryEntry, UserMemory, MemoryStore } from "../types.js";
+import type { Logger } from "../../logger.js";
+import { consoleLogger } from "../../logger.js";
 
 export class S3MemoryStore implements MemoryStore {
   private s3: S3Client;
   private bucket: string;
   private prefix: string;
   private cache = new Map<string, UserMemory>();
+  private logger: Logger;
 
-  constructor(bucket: string, prefix = "", region = "us-west-2") {
+  constructor(bucket: string, prefix = "", region = "us-west-2", logger?: Logger) {
     this.s3 = new S3Client({ region });
     this.bucket = bucket;
     this.prefix = prefix;
+    this.logger = logger ?? consoleLogger;
   }
 
   private s3Key(userId: string): string {
@@ -36,7 +40,7 @@ export class S3MemoryStore implements MemoryStore {
     } catch (err: unknown) {
       const code = (err as { name?: string }).name;
       if (code !== "NoSuchKey" && code !== "AccessDenied") {
-        console.error("[memory] Failed to load memories:", err);
+        this.logger.error("[memory] Failed to load memories:", err);
       }
     }
 

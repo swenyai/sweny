@@ -1,12 +1,16 @@
 import { readFile, writeFile, appendFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type { PersistedSession, TranscriptEntry, SessionStore } from "../types.js";
+import type { Logger } from "../../logger.js";
+import { consoleLogger } from "../../logger.js";
 
 export class FsSessionStore implements SessionStore {
   private baseDir: string;
+  private logger: Logger;
 
-  constructor(baseDir: string) {
+  constructor(baseDir: string, logger?: Logger) {
     this.baseDir = baseDir;
+    this.logger = logger ?? consoleLogger;
   }
 
   private sessionDir(userId: string, threadKey: string): string {
@@ -27,7 +31,7 @@ export class FsSessionStore implements SessionStore {
       return JSON.parse(data) as PersistedSession;
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        console.error("[session-store] Failed to load session:", err);
+        this.logger.error("[session-store] Failed to load session:", err);
       }
     }
     return null;
@@ -55,7 +59,7 @@ export class FsSessionStore implements SessionStore {
         .map((line) => JSON.parse(line) as TranscriptEntry);
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        console.error("[session-store] Failed to read transcript:", err);
+        this.logger.error("[session-store] Failed to read transcript:", err);
       }
     }
     return [];
@@ -76,7 +80,7 @@ export class FsSessionStore implements SessionStore {
       return sessions;
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        console.error("[session-store] Failed to list sessions:", err);
+        this.logger.error("[session-store] Failed to list sessions:", err);
       }
     }
     return [];

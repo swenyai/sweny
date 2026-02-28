@@ -1,15 +1,19 @@
 import { S3Client, GetObjectCommand, PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import type { PersistedSession, TranscriptEntry, SessionStore } from "../types.js";
+import type { Logger } from "../../logger.js";
+import { consoleLogger } from "../../logger.js";
 
 export class S3SessionStore implements SessionStore {
   private s3: S3Client;
   private bucket: string;
   private prefix: string;
+  private logger: Logger;
 
-  constructor(bucket: string, prefix = "", region = "us-west-2") {
+  constructor(bucket: string, prefix = "", region = "us-west-2", logger?: Logger) {
     this.s3 = new S3Client({ region });
     this.bucket = bucket;
     this.prefix = prefix;
+    this.logger = logger ?? consoleLogger;
   }
 
   private baseKey(userId: string, threadKey: string): string {
@@ -35,7 +39,7 @@ export class S3SessionStore implements SessionStore {
     } catch (err: unknown) {
       const code = (err as { name?: string }).name;
       if (code !== "NoSuchKey" && code !== "AccessDenied") {
-        console.error("[session-store] Failed to load session:", err);
+        this.logger.error("[session-store] Failed to load session:", err);
       }
     }
     return null;
@@ -67,7 +71,7 @@ export class S3SessionStore implements SessionStore {
     } catch (err: unknown) {
       const code = (err as { name?: string }).name;
       if (code !== "NoSuchKey" && code !== "AccessDenied") {
-        console.error("[session-store] Failed to read transcript:", err);
+        this.logger.error("[session-store] Failed to read transcript:", err);
       }
     }
 
@@ -97,7 +101,7 @@ export class S3SessionStore implements SessionStore {
     } catch (err: unknown) {
       const code = (err as { name?: string }).name;
       if (code !== "NoSuchKey" && code !== "AccessDenied") {
-        console.error("[session-store] Failed to read transcript:", err);
+        this.logger.error("[session-store] Failed to read transcript:", err);
       }
     }
     return [];

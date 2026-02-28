@@ -3,6 +3,8 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 import type { WorkspaceFile, WorkspaceManifest, WorkspaceStore } from "../types.js";
 import { WORKSPACE_LIMITS } from "../types.js";
+import type { Logger } from "../../logger.js";
+import { consoleLogger } from "../../logger.js";
 
 function emptyManifest(userId: string): WorkspaceManifest {
   const now = new Date().toISOString();
@@ -26,11 +28,13 @@ export class S3WorkspaceStore implements WorkspaceStore {
   private bucket: string;
   private prefix: string;
   private cache = new Map<string, WorkspaceManifest>();
+  private logger: Logger;
 
-  constructor(bucket: string, prefix = "", region = "us-west-2") {
+  constructor(bucket: string, prefix = "", region = "us-west-2", logger?: Logger) {
     this.s3 = new S3Client({ region });
     this.bucket = bucket;
     this.prefix = prefix;
+    this.logger = logger ?? consoleLogger;
   }
 
   private manifestKey(userId: string): string {
@@ -60,7 +64,7 @@ export class S3WorkspaceStore implements WorkspaceStore {
     } catch (err: unknown) {
       const code = (err as { name?: string }).name;
       if (code !== "NoSuchKey" && code !== "AccessDenied") {
-        console.error("[workspace] Failed to load manifest:", err);
+        this.logger.error("[workspace] Failed to load manifest:", err);
       }
     }
 

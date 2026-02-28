@@ -2,13 +2,17 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { MemoryEntry, UserMemory, MemoryStore } from "../types.js";
+import type { Logger } from "../../logger.js";
+import { consoleLogger } from "../../logger.js";
 
 export class FsMemoryStore implements MemoryStore {
   private baseDir: string;
   private cache = new Map<string, UserMemory>();
+  private logger: Logger;
 
-  constructor(baseDir: string) {
+  constructor(baseDir: string, logger?: Logger) {
     this.baseDir = baseDir;
+    this.logger = logger ?? consoleLogger;
   }
 
   private filePath(userId: string): string {
@@ -26,7 +30,7 @@ export class FsMemoryStore implements MemoryStore {
       return memory;
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        console.error("[memory] Failed to load memories:", err);
+        this.logger.error("[memory] Failed to load memories:", err);
       }
     }
 

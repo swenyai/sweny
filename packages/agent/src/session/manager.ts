@@ -1,5 +1,6 @@
 import type { SessionStore } from "../storage/session/types.js";
 import type { PersistedSession, TranscriptEntry } from "../storage/session/types.js";
+import type { Logger } from "../logger.js";
 
 export interface Session {
   threadKey: string;
@@ -10,15 +11,24 @@ export interface Session {
   messageCount: number;
 }
 
+const defaultLogger: Logger = {
+  info: () => {},
+  debug: () => {},
+  warn: () => {},
+  error: (...args: unknown[]) => console.error(...args),
+};
+
 export class SessionManager {
   private sessions = new Map<string, Session>();
   private ttlMs: number;
   private cleanupInterval: ReturnType<typeof setInterval>;
   private store?: SessionStore;
+  private logger: Logger;
 
-  constructor(ttlHours: number, store?: SessionStore) {
+  constructor(ttlHours: number, store?: SessionStore, logger?: Logger) {
     this.ttlMs = ttlHours * 60 * 60 * 1000;
     this.store = store;
+    this.logger = logger ?? defaultLogger;
     this.cleanupInterval = setInterval(() => this.cleanup(), 60 * 60 * 1000);
   }
 
@@ -71,7 +81,7 @@ export class SessionManager {
           }
         }
       } catch (err) {
-        console.error("[session] Failed to load from store:", err);
+        this.logger.error("[session] Failed to load from store:", err);
       }
     }
 
@@ -101,7 +111,7 @@ export class SessionManager {
     };
 
     this.store.save(session.userId, session.threadKey, persisted)
-      .catch((err: unknown) => console.error("[session] Failed to persist session:", err));
+      .catch((err: unknown) => this.logger.error("[session] Failed to persist session:", err));
   }
 
   /**
@@ -111,7 +121,7 @@ export class SessionManager {
     if (!this.store) return;
 
     this.store.appendTranscript(session.userId, session.threadKey, entry)
-      .catch((err: unknown) => console.error("[session] Failed to append transcript:", err));
+      .catch((err: unknown) => this.logger.error("[session] Failed to append transcript:", err));
   }
 
   /**

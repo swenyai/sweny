@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import type { WorkspaceFile, WorkspaceManifest, WorkspaceStore } from "../types.js";
 import { WORKSPACE_LIMITS } from "../types.js";
+import type { Logger } from "../../logger.js";
+import { consoleLogger } from "../../logger.js";
 
 function emptyManifest(userId: string): WorkspaceManifest {
   const now = new Date().toISOString();
@@ -25,9 +27,11 @@ function guessMimeType(path: string): string {
 export class FsWorkspaceStore implements WorkspaceStore {
   private baseDir: string;
   private cache = new Map<string, WorkspaceManifest>();
+  private logger: Logger;
 
-  constructor(baseDir: string) {
+  constructor(baseDir: string, logger?: Logger) {
     this.baseDir = baseDir;
+    this.logger = logger ?? consoleLogger;
   }
 
   private manifestPath(userId: string): string {
@@ -49,7 +53,7 @@ export class FsWorkspaceStore implements WorkspaceStore {
       return manifest;
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        console.error("[workspace] Failed to load manifest:", err);
+        this.logger.error("[workspace] Failed to load manifest:", err);
       }
     }
 
