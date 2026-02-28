@@ -337,6 +337,208 @@ describe("github source-control provider", () => {
     });
   });
 
+  describe("configureBotIdentity", () => {
+    it("configures git user.name and user.email", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      await provider.configureBotIdentity();
+
+      expect(mockExecFile).toHaveBeenCalledTimes(2);
+      expect(mockExecFile).toHaveBeenNthCalledWith(
+        1,
+        "git",
+        ["config", "user.name", "github-actions[bot]"],
+        expect.any(Function),
+      );
+      expect(mockExecFile).toHaveBeenNthCalledWith(
+        2,
+        "git",
+        ["config", "user.email", "github-actions[bot]@users.noreply.github.com"],
+        expect.any(Function),
+      );
+      expect(config.logger.debug).toHaveBeenCalledWith("Configured git bot identity");
+    });
+  });
+
+  describe("createBranch", () => {
+    it("calls git checkout -b with the branch name", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      await provider.createBranch("fix/my-branch");
+
+      expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "-b", "fix/my-branch"], expect.any(Function));
+      expect(config.logger.info).toHaveBeenCalledWith("Created branch: fix/my-branch");
+    });
+  });
+
+  describe("pushBranch", () => {
+    it("sets remote URL with token then pushes", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      await provider.pushBranch("fix/my-branch");
+
+      expect(mockExecFile).toHaveBeenCalledTimes(2);
+      expect(mockExecFile).toHaveBeenNthCalledWith(
+        1,
+        "git",
+        ["remote", "set-url", "origin", "https://x-access-token:ghp_test@github.com/acme/app.git"],
+        expect.any(Function),
+      );
+      expect(mockExecFile).toHaveBeenNthCalledWith(2, "git", ["push", "origin", "fix/my-branch"], expect.any(Function));
+      expect(config.logger.info).toHaveBeenCalledWith("Pushed branch: fix/my-branch");
+    });
+  });
+
+  describe("hasChanges", () => {
+    it("returns true when unstaged changes exist", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "src/index.ts\n", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      const result = await provider.hasChanges();
+      expect(result).toBe(true);
+    });
+
+    it("returns true when staged changes exist", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "src/utils.ts\n", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      const result = await provider.hasChanges();
+      expect(result).toBe(true);
+    });
+
+    it("returns false when no changes exist", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      const result = await provider.hasChanges();
+      expect(result).toBe(false);
+    });
+
+    it("returns true when both staged and unstaged changes exist", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "a.ts\n", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "b.ts\n", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      const result = await provider.hasChanges();
+      expect(result).toBe(true);
+    });
+  });
+
+  describe("resetPaths", () => {
+    it("calls git checkout HEAD for each path", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      await provider.resetPaths(["src/index.ts", "src/utils.ts"]);
+
+      expect(mockExecFile).toHaveBeenCalledTimes(2);
+      expect(mockExecFile).toHaveBeenNthCalledWith(
+        1,
+        "git",
+        ["checkout", "HEAD", "--", "src/index.ts"],
+        expect.any(Function),
+      );
+      expect(mockExecFile).toHaveBeenNthCalledWith(
+        2,
+        "git",
+        ["checkout", "HEAD", "--", "src/utils.ts"],
+        expect.any(Function),
+      );
+      expect(config.logger.debug).toHaveBeenCalledWith("Reset paths: src/index.ts, src/utils.ts");
+    });
+
+    it("handles a single path", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      await provider.resetPaths(["package.json"]);
+
+      expect(mockExecFile).toHaveBeenCalledTimes(1);
+      expect(mockExecFile).toHaveBeenCalledWith(
+        "git",
+        ["checkout", "HEAD", "--", "package.json"],
+        expect.any(Function),
+      );
+    });
+  });
+
+  describe("stageAndCommit", () => {
+    it("stages all files and commits with the given message", async () => {
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+      mockExecFile.mockImplementationOnce((_cmd: string, _args: unknown, cb: unknown) => {
+        (cb as Function)(null, { stdout: "", stderr: "" });
+        return {} as ReturnType<typeof _execFile>;
+      });
+
+      await provider.stageAndCommit("fix: resolve null pointer issue");
+
+      expect(mockExecFile).toHaveBeenCalledTimes(2);
+      expect(mockExecFile).toHaveBeenNthCalledWith(
+        1,
+        "git",
+        ["add", "-A", "--", ".", ":!.github/triage-analysis", ":!.github/workflows"],
+        expect.any(Function),
+      );
+      expect(mockExecFile).toHaveBeenNthCalledWith(
+        2,
+        "git",
+        ["commit", "-m", "fix: resolve null pointer issue"],
+        expect.any(Function),
+      );
+    });
+  });
+
   describe("dispatchWorkflow", () => {
     it("dispatches a workflow via GitHub API", async () => {
       mockFetch.mockResolvedValueOnce(makeJsonResponse({}, 204));
