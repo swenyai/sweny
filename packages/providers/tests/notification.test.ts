@@ -24,9 +24,7 @@ describe("slackWebhookConfigSchema", () => {
   });
 
   it("rejects non-URL string", () => {
-    expect(
-      slackWebhookConfigSchema.safeParse({ webhookUrl: "not-a-url" }).success,
-    ).toBe(false);
+    expect(slackWebhookConfigSchema.safeParse({ webhookUrl: "not-a-url" }).success).toBe(false);
   });
 });
 
@@ -100,9 +98,7 @@ describe("slackWebhook", () => {
       logger: silentLogger,
     });
 
-    await expect(provider.send({ body: "x" })).rejects.toThrow(
-      "Slack webhook error: 500 Internal Server Error",
-    );
+    await expect(provider.send({ body: "x" })).rejects.toThrow("Slack webhook error: 500 Internal Server Error");
   });
 });
 

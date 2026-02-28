@@ -25,9 +25,7 @@ export function registerLoginModal(app: App, authProvider: AuthProvider): void {
       element: {
         type: field.type === "email" ? ("email_text_input" as const) : ("plain_text_input" as const),
         action_id: `${field.key}_input`,
-        placeholder: field.placeholder
-          ? { type: "plain_text" as const, text: field.placeholder }
-          : undefined,
+        placeholder: field.placeholder ? { type: "plain_text" as const, text: field.placeholder } : undefined,
       },
     }));
 

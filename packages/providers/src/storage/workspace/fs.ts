@@ -15,11 +15,21 @@ function emptyManifest(userId: string): WorkspaceManifest {
 function guessMimeType(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   const map: Record<string, string> = {
-    json: "application/json", txt: "text/plain", log: "text/plain",
-    md: "text/markdown", csv: "text/csv", xml: "application/xml",
-    yaml: "text/yaml", yml: "text/yaml", ts: "text/typescript",
-    js: "text/javascript", py: "text/x-python", sh: "text/x-shellscript",
-    html: "text/html", css: "text/css", sql: "text/x-sql",
+    json: "application/json",
+    txt: "text/plain",
+    log: "text/plain",
+    md: "text/markdown",
+    csv: "text/csv",
+    xml: "application/xml",
+    yaml: "text/yaml",
+    yml: "text/yaml",
+    ts: "text/typescript",
+    js: "text/javascript",
+    py: "text/x-python",
+    sh: "text/x-shellscript",
+    html: "text/html",
+    css: "text/css",
+    sql: "text/x-sql",
   };
   return map[ext] ?? "text/plain";
 }
@@ -91,11 +101,15 @@ export class FsWorkspaceStore implements WorkspaceStore {
     const newTotal = manifest.totalBytes - existingSize + size;
 
     if (newTotal > WORKSPACE_LIMITS.maxTotalBytes) {
-      throw new Error(`Workspace full (${newTotal} bytes). Max: ${WORKSPACE_LIMITS.maxTotalBytes} bytes. Use workspace_delete to free space.`);
+      throw new Error(
+        `Workspace full (${newTotal} bytes). Max: ${WORKSPACE_LIMITS.maxTotalBytes} bytes. Use workspace_delete to free space.`,
+      );
     }
 
     if (existingIdx < 0 && manifest.files.length >= WORKSPACE_LIMITS.maxFiles) {
-      throw new Error(`Too many files (${manifest.files.length}). Max: ${WORKSPACE_LIMITS.maxFiles}. Delete some first.`);
+      throw new Error(
+        `Too many files (${manifest.files.length}). Max: ${WORKSPACE_LIMITS.maxFiles}. Delete some first.`,
+      );
     }
 
     // Delete old blob if replacing

@@ -57,18 +57,26 @@ export function workspacePlugin(): ToolPlugin {
               if (!args.confirm) {
                 const size = Buffer.byteLength(args.content as string, "utf-8");
                 return {
-                  content: [{
-                    type: "text" as const,
-                    text: `**Preview \u2014 workspace_write**\n` +
-                      `Path: ${args.path}\n` +
-                      `Size: ${size} bytes\n` +
-                      `Description: ${args.description ?? "(none)"}\n\n` +
-                      `Call again with confirm=true to write this file.`,
-                  }],
+                  content: [
+                    {
+                      type: "text" as const,
+                      text:
+                        `**Preview \u2014 workspace_write**\n` +
+                        `Path: ${args.path}\n` +
+                        `Size: ${size} bytes\n` +
+                        `Description: ${args.description ?? "(none)"}\n\n` +
+                        `Call again with confirm=true to write this file.`,
+                    },
+                  ],
                 };
               }
 
-              const file = await store.writeFile(userId, args.path as string, args.content as string, args.description as string | undefined);
+              const file = await store.writeFile(
+                userId,
+                args.path as string,
+                args.content as string,
+                args.description as string | undefined,
+              );
               return { content: [{ type: "text" as const, text: `Written: ${file.path} (${file.size} bytes)` }] };
             } catch (err) {
               return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
@@ -87,10 +95,12 @@ export function workspacePlugin(): ToolPlugin {
             try {
               if (!args.confirm) {
                 return {
-                  content: [{
-                    type: "text" as const,
-                    text: `**Preview \u2014 workspace_delete**\nWill delete: ${args.path}\n\nCall again with confirm=true to delete.`,
-                  }],
+                  content: [
+                    {
+                      type: "text" as const,
+                      text: `**Preview \u2014 workspace_delete**\nWill delete: ${args.path}\n\nCall again with confirm=true to delete.`,
+                    },
+                  ],
                 };
               }
 
@@ -116,12 +126,15 @@ export function workspacePlugin(): ToolPlugin {
               if (!args.confirm) {
                 const manifest = await store.getManifest(userId);
                 return {
-                  content: [{
-                    type: "text" as const,
-                    text: `**Preview \u2014 workspace_reset**\n` +
-                      `Will delete ${manifest.files.length} files (${manifest.totalBytes} bytes).\n\n` +
-                      `Call again with confirm=true to clear the workspace.`,
-                  }],
+                  content: [
+                    {
+                      type: "text" as const,
+                      text:
+                        `**Preview \u2014 workspace_reset**\n` +
+                        `Will delete ${manifest.files.length} files (${manifest.totalBytes} bytes).\n\n` +
+                        `Call again with confirm=true to clear the workspace.`,
+                    },
+                  ],
                 };
               }
 

@@ -151,10 +151,7 @@ describe("investigate", () => {
 
     await investigate(makeConfig(), providers);
 
-    expect(fsMock.mkdirSync).toHaveBeenCalledWith(
-      ".github/triage-analysis",
-      { recursive: true },
-    );
+    expect(fsMock.mkdirSync).toHaveBeenCalledWith(".github/triage-analysis", { recursive: true });
   });
 
   it("calls codingAgent.run with correct maxTurns and env", async () => {
@@ -307,11 +304,7 @@ describe("investigate", () => {
       });
       fsMock.readFileSync.mockImplementation((p: string) => {
         if (typeof p === "string" && p.endsWith("best-candidate.md")) {
-          return [
-            "# Fix Bug",
-            "RECOMMENDATION: implement",
-            "TARGET_REPO: other-org/other-repo",
-          ].join("\n");
+          return ["# Fix Bug", "RECOMMENDATION: implement", "TARGET_REPO: other-org/other-repo"].join("\n");
         }
         return "";
       });
@@ -412,16 +405,12 @@ describe("investigate", () => {
 
     it("handles listTriageHistory failure with warning", async () => {
       const providers = makeProviders();
-      vi.mocked(providers.issueTracker.listTriageHistory).mockRejectedValue(
-        new Error("API error"),
-      );
+      vi.mocked(providers.issueTracker.listTriageHistory).mockRejectedValue(new Error("API error"));
       vi.mocked(providers.sourceControl.listPullRequests).mockResolvedValue([]);
 
       await investigate(makeConfig(), providers);
 
-      expect(core.warning).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to fetch Linear triage history"),
-      );
+      expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("Failed to fetch Linear triage history"));
 
       const writeCall = fsMock.writeFileSync.mock.calls.find(
         (c: string[]) => typeof c[0] === "string" && c[0].endsWith("known-issues-context.md"),
@@ -433,15 +422,11 @@ describe("investigate", () => {
     it("handles listPullRequests failure with warning", async () => {
       const providers = makeProviders();
       vi.mocked(providers.issueTracker.listTriageHistory).mockResolvedValue([]);
-      vi.mocked(providers.sourceControl.listPullRequests).mockRejectedValue(
-        new Error("GH error"),
-      );
+      vi.mocked(providers.sourceControl.listPullRequests).mockRejectedValue(new Error("GH error"));
 
       await investigate(makeConfig(), providers);
 
-      expect(core.warning).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to fetch GitHub triage PRs"),
-      );
+      expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("Failed to fetch GitHub triage PRs"));
     });
   });
 });

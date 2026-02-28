@@ -6,10 +6,7 @@ import type { ChannelCommand } from "./types.js";
  * Create the standard set of channel commands (/new, /memory).
  * These are channel-agnostic — they work with any Channel adapter.
  */
-export function createStandardCommands(
-  sessionManager: SessionManager,
-  memoryStore?: MemoryStore,
-): ChannelCommand[] {
+export function createStandardCommands(sessionManager: SessionManager, memoryStore?: MemoryStore): ChannelCommand[] {
   const commands: ChannelCommand[] = [];
 
   // /new — clear current session

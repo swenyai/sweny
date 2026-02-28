@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { linear, linearConfigSchema } from "../src/issue-tracking/linear.js";
 import { githubIssues, githubIssuesConfigSchema } from "../src/issue-tracking/github-issues.js";
-import {
-  canLinkPr,
-  canSearchByFingerprint,
-  canListTriageHistory,
-} from "../src/issue-tracking/types.js";
+import { canLinkPr, canSearchByFingerprint, canListTriageHistory } from "../src/issue-tracking/types.js";
 import type { IssueTrackingProvider } from "../src/issue-tracking/types.js";
 
 const silentLogger = { info: () => {}, debug: () => {}, warn: () => {} };
@@ -40,9 +36,7 @@ describe("githubIssuesConfigSchema", () => {
   });
 
   it("rejects missing owner", () => {
-    expect(
-      githubIssuesConfigSchema.safeParse({ token: "t", repo: "r" }).success,
-    ).toBe(false);
+    expect(githubIssuesConfigSchema.safeParse({ token: "t", repo: "r" }).success).toBe(false);
   });
 });
 

@@ -98,9 +98,7 @@ function makeProviders(): Providers {
   } as unknown as Providers;
 }
 
-function makeInvestigation(
-  overrides: Partial<InvestigationResult> = {},
-): InvestigationResult {
+function makeInvestigation(overrides: Partial<InvestigationResult> = {}): InvestigationResult {
   return {
     issuesFound: true,
     bestCandidate: true,
@@ -112,9 +110,7 @@ function makeInvestigation(
   };
 }
 
-function makeImplementation(
-  overrides: Partial<ImplementResult> = {},
-): ImplementResult {
+function makeImplementation(overrides: Partial<ImplementResult> = {}): ImplementResult {
   return {
     issueIdentifier: "ENG-999",
     issueUrl: "https://linear.app/ENG-999",
@@ -216,11 +212,7 @@ describe("notify", () => {
     it("shows skip message when recommendation is skip", async () => {
       const providers = makeProviders();
 
-      await notify(
-        makeConfig(),
-        providers,
-        makeInvestigation({ recommendation: "skip" }),
-      );
+      await notify(makeConfig(), providers, makeInvestigation({ recommendation: "skip" }));
 
       const body = vi.mocked(providers.notification.send).mock.calls[0][0].body;
       expect(body).toContain("**Skipped**: No novel issues found");
@@ -229,11 +221,7 @@ describe("notify", () => {
     it("shows +1 existing message", async () => {
       const providers = makeProviders();
 
-      await notify(
-        makeConfig(),
-        providers,
-        makeInvestigation({ recommendation: "+1 existing ENG-123" }),
-      );
+      await notify(makeConfig(), providers, makeInvestigation({ recommendation: "+1 existing ENG-123" }));
 
       const body = vi.mocked(providers.notification.send).mock.calls[0][0].body;
       expect(body).toContain("+1 Existing");
@@ -279,11 +267,7 @@ describe("notify", () => {
     it("shows dry run message when dryRun is true", async () => {
       const providers = makeProviders();
 
-      await notify(
-        makeConfig({ dryRun: true }),
-        providers,
-        makeInvestigation({ recommendation: "implement" }),
-      );
+      await notify(makeConfig({ dryRun: true }), providers, makeInvestigation({ recommendation: "implement" }));
 
       const body = vi.mocked(providers.notification.send).mock.calls[0][0].body;
       expect(body).toContain("**Dry Run**: Analysis only");

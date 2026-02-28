@@ -19,9 +19,7 @@ export const githubIssuesConfigSchema = z.object({
 
 export type GitHubIssuesConfig = z.infer<typeof githubIssuesConfigSchema>;
 
-export function githubIssues(
-  config: GitHubIssuesConfig,
-): IssueTrackingProvider & PrLinkCapable {
+export function githubIssues(config: GitHubIssuesConfig): IssueTrackingProvider & PrLinkCapable {
   const parsed = githubIssuesConfigSchema.parse(config);
   return new GitHubIssuesProvider(parsed);
 }
@@ -39,10 +37,7 @@ class GitHubIssuesProvider implements IssueTrackingProvider, PrLinkCapable {
     this.log = config.logger ?? consoleLogger;
   }
 
-  private async request<T>(
-    path: string,
-    opts?: { method?: string; body?: unknown },
-  ): Promise<T> {
+  private async request<T>(path: string, opts?: { method?: string; body?: unknown }): Promise<T> {
     const url = `https://api.github.com${path}`;
     const response = await fetch(url, {
       method: opts?.method ?? "GET",
@@ -56,9 +51,7 @@ class GitHubIssuesProvider implements IssueTrackingProvider, PrLinkCapable {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `GitHub API error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
     }
 
     return (await response.json()) as T;
@@ -127,10 +120,7 @@ class GitHubIssuesProvider implements IssueTrackingProvider, PrLinkCapable {
     };
   }
 
-  async updateIssue(
-    issueId: string,
-    opts: IssueUpdateOptions,
-  ): Promise<void> {
+  async updateIssue(issueId: string, opts: IssueUpdateOptions): Promise<void> {
     this.log.info(`Updating GitHub issue ${issueId}`);
 
     // GitHub Issues uses issue number, not internal ID
@@ -185,23 +175,16 @@ class GitHubIssuesProvider implements IssueTrackingProvider, PrLinkCapable {
   }
 
   async addComment(issueId: string, body: string): Promise<void> {
-    await this.request(
-      `/repos/${this.owner}/${this.repo}/issues/${issueId}/comments`,
-      { method: "POST", body: { body } },
-    );
+    await this.request(`/repos/${this.owner}/${this.repo}/issues/${issueId}/comments`, {
+      method: "POST",
+      body: { body },
+    });
     this.log.info(`Comment added to issue ${issueId}`);
   }
 
-  async linkPr(
-    issueId: string,
-    prUrl: string,
-    prNumber: number,
-  ): Promise<void> {
+  async linkPr(issueId: string, prUrl: string, prNumber: number): Promise<void> {
     this.log.info(`Linking PR #${prNumber} to issue #${issueId}`);
 
-    await this.addComment(
-      issueId,
-      `**Pull Request Created**: [PR #${prNumber}](${prUrl})`,
-    );
+    await this.addComment(issueId, `**Pull Request Created**: [PR #${prNumber}](${prUrl})`);
   }
 }

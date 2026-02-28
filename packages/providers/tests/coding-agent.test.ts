@@ -29,11 +29,7 @@ describe("claudeCode coding agent", () => {
     it("installs claude-code CLI via npm", async () => {
       await agent.install();
 
-      expect(mockExec).toHaveBeenCalledWith(
-        "npm",
-        ["install", "-g", "@anthropic-ai/claude-code"],
-        expect.any(Object),
-      );
+      expect(mockExec).toHaveBeenCalledWith("npm", ["install", "-g", "@anthropic-ai/claude-code"], expect.any(Object));
     });
   });
 
@@ -47,12 +43,7 @@ describe("claudeCode coding agent", () => {
       expect(exitCode).toBe(0);
       expect(mockExec).toHaveBeenCalledWith(
         "claude",
-        expect.arrayContaining([
-          "-p",
-          "Fix the bug",
-          "--max-turns",
-          "10",
-        ]),
+        expect.arrayContaining(["-p", "Fix the bug", "--max-turns", "10"]),
         expect.objectContaining({
           ignoreReturnCode: true,
         }),
@@ -67,9 +58,7 @@ describe("claudeCode coding agent", () => {
       });
 
       const callArgs = mockExec.mock.calls[0];
-      expect(callArgs[2].env).toEqual(
-        expect.objectContaining({ MY_KEY: "my-value" }),
-      );
+      expect(callArgs[2].env).toEqual(expect.objectContaining({ MY_KEY: "my-value" }));
     });
 
     it("includes default CLI flags", async () => {

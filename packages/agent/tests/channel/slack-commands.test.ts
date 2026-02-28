@@ -59,9 +59,7 @@ describe("createStandardCommands", () => {
       await cmd.execute({ userId: "U123", text: "", conversation, respond });
 
       expect(sessionManager.clearAllForUser).toHaveBeenCalledWith("U123");
-      expect(respond).toHaveBeenCalledWith(
-        "Session cleared. Your next message will start a fresh conversation.",
-      );
+      expect(respond).toHaveBeenCalledWith("Session cleared. Your next message will start a fresh conversation.");
     });
   });
 
@@ -126,9 +124,7 @@ describe("createStandardCommands", () => {
         });
 
         expect(memoryStore.getMemories).toHaveBeenCalledWith("U123");
-        expect(respond).toHaveBeenCalledWith(
-          "*Your memories:*\n1. `mem-1` — First\n2. `mem-2` — Second",
-        );
+        expect(respond).toHaveBeenCalledWith("*Your memories:*\n1. `mem-1` — First\n2. `mem-2` — Second");
       });
 
       it("shows message when no memories exist", async () => {
@@ -142,9 +138,7 @@ describe("createStandardCommands", () => {
           respond,
         });
 
-        expect(respond).toHaveBeenCalledWith(
-          "No memories saved. Use `/memory add <text>` to save one.",
-        );
+        expect(respond).toHaveBeenCalledWith("No memories saved. Use `/memory add <text>` to save one.");
       });
     });
 
@@ -241,9 +235,7 @@ describe("createStandardCommands", () => {
           respond,
         });
 
-        expect(respond).toHaveBeenCalledWith(
-          expect.stringContaining("*Memory commands:*"),
-        );
+        expect(respond).toHaveBeenCalledWith(expect.stringContaining("*Memory commands:*"));
       });
     });
   });

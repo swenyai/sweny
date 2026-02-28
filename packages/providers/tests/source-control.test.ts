@@ -165,19 +165,17 @@ describe("github source-control provider", () => {
     });
 
     it("finds matching merged PR when no open match", async () => {
-      mockFetch
-        .mockResolvedValueOnce(makeJsonResponse([]))
-        .mockResolvedValueOnce(
-          makeJsonResponse([
-            {
-              number: 5,
-              html_url: "https://github.com/acme/app/pull/5",
-              title: "Fix ABC-456",
-              body: null,
-              merged_at: new Date().toISOString(),
-            },
-          ]),
-        );
+      mockFetch.mockResolvedValueOnce(makeJsonResponse([])).mockResolvedValueOnce(
+        makeJsonResponse([
+          {
+            number: 5,
+            html_url: "https://github.com/acme/app/pull/5",
+            title: "Fix ABC-456",
+            body: null,
+            merged_at: new Date().toISOString(),
+          },
+        ]),
+      );
 
       const pr = await provider.findExistingPr("ABC-456");
 
@@ -187,9 +185,7 @@ describe("github source-control provider", () => {
     });
 
     it("returns null when no match found", async () => {
-      mockFetch
-        .mockResolvedValueOnce(makeJsonResponse([]))
-        .mockResolvedValueOnce(makeJsonResponse([]));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse([])).mockResolvedValueOnce(makeJsonResponse([]));
 
       const pr = await provider.findExistingPr("UNKNOWN-999");
       expect(pr).toBeNull();
@@ -197,19 +193,17 @@ describe("github source-control provider", () => {
 
     it("ignores merged PRs older than 30 days", async () => {
       const oldDate = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString();
-      mockFetch
-        .mockResolvedValueOnce(makeJsonResponse([]))
-        .mockResolvedValueOnce(
-          makeJsonResponse([
-            {
-              number: 1,
-              html_url: "https://github.com/acme/app/pull/1",
-              title: "Fix ABC-789",
-              body: null,
-              merged_at: oldDate,
-            },
-          ]),
-        );
+      mockFetch.mockResolvedValueOnce(makeJsonResponse([])).mockResolvedValueOnce(
+        makeJsonResponse([
+          {
+            number: 1,
+            html_url: "https://github.com/acme/app/pull/1",
+            title: "Fix ABC-789",
+            body: null,
+            merged_at: oldDate,
+          },
+        ]),
+      );
 
       const pr = await provider.findExistingPr("ABC-789");
       expect(pr).toBeNull();
@@ -285,8 +279,24 @@ describe("github source-control provider", () => {
     it("filters by label", async () => {
       mockFetch.mockResolvedValueOnce(
         makeJsonResponse([
-          { number: 1, html_url: "url1", title: "PR 1", state: "open", merged_at: null, closed_at: null, labels: [{ name: "triage" }] },
-          { number: 2, html_url: "url2", title: "PR 2", state: "open", merged_at: null, closed_at: null, labels: [{ name: "bug" }] },
+          {
+            number: 1,
+            html_url: "url1",
+            title: "PR 1",
+            state: "open",
+            merged_at: null,
+            closed_at: null,
+            labels: [{ name: "triage" }],
+          },
+          {
+            number: 2,
+            html_url: "url2",
+            title: "PR 2",
+            state: "open",
+            merged_at: null,
+            closed_at: null,
+            labels: [{ name: "bug" }],
+          },
         ]),
       );
 
@@ -299,8 +309,24 @@ describe("github source-control provider", () => {
       const mergedAt = new Date().toISOString();
       mockFetch.mockResolvedValueOnce(
         makeJsonResponse([
-          { number: 5, html_url: "url5", title: "Merged PR", state: "closed", merged_at: mergedAt, closed_at: mergedAt, labels: [] },
-          { number: 6, html_url: "url6", title: "Closed PR", state: "closed", merged_at: null, closed_at: mergedAt, labels: [] },
+          {
+            number: 5,
+            html_url: "url5",
+            title: "Merged PR",
+            state: "closed",
+            merged_at: mergedAt,
+            closed_at: mergedAt,
+            labels: [],
+          },
+          {
+            number: 6,
+            html_url: "url6",
+            title: "Closed PR",
+            state: "closed",
+            merged_at: null,
+            closed_at: mergedAt,
+            labels: [],
+          },
         ]),
       );
 

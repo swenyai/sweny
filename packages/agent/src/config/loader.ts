@@ -25,9 +25,7 @@ export async function loadConfig(configPath?: string): Promise<ResolvedConfig> {
 
   let sweny: SwenyConfig;
 
-  const resolvedPath = configPath
-    ? path.resolve(configPath)
-    : path.resolve(process.cwd(), "sweny.config.ts");
+  const resolvedPath = configPath ? path.resolve(configPath) : path.resolve(process.cwd(), "sweny.config.ts");
 
   try {
     const fileUrl = pathToFileURL(resolvedPath).href;

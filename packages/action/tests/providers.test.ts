@@ -125,14 +125,14 @@ describe("createProviders", () => {
   });
 
   it("throws for unsupported observability provider", () => {
-    expect(() =>
-      createProviders(makeConfig({ observabilityProvider: "splunk" })),
-    ).toThrow("Unsupported observability provider: splunk");
+    expect(() => createProviders(makeConfig({ observabilityProvider: "splunk" }))).toThrow(
+      "Unsupported observability provider: splunk",
+    );
   });
 
   it("throws for unsupported issue tracker provider", () => {
-    expect(() =>
-      createProviders(makeConfig({ issueTrackerProvider: "jira" })),
-    ).toThrow("Unsupported issue tracker provider: jira");
+    expect(() => createProviders(makeConfig({ issueTrackerProvider: "jira" }))).toThrow(
+      "Unsupported issue tracker provider: jira",
+    );
   });
 });

@@ -1,10 +1,4 @@
-export type {
-  ConversationRef,
-  SentMessage,
-  IncomingMessage,
-  ChannelCommand,
-  Channel,
-} from "./types.js";
+export type { ConversationRef, SentMessage, IncomingMessage, ChannelCommand, Channel } from "./types.js";
 
 export { cliChannel } from "./cli.js";
 export type { CliChannelConfig } from "./cli.js";

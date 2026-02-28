@@ -110,7 +110,8 @@ export class SessionManager {
       lastActiveAt: session.lastActiveAt.toISOString(),
     };
 
-    this.store.save(session.userId, session.threadKey, persisted)
+    this.store
+      .save(session.userId, session.threadKey, persisted)
       .catch((err: unknown) => this.logger.error("[session] Failed to persist session:", err));
   }
 
@@ -120,7 +121,8 @@ export class SessionManager {
   appendTranscript(session: Session, entry: TranscriptEntry): void {
     if (!this.store) return;
 
-    this.store.appendTranscript(session.userId, session.threadKey, entry)
+    this.store
+      .appendTranscript(session.userId, session.threadKey, entry)
       .catch((err: unknown) => this.logger.error("[session] Failed to append transcript:", err));
   }
 

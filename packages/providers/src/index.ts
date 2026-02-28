@@ -6,15 +6,38 @@ export type { ObservabilityProvider, LogEntry, AggregateResult, LogQueryOptions 
 export { datadog, sentry, cloudwatch } from "./observability/index.js";
 
 // Issue Tracking
-export type { IssueTrackingProvider, Issue, IssueCreateOptions, IssueUpdateOptions, IssueSearchOptions, TriageHistoryEntry, PrLinkCapable, FingerprintCapable, TriageHistoryCapable } from "./issue-tracking/index.js";
-export { canLinkPr, canSearchByFingerprint, canListTriageHistory, linear, githubIssues } from "./issue-tracking/index.js";
+export type {
+  IssueTrackingProvider,
+  Issue,
+  IssueCreateOptions,
+  IssueUpdateOptions,
+  IssueSearchOptions,
+  TriageHistoryEntry,
+  PrLinkCapable,
+  FingerprintCapable,
+  TriageHistoryCapable,
+} from "./issue-tracking/index.js";
+export {
+  canLinkPr,
+  canSearchByFingerprint,
+  canListTriageHistory,
+  linear,
+  githubIssues,
+} from "./issue-tracking/index.js";
 
 // Notification
 export type { NotificationProvider, NotificationPayload } from "./notification/index.js";
 export { githubSummary, slackWebhook, teamsWebhook, discordWebhook } from "./notification/index.js";
 
 // Source Control
-export type { SourceControlProvider, PullRequest, PrCreateOptions, PrListOptions, DispatchWorkflowOptions, GitHubSourceControlConfig } from "./source-control/index.js";
+export type {
+  SourceControlProvider,
+  PullRequest,
+  PrCreateOptions,
+  PrListOptions,
+  DispatchWorkflowOptions,
+  GitHubSourceControlConfig,
+} from "./source-control/index.js";
 export { github } from "./source-control/index.js";
 
 // Incident Management
@@ -34,7 +57,18 @@ export type { AccessGuard, RoleMapping } from "./access/index.js";
 export { AccessLevel, AccessDeniedError, allowAllGuard, roleBasedGuard } from "./access/index.js";
 
 // Storage
-export type { StorageProvider, SessionStore, PersistedSession, TranscriptEntry, MemoryStore, MemoryEntry, UserMemory, WorkspaceStore, WorkspaceFile, WorkspaceManifest } from "./storage/index.js";
+export type {
+  StorageProvider,
+  SessionStore,
+  PersistedSession,
+  TranscriptEntry,
+  MemoryStore,
+  MemoryEntry,
+  UserMemory,
+  WorkspaceStore,
+  WorkspaceFile,
+  WorkspaceManifest,
+} from "./storage/index.js";
 export { WORKSPACE_LIMITS } from "./storage/index.js";
 
 // Coding Agent

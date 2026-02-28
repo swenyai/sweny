@@ -9,12 +9,7 @@ type SdkTool = ReturnType<typeof tool<any>>;
  * the Claude-specific MCP server.
  */
 export function toSdkTool(agentTool: AgentTool): SdkTool {
-  return tool(
-    agentTool.name,
-    agentTool.description,
-    agentTool.schema,
-    agentTool.execute,
-  );
+  return tool(agentTool.name, agentTool.description, agentTool.schema, agentTool.execute);
 }
 
 /**

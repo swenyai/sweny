@@ -1,12 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
-import type {
-  IncidentProvider,
-  Incident,
-  IncidentCreateOptions,
-  OnCallEntry,
-} from "./types.js";
+import type { IncidentProvider, Incident, IncidentCreateOptions, OnCallEntry } from "./types.js";
 
 export const pagerdutyConfigSchema = z.object({
   apiToken: z.string().min(1, "PagerDuty API token is required"),
@@ -32,10 +27,7 @@ class PagerDutyProvider implements IncidentProvider {
     this.log = config.logger ?? consoleLogger;
   }
 
-  private async apiRequest<T>(
-    path: string,
-    opts?: { method?: string; body?: unknown },
-  ): Promise<T> {
+  private async apiRequest<T>(path: string, opts?: { method?: string; body?: unknown }): Promise<T> {
     const url = `https://api.pagerduty.com${path}`;
     const response = await fetch(url, {
       method: opts?.method ?? "GET",
@@ -48,9 +40,7 @@ class PagerDutyProvider implements IncidentProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `PagerDuty API error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`PagerDuty API error: ${response.status} ${response.statusText}`);
     }
 
     return (await response.json()) as T;
@@ -84,9 +74,7 @@ class PagerDutyProvider implements IncidentProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `PagerDuty Events API error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`PagerDuty Events API error: ${response.status} ${response.statusText}`);
     }
 
     const result = (await response.json()) as {
@@ -131,9 +119,7 @@ class PagerDutyProvider implements IncidentProvider {
         routing_key: this.routingKey,
         event_action: "resolve",
         dedup_key: id,
-        ...(resolution
-          ? { payload: { summary: resolution, source: "sweny", severity: "info" } }
-          : {}),
+        ...(resolution ? { payload: { summary: resolution, source: "sweny", severity: "info" } } : {}),
       }),
     });
 
@@ -143,9 +129,7 @@ class PagerDutyProvider implements IncidentProvider {
   async getOnCall(scheduleId?: string): Promise<OnCallEntry[]> {
     this.log.info("Fetching PagerDuty on-call schedule");
 
-    const params = scheduleId
-      ? `?schedule_ids[]=${scheduleId}`
-      : "";
+    const params = scheduleId ? `?schedule_ids[]=${scheduleId}` : "";
 
     const result = await this.apiRequest<{
       oncalls: Array<{

@@ -35,18 +35,42 @@
   },
   "typesVersions": {
     "*": {
-      "observability": ["dist/observability/index.d.ts"],
-      "issue-tracking": ["dist/issue-tracking/index.d.ts"],
-      "notification": ["dist/notification/index.d.ts"],
-      "source-control": ["dist/source-control/index.d.ts"],
-      "incident": ["dist/incident/index.d.ts"],
-      "messaging": ["dist/messaging/index.d.ts"],
-      "auth": ["dist/auth/index.d.ts"],
-      "access": ["dist/access/index.d.ts"],
-      "storage": ["dist/storage/index.d.ts"],
-      "coding-agent": ["dist/coding-agent/index.d.ts"],
-      "agent-tool": ["dist/agent-tool/index.d.ts"],
-      "credential-vault": ["dist/credential-vault/index.d.ts"]
+      "observability": [
+        "dist/observability/index.d.ts"
+      ],
+      "issue-tracking": [
+        "dist/issue-tracking/index.d.ts"
+      ],
+      "notification": [
+        "dist/notification/index.d.ts"
+      ],
+      "source-control": [
+        "dist/source-control/index.d.ts"
+      ],
+      "incident": [
+        "dist/incident/index.d.ts"
+      ],
+      "messaging": [
+        "dist/messaging/index.d.ts"
+      ],
+      "auth": [
+        "dist/auth/index.d.ts"
+      ],
+      "access": [
+        "dist/access/index.d.ts"
+      ],
+      "storage": [
+        "dist/storage/index.d.ts"
+      ],
+      "coding-agent": [
+        "dist/coding-agent/index.d.ts"
+      ],
+      "agent-tool": [
+        "dist/agent-tool/index.d.ts"
+      ],
+      "credential-vault": [
+        "dist/credential-vault/index.d.ts"
+      ]
     }
   },
   "dependencies": {

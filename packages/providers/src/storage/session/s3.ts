@@ -64,9 +64,7 @@ export class S3SessionStore implements SessionStore {
     // Read existing transcript and append
     let existing = "";
     try {
-      const result = await this.s3.send(
-        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
-      );
+      const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
       existing = (await result.Body?.transformToString("utf-8")) ?? "";
     } catch (err: unknown) {
       const code = (err as { name?: string }).name;
@@ -108,9 +106,7 @@ export class S3SessionStore implements SessionStore {
   }
 
   async listSessions(userId: string): Promise<PersistedSession[]> {
-    const prefix = this.prefix
-      ? `${this.prefix}/users/${userId}/sessions/`
-      : `users/${userId}/sessions/`;
+    const prefix = this.prefix ? `${this.prefix}/users/${userId}/sessions/` : `users/${userId}/sessions/`;
 
     const sessions: PersistedSession[] = [];
     let continuationToken: string | undefined;

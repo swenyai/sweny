@@ -29,12 +29,7 @@ describe("toSdkTool", () => {
 
     toSdkTool(agentTool);
 
-    expect(tool).toHaveBeenCalledWith(
-      agentTool.name,
-      agentTool.description,
-      agentTool.schema,
-      agentTool.execute,
-    );
+    expect(tool).toHaveBeenCalledWith(agentTool.name, agentTool.description, agentTool.schema, agentTool.execute);
   });
 
   it("returns a valid SDK tool object", () => {

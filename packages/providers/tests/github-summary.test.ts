@@ -32,15 +32,11 @@ beforeEach(() => {
 
 describe("githubSummaryConfigSchema", () => {
   it("validates config with logger", () => {
-    expect(
-      githubSummaryConfigSchema.safeParse({ logger: silentLogger }).success,
-    ).toBe(true);
+    expect(githubSummaryConfigSchema.safeParse({ logger: silentLogger }).success).toBe(true);
   });
 
   it("validates config without logger", () => {
-    expect(
-      githubSummaryConfigSchema.safeParse({}).success,
-    ).toBe(true);
+    expect(githubSummaryConfigSchema.safeParse({}).success).toBe(true);
   });
 });
 

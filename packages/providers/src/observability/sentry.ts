@@ -1,12 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
-import type {
-  ObservabilityProvider,
-  LogQueryOptions,
-  LogEntry,
-  AggregateResult,
-} from "./types.js";
+import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
 
 export const sentryConfigSchema = z.object({
   authToken: z.string().min(1, "Sentry auth token is required"),
@@ -53,9 +48,7 @@ class SentryProvider implements ObservabilityProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Sentry API error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Sentry API error: ${response.status} ${response.statusText}`);
     }
 
     return (await response.json()) as T;
@@ -70,9 +63,7 @@ class SentryProvider implements ObservabilityProvider {
   }
 
   async queryLogs(opts: LogQueryOptions): Promise<LogEntry[]> {
-    this.log.info(
-      `Querying Sentry issues (severity: ${opts.severity}, range: ${opts.timeRange})`,
-    );
+    this.log.info(`Querying Sentry issues (severity: ${opts.severity}, range: ${opts.timeRange})`);
 
     const levelMap: Record<string, string> = {
       error: "error",
@@ -168,12 +159,8 @@ curl -s "\${SENTRY_BASE_URL}/api/0/issues/{issue_id}/" \\
 \`\`\``;
   }
 
-  async aggregate(
-    opts: Omit<LogQueryOptions, "severity">,
-  ): Promise<AggregateResult[]> {
-    this.log.info(
-      `Aggregating Sentry errors (range: ${opts.timeRange})`,
-    );
+  async aggregate(opts: Omit<LogQueryOptions, "severity">): Promise<AggregateResult[]> {
+    this.log.info(`Aggregating Sentry errors (range: ${opts.timeRange})`);
 
     const params: Record<string, string> = {
       query: "level:error",

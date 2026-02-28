@@ -1,5 +1,6 @@
 {
   "name": "sweny",
+  "type": "module",
   "private": true,
   "description": "SWEny — autonomous engineering tools",
   "workspaces": [

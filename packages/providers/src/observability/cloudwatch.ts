@@ -1,12 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
-import type {
-  ObservabilityProvider,
-  LogQueryOptions,
-  LogEntry,
-  AggregateResult,
-} from "./types.js";
+import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
 
 export const cloudwatchConfigSchema = z.object({
   region: z.string().default("us-east-1"),
@@ -52,7 +47,7 @@ class CloudWatchProvider implements ObservabilityProvider {
   async verifyAccess(): Promise<void> {
     this.log.info(`Verifying CloudWatch access (region: ${this.region})`);
 
-    const client = await this.getClient() as import("@aws-sdk/client-cloudwatch-logs").CloudWatchLogsClient;
+    const client = (await this.getClient()) as import("@aws-sdk/client-cloudwatch-logs").CloudWatchLogsClient;
     const { DescribeLogGroupsCommand } = await import("@aws-sdk/client-cloudwatch-logs");
 
     await client.send(
@@ -66,20 +61,16 @@ class CloudWatchProvider implements ObservabilityProvider {
   }
 
   async queryLogs(opts: LogQueryOptions): Promise<LogEntry[]> {
-    this.log.info(
-      `Querying CloudWatch logs (range: ${opts.timeRange}, severity: ${opts.severity})`,
-    );
+    this.log.info(`Querying CloudWatch logs (range: ${opts.timeRange}, severity: ${opts.severity})`);
 
-    const client = await this.getClient() as import("@aws-sdk/client-cloudwatch-logs").CloudWatchLogsClient;
+    const client = (await this.getClient()) as import("@aws-sdk/client-cloudwatch-logs").CloudWatchLogsClient;
     const { StartQueryCommand, GetQueryResultsCommand } = await import("@aws-sdk/client-cloudwatch-logs");
 
     const endTime = Date.now();
     const startTime = endTime - parseTimeRange(opts.timeRange);
 
     const serviceFilter =
-      opts.serviceFilter && opts.serviceFilter !== "*"
-        ? `| filter @logStream like /${opts.serviceFilter}/`
-        : "";
+      opts.serviceFilter && opts.serviceFilter !== "*" ? `| filter @logStream like /${opts.serviceFilter}/` : "";
 
     const queryString = `fields @timestamp, @message, @logStream
       ${serviceFilter}
@@ -102,9 +93,7 @@ class CloudWatchProvider implements ObservabilityProvider {
     let results: Array<Array<{ field?: string; value?: string }>> = [];
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 1000));
-      const queryResult = await client.send(
-        new GetQueryResultsCommand({ queryId }),
-      );
+      const queryResult = await client.send(new GetQueryResultsCommand({ queryId }));
       if (queryResult.status === "Complete") {
         results = queryResult.results ?? [];
         break;
@@ -112,9 +101,7 @@ class CloudWatchProvider implements ObservabilityProvider {
     }
 
     const logs: LogEntry[] = results.map((row) => {
-      const fields = Object.fromEntries(
-        row.map((f) => [f.field, f.value]),
-      );
+      const fields = Object.fromEntries(row.map((f) => [f.field, f.value]));
       return {
         timestamp: fields["@timestamp"] || "",
         service: fields["@logStream"] || "unknown",
@@ -179,23 +166,17 @@ aws logs start-query \\
 \`\`\``;
   }
 
-  async aggregate(
-    opts: Omit<LogQueryOptions, "severity">,
-  ): Promise<AggregateResult[]> {
-    this.log.info(
-      `Aggregating CloudWatch errors (range: ${opts.timeRange})`,
-    );
+  async aggregate(opts: Omit<LogQueryOptions, "severity">): Promise<AggregateResult[]> {
+    this.log.info(`Aggregating CloudWatch errors (range: ${opts.timeRange})`);
 
-    const client = await this.getClient() as import("@aws-sdk/client-cloudwatch-logs").CloudWatchLogsClient;
+    const client = (await this.getClient()) as import("@aws-sdk/client-cloudwatch-logs").CloudWatchLogsClient;
     const { StartQueryCommand, GetQueryResultsCommand } = await import("@aws-sdk/client-cloudwatch-logs");
 
     const endTime = Date.now();
     const startTime = endTime - parseTimeRange(opts.timeRange);
 
     const serviceFilter =
-      opts.serviceFilter && opts.serviceFilter !== "*"
-        ? `| filter @logStream like /${opts.serviceFilter}/`
-        : "";
+      opts.serviceFilter && opts.serviceFilter !== "*" ? `| filter @logStream like /${opts.serviceFilter}/` : "";
 
     const queryString = `fields @logStream
       ${serviceFilter}
@@ -218,9 +199,7 @@ aws logs start-query \\
     let results: Array<Array<{ field?: string; value?: string }>> = [];
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 1000));
-      const queryResult = await client.send(
-        new GetQueryResultsCommand({ queryId }),
-      );
+      const queryResult = await client.send(new GetQueryResultsCommand({ queryId }));
       if (queryResult.status === "Complete") {
         results = queryResult.results ?? [];
         break;
@@ -228,9 +207,7 @@ aws logs start-query \\
     }
 
     const groups: AggregateResult[] = results.map((row) => {
-      const fields = Object.fromEntries(
-        row.map((f) => [f.field, f.value]),
-      );
+      const fields = Object.fromEntries(row.map((f) => [f.field, f.value]));
       return {
         service: fields["@logStream"] || "unknown",
         count: parseInt(fields["errorCount"] || "0", 10),

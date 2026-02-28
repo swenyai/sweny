@@ -23,10 +23,12 @@ export function memoryPlugin(): ToolPlugin {
             try {
               const entry = await store.addEntry(userId, args.text as string);
               return {
-                content: [{
-                  type: "text" as const,
-                  text: `Memory saved (id: ${entry.id}): ${entry.text}`,
-                }],
+                content: [
+                  {
+                    type: "text" as const,
+                    text: `Memory saved (id: ${entry.id}): ${entry.text}`,
+                  },
+                ],
               };
             } catch (err) {
               return {
@@ -51,10 +53,12 @@ export function memoryPlugin(): ToolPlugin {
               }
               const lines = memory.entries.map((e) => `- [${e.id}] ${e.text} (saved ${e.createdAt})`);
               return {
-                content: [{
-                  type: "text" as const,
-                  text: `**Saved memories (${memory.entries.length}):**\n${lines.join("\n")}`,
-                }],
+                content: [
+                  {
+                    type: "text" as const,
+                    text: `**Saved memories (${memory.entries.length}):**\n${lines.join("\n")}`,
+                  },
+                ],
               };
             } catch (err) {
               return {

@@ -36,27 +36,21 @@ class RoleBasedGuard implements AccessGuard {
   assertNotForbidden(user: UserIdentity): void {
     const level = this.resolveAccessLevel(user);
     if (level === AccessLevel.FORBIDDEN) {
-      throw new AccessDeniedError(
-        `User "${user.userId}" does not have any permitted role`,
-      );
+      throw new AccessDeniedError(`User "${user.userId}" does not have any permitted role`);
     }
   }
 
   assertCanQuery(user: UserIdentity): void {
     const level = this.resolveAccessLevel(user);
     if (level === AccessLevel.FORBIDDEN) {
-      throw new AccessDeniedError(
-        `User "${user.userId}" does not have read access`,
-      );
+      throw new AccessDeniedError(`User "${user.userId}" does not have read access`);
     }
   }
 
   assertCanMutate(user: UserIdentity): void {
     const level = this.resolveAccessLevel(user);
     if (level === AccessLevel.FORBIDDEN || level === AccessLevel.READ_ONLY) {
-      throw new AccessDeniedError(
-        `User "${user.userId}" does not have write access`,
-      );
+      throw new AccessDeniedError(`User "${user.userId}" does not have write access`);
     }
   }
 }

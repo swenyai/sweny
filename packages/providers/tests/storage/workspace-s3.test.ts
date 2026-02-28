@@ -161,9 +161,7 @@ describe("S3WorkspaceStore", () => {
   it("readFile throws for missing file", async () => {
     const store = new S3WorkspaceStore("test-bucket", "pfx");
 
-    await expect(store.readFile("user-a", "missing.txt")).rejects.toThrow(
-      "File not found in workspace",
-    );
+    await expect(store.readFile("user-a", "missing.txt")).rejects.toThrow("File not found in workspace");
   });
 
   // -----------------------------------------------------------------------
@@ -246,9 +244,7 @@ describe("S3WorkspaceStore", () => {
   it("getDownloadUrl throws for missing file", async () => {
     const store = new S3WorkspaceStore("test-bucket", "pfx");
 
-    await expect(store.getDownloadUrl("user-a", "missing.txt")).rejects.toThrow(
-      "File not found in workspace",
-    );
+    await expect(store.getDownloadUrl("user-a", "missing.txt")).rejects.toThrow("File not found in workspace");
   });
 
   // -----------------------------------------------------------------------
@@ -273,9 +269,7 @@ describe("S3WorkspaceStore", () => {
     const store = new S3WorkspaceStore("test-bucket", "pfx");
     const oversized = "x".repeat(WORKSPACE_LIMITS.maxFileBytes + 1);
 
-    await expect(
-      store.writeFile("user-a", "huge.txt", oversized),
-    ).rejects.toThrow(/File too large/);
+    await expect(store.writeFile("user-a", "huge.txt", oversized)).rejects.toThrow(/File too large/);
   });
 
   it("accepts file exactly at maxFileBytes", async () => {
@@ -299,9 +293,7 @@ describe("S3WorkspaceStore", () => {
     manifest.totalBytes = WORKSPACE_LIMITS.maxTotalBytes - 5;
 
     // Writing 6 more bytes pushes past the limit
-    await expect(
-      store.writeFile("user-a", "extra.txt", "abcdef"),
-    ).rejects.toThrow(/Workspace full/);
+    await expect(store.writeFile("user-a", "extra.txt", "abcdef")).rejects.toThrow(/Workspace full/);
   });
 
   it("allows overwrite that stays within maxTotalBytes", async () => {
@@ -340,9 +332,7 @@ describe("S3WorkspaceStore", () => {
     }
     manifest.totalBytes = WORKSPACE_LIMITS.maxFiles;
 
-    await expect(
-      store.writeFile("user-a", "one-too-many.txt", "boom"),
-    ).rejects.toThrow(/Too many files/);
+    await expect(store.writeFile("user-a", "one-too-many.txt", "boom")).rejects.toThrow(/Too many files/);
   });
 
   it("allows overwrite when at maxFiles (no new file slot needed)", async () => {

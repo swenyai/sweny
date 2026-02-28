@@ -1,159 +1,159 @@
-name: 'SWEny Triage'
-description: 'Autonomous SRE triage — monitors observability logs, investigates issues, creates Linear tickets, and opens fix PRs using Claude.'
-author: 'SWEny'
+name: "SWEny Triage"
+description: "Autonomous SRE triage — monitors observability logs, investigates issues, creates Linear tickets, and opens fix PRs using Claude."
+author: "SWEny"
 
 branding:
-  icon: 'activity'
-  color: 'orange'
+  icon: "activity"
+  color: "orange"
 
 inputs:
   anthropic-api-key:
-    description: 'Anthropic API key for Claude (use this OR claude-oauth-token)'
+    description: "Anthropic API key for Claude (use this OR claude-oauth-token)"
     required: false
   claude-oauth-token:
-    description: 'Claude Code OAuth token (use this OR anthropic-api-key)'
+    description: "Claude Code OAuth token (use this OR anthropic-api-key)"
     required: false
 
   # Observability provider
   observability-provider:
-    description: 'Observability provider to use (datadog, sentry, cloudwatch)'
+    description: "Observability provider to use (datadog, sentry, cloudwatch)"
     required: false
-    default: 'datadog'
+    default: "datadog"
 
   # Datadog credentials
   dd-api-key:
-    description: 'Datadog API key'
+    description: "Datadog API key"
     required: false
   dd-app-key:
-    description: 'Datadog Application key'
+    description: "Datadog Application key"
     required: false
   dd-site:
-    description: 'Datadog site (e.g., datadoghq.com, datadoghq.eu)'
+    description: "Datadog site (e.g., datadoghq.com, datadoghq.eu)"
     required: false
-    default: 'datadoghq.com'
+    default: "datadoghq.com"
 
   # Sentry credentials
   sentry-auth-token:
-    description: 'Sentry auth token'
+    description: "Sentry auth token"
     required: false
   sentry-org:
-    description: 'Sentry organization slug'
+    description: "Sentry organization slug"
     required: false
   sentry-project:
-    description: 'Sentry project slug'
+    description: "Sentry project slug"
     required: false
   sentry-base-url:
-    description: 'Sentry base URL (default: https://sentry.io)'
+    description: "Sentry base URL (default: https://sentry.io)"
     required: false
-    default: 'https://sentry.io'
+    default: "https://sentry.io"
 
   # CloudWatch credentials
   cloudwatch-region:
-    description: 'AWS region for CloudWatch Logs'
+    description: "AWS region for CloudWatch Logs"
     required: false
-    default: 'us-east-1'
+    default: "us-east-1"
   cloudwatch-log-group-prefix:
-    description: 'CloudWatch log group name or prefix'
+    description: "CloudWatch log group name or prefix"
     required: false
 
   # Issue tracker provider
   issue-tracker-provider:
-    description: 'Issue tracker provider to use (linear)'
+    description: "Issue tracker provider to use (linear)"
     required: false
-    default: 'linear'
+    default: "linear"
   linear-api-key:
-    description: 'Linear API key'
+    description: "Linear API key"
     required: false
   linear-team-id:
-    description: 'Linear team UUID'
+    description: "Linear team UUID"
     required: false
   linear-bug-label-id:
-    description: 'Linear label UUID for bugs'
+    description: "Linear label UUID for bugs"
     required: false
   linear-triage-label-id:
-    description: 'Linear label UUID for agent-triage issues'
+    description: "Linear label UUID for agent-triage issues"
     required: false
   linear-state-backlog:
-    description: 'Linear workflow state UUID for Backlog'
+    description: "Linear workflow state UUID for Backlog"
     required: false
   linear-state-in-progress:
-    description: 'Linear workflow state UUID for In Progress'
+    description: "Linear workflow state UUID for In Progress"
     required: false
   linear-state-peer-review:
-    description: 'Linear workflow state UUID for Peer Review'
+    description: "Linear workflow state UUID for Peer Review"
     required: false
 
   # Investigation parameters
   time-range:
-    description: 'Time range to analyze (e.g., 1h, 6h, 24h, 7d)'
+    description: "Time range to analyze (e.g., 1h, 6h, 24h, 7d)"
     required: false
-    default: '24h'
+    default: "24h"
   severity-focus:
-    description: 'Primary focus area (errors, warnings, all)'
+    description: "Primary focus area (errors, warnings, all)"
     required: false
-    default: 'errors'
+    default: "errors"
   service-filter:
-    description: 'Service filter pattern (e.g., my-service, api-*, *)'
+    description: "Service filter pattern (e.g., my-service, api-*, *)"
     required: false
-    default: '*'
+    default: "*"
   investigation-depth:
-    description: 'How deep Claude should investigate (quick, standard, thorough)'
+    description: "How deep Claude should investigate (quick, standard, thorough)"
     required: false
-    default: 'standard'
+    default: "standard"
   max-investigate-turns:
-    description: 'Maximum Claude turns for investigation phase'
+    description: "Maximum Claude turns for investigation phase"
     required: false
-    default: '50'
+    default: "50"
   max-implement-turns:
-    description: 'Maximum Claude turns for implementation phase'
+    description: "Maximum Claude turns for implementation phase"
     required: false
-    default: '30'
+    default: "30"
 
   # Behavior
   dry-run:
-    description: 'Dry run mode — analyze only, do not create PRs'
+    description: "Dry run mode — analyze only, do not create PRs"
     required: false
-    default: 'false'
+    default: "false"
   novelty-mode:
-    description: 'Only report novel issues not already tracked in Linear/GitHub'
+    description: "Only report novel issues not already tracked in Linear/GitHub"
     required: false
-    default: 'true'
+    default: "true"
   linear-issue:
-    description: 'Existing Linear issue to work on (e.g., ENG-123). Skips log investigation.'
+    description: "Existing Linear issue to work on (e.g., ENG-123). Skips log investigation."
     required: false
-    default: ''
+    default: ""
   additional-instructions:
     description: 'Additional instructions for Claude (e.g., "focus on the webhook handler")'
     required: false
-    default: ''
+    default: ""
   service-map-path:
-    description: 'Path to the service ownership map YAML file'
+    description: "Path to the service ownership map YAML file"
     required: false
-    default: '.github/service-map.yml'
+    default: ".github/service-map.yml"
 
   # GitHub tokens
   github-token:
-    description: 'GitHub token for API access and PR creation'
+    description: "GitHub token for API access and PR creation"
     required: false
-    default: '${{ github.token }}'
+    default: "${{ github.token }}"
   bot-token:
-    description: 'Optional bot token with elevated permissions (for cross-repo dispatch, push to protected branches)'
+    description: "Optional bot token with elevated permissions (for cross-repo dispatch, push to protected branches)"
     required: false
 
 outputs:
   issues-found:
-    description: 'Whether any issues were found during investigation (true/false)'
+    description: "Whether any issues were found during investigation (true/false)"
   recommendation:
-    description: 'Investigation recommendation (implement, +1 existing ENG-XXX, skip)'
+    description: "Investigation recommendation (implement, +1 existing ENG-XXX, skip)"
   issue-identifier:
-    description: 'Linear issue identifier (e.g., ENG-123)'
+    description: "Linear issue identifier (e.g., ENG-123)"
   issue-url:
-    description: 'Linear issue URL'
+    description: "Linear issue URL"
   pr-url:
-    description: 'URL of the created pull request'
+    description: "URL of the created pull request"
   pr-number:
-    description: 'Number of the created pull request'
+    description: "Number of the created pull request"
 
 runs:
-  using: 'node22'
-  main: 'dist/index.js'
+  using: "node22"
+  main: "dist/index.js"

@@ -8,9 +8,7 @@
  * and process data in /tmp. The runner sets cwd="/tmp" and in k8s the FS
  * is immutable outside /tmp, so this is safe.
  */
-export const DENIED_TOOLS: string[] = [
-  "NotebookEdit",
-];
+export const DENIED_TOOLS: string[] = ["NotebookEdit"];
 
 /**
  * Tools that would require user confirmation before execution (future phase).

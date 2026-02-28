@@ -14,10 +14,7 @@ export interface InvestigationResult {
   shouldImplement: boolean; // recommendation starts with "implement"
 }
 
-export async function investigate(
-  config: ActionConfig,
-  providers: Providers,
-): Promise<InvestigationResult> {
+export async function investigate(config: ActionConfig, providers: Providers): Promise<InvestigationResult> {
   const analysisDir = ".github/triage-analysis";
   fs.mkdirSync(analysisDir, { recursive: true });
 
@@ -50,10 +47,8 @@ export async function investigate(
     LINEAR_TEAM_ID: config.linearTeamId,
     LINEAR_BUG_LABEL_ID: config.linearBugLabelId,
   };
-  if (config.anthropicApiKey)
-    agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
-  if (config.claudeOauthToken)
-    agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+  if (config.anthropicApiKey) agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
+  if (config.claudeOauthToken) agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
 
   await providers.codingAgent.run({ prompt, maxTurns: config.maxInvestigateTurns, env: agentEnv });
   core.endGroup();
@@ -66,37 +61,27 @@ export async function investigate(
 // Build Known Issues Context
 // ---------------------------------------------------------------------------
 
-async function buildKnownIssuesContext(
-  config: ActionConfig,
-  providers: Providers,
-): Promise<string> {
+async function buildKnownIssuesContext(config: ActionConfig, providers: Providers): Promise<string> {
   const lines: string[] = [];
 
   lines.push("# Known Triage History (Last 30 Days)");
   lines.push("");
-  lines.push(
-    "These issues have already been identified by previous SWEny Triage runs.",
-  );
-  lines.push(
-    "Do NOT create new issues or propose fixes for these same problems.",
-  );
+  lines.push("These issues have already been identified by previous SWEny Triage runs.");
+  lines.push("Do NOT create new issues or propose fixes for these same problems.");
   lines.push("");
 
   // 1. Fetch recent triage Linear issues (last 30 days)
   lines.push("## Linear Issues");
   try {
-    const triageHistory =
-      await providers.issueTracker.listTriageHistory(
-        config.linearTeamId,
-        config.linearTriageLabelId,
-        30,
-      );
+    const triageHistory = await providers.issueTracker.listTriageHistory(
+      config.linearTeamId,
+      config.linearTriageLabelId,
+      30,
+    );
 
     if (triageHistory.length > 0) {
       for (const entry of triageHistory) {
-        lines.push(
-          `- **${entry.identifier}** [${entry.state}] ${entry.title} — ${entry.url}`,
-        );
+        lines.push(`- **${entry.identifier}** [${entry.state}] ${entry.title} — ${entry.url}`);
       }
     } else {
       lines.push("_No triage-labeled Linear issues found in last 30 days_");
@@ -142,9 +127,7 @@ async function buildKnownIssuesContext(
 
     // Closed (failed attempts)
     lines.push("### Closed (failed attempts)");
-    const closed = triagePrs.filter(
-      (pr) => pr.state === "closed",
-    );
+    const closed = triagePrs.filter((pr) => pr.state === "closed");
     if (closed.length > 0) {
       for (const pr of closed) {
         lines.push(`- PR #${pr.number}: ${pr.title} — ${pr.url}`);
@@ -164,11 +147,7 @@ async function buildKnownIssuesContext(
 // Build Investigation Prompt
 // ---------------------------------------------------------------------------
 
-function buildInvestigationPrompt(
-  config: ActionConfig,
-  providers: Providers,
-  knownIssuesContent: string,
-): string {
+function buildInvestigationPrompt(config: ActionConfig, providers: Providers, knownIssuesContent: string): string {
   const parts: string[] = [];
 
   // Dynamic inputs section (variable expansion)
@@ -390,15 +369,11 @@ function parseInvestigationResults(analysisDir: string): InvestigationResult {
     } else {
       // Default to "implement" if best candidate exists but no explicit recommendation
       recommendation = "implement";
-      core.info(
-        "No explicit RECOMMENDATION found in best-candidate.md, defaulting to implement",
-      );
+      core.info("No explicit RECOMMENDATION found in best-candidate.md, defaulting to implement");
     }
 
     // Extract existing issue reference from "+1 existing" recommendation
-    const existingMatch = recommendation.match(
-      /\+1 existing\s+([A-Z]+-\d+)/i,
-    );
+    const existingMatch = recommendation.match(/\+1 existing\s+([A-Z]+-\d+)/i);
     if (existingMatch) {
       existingIssue = existingMatch[1];
       core.info(`Existing issue reference: ${existingIssue}`);
@@ -414,8 +389,7 @@ function parseInvestigationResults(analysisDir: string): InvestigationResult {
     core.info("No best-candidate.md found, recommendation: skip");
   }
 
-  const shouldImplement =
-    recommendation.toLowerCase().startsWith("implement");
+  const shouldImplement = recommendation.toLowerCase().startsWith("implement");
 
   return {
     issuesFound,

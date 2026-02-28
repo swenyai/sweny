@@ -1,6 +1,12 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { SourceControlProvider, PullRequest, PrCreateOptions, PrListOptions, DispatchWorkflowOptions } from "./types.js";
+import type {
+  SourceControlProvider,
+  PullRequest,
+  PrCreateOptions,
+  PrListOptions,
+  DispatchWorkflowOptions,
+} from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 
@@ -24,12 +30,7 @@ async function git(args: string[], opts?: { ignoreReturnCode?: boolean }): Promi
   }
 }
 
-async function ghApi(
-  method: string,
-  path: string,
-  token: string,
-  body?: Record<string, unknown>,
-): Promise<unknown> {
+async function ghApi(method: string, path: string, token: string, body?: Record<string, unknown>): Promise<unknown> {
   const resp = await fetch(`https://api.github.com${path}`, {
     method,
     headers: {
@@ -69,10 +70,7 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
     },
 
     async pushBranch(name: string): Promise<void> {
-      await git([
-        "remote", "set-url", "origin",
-        `https://x-access-token:${token}@github.com/${owner}/${repo}.git`,
-      ]);
+      await git(["remote", "set-url", "origin", `https://x-access-token:${token}@github.com/${owner}/${repo}.git`]);
       await git(["push", "origin", name]);
       log.info(`Pushed branch: ${name}`);
     },
@@ -90,19 +88,13 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
     },
 
     async hasNewCommits(): Promise<boolean> {
-      const output = await git(
-        ["rev-list", "--count", `HEAD`, `^origin/${baseBranch}`],
-        { ignoreReturnCode: true },
-      );
+      const output = await git(["rev-list", "--count", `HEAD`, `^origin/${baseBranch}`], { ignoreReturnCode: true });
       const count = parseInt(output.trim(), 10);
       return !isNaN(count) && count > 0;
     },
 
     async getChangedFiles(): Promise<string[]> {
-      const output = await git(
-        ["diff", "--name-only", `origin/${baseBranch}..HEAD`],
-        { ignoreReturnCode: true },
-      );
+      const output = await git(["diff", "--name-only", `origin/${baseBranch}..HEAD`], { ignoreReturnCode: true });
       return output.trim().split("\n").filter(Boolean);
     },
 
@@ -134,12 +126,7 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
       log.info(`Created PR #${pr.number}: ${pr.html_url}`);
 
       if (opts.labels && opts.labels.length > 0) {
-        await ghApi(
-          "POST",
-          `/repos/${owner}/${repo}/issues/${pr.number}/labels`,
-          token,
-          { labels: opts.labels },
-        );
+        await ghApi("POST", `/repos/${owner}/${repo}/issues/${pr.number}/labels`, token, { labels: opts.labels });
       }
 
       return { number: pr.number, url: pr.html_url, state: "open", title: opts.title };
@@ -155,11 +142,7 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
         direction: "desc",
       });
 
-      const prs = (await ghApi(
-        "GET",
-        `/repos/${owner}/${repo}/pulls?${params}`,
-        token,
-      )) as {
+      const prs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?${params}`, token)) as {
         number: number;
         html_url: string;
         title: string;
@@ -169,18 +152,12 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
         labels: { name: string }[];
       }[];
 
-      const labelFilter = opts?.labels?.length
-        ? new Set(opts.labels.map((l) => l.toLowerCase()))
-        : null;
+      const labelFilter = opts?.labels?.length ? new Set(opts.labels.map((l) => l.toLowerCase())) : null;
 
       const results: PullRequest[] = [];
       for (const pr of prs) {
         // Determine normalized state
-        const prState: PullRequest["state"] = pr.merged_at
-          ? "merged"
-          : pr.state === "open"
-            ? "open"
-            : "closed";
+        const prState: PullRequest["state"] = pr.merged_at ? "merged" : pr.state === "open" ? "open" : "closed";
 
         // Filter by requested state (handle "merged" vs "closed")
         if (state === "merged" && !pr.merged_at) continue;
@@ -206,11 +183,12 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
 
     async findExistingPr(searchTerm: string): Promise<PullRequest | null> {
       // Search open PRs
-      const openPrs = (await ghApi(
-        "GET",
-        `/repos/${owner}/${repo}/pulls?state=open&per_page=20`,
-        token,
-      )) as { number: number; html_url: string; title: string; body: string | null }[];
+      const openPrs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?state=open&per_page=20`, token)) as {
+        number: number;
+        html_url: string;
+        title: string;
+        body: string | null;
+      }[];
 
       for (const pr of openPrs) {
         const text = `${pr.title} ${pr.body || ""}`;

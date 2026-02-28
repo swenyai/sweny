@@ -51,10 +51,12 @@ export function httpPlugin(opts: HttpPluginOpts = {}): ToolPlugin {
                 const url = new URL(urlStr);
                 if (!opts.allowedHosts.includes(url.hostname)) {
                   return {
-                    content: [{
-                      type: "text" as const,
-                      text: `Host not allowed: ${url.hostname}. Allowed: ${opts.allowedHosts.join(", ")}`,
-                    }],
+                    content: [
+                      {
+                        type: "text" as const,
+                        text: `Host not allowed: ${url.hostname}. Allowed: ${opts.allowedHosts.join(", ")}`,
+                      },
+                    ],
                     isError: true,
                   };
                 }
@@ -70,17 +72,24 @@ export function httpPlugin(opts: HttpPluginOpts = {}): ToolPlugin {
               const responseHeaders = Object.fromEntries(response.headers.entries());
 
               return {
-                content: [{
-                  type: "text" as const,
-                  text: JSON.stringify({
-                    status: response.status,
-                    statusText: response.statusText,
-                    headers: responseHeaders,
-                    body: responseBody.length > 10000
-                      ? responseBody.slice(0, 10000) + "\n...(truncated)"
-                      : responseBody,
-                  }, null, 2),
-                }],
+                content: [
+                  {
+                    type: "text" as const,
+                    text: JSON.stringify(
+                      {
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: responseHeaders,
+                        body:
+                          responseBody.length > 10000
+                            ? responseBody.slice(0, 10000) + "\n...(truncated)"
+                            : responseBody,
+                      },
+                      null,
+                      2,
+                    ),
+                  },
+                ],
               };
             } catch (err) {
               return {

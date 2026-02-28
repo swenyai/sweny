@@ -3,7 +3,7 @@ name: Release @sweny/providers
 on:
   push:
     tags:
-      - 'providers-v*'
+      - "providers-v*"
 
 jobs:
   publish:

@@ -127,9 +127,7 @@ function makeProviders(overrides?: Record<string, unknown>): Providers {
   } as unknown as Providers;
 }
 
-function makeInvestigation(
-  overrides: Partial<InvestigationResult> = {},
-): InvestigationResult {
+function makeInvestigation(overrides: Partial<InvestigationResult> = {}): InvestigationResult {
   return {
     issuesFound: true,
     bestCandidate: true,
@@ -220,9 +218,7 @@ describe("implement", () => {
 
     it("handles addComment failure gracefully", async () => {
       const providers = makeProviders();
-      vi.mocked(providers.issueTracker.addComment).mockRejectedValue(
-        new Error("API error"),
-      );
+      vi.mocked(providers.issueTracker.addComment).mockRejectedValue(new Error("API error"));
 
       const result = await implement(
         makeConfig(),
@@ -410,11 +406,7 @@ describe("implement", () => {
         targetRepo: "other-org/other-repo",
       });
 
-      const result = await implement(
-        makeConfig({ repository: "org/repo" }),
-        providers,
-        investigation,
-      );
+      const result = await implement(makeConfig({ repository: "org/repo" }), providers, investigation);
 
       expect(providers.sourceControl.dispatchWorkflow).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -447,11 +439,7 @@ describe("implement", () => {
     it("continues locally when targetRepo is empty", async () => {
       const providers = makeProviders();
 
-      const result = await implement(
-        makeConfig(),
-        providers,
-        makeInvestigation({ targetRepo: "" }),
-      );
+      const result = await implement(makeConfig(), providers, makeInvestigation({ targetRepo: "" }));
 
       expect(providers.sourceControl.dispatchWorkflow).not.toHaveBeenCalled();
       expect(result.skipped).toBe(false);
@@ -459,9 +447,7 @@ describe("implement", () => {
 
     it("handles dispatch failure gracefully", async () => {
       const providers = makeProviders();
-      vi.mocked(providers.sourceControl.dispatchWorkflow).mockRejectedValue(
-        new Error("dispatch failed"),
-      );
+      vi.mocked(providers.sourceControl.dispatchWorkflow).mockRejectedValue(new Error("dispatch failed"));
 
       const result = await implement(
         makeConfig({ repository: "org/repo" }),
@@ -522,11 +508,7 @@ describe("implement", () => {
         title: "fix: merged",
       });
 
-      const result = await implement(
-        makeConfig({ linearIssue: "ENG-500" }),
-        providers,
-        makeInvestigation(),
-      );
+      const result = await implement(makeConfig({ linearIssue: "ENG-500" }), providers, makeInvestigation());
 
       // Should proceed with implementation (merged PR ignored due to linearIssue)
       expect(result.skipped).toBe(false);
@@ -592,9 +574,7 @@ describe("implement", () => {
 
       const result = await implement(makeConfig(), providers, makeInvestigation());
 
-      expect(providers.sourceControl.stageAndCommit).toHaveBeenCalledWith(
-        expect.stringContaining("automated fix"),
-      );
+      expect(providers.sourceControl.stageAndCommit).toHaveBeenCalledWith(expect.stringContaining("automated fix"));
       expect(result.skipped).toBe(false);
       expect(providers.sourceControl.pushBranch).toHaveBeenCalled();
     });
@@ -612,21 +592,15 @@ describe("implement", () => {
 
       // Branch creation
       expect(providers.sourceControl.configureBotIdentity).toHaveBeenCalled();
-      expect(providers.sourceControl.createBranch).toHaveBeenCalledWith(
-        "eng-999-triage-fix",
-      );
-      expect(providers.sourceControl.resetPaths).toHaveBeenCalledWith([
-        ".github/workflows/",
-      ]);
+      expect(providers.sourceControl.createBranch).toHaveBeenCalledWith("eng-999-triage-fix");
+      expect(providers.sourceControl.resetPaths).toHaveBeenCalledWith([".github/workflows/"]);
 
       // Implementation
       expect(providers.codingAgent.install).toHaveBeenCalled();
       expect(providers.codingAgent.run).toHaveBeenCalledTimes(2); // implement + PR description
 
       // Push and PR
-      expect(providers.sourceControl.pushBranch).toHaveBeenCalledWith(
-        "eng-999-triage-fix",
-      );
+      expect(providers.sourceControl.pushBranch).toHaveBeenCalledWith("eng-999-triage-fix");
       expect(providers.sourceControl.createPullRequest).toHaveBeenCalledWith(
         expect.objectContaining({
           head: "eng-999-triage-fix",
@@ -664,9 +638,7 @@ describe("implement", () => {
 
       await implement(makeConfig(), providers, makeInvestigation());
 
-      expect(providers.sourceControl.createBranch).toHaveBeenCalledWith(
-        "eng-999-my-branch",
-      );
+      expect(providers.sourceControl.createBranch).toHaveBeenCalledWith("eng-999-my-branch");
     });
 
     it("reads pr-description.md for PR body when it exists", async () => {
@@ -715,9 +687,7 @@ describe("implement", () => {
 
     it("handles linkPr failure gracefully", async () => {
       const providers = makeProviders();
-      vi.mocked(providers.issueTracker.linkPr).mockRejectedValue(
-        new Error("link failed"),
-      );
+      vi.mocked(providers.issueTracker.linkPr).mockRejectedValue(new Error("link failed"));
 
       // Should not throw
       const result = await implement(makeConfig(), providers, makeInvestigation());
@@ -727,9 +697,7 @@ describe("implement", () => {
 
     it("handles updateIssue failure for state change gracefully", async () => {
       const providers = makeProviders();
-      vi.mocked(providers.issueTracker.updateIssue).mockRejectedValue(
-        new Error("update failed"),
-      );
+      vi.mocked(providers.issueTracker.updateIssue).mockRejectedValue(new Error("update failed"));
 
       const result = await implement(makeConfig(), providers, makeInvestigation());
       expect(result.skipped).toBe(false);

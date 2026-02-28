@@ -25,9 +25,7 @@ class SlackWebhookProvider implements NotificationProvider {
   }
 
   async send(payload: NotificationPayload): Promise<void> {
-    const text = payload.title
-      ? `*${payload.title}*\n${payload.body}`
-      : payload.body;
+    const text = payload.title ? `*${payload.title}*\n${payload.body}` : payload.body;
 
     const response = await fetch(this.webhookUrl, {
       method: "POST",
@@ -36,9 +34,7 @@ class SlackWebhookProvider implements NotificationProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Slack webhook error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Slack webhook error: ${response.status} ${response.statusText}`);
     }
 
     this.log.info("Slack notification sent");

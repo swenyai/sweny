@@ -180,17 +180,8 @@ describe("main run()", () => {
     const providers = makeFakeProviders();
 
     expect(mockInvestigate).toHaveBeenCalledWith(config, providers);
-    expect(mockImplement).toHaveBeenCalledWith(
-      config,
-      providers,
-      makeInvestigationResult(),
-    );
-    expect(mockNotify).toHaveBeenCalledWith(
-      config,
-      providers,
-      makeInvestigationResult(),
-      makeImplementResult(),
-    );
+    expect(mockImplement).toHaveBeenCalledWith(config, providers, makeInvestigationResult());
+    expect(mockNotify).toHaveBeenCalledWith(config, providers, makeInvestigationResult(), makeImplementResult());
   });
 
   // -----------------------------------------------------------------------
@@ -212,32 +203,18 @@ describe("main run()", () => {
     await runMain();
 
     expect(core.setOutput).toHaveBeenCalledWith("issue-identifier", "ENG-999");
-    expect(core.setOutput).toHaveBeenCalledWith(
-      "issue-url",
-      "https://linear.app/ENG-999",
-    );
-    expect(core.setOutput).toHaveBeenCalledWith(
-      "pr-url",
-      "https://github.com/org/repo/pull/42",
-    );
+    expect(core.setOutput).toHaveBeenCalledWith("issue-url", "https://linear.app/ENG-999");
+    expect(core.setOutput).toHaveBeenCalledWith("pr-url", "https://github.com/org/repo/pull/42");
     expect(core.setOutput).toHaveBeenCalledWith("pr-number", "42");
   });
 
   it("does not set PR outputs when implementation is skipped", async () => {
-    mockImplement.mockResolvedValue(
-      makeImplementResult({ skipped: true, prUrl: "", prNumber: 0 }),
-    );
+    mockImplement.mockResolvedValue(makeImplementResult({ skipped: true, prUrl: "", prNumber: 0 }));
 
     await runMain();
 
-    expect(core.setOutput).not.toHaveBeenCalledWith(
-      "pr-url",
-      expect.anything(),
-    );
-    expect(core.setOutput).not.toHaveBeenCalledWith(
-      "pr-number",
-      expect.anything(),
-    );
+    expect(core.setOutput).not.toHaveBeenCalledWith("pr-url", expect.anything());
+    expect(core.setOutput).not.toHaveBeenCalledWith("pr-number", expect.anything());
   });
 
   // -----------------------------------------------------------------------
@@ -264,9 +241,7 @@ describe("main run()", () => {
   // -----------------------------------------------------------------------
 
   it("skips implement phase when shouldImplement is false", async () => {
-    mockInvestigate.mockResolvedValue(
-      makeInvestigationResult({ shouldImplement: false, recommendation: "skip" }),
-    );
+    mockInvestigate.mockResolvedValue(makeInvestigationResult({ shouldImplement: false, recommendation: "skip" }));
 
     await runMain();
 
@@ -300,9 +275,7 @@ describe("main run()", () => {
   });
 
   it("still calls notify even when implement is skipped", async () => {
-    mockInvestigate.mockResolvedValue(
-      makeInvestigationResult({ shouldImplement: false }),
-    );
+    mockInvestigate.mockResolvedValue(makeInvestigationResult({ shouldImplement: false }));
 
     await runMain();
 

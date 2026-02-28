@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  DENIED_TOOLS,
-  CONFIRMATION_REQUIRED_TOOLS,
-} from "../../src/claude/tool-guard.js";
+import { DENIED_TOOLS, CONFIRMATION_REQUIRED_TOOLS } from "../../src/claude/tool-guard.js";
 
 // ---------------------------------------------------------------------------
 // DENIED_TOOLS

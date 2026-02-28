@@ -46,10 +46,7 @@ describe("parseServiceMap", () => {
     expect(result.services).toHaveLength(2);
     expect(result.services[0].name).toBe("api-gateway");
     expect(result.services[0].repo).toBe("org/api-gateway");
-    expect(result.services[0].owns).toEqual([
-      "api-gateway",
-      "api-gateway-staging",
-    ]);
+    expect(result.services[0].owns).toEqual(["api-gateway", "api-gateway-staging"]);
     expect(result.services[1].name).toBe("worker");
     expect(result.services[1].repo).toBe("org/worker");
     expect(result.services[1].owns).toEqual(["worker-prod", "worker-staging"]);

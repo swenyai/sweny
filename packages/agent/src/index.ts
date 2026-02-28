@@ -50,10 +50,7 @@ async function main(): Promise<void> {
     modelRunner,
   );
   const auditLogger = config.audit ?? new ConsoleAuditLogger();
-  const rateLimiter = new RateLimiter(
-    config.rateLimit?.maxPerMinute,
-    config.rateLimit?.maxPerHour,
-  );
+  const rateLimiter = new RateLimiter(config.rateLimit?.maxPerMinute, config.rateLimit?.maxPerHour);
   const accessGuard = config.accessGuard ?? allowAllGuard();
 
   // ─── Resolve channels ─────────────────────────────────────────

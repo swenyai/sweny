@@ -259,9 +259,7 @@ describe("SentryProvider", () => {
       statusText: "Unauthorized",
     });
 
-    await expect(makeSentry().verifyAccess()).rejects.toThrow(
-      "Sentry API error: 401 Unauthorized",
-    );
+    await expect(makeSentry().verifyAccess()).rejects.toThrow("Sentry API error: 401 Unauthorized");
   });
 });
 

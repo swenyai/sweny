@@ -38,7 +38,17 @@ export class Orchestrator {
   ) {}
 
   async handleMessage(msg: IncomingMessage): Promise<void> {
-    const { authProvider, sessionManager, runner, memoryStore, auditLogger, rateLimiter, accessGuard, allowedUsers, logger } = this.deps;
+    const {
+      authProvider,
+      sessionManager,
+      runner,
+      memoryStore,
+      auditLogger,
+      rateLimiter,
+      accessGuard,
+      allowedUsers,
+      logger,
+    } = this.deps;
     const { userId, text, conversation } = msg;
     const { conversationId, messageId } = conversation;
 
@@ -63,7 +73,9 @@ export class Orchestrator {
     // Authentication
     const identity = await authProvider.authenticate(userId);
     if (!identity) {
-      const loginCmd = authProvider.loginFields ? "Please use `/login` first to authenticate." : "Authentication required.";
+      const loginCmd = authProvider.loginFields
+        ? "Please use `/login` first to authenticate."
+        : "Authentication required.";
       await this.channel.sendMessage(conversation, loginCmd);
       return;
     }

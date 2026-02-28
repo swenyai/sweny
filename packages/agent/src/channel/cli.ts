@@ -1,11 +1,5 @@
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
-import type {
-  Channel,
-  ChannelCommand,
-  ConversationRef,
-  IncomingMessage,
-  SentMessage,
-} from "./types.js";
+import type { Channel, ChannelCommand, ConversationRef, IncomingMessage, SentMessage } from "./types.js";
 
 const CLI_USER_ID = "cli-user";
 const CLI_CONVERSATION_ID = "cli";
@@ -46,10 +40,7 @@ export function cliChannel(config?: CliChannelConfig): Channel {
       return [text];
     },
 
-    async sendMessage(
-      conversation: ConversationRef,
-      text: string,
-    ): Promise<SentMessage> {
+    async sendMessage(conversation: ConversationRef, text: string): Promise<SentMessage> {
       const data = text + "\n";
       await new Promise<void>((resolve, reject) => {
         output.write(data, (err) => {
@@ -64,9 +55,7 @@ export function cliChannel(config?: CliChannelConfig): Channel {
       };
     },
 
-    async start(
-      onMessage: (msg: IncomingMessage) => Promise<void>,
-    ): Promise<() => Promise<void>> {
+    async start(onMessage: (msg: IncomingMessage) => Promise<void>): Promise<() => Promise<void>> {
       const rl: ReadlineInterface = createInterface({
         input: input as NodeJS.ReadableStream,
         output: output as NodeJS.WritableStream,

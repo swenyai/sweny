@@ -55,9 +55,7 @@ describe("memoryPlugin", () => {
 
   it("createTools() returns 3 tools", () => {
     expect(tools).toHaveLength(3);
-    expect(tools.map((t) => t.name)).toEqual(
-      expect.arrayContaining(["memory_save", "memory_list", "memory_remove"]),
-    );
+    expect(tools.map((t) => t.name)).toEqual(expect.arrayContaining(["memory_save", "memory_list", "memory_remove"]));
   });
 
   describe("memory_save", () => {
@@ -81,9 +79,7 @@ describe("memoryPlugin", () => {
 
     it("returns isError: true when store throws", async () => {
       const store = ctx.storage.memory;
-      (store.addEntry as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("disk full"),
-      );
+      (store.addEntry as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("disk full"));
 
       const tool = findTool(tools, "memory_save");
       const result = await tool.execute({ text: "fail" });
@@ -128,9 +124,7 @@ describe("memoryPlugin", () => {
 
     it("returns isError: true when store throws", async () => {
       const store = ctx.storage.memory;
-      (store.getMemories as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("connection refused"),
-      );
+      (store.getMemories as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("connection refused"));
 
       const tool = findTool(tools, "memory_list");
       const result = await tool.execute({});
@@ -166,9 +160,7 @@ describe("memoryPlugin", () => {
 
     it("returns isError: true when store throws", async () => {
       const store = ctx.storage.memory;
-      (store.removeEntry as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("timeout"),
-      );
+      (store.removeEntry as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("timeout"));
 
       const tool = findTool(tools, "memory_remove");
       const result = await tool.execute({ entryId: "m1" });

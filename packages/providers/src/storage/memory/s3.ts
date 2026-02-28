@@ -28,9 +28,7 @@ export class S3MemoryStore implements MemoryStore {
     if (cached) return cached;
 
     try {
-      const result = await this.s3.send(
-        new GetObjectCommand({ Bucket: this.bucket, Key: this.s3Key(userId) }),
-      );
+      const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.s3Key(userId) }));
       const body = await result.Body?.transformToString("utf-8");
       if (body) {
         const memory = JSON.parse(body) as UserMemory;

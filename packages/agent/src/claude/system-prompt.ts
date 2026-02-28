@@ -13,8 +13,7 @@ export const FORMAT_HINTS: Record<string, string> = {
     "Format your responses for Slack using Slack's mrkdwn syntax. Use *bold* for emphasis, `code` for inline code, and ``` for code blocks.",
   "discord-markdown":
     "Format your responses using Discord markdown. Use **bold** for emphasis, `code` for inline code, and ``` for code blocks.",
-  plaintext:
-    "Format your responses as plain text. Use simple indentation and dashes for lists.",
+  plaintext: "Format your responses as plain text. Use simple indentation and dashes for lists.",
 };
 
 const DEFAULT_FORMAT_HINT = "slack-mrkdwn";
@@ -50,9 +49,7 @@ export function buildSystemPrompt(opts: SystemPromptOpts): string {
   // User memories
   if (opts.memories.length > 0) {
     const memoryLines = opts.memories.map((m) => `- ${m.text}`).join("\n");
-    sections.push(
-      `## Things you remember about this user\n${memoryLines}`,
-    );
+    sections.push(`## Things you remember about this user\n${memoryLines}`);
   }
 
   return sections.join("\n\n");

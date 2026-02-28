@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  buildSystemPrompt,
-  FORMAT_HINTS,
-} from "../../src/claude/system-prompt.js";
+import { buildSystemPrompt, FORMAT_HINTS } from "../../src/claude/system-prompt.js";
 import type { MemoryEntry } from "../../src/storage/memory/types.js";
 
 // ---------------------------------------------------------------------------
@@ -49,9 +46,7 @@ describe("buildSystemPrompt", () => {
   describe("default base prompt", () => {
     it("includes the default core prompt when basePrompt is omitted", () => {
       const result = buildSystemPrompt(baseOpts());
-      expect(result).toContain(
-        "You are a helpful assistant. You are knowledgeable, concise, and friendly.",
-      );
+      expect(result).toContain("You are a helpful assistant. You are knowledgeable, concise, and friendly.");
     });
 
     it("includes the formatting section with default slack-mrkdwn hint", () => {
@@ -64,9 +59,7 @@ describe("buildSystemPrompt", () => {
       const result = buildSystemPrompt(baseOpts());
       expect(result).toContain("Use bullet points for lists.");
       expect(result).toContain("Keep responses concise and actionable.");
-      expect(result).toContain(
-        "If you are unsure about something, say so rather than guessing.",
-      );
+      expect(result).toContain("If you are unsure about something, say so rather than guessing.");
     });
   });
 
@@ -76,9 +69,7 @@ describe("buildSystemPrompt", () => {
       const custom = "You are a pirate. Speak like a pirate at all times.";
       const result = buildSystemPrompt({ ...baseOpts(), basePrompt: custom });
       expect(result).toContain(custom);
-      expect(result).not.toContain(
-        "You are a helpful assistant. You are knowledgeable, concise, and friendly.",
-      );
+      expect(result).not.toContain("You are a helpful assistant. You are knowledgeable, concise, and friendly.");
     });
 
     it("does not include default formatting section when basePrompt is set", () => {
@@ -179,9 +170,7 @@ describe("buildSystemPrompt", () => {
       // Should only have identity + base prompt (two sections)
       const sections = result.split("\n\n");
       // No extra empty section from plugins
-      expect(
-        sections.every((s) => s.trim().length > 0),
-      ).toBe(true);
+      expect(sections.every((s) => s.trim().length > 0)).toBe(true);
     });
 
     it("excludes plugin sections when whitespace-only", () => {
@@ -192,9 +181,7 @@ describe("buildSystemPrompt", () => {
       expect(result).not.toContain("   \n  \t  ");
       // Verify prompt is clean — no trailing whitespace sections
       const sections = result.split("\n\n");
-      expect(
-        sections.every((s) => s.trim().length > 0),
-      ).toBe(true);
+      expect(sections.every((s) => s.trim().length > 0)).toBe(true);
     });
   });
 
@@ -247,9 +234,7 @@ describe("buildSystemPrompt", () => {
       ];
       const result = buildSystemPrompt({ ...baseOpts(), memories });
 
-      expect(result).toContain(
-        "## Things you remember about this user\n- Fact A\n- Fact B",
-      );
+      expect(result).toContain("## Things you remember about this user\n- Fact A\n- Fact B");
     });
   });
 
@@ -274,9 +259,7 @@ describe("buildSystemPrompt", () => {
       expect(result).toContain("## GitHub\nCan search repos.");
 
       // Memory section appears at the end
-      expect(result).toContain(
-        "## Things you remember about this user\n- Uses VS Code",
-      );
+      expect(result).toContain("## Things you remember about this user\n- Uses VS Code");
     });
 
     it("assembles correctly with custom basePrompt and all sections", () => {

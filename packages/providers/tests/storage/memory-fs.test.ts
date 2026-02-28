@@ -49,11 +49,7 @@ describe("FsMemoryStore", () => {
 
     const memory = await store.getMemories("user-a");
     expect(memory.entries).toHaveLength(3);
-    expect(memory.entries.map((e) => e.text)).toEqual([
-      "First note",
-      "Second note",
-      "Third note",
-    ]);
+    expect(memory.entries.map((e) => e.text)).toEqual(["First note", "Second note", "Third note"]);
   });
 
   it("removeEntry filters by entry id", async () => {

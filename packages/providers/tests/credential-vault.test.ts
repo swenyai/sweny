@@ -47,9 +47,7 @@ describe("envVault", () => {
 
   it("setSecret throws (read-only)", async () => {
     const vault = envVault();
-    await expect(
-      vault.setSecret("t1", "key", "val"),
-    ).rejects.toThrow("read-only");
+    await expect(vault.setSecret("t1", "key", "val")).rejects.toThrow("read-only");
   });
 
   it("deleteSecret throws (read-only)", async () => {

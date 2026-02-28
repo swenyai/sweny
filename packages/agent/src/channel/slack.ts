@@ -1,12 +1,6 @@
 import { App } from "@slack/bolt";
 import type { AuthProvider } from "../auth/types.js";
-import type {
-  Channel,
-  ChannelCommand,
-  ConversationRef,
-  IncomingMessage,
-  SentMessage,
-} from "./types.js";
+import type { Channel, ChannelCommand, ConversationRef, IncomingMessage, SentMessage } from "./types.js";
 import { formatForSlack } from "./slack-formatter.js";
 import { registerLoginModal } from "./slack-login.js";
 
@@ -40,10 +34,7 @@ export function slackChannel(config: SlackChannelConfig): Channel {
       return formatForSlack(text);
     },
 
-    async sendMessage(
-      conversation: ConversationRef,
-      text: string,
-    ): Promise<SentMessage> {
+    async sendMessage(conversation: ConversationRef, text: string): Promise<SentMessage> {
       const result = await app.client.chat.postMessage({
         channel: conversation.conversationId,
         thread_ts: conversation.messageId,
@@ -64,18 +55,14 @@ export function slackChannel(config: SlackChannelConfig): Channel {
       });
     },
 
-    async start(
-      onMessage: (msg: IncomingMessage) => Promise<void>,
-    ): Promise<() => Promise<void>> {
+    async start(onMessage: (msg: IncomingMessage) => Promise<void>): Promise<() => Promise<void>> {
       // Register direct messages
       app.message(async ({ message }) => {
         if (message.subtype) return;
         if (!("text" in message) || !message.text) return;
         if (!("user" in message) || !message.user) return;
 
-        const threadTs =
-          ("thread_ts" in message ? message.thread_ts : message.ts) ??
-          message.ts;
+        const threadTs = ("thread_ts" in message ? message.thread_ts : message.ts) ?? message.ts;
 
         const msg: IncomingMessage = {
           userId: message.user,

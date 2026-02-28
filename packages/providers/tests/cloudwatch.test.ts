@@ -1,8 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  cloudwatch,
-  cloudwatchConfigSchema,
-} from "../src/observability/cloudwatch.js";
+import { cloudwatch, cloudwatchConfigSchema } from "../src/observability/cloudwatch.js";
 import type { ObservabilityProvider } from "../src/observability/types.js";
 
 // ---------------------------------------------------------------------------
@@ -166,9 +163,7 @@ describe("CloudWatchProvider.verifyAccess", () => {
       logger: silentLogger,
     });
 
-    await expect(provider.verifyAccess()).rejects.toThrow(
-      "AccessDeniedException",
-    );
+    await expect(provider.verifyAccess()).rejects.toThrow("AccessDeniedException");
   });
 });
 
@@ -186,14 +181,10 @@ describe("CloudWatchProvider.queryLogs", () => {
     vi.useRealTimers();
   });
 
-  function setupQueryMocks(
-    results: Array<Array<{ field?: string; value?: string }>>,
-  ) {
+  function setupQueryMocks(results: Array<Array<{ field?: string; value?: string }>>) {
     // First call: StartQueryCommand -> returns queryId
     // Second call: GetQueryResultsCommand -> returns Complete with results
-    mockSend
-      .mockResolvedValueOnce({ queryId: "test-query-id" })
-      .mockResolvedValueOnce({ status: "Complete", results });
+    mockSend.mockResolvedValueOnce({ queryId: "test-query-id" }).mockResolvedValueOnce({ status: "Complete", results });
   }
 
   it("starts query with correct time range, service filter, and severity", async () => {
@@ -222,9 +213,7 @@ describe("CloudWatchProvider.queryLogs", () => {
     const startCmd = mockSend.mock.calls[0][0];
     expect(startCmd._type).toBe("StartQueryCommand");
     expect(startCmd.input.logGroupName).toBe("/ecs/app");
-    expect(startCmd.input.startTime).toBe(
-      Math.floor((now - 3_600_000) / 1000),
-    );
+    expect(startCmd.input.startTime).toBe(Math.floor((now - 3_600_000) / 1000));
     expect(startCmd.input.endTime).toBe(Math.floor(now / 1000));
     expect(startCmd.input.queryString).toContain("api-service");
     expect(startCmd.input.queryString).toContain("error");
@@ -315,9 +304,7 @@ describe("CloudWatchProvider.queryLogs", () => {
     await promise;
 
     const startCmd = mockSend.mock.calls[0][0];
-    expect(startCmd.input.queryString).toContain(
-      "filter @logStream like /my-service/",
-    );
+    expect(startCmd.input.queryString).toContain("filter @logStream like /my-service/");
   });
 
   it("omits service filter when serviceFilter is '*'", async () => {
@@ -356,12 +343,8 @@ describe("CloudWatchProvider.aggregate", () => {
     vi.useRealTimers();
   });
 
-  function setupAggMocks(
-    results: Array<Array<{ field?: string; value?: string }>>,
-  ) {
-    mockSend
-      .mockResolvedValueOnce({ queryId: "agg-query-id" })
-      .mockResolvedValueOnce({ status: "Complete", results });
+  function setupAggMocks(results: Array<Array<{ field?: string; value?: string }>>) {
+    mockSend.mockResolvedValueOnce({ queryId: "agg-query-id" }).mockResolvedValueOnce({ status: "Complete", results });
   }
 
   it("starts aggregation query", async () => {
@@ -386,9 +369,7 @@ describe("CloudWatchProvider.aggregate", () => {
     const startCmd = mockSend.mock.calls[0][0];
     expect(startCmd._type).toBe("StartQueryCommand");
     expect(startCmd.input.logGroupName).toBe("/ecs/app");
-    expect(startCmd.input.startTime).toBe(
-      Math.floor((now - 604_800_000) / 1000),
-    );
+    expect(startCmd.input.startTime).toBe(Math.floor((now - 604_800_000) / 1000));
     expect(startCmd.input.endTime).toBe(Math.floor(now / 1000));
     expect(startCmd.input.queryString).toContain("stats count(*)");
     expect(startCmd.input.queryString).toContain("by @logStream");
@@ -459,9 +440,7 @@ describe("parseTimeRange (via queryLogs)", () => {
   });
 
   function setupMocks() {
-    mockSend
-      .mockResolvedValueOnce({ queryId: "q" })
-      .mockResolvedValueOnce({ status: "Complete", results: [] });
+    mockSend.mockResolvedValueOnce({ queryId: "q" }).mockResolvedValueOnce({ status: "Complete", results: [] });
   }
 
   it("parses '1h' as 3,600,000ms", async () => {
@@ -483,9 +462,7 @@ describe("parseTimeRange (via queryLogs)", () => {
     await promise;
 
     const startCmd = mockSend.mock.calls[0][0];
-    expect(startCmd.input.startTime).toBe(
-      Math.floor((now - 3_600_000) / 1000),
-    );
+    expect(startCmd.input.startTime).toBe(Math.floor((now - 3_600_000) / 1000));
   });
 
   it("parses '30m' as 1,800,000ms", async () => {
@@ -507,9 +484,7 @@ describe("parseTimeRange (via queryLogs)", () => {
     await promise;
 
     const startCmd = mockSend.mock.calls[0][0];
-    expect(startCmd.input.startTime).toBe(
-      Math.floor((now - 1_800_000) / 1000),
-    );
+    expect(startCmd.input.startTime).toBe(Math.floor((now - 1_800_000) / 1000));
   });
 
   it("parses '7d' as 604,800,000ms", async () => {
@@ -531,9 +506,7 @@ describe("parseTimeRange (via queryLogs)", () => {
     await promise;
 
     const startCmd = mockSend.mock.calls[0][0];
-    expect(startCmd.input.startTime).toBe(
-      Math.floor((now - 604_800_000) / 1000),
-    );
+    expect(startCmd.input.startTime).toBe(Math.floor((now - 604_800_000) / 1000));
   });
 
   it("throws on invalid time range format", async () => {

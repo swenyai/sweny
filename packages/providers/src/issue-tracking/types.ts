@@ -71,37 +71,21 @@ export interface FingerprintCapable {
 }
 
 export interface TriageHistoryCapable {
-  listTriageHistory(
-    projectId: string,
-    labelId: string,
-    days?: number,
-  ): Promise<TriageHistoryEntry[]>;
+  listTriageHistory(projectId: string, labelId: string, days?: number): Promise<TriageHistoryEntry[]>;
 }
 
 // ---------------------------------------------------------------------------
 // Type guards
 // ---------------------------------------------------------------------------
 
-export function canLinkPr(
-  p: IssueTrackingProvider,
-): p is IssueTrackingProvider & PrLinkCapable {
+export function canLinkPr(p: IssueTrackingProvider): p is IssueTrackingProvider & PrLinkCapable {
   return "linkPr" in p && typeof (p as Record<string, unknown>).linkPr === "function";
 }
 
-export function canSearchByFingerprint(
-  p: IssueTrackingProvider,
-): p is IssueTrackingProvider & FingerprintCapable {
-  return (
-    "searchByFingerprint" in p &&
-    typeof (p as Record<string, unknown>).searchByFingerprint === "function"
-  );
+export function canSearchByFingerprint(p: IssueTrackingProvider): p is IssueTrackingProvider & FingerprintCapable {
+  return "searchByFingerprint" in p && typeof (p as Record<string, unknown>).searchByFingerprint === "function";
 }
 
-export function canListTriageHistory(
-  p: IssueTrackingProvider,
-): p is IssueTrackingProvider & TriageHistoryCapable {
-  return (
-    "listTriageHistory" in p &&
-    typeof (p as Record<string, unknown>).listTriageHistory === "function"
-  );
+export function canListTriageHistory(p: IssueTrackingProvider): p is IssueTrackingProvider & TriageHistoryCapable {
+  return "listTriageHistory" in p && typeof (p as Record<string, unknown>).listTriageHistory === "function";
 }

@@ -131,7 +131,9 @@ function makeRunner(result?: RunResult): AgentRunner {
 
 function makeMemoryStore(): MemoryStore {
   return {
-    getMemories: vi.fn(async () => ({ entries: [{ id: "m1", text: "Remember this", createdAt: "2025-01-01T00:00:00Z" }] })),
+    getMemories: vi.fn(async () => ({
+      entries: [{ id: "m1", text: "Remember this", createdAt: "2025-01-01T00:00:00Z" }],
+    })),
     addEntry: vi.fn(async () => ({ id: "m2", text: "", createdAt: "" })),
     removeEntry: vi.fn(async () => true),
     clearMemories: vi.fn(async () => {}),
@@ -224,10 +226,7 @@ describe("Orchestrator", () => {
 
       await orchestrator.handleMessage(makeMessage());
 
-      expect(channel.sendMessage).toHaveBeenCalledWith(
-        expect.anything(),
-        "Please use `/login` first to authenticate.",
-      );
+      expect(channel.sendMessage).toHaveBeenCalledWith(expect.anything(), "Please use `/login` first to authenticate.");
     });
   });
 
@@ -349,7 +348,9 @@ describe("Orchestrator", () => {
     it("serializes concurrent messages on the same thread", async () => {
       const order: number[] = [];
       let resolveFirst: () => void;
-      const firstBlocked = new Promise<void>((r) => { resolveFirst = r; });
+      const firstBlocked = new Promise<void>((r) => {
+        resolveFirst = r;
+      });
 
       const runner = makeRunner();
       let callCount = 0;
@@ -477,10 +478,7 @@ describe("Orchestrator", () => {
 
       await orchestrator.handleMessage(makeMessage());
 
-      expect(channel.editMessage).toHaveBeenCalledWith(
-        expect.anything(),
-        "Something went wrong: Unknown error",
-      );
+      expect(channel.editMessage).toHaveBeenCalledWith(expect.anything(), "Something went wrong: Unknown error");
     });
 
     it("handles memoryStore.getMemories() failure gracefully", async () => {
@@ -510,10 +508,7 @@ describe("Orchestrator", () => {
 
       await orchestrator.handleMessage(makeMessage());
 
-      expect(channel.editMessage).toHaveBeenCalledWith(
-        expect.anything(),
-        "Something went wrong: Session store down",
-      );
+      expect(channel.editMessage).toHaveBeenCalledWith(expect.anything(), "Something went wrong: Session store down");
     });
 
     it("does not crash when auditLogger.logTurn() rejects", async () => {
@@ -528,10 +523,7 @@ describe("Orchestrator", () => {
       await expect(orchestrator.handleMessage(makeMessage())).resolves.not.toThrow();
 
       // Response should still be delivered
-      expect(channel.editMessage).toHaveBeenCalledWith(
-        expect.anything(),
-        "Here is the answer.",
-      );
+      expect(channel.editMessage).toHaveBeenCalledWith(expect.anything(), "Here is the answer.");
     });
 
     it("rethrows non-AccessDeniedError from accessGuard", async () => {
@@ -544,9 +536,7 @@ describe("Orchestrator", () => {
       });
       orchestrator = new Orchestrator(channel, deps);
 
-      await expect(orchestrator.handleMessage(makeMessage())).rejects.toThrow(
-        "Unexpected guard error",
-      );
+      await expect(orchestrator.handleMessage(makeMessage())).rejects.toThrow("Unexpected guard error");
     });
   });
 

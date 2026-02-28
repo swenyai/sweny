@@ -22,9 +22,7 @@ describe("pagerdutyConfigSchema", () => {
   });
 
   it("rejects missing routingKey", () => {
-    expect(
-      pagerdutyConfigSchema.safeParse({ apiToken: "tok" }).success,
-    ).toBe(false);
+    expect(pagerdutyConfigSchema.safeParse({ apiToken: "tok" }).success).toBe(false);
   });
 });
 

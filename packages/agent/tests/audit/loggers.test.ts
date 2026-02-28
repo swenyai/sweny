@@ -49,9 +49,7 @@ describe("ConsoleAuditLogger", () => {
     await logger.logTurn(record);
 
     expect(logSpy).toHaveBeenCalledOnce();
-    expect(logSpy).toHaveBeenCalledWith(
-      "[audit] user-42 turn=3 tools=2 duration=1500ms",
-    );
+    expect(logSpy).toHaveBeenCalledWith("[audit] user-42 turn=3 tools=2 duration=1500ms");
   });
 
   it("includes correct values from the record", async () => {
@@ -65,9 +63,7 @@ describe("ConsoleAuditLogger", () => {
 
     await logger.logTurn(record);
 
-    expect(logSpy).toHaveBeenCalledWith(
-      "[audit] alice turn=7 tools=0 duration=250ms",
-    );
+    expect(logSpy).toHaveBeenCalledWith("[audit] alice turn=7 tools=0 duration=250ms");
   });
 
   it("returns a resolved promise", async () => {
@@ -103,15 +99,7 @@ describe("FsAuditLogger", () => {
 
     await logger.logTurn(record);
 
-    const expectedPath = join(
-      tempDir,
-      "users",
-      "user-42",
-      "conversations",
-      "2026-02-28",
-      "thread-abc",
-      "3.jsonl",
-    );
+    const expectedPath = join(tempDir, "users", "user-42", "conversations", "2026-02-28", "thread-abc", "3.jsonl");
 
     const content = readFileSync(expectedPath, "utf-8");
     expect(content).toBeTruthy();

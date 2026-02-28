@@ -23,10 +23,7 @@ export function apiKeyAuth(opts: ApiKeyAuthOpts): AuthProvider {
       return sessions.get(userId) ?? null;
     },
 
-    async login(
-      _userId: string,
-      credentials: Record<string, string>,
-    ): Promise<UserIdentity> {
+    async login(_userId: string, credentials: Record<string, string>): Promise<UserIdentity> {
       const apiKey = credentials["apiKey"];
       if (!apiKey) {
         throw new Error("API key is required");

@@ -97,9 +97,7 @@ describe("workspacePlugin", () => {
 
     it("returns isError: true when store throws", async () => {
       const store = ctx.storage.workspace;
-      (store.getManifest as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("storage unavailable"),
-      );
+      (store.getManifest as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("storage unavailable"));
 
       const tool = findTool(tools, "workspace_list");
       const result = await tool.execute({});
@@ -112,9 +110,7 @@ describe("workspacePlugin", () => {
   describe("workspace_read", () => {
     it("returns file content", async () => {
       const store = ctx.storage.workspace;
-      (store.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(
-        "file content here",
-      );
+      (store.readFile as ReturnType<typeof vi.fn>).mockResolvedValue("file content here");
 
       const tool = findTool(tools, "workspace_read");
       const result = await tool.execute({ path: "logs/error.log" });
@@ -126,9 +122,7 @@ describe("workspacePlugin", () => {
 
     it("returns isError: true when store throws", async () => {
       const store = ctx.storage.workspace;
-      (store.readFile as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("file not found"),
-      );
+      (store.readFile as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("file not found"));
 
       const tool = findTool(tools, "workspace_read");
       const result = await tool.execute({ path: "nonexistent.txt" });
@@ -154,9 +148,7 @@ describe("workspacePlugin", () => {
       expect(result.isError).toBeUndefined();
       expect(result.content[0].text).toContain("Preview");
       expect(result.content[0].text).toContain("report.txt");
-      expect(result.content[0].text).toContain(
-        `${Buffer.byteLength("Hello, world!", "utf-8")} bytes`,
-      );
+      expect(result.content[0].text).toContain(`${Buffer.byteLength("Hello, world!", "utf-8")} bytes`);
       expect(result.content[0].text).toContain("A test file");
       expect(result.content[0].text).toContain("confirm=true");
     });
@@ -180,12 +172,7 @@ describe("workspacePlugin", () => {
         confirm: true,
       });
 
-      expect(store.writeFile).toHaveBeenCalledWith(
-        "user-1",
-        "report.txt",
-        "Hello, world!",
-        "A test file",
-      );
+      expect(store.writeFile).toHaveBeenCalledWith("user-1", "report.txt", "Hello, world!", "A test file");
       expect(result.isError).toBeUndefined();
       expect(result.content[0].text).toContain("Written: report.txt");
       expect(result.content[0].text).toContain("13 bytes");
@@ -193,9 +180,7 @@ describe("workspacePlugin", () => {
 
     it("returns isError: true when store throws on confirmed write", async () => {
       const store = ctx.storage.workspace;
-      (store.writeFile as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("quota exceeded"),
-      );
+      (store.writeFile as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("quota exceeded"));
 
       const tool = findTool(tools, "workspace_write");
       const result = await tool.execute({
@@ -251,9 +236,7 @@ describe("workspacePlugin", () => {
 
     it("returns isError: true when store throws on confirmed delete", async () => {
       const store = ctx.storage.workspace;
-      (store.deleteFile as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("permission denied"),
-      );
+      (store.deleteFile as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("permission denied"));
 
       const tool = findTool(tools, "workspace_delete");
       const result = await tool.execute({ path: "locked.txt", confirm: true });
@@ -301,9 +284,7 @@ describe("workspacePlugin", () => {
 
     it("returns isError: true when store throws on confirmed reset", async () => {
       const store = ctx.storage.workspace;
-      (store.reset as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("reset failed"),
-      );
+      (store.reset as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("reset failed"));
 
       const tool = findTool(tools, "workspace_reset");
       const result = await tool.execute({ confirm: true });
@@ -325,16 +306,12 @@ describe("workspacePlugin", () => {
 
       expect(store.getDownloadUrl).toHaveBeenCalledWith("user-1", "report.txt");
       expect(result.isError).toBeUndefined();
-      expect(result.content[0].text).toBe(
-        "https://cdn.example.com/files/report.txt?token=abc",
-      );
+      expect(result.content[0].text).toBe("https://cdn.example.com/files/report.txt?token=abc");
     });
 
     it("returns isError: true when store throws", async () => {
       const store = ctx.storage.workspace;
-      (store.getDownloadUrl as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error("not found"),
-      );
+      (store.getDownloadUrl as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("not found"));
 
       const tool = findTool(tools, "workspace_download_url");
       const result = await tool.execute({ path: "missing.txt" });

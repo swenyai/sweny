@@ -15,16 +15,7 @@ import type {
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 
-const DEFAULT_OPEN_STATES = [
-  "Triage",
-  "Backlog",
-  "Todo",
-  "In Progress",
-  "Peer Review",
-  "In Review",
-  "QA",
-  "Blocked",
-];
+const DEFAULT_OPEN_STATES = ["Triage", "Backlog", "Todo", "In Progress", "Peer Review", "In Review", "QA", "Blocked"];
 
 export const linearConfigSchema = z.object({
   apiKey: z.string().min(1, "Linear API key is required"),
@@ -40,9 +31,7 @@ export function linear(
   return new LinearProvider(parsed);
 }
 
-class LinearProvider
-  implements IssueTrackingProvider, PrLinkCapable, FingerprintCapable, TriageHistoryCapable
-{
+class LinearProvider implements IssueTrackingProvider, PrLinkCapable, FingerprintCapable, TriageHistoryCapable {
   private readonly apiKey: string;
   private readonly log: Logger;
 
@@ -51,10 +40,7 @@ class LinearProvider
     this.log = config.logger ?? consoleLogger;
   }
 
-  private async request<T>(
-    query: string,
-    variables?: Record<string, unknown>,
-  ): Promise<T> {
+  private async request<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
     const response = await fetch(LINEAR_API_URL, {
       method: "POST",
       headers: {
@@ -65,9 +51,7 @@ class LinearProvider
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Linear API error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Linear API error: ${response.status} ${response.statusText}`);
     }
 
     const json = (await response.json()) as {
@@ -76,9 +60,7 @@ class LinearProvider
     };
 
     if (json.errors && json.errors.length > 0) {
-      throw new Error(
-        `Linear GraphQL error: ${json.errors.map((e) => e.message).join(", ")}`,
-      );
+      throw new Error(`Linear GraphQL error: ${json.errors.map((e) => e.message).join(", ")}`);
     }
 
     return json.data as T;
@@ -192,9 +174,7 @@ class LinearProvider
     }
 
     const issue = result.issue;
-    this.log.debug(
-      `Fetched issue ${issue.identifier}: ${issue.title} [${issue.state.name}]`,
-    );
+    this.log.debug(`Fetched issue ${issue.identifier}: ${issue.title} [${issue.state.name}]`);
 
     return {
       id: issue.id,
@@ -236,9 +216,7 @@ class LinearProvider
   async searchIssues(opts: IssueSearchOptions): Promise<Issue[]> {
     const stateNames = opts.states ?? DEFAULT_OPEN_STATES;
 
-    this.log.info(
-      `Searching Linear issues: "${opts.query}" in project ${opts.projectId}`,
-    );
+    this.log.info(`Searching Linear issues: "${opts.query}" in project ${opts.projectId}`);
 
     const query = `
       query SearchIssues($teamId: String!, $filter: IssueFilter) {
@@ -308,11 +286,7 @@ class LinearProvider
     this.log.info(`Comment added to issue ${issueId}`);
   }
 
-  async linkPr(
-    issueId: string,
-    prUrl: string,
-    prNumber: number,
-  ): Promise<void> {
+  async linkPr(issueId: string, prUrl: string, prNumber: number): Promise<void> {
     this.log.info(`Linking PR #${prNumber} to issue ${issueId}`);
 
     await this.request(
@@ -324,26 +298,15 @@ class LinearProvider
       { input: { issueId, url: prUrl, title: `GitHub PR #${prNumber}` } },
     );
 
-    await this.addComment(
-      issueId,
-      `**Pull Request Created**: [PR #${prNumber}](${prUrl})`,
-    );
+    await this.addComment(issueId, `**Pull Request Created**: [PR #${prNumber}](${prUrl})`);
 
     this.log.info(`PR #${prNumber} linked to issue ${issueId}`);
   }
 
-  async listTriageHistory(
-    projectId: string,
-    labelId: string,
-    days: number = 30,
-  ): Promise<TriageHistoryEntry[]> {
-    const since = new Date(
-      Date.now() - days * 24 * 60 * 60 * 1000,
-    ).toISOString();
+  async listTriageHistory(projectId: string, labelId: string, days: number = 30): Promise<TriageHistoryEntry[]> {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-    this.log.info(
-      `Listing triage history for project ${projectId} (last ${days} days)`,
-    );
+    this.log.info(`Listing triage history for project ${projectId} (last ${days} days)`);
 
     const query = `
       query TriageHistory($teamId: String!, $filter: IssueFilter) {
@@ -392,9 +355,7 @@ class LinearProvider
     const entries: TriageHistoryEntry[] = issues.map((issue) => {
       let fingerprint: string | null = null;
       if (issue.description) {
-        const match = issue.description.match(
-          /<!-- TRIAGE_FINGERPRINT\n([\s\S]*?)-->/,
-        );
+        const match = issue.description.match(/<!-- TRIAGE_FINGERPRINT\n([\s\S]*?)-->/);
         if (match) {
           fingerprint = match[1].trim();
         }
@@ -406,9 +367,7 @@ class LinearProvider
         state: issue.state.name,
         stateType: issue.state.type,
         url: issue.url,
-        descriptionSnippet: issue.description
-          ? issue.description.slice(0, 200)
-          : null,
+        descriptionSnippet: issue.description ? issue.description.slice(0, 200) : null,
         fingerprint,
         createdAt: issue.createdAt,
         labels: issue.labels.nodes.map((l) => l.name),
@@ -425,9 +384,7 @@ class LinearProvider
     errorPattern: string,
     opts?: { labelId?: string; service?: string },
   ): Promise<Issue[]> {
-    this.log.info(
-      `Searching by fingerprint: "${errorPattern}" in project ${projectId}`,
-    );
+    this.log.info(`Searching by fingerprint: "${errorPattern}" in project ${projectId}`);
 
     const query = `
       query FingerprintSearch($teamId: String!, $filter: IssueFilter) {

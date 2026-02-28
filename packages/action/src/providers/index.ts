@@ -6,11 +6,7 @@ import { github } from "@sweny/providers/source-control";
 import { githubSummary } from "@sweny/providers/notification";
 import { claudeCode } from "@sweny/providers/coding-agent";
 import type { ObservabilityProvider } from "@sweny/providers/observability";
-import type {
-  IssueTrackingProvider,
-  PrLinkCapable,
-  TriageHistoryCapable,
-} from "@sweny/providers/issue-tracking";
+import type { IssueTrackingProvider, PrLinkCapable, TriageHistoryCapable } from "@sweny/providers/issue-tracking";
 import type { SourceControlProvider } from "@sweny/providers/source-control";
 import type { NotificationProvider } from "@sweny/providers/notification";
 import type { CodingAgent } from "@sweny/providers/coding-agent";
@@ -57,9 +53,7 @@ export function createProviders(config: ActionConfig): Providers {
       });
       break;
     default:
-      throw new Error(
-        `Unsupported observability provider: ${config.observabilityProvider}`,
-      );
+      throw new Error(`Unsupported observability provider: ${config.observabilityProvider}`);
   }
 
   // Issue tracker
@@ -69,9 +63,7 @@ export function createProviders(config: ActionConfig): Providers {
       issueTracker = linear({ apiKey: config.linearApiKey, logger: actionsLogger });
       break;
     default:
-      throw new Error(
-        `Unsupported issue tracker provider: ${config.issueTrackerProvider}`,
-      );
+      throw new Error(`Unsupported issue tracker provider: ${config.issueTrackerProvider}`);
   }
 
   // Source control

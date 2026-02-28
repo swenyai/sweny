@@ -74,10 +74,7 @@ export function parseServiceMap(filePath: string): ServiceMap {
 /**
  * Find the target repo for a given Datadog service name.
  */
-export function findRepoForService(
-  serviceMap: ServiceMap,
-  serviceName: string
-): string | null {
+export function findRepoForService(serviceMap: ServiceMap, serviceName: string): string | null {
   for (const entry of serviceMap.services) {
     if (entry.owns.includes(serviceName)) {
       return entry.repo;

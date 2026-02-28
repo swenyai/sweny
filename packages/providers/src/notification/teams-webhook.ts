@@ -63,9 +63,7 @@ class TeamsWebhookProvider implements NotificationProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Teams webhook error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Teams webhook error: ${response.status} ${response.statusText}`);
     }
 
     this.log.info("Teams notification sent");

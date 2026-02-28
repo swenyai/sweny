@@ -74,15 +74,11 @@ describe("apiKeyAuth", () => {
   });
 
   it("login throws on invalid key", async () => {
-    await expect(
-      provider.login!("u2", { apiKey: "bad-key" }),
-    ).rejects.toThrow("Invalid API key");
+    await expect(provider.login!("u2", { apiKey: "bad-key" })).rejects.toThrow("Invalid API key");
   });
 
   it("login throws on missing key", async () => {
-    await expect(provider.login!("u2", {})).rejects.toThrow(
-      "API key is required",
-    );
+    await expect(provider.login!("u2", {})).rejects.toThrow("API key is required");
   });
 
   it("clearSession removes the session", async () => {

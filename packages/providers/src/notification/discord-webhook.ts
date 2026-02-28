@@ -25,15 +25,10 @@ class DiscordWebhookProvider implements NotificationProvider {
   }
 
   async send(payload: NotificationPayload): Promise<void> {
-    const content = payload.title
-      ? `**${payload.title}**\n${payload.body}`
-      : payload.body;
+    const content = payload.title ? `**${payload.title}**\n${payload.body}` : payload.body;
 
     // Discord has a 2000 character limit per message
-    const truncated =
-      content.length > 2000
-        ? content.slice(0, 1997) + "..."
-        : content;
+    const truncated = content.length > 2000 ? content.slice(0, 1997) + "..." : content;
 
     const response = await fetch(this.webhookUrl, {
       method: "POST",
@@ -42,9 +37,7 @@ class DiscordWebhookProvider implements NotificationProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Discord webhook error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Discord webhook error: ${response.status} ${response.statusText}`);
     }
 
     this.log.info("Discord notification sent");

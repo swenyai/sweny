@@ -7,9 +7,7 @@ describe("formatForSlack", () => {
   });
 
   it("returns fallback message for undefined-ish input", () => {
-    expect(formatForSlack(null as unknown as string)).toEqual([
-      "No response generated.",
-    ]);
+    expect(formatForSlack(null as unknown as string)).toEqual(["No response generated."]);
   });
 
   it("returns single chunk for short text", () => {
@@ -98,9 +96,7 @@ describe("formatForSlack", () => {
   });
 
   it("handles multiple chunks for very long text", () => {
-    const text = Array.from({ length: 20 }, (_, i) =>
-      `Paragraph ${i}: ${"content ".repeat(50)}`,
-    ).join("\n\n");
+    const text = Array.from({ length: 20 }, (_, i) => `Paragraph ${i}: ${"content ".repeat(50)}`).join("\n\n");
 
     const result = formatForSlack(text);
 

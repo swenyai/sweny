@@ -15,7 +15,7 @@ export class PluginRegistry {
 
   buildSystemPromptSections(ctx: PluginContext): string {
     return this.plugins
-      .map(p => p.systemPromptSection?.(ctx))
+      .map((p) => p.systemPromptSection?.(ctx))
       .filter(Boolean)
       .join("\n\n");
   }

@@ -43,14 +43,10 @@ export async function implement(
   }
 
   if (/\+1 existing/i.test(recommendation)) {
-    core.notice(
-      `Recommendation is +1 EXISTING - adding occurrence to ${investigation.existingIssue}`,
-    );
+    core.notice(`Recommendation is +1 EXISTING - adding occurrence to ${investigation.existingIssue}`);
     if (investigation.existingIssue) {
       try {
-        const existing = await providers.issueTracker.getIssue(
-          investigation.existingIssue,
-        );
+        const existing = await providers.issueTracker.getIssue(investigation.existingIssue);
         const date = new Date().toISOString().split("T")[0];
         await providers.issueTracker.addComment(existing.id, `+1 detected on ${date}`);
         core.info(`Added +1 occurrence to ${investigation.existingIssue}`);
@@ -107,9 +103,7 @@ export async function implement(
     // User provided a specific Linear issue
     core.info(`User provided Linear issue: ${config.linearIssue}`);
     issue = await providers.issueTracker.getIssue(config.linearIssue);
-    core.info(
-      `Working on Linear issue: ${issue.identifier} - ${issue.url}`,
-    );
+    core.info(`Working on Linear issue: ${issue.identifier} - ${issue.url}`);
   } else {
     // Search for existing issue or create new one
     core.info(`Searching for existing Linear issues matching: ${issueTitle}`);
@@ -124,18 +118,14 @@ export async function implement(
       issue = searchResults[0];
       const date = new Date().toISOString().split("T")[0];
       await providers.issueTracker.addComment(issue.id, `+1 detected on ${date}`);
-      core.info(
-        `Found existing Linear issue: ${issue.identifier} - ${issue.url}`,
-      );
+      core.info(`Found existing Linear issue: ${issue.identifier} - ${issue.url}`);
     } else {
       // Create new issue
       core.info("No existing Linear issue found, creating new one...");
       let description = "";
       const bestCandidatePath = ".github/triage-analysis/best-candidate.md";
       if (fs.existsSync(bestCandidatePath)) {
-        description = fs
-          .readFileSync(bestCandidatePath, "utf-8")
-          .slice(0, 10000);
+        description = fs.readFileSync(bestCandidatePath, "utf-8").slice(0, 10000);
       }
 
       const labelIds = [config.linearBugLabelId];
@@ -151,9 +141,7 @@ export async function implement(
         stateId: config.linearStateBacklog,
         description,
       });
-      core.info(
-        `Created new Linear issue: ${issue.identifier} - ${issue.url}`,
-      );
+      core.info(`Created new Linear issue: ${issue.identifier} - ${issue.url}`);
     }
   }
   core.endGroup();
@@ -166,9 +154,7 @@ export async function implement(
   const currentRepo = config.repository;
 
   if (targetRepo && targetRepo !== currentRepo) {
-    core.notice(
-      `Bug belongs to ${targetRepo} (current repo: ${currentRepo}) - dispatching cross-repo`,
-    );
+    core.notice(`Bug belongs to ${targetRepo} (current repo: ${currentRepo}) - dispatching cross-repo`);
 
     try {
       await providers.sourceControl.dispatchWorkflow({
@@ -199,9 +185,7 @@ export async function implement(
       skipReason: `Cross-repo dispatch to ${targetRepo}`,
     };
   }
-  core.info(
-    `Bug belongs to this repo (${currentRepo}) - implementing locally`,
-  );
+  core.info(`Bug belongs to this repo (${currentRepo}) - implementing locally`);
   core.endGroup();
 
   // -------------------------------------------------------------------------
@@ -224,9 +208,7 @@ export async function implement(
       );
     } else {
       // Skip implementation to avoid duplication
-      core.notice(
-        `Found existing PR: ${existingPr.url} (state: ${existingPr.state}) — skipping implementation`,
-      );
+      core.notice(`Found existing PR: ${existingPr.url} (state: ${existingPr.state}) — skipping implementation`);
 
       // Update Linear based on existing PR state
       try {
@@ -297,10 +279,8 @@ export async function implement(
   const implementPrompt = buildImplementPrompt(issue.identifier);
 
   const agentEnv: Record<string, string> = {};
-  if (config.anthropicApiKey)
-    agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
-  if (config.claudeOauthToken)
-    agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+  if (config.anthropicApiKey) agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
+  if (config.claudeOauthToken) agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
 
   await providers.codingAgent.run({
     prompt: implementPrompt,
@@ -336,9 +316,7 @@ export async function implement(
     core.info("No commits created by Claude");
     const hasUncommitted = await providers.sourceControl.hasChanges();
     if (hasUncommitted) {
-      core.info(
-        "Found uncommitted code changes, creating fallback commit",
-      );
+      core.info("Found uncommitted code changes, creating fallback commit");
       await providers.sourceControl.stageAndCommit(
         `fix: automated fix from log analysis\n\nPartial implementation by Claude (reached max turns before completion)\n\nIdentified by SWEny Triage\nLinear: ${issue.identifier}`,
       );
@@ -357,9 +335,7 @@ export async function implement(
     }
   } else {
     const changedFiles = await providers.sourceControl.getChangedFiles();
-    core.info(
-      `Claude created commits with changes to: ${changedFiles.join(", ")}`,
-    );
+    core.info(`Claude created commits with changes to: ${changedFiles.join(", ")}`);
   }
   core.endGroup();
 
@@ -374,10 +350,7 @@ export async function implement(
   // 10. Generate PR description with Claude
   // -------------------------------------------------------------------------
   core.startGroup("Generate PR Description");
-  const prDescPrompt = buildPrDescriptionPrompt(
-    issue.identifier,
-    issue.url,
-  );
+  const prDescPrompt = buildPrDescriptionPrompt(issue.identifier, issue.url);
   await providers.codingAgent.run({
     prompt: prDescPrompt,
     maxTurns: 10,
@@ -503,10 +476,7 @@ Start by reading the best-candidate.md file.`;
 // PR Description Prompt
 // ---------------------------------------------------------------------------
 
-function buildPrDescriptionPrompt(
-  linearIdentifier: string,
-  linearUrl: string,
-): string {
+function buildPrDescriptionPrompt(linearIdentifier: string, linearUrl: string): string {
   return `Generate a pull request description.
 
 ## Context

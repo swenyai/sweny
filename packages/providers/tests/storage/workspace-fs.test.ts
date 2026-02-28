@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FsWorkspaceStore } from "../../src/storage/workspace/fs.js";
@@ -57,12 +57,7 @@ describe("FsWorkspaceStore", () => {
 
   it("writeFile with metadata sets mimeType and description", async () => {
     const store = new FsWorkspaceStore(makeTempDir());
-    const file = await store.writeFile(
-      "user-a",
-      "data.json",
-      '{"key":"value"}',
-      "sample config",
-    );
+    const file = await store.writeFile("user-a", "data.json", '{"key":"value"}', "sample config");
 
     expect(file.mimeType).toBe("application/json");
     expect(file.description).toBe("sample config");
@@ -128,9 +123,7 @@ describe("FsWorkspaceStore", () => {
   it("readFile throws for missing file", async () => {
     const store = new FsWorkspaceStore(makeTempDir());
 
-    await expect(store.readFile("user-a", "missing.txt")).rejects.toThrow(
-      "File not found in workspace",
-    );
+    await expect(store.readFile("user-a", "missing.txt")).rejects.toThrow("File not found in workspace");
   });
 
   // -----------------------------------------------------------------------
@@ -195,9 +188,7 @@ describe("FsWorkspaceStore", () => {
   it("getDownloadUrl throws for missing file", async () => {
     const store = new FsWorkspaceStore(makeTempDir());
 
-    await expect(store.getDownloadUrl("user-a", "missing.txt")).rejects.toThrow(
-      "File not found in workspace",
-    );
+    await expect(store.getDownloadUrl("user-a", "missing.txt")).rejects.toThrow("File not found in workspace");
   });
 
   // -----------------------------------------------------------------------
@@ -223,9 +214,7 @@ describe("FsWorkspaceStore", () => {
     const store = new FsWorkspaceStore(makeTempDir());
     const oversized = "x".repeat(WORKSPACE_LIMITS.maxFileBytes + 1);
 
-    await expect(
-      store.writeFile("user-a", "huge.txt", oversized),
-    ).rejects.toThrow(/File too large/);
+    await expect(store.writeFile("user-a", "huge.txt", oversized)).rejects.toThrow(/File too large/);
   });
 
   it("accepts file exactly at maxFileBytes", async () => {
@@ -249,16 +238,14 @@ describe("FsWorkspaceStore", () => {
     manifest.totalBytes = WORKSPACE_LIMITS.maxTotalBytes - 5;
 
     // Writing 6 more bytes pushes past the limit
-    await expect(
-      store.writeFile("user-a", "extra.txt", "abcdef"),
-    ).rejects.toThrow(/Workspace full/);
+    await expect(store.writeFile("user-a", "extra.txt", "abcdef")).rejects.toThrow(/Workspace full/);
   });
 
   it("allows overwrite that stays within maxTotalBytes", async () => {
     const store = new FsWorkspaceStore(makeTempDir());
 
     // Write a file, then inflate totalBytes close to the limit
-    const file1 = await store.writeFile("user-a", "big.txt", "original");
+    await store.writeFile("user-a", "big.txt", "original");
     const originalSize = Buffer.byteLength("original", "utf-8");
     const manifest = await store.getManifest("user-a");
     manifest.totalBytes = WORKSPACE_LIMITS.maxTotalBytes - originalSize;
@@ -294,9 +281,7 @@ describe("FsWorkspaceStore", () => {
     manifest.totalBytes = WORKSPACE_LIMITS.maxFiles; // small total
 
     // The cache already holds this mutated manifest, so the next write sees 500 files
-    await expect(
-      store.writeFile("user-a", "one-too-many.txt", "boom"),
-    ).rejects.toThrow(/Too many files/);
+    await expect(store.writeFile("user-a", "one-too-many.txt", "boom")).rejects.toThrow(/Too many files/);
   });
 
   it("allows overwrite when at maxFiles (no new file added)", async () => {

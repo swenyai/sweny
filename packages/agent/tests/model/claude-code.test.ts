@@ -127,9 +127,7 @@ describe("ClaudeCodeRunner", () => {
   });
 
   it("returns fallback response when stream has no result", async () => {
-    mockQuery.mockReturnValue(
-      asyncIter([{ type: "system", session_id: "sess-3" }]),
-    );
+    mockQuery.mockReturnValue(asyncIter([{ type: "system", session_id: "sess-3" }]));
 
     const runner = new ClaudeCodeRunner();
     const result = await runner.run(makeOpts());
@@ -139,10 +137,12 @@ describe("ClaudeCodeRunner", () => {
   });
 
   it("passes apiKey and oauthToken to env", async () => {
-    mockQuery.mockReturnValue(asyncIter([
-      { type: "system", session_id: "s" },
-      { type: "result", subtype: "success", result: "ok" },
-    ]));
+    mockQuery.mockReturnValue(
+      asyncIter([
+        { type: "system", session_id: "s" },
+        { type: "result", subtype: "success", result: "ok" },
+      ]),
+    );
 
     const runner = new ClaudeCodeRunner({
       apiKey: "sk-key",
@@ -156,10 +156,12 @@ describe("ClaudeCodeRunner", () => {
   });
 
   it("passes sessionId as resume option", async () => {
-    mockQuery.mockReturnValue(asyncIter([
-      { type: "system", session_id: "resumed" },
-      { type: "result", subtype: "success", result: "ok" },
-    ]));
+    mockQuery.mockReturnValue(
+      asyncIter([
+        { type: "system", session_id: "resumed" },
+        { type: "result", subtype: "success", result: "ok" },
+      ]),
+    );
 
     const runner = new ClaudeCodeRunner();
     await runner.run(makeOpts({ sessionId: "prev-sess" }));
@@ -169,10 +171,12 @@ describe("ClaudeCodeRunner", () => {
   });
 
   it("does not pass resume when sessionId is null", async () => {
-    mockQuery.mockReturnValue(asyncIter([
-      { type: "system", session_id: "new" },
-      { type: "result", subtype: "success", result: "ok" },
-    ]));
+    mockQuery.mockReturnValue(
+      asyncIter([
+        { type: "system", session_id: "new" },
+        { type: "result", subtype: "success", result: "ok" },
+      ]),
+    );
 
     const runner = new ClaudeCodeRunner();
     await runner.run(makeOpts({ sessionId: null }));
@@ -182,10 +186,12 @@ describe("ClaudeCodeRunner", () => {
   });
 
   it("passes custom env, cwd, name, maxTurns, disallowedTools", async () => {
-    mockQuery.mockReturnValue(asyncIter([
-      { type: "system", session_id: "s" },
-      { type: "result", subtype: "success", result: "ok" },
-    ]));
+    mockQuery.mockReturnValue(
+      asyncIter([
+        { type: "system", session_id: "s" },
+        { type: "result", subtype: "success", result: "ok" },
+      ]),
+    );
 
     const runner = new ClaudeCodeRunner();
     await runner.run(
@@ -206,17 +212,17 @@ describe("ClaudeCodeRunner", () => {
     expect(call.options.env.MY_VAR).toBe("hello");
 
     // MCP server should use the custom name
-    expect(mockCreateSdkMcpServer).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "my-agent" }),
-    );
+    expect(mockCreateSdkMcpServer).toHaveBeenCalledWith(expect.objectContaining({ name: "my-agent" }));
     expect(call.options.mcpServers).toHaveProperty("my-agent");
   });
 
   it("defaults cwd to /tmp and name to sweny", async () => {
-    mockQuery.mockReturnValue(asyncIter([
-      { type: "system", session_id: "s" },
-      { type: "result", subtype: "success", result: "ok" },
-    ]));
+    mockQuery.mockReturnValue(
+      asyncIter([
+        { type: "system", session_id: "s" },
+        { type: "result", subtype: "success", result: "ok" },
+      ]),
+    );
 
     const runner = new ClaudeCodeRunner();
     await runner.run(makeOpts());

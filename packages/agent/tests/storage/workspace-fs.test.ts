@@ -90,9 +90,7 @@ describe("FsWorkspaceStore", () => {
     const store = new FsWorkspaceStore(makeTempDir());
     const oversized = "x".repeat(WORKSPACE_LIMITS.maxFileBytes + 1);
 
-    await expect(
-      store.writeFile("user-a", "big.txt", oversized),
-    ).rejects.toThrow("File too large");
+    await expect(store.writeFile("user-a", "big.txt", oversized)).rejects.toThrow("File too large");
   });
 
   it("enforces file count limit", async () => {
@@ -104,9 +102,7 @@ describe("FsWorkspaceStore", () => {
     }
 
     // One more should fail
-    await expect(
-      store.writeFile("user-a", "one-too-many.txt", "x"),
-    ).rejects.toThrow("Too many files");
+    await expect(store.writeFile("user-a", "one-too-many.txt", "x")).rejects.toThrow("Too many files");
   });
 
   it("enforces total workspace size limit", async () => {
@@ -121,9 +117,7 @@ describe("FsWorkspaceStore", () => {
     }
 
     // One more file should push over the total limit
-    await expect(
-      store.writeFile("user-a", "overflow.txt", chunk),
-    ).rejects.toThrow("Workspace full");
+    await expect(store.writeFile("user-a", "overflow.txt", chunk)).rejects.toThrow("Workspace full");
   });
 
   it("overwriting a file does not double-count size", async () => {

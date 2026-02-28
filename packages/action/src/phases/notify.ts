@@ -20,25 +20,18 @@ export async function notify(
   lines.push("");
 
   if (implementation?.issueIdentifier) {
-    lines.push(
-      `**Linear Issue**: [${implementation.issueIdentifier}](${implementation.issueUrl})`,
-    );
+    lines.push(`**Linear Issue**: [${implementation.issueIdentifier}](${implementation.issueUrl})`);
     lines.push("");
   }
 
   // Status message
-  if (
-    investigation.targetRepo &&
-    investigation.targetRepo !== config.repository
-  ) {
+  if (investigation.targetRepo && investigation.targetRepo !== config.repository) {
     lines.push(
       `> **Cross-repo dispatch**: Bug belongs to \`${investigation.targetRepo}\` — dispatched for implementation`,
     );
   } else if (investigation.recommendation.toLowerCase().includes("skip")) {
     lines.push("> **Skipped**: No novel issues found");
-  } else if (
-    investigation.recommendation.toLowerCase().includes("+1 existing")
-  ) {
+  } else if (investigation.recommendation.toLowerCase().includes("+1 existing")) {
     lines.push("> **+1 Existing**: Added occurrence to existing issue");
   } else if (implementation?.skipped && implementation.skipReason) {
     lines.push(`> **Skipped**: ${implementation.skipReason}`);

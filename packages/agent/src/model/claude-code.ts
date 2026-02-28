@@ -31,9 +31,7 @@ export class ClaudeCodeRunner implements ModelRunner {
     // Build env — SDK replaces entire env when `env` is provided,
     // so spread process.env to preserve PATH, HOME, etc.
     const env: Record<string, string> = {
-      ...(Object.fromEntries(
-        Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
-      )),
+      ...Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] != null)),
       ...opts.env,
     };
     if (this.config.oauthToken) {
@@ -82,7 +80,8 @@ export class ClaudeCodeRunner implements ModelRunner {
         if (resultMsg.subtype === "success" && "result" in resultMsg) {
           response = resultMsg.result;
         } else if (resultMsg.subtype === "error_max_turns") {
-          response = (response || "") + "\n\n_Reached maximum number of turns. Please continue in a follow-up message._";
+          response =
+            (response || "") + "\n\n_Reached maximum number of turns. Please continue in a follow-up message._";
         }
       }
     }

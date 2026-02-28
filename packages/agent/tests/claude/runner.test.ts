@@ -43,10 +43,7 @@ function makeWorkspaceStore(): WorkspaceStore {
   } as unknown as WorkspaceStore;
 }
 
-function makeRegistry(overrides?: {
-  sections?: string;
-  tools?: AgentTool[];
-}): PluginRegistry {
+function makeRegistry(overrides?: { sections?: string; tools?: AgentTool[] }): PluginRegistry {
   return {
     buildSystemPromptSections: vi.fn(() => overrides?.sections ?? ""),
     buildToolsForSession: vi.fn(async () => overrides?.tools ?? []),

@@ -47,9 +47,7 @@ export function parseInputs(): ActionConfig {
     claudeOauthToken: core.getInput("claude-oauth-token"),
 
     observabilityProvider: core.getInput("observability-provider") || "datadog",
-    observabilityCredentials: parseObservabilityCredentials(
-      core.getInput("observability-provider") || "datadog",
-    ),
+    observabilityCredentials: parseObservabilityCredentials(core.getInput("observability-provider") || "datadog"),
 
     issueTrackerProvider: core.getInput("issue-tracker-provider") || "linear",
     linearApiKey: core.getInput("linear-api-key"),

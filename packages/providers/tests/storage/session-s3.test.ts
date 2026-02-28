@@ -330,18 +330,14 @@ describe("S3SessionStore", () => {
 
     // First page
     mockSend.mockResolvedValueOnce({
-      CommonPrefixes: [
-        { Prefix: "data/users/user-a/sessions/thread-1/" },
-      ],
+      CommonPrefixes: [{ Prefix: "data/users/user-a/sessions/thread-1/" }],
       NextContinuationToken: "token-page-2",
     });
     // Load session from first page
     mockSend.mockResolvedValueOnce(s3Body(JSON.stringify(session1)));
     // Second page
     mockSend.mockResolvedValueOnce({
-      CommonPrefixes: [
-        { Prefix: "data/users/user-a/sessions/thread-2/" },
-      ],
+      CommonPrefixes: [{ Prefix: "data/users/user-a/sessions/thread-2/" }],
       NextContinuationToken: undefined,
     });
     // Load session from second page
@@ -423,10 +419,7 @@ describe("S3SessionStore", () => {
     const store = new S3SessionStore(BUCKET, PREFIX);
 
     mockSend.mockResolvedValueOnce({
-      CommonPrefixes: [
-        { Prefix: "" },
-        { Prefix: undefined },
-      ],
+      CommonPrefixes: [{ Prefix: "" }, { Prefix: undefined }],
       NextContinuationToken: undefined,
     });
 

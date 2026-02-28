@@ -1,12 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
-import type {
-  ObservabilityProvider,
-  LogQueryOptions,
-  LogEntry,
-  AggregateResult,
-} from "./types.js";
+import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
 
 export const datadogConfigSchema = z.object({
   apiKey: z.string().min(1, "Datadog API key is required"),
@@ -35,10 +30,7 @@ class DatadogProvider implements ObservabilityProvider {
     this.log = config.logger ?? consoleLogger;
   }
 
-  private async request<T>(
-    path: string,
-    body: Record<string, unknown>,
-  ): Promise<T> {
+  private async request<T>(path: string, body: Record<string, unknown>): Promise<T> {
     const url = `https://api.${this.site}${path}`;
     const response = await fetch(url, {
       method: "POST",
@@ -51,9 +43,7 @@ class DatadogProvider implements ObservabilityProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Datadog API error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Datadog API error: ${response.status} ${response.statusText}`);
     }
 
     return (await response.json()) as T;
@@ -72,9 +62,7 @@ class DatadogProvider implements ObservabilityProvider {
 
   async queryLogs(opts: LogQueryOptions): Promise<LogEntry[]> {
     const query = `service:${opts.serviceFilter} status:${opts.severity}`;
-    this.log.info(
-      `Querying Datadog logs: ${query} (range: ${opts.timeRange})`,
-    );
+    this.log.info(`Querying Datadog logs: ${query} (range: ${opts.timeRange})`);
 
     const result = await this.request<{
       data?: Array<{
@@ -100,9 +88,7 @@ class DatadogProvider implements ObservabilityProvider {
       attributes: entry.attributes?.attributes || {},
     }));
 
-    this.log.info(
-      `Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`,
-    );
+    this.log.info(`Found ${logs.length} ${opts.severity} logs for ${opts.serviceFilter} in last ${opts.timeRange}`);
 
     return logs;
   }
@@ -155,12 +141,8 @@ curl -s -X POST "https://api.\${DD_SITE}/api/v2/logs/events/search" \\
 \`\`\``;
   }
 
-  async aggregate(
-    opts: Omit<LogQueryOptions, "severity">,
-  ): Promise<AggregateResult[]> {
-    this.log.info(
-      `Aggregating Datadog errors for ${opts.serviceFilter} (range: ${opts.timeRange})`,
-    );
+  async aggregate(opts: Omit<LogQueryOptions, "severity">): Promise<AggregateResult[]> {
+    this.log.info(`Aggregating Datadog errors for ${opts.serviceFilter} (range: ${opts.timeRange})`);
 
     const result = await this.request<{
       data?: {
@@ -185,12 +167,10 @@ curl -s -X POST "https://api.\${DD_SITE}/api/v2/logs/events/search" \\
       ],
     });
 
-    const groups: AggregateResult[] = (result.data?.buckets || []).map(
-      (bucket) => ({
-        service: bucket.by?.service || "unknown",
-        count: bucket.computes?.c0 || 0,
-      }),
-    );
+    const groups: AggregateResult[] = (result.data?.buckets || []).map((bucket) => ({
+      service: bucket.by?.service || "unknown",
+      count: bucket.computes?.c0 || 0,
+    }));
 
     this.log.info(`Aggregated ${groups.length} service groups`);
 

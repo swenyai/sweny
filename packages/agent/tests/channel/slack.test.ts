@@ -357,9 +357,7 @@ describe("slackChannel", () => {
         await channel.start(onMessage);
 
         // Grab the app_mention handler
-        const mentionHandler = mockAppEvent.mock.calls.find(
-          (c) => c[0] === "app_mention",
-        )![1];
+        const mentionHandler = mockAppEvent.mock.calls.find((c) => c[0] === "app_mention")![1];
 
         await mentionHandler({
           event: {
@@ -384,9 +382,7 @@ describe("slackChannel", () => {
 
         await channel.start(onMessage);
 
-        const mentionHandler = mockAppEvent.mock.calls.find(
-          (c) => c[0] === "app_mention",
-        )![1];
+        const mentionHandler = mockAppEvent.mock.calls.find((c) => c[0] === "app_mention")![1];
 
         await mentionHandler({
           event: {
@@ -408,9 +404,7 @@ describe("slackChannel", () => {
 
         await channel.start(onMessage);
 
-        const mentionHandler = mockAppEvent.mock.calls.find(
-          (c) => c[0] === "app_mention",
-        )![1];
+        const mentionHandler = mockAppEvent.mock.calls.find((c) => c[0] === "app_mention")![1];
 
         await mentionHandler({
           event: {
@@ -429,9 +423,7 @@ describe("slackChannel", () => {
         const onMessage = vi.fn(async () => {});
         await channel.start(onMessage);
 
-        const mentionHandler = mockAppEvent.mock.calls.find(
-          (c) => c[0] === "app_mention",
-        )![1];
+        const mentionHandler = mockAppEvent.mock.calls.find((c) => c[0] === "app_mention")![1];
 
         await mentionHandler({
           event: {
@@ -449,9 +441,7 @@ describe("slackChannel", () => {
         const onMessage = vi.fn(async () => {});
         await channel.start(onMessage);
 
-        const mentionHandler = mockAppEvent.mock.calls.find(
-          (c) => c[0] === "app_mention",
-        )![1];
+        const mentionHandler = mockAppEvent.mock.calls.find((c) => c[0] === "app_mention")![1];
 
         await mentionHandler({
           event: {
@@ -480,10 +470,7 @@ describe("slackChannel", () => {
 
       expect(mockRegisterLoginModal).toHaveBeenCalledTimes(1);
       // First arg is the Bolt app instance, second is the auth provider
-      expect(mockRegisterLoginModal).toHaveBeenCalledWith(
-        expect.any(Object),
-        mockAuthProvider,
-      );
+      expect(mockRegisterLoginModal).toHaveBeenCalledWith(expect.any(Object), mockAuthProvider);
     });
   });
 
@@ -515,9 +502,7 @@ describe("slackChannel", () => {
       channel.registerCommands!(cmds);
 
       // Grab the registered command handler
-      const commandHandler = mockAppCommand.mock.calls.find(
-        (c) => c[0] === "/test",
-      )![1];
+      const commandHandler = mockAppCommand.mock.calls.find((c) => c[0] === "/test")![1];
 
       const ack = vi.fn(async () => {});
       const respond = vi.fn(async () => {});
@@ -552,9 +537,7 @@ describe("slackChannel", () => {
 
       channel.registerCommands!(cmds);
 
-      const commandHandler = mockAppCommand.mock.calls.find(
-        (c) => c[0] === "/echo",
-      )![1];
+      const commandHandler = mockAppCommand.mock.calls.find((c) => c[0] === "/echo")![1];
 
       const ack = vi.fn(async () => {});
       const respond = vi.fn(async () => {});
