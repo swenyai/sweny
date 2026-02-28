@@ -14,3 +14,4 @@ export { canLinkPr, canSearchByFingerprint, canListTriageHistory } from "./types
 
 export { linear, linearConfigSchema, type LinearConfig } from "./linear.js";
 export { githubIssues, githubIssuesConfigSchema, type GitHubIssuesConfig } from "./github-issues.js";
+export { jira, jiraConfigSchema, type JiraConfig } from "./jira.js";
