@@ -5,12 +5,13 @@ description: Get SWEny Triage running in your repo in 5 minutes.
 
 ## Prerequisites
 
-- A GitHub repository
-- An observability platform — [Datadog](https://www.datadoghq.com/), [Sentry](https://sentry.io/), or [CloudWatch](https://aws.amazon.com/cloudwatch/)
-- An issue tracker — [Linear](https://linear.app/) or GitHub Issues
+- A GitHub or GitLab repository
+- An observability platform — [Datadog](https://www.datadoghq.com/), [Sentry](https://sentry.io/), [CloudWatch](https://aws.amazon.com/cloudwatch/), [Splunk](https://www.splunk.com/), [Elasticsearch](https://www.elastic.co/), [New Relic](https://newrelic.com/), or [Grafana Loki](https://grafana.com/oss/loki/)
+- An issue tracker — [Linear](https://linear.app/), GitHub Issues, or [Jira](https://www.atlassian.com/software/jira)
+- Source control — GitHub or [GitLab](https://gitlab.com/)
 - A Claude Code OAuth token (from a Claude Max / Pro subscription) or an Anthropic API key
 
-This guide uses **Datadog + Linear**. See [Observability Providers](/providers/observability/) and [Issue Tracking Providers](/providers/issue-tracking/) for alternatives.
+This guide uses **Datadog + Linear** as the default walkthrough. See [Observability Providers](/providers/observability/), [Issue Tracking Providers](/providers/issue-tracking/), and [Source Control Providers](/providers/source-control/) for alternatives.
 
 ## Add the workflow
 

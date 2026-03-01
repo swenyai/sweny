@@ -5,7 +5,7 @@
 <h1 align="center">SWEny</h1>
 
 <p align="center">
-  <strong>Autonomous engineering tools powered by Claude AI</strong>
+  <strong>Build AI-powered engineering workflows that learn from any source, take any action, and report through any channel.</strong>
 </p>
 
 <p align="center">
@@ -22,18 +22,45 @@ This monorepo contains the SWEny platform:
 
 | Package | Description |
 |---------|-------------|
-| **[SWEny Triage](#sweny-triage)** | GitHub Action — autonomous SRE triage from observability logs |
-| **[@sweny/providers](packages/providers)** | Shared provider interfaces and implementations |
-| **[@sweny/agent](packages/agent)** | AI assistant framework — Slack bot + CLI with plugin architecture |
-| **[@sweny/web](packages/web)** | Public website — sweny.ai |
+| **[@sweny/engine](packages/engine)** | Workflow engine — Learn, Act, Report |
+| **[SWEny Triage](#sweny-triage)** | GitHub Action — autonomous SRE triage |
+| **[@sweny/providers](packages/providers)** | 30+ provider implementations |
+| **[@sweny/agent](packages/agent)** | AI assistant — Slack bot + CLI |
+| **[@sweny/web](packages/web)** | sweny.ai website |
+
+---
+
+## How It Works
+
+SWEny workflows follow three phases:
+
+- **Learn** -- Connect any input source (observability logs, issue trackers, APIs) to gather context about your system.
+- **Act** -- Take any action (create tickets, open PRs, dispatch workflows) based on AI-driven analysis.
+- **Report** -- Notify through any channel (Slack, email, GitHub, Discord, Teams, webhooks) with full investigation details.
+
+```
+┌─────────────────────────────────────────────┐
+│  Entry Points                               │
+│  GitHub Action · Slack Bot · CLI             │
+├─────────────────────────────────────────────┤
+│  @sweny/engine                              │
+│  Workflow Runner · Recipes · Step Context    │
+├─────────────────────────────────────────────┤
+│  @sweny/providers                           │
+│  Observability · Issue Tracking · Source     │
+│  Control · Notification · Coding Agent      │
+└─────────────────────────────────────────────┘
+```
+
+Entry points (GitHub Action, Slack Bot, CLI) feed into the **@sweny/engine**, which orchestrates recipes -- pre-built workflows composed of Learn, Act, and Report steps. Each step delegates to a pluggable provider from **@sweny/providers**, so you can swap Datadog for CloudWatch or Linear for Jira without changing your workflow.
 
 ---
 
 ## SWEny Triage
 
-**Autonomous SRE triage that monitors your observability logs, investigates issues with Claude AI, creates tickets, and opens fix PRs — all without human intervention.**
+**SWEny Triage is the first recipe built on the engine** -- autonomous SRE triage that monitors your observability logs, investigates issues with Claude AI, creates tickets, and opens fix PRs, all without human intervention.
 
-Instead of waking up to a wall of alerts, SWEny Triage analyzes your Datadog logs overnight, identifies the highest-impact issue, creates a Linear ticket with full root cause analysis, implements a fix, and opens a PR ready for review by morning.
+Instead of waking up to a wall of alerts, SWEny Triage analyzes your logs overnight, identifies the highest-impact issue, creates a ticket with full root cause analysis, implements a fix, and opens a PR ready for review by morning.
 
 ### Quick Start
 
@@ -79,13 +106,13 @@ That's it. SWEny handles the rest.
                     └──────────┬──────────┘
                                │
                     ┌──────────▼──────────┐
-                    │  Phase 1: Investigate│
-                    │                     │
-                    │  • Query Datadog    │
-                    │  • Analyze errors   │
-                    │  • Check Linear for │
-                    │    known issues     │
-                    │  • Rank by impact   │
+                    │  Learn               │
+                    │                      │
+                    │  • Query logs        │
+                    │  • Analyze errors    │
+                    │  • Check tracker for │
+                    │    known issues      │
+                    │  • Rank by impact    │
                     └──────────┬──────────┘
                                │
                   ┌────────────┼────────────┐
@@ -98,18 +125,17 @@ That's it. SWEny handles the rest.
             └───────────┘ │ occurrence│ └────┬─────┘
                           └──────────┘      │
                                  ┌──────────▼──────────┐
-                                 │  Phase 2: Implement  │
+                                 │  Act                 │
                                  │                      │
-                                 │  • Create/find Linear│
-                                 │    issue             │
+                                 │  • Create/find issue │
                                  │  • Create branch     │
                                  │  • Claude writes fix │
                                  │  • Open PR           │
-                                 │  • Link to Linear    │
+                                 │  • Link to tracker   │
                                  └──────────┬───────────┘
                                             │
                                  ┌──────────▼──────────┐
-                                 │  Phase 3: Notify     │
+                                 │  Report              │
                                  │                      │
                                  │  • GitHub Summary    │
                                  │  • Investigation log │
@@ -137,15 +163,40 @@ That's it. SWEny handles the rest.
 | Input | Description | Default |
 |-------|-------------|---------|
 | `observability-provider` | Provider to use | `datadog` |
+| **Datadog** | | |
 | `dd-api-key` | Datadog API key | — |
 | `dd-app-key` | Datadog Application key | — |
 | `dd-site` | Datadog site | `datadoghq.com` |
+| **Sentry** | | |
+| `sentry-auth-token` | Sentry auth token | — |
+| `sentry-organization` | Sentry organization slug | — |
+| `sentry-project` | Sentry project slug | — |
+| **CloudWatch** | | |
+| `cloudwatch-region` | AWS region | — |
+| `cloudwatch-log-group-prefix` | Log group prefix to scan | — |
+| **Splunk** | | |
+| `splunk-url` | Splunk instance URL | — |
+| `splunk-token` | Splunk HEC token | — |
+| `splunk-index` | Splunk index to query | — |
+| **Elasticsearch** | | |
+| `elastic-url` | Elasticsearch URL | — |
+| `elastic-api-key` | Elasticsearch API key | — |
+| `elastic-index` | Elasticsearch index pattern | — |
+| **New Relic** | | |
+| `newrelic-api-key` | New Relic API key | — |
+| `newrelic-account-id` | New Relic account ID | — |
+| `newrelic-region` | New Relic region (`us` or `eu`) | `us` |
+| **Grafana Loki** | | |
+| `loki-url` | Loki endpoint URL | — |
+| `loki-api-key` | Loki API key | — |
+| `loki-org-id` | Loki tenant/org ID | — |
 
 #### Issue Tracker
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `issue-tracker-provider` | Provider to use | `linear` |
+| **Linear** | | |
 | `linear-api-key` | Linear API key | — |
 | `linear-team-id` | Linear team UUID | — |
 | `linear-bug-label-id` | Label UUID for bugs | — |
@@ -153,6 +204,21 @@ That's it. SWEny handles the rest.
 | `linear-state-backlog` | State UUID for Backlog | — |
 | `linear-state-in-progress` | State UUID for In Progress | — |
 | `linear-state-peer-review` | State UUID for Peer Review | — |
+| **Jira** | | |
+| `jira-base-url` | Jira instance URL | — |
+| `jira-email` | Jira account email | — |
+| `jira-api-token` | Jira API token | — |
+| **GitHub Issues** | | |
+| Uses existing `github-token` | | |
+
+#### Source Control
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `source-control-provider` | Provider to use | `github` |
+| `gitlab-token` | GitLab personal access token | — |
+| `gitlab-project-id` | GitLab project ID | — |
+| `gitlab-base-url` | GitLab base URL | `https://gitlab.com` |
 
 #### Investigation
 
@@ -263,24 +329,17 @@ When SWEny finds an error in `billing-svc`, it matches it to `your-org/billing` 
 
 ### Provider Architecture
 
-SWEny is built on a provider/plugin architecture. The core engine is provider-agnostic — it delegates to pluggable implementations:
+The engine is provider-agnostic. Every integration is a pluggable provider that maps to a workflow phase:
 
-| Provider Type | Ships With |
-|---------------|-----------|
-| **Observability** | Datadog, Sentry, CloudWatch, New Relic, Grafana Loki, Splunk, Elasticsearch |
-| **Issue Tracker** | Linear, GitHub Issues, Jira |
-| **Source Control** | GitHub, GitLab |
-| **Notification** | GitHub Summary, Slack, Teams, Discord |
-| **Incident** | PagerDuty, OpsGenie |
-| **Messaging** | Slack, Microsoft Teams |
-| **Auth** | No-Auth, API Key |
-| **Access Control** | Allow-All Guard, Role-Based Guard |
-| **Storage** | Filesystem, S3, Kubernetes CSI |
-| **Credential Vault** | Env Vars, AWS Secrets Manager |
-| **Coding Agent** | Claude Code |
-| **Agent Tool** | Agent Tool |
+| Role | Providers |
+|------|-----------|
+| **Learn** | Datadog, Sentry, CloudWatch, Splunk, Elasticsearch, New Relic, Grafana Loki |
+| **Act** | Linear, GitHub Issues, Jira (issue tracking) -- GitHub, GitLab (source control) -- PagerDuty, OpsGenie (incident) |
+| **Report** | GitHub Summary, Slack, Teams, Discord, Email (SendGrid), Generic Webhook |
+| **Infrastructure** | Filesystem / S3 / K8s CSI (storage) -- Env Vars / AWS Secrets Manager (credentials) -- API Key / No-Auth (auth) |
+| **AI** | Claude Code (coding agent) |
 
-Implementing a custom provider means implementing a TypeScript interface — see [`packages/providers/`](packages/providers/) for the full library and [`@sweny/providers` on npm](https://www.npmjs.com/package/@sweny/providers).
+Implementing a custom provider means implementing a TypeScript interface -- see [`packages/providers/`](packages/providers/) for the full library and [`@sweny/providers` on npm](https://www.npmjs.com/package/@sweny/providers).
 
 ---
 

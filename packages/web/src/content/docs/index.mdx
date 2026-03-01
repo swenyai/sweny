@@ -1,9 +1,9 @@
 ---
 title: SWEny
-description: A GitHub Action and interactive agent that investigates production errors and writes fixes automatically
+description: An AI-powered engineering platform that learns from your logs, fixes issues, and reports results
 template: splash
 hero:
-  tagline: "SWEny is a GitHub Action that monitors your production logs, investigates errors, files tickets, and opens fix PRs — on a schedule, overnight, without waking anyone up."
+  tagline: "SWEny is a platform for building AI-powered engineering workflows. Connect any observability source, take action with AI, and report results through any channel. Triage is the first recipe — it monitors your production logs, investigates errors, and opens fix PRs automatically."
   actions:
     - text: Get Started in 5 Minutes
       link: /getting-started/
@@ -19,16 +19,13 @@ import { Card, CardGrid } from "@astrojs/starlight/components";
 
 ## What it does
 
-SWEny runs as a scheduled GitHub Action. Every time it runs, it:
+SWEny's workflow engine orchestrates three phases — **Learn**, **Act**, **Report** — to automate engineering tasks end-to-end:
 
-1. **Queries your logs** — pulls errors from Datadog, Sentry, or CloudWatch for the last 24 hours
-2. **Checks for duplicates** — searches your issue tracker (Linear or GitHub Issues) and open PRs to avoid double-filing
-3. **Investigates** — the agent reads the error logs, traces root causes through your codebase, and ranks by impact
-4. **Files a ticket** — creates a detailed issue with root cause analysis, affected files, and suggested approach
-5. **Writes a fix** — creates a branch, implements the fix, and opens a PR ready for human review
-6. **Reports back** — posts a summary to your GitHub Actions run (or Slack, Teams, Discord)
+1. **Learn** — connects to your observability stack, pulls errors and log data, checks your issue tracker for duplicates, and builds context
+2. **Act** — an AI agent investigates root causes through your codebase, files tickets, creates branches, and opens fix PRs
+3. **Report** — sends results to the channels your team already uses: Slack, Teams, Discord, email, or webhooks
 
-No new infrastructure. No servers to run. Just a workflow file in your repo.
+Triage is the first recipe built on this engine. It runs on a schedule, finds novel production errors, and fixes them without waking anyone up. See [Engine & Recipes](/getting-started/engine/) to learn how the engine works and how to build your own recipes.
 
 ## See it in action
 
@@ -38,16 +35,18 @@ Want to understand the full flow? Read the [end-to-end walkthrough](/getting-sta
 
 <CardGrid stagger>
   <Card title="Observability" icon="magnifier">
-    **Datadog**, **Sentry**, **CloudWatch** — query logs and aggregate errors from your existing monitoring.
+    **Datadog**, **Sentry**, **CloudWatch**, **Splunk**, **Elasticsearch**, **New Relic**, **Grafana Loki** — query logs
+    and aggregate errors from your existing monitoring.
   </Card>
   <Card title="Issue Tracking" icon="list-format">
-    **Linear**, **GitHub Issues** — create tickets, search for duplicates, link PRs automatically.
+    **Linear**, **GitHub Issues**, **Jira** — create tickets, search for duplicates, link PRs automatically.
   </Card>
   <Card title="Source Control" icon="github">
-    **GitHub** — create branches, push commits, open PRs, dispatch cross-repo workflows.
+    **GitHub**, **GitLab** — create branches, push commits, open PRs, dispatch cross-repo workflows.
   </Card>
   <Card title="Notification" icon="comment">
-    **GitHub Summary**, **Slack**, **Teams**, **Discord** — send results wherever your team works.
+    **GitHub Summary**, **Slack**, **Teams**, **Discord**, **Email**, **Webhook** — send results wherever your team
+    works.
   </Card>
   <Card title="Incident" icon="warning">
     **PagerDuty** — create incidents, acknowledge, resolve, check on-call schedules.
@@ -58,6 +57,8 @@ Want to understand the full flow? Read the [end-to-end walkthrough](/getting-sta
 </CardGrid>
 
 ## Two deployment modes
+
+Both modes are powered by SWEny's workflow engine, which manages provider connections, step orchestration, and the Learn/Act/Report pipeline.
 
 **GitHub Action** — runs on a cron schedule in your CI. No servers, no infrastructure. This is the primary deployment.
 

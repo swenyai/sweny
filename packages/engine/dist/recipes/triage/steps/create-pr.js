@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import { canLinkPr } from "@sweny/providers/issue-tracking";
+import { getStepData } from "../results.js";
 import { buildPrDescriptionPrompt } from "../prompts.js";
 /** Generate PR description with Claude, create PR, link to issue, update issue state. */
 export async function createPr(ctx) {
@@ -7,8 +8,8 @@ export async function createPr(ctx) {
     const sourceControl = ctx.providers.get("sourceControl");
     const issueTracker = ctx.providers.get("issueTracker");
     const codingAgent = ctx.providers.get("codingAgent");
-    const issueData = ctx.results.get("create-issue")?.data;
-    const implementData = ctx.results.get("implement-fix")?.data;
+    const issueData = getStepData(ctx, "create-issue");
+    const implementData = getStepData(ctx, "implement-fix");
     // If implement-fix was skipped, we can't create a PR
     const implementResult = ctx.results.get("implement-fix");
     if (!implementResult || implementResult.status !== "success") {
@@ -17,7 +18,7 @@ export async function createPr(ctx) {
             reason: implementResult?.reason ?? "No implementation to create PR for",
         };
     }
-    const issueId = issueData?.issueId;
+    const issueId = issueData?.issueId ?? "";
     const issueIdentifier = issueData?.issueIdentifier ?? "";
     const issueTitle = issueData?.issueTitle ?? "";
     const issueUrl = issueData?.issueUrl ?? "";

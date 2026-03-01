@@ -1,7 +1,17 @@
+import { getStepData } from "../results.js";
 /** Check investigation recommendation and decide whether to proceed with implementation. */
 export async function noveltyGate(ctx) {
     const issueTracker = ctx.providers.get("issueTracker");
-    const investigation = ctx.results.get("investigate")?.data;
+    const investigation = getStepData(ctx, "investigate");
+    // Dry run — skip the entire act phase
+    if (ctx.config.dryRun) {
+        ctx.logger.info("Dry run mode — skipping act phase");
+        ctx.skipPhase("act", "Dry run mode");
+        return {
+            status: "success",
+            data: { action: "dry-run", recommendation: investigation?.recommendation ?? "unknown" },
+        };
+    }
     if (!investigation) {
         ctx.skipPhase("act", "No investigation result");
         return { status: "failed", reason: "No investigation result available" };

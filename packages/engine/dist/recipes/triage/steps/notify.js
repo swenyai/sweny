@@ -1,12 +1,13 @@
 import * as fs from "fs";
+import { getStepData } from "../results.js";
 /** Build summary and send notification with investigation results. */
 export async function sendNotification(ctx) {
     const config = ctx.config;
     const notification = ctx.providers.get("notification");
-    const investigation = ctx.results.get("investigate")?.data;
-    const prData = ctx.results.get("create-pr")?.data;
-    const issueData = ctx.results.get("create-issue")?.data;
-    const crossRepoData = ctx.results.get("cross-repo-check")?.data;
+    const investigation = getStepData(ctx, "investigate");
+    const prData = getStepData(ctx, "create-pr");
+    const issueData = getStepData(ctx, "create-issue");
+    const crossRepoData = getStepData(ctx, "cross-repo-check");
     const implementResult = ctx.results.get("implement-fix");
     const lines = [];
     lines.push(`**Run Date**: ${new Date().toISOString()}`);
@@ -16,8 +17,8 @@ export async function sendNotification(ctx) {
     lines.push(`**Recommendation**: ${investigation?.recommendation ?? "unknown"}`);
     lines.push("");
     // Issue reference
-    const issueIdentifier = (prData?.issueIdentifier ?? issueData?.issueIdentifier);
-    const issueUrl = (prData?.issueUrl ?? issueData?.issueUrl);
+    const issueIdentifier = prData?.issueIdentifier ?? issueData?.issueIdentifier;
+    const issueUrl = prData?.issueUrl ?? issueData?.issueUrl;
     if (issueIdentifier) {
         lines.push(`**Issue**: [${issueIdentifier}](${issueUrl})`);
         lines.push("");

@@ -1,10 +1,10 @@
 ---
 title: Notification
-description: Send triage results to Slack, Teams, Discord, or GitHub Actions.
+description: Send triage results to Slack, Teams, Discord, email, webhooks, or GitHub Actions.
 ---
 
 ```typescript
-import { githubSummary, slackWebhook, teamsWebhook, discordWebhook } from "@sweny/providers/notification";
+import { githubSummary, slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@sweny/providers/notification";
 ```
 
 ## Interface
@@ -69,5 +69,31 @@ await notifier.send({
   format: "markdown",
 });
 ```
+
+## Email
+
+```typescript
+const notifier = email({
+  apiKey: process.env.SENDGRID_API_KEY!,
+  from: "sweny@mycompany.com",
+  to: ["oncall@mycompany.com", "team-lead@mycompany.com"],
+  logger: myLogger,
+});
+```
+
+Uses the SendGrid v3 API. Native `fetch` only.
+
+## Generic Webhook
+
+```typescript
+const notifier = webhook({
+  url: "https://hooks.mycompany.com/sweny",
+  headers: { Authorization: "Bearer my-token" },
+  signingSecret: process.env.WEBHOOK_SECRET,  // optional, HMAC-SHA256
+  logger: myLogger,
+});
+```
+
+POSTs JSON `{ title, body, format, timestamp }`. Supports HMAC-SHA256 signing via `X-Signature-256` header.
 
 The notification provider is fire-and-forget — there's no message ID or threading. For two-way conversations, see the [Messaging provider](/providers/messaging/).

@@ -1,11 +1,12 @@
 import * as fs from "fs";
+import { getStepData } from "../results.js";
 import { buildImplementPrompt } from "../prompts.js";
 /** Create branch, run Claude to implement fix, check for changes, and push. */
 export async function implementFix(ctx) {
     const config = ctx.config;
     const sourceControl = ctx.providers.get("sourceControl");
     const codingAgent = ctx.providers.get("codingAgent");
-    const issueData = ctx.results.get("create-issue")?.data;
+    const issueData = getStepData(ctx, "create-issue");
     const issueIdentifier = issueData?.issueIdentifier ?? "";
     const issueBranchName = issueData?.issueBranchName;
     // -------------------------------------------------------------------------

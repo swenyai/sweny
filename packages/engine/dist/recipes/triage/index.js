@@ -26,4 +26,5 @@ export const triageWorkflow = {
         { name: "notify", phase: "report", run: sendNotification },
     ],
 };
+export { getStepData } from "./results.js";
 //# sourceMappingURL=index.js.map

@@ -4,7 +4,7 @@ description: Query logs and aggregate errors from your monitoring stack.
 ---
 
 ```typescript
-import { datadog, sentry, cloudwatch } from "@sweny/providers/observability";
+import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "@sweny/providers/observability";
 ```
 
 ## Interface
@@ -14,6 +14,8 @@ interface ObservabilityProvider {
   verifyAccess(): Promise<void>;
   queryLogs(opts: LogQueryOptions): Promise<LogEntry[]>;
   aggregate(opts: Omit<LogQueryOptions, "severity">): Promise<AggregateResult[]>;
+  getAgentEnv(): Record<string, string>;
+  getPromptInstructions(): string;
 }
 
 interface LogQueryOptions {
@@ -80,3 +82,51 @@ const obs = cloudwatch({
 ```
 
 Requires `@aws-sdk/client-cloudwatch-logs` as a peer dependency.
+
+## Splunk
+
+```typescript
+const obs = splunk({
+  baseUrl: "https://splunk.example.com:8089",
+  token: process.env.SPLUNK_TOKEN!,
+  index: "main",  // optional, defaults to "main"
+  logger: myLogger,
+});
+```
+
+Uses the Splunk REST API. Native `fetch` only.
+
+## Elasticsearch
+
+```typescript
+const obs = elastic({
+  baseUrl: "https://elastic.example.com:9200",
+  apiKey: process.env.ELASTIC_API_KEY!,
+  index: "logs-*",  // optional, defaults to "logs-*"
+  logger: myLogger,
+});
+```
+
+## New Relic
+
+```typescript
+const obs = newrelic({
+  apiKey: process.env.NR_API_KEY!,
+  accountId: "12345",
+  region: "us",  // optional, "us" or "eu", defaults to "us"
+  logger: myLogger,
+});
+```
+
+Uses the NerdGraph (GraphQL) API.
+
+## Grafana Loki
+
+```typescript
+const obs = loki({
+  baseUrl: "https://loki.example.com",
+  apiKey: process.env.LOKI_API_KEY,  // optional
+  orgId: "tenant-1",  // optional
+  logger: myLogger,
+});
+```

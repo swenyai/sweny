@@ -1,10 +1,11 @@
+import { getStepData } from "../results.js";
 /** If the bug belongs to a different repo, dispatch the workflow there and skip remaining act steps. */
 export async function crossRepoCheck(ctx) {
     const config = ctx.config;
     const sourceControl = ctx.providers.get("sourceControl");
     const issueTracker = ctx.providers.get("issueTracker");
-    const investigation = ctx.results.get("investigate")?.data;
-    const issueData = ctx.results.get("create-issue")?.data;
+    const investigation = getStepData(ctx, "investigate");
+    const issueData = getStepData(ctx, "create-issue");
     const targetRepo = investigation?.targetRepo;
     const currentRepo = config.repository;
     if (!targetRepo || targetRepo === currentRepo) {

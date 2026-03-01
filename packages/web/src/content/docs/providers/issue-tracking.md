@@ -4,7 +4,7 @@ description: Create tickets, search for duplicates, and link PRs.
 ---
 
 ```typescript
-import { linear, githubIssues, canLinkPr, canListTriageHistory } from "@sweny/providers/issue-tracking";
+import { linear, githubIssues, jira, canLinkPr, canListTriageHistory } from "@sweny/providers/issue-tracking";
 ```
 
 ## Interface
@@ -91,3 +91,16 @@ const tracker = githubIssues({
 ```
 
 Supports `PrLinkCapable`.
+
+## Jira
+
+```typescript
+const tracker = jira({
+  baseUrl: "https://mycompany.atlassian.net",
+  email: "bot@mycompany.com",
+  apiToken: process.env.JIRA_API_TOKEN!,
+  logger: myLogger,
+});
+```
+
+Supports `PrLinkCapable`. Uses the Jira REST API v3. Native `fetch` only.

@@ -16,16 +16,33 @@ Most users should use `claude-oauth-token`. The `anthropic-api-key` option is av
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `observability-provider` | Provider to use | `datadog` |
+| `observability-provider` | Provider to use (`datadog`, `sentry`, `cloudwatch`, `splunk`, `elastic`, `newrelic`, `loki`) | `datadog` |
 | `dd-api-key` | Datadog API key | — |
 | `dd-app-key` | Datadog Application key | — |
 | `dd-site` | Datadog site | `datadoghq.com` |
+| `sentry-auth-token` | Sentry auth token | — |
+| `sentry-organization` | Sentry organization slug | — |
+| `sentry-project` | Sentry project slug | — |
+| `cloudwatch-region` | AWS region for CloudWatch | — |
+| `cloudwatch-log-group-prefix` | CloudWatch log group prefix | — |
+| `splunk-url` | Splunk REST API base URL | — |
+| `splunk-token` | Splunk authentication token | — |
+| `splunk-index` | Splunk index to query | `main` |
+| `elastic-url` | Elasticsearch base URL | — |
+| `elastic-api-key` | Elasticsearch API key | — |
+| `elastic-index` | Elasticsearch index pattern | `logs-*` |
+| `newrelic-api-key` | New Relic API key | — |
+| `newrelic-account-id` | New Relic account ID | — |
+| `newrelic-region` | New Relic region (`us` or `eu`) | `us` |
+| `loki-url` | Grafana Loki base URL | — |
+| `loki-api-key` | Grafana Loki API key | — |
+| `loki-org-id` | Grafana Loki tenant/org ID | — |
 
 ## Issue Tracker
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `issue-tracker-provider` | Provider to use | `linear` |
+| `issue-tracker-provider` | Provider to use (`linear`, `github-issues`, `jira`) | `linear` |
 | `linear-api-key` | Linear API key | — |
 | `linear-team-id` | Linear team UUID | — |
 | `linear-bug-label-id` | Label UUID for bugs | — |
@@ -33,6 +50,20 @@ Most users should use `claude-oauth-token`. The `anthropic-api-key` option is av
 | `linear-state-backlog` | State UUID for Backlog | — |
 | `linear-state-in-progress` | State UUID for In Progress | — |
 | `linear-state-peer-review` | State UUID for Peer Review | — |
+| `jira-base-url` | Jira instance URL (e.g. `https://mycompany.atlassian.net`) | — |
+| `jira-email` | Jira bot account email | — |
+| `jira-api-token` | Jira API token | — |
+
+Note: `github-issues` uses the existing `github-token` input for authentication.
+
+## Source Control
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `source-control-provider` | Provider to use (`github`, `gitlab`) | `github` |
+| `gitlab-token` | GitLab personal access token | — |
+| `gitlab-project-id` | GitLab project path (e.g. `my-group/my-project`) | — |
+| `gitlab-base-url` | GitLab instance URL | `https://gitlab.com` |
 
 ## Investigation
 

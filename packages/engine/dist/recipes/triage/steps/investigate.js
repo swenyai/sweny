@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { getStepData } from "../results.js";
 import { buildInvestigationPrompt } from "../prompts.js";
 const ANALYSIS_DIR = ".github/triage-analysis";
 /** Run Claude coding agent to investigate production issues and parse results. */
@@ -11,7 +12,7 @@ export async function investigate(ctx) {
     // Install coding agent CLI
     await codingAgent.install();
     // Get known issues context from prior step
-    const knownIssuesContent = ctx.results.get("build-context")?.data?.knownIssuesContent ?? "";
+    const knownIssuesContent = getStepData(ctx, "build-context")?.knownIssuesContent ?? "";
     // Write known issues file for reference
     const knownIssuesPath = path.join(ANALYSIS_DIR, "known-issues-context.md");
     fs.writeFileSync(knownIssuesPath, knownIssuesContent);

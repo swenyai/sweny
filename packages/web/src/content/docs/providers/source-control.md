@@ -4,7 +4,7 @@ description: Create branches, push commits, open PRs, and dispatch workflows.
 ---
 
 ```typescript
-import { github } from "@sweny/providers/source-control";
+import { github, gitlab } from "@sweny/providers/source-control";
 ```
 
 ## Interface
@@ -76,3 +76,17 @@ await sc.dispatchWorkflow({
   inputs: { service: "payment-api" },
 });
 ```
+
+## GitLab
+
+```typescript
+const sc = gitlab({
+  token: process.env.GITLAB_TOKEN!,
+  projectId: "my-group/my-project",
+  baseUrl: "https://gitlab.com",  // optional
+  baseBranch: "main",  // optional
+  logger: myLogger,
+});
+```
+
+Uses the GitLab REST API v4. Native `fetch` only.
