@@ -49,6 +49,14 @@ export interface ActionConfig {
   gitlabProjectId: string;
   gitlabBaseUrl: string;
 
+  // Notification
+  notificationProvider: string;
+  notificationWebhookUrl: string;
+  sendgridApiKey: string;
+  emailFrom: string;
+  emailTo: string;
+  webhookSigningSecret: string;
+
   // Runtime context
   repository: string;
   repositoryOwner: string;
@@ -95,6 +103,13 @@ export function parseInputs(): ActionConfig {
     gitlabToken: core.getInput("gitlab-token"),
     gitlabProjectId: core.getInput("gitlab-project-id"),
     gitlabBaseUrl: core.getInput("gitlab-base-url") || "https://gitlab.com",
+
+    notificationProvider: core.getInput("notification-provider") || "github-summary",
+    notificationWebhookUrl: core.getInput("notification-webhook-url"),
+    sendgridApiKey: core.getInput("sendgrid-api-key"),
+    emailFrom: core.getInput("email-from"),
+    emailTo: core.getInput("email-to"),
+    webhookSigningSecret: core.getInput("webhook-signing-secret"),
 
     repository: process.env.GITHUB_REPOSITORY || "",
     repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",

@@ -45,6 +45,12 @@ function makeConfig(overrides: Partial<ActionConfig> = {}): ActionConfig {
     gitlabToken: "",
     gitlabProjectId: "",
     gitlabBaseUrl: "https://gitlab.com",
+    notificationProvider: "github-summary",
+    notificationWebhookUrl: "",
+    sendgridApiKey: "",
+    emailFrom: "",
+    emailTo: "",
+    webhookSigningSecret: "",
     repository: "org/repo",
     repositoryOwner: "org",
     ...overrides,
@@ -296,6 +302,52 @@ describe("createProviders", () => {
     expect(typeof sourceControl.getChangedFiles).toBe("function");
     expect(typeof sourceControl.resetPaths).toBe("function");
     expect(typeof sourceControl.dispatchWorkflow).toBe("function");
+  });
+
+  it("creates providers with slack notification", () => {
+    const registry = createProviders(
+      makeConfig({
+        notificationProvider: "slack",
+        notificationWebhookUrl: "https://hooks.slack.com/services/T/B/X",
+      }),
+    );
+    const notification = registry.get<NotificationProvider>("notification");
+    expect(notification).toBeDefined();
+    expect(typeof notification.send).toBe("function");
+  });
+
+  it("creates providers with email notification", () => {
+    const registry = createProviders(
+      makeConfig({
+        notificationProvider: "email",
+        sendgridApiKey: "SG.test",
+        emailFrom: "bot@example.com",
+        emailTo: "team@example.com, lead@example.com",
+      }),
+    );
+    const notification = registry.get<NotificationProvider>("notification");
+    expect(notification).toBeDefined();
+    expect(typeof notification.send).toBe("function");
+  });
+
+  it("creates providers with generic webhook notification", () => {
+    const registry = createProviders(
+      makeConfig({
+        notificationProvider: "webhook",
+        notificationWebhookUrl: "https://hooks.example.com/sweny",
+        webhookSigningSecret: "secret123",
+      }),
+    );
+    const notification = registry.get<NotificationProvider>("notification");
+    expect(notification).toBeDefined();
+    expect(typeof notification.send).toBe("function");
+  });
+
+  it("defaults to github-summary notification", () => {
+    const registry = createProviders(makeConfig());
+    const notification = registry.get<NotificationProvider>("notification");
+    expect(notification).toBeDefined();
+    expect(typeof notification.send).toBe("function");
   });
 
   it("throws for unsupported observability provider", () => {

@@ -159,6 +159,27 @@ inputs:
     required: false
     default: "https://gitlab.com"
 
+  # Notification provider
+  notification-provider:
+    description: "Notification provider (github-summary, slack, teams, discord, email, webhook)"
+    required: false
+    default: "github-summary"
+  notification-webhook-url:
+    description: "Webhook URL for Slack, Teams, Discord, or generic webhook notifications"
+    required: false
+  sendgrid-api-key:
+    description: "SendGrid API key (when notification-provider = email)"
+    required: false
+  email-from:
+    description: "Sender email address (when notification-provider = email)"
+    required: false
+  email-to:
+    description: "Recipient email addresses, comma-separated (when notification-provider = email)"
+    required: false
+  webhook-signing-secret:
+    description: "HMAC-SHA256 signing secret for generic webhook notifications"
+    required: false
+
   # Investigation parameters
   time-range:
     description: "Time range to analyze (e.g., 1h, 6h, 24h, 7d)"

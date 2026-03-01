@@ -6,7 +6,14 @@ import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "@s
 import type { ObservabilityProvider } from "@sweny/providers/observability";
 import { linear, jira, githubIssues } from "@sweny/providers/issue-tracking";
 import { github, gitlab } from "@sweny/providers/source-control";
-import { githubSummary } from "@sweny/providers/notification";
+import {
+  githubSummary,
+  slackWebhook,
+  teamsWebhook,
+  discordWebhook,
+  email,
+  webhook,
+} from "@sweny/providers/notification";
 import { claudeCode } from "@sweny/providers/coding-agent";
 
 const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
@@ -135,7 +142,44 @@ export function createProviders(config: ActionConfig): ProviderRegistry {
   }
 
   // Notification
-  registry.set("notification", githubSummary({ logger: actionsLogger }));
+  switch (config.notificationProvider) {
+    case "slack":
+      registry.set("notification", slackWebhook({ webhookUrl: config.notificationWebhookUrl, logger: actionsLogger }));
+      break;
+    case "teams":
+      registry.set("notification", teamsWebhook({ webhookUrl: config.notificationWebhookUrl, logger: actionsLogger }));
+      break;
+    case "discord":
+      registry.set(
+        "notification",
+        discordWebhook({ webhookUrl: config.notificationWebhookUrl, logger: actionsLogger }),
+      );
+      break;
+    case "email":
+      registry.set(
+        "notification",
+        email({
+          apiKey: config.sendgridApiKey,
+          from: config.emailFrom,
+          to: config.emailTo.split(",").map((e) => e.trim()),
+          logger: actionsLogger,
+        }),
+      );
+      break;
+    case "webhook":
+      registry.set(
+        "notification",
+        webhook({
+          url: config.notificationWebhookUrl,
+          signingSecret: config.webhookSigningSecret || undefined,
+          logger: actionsLogger,
+        }),
+      );
+      break;
+    default:
+      registry.set("notification", githubSummary({ logger: actionsLogger }));
+      break;
+  }
 
   // Coding agent
   registry.set("codingAgent", claudeCode({ logger: actionsLogger }));

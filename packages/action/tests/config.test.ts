@@ -252,4 +252,33 @@ describe("parseInputs", () => {
 
     expect(config.gitlabBaseUrl).toBe("https://gitlab.com");
   });
+
+  it("notificationProvider defaults to github-summary", () => {
+    mockGetInput.mockReturnValue("");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.notificationProvider).toBe("github-summary");
+  });
+
+  it("parses notification fields from inputs", () => {
+    const inputMap: Record<string, string> = {
+      "notification-provider": "email",
+      "sendgrid-api-key": "SG.test",
+      "email-from": "bot@example.com",
+      "email-to": "team@example.com",
+      "notification-webhook-url": "",
+      "webhook-signing-secret": "",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.notificationProvider).toBe("email");
+    expect(config.sendgridApiKey).toBe("SG.test");
+    expect(config.emailFrom).toBe("bot@example.com");
+    expect(config.emailTo).toBe("team@example.com");
+  });
 });
