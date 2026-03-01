@@ -1,10 +1,10 @@
 {
-  "name": "@sweny/engine",
+  "name": "@swenyai/engine",
   "version": "0.1.0",
   "description": "Workflow engine for SWEny — Learn, Act, Report",
   "type": "module",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=20.0.0"
   },
   "files": [
     "dist",
@@ -22,7 +22,7 @@
     ".": "./dist/index.js"
   },
   "dependencies": {
-    "@sweny/providers": "*"
+    "@swenyai/providers": "*"
   },
   "devDependencies": {
     "@types/node": "^22",
