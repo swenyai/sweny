@@ -27667,7 +27667,7 @@ class ProviderAuthError extends ProviderError {
         this.name = "ProviderAuthError";
     }
 }
-class ProviderApiError extends ProviderError {
+class errors_ProviderApiError extends ProviderError {
     statusCode;
     statusText;
     responseBody;
@@ -32395,7 +32395,7 @@ class SplunkProvider {
         this.baseUrl = config.baseUrl.replace(/\/+$/, "");
         this.token = config.token;
         this.index = config.index;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async request(method, path, params) {
         const url = new URL(path, this.baseUrl);
@@ -32578,7 +32578,7 @@ class ElasticProvider {
         this.username = config.username;
         this.password = config.password;
         this.index = config.index;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     authHeaders() {
         if (this.apiKey) {
@@ -32811,7 +32811,7 @@ class NewRelicProvider {
         this.apiKey = config.apiKey;
         this.accountId = config.accountId;
         this.region = config.region;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     get endpoint() {
         return this.region === "eu" ? "https://api.eu.newrelic.com/graphql" : "https://api.newrelic.com/graphql";
@@ -32957,7 +32957,7 @@ class LokiProvider {
         this.baseUrl = config.baseUrl.replace(/\/+$/, "");
         this.apiKey = config.apiKey;
         this.orgId = config.orgId;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     buildHeaders() {
         const headers = {};
@@ -33506,7 +33506,7 @@ class GitHubIssuesProvider {
         this.token = config.token;
         this.owner = config.owner;
         this.repo = config.repo;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async request(path, opts) {
         const url = `https://api.github.com${path}`;
@@ -33642,7 +33642,7 @@ class JiraProvider {
         // Strip trailing slash for consistency
         this.baseUrl = config.baseUrl.replace(/\/+$/, "");
         this.authHeader = `Basic ${btoa(`${config.email}:${config.apiToken}`)}`;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async request(path, opts) {
         const url = `${this.baseUrl}/rest/api/3${path}`;
@@ -34002,7 +34002,126 @@ class DiscordWebhookProvider {
     }
 }
 //# sourceMappingURL=discord-webhook.js.map
+;// CONCATENATED MODULE: ../providers/dist/notification/email.js
+
+
+
+const emailConfigSchema = objectType({
+    apiKey: stringType().min(1, "SendGrid API key is required"),
+    from: stringType().email("Valid sender email is required"),
+    to: unionType([stringType().email(), arrayType(stringType().email()).min(1)]),
+    logger: custom().optional(),
+});
+function email(config) {
+    const parsed = emailConfigSchema.parse(config);
+    return new EmailProvider(parsed);
+}
+class EmailProvider {
+    apiKey;
+    from;
+    to;
+    log;
+    constructor(config) {
+        this.apiKey = config.apiKey;
+        this.from = config.from;
+        this.to = Array.isArray(config.to) ? config.to : [config.to];
+        this.log = config.logger ?? consoleLogger;
+    }
+    async send(payload) {
+        const subject = payload.title ?? "SWEny Notification";
+        const isHtml = payload.format === "html";
+        const content = [
+            {
+                type: isHtml ? "text/html" : "text/plain",
+                value: payload.body,
+            },
+        ];
+        const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${this.apiKey}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                personalizations: [{ to: this.to.map((addr) => ({ email: addr })) }],
+                from: { email: this.from },
+                subject,
+                content,
+            }),
+        });
+        if (!response.ok) {
+            const body = await response.text().catch(() => undefined);
+            throw new ProviderApiError("email", response.status, response.statusText, body);
+        }
+        this.log.info(`Email notification sent to ${this.to.join(", ")}`);
+    }
+}
+//# sourceMappingURL=email.js.map
+// EXTERNAL MODULE: external "node:crypto"
+var external_node_crypto_ = __nccwpck_require__(7598);
+;// CONCATENATED MODULE: ../providers/dist/notification/webhook.js
+
+
+
+
+const webhookConfigSchema = objectType({
+    url: stringType().url("Webhook URL is required"),
+    /** Extra headers merged into the request (e.g., Authorization). */
+    headers: recordType(stringType()).optional(),
+    /** HTTP method — defaults to POST. */
+    method: enumType(["POST", "PUT"]).default("POST"),
+    /** Optional HMAC secret for signing the payload (X-Signature-256 header). */
+    signingSecret: stringType().optional(),
+    logger: custom().optional(),
+});
+function webhook(config) {
+    const parsed = webhookConfigSchema.parse(config);
+    return new WebhookProvider(parsed);
+}
+class WebhookProvider {
+    url;
+    headers;
+    method;
+    signingSecret;
+    log;
+    constructor(config) {
+        this.url = config.url;
+        this.headers = config.headers ?? {};
+        this.method = config.method;
+        this.signingSecret = config.signingSecret;
+        this.log = config.logger ?? consoleLogger;
+    }
+    async send(payload) {
+        const jsonBody = JSON.stringify({
+            title: payload.title,
+            body: payload.body,
+            format: payload.format,
+            timestamp: new Date().toISOString(),
+        });
+        const headers = {
+            "Content-Type": "application/json",
+            ...this.headers,
+        };
+        if (this.signingSecret) {
+            const signature = createHmac("sha256", this.signingSecret).update(jsonBody).digest("hex");
+            headers["X-Signature-256"] = `sha256=${signature}`;
+        }
+        const response = await fetch(this.url, {
+            method: this.method,
+            headers,
+            body: jsonBody,
+        });
+        if (!response.ok) {
+            const body = await response.text().catch(() => undefined);
+            throw new ProviderApiError("webhook", response.status, response.statusText, body);
+        }
+        this.log.info(`Webhook notification sent to ${this.url}`);
+    }
+}
+//# sourceMappingURL=webhook.js.map
 ;// CONCATENATED MODULE: ../providers/dist/notification/index.js
+
+
 
 
 
@@ -34241,7 +34360,7 @@ function gitlab(config) {
     const { token, baseBranch } = parsed;
     const baseUrl = parsed.baseUrl.replace(/\/+$/, "");
     const projectId = typeof parsed.projectId === "number" ? String(parsed.projectId) : encodeURIComponent(parsed.projectId);
-    const log = parsed.logger ?? consoleLogger;
+    const log = parsed.logger ?? logger_consoleLogger;
     return {
         async verifyAccess() {
             const project = (await glApi("GET", `/projects/${projectId}`, baseUrl, token));
@@ -34999,8 +35118,6 @@ class fs_FsSessionStore {
     }
 }
 //# sourceMappingURL=fs.js.map
-// EXTERNAL MODULE: external "node:crypto"
-var external_node_crypto_ = __nccwpck_require__(7598);
 ;// CONCATENATED MODULE: ../providers/dist/storage/memory/fs.js
 
 
@@ -36064,6 +36181,21 @@ async function buildContext(ctx) {
 var external_fs_ = __nccwpck_require__(9896);
 // EXTERNAL MODULE: external "path"
 var external_path_ = __nccwpck_require__(6928);
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/results.js
+/**
+ * Get typed step result data from the workflow context.
+ *
+ * Replaces unsafe casts like `ctx.results.get("investigate")?.data as unknown as T`.
+ * Step name is checked at compile time — typos are caught immediately.
+ *
+ * @example
+ * const investigation = getStepData(ctx, "investigate");
+ * //    ^? InvestigationResult | undefined
+ */
+function getStepData(ctx, stepName) {
+    return ctx.results.get(stepName)?.data;
+}
+//# sourceMappingURL=results.js.map
 ;// CONCATENATED MODULE: ../engine/dist/recipes/triage/service-map.js
 
 /**
@@ -36405,6 +36537,7 @@ Create \`.github/triage-analysis/pr-description.md\` with:
 
 
 
+
 const ANALYSIS_DIR = ".github/triage-analysis";
 /** Run Claude coding agent to investigate production issues and parse results. */
 async function investigate(ctx) {
@@ -36415,7 +36548,7 @@ async function investigate(ctx) {
     // Install coding agent CLI
     await codingAgent.install();
     // Get known issues context from prior step
-    const knownIssuesContent = ctx.results.get("build-context")?.data?.knownIssuesContent ?? "";
+    const knownIssuesContent = getStepData(ctx, "build-context")?.knownIssuesContent ?? "";
     // Write known issues file for reference
     const knownIssuesPath = external_path_.join(ANALYSIS_DIR, "known-issues-context.md");
     external_fs_.writeFileSync(knownIssuesPath, knownIssuesContent);
@@ -36476,10 +36609,20 @@ function parseInvestigationResults(analysisDir) {
 }
 //# sourceMappingURL=investigate.js.map
 ;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/novelty-gate.js
+
 /** Check investigation recommendation and decide whether to proceed with implementation. */
 async function noveltyGate(ctx) {
     const issueTracker = ctx.providers.get("issueTracker");
-    const investigation = ctx.results.get("investigate")?.data;
+    const investigation = getStepData(ctx, "investigate");
+    // Dry run — skip the entire act phase
+    if (ctx.config.dryRun) {
+        ctx.logger.info("Dry run mode — skipping act phase");
+        ctx.skipPhase("act", "Dry run mode");
+        return {
+            status: "success",
+            data: { action: "dry-run", recommendation: investigation?.recommendation ?? "unknown" },
+        };
+    }
     if (!investigation) {
         ctx.skipPhase("act", "No investigation result");
         return { status: "failed", reason: "No investigation result available" };
@@ -36613,13 +36756,14 @@ async function createIssue(ctx) {
 }
 //# sourceMappingURL=create-issue.js.map
 ;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/cross-repo-check.js
+
 /** If the bug belongs to a different repo, dispatch the workflow there and skip remaining act steps. */
 async function crossRepoCheck(ctx) {
     const config = ctx.config;
     const sourceControl = ctx.providers.get("sourceControl");
     const issueTracker = ctx.providers.get("issueTracker");
-    const investigation = ctx.results.get("investigate")?.data;
-    const issueData = ctx.results.get("create-issue")?.data;
+    const investigation = getStepData(ctx, "investigate");
+    const issueData = getStepData(ctx, "create-issue");
     const targetRepo = investigation?.targetRepo;
     const currentRepo = config.repository;
     if (!targetRepo || targetRepo === currentRepo) {
@@ -36659,12 +36803,13 @@ async function crossRepoCheck(ctx) {
 ;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/implement-fix.js
 
 
+
 /** Create branch, run Claude to implement fix, check for changes, and push. */
 async function implementFix(ctx) {
     const config = ctx.config;
     const sourceControl = ctx.providers.get("sourceControl");
     const codingAgent = ctx.providers.get("codingAgent");
-    const issueData = ctx.results.get("create-issue")?.data;
+    const issueData = getStepData(ctx, "create-issue");
     const issueIdentifier = issueData?.issueIdentifier ?? "";
     const issueBranchName = issueData?.issueBranchName;
     // -------------------------------------------------------------------------
@@ -36760,14 +36905,15 @@ async function implementFix(ctx) {
 
 
 
+
 /** Generate PR description with Claude, create PR, link to issue, update issue state. */
 async function createPr(ctx) {
     const config = ctx.config;
     const sourceControl = ctx.providers.get("sourceControl");
     const issueTracker = ctx.providers.get("issueTracker");
     const codingAgent = ctx.providers.get("codingAgent");
-    const issueData = ctx.results.get("create-issue")?.data;
-    const implementData = ctx.results.get("implement-fix")?.data;
+    const issueData = getStepData(ctx, "create-issue");
+    const implementData = getStepData(ctx, "implement-fix");
     // If implement-fix was skipped, we can't create a PR
     const implementResult = ctx.results.get("implement-fix");
     if (!implementResult || implementResult.status !== "success") {
@@ -36776,7 +36922,7 @@ async function createPr(ctx) {
             reason: implementResult?.reason ?? "No implementation to create PR for",
         };
     }
-    const issueId = issueData?.issueId;
+    const issueId = issueData?.issueId ?? "";
     const issueIdentifier = issueData?.issueIdentifier ?? "";
     const issueTitle = issueData?.issueTitle ?? "";
     const issueUrl = issueData?.issueUrl ?? "";
@@ -36855,14 +37001,15 @@ This PR contains an automated fix for an issue identified in production logs.
 //# sourceMappingURL=create-pr.js.map
 ;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/notify.js
 
+
 /** Build summary and send notification with investigation results. */
 async function sendNotification(ctx) {
     const config = ctx.config;
     const notification = ctx.providers.get("notification");
-    const investigation = ctx.results.get("investigate")?.data;
-    const prData = ctx.results.get("create-pr")?.data;
-    const issueData = ctx.results.get("create-issue")?.data;
-    const crossRepoData = ctx.results.get("cross-repo-check")?.data;
+    const investigation = getStepData(ctx, "investigate");
+    const prData = getStepData(ctx, "create-pr");
+    const issueData = getStepData(ctx, "create-issue");
+    const crossRepoData = getStepData(ctx, "cross-repo-check");
     const implementResult = ctx.results.get("implement-fix");
     const lines = [];
     lines.push(`**Run Date**: ${new Date().toISOString()}`);
@@ -36872,8 +37019,8 @@ async function sendNotification(ctx) {
     lines.push(`**Recommendation**: ${investigation?.recommendation ?? "unknown"}`);
     lines.push("");
     // Issue reference
-    const issueIdentifier = (prData?.issueIdentifier ?? issueData?.issueIdentifier);
-    const issueUrl = (prData?.issueUrl ?? issueData?.issueUrl);
+    const issueIdentifier = prData?.issueIdentifier ?? issueData?.issueIdentifier;
+    const issueUrl = prData?.issueUrl ?? issueData?.issueUrl;
     if (issueIdentifier) {
         lines.push(`**Issue**: [${issueIdentifier}](${issueUrl})`);
         lines.push("");
@@ -36948,11 +37095,13 @@ const triageWorkflow = {
         { name: "notify", phase: "report", run: sendNotification },
     ],
 };
+
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ../engine/dist/index.js
 // Runtime
 
 // Recipes
+
 
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ./src/config.ts
@@ -36984,6 +37133,13 @@ function parseInputs() {
         serviceMapPath: core.getInput("service-map-path") || ".github/service-map.yml",
         githubToken: core.getInput("github-token"),
         botToken: core.getInput("bot-token"),
+        sourceControlProvider: core.getInput("source-control-provider") || "github",
+        jiraBaseUrl: core.getInput("jira-base-url"),
+        jiraEmail: core.getInput("jira-email"),
+        jiraApiToken: core.getInput("jira-api-token"),
+        gitlabToken: core.getInput("gitlab-token"),
+        gitlabProjectId: core.getInput("gitlab-project-id"),
+        gitlabBaseUrl: core.getInput("gitlab-base-url") || "https://gitlab.com",
         repository: process.env.GITHUB_REPOSITORY || "",
         repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",
     };
@@ -37007,6 +37163,30 @@ function parseObservabilityCredentials(provider) {
             return {
                 region: core.getInput("cloudwatch-region") || "us-east-1",
                 logGroupPrefix: core.getInput("cloudwatch-log-group-prefix"),
+            };
+        case "splunk":
+            return {
+                baseUrl: core.getInput("splunk-url"),
+                token: core.getInput("splunk-token"),
+                index: core.getInput("splunk-index") || "main",
+            };
+        case "elastic":
+            return {
+                baseUrl: core.getInput("elastic-url"),
+                apiKey: core.getInput("elastic-api-key"),
+                index: core.getInput("elastic-index") || "logs-*",
+            };
+        case "newrelic":
+            return {
+                apiKey: core.getInput("newrelic-api-key"),
+                accountId: core.getInput("newrelic-account-id"),
+                region: core.getInput("newrelic-region") || "us",
+            };
+        case "loki":
+            return {
+                baseUrl: core.getInput("loki-url"),
+                apiKey: core.getInput("loki-api-key"),
+                orgId: core.getInput("loki-org-id"),
             };
         default:
             return {};
@@ -37052,27 +37232,85 @@ function createProviders(config) {
                 logger: actionsLogger,
             });
             break;
+        case "splunk":
+            observability = splunk({
+                baseUrl: obsCreds.baseUrl,
+                token: obsCreds.token,
+                index: obsCreds.index,
+                logger: actionsLogger,
+            });
+            break;
+        case "elastic":
+            observability = elastic({
+                baseUrl: obsCreds.baseUrl,
+                apiKey: obsCreds.apiKey,
+                index: obsCreds.index,
+                logger: actionsLogger,
+            });
+            break;
+        case "newrelic":
+            observability = newrelic({
+                apiKey: obsCreds.apiKey,
+                accountId: obsCreds.accountId,
+                region: obsCreds.region,
+                logger: actionsLogger,
+            });
+            break;
+        case "loki":
+            observability = loki({
+                baseUrl: obsCreds.baseUrl,
+                apiKey: obsCreds.apiKey,
+                orgId: obsCreds.orgId,
+                logger: actionsLogger,
+            });
+            break;
         default:
             throw new Error(`Unsupported observability provider: ${config.observabilityProvider}`);
     }
     registry.set("observability", observability);
+    // Source control
+    const scToken = config.botToken || config.githubToken;
+    const [scOwner = "", scRepo = ""] = config.repository.split("/");
+    switch (config.sourceControlProvider) {
+        case "github":
+            registry.set("sourceControl", github({ token: scToken, owner: scOwner, repo: scRepo, logger: actionsLogger }));
+            break;
+        case "gitlab":
+            registry.set("sourceControl", gitlab({
+                token: config.gitlabToken,
+                projectId: config.gitlabProjectId,
+                baseUrl: config.gitlabBaseUrl,
+                baseBranch: "main",
+                logger: actionsLogger,
+            }));
+            break;
+        default:
+            throw new Error(`Unsupported source control provider: ${config.sourceControlProvider}`);
+    }
     // Issue tracker
     switch (config.issueTrackerProvider) {
         case "linear":
             registry.set("issueTracker", linear({ apiKey: config.linearApiKey, logger: actionsLogger }));
             break;
+        case "jira":
+            registry.set("issueTracker", jira({
+                baseUrl: config.jiraBaseUrl,
+                email: config.jiraEmail,
+                apiToken: config.jiraApiToken,
+                logger: actionsLogger,
+            }));
+            break;
+        case "github-issues":
+            registry.set("issueTracker", githubIssues({
+                token: config.githubToken,
+                owner: scOwner,
+                repo: scRepo,
+                logger: actionsLogger,
+            }));
+            break;
         default:
             throw new Error(`Unsupported issue tracker provider: ${config.issueTrackerProvider}`);
     }
-    // Source control
-    const scToken = config.botToken || config.githubToken;
-    const [scOwner = "", scRepo = ""] = config.repository.split("/");
-    registry.set("sourceControl", github({
-        token: scToken,
-        owner: scOwner,
-        repo: scRepo,
-        logger: actionsLogger,
-    }));
     // Notification
     registry.set("notification", githubSummary({ logger: actionsLogger }));
     // Coding agent
@@ -37137,6 +37375,30 @@ function mapToTriageConfig(config) {
         case "sentry":
             if (obsCreds.authToken)
                 agentEnv.SENTRY_AUTH_TOKEN = obsCreds.authToken;
+            break;
+        case "splunk":
+            if (obsCreds.baseUrl)
+                agentEnv.SPLUNK_URL = obsCreds.baseUrl;
+            if (obsCreds.token)
+                agentEnv.SPLUNK_TOKEN = obsCreds.token;
+            break;
+        case "elastic":
+            if (obsCreds.baseUrl)
+                agentEnv.ELASTIC_URL = obsCreds.baseUrl;
+            if (obsCreds.apiKey)
+                agentEnv.ELASTIC_API_KEY = obsCreds.apiKey;
+            break;
+        case "newrelic":
+            if (obsCreds.apiKey)
+                agentEnv.NR_API_KEY = obsCreds.apiKey;
+            if (obsCreds.accountId)
+                agentEnv.NR_ACCOUNT_ID = obsCreds.accountId;
+            break;
+        case "loki":
+            if (obsCreds.baseUrl)
+                agentEnv.LOKI_URL = obsCreds.baseUrl;
+            if (obsCreds.apiKey)
+                agentEnv.LOKI_API_KEY = obsCreds.apiKey;
             break;
     }
     return {
