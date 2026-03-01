@@ -3,8 +3,7 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 
 export default defineConfig({
-  site: process.env.GITHUB_PAGES ? "https://swenyai.github.io" : "https://docs.sweny.ai",
-  base: process.env.GITHUB_PAGES ? "/sweny/" : "/",
+  site: "https://docs.sweny.ai",
   integrations: [
     starlight({
       title: "SWEny",
