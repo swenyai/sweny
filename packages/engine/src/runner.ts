@@ -1,4 +1,4 @@
-import { consoleLogger } from "@sweny/providers";
+import { consoleLogger } from "@swenyai/providers";
 import { createProviderRegistry } from "./registry.js";
 import type {
   ProviderRegistry,

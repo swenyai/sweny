@@ -6,7 +6,7 @@ description: Create, acknowledge, and resolve incidents. Check on-call schedules
 The incident provider manages the lifecycle of production incidents. Use it when SWEny discovers a critical error that warrants paging someone — or to check who's on-call before escalating.
 
 ```typescript
-import { pagerduty } from "@sweny/providers/incident";
+import { pagerduty } from "@swenyai/providers/incident";
 ```
 
 ## Interface

@@ -1,11 +1,11 @@
-<h1 align="center">@sweny/agent</h1>
+<h1 align="center">@swenyai/agent</h1>
 
 <p align="center">
   <strong>AI assistant framework powered by Claude Code SDK — Slack bot + CLI with plugin architecture</strong>
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@sweny/agent"><img alt="npm version" src="https://img.shields.io/npm/v/@sweny/agent?style=flat-square&color=orange" /></a>
+  <a href="https://www.npmjs.com/package/@swenyai/agent"><img alt="npm version" src="https://img.shields.io/npm/v/@swenyai/agent?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/swenyai/sweny?style=flat-square" /></a>
   <a href="https://sweny.ai"><img alt="Website" src="https://img.shields.io/badge/sweny.ai-website-blue?style=flat-square" /></a>
 </p>
@@ -14,7 +14,7 @@
 
 ## Overview
 
-`@sweny/agent` is a framework for building AI assistants on top of the [Claude Code SDK](https://docs.anthropic.com/en/docs/claude-code/sdk). It ships with two ready-to-use interfaces — a **Slack bot** and an **interactive CLI** — and exposes a plugin architecture so you can extend the assistant with custom tools, storage backends, and authentication providers.
+`@swenyai/agent` is a framework for building AI assistants on top of the [Claude Code SDK](https://docs.anthropic.com/en/docs/claude-code/sdk). It ships with two ready-to-use interfaces — a **Slack bot** and an **interactive CLI** — and exposes a plugin architecture so you can extend the assistant with custom tools, storage backends, and authentication providers.
 
 Core concepts:
 

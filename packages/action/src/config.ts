@@ -70,7 +70,7 @@ export function parseInputs(): ActionConfig {
     observabilityProvider: core.getInput("observability-provider") || "datadog",
     observabilityCredentials: parseObservabilityCredentials(core.getInput("observability-provider") || "datadog"),
 
-    issueTrackerProvider: core.getInput("issue-tracker-provider") || "linear",
+    issueTrackerProvider: core.getInput("issue-tracker-provider") || "github-issues",
     linearApiKey: core.getInput("linear-api-key"),
     linearTeamId: core.getInput("linear-team-id"),
     linearBugLabelId: core.getInput("linear-bug-label-id"),

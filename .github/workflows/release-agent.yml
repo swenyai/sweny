@@ -1,4 +1,4 @@
-name: Release @sweny/agent
+name: Release @swenyai/agent
 
 on:
   push:

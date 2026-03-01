@@ -7,10 +7,10 @@ The agent's capabilities are defined by plugins. Each plugin provides tools that
 
 ## AgentTool
 
-Tools are defined using the `AgentTool` interface from `@sweny/providers/agent-tool`:
+Tools are defined using the `AgentTool` interface from `@swenyai/providers/agent-tool`:
 
 ```typescript
-import type { AgentTool, ToolResult } from "@sweny/providers/agent-tool";
+import type { AgentTool, ToolResult } from "@swenyai/providers/agent-tool";
 ```
 
 ```typescript
@@ -35,7 +35,7 @@ The `agentTool()` helper creates an `AgentTool` with a single function call:
 
 ```typescript
 import { z } from "zod";
-import { agentTool } from "@sweny/providers/agent-tool";
+import { agentTool } from "@swenyai/providers/agent-tool";
 
 const greet = agentTool(
   "greet",
@@ -52,7 +52,7 @@ const greet = agentTool(
 Plugins implement the `ToolPlugin` interface:
 
 ```typescript
-import type { ToolPlugin, PluginContext } from "@sweny/agent";
+import type { ToolPlugin, PluginContext } from "@swenyai/agent";
 ```
 
 ```typescript
@@ -97,9 +97,9 @@ Here is a complete plugin that adds an HTTP request tool with host allowlisting:
 
 ```typescript
 import { z } from "zod";
-import { agentTool } from "@sweny/providers/agent-tool";
-import type { AgentTool } from "@sweny/providers/agent-tool";
-import type { ToolPlugin, PluginContext } from "@sweny/agent";
+import { agentTool } from "@swenyai/providers/agent-tool";
+import type { AgentTool } from "@swenyai/providers/agent-tool";
+import type { ToolPlugin, PluginContext } from "@swenyai/agent";
 
 interface HttpPluginOpts {
   allowedHosts?: string[];
@@ -175,8 +175,8 @@ Key patterns:
 Register plugins in your `sweny.config.ts`:
 
 ```typescript
-import { defineConfig } from "@sweny/agent";
-import { memoryPlugin, workspacePlugin } from "@sweny/agent";
+import { defineConfig } from "@swenyai/agent";
+import { memoryPlugin, workspacePlugin } from "@swenyai/agent";
 import { httpPlugin } from "./plugins/http.js";
 
 export default defineConfig({

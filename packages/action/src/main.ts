@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
-import { runWorkflow, triageWorkflow } from "@sweny/engine";
-import type { TriageConfig, WorkflowResult } from "@sweny/engine";
+import { runWorkflow, triageWorkflow } from "@swenyai/engine";
+import type { TriageConfig, WorkflowResult } from "@swenyai/engine";
 import { parseInputs, ActionConfig } from "./config.js";
 import { createProviders } from "./providers/index.js";
 
@@ -35,13 +35,14 @@ async function run(): Promise<void> {
 
 function mapToTriageConfig(config: ActionConfig): TriageConfig {
   // Build agent env vars for coding agent auth
-  const agentEnv: Record<string, string> = {
-    LINEAR_API_KEY: config.linearApiKey,
-    LINEAR_TEAM_ID: config.linearTeamId,
-    LINEAR_BUG_LABEL_ID: config.linearBugLabelId,
-  };
+  const agentEnv: Record<string, string> = {};
   if (config.anthropicApiKey) agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
   if (config.claudeOauthToken) agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+
+  // Issue tracker env vars (only set when relevant)
+  if (config.linearApiKey) agentEnv.LINEAR_API_KEY = config.linearApiKey;
+  if (config.linearTeamId) agentEnv.LINEAR_TEAM_ID = config.linearTeamId;
+  if (config.linearBugLabelId) agentEnv.LINEAR_BUG_LABEL_ID = config.linearBugLabelId;
 
   // Add observability env vars
   const obsCreds = config.observabilityCredentials;

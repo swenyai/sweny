@@ -4,7 +4,7 @@ description: Send triage results to Slack, Teams, Discord, email, webhooks, or G
 ---
 
 ```typescript
-import { githubSummary, slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@sweny/providers/notification";
+import { githubSummary, slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@swenyai/providers/notification";
 ```
 
 ## Interface

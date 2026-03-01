@@ -1,4 +1,4 @@
-import type { AgentTool } from "@sweny/providers/agent-tool";
+import type { AgentTool } from "@swenyai/providers/agent-tool";
 
 export interface ToolCall {
   toolName: string;

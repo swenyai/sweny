@@ -1,4 +1,4 @@
-import type { Logger } from "@sweny/providers";
+import type { Logger } from "@swenyai/providers";
 export interface ServiceEntry {
     name: string;
     repo: string;

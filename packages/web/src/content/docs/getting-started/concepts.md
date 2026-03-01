@@ -36,10 +36,10 @@ The **ProviderRegistry** is how the engine connects to external services. You re
 This means you can swap Datadog for CloudWatch, or Linear for Jira, without changing your workflow logic.
 
 ```typescript
-import { createProviderRegistry } from "@sweny/engine";
-import { datadog } from "@sweny/providers/observability";
-import { linear } from "@sweny/providers/issue-tracking";
-import { github } from "@sweny/providers/source-control";
+import { createProviderRegistry } from "@swenyai/engine";
+import { datadog } from "@swenyai/providers/observability";
+import { linear } from "@swenyai/providers/issue-tracking";
+import { github } from "@swenyai/providers/source-control";
 
 const providers = createProviderRegistry();
 providers.set("observability", datadog({ apiKey, appKey }));

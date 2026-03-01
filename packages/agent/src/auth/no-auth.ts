@@ -1,1 +1,1 @@
-export { noAuth } from "@sweny/providers/auth";
+export { noAuth } from "@swenyai/providers/auth";

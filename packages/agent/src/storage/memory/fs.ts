@@ -1,1 +1,1 @@
-export { FsMemoryStore } from "@sweny/providers/storage";
+export { FsMemoryStore } from "@swenyai/providers/storage";

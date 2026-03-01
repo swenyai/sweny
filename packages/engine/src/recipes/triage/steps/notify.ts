@@ -1,5 +1,5 @@
 import * as fs from "fs";
-import type { NotificationProvider } from "@sweny/providers/notification";
+import type { NotificationProvider } from "@swenyai/providers/notification";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig } from "../types.js";
 import { getStepData } from "../results.js";

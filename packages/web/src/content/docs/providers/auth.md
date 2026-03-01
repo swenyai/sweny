@@ -4,7 +4,7 @@ description: Authenticate users for the SWEny agent.
 ---
 
 ```typescript
-import { noAuth, apiKeyAuth } from "@sweny/providers/auth";
+import { noAuth, apiKeyAuth } from "@swenyai/providers/auth";
 ```
 
 ## Interface

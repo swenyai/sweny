@@ -37112,7 +37112,7 @@ function parseInputs() {
         claudeOauthToken: core.getInput("claude-oauth-token"),
         observabilityProvider: core.getInput("observability-provider") || "datadog",
         observabilityCredentials: parseObservabilityCredentials(core.getInput("observability-provider") || "datadog"),
-        issueTrackerProvider: core.getInput("issue-tracker-provider") || "linear",
+        issueTrackerProvider: core.getInput("issue-tracker-provider") || "github-issues",
         linearApiKey: core.getInput("linear-api-key"),
         linearTeamId: core.getInput("linear-team-id"),
         linearBugLabelId: core.getInput("linear-bug-label-id"),
@@ -37386,15 +37386,18 @@ async function run() {
 }
 function mapToTriageConfig(config) {
     // Build agent env vars for coding agent auth
-    const agentEnv = {
-        LINEAR_API_KEY: config.linearApiKey,
-        LINEAR_TEAM_ID: config.linearTeamId,
-        LINEAR_BUG_LABEL_ID: config.linearBugLabelId,
-    };
+    const agentEnv = {};
     if (config.anthropicApiKey)
         agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
     if (config.claudeOauthToken)
         agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+    // Issue tracker env vars (only set when relevant)
+    if (config.linearApiKey)
+        agentEnv.LINEAR_API_KEY = config.linearApiKey;
+    if (config.linearTeamId)
+        agentEnv.LINEAR_TEAM_ID = config.linearTeamId;
+    if (config.linearBugLabelId)
+        agentEnv.LINEAR_BUG_LABEL_ID = config.linearBugLabelId;
     // Add observability env vars
     const obsCreds = config.observabilityCredentials;
     switch (config.observabilityProvider) {

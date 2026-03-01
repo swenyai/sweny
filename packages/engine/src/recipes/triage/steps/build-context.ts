@@ -1,6 +1,6 @@
-import type { IssueTrackingProvider, TriageHistoryCapable } from "@sweny/providers/issue-tracking";
-import { canListTriageHistory } from "@sweny/providers/issue-tracking";
-import type { SourceControlProvider } from "@sweny/providers/source-control";
+import type { IssueTrackingProvider, TriageHistoryCapable } from "@swenyai/providers/issue-tracking";
+import { canListTriageHistory } from "@swenyai/providers/issue-tracking";
+import type { SourceControlProvider } from "@swenyai/providers/source-control";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig } from "../types.js";
 

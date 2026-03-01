@@ -8,7 +8,7 @@ The messaging provider sends and updates messages in chat platforms. This is use
 The key difference: **messaging** supports two-way threads (send a message, then update it in-place), while **notification** is fire-and-forget.
 
 ```typescript
-import { slack } from "@sweny/providers/messaging";
+import { slack } from "@swenyai/providers/messaging";
 ```
 
 ## Interface

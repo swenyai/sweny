@@ -9,11 +9,11 @@ vi.mock("fs");
 vi.mock("../prompts.js", () => ({
   buildPrDescriptionPrompt: vi.fn().mockReturnValue("mock pr desc prompt"),
 }));
-vi.mock("@sweny/providers/issue-tracking", () => ({
+vi.mock("@swenyai/providers/issue-tracking", () => ({
   canLinkPr: vi.fn(),
 }));
 
-import { canLinkPr } from "@sweny/providers/issue-tracking";
+import { canLinkPr } from "@swenyai/providers/issue-tracking";
 
 describe("createPr", () => {
   const createPullRequest = vi.fn();

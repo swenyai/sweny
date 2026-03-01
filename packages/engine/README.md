@@ -1,22 +1,22 @@
-# @sweny/engine
+# @swenyai/engine
 
 Workflow engine for SWEny -- orchestrates **Learn -> Act -> Report** pipelines with pluggable providers.
 
 ## Install
 
 ```bash
-npm install @sweny/engine @sweny/providers
+npm install @swenyai/engine @swenyai/providers
 ```
 
 ## Quick Example
 
 ```typescript
-import { runWorkflow, createProviderRegistry } from "@sweny/engine";
-import { datadog } from "@sweny/providers/observability";
-import { linear } from "@sweny/providers/issue-tracking";
-import { github } from "@sweny/providers/source-control";
-import { slackWebhook } from "@sweny/providers/notification";
-import { claudeCode } from "@sweny/providers/coding-agent";
+import { runWorkflow, createProviderRegistry } from "@swenyai/engine";
+import { datadog } from "@swenyai/providers/observability";
+import { linear } from "@swenyai/providers/issue-tracking";
+import { github } from "@swenyai/providers/source-control";
+import { slackWebhook } from "@swenyai/providers/notification";
+import { claudeCode } from "@swenyai/providers/coding-agent";
 
 // 1. Register providers
 const providers = createProviderRegistry();
@@ -27,7 +27,7 @@ providers.set("notification", slackWebhook({ webhookUrl }));
 providers.set("codingAgent", claudeCode({}));
 
 // 2. Run a recipe
-import { triageWorkflow } from "@sweny/engine/recipes/triage";
+import { triageWorkflow } from "@swenyai/engine/recipes/triage";
 
 const result = await runWorkflow(triageWorkflow, triageConfig, providers);
 console.log(result.status); // "completed" | "failed" | "partial"
@@ -52,7 +52,7 @@ console.log(result.status); // "completed" | "failed" | "partial"
 ## Creating a Custom Workflow
 
 ```typescript
-import type { Workflow } from "@sweny/engine";
+import type { Workflow } from "@swenyai/engine";
 
 const myWorkflow: Workflow<MyConfig> = {
   name: "my-workflow",

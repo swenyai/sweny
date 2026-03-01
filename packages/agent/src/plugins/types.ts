@@ -1,10 +1,10 @@
-import type { AgentTool } from "@sweny/providers/agent-tool";
+import type { AgentTool } from "@swenyai/providers/agent-tool";
 import type { UserIdentity } from "../auth/types.js";
 import type { MemoryStore } from "../storage/memory/types.js";
 import type { WorkspaceStore } from "../storage/workspace/types.js";
 import type { Logger } from "../logger.js";
 
-export type { AgentTool } from "@sweny/providers/agent-tool";
+export type { AgentTool } from "@swenyai/providers/agent-tool";
 
 export interface PluginContext {
   user: UserIdentity;

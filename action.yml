@@ -105,9 +105,9 @@ inputs:
 
   # Issue tracker provider
   issue-tracker-provider:
-    description: "Issue tracker provider to use (linear, jira, github-issues)"
+    description: "Issue tracker provider to use (github-issues, linear, jira)"
     required: false
-    default: "linear"
+    default: "github-issues"
   linear-api-key:
     description: "Linear API key"
     required: false

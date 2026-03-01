@@ -3,7 +3,7 @@ title: Deploying the Agent
 description: Run the SWEny agent as an interactive bot or CLI.
 ---
 
-The `@sweny/agent` package is an agentic harness that orchestrates coding sessions. The model backend and messaging channel are pluggable — deploy it as a Slack bot (more channels planned) or run it locally as an interactive CLI.
+The `@swenyai/agent` package is an agentic harness that orchestrates coding sessions. The model backend and messaging channel are pluggable — deploy it as a Slack bot (more channels planned) or run it locally as an interactive CLI.
 
 ## Slack channel
 
@@ -20,10 +20,10 @@ The first supported channel is Slack. More channels are planned.
 Create a `sweny.config.ts` in your project root:
 
 ```typescript
-import { defineConfig } from "@sweny/agent";
-import { noAuth } from "@sweny/providers/auth";
-import { fsStorage } from "@sweny/providers/storage";
-import { memoryPlugin, workspacePlugin } from "@sweny/agent";
+import { defineConfig } from "@swenyai/agent";
+import { noAuth } from "@swenyai/providers/auth";
+import { fsStorage } from "@swenyai/providers/storage";
+import { memoryPlugin, workspacePlugin } from "@swenyai/agent";
 
 export default defineConfig({
   name: "sweny",
@@ -68,8 +68,8 @@ The agent supports custom tool plugins. Each plugin can expose tools to the mode
 
 ```typescript
 import { z } from "zod";
-import { agentTool } from "@sweny/providers/agent-tool";
-import type { ToolPlugin } from "@sweny/agent";
+import { agentTool } from "@swenyai/providers/agent-tool";
+import type { ToolPlugin } from "@swenyai/agent";
 
 export function httpPlugin(): ToolPlugin {
   return {
@@ -108,10 +108,10 @@ The agent persists sessions, memory, and workspace files. Choose a backend:
 
 ```typescript
 // Local filesystem (development)
-import { fsStorage } from "@sweny/providers/storage";
+import { fsStorage } from "@swenyai/providers/storage";
 const storage = fsStorage({ baseDir: "./.sweny-data" });
 
 // Amazon S3 (production)
-import { s3Storage } from "@sweny/providers/storage";
+import { s3Storage } from "@swenyai/providers/storage";
 const storage = s3Storage({ bucket: "my-sweny-bucket", prefix: "agent" });
 ```

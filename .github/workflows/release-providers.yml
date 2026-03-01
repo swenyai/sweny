@@ -1,4 +1,4 @@
-name: Release @sweny/providers
+name: Release @swenyai/providers
 
 on:
   push:

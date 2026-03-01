@@ -1,1 +1,1 @@
-export { allowAllGuard } from "@sweny/providers/access";
+export { allowAllGuard } from "@swenyai/providers/access";

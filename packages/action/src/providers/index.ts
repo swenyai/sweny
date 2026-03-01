@@ -1,11 +1,11 @@
 import * as core from "@actions/core";
-import { createProviderRegistry } from "@sweny/engine";
-import type { ProviderRegistry } from "@sweny/engine";
+import { createProviderRegistry } from "@swenyai/engine";
+import type { ProviderRegistry } from "@swenyai/engine";
 import { ActionConfig } from "../config.js";
-import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "@sweny/providers/observability";
-import type { ObservabilityProvider } from "@sweny/providers/observability";
-import { linear, jira, githubIssues } from "@sweny/providers/issue-tracking";
-import { github, gitlab } from "@sweny/providers/source-control";
+import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "@swenyai/providers/observability";
+import type { ObservabilityProvider } from "@swenyai/providers/observability";
+import { linear, jira, githubIssues } from "@swenyai/providers/issue-tracking";
+import { github, gitlab } from "@swenyai/providers/source-control";
 import {
   githubSummary,
   slackWebhook,
@@ -13,8 +13,8 @@ import {
   discordWebhook,
   email,
   webhook,
-} from "@sweny/providers/notification";
-import { claudeCode } from "@sweny/providers/coding-agent";
+} from "@swenyai/providers/notification";
+import { claudeCode } from "@swenyai/providers/coding-agent";
 
 const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
 

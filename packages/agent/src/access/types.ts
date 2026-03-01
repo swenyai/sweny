@@ -1,2 +1,2 @@
-export type { AccessGuard } from "@sweny/providers/access";
-export { AccessLevel, AccessDeniedError } from "@sweny/providers/access";
+export type { AccessGuard } from "@swenyai/providers/access";
+export { AccessLevel, AccessDeniedError } from "@swenyai/providers/access";

@@ -8,7 +8,7 @@ The credential vault provides tenant-scoped secret storage. In multi-tenant depl
 If you're running SWEny as a single-tenant GitHub Action, you probably don't need this directly. It's used internally by the action to resolve provider credentials.
 
 ```typescript
-import { envVault } from "@sweny/providers/credential-vault";
+import { envVault } from "@swenyai/providers/credential-vault";
 ```
 
 ## Interface

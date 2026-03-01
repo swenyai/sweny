@@ -4,7 +4,7 @@ description: Query logs and aggregate errors from your monitoring stack.
 ---
 
 ```typescript
-import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "@sweny/providers/observability";
+import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "@swenyai/providers/observability";
 ```
 
 ## Interface

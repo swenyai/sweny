@@ -1,1 +1,1 @@
-export type { MemoryStore, MemoryEntry, UserMemory } from "@sweny/providers/storage";
+export type { MemoryStore, MemoryEntry, UserMemory } from "@swenyai/providers/storage";

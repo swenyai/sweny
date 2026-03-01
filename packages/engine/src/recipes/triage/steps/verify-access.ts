@@ -1,5 +1,5 @@
-import type { ObservabilityProvider } from "@sweny/providers/observability";
-import type { IssueTrackingProvider } from "@sweny/providers/issue-tracking";
+import type { ObservabilityProvider } from "@swenyai/providers/observability";
+import type { IssueTrackingProvider } from "@swenyai/providers/issue-tracking";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig } from "../types.js";
 

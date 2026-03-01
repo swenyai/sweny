@@ -1,1 +1,1 @@
-export type { AuthProvider, UserIdentity, LoginField } from "@sweny/providers/auth";
+export type { AuthProvider, UserIdentity, LoginField } from "@swenyai/providers/auth";

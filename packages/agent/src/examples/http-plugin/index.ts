@@ -15,8 +15,8 @@
  *   });
  */
 import { z } from "zod";
-import { agentTool } from "@sweny/providers/agent-tool";
-import type { AgentTool } from "@sweny/providers/agent-tool";
+import { agentTool } from "@swenyai/providers/agent-tool";
+import type { AgentTool } from "@swenyai/providers/agent-tool";
 import type { ToolPlugin, PluginContext } from "../../plugins/types.js";
 
 export interface HttpPluginOpts {

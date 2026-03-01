@@ -59,4 +59,4 @@ npm test --workspace=packages/action
 - Branch from `main`
 - Run `npm run typecheck` and `npm test` before submitting
 - Keep PRs focused — one feature or fix per PR
-- Update the CHANGELOG if modifying `@sweny/providers`
+- Update the CHANGELOG if modifying `@swenyai/providers`

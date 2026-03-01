@@ -4,7 +4,7 @@ description: Install and run coding agents to implement changes.
 ---
 
 ```typescript
-import { claudeCode } from "@sweny/providers/coding-agent";
+import { claudeCode } from "@swenyai/providers/coding-agent";
 ```
 
 ## Interface

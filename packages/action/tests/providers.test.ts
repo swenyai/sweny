@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { createProviders } from "../src/providers/index.js";
 import type { ActionConfig } from "../src/config.js";
-import type { ObservabilityProvider } from "@sweny/providers/observability";
-import type { IssueTrackingProvider } from "@sweny/providers/issue-tracking";
-import type { SourceControlProvider } from "@sweny/providers/source-control";
-import type { NotificationProvider } from "@sweny/providers/notification";
-import type { CodingAgent } from "@sweny/providers/coding-agent";
+import type { ObservabilityProvider } from "@swenyai/providers/observability";
+import type { IssueTrackingProvider } from "@swenyai/providers/issue-tracking";
+import type { SourceControlProvider } from "@swenyai/providers/source-control";
+import type { NotificationProvider } from "@swenyai/providers/notification";
+import type { CodingAgent } from "@swenyai/providers/coding-agent";
 
 function makeConfig(overrides: Partial<ActionConfig> = {}): ActionConfig {
   return {

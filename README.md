@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/swenyai/sweny/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/swenyai/sweny/ci.yml?style=flat-square&label=CI" /></a>
-  <a href="https://www.npmjs.com/package/@sweny/providers"><img alt="npm" src="https://img.shields.io/npm/v/@sweny/providers?style=flat-square&color=orange" /></a>
+  <a href="https://www.npmjs.com/package/@swenyai/providers"><img alt="npm" src="https://img.shields.io/npm/v/@swenyai/providers?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/releases"><img alt="Release" src="https://img.shields.io/github/v/release/swenyai/sweny?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/swenyai/sweny?style=flat-square" /></a>
   <a href="https://sweny.ai"><img alt="Website" src="https://img.shields.io/badge/sweny.ai-website-blue?style=flat-square" /></a>
@@ -22,11 +22,11 @@ This monorepo contains the SWEny platform:
 
 | Package | Description |
 |---------|-------------|
-| **[@sweny/engine](packages/engine)** | Workflow engine — Learn, Act, Report |
+| **[@swenyai/engine](packages/engine)** | Workflow engine — Learn, Act, Report |
 | **[SWEny Triage](#sweny-triage)** | GitHub Action — autonomous SRE triage |
-| **[@sweny/providers](packages/providers)** | 30+ provider implementations |
-| **[@sweny/agent](packages/agent)** | AI assistant — Slack bot + CLI |
-| **[@sweny/web](packages/web)** | sweny.ai website |
+| **[@swenyai/providers](packages/providers)** | 30+ provider implementations |
+| **[@swenyai/agent](packages/agent)** | AI assistant — Slack bot + CLI |
+| **[@swenyai/web](packages/web)** | sweny.ai website |
 
 ---
 
@@ -43,16 +43,16 @@ SWEny workflows follow three phases:
 │  Entry Points                               │
 │  GitHub Action · Slack Bot · CLI · Cloud     │
 ├─────────────────────────────────────────────┤
-│  @sweny/engine                              │
+│  @swenyai/engine                              │
 │  Workflow Runner · Recipes · Step Context    │
 ├─────────────────────────────────────────────┤
-│  @sweny/providers                           │
+│  @swenyai/providers                           │
 │  Observability · Issue Tracking · Source     │
 │  Control · Notification · Coding Agent      │
 └─────────────────────────────────────────────┘
 ```
 
-Entry points (GitHub Action, Slack Bot, CLI) feed into the **@sweny/engine**, which orchestrates recipes -- pre-built workflows composed of Learn, Act, and Report steps. Each step delegates to a pluggable provider from **@sweny/providers**, so you can swap Datadog for CloudWatch or Linear for Jira without changing your workflow.
+Entry points (GitHub Action, Slack Bot, CLI) feed into the **@swenyai/engine**, which orchestrates recipes -- pre-built workflows composed of Learn, Act, and Report steps. Each step delegates to a pluggable provider from **@swenyai/providers**, so you can swap Datadog for CloudWatch or Linear for Jira without changing your workflow.
 
 ---
 
@@ -64,16 +64,18 @@ Instead of waking up to a wall of alerts, SWEny Triage analyzes your logs overni
 
 ### Quick Start
 
+**Step 1: Try it out (dry run, 3 secrets)**
+
+Create `.github/workflows/sweny-triage.yml`:
+
 ```yaml
 name: SWEny Triage
 on:
-  schedule:
-    - cron: '0 6 * * 1,4'  # Mon & Thu at 6 AM UTC
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger to start
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  issues: write
 
 jobs:
   triage:
@@ -86,16 +88,49 @@ jobs:
 
       - uses: swenyai/sweny@v0.1
         with:
-          claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
           dd-app-key: ${{ secrets.DD_APP_KEY }}
-          linear-api-key: ${{ secrets.LINEAR_API_KEY }}
-          linear-team-id: ${{ vars.LINEAR_TEAM_ID }}
-          linear-bug-label-id: ${{ vars.LINEAR_BUG_LABEL_ID }}
-          linear-triage-label-id: ${{ vars.AGENT_TRIAGE_LABEL_ID }}
+          dry-run: true
 ```
 
-That's it. SWEny handles the rest.
+That's it — 3 secrets and you'll see a full investigation report in the GitHub Actions summary. No PRs, no tickets, just analysis.
+
+> **Why `claude-oauth-token`?** This uses your Claude Max subscription — predictable monthly cost, no per-token billing surprises. If you prefer pay-per-use, swap it for `anthropic-api-key` with an [Anthropic API key](https://console.anthropic.com/).
+
+**Step 2: Turn it on**
+
+Once you're happy with the investigation quality, remove `dry-run`, add write permissions, and schedule it:
+
+```yaml
+name: SWEny Triage
+on:
+  schedule:
+    - cron: '0 6 * * 1,4'  # Mon & Thu at 6 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: swenyai/sweny@v0.1
+        with:
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          dd-api-key: ${{ secrets.DD_API_KEY }}
+          dd-app-key: ${{ secrets.DD_APP_KEY }}
+```
+
+SWEny creates GitHub Issues by default — zero additional config. Want Linear or Jira instead? See [Issue Tracker](#issue-tracker) below.
 
 ### How It Works
 
@@ -153,10 +188,10 @@ That's it. SWEny handles the rest.
 
 | Input | Description | Required |
 |-------|-------------|----------|
-| `claude-oauth-token` | Claude Code OAuth token (Max subscriptions) | Recommended |
+| `claude-oauth-token` | Claude Code OAuth token (Max subscription) — predictable cost | Recommended |
 | `anthropic-api-key` | Anthropic API key (pay-per-use) | Alternative |
 
-> Most users should use `claude-oauth-token` — this is the token from Claude Max / Pro subscriptions. Set it as a repository secret named `CLAUDE_OAUTH_TOKEN`. The `anthropic-api-key` option is available for direct API billing.
+> Use `claude-oauth-token` with a Claude Max subscription for predictable monthly costs. Set it as a repository secret named `CLAUDE_CODE_OAUTH_TOKEN`. The `anthropic-api-key` option is available if you prefer direct API billing.
 
 #### Observability Provider
 
@@ -195,7 +230,7 @@ That's it. SWEny handles the rest.
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `issue-tracker-provider` | Provider to use | `linear` |
+| `issue-tracker-provider` | Provider to use | `github-issues` |
 | **Linear** | | |
 | `linear-api-key` | Linear API key | — |
 | `linear-team-id` | Linear team UUID | — |
@@ -266,30 +301,16 @@ If using cross-repo dispatch, pass a `bot-token` with `repo` and `actions` scope
 
 ### Examples
 
-#### Scheduled triage with dry-run first
+#### Deep investigation of last 7 days
 
 ```yaml
 - uses: swenyai/sweny@v0.1
   with:
-    claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
     dd-app-key: ${{ secrets.DD_APP_KEY }}
-    linear-api-key: ${{ secrets.LINEAR_API_KEY }}
-    linear-team-id: ${{ vars.LINEAR_TEAM_ID }}
-    dry-run: true
     time-range: '7d'
     investigation-depth: 'thorough'
-```
-
-#### Work on a specific Linear issue
-
-```yaml
-- uses: swenyai/sweny@v0.1
-  with:
-    claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
-    linear-api-key: ${{ secrets.LINEAR_API_KEY }}
-    linear-issue: 'ENG-123'
-    additional-instructions: 'Focus on the webhook handler timeout'
 ```
 
 #### Filter to a specific service
@@ -297,14 +318,37 @@ If using cross-repo dispatch, pass a `bot-token` with `repo` and `actions` scope
 ```yaml
 - uses: swenyai/sweny@v0.1
   with:
-    claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
     dd-app-key: ${{ secrets.DD_APP_KEY }}
-    linear-api-key: ${{ secrets.LINEAR_API_KEY }}
-    linear-team-id: ${{ vars.LINEAR_TEAM_ID }}
     service-filter: 'billing-*'
     severity-focus: 'errors'
     time-range: '4h'
+```
+
+#### Use Linear for issue tracking
+
+```yaml
+- uses: swenyai/sweny@v0.1
+  with:
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    dd-api-key: ${{ secrets.DD_API_KEY }}
+    dd-app-key: ${{ secrets.DD_APP_KEY }}
+    issue-tracker-provider: 'linear'
+    linear-api-key: ${{ secrets.LINEAR_API_KEY }}
+    linear-team-id: ${{ vars.LINEAR_TEAM_ID }}
+```
+
+#### Work on a specific Linear issue
+
+```yaml
+- uses: swenyai/sweny@v0.1
+  with:
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    issue-tracker-provider: 'linear'
+    linear-api-key: ${{ secrets.LINEAR_API_KEY }}
+    linear-issue: 'ENG-123'
+    additional-instructions: 'Focus on the webhook handler timeout'
 ```
 
 ### Service Map
@@ -339,11 +383,11 @@ The engine is provider-agnostic. Every integration is a pluggable provider that 
 | **Infrastructure** | Filesystem / S3 / K8s CSI (storage) -- Env Vars / AWS Secrets Manager (credentials) -- API Key / No-Auth (auth) |
 | **AI** | Claude Code (coding agent) |
 
-Implementing a custom provider means implementing a TypeScript interface -- see [`packages/providers/`](packages/providers/) for the full library and [`@sweny/providers` on npm](https://www.npmjs.com/package/@sweny/providers).
+Implementing a custom provider means implementing a TypeScript interface -- see [`packages/providers/`](packages/providers/) for the full library and [`@swenyai/providers` on npm](https://www.npmjs.com/package/@swenyai/providers).
 
 ---
 
-## @sweny/agent
+## @swenyai/agent
 
 AI assistant framework powered by [Claude Code SDK](https://docs.anthropic.com/en/docs/claude-code/sdk) — deploy as a Slack bot or CLI with a plugin architecture for custom tools.
 

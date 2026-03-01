@@ -1,1 +1,1 @@
-export type { StorageProvider, SessionStore, MemoryStore, WorkspaceStore } from "@sweny/providers/storage";
+export type { StorageProvider, SessionStore, MemoryStore, WorkspaceStore } from "@swenyai/providers/storage";

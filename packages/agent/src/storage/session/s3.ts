@@ -1,1 +1,1 @@
-export { S3SessionStore } from "@sweny/providers/storage";
+export { S3SessionStore } from "@swenyai/providers/storage";

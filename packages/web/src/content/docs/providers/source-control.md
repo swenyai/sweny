@@ -4,7 +4,7 @@ description: Create branches, push commits, open PRs, and dispatch workflows.
 ---
 
 ```typescript
-import { github, gitlab } from "@sweny/providers/source-control";
+import { github, gitlab } from "@swenyai/providers/source-control";
 ```
 
 ## Interface

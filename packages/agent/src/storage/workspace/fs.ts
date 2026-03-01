@@ -1,1 +1,1 @@
-export { FsWorkspaceStore } from "@sweny/providers/storage";
+export { FsWorkspaceStore } from "@swenyai/providers/storage";

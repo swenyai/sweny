@@ -10,7 +10,7 @@ SWEny is built on a provider/plugin architecture. The core engine is provider-ag
 Every provider follows the same factory function pattern:
 
 ```typescript
-import { datadog } from "@sweny/providers/observability";
+import { datadog } from "@swenyai/providers/observability";
 
 const obs = datadog({
   apiKey: "your-api-key",
@@ -47,15 +47,15 @@ Config is validated at construction time using Zod. If you pass an invalid confi
 Each category has its own import path to keep your bundle lean:
 
 ```typescript
-import { datadog } from "@sweny/providers/observability";
-import { linear } from "@sweny/providers/issue-tracking";
-import { github } from "@sweny/providers/source-control";
-import { slackWebhook } from "@sweny/providers/notification";
-import { pagerduty } from "@sweny/providers/incident";
-import { slack } from "@sweny/providers/messaging";
-import { apiKeyAuth } from "@sweny/providers/auth";
-import { roleBasedGuard } from "@sweny/providers/access";
-import { s3Storage } from "@sweny/providers/storage";
+import { datadog } from "@swenyai/providers/observability";
+import { linear } from "@swenyai/providers/issue-tracking";
+import { github } from "@swenyai/providers/source-control";
+import { slackWebhook } from "@swenyai/providers/notification";
+import { pagerduty } from "@swenyai/providers/incident";
+import { slack } from "@swenyai/providers/messaging";
+import { apiKeyAuth } from "@swenyai/providers/auth";
+import { roleBasedGuard } from "@swenyai/providers/access";
+import { s3Storage } from "@swenyai/providers/storage";
 ```
 
 ## Optional capabilities
@@ -63,7 +63,7 @@ import { s3Storage } from "@sweny/providers/storage";
 Some providers support optional capabilities beyond the base interface. Use type guards to check:
 
 ```typescript
-import { linear, canLinkPr, canListTriageHistory } from "@sweny/providers/issue-tracking";
+import { linear, canLinkPr, canListTriageHistory } from "@swenyai/providers/issue-tracking";
 
 const tracker = linear({ apiKey: "..." });
 
@@ -86,7 +86,7 @@ Available capabilities:
 Implement the TypeScript interface and pass your instance wherever a provider is expected:
 
 ```typescript
-import type { ObservabilityProvider } from "@sweny/providers/observability";
+import type { ObservabilityProvider } from "@swenyai/providers/observability";
 
 export function grafanaLoki(config: LokiConfig): ObservabilityProvider {
   return {

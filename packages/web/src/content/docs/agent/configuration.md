@@ -8,11 +8,11 @@ The agent is configured through a `sweny.config.ts` file in your project root an
 ## sweny.config.ts
 
 ```typescript
-import { defineConfig } from "@sweny/agent";
-import { noAuth } from "@sweny/providers/auth";
-import { fsStorage } from "@sweny/providers/storage";
-import { allowAllGuard } from "@sweny/providers/access";
-import { memoryPlugin, workspacePlugin } from "@sweny/agent";
+import { defineConfig } from "@swenyai/agent";
+import { noAuth } from "@swenyai/providers/auth";
+import { fsStorage } from "@swenyai/providers/storage";
+import { allowAllGuard } from "@swenyai/providers/access";
+import { memoryPlugin, workspacePlugin } from "@swenyai/agent";
 
 export default defineConfig({
   name: "my-agent",
@@ -59,7 +59,7 @@ export default defineConfig({
 A type-only helper that returns its argument unchanged. It provides TypeScript autocomplete in your config file:
 
 ```typescript
-import { defineConfig } from "@sweny/agent";
+import { defineConfig } from "@swenyai/agent";
 
 export default defineConfig({
   // IDE autocomplete works here

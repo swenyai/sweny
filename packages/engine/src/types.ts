@@ -1,4 +1,4 @@
-import type { Logger } from "@sweny/providers";
+import type { Logger } from "@swenyai/providers";
 
 /** The three phases of every workflow. */
 export type WorkflowPhase = "learn" | "act" | "report";

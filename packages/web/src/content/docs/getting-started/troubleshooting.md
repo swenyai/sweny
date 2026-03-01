@@ -62,11 +62,11 @@ CLAUDE_CODE_OAUTH_TOKEN=...
 - Verify bot token scopes include `chat:write`, `app_mentions:read`, `im:history`
 - Check the agent logs for connection errors
 
-### "Cannot find module '@sweny/providers/...'"
+### "Cannot find module '@swenyai/providers/...'"
 
 If you see this when building:
 
-- Make sure `@sweny/providers` is installed
+- Make sure `@swenyai/providers` is installed
 - Run `npm run build` in the providers package first (it needs to generate `dist/`)
 - Check that your `tsconfig.json` uses `moduleResolution: "NodeNext"`
 

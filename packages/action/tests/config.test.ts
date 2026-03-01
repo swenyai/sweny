@@ -31,7 +31,7 @@ describe("parseInputs", () => {
 
     expect(config.observabilityProvider).toBe("datadog");
     expect(config.observabilityCredentials.site).toBe("datadoghq.com");
-    expect(config.issueTrackerProvider).toBe("linear");
+    expect(config.issueTrackerProvider).toBe("github-issues"); // default changed from linear
     expect(config.timeRange).toBe("24h");
     expect(config.severityFocus).toBe("errors");
     expect(config.serviceFilter).toBe("*");

@@ -4,7 +4,7 @@ description: Persist sessions, memory, and workspace files.
 ---
 
 ```typescript
-import { fsStorage, s3Storage } from "@sweny/providers/storage";
+import { fsStorage, s3Storage } from "@swenyai/providers/storage";
 ```
 
 ## Interface

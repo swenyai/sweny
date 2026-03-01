@@ -1,5 +1,5 @@
 import * as fs from "fs";
-import { canLinkPr } from "@sweny/providers/issue-tracking";
+import { canLinkPr } from "@swenyai/providers/issue-tracking";
 import { getStepData } from "../results.js";
 import { buildPrDescriptionPrompt } from "../prompts.js";
 /** Generate PR description with Claude, create PR, link to issue, update issue state. */

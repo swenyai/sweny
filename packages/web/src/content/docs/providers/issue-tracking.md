@@ -4,7 +4,7 @@ description: Create tickets, search for duplicates, and link PRs.
 ---
 
 ```typescript
-import { linear, githubIssues, jira, canLinkPr, canListTriageHistory } from "@sweny/providers/issue-tracking";
+import { linear, githubIssues, jira, canLinkPr, canListTriageHistory } from "@swenyai/providers/issue-tracking";
 ```
 
 ## Interface

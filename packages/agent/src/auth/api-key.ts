@@ -1,1 +1,1 @@
-export { apiKeyAuth, type ApiKeyAuthOpts } from "@sweny/providers/auth";
+export { apiKeyAuth, type ApiKeyAuthOpts } from "@swenyai/providers/auth";
