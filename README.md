@@ -41,7 +41,7 @@ SWEny workflows follow three phases:
 ```
 ┌─────────────────────────────────────────────┐
 │  Entry Points                               │
-│  GitHub Action · Slack Bot · CLI             │
+│  GitHub Action · Slack Bot · CLI · Cloud     │
 ├─────────────────────────────────────────────┤
 │  @sweny/engine                              │
 │  Workflow Runner · Recipes · Step Context    │

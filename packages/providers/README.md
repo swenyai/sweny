@@ -1,6 +1,12 @@
 # @sweny/providers
 
-Shared provider interfaces and implementations for [SWEny](https://sweny.ai) — autonomous engineering tools powered by Claude AI.
+Shared provider interfaces and implementations for [SWEny](https://sweny.ai) — pluggable integrations for the `@sweny/engine` workflow runner.
+
+Providers map to the three workflow phases:
+
+- **Learn** — Observability providers query logs and metrics from your production systems
+- **Act** — Issue tracking, source control, incident management, and coding agent providers take action based on AI analysis
+- **Report** — Notification and messaging providers deliver results through your team's channels
 
 ## Install
 
@@ -71,17 +77,19 @@ import { pagerduty, opsgenie } from "@sweny/providers/incident";
 import { slack, teams } from "@sweny/providers/messaging";
 ```
 
-### Notification (4 providers)
+### Notification (6 providers)
 
-| Provider | Factory |
-|----------|---------|
-| GitHub Summary | `githubSummary()` |
-| Slack Webhook | `slackWebhook()` |
-| Teams Webhook | `teamsWebhook()` |
-| Discord Webhook | `discordWebhook()` |
+| Provider | Factory | Config |
+|----------|---------|--------|
+| GitHub Summary | `githubSummary()` | — |
+| Slack Webhook | `slackWebhook()` | `webhookUrl` |
+| Teams Webhook | `teamsWebhook()` | `webhookUrl` |
+| Discord Webhook | `discordWebhook()` | `webhookUrl` |
+| Email (SendGrid) | `email()` | `apiKey`, `from`, `to` |
+| Generic Webhook | `webhook()` | `url`, `headers`, `method`, `signingSecret` |
 
 ```typescript
-import { githubSummary, slackWebhook, teamsWebhook, discordWebhook } from "@sweny/providers/notification";
+import { githubSummary, slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@sweny/providers/notification";
 ```
 
 ### Storage (3 backends)

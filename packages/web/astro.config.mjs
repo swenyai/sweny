@@ -17,10 +17,22 @@ export default defineConfig({
           label: "Getting Started",
           items: [
             { label: "Introduction", slug: "getting-started" },
+            { label: "Concepts", slug: "getting-started/concepts" },
+            { label: "Engine & Recipes", slug: "getting-started/engine" },
             { label: "End-to-End Walkthrough", slug: "getting-started/walkthrough" },
             { label: "Provider Architecture", slug: "getting-started/providers" },
             { label: "Deploying the Agent", slug: "getting-started/agent" },
             { label: "Troubleshooting", slug: "getting-started/troubleshooting" },
+          ],
+        },
+        {
+          label: "Recipes",
+          items: [
+            { label: "SWEny Triage", slug: "recipes/triage" },
+            { label: "Inputs", slug: "action/inputs" },
+            { label: "Outputs", slug: "action/outputs" },
+            { label: "Examples", slug: "action/examples" },
+            { label: "Service Map", slug: "action/service-map" },
           ],
         },
         {
@@ -30,15 +42,6 @@ export default defineConfig({
             { label: "Built-in Plugins", slug: "agent/built-in-plugins" },
             { label: "Model Architecture", slug: "agent/model-architecture" },
             { label: "Configuration", slug: "agent/configuration" },
-          ],
-        },
-        {
-          label: "Action Reference",
-          items: [
-            { label: "Inputs", slug: "action/inputs" },
-            { label: "Outputs", slug: "action/outputs" },
-            { label: "Examples", slug: "action/examples" },
-            { label: "Service Map", slug: "action/service-map" },
           ],
         },
         {

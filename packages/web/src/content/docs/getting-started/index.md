@@ -1,7 +1,9 @@
 ---
 title: Quick Start
-description: Get SWEny Triage running in your repo in 5 minutes.
+description: Get SWEny running in your repo in 5 minutes.
 ---
+
+SWEny is a platform for building AI-powered engineering workflows that follow a **Learn → Act → Report** pattern. **SWEny Triage** is the first recipe -- it monitors your observability logs, investigates issues, creates tickets, and opens fix PRs. This guide walks through setting it up.
 
 ## Prerequisites
 

@@ -57,17 +57,17 @@ A Recipe is a pre-configured Workflow with sensible defaults. It bundles togethe
 The ProviderRegistry is how the engine discovers and connects to external services. You register providers by category -- observability, issue tracking, source control, notification -- and the engine injects them into steps that need them.
 
 ```typescript
-import { ProviderRegistry } from "@sweny/engine";
+import { createProviderRegistry } from "@sweny/engine";
 import { datadog } from "@sweny/providers/observability";
 import { linear } from "@sweny/providers/issue-tracking";
 import { github } from "@sweny/providers/source-control";
 import { slackWebhook } from "@sweny/providers/notification";
 
-const registry = new ProviderRegistry();
-registry.register("observability", datadog({ apiKey: "...", appKey: "..." }));
-registry.register("issue-tracking", linear({ apiKey: "..." }));
-registry.register("source-control", github({ token: "...", owner: "my-org", repo: "my-repo" }));
-registry.register("notification", slackWebhook({ webhookUrl: "..." }));
+const providers = createProviderRegistry();
+providers.set("observability", datadog({ apiKey: "...", appKey: "..." }));
+providers.set("issueTracker", linear({ apiKey: "..." }));
+providers.set("sourceControl", github({ token: "...", owner: "my-org", repo: "my-repo" }));
+providers.set("notification", slackWebhook({ webhookUrl: "..." }));
 ```
 
 ## Architecture
@@ -105,37 +105,38 @@ See the [Quick Start](/getting-started/) to set up Triage in your repo.
 ## Running a workflow programmatically
 
 ```typescript
-import { Engine, TriageRecipe } from "@sweny/engine";
-import { ProviderRegistry } from "@sweny/engine";
+import { runWorkflow, triageWorkflow, createProviderRegistry } from "@sweny/engine";
 import { datadog } from "@sweny/providers/observability";
 import { linear } from "@sweny/providers/issue-tracking";
 import { github } from "@sweny/providers/source-control";
 import { githubSummary } from "@sweny/providers/notification";
+import { claudeCode } from "@sweny/providers/coding-agent";
 
-const registry = new ProviderRegistry();
-registry.register("observability", datadog({
+const providers = createProviderRegistry();
+providers.set("observability", datadog({
   apiKey: process.env.DD_API_KEY!,
   appKey: process.env.DD_APP_KEY!,
 }));
-registry.register("issue-tracking", linear({
+providers.set("issueTracker", linear({
   apiKey: process.env.LINEAR_API_KEY!,
 }));
-registry.register("source-control", github({
+providers.set("sourceControl", github({
   token: process.env.GITHUB_TOKEN!,
   owner: "my-org",
   repo: "my-repo",
 }));
-registry.register("notification", githubSummary({}));
+providers.set("notification", githubSummary({}));
+providers.set("codingAgent", claudeCode({}));
 
-const engine = new Engine({ registry });
-const result = await engine.run(TriageRecipe, {
+const result = await runWorkflow(triageWorkflow, {
   timeRange: "24h",
   severityFocus: "errors",
   serviceFilter: "*",
-});
+  repository: "my-org/my-repo",
+  // ... other TriageConfig fields
+}, providers);
 
-console.log(result.summary);
-// "Found 3 novel issues. Created ENG-456, ENG-457. Opened PRs #89, #90."
+console.log(result.status); // "completed" | "failed" | "partial"
 ```
 
 ## Provider docs
