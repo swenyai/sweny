@@ -27667,7 +27667,7 @@ class ProviderAuthError extends ProviderError {
         this.name = "ProviderAuthError";
     }
 }
-class errors_ProviderApiError extends ProviderError {
+class ProviderApiError extends ProviderError {
     statusCode;
     statusText;
     responseBody;
@@ -33891,7 +33891,7 @@ class SlackWebhookProvider {
     log;
     constructor(config) {
         this.webhookUrl = config.webhookUrl;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async send(payload) {
         const text = payload.title ? `*${payload.title}*\n${payload.body}` : payload.body;
@@ -33923,7 +33923,7 @@ class TeamsWebhookProvider {
     log;
     constructor(config) {
         this.webhookUrl = config.webhookUrl;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async send(payload) {
         const card = {
@@ -33984,7 +33984,7 @@ class DiscordWebhookProvider {
     log;
     constructor(config) {
         this.webhookUrl = config.webhookUrl;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async send(payload) {
         const content = payload.title ? `**${payload.title}**\n${payload.body}` : payload.body;
@@ -34025,7 +34025,7 @@ class EmailProvider {
         this.apiKey = config.apiKey;
         this.from = config.from;
         this.to = Array.isArray(config.to) ? config.to : [config.to];
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async send(payload) {
         const subject = payload.title ?? "SWEny Notification";
@@ -34089,7 +34089,7 @@ class WebhookProvider {
         this.headers = config.headers ?? {};
         this.method = config.method;
         this.signingSecret = config.signingSecret;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async send(payload) {
         const jsonBody = JSON.stringify({
@@ -34103,7 +34103,7 @@ class WebhookProvider {
             ...this.headers,
         };
         if (this.signingSecret) {
-            const signature = createHmac("sha256", this.signingSecret).update(jsonBody).digest("hex");
+            const signature = (0,external_node_crypto_.createHmac)("sha256", this.signingSecret).update(jsonBody).digest("hex");
             headers["X-Signature-256"] = `sha256=${signature}`;
         }
         const response = await fetch(this.url, {
@@ -37140,6 +37140,12 @@ function parseInputs() {
         gitlabToken: core.getInput("gitlab-token"),
         gitlabProjectId: core.getInput("gitlab-project-id"),
         gitlabBaseUrl: core.getInput("gitlab-base-url") || "https://gitlab.com",
+        notificationProvider: core.getInput("notification-provider") || "github-summary",
+        notificationWebhookUrl: core.getInput("notification-webhook-url"),
+        sendgridApiKey: core.getInput("sendgrid-api-key"),
+        emailFrom: core.getInput("email-from"),
+        emailTo: core.getInput("email-to"),
+        webhookSigningSecret: core.getInput("webhook-signing-secret"),
         repository: process.env.GITHUB_REPOSITORY || "",
         repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",
     };
@@ -37312,7 +37318,35 @@ function createProviders(config) {
             throw new Error(`Unsupported issue tracker provider: ${config.issueTrackerProvider}`);
     }
     // Notification
-    registry.set("notification", githubSummary({ logger: actionsLogger }));
+    switch (config.notificationProvider) {
+        case "slack":
+            registry.set("notification", slackWebhook({ webhookUrl: config.notificationWebhookUrl, logger: actionsLogger }));
+            break;
+        case "teams":
+            registry.set("notification", teamsWebhook({ webhookUrl: config.notificationWebhookUrl, logger: actionsLogger }));
+            break;
+        case "discord":
+            registry.set("notification", discordWebhook({ webhookUrl: config.notificationWebhookUrl, logger: actionsLogger }));
+            break;
+        case "email":
+            registry.set("notification", email({
+                apiKey: config.sendgridApiKey,
+                from: config.emailFrom,
+                to: config.emailTo.split(",").map((e) => e.trim()),
+                logger: actionsLogger,
+            }));
+            break;
+        case "webhook":
+            registry.set("notification", webhook({
+                url: config.notificationWebhookUrl,
+                signingSecret: config.webhookSigningSecret || undefined,
+                logger: actionsLogger,
+            }));
+            break;
+        default:
+            registry.set("notification", githubSummary({ logger: actionsLogger }));
+            break;
+    }
     // Coding agent
     registry.set("codingAgent", claudeCode({ logger: actionsLogger }));
     return registry;
