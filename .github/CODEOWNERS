@@ -1,0 +1,13 @@
+# Default owner for everything
+* @swenyai/core
+
+# Packages
+packages/action/    @swenyai/core
+packages/engine/    @swenyai/core
+packages/providers/ @swenyai/core
+packages/agent/     @swenyai/core
+packages/web/       @swenyai/core
+
+# CI and release
+.github/workflows/  @swenyai/core
+dist/               @swenyai/core
