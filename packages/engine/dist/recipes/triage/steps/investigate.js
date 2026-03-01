@@ -2,19 +2,19 @@ import * as fs from "fs";
 import * as path from "path";
 import { getStepData } from "../results.js";
 import { buildInvestigationPrompt } from "../prompts.js";
-const ANALYSIS_DIR = ".github/triage-analysis";
 /** Run Claude coding agent to investigate production issues and parse results. */
 export async function investigate(ctx) {
     const config = ctx.config;
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
     const observability = ctx.providers.get("observability");
     const codingAgent = ctx.providers.get("codingAgent");
-    fs.mkdirSync(ANALYSIS_DIR, { recursive: true });
+    fs.mkdirSync(analysisDir, { recursive: true });
     // Install coding agent CLI
     await codingAgent.install();
     // Get known issues context from prior step
     const knownIssuesContent = getStepData(ctx, "build-context")?.knownIssuesContent ?? "";
     // Write known issues file for reference
-    const knownIssuesPath = path.join(ANALYSIS_DIR, "known-issues-context.md");
+    const knownIssuesPath = path.join(analysisDir, "known-issues-context.md");
     fs.writeFileSync(knownIssuesPath, knownIssuesContent);
     // Build investigation prompt
     const prompt = buildInvestigationPrompt(config, observability, knownIssuesContent);
@@ -25,10 +25,10 @@ export async function investigate(ctx) {
         env: { ...config.agentEnv },
     });
     // Parse results
-    const result = parseInvestigationResults(ANALYSIS_DIR);
+    const result = parseInvestigationResults(analysisDir);
     return {
         status: "success",
-        data: result,
+        data: { ...result },
     };
 }
 function parseInvestigationResults(analysisDir) {

@@ -9,6 +9,7 @@ import type {
 } from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,8 +43,8 @@ async function ghApi(method: string, path: string, token: string, body?: Record<
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`GitHub API ${method} ${path} failed (${resp.status}): ${text}`);
+    const body = await resp.text().catch(() => "");
+    throw new ProviderApiError("GitHub", resp.status, resp.statusText, body);
   }
   return resp.json();
 }

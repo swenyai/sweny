@@ -22,7 +22,10 @@
     ".": "./dist/index.js"
   },
   "dependencies": {
-    "@swenyai/providers": "*"
+    "@swenyai/providers": "^0.1.0"
+  },
+  "peerDependencies": {
+    "@swenyai/providers": ">=0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22",

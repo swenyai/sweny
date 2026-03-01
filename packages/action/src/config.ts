@@ -27,6 +27,10 @@ export interface ActionConfig {
   maxInvestigateTurns: number;
   maxImplementTurns: number;
 
+  // PR / branch settings
+  baseBranch: string;
+  prLabels: string[];
+
   // Behavior
   dryRun: boolean;
   noveltyMode: boolean;
@@ -86,6 +90,9 @@ export function parseInputs(): ActionConfig {
     maxInvestigateTurns: parseInt(core.getInput("max-investigate-turns") || "50", 10),
     maxImplementTurns: parseInt(core.getInput("max-implement-turns") || "30", 10),
 
+    baseBranch: core.getInput("base-branch") || "main",
+    prLabels: (core.getInput("pr-labels") || "agent,triage,needs-review").split(",").map((l) => l.trim()),
+
     dryRun: core.getBooleanInput("dry-run"),
     noveltyMode: core.getBooleanInput("novelty-mode"),
     linearIssue: core.getInput("linear-issue"),
@@ -114,6 +121,128 @@ export function parseInputs(): ActionConfig {
     repository: process.env.GITHUB_REPOSITORY || "",
     repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",
   };
+}
+
+export function validateInputs(config: ActionConfig): string[] {
+  const errors: string[] = [];
+
+  // Auth: at least one required
+  if (!config.anthropicApiKey && !config.claudeOauthToken) {
+    errors.push("Missing required input: either `anthropic-api-key` or `claude-oauth-token` must be provided");
+  }
+
+  // Observability credentials by provider
+  switch (config.observabilityProvider) {
+    case "datadog":
+      if (!config.observabilityCredentials.apiKey)
+        errors.push("Missing required input: `dd-api-key` is required when `observability-provider` is `datadog`");
+      if (!config.observabilityCredentials.appKey)
+        errors.push("Missing required input: `dd-app-key` is required when `observability-provider` is `datadog`");
+      break;
+    case "sentry":
+      if (!config.observabilityCredentials.authToken)
+        errors.push(
+          "Missing required input: `sentry-auth-token` is required when `observability-provider` is `sentry`",
+        );
+      if (!config.observabilityCredentials.organization)
+        errors.push("Missing required input: `sentry-org` is required when `observability-provider` is `sentry`");
+      if (!config.observabilityCredentials.project)
+        errors.push("Missing required input: `sentry-project` is required when `observability-provider` is `sentry`");
+      break;
+    case "cloudwatch":
+      if (!config.observabilityCredentials.logGroupPrefix)
+        errors.push(
+          "Missing required input: `cloudwatch-log-group-prefix` is required when `observability-provider` is `cloudwatch`",
+        );
+      break;
+    case "splunk":
+      if (!config.observabilityCredentials.baseUrl)
+        errors.push("Missing required input: `splunk-url` is required when `observability-provider` is `splunk`");
+      if (!config.observabilityCredentials.token)
+        errors.push("Missing required input: `splunk-token` is required when `observability-provider` is `splunk`");
+      break;
+    case "elastic":
+      if (!config.observabilityCredentials.baseUrl)
+        errors.push("Missing required input: `elastic-url` is required when `observability-provider` is `elastic`");
+      if (!config.observabilityCredentials.apiKey)
+        errors.push("Missing required input: `elastic-api-key` is required when `observability-provider` is `elastic`");
+      break;
+    case "newrelic":
+      if (!config.observabilityCredentials.apiKey)
+        errors.push(
+          "Missing required input: `newrelic-api-key` is required when `observability-provider` is `newrelic`",
+        );
+      if (!config.observabilityCredentials.accountId)
+        errors.push(
+          "Missing required input: `newrelic-account-id` is required when `observability-provider` is `newrelic`",
+        );
+      break;
+    case "loki":
+      if (!config.observabilityCredentials.baseUrl)
+        errors.push("Missing required input: `loki-url` is required when `observability-provider` is `loki`");
+      break;
+  }
+
+  // Issue tracker credentials by provider
+  switch (config.issueTrackerProvider) {
+    case "linear":
+      if (!config.linearApiKey)
+        errors.push("Missing required input: `linear-api-key` is required when `issue-tracker-provider` is `linear`");
+      if (!config.linearTeamId)
+        errors.push("Missing required input: `linear-team-id` is required when `issue-tracker-provider` is `linear`");
+      break;
+    case "jira":
+      if (!config.jiraBaseUrl)
+        errors.push("Missing required input: `jira-base-url` is required when `issue-tracker-provider` is `jira`");
+      if (!config.jiraEmail)
+        errors.push("Missing required input: `jira-email` is required when `issue-tracker-provider` is `jira`");
+      if (!config.jiraApiToken)
+        errors.push("Missing required input: `jira-api-token` is required when `issue-tracker-provider` is `jira`");
+      break;
+  }
+
+  // Source control credentials by provider
+  switch (config.sourceControlProvider) {
+    case "gitlab":
+      if (!config.gitlabToken)
+        errors.push("Missing required input: `gitlab-token` is required when `source-control-provider` is `gitlab`");
+      if (!config.gitlabProjectId)
+        errors.push(
+          "Missing required input: `gitlab-project-id` is required when `source-control-provider` is `gitlab`",
+        );
+      break;
+  }
+
+  // Notification credentials by provider
+  switch (config.notificationProvider) {
+    case "slack":
+    case "teams":
+    case "discord":
+    case "webhook":
+      if (!config.notificationWebhookUrl)
+        errors.push(
+          `Missing required input: \`notification-webhook-url\` is required when \`notification-provider\` is \`${config.notificationProvider}\``,
+        );
+      break;
+    case "email":
+      if (!config.sendgridApiKey)
+        errors.push("Missing required input: `sendgrid-api-key` is required when `notification-provider` is `email`");
+      if (!config.emailFrom)
+        errors.push("Missing required input: `email-from` is required when `notification-provider` is `email`");
+      if (!config.emailTo)
+        errors.push("Missing required input: `email-to` is required when `notification-provider` is `email`");
+      break;
+  }
+
+  // Integer bounds
+  if (config.maxInvestigateTurns < 1 || config.maxInvestigateTurns > 500) {
+    errors.push("`max-investigate-turns` must be between 1 and 500");
+  }
+  if (config.maxImplementTurns < 1 || config.maxImplementTurns > 500) {
+    errors.push("`max-implement-turns` must be between 1 and 500");
+  }
+
+  return errors;
 }
 
 function parseObservabilityCredentials(provider: string): Record<string, string> {

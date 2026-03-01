@@ -206,6 +206,16 @@ inputs:
     required: false
     default: "30"
 
+  # PR / branch settings
+  base-branch:
+    description: "Target branch for PRs (e.g., main, master, develop)"
+    required: false
+    default: "main"
+  pr-labels:
+    description: "Comma-separated list of labels to apply to created PRs"
+    required: false
+    default: "agent,triage,needs-review"
+
   # Behavior
   dry-run:
     description: "Dry run mode — analyze only, do not create PRs"

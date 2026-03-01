@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
 
 export const cloudwatchConfigSchema = z.object({
@@ -88,7 +89,7 @@ class CloudWatchProvider implements ObservabilityProvider {
     );
 
     const queryId = startResult.queryId;
-    if (!queryId) throw new Error("CloudWatch StartQuery did not return a queryId");
+    if (!queryId) throw new ProviderApiError("CloudWatch", 0, "StartQuery did not return a queryId", "");
 
     // Poll for results
     let results: Array<Array<{ field?: string; value?: string }>> = [];
@@ -196,7 +197,7 @@ aws logs start-query \\
     );
 
     const queryId = startResult.queryId;
-    if (!queryId) throw new Error("CloudWatch StartQuery did not return a queryId");
+    if (!queryId) throw new ProviderApiError("CloudWatch", 0, "StartQuery did not return a queryId", "");
 
     let results: Array<Array<{ field?: string; value?: string }>> = [];
     for (let i = 0; i < 30; i++) {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
 
 export const sentryConfigSchema = z.object({
@@ -48,7 +49,8 @@ class SentryProvider implements ObservabilityProvider {
     });
 
     if (!response.ok) {
-      throw new Error(`Sentry API error: ${response.status} ${response.statusText}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("Sentry", response.status, response.statusText, body);
     }
 
     return (await response.json()) as T;

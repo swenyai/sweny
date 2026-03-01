@@ -158,13 +158,15 @@ describe("LinearProvider", () => {
   it("throws on GraphQL errors", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
+      statusText: "OK",
       json: async () => ({
         errors: [{ message: "Not authorized" }],
       }),
     });
 
     const provider = linear({ apiKey: "bad", logger: silentLogger });
-    await expect(provider.verifyAccess()).rejects.toThrow("Linear GraphQL error: Not authorized");
+    await expect(provider.verifyAccess()).rejects.toThrow("Linear API error: 200 OK");
   });
 
   it("getIssue fetches issue by identifier and returns state", async () => {

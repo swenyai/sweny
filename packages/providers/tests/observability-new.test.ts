@@ -230,6 +230,7 @@ describe("SplunkProvider", () => {
       ok: false,
       status: 401,
       statusText: "Unauthorized",
+      text: async () => "",
     });
 
     await expect(makeSplunk().verifyAccess()).rejects.toThrow("Splunk API error: 401 Unauthorized");
@@ -691,12 +692,13 @@ describe("LokiProvider", () => {
 
   it("throws on non-ok response", async () => {
     // verifyAccess tries /ready first; if that fails with non-ok, it throws before the fallback
-    // Actually, looking at the code: if /ready returns non-ok, it throws "Loki ready check failed: 401"
+    // Actually, looking at the code: if /ready returns non-ok, it throws ProviderApiError
     // Let's test via queryLogs which goes through this.request directly
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
       statusText: "Unauthorized",
+      text: async () => "",
     });
 
     await expect(makeLoki().queryLogs({ timeRange: "1h", serviceFilter: "x", severity: "error" })).rejects.toThrow(
@@ -956,19 +958,22 @@ describe("NewRelicProvider", () => {
       ok: false,
       status: 401,
       statusText: "Unauthorized",
+      text: async () => "",
     });
 
-    await expect(makeNewRelic().verifyAccess()).rejects.toThrow("New Relic NerdGraph API error: 401 Unauthorized");
+    await expect(makeNewRelic().verifyAccess()).rejects.toThrow("NewRelic API error: 401 Unauthorized");
   });
 
   it("throws on GraphQL errors in response", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
+      statusText: "OK",
       json: async () => ({
         errors: [{ message: "Invalid API key" }],
       }),
     });
 
-    await expect(makeNewRelic().verifyAccess()).rejects.toThrow("Invalid API key");
+    await expect(makeNewRelic().verifyAccess()).rejects.toThrow("NewRelic API error: 200 OK");
   });
 });

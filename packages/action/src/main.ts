@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
 import { runWorkflow, triageWorkflow } from "@swenyai/engine";
 import type { TriageConfig, WorkflowResult } from "@swenyai/engine";
-import { parseInputs, ActionConfig } from "./config.js";
+import { parseInputs, validateInputs, ActionConfig } from "./config.js";
 import { createProviders } from "./providers/index.js";
 
 const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
@@ -9,6 +9,11 @@ const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, 
 async function run(): Promise<void> {
   try {
     const config = parseInputs();
+    const validationErrors = validateInputs(config);
+    if (validationErrors.length > 0) {
+      core.setFailed(validationErrors.join("\n"));
+      return;
+    }
     const providers = createProviders(config);
     const triageConfig = mapToTriageConfig(config);
 
@@ -90,6 +95,9 @@ function mapToTriageConfig(config: ActionConfig): TriageConfig {
     statePeerReview: config.linearStatePeerReview,
 
     repository: config.repository,
+
+    baseBranch: config.baseBranch,
+    prLabels: config.prLabels,
 
     dryRun: config.dryRun,
     noveltyMode: config.noveltyMode,

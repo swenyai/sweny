@@ -10,7 +10,7 @@ vi.mock("@actions/core", () => ({
   getBooleanInput: mockGetBooleanInput,
 }));
 
-import { parseInputs } from "../src/config.js";
+import { parseInputs, validateInputs, ActionConfig } from "../src/config.js";
 
 describe("parseInputs", () => {
   const originalEnv = process.env;
@@ -253,6 +253,36 @@ describe("parseInputs", () => {
     expect(config.gitlabBaseUrl).toBe("https://gitlab.com");
   });
 
+  it("baseBranch defaults to main", () => {
+    mockGetInput.mockReturnValue("");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.baseBranch).toBe("main");
+  });
+
+  it("prLabels defaults to agent,triage,needs-review", () => {
+    mockGetInput.mockReturnValue("");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.prLabels).toEqual(["agent", "triage", "needs-review"]);
+  });
+
+  it("parses custom prLabels from comma-separated input", () => {
+    const inputMap: Record<string, string> = {
+      "pr-labels": "custom, label-2",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.prLabels).toEqual(["custom", "label-2"]);
+  });
+
   it("notificationProvider defaults to github-summary", () => {
     mockGetInput.mockReturnValue("");
     mockGetBooleanInput.mockReturnValue(false);
@@ -280,5 +310,128 @@ describe("parseInputs", () => {
     expect(config.sendgridApiKey).toBe("SG.test");
     expect(config.emailFrom).toBe("bot@example.com");
     expect(config.emailTo).toBe("team@example.com");
+  });
+});
+
+describe("validateInputs", () => {
+  function baseConfig(overrides?: Partial<ActionConfig>): ActionConfig {
+    return {
+      anthropicApiKey: "sk-ant-test",
+      claudeOauthToken: "",
+      observabilityProvider: "datadog",
+      observabilityCredentials: { apiKey: "dd-key", appKey: "dd-app" },
+      issueTrackerProvider: "github-issues",
+      linearApiKey: "",
+      linearTeamId: "",
+      linearBugLabelId: "",
+      linearTriageLabelId: "",
+      linearStateBacklog: "",
+      linearStateInProgress: "",
+      linearStatePeerReview: "",
+      timeRange: "24h",
+      severityFocus: "errors",
+      serviceFilter: "*",
+      investigationDepth: "standard",
+      maxInvestigateTurns: 50,
+      maxImplementTurns: 30,
+      baseBranch: "main",
+      prLabels: ["agent"],
+      dryRun: false,
+      noveltyMode: true,
+      linearIssue: "",
+      additionalInstructions: "",
+      serviceMapPath: ".github/service-map.yml",
+      githubToken: "ghs_test",
+      botToken: "",
+      sourceControlProvider: "github",
+      jiraBaseUrl: "",
+      jiraEmail: "",
+      jiraApiToken: "",
+      gitlabToken: "",
+      gitlabProjectId: "",
+      gitlabBaseUrl: "https://gitlab.com",
+      notificationProvider: "github-summary",
+      notificationWebhookUrl: "",
+      sendgridApiKey: "",
+      emailFrom: "",
+      emailTo: "",
+      webhookSigningSecret: "",
+      repository: "org/repo",
+      repositoryOwner: "org",
+      ...overrides,
+    };
+  }
+
+  it("returns no errors for valid config", () => {
+    expect(validateInputs(baseConfig())).toEqual([]);
+  });
+
+  it("requires auth: either anthropic-api-key or claude-oauth-token", () => {
+    const errors = validateInputs(baseConfig({ anthropicApiKey: "", claudeOauthToken: "" }));
+    expect(errors).toContainEqual(expect.stringContaining("anthropic-api-key"));
+  });
+
+  it("accepts claude-oauth-token as auth", () => {
+    const errors = validateInputs(baseConfig({ anthropicApiKey: "", claudeOauthToken: "tok" }));
+    expect(errors.some((e) => e.includes("anthropic-api-key") || e.includes("oauth"))).toBe(false);
+  });
+
+  it("validates datadog requires dd-api-key and dd-app-key", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "datadog", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("dd-api-key"));
+    expect(errors).toContainEqual(expect.stringContaining("dd-app-key"));
+  });
+
+  it("validates sentry requires auth-token, org, project", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "sentry", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("sentry-auth-token"));
+    expect(errors).toContainEqual(expect.stringContaining("sentry-org"));
+    expect(errors).toContainEqual(expect.stringContaining("sentry-project"));
+  });
+
+  it("validates linear requires api-key and team-id", () => {
+    const errors = validateInputs(baseConfig({ issueTrackerProvider: "linear" }));
+    expect(errors).toContainEqual(expect.stringContaining("linear-api-key"));
+    expect(errors).toContainEqual(expect.stringContaining("linear-team-id"));
+  });
+
+  it("validates jira requires base-url, email, api-token", () => {
+    const errors = validateInputs(baseConfig({ issueTrackerProvider: "jira" }));
+    expect(errors).toContainEqual(expect.stringContaining("jira-base-url"));
+    expect(errors).toContainEqual(expect.stringContaining("jira-email"));
+    expect(errors).toContainEqual(expect.stringContaining("jira-api-token"));
+  });
+
+  it("validates gitlab requires token and project-id", () => {
+    const errors = validateInputs(baseConfig({ sourceControlProvider: "gitlab" }));
+    expect(errors).toContainEqual(expect.stringContaining("gitlab-token"));
+    expect(errors).toContainEqual(expect.stringContaining("gitlab-project-id"));
+  });
+
+  it("validates slack notification requires webhook-url", () => {
+    const errors = validateInputs(baseConfig({ notificationProvider: "slack" }));
+    expect(errors).toContainEqual(expect.stringContaining("notification-webhook-url"));
+  });
+
+  it("validates email notification requires sendgrid-api-key, from, to", () => {
+    const errors = validateInputs(baseConfig({ notificationProvider: "email" }));
+    expect(errors).toContainEqual(expect.stringContaining("sendgrid-api-key"));
+    expect(errors).toContainEqual(expect.stringContaining("email-from"));
+    expect(errors).toContainEqual(expect.stringContaining("email-to"));
+  });
+
+  it("validates max-investigate-turns bounds", () => {
+    const errors = validateInputs(baseConfig({ maxInvestigateTurns: 0 }));
+    expect(errors).toContainEqual(expect.stringContaining("max-investigate-turns"));
+  });
+
+  it("validates max-implement-turns bounds", () => {
+    const errors = validateInputs(baseConfig({ maxImplementTurns: 501 }));
+    expect(errors).toContainEqual(expect.stringContaining("max-implement-turns"));
+  });
+
+  it("github-issues issue tracker needs no extra credentials", () => {
+    const errors = validateInputs(baseConfig({ issueTrackerProvider: "github-issues" }));
+    expect(errors.some((e) => e.includes("issue-tracker"))).toBe(false);
   });
 });

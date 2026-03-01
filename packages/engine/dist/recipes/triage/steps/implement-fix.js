@@ -4,6 +4,7 @@ import { buildImplementPrompt } from "../prompts.js";
 /** Create branch, run Claude to implement fix, check for changes, and push. */
 export async function implementFix(ctx) {
     const config = ctx.config;
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
     const sourceControl = ctx.providers.get("sourceControl");
     const codingAgent = ctx.providers.get("codingAgent");
     const issueData = getStepData(ctx, "create-issue");
@@ -48,7 +49,7 @@ export async function implementFix(ctx) {
     // 3. Install Claude and implement fix
     // -------------------------------------------------------------------------
     await codingAgent.install();
-    const implementPrompt = buildImplementPrompt(issueIdentifier);
+    const implementPrompt = buildImplementPrompt(issueIdentifier, analysisDir);
     await codingAgent.run({
         prompt: implementPrompt,
         maxTurns: config.maxImplementTurns,
@@ -58,7 +59,7 @@ export async function implementFix(ctx) {
     // 4. Check for code changes
     // -------------------------------------------------------------------------
     // Check if fix was declined
-    const fixDeclinedPath = ".github/triage-analysis/fix-declined.md";
+    const fixDeclinedPath = `${analysisDir}/fix-declined.md`;
     if (fs.existsSync(fixDeclinedPath)) {
         const reason = fs.readFileSync(fixDeclinedPath, "utf-8").trim();
         ctx.logger.info(`Fix was declined by Claude: ${reason.slice(0, 200)}`);

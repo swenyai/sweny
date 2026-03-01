@@ -119,12 +119,26 @@ describe("createPr", () => {
     expect(createPullRequest).toHaveBeenCalledWith(expect.objectContaining({ title: "fix(ENG-99): fix auth bug" }));
   });
 
-  it('PR labels: ["agent", "triage", "needs-review"]', async () => {
+  it('PR labels: ["agent", "triage", "needs-review"] by default', async () => {
     const ctx = buildCtx();
     await createPr(ctx);
     expect(createPullRequest).toHaveBeenCalledWith(
       expect.objectContaining({ labels: ["agent", "triage", "needs-review"] }),
     );
+  });
+
+  it("uses custom baseBranch from config", async () => {
+    const ctx = buildCtx();
+    ctx.config.baseBranch = "develop";
+    await createPr(ctx);
+    expect(createPullRequest).toHaveBeenCalledWith(expect.objectContaining({ base: "develop" }));
+  });
+
+  it("uses custom prLabels from config", async () => {
+    const ctx = buildCtx();
+    ctx.config.prLabels = ["custom-label"];
+    await createPr(ctx);
+    expect(createPullRequest).toHaveBeenCalledWith(expect.objectContaining({ labels: ["custom-label"] }));
   });
 
   it("linkPr called when canLinkPr returns true", async () => {

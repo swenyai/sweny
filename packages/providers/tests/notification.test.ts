@@ -91,6 +91,7 @@ describe("slackWebhook", () => {
       ok: false,
       status: 500,
       statusText: "Internal Server Error",
+      text: async () => "",
     });
 
     const provider = slackWebhook({
@@ -98,7 +99,7 @@ describe("slackWebhook", () => {
       logger: silentLogger,
     });
 
-    await expect(provider.send({ body: "x" })).rejects.toThrow("Slack webhook error: 500 Internal Server Error");
+    await expect(provider.send({ body: "x" })).rejects.toThrow("Slack API error: 500 Internal Server Error");
   });
 });
 

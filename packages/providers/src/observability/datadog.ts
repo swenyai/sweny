@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
 
 export const datadogConfigSchema = z.object({
@@ -43,7 +44,8 @@ class DatadogProvider implements ObservabilityProvider {
     });
 
     if (!response.ok) {
-      throw new Error(`Datadog API error: ${response.status} ${response.statusText}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("Datadog", response.status, response.statusText, body);
     }
 
     return (await response.json()) as T;

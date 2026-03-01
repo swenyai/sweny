@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
 
 export const newrelicConfigSchema = z.object({
@@ -49,13 +50,14 @@ class NewRelicProvider implements ObservabilityProvider {
     });
 
     if (!response.ok) {
-      throw new Error(`New Relic NerdGraph API error: ${response.status} ${response.statusText}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("NewRelic", response.status, response.statusText, body);
     }
 
     const json = (await response.json()) as { errors?: Array<{ message: string }>; data?: T };
 
     if (json.errors && json.errors.length > 0) {
-      throw new Error(`New Relic NerdGraph query error: ${json.errors[0].message}`);
+      throw new ProviderApiError("NewRelic", response.status, response.statusText, JSON.stringify(json.errors));
     }
 
     return json.data as T;

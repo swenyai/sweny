@@ -257,6 +257,7 @@ describe("SentryProvider", () => {
       ok: false,
       status: 401,
       statusText: "Unauthorized",
+      text: async () => "",
     });
 
     await expect(makeSentry().verifyAccess()).rejects.toThrow("Sentry API error: 401 Unauthorized");
@@ -375,6 +376,7 @@ describe("DatadogProvider", () => {
       ok: false,
       status: 403,
       statusText: "Forbidden",
+      text: async () => "",
     });
 
     const silentLogger = { info: () => {}, debug: () => {}, warn: () => {} };

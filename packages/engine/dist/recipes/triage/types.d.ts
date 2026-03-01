@@ -18,6 +18,16 @@ export interface TriageConfig {
     noveltyMode: boolean;
     issueOverride: string;
     additionalInstructions: string;
+    /** Default branch for PR targets (default: "main"). */
+    baseBranch?: string;
+    /** Labels applied to created PRs (default: ["agent", "triage", "needs-review"]). */
+    prLabels?: string[];
+    /** Directory for triage analysis files (default: ".github/triage-analysis"). */
+    analysisDir?: string;
+    /** Max Claude turns for PR description generation (default: 10). */
+    prDescriptionMaxTurns?: number;
+    /** Default priority for new issues (default: 2). */
+    issuePriority?: number;
     agentEnv: Record<string, string>;
 }
 /** Result of the investigation (learn) phase. */

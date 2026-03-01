@@ -43,14 +43,15 @@ export async function sendNotification(ctx) {
         lines.push("> **Dry Run**: Analysis only");
     }
     // Append investigation log if it exists
-    const investigationLog = ".github/triage-analysis/investigation-log.md";
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
+    const investigationLog = `${analysisDir}/investigation-log.md`;
     if (fs.existsSync(investigationLog)) {
         lines.push("");
         lines.push("### Investigation Log");
         lines.push(fs.readFileSync(investigationLog, "utf-8"));
     }
     // Append issues report if it exists
-    const issuesReport = ".github/triage-analysis/issues-report.md";
+    const issuesReport = `${analysisDir}/issues-report.md`;
     if (fs.existsSync(issuesReport)) {
         lines.push("");
         lines.push("### Issues Found");

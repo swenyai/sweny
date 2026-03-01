@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
 
 export const lokiConfigSchema = z.object({
@@ -58,7 +59,8 @@ class LokiProvider implements ObservabilityProvider {
     });
 
     if (!response.ok) {
-      throw new Error(`Loki API error: ${response.status} ${response.statusText}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("Loki", response.status, response.statusText, body);
     }
 
     return (await response.json()) as T;
@@ -106,7 +108,8 @@ class LokiProvider implements ObservabilityProvider {
       });
 
       if (!response.ok) {
-        throw new Error(`Loki ready check failed: ${response.status}`);
+        const body = await response.text().catch(() => "");
+        throw new ProviderApiError("Loki", response.status, response.statusText, body);
       }
     } catch {
       // Fall back to labels endpoint

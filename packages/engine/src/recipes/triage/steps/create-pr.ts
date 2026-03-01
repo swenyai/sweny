@@ -32,13 +32,15 @@ export async function createPr(ctx: WorkflowContext<TriageConfig>): Promise<Step
   const issueUrl = issueData?.issueUrl ?? "";
   const branchName = implementData?.branchName ?? "";
 
+  const analysisDir = config.analysisDir ?? ".github/triage-analysis";
+
   // -------------------------------------------------------------------------
   // 1. Generate PR description with Claude
   // -------------------------------------------------------------------------
-  const prDescPrompt = buildPrDescriptionPrompt(issueIdentifier, issueUrl);
+  const prDescPrompt = buildPrDescriptionPrompt(issueIdentifier, issueUrl, analysisDir);
   await codingAgent.run({
     prompt: prDescPrompt,
-    maxTurns: 10,
+    maxTurns: config.prDescriptionMaxTurns ?? 10,
     env: { ...config.agentEnv },
   });
 
@@ -46,7 +48,7 @@ export async function createPr(ctx: WorkflowContext<TriageConfig>): Promise<Step
   // 2. Create Pull Request
   // -------------------------------------------------------------------------
   let prBody = "";
-  const prDescPath = ".github/triage-analysis/pr-description.md";
+  const prDescPath = `${analysisDir}/pr-description.md`;
   if (fs.existsSync(prDescPath)) {
     prBody = fs.readFileSync(prDescPath, "utf-8");
   } else {
@@ -65,8 +67,8 @@ This PR contains an automated fix for an issue identified in production logs.
     title: prTitle,
     body: prBody,
     head: branchName,
-    base: "main",
-    labels: ["agent", "triage", "needs-review"],
+    base: config.baseBranch ?? "main",
+    labels: config.prLabels ?? ["agent", "triage", "needs-review"],
   });
   ctx.logger.info(`Created PR #${pr.number}: ${pr.url}`);
 

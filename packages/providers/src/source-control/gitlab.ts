@@ -10,6 +10,7 @@ import type {
 } from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -49,8 +50,8 @@ async function glApi(
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`GitLab API ${method} ${path} failed (${resp.status}): ${text}`);
+    const body = await resp.text().catch(() => "");
+    throw new ProviderApiError("GitLab", resp.status, resp.statusText, body);
   }
   // Some endpoints (204 No Content) return no body
   const contentLength = resp.headers.get("content-length");

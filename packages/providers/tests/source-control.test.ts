@@ -16,10 +16,11 @@ const mockExecFile = vi.mocked(_execFile);
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-function makeJsonResponse(data: unknown, status = 200): Response {
+function makeJsonResponse(data: unknown, status = 200, statusText = "OK"): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    statusText,
     json: () => Promise.resolve(data),
     text: () => Promise.resolve(JSON.stringify(data)),
   } as Response;
@@ -76,9 +77,9 @@ describe("github source-control provider", () => {
     });
 
     it("throws on API failure", async () => {
-      mockFetch.mockResolvedValueOnce(makeJsonResponse({ message: "Not Found" }, 404));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ message: "Not Found" }, 404, "Not Found"));
 
-      await expect(provider.verifyAccess()).rejects.toThrow("GitHub API GET /repos/acme/app failed (404)");
+      await expect(provider.verifyAccess()).rejects.toThrow("GitHub API error: 404 Not Found");
     });
   });
 

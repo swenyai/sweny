@@ -12,6 +12,7 @@ export function buildInvestigationPrompt(
   observability: ObservabilityProvider,
   knownIssuesContent: string,
 ): string {
+  const analysisDir = config.analysisDir ?? ".github/triage-analysis";
   const parts: string[] = [];
 
   parts.push(`You are an autonomous SRE agent investigating production issues.
@@ -146,10 +147,10 @@ ${knownIssuesContent}`);
 
 Create these files with your findings:
 
-### 1. \`.github/triage-analysis/investigation-log.md\`
+### 1. \`${analysisDir}/investigation-log.md\`
 Document your investigation process - commands run, what you found, reasoning.
 
-### 2. \`.github/triage-analysis/issues-report.md\`
+### 2. \`${analysisDir}/issues-report.md\`
 For each issue found:
 - Severity, Environment (Production/Staging/Both), Frequency
 - Description, Evidence (logs, stack traces)
@@ -159,7 +160,7 @@ For each issue found:
   - If exists: Note the issue identifier (e.g., ENG-123) and URL
   - If not found: Note as "No existing Linear issue found"
 
-### 3. \`.github/triage-analysis/best-candidate.md\`
+### 3. \`${analysisDir}/best-candidate.md\`
 Select the BEST issue to fix based on impact, frequency, fixability.
 Include full technical analysis, exact code changes, test plan, rollback plan.
 
@@ -209,13 +210,13 @@ Write files early and update them if needed. Do NOT keep investigating without w
 // Implementation Prompt
 // ---------------------------------------------------------------------------
 
-export function buildImplementPrompt(issueIdentifier: string): string {
+export function buildImplementPrompt(issueIdentifier: string, analysisDir = ".github/triage-analysis"): string {
   return `You are implementing a fix for an issue identified from production logs.
 
 ## Context
 
-Read the best candidate analysis at \`.github/triage-analysis/best-candidate.md\`.
-Also read \`.github/triage-analysis/investigation-log.md\` for context.
+Read the best candidate analysis at \`${analysisDir}/best-candidate.md\`.
+Also read \`${analysisDir}/investigation-log.md\` for context.
 
 ## Your Task
 
@@ -246,7 +247,7 @@ Also read \`.github/triage-analysis/investigation-log.md\` for context.
 
 ## Safety Guidelines
 
-- If the fix is too complex or risky, create \`.github/triage-analysis/fix-declined.md\` explaining why
+- If the fix is too complex or risky, create \`${analysisDir}/fix-declined.md\` explaining why
 - Do not make breaking changes
 - Prefer defensive coding patterns
 
@@ -257,18 +258,22 @@ Start by reading the best-candidate.md file.`;
 // PR Description Prompt
 // ---------------------------------------------------------------------------
 
-export function buildPrDescriptionPrompt(issueIdentifier: string, issueUrl: string): string {
+export function buildPrDescriptionPrompt(
+  issueIdentifier: string,
+  issueUrl: string,
+  analysisDir = ".github/triage-analysis",
+): string {
   return `Generate a pull request description.
 
 ## Context
 
-1. Read \`.github/triage-analysis/best-candidate.md\` for issue details
-2. Read \`.github/triage-analysis/investigation-log.md\` for context
+1. Read \`${analysisDir}/best-candidate.md\` for issue details
+2. Read \`${analysisDir}/investigation-log.md\` for context
 3. Run \`git diff main..HEAD\` to see the changes made
 
 ## Output
 
-Create \`.github/triage-analysis/pr-description.md\` with:
+Create \`${analysisDir}/pr-description.md\` with:
 
 ## Summary
 <What this PR fixes and why>

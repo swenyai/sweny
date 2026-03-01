@@ -16,10 +16,11 @@ const mockExecFile = vi.mocked(_execFile);
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-function makeJsonResponse(data: unknown, status = 200): Response {
+function makeJsonResponse(data: unknown, status = 200, statusText = "OK"): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    statusText,
     headers: new Headers({ "content-length": String(JSON.stringify(data).length) }),
     json: () => Promise.resolve(data),
     text: () => Promise.resolve(JSON.stringify(data)),
@@ -87,9 +88,9 @@ describe("gitlab source-control provider", () => {
     });
 
     it("throws on API failure", async () => {
-      mockFetch.mockResolvedValueOnce(makeJsonResponse({ message: "Not Found" }, 404));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ message: "Not Found" }, 404, "Not Found"));
 
-      await expect(provider.verifyAccess()).rejects.toThrow("GitLab API GET /projects/42 failed (404)");
+      await expect(provider.verifyAccess()).rejects.toThrow("GitLab API error: 404 Not Found");
     });
   });
 

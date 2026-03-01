@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 import type { IncidentProvider, Incident, IncidentCreateOptions, OnCallEntry } from "./types.js";
 
 export const opsgenieConfigSchema = z.object({
@@ -39,7 +40,8 @@ class OpsGenieProvider implements IncidentProvider {
     });
 
     if (!response.ok) {
-      throw new Error(`OpsGenie API error: ${response.status} ${response.statusText}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("OpsGenie", response.status, response.statusText, body);
     }
 
     return (await response.json()) as T;

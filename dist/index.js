@@ -27667,7 +27667,7 @@ class ProviderAuthError extends ProviderError {
         this.name = "ProviderAuthError";
     }
 }
-class ProviderApiError extends ProviderError {
+class errors_ProviderApiError extends ProviderError {
     statusCode;
     statusText;
     responseBody;
@@ -31903,6 +31903,7 @@ const NEVER = (/* unused pure expression or super */ null && (INVALID));
 ;// CONCATENATED MODULE: ../providers/dist/observability/datadog.js
 
 
+
 const datadogConfigSchema = objectType({
     apiKey: stringType().min(1, "Datadog API key is required"),
     appKey: stringType().min(1, "Datadog Application key is required"),
@@ -31936,7 +31937,8 @@ class DatadogProvider {
             body: JSON.stringify(body),
         });
         if (!response.ok) {
-            throw new Error(`Datadog API error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("Datadog", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -32041,6 +32043,7 @@ curl -s -X POST "https://api.\${DD_SITE}/api/v2/logs/events/search" \\
 ;// CONCATENATED MODULE: ../providers/dist/observability/sentry.js
 
 
+
 const sentryConfigSchema = objectType({
     authToken: stringType().min(1, "Sentry auth token is required"),
     organization: stringType().min(1, "Sentry organization slug is required"),
@@ -32078,7 +32081,8 @@ class SentryProvider {
             },
         });
         if (!response.ok) {
-            throw new Error(`Sentry API error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("Sentry", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -32191,6 +32195,7 @@ curl -s "\${SENTRY_BASE_URL}/api/0/issues/{issue_id}/" \\
 ;// CONCATENATED MODULE: ../providers/dist/observability/cloudwatch.js
 
 
+
 const cloudwatchConfigSchema = objectType({
     region: stringType().default("us-east-1"),
     logGroupPrefix: stringType().min(1, "CloudWatch log group prefix is required"),
@@ -32255,7 +32260,7 @@ class CloudWatchProvider {
         }));
         const queryId = startResult.queryId;
         if (!queryId)
-            throw new Error("CloudWatch StartQuery did not return a queryId");
+            throw new errors_ProviderApiError("CloudWatch", 0, "StartQuery did not return a queryId", "");
         // Poll for results
         let results = [];
         for (let i = 0; i < 30; i++) {
@@ -32348,7 +32353,7 @@ aws logs start-query \\
         }));
         const queryId = startResult.queryId;
         if (!queryId)
-            throw new Error("CloudWatch StartQuery did not return a queryId");
+            throw new errors_ProviderApiError("CloudWatch", 0, "StartQuery did not return a queryId", "");
         let results = [];
         for (let i = 0; i < 30; i++) {
             await new Promise((r) => setTimeout(r, 1000));
@@ -32371,6 +32376,7 @@ aws logs start-query \\
 }
 //# sourceMappingURL=cloudwatch.js.map
 ;// CONCATENATED MODULE: ../providers/dist/observability/splunk.js
+
 
 
 const splunkConfigSchema = objectType({
@@ -32415,7 +32421,8 @@ class SplunkProvider {
         }
         const response = await fetch(url.toString(), fetchOpts);
         if (!response.ok) {
-            throw new Error(`Splunk API error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("Splunk", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -32550,6 +32557,7 @@ curl -s "\${SPLUNK_URL}/services/server/info?output_mode=json" \\
 ;// CONCATENATED MODULE: ../providers/dist/observability/elastic.js
 
 
+
 const elasticConfigSchema = objectType({
     baseUrl: stringType().min(1, "Elasticsearch URL is required"),
     apiKey: stringType().min(1).optional(),
@@ -32564,6 +32572,10 @@ const elasticConfigSchema = objectType({
 function elastic(config) {
     const parsed = elasticConfigSchema.parse(config);
     return new ElasticProvider(parsed);
+}
+/** Safely extract a string from an unknown value, returning undefined for non-strings. */
+function str(v) {
+    return typeof v === "string" ? v : undefined;
 }
 class ElasticProvider {
     baseUrl;
@@ -32598,8 +32610,8 @@ class ElasticProvider {
             ...(body ? { body: JSON.stringify(body) } : {}),
         });
         if (!response.ok) {
-            const text = await response.text().catch(() => "");
-            throw new Error(`Elasticsearch API error: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("Elasticsearch", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -32652,25 +32664,25 @@ class ElasticProvider {
         const hits = result.hits?.hits ?? [];
         const logs = hits.map((hit) => {
             const src = hit._source ?? {};
-            const service = src["service.name"] ??
+            const service = str(src["service.name"]) ??
                 (src["service"] && typeof src["service"] === "object"
-                    ? src["service"]["name"]
+                    ? str(src["service"]["name"])
                     : undefined) ??
-                src["host.name"] ??
+                str(src["host.name"]) ??
                 (src["host"] && typeof src["host"] === "object"
-                    ? src["host"]["name"]
+                    ? str(src["host"]["name"])
                     : undefined) ??
                 "unknown";
-            const level = src["log.level"] ??
+            const level = str(src["log.level"]) ??
                 (src["log"] && typeof src["log"] === "object"
-                    ? src["log"]["level"]
+                    ? str(src["log"]["level"])
                     : undefined) ??
                 "unknown";
             return {
-                timestamp: src["@timestamp"] ?? "",
+                timestamp: str(src["@timestamp"]) ?? "",
                 service,
                 level,
-                message: src["message"] ?? "",
+                message: str(src["message"]) ?? "",
                 attributes: src,
             };
         });
@@ -32789,6 +32801,7 @@ curl -s "\${ELASTIC_URL}/_cluster/health" \\
 ;// CONCATENATED MODULE: ../providers/dist/observability/newrelic.js
 
 
+
 const newrelicConfigSchema = objectType({
     apiKey: stringType().min(1, "New Relic User API key is required"),
     accountId: stringType().min(1, "New Relic account ID is required"),
@@ -32826,11 +32839,12 @@ class NewRelicProvider {
             body: JSON.stringify({ query }),
         });
         if (!response.ok) {
-            throw new Error(`New Relic NerdGraph API error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("NewRelic", response.status, response.statusText, body);
         }
         const json = (await response.json());
         if (json.errors && json.errors.length > 0) {
-            throw new Error(`New Relic NerdGraph query error: ${json.errors[0].message}`);
+            throw new errors_ProviderApiError("NewRelic", response.status, response.statusText, JSON.stringify(json.errors));
         }
         return json.data;
     }
@@ -32935,6 +32949,7 @@ curl -s -X POST "${this.endpoint}" \\
 ;// CONCATENATED MODULE: ../providers/dist/observability/loki.js
 
 
+
 const lokiConfigSchema = objectType({
     baseUrl: stringType().min(1, "Loki base URL is required"),
     apiKey: stringType().optional(),
@@ -32980,7 +32995,8 @@ class LokiProvider {
             headers: this.buildHeaders(),
         });
         if (!response.ok) {
-            throw new Error(`Loki API error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("Loki", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -33020,7 +33036,8 @@ class LokiProvider {
                 headers: this.buildHeaders(),
             });
             if (!response.ok) {
-                throw new Error(`Loki ready check failed: ${response.status}`);
+                const body = await response.text().catch(() => "");
+                throw new errors_ProviderApiError("Loki", response.status, response.statusText, body);
             }
         }
         catch {
@@ -33177,6 +33194,7 @@ function canListTriageHistory(p) {
 ;// CONCATENATED MODULE: ../providers/dist/issue-tracking/linear.js
 
 
+
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 const DEFAULT_OPEN_STATES = ["Triage", "Backlog", "Todo", "In Progress", "Peer Review", "In Review", "QA", "Blocked"];
 const linearConfigSchema = objectType({
@@ -33204,11 +33222,12 @@ class LinearProvider {
             body: JSON.stringify({ query, variables }),
         });
         if (!response.ok) {
-            throw new Error(`Linear API error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("Linear", response.status, response.statusText, body);
         }
         const json = (await response.json());
         if (json.errors && json.errors.length > 0) {
-            throw new Error(`Linear GraphQL error: ${json.errors.map((e) => e.message).join(", ")}`);
+            throw new errors_ProviderApiError("Linear", response.status, response.statusText, JSON.stringify(json.errors));
         }
         return json.data;
     }
@@ -33487,6 +33506,7 @@ class LinearProvider {
 ;// CONCATENATED MODULE: ../providers/dist/issue-tracking/github-issues.js
 
 
+
 const githubIssuesConfigSchema = objectType({
     token: stringType().min(1, "GitHub token is required"),
     owner: stringType().min(1, "Repository owner is required"),
@@ -33521,7 +33541,8 @@ class GitHubIssuesProvider {
             body: opts?.body ? JSON.stringify(opts.body) : undefined,
         });
         if (!response.ok) {
-            throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("GitHub", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -33622,6 +33643,7 @@ class GitHubIssuesProvider {
 ;// CONCATENATED MODULE: ../providers/dist/issue-tracking/jira.js
 
 
+
 const jiraConfigSchema = objectType({
     baseUrl: stringType()
         .min(1, "Jira base URL is required")
@@ -33656,8 +33678,8 @@ class JiraProvider {
             body: opts?.body ? JSON.stringify(opts.body) : undefined,
         });
         if (!response.ok) {
-            const text = await response.text().catch(() => "");
-            throw new Error(`Jira API error: ${response.status} ${response.statusText}${text ? ` — ${text}` : ""}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("Jira", response.status, response.statusText, body);
         }
         // Some endpoints (204 No Content) return no body
         if (response.status === 204) {
@@ -33878,6 +33900,7 @@ class GitHubSummaryProvider {
 ;// CONCATENATED MODULE: ../providers/dist/notification/slack-webhook.js
 
 
+
 const slackWebhookConfigSchema = objectType({
     webhookUrl: stringType().url("Slack webhook URL is required"),
     logger: custom().optional(),
@@ -33901,13 +33924,15 @@ class SlackWebhookProvider {
             body: JSON.stringify({ text }),
         });
         if (!response.ok) {
-            throw new Error(`Slack webhook error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("Slack", response.status, response.statusText, body);
         }
         this.log.info("Slack notification sent");
     }
 }
 //# sourceMappingURL=slack-webhook.js.map
 ;// CONCATENATED MODULE: ../providers/dist/notification/teams-webhook.js
+
 
 
 const teamsWebhookConfigSchema = objectType({
@@ -33962,13 +33987,15 @@ class TeamsWebhookProvider {
             body: JSON.stringify(card),
         });
         if (!response.ok) {
-            throw new Error(`Teams webhook error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("Teams", response.status, response.statusText, body);
         }
         this.log.info("Teams notification sent");
     }
 }
 //# sourceMappingURL=teams-webhook.js.map
 ;// CONCATENATED MODULE: ../providers/dist/notification/discord-webhook.js
+
 
 
 const discordWebhookConfigSchema = objectType({
@@ -33996,7 +34023,8 @@ class DiscordWebhookProvider {
             body: JSON.stringify({ content: truncated }),
         });
         if (!response.ok) {
-            throw new Error(`Discord webhook error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("Discord", response.status, response.statusText, body);
         }
         this.log.info("Discord notification sent");
     }
@@ -34051,7 +34079,7 @@ class EmailProvider {
         });
         if (!response.ok) {
             const body = await response.text().catch(() => undefined);
-            throw new ProviderApiError("email", response.status, response.statusText, body);
+            throw new errors_ProviderApiError("email", response.status, response.statusText, body);
         }
         this.log.info(`Email notification sent to ${this.to.join(", ")}`);
     }
@@ -34113,7 +34141,7 @@ class WebhookProvider {
         });
         if (!response.ok) {
             const body = await response.text().catch(() => undefined);
-            throw new ProviderApiError("webhook", response.status, response.statusText, body);
+            throw new errors_ProviderApiError("webhook", response.status, response.statusText, body);
         }
         this.log.info(`Webhook notification sent to ${this.url}`);
     }
@@ -34132,6 +34160,7 @@ var external_node_child_process_ = __nccwpck_require__(1421);
 // EXTERNAL MODULE: external "node:util"
 var external_node_util_ = __nccwpck_require__(7975);
 ;// CONCATENATED MODULE: ../providers/dist/source-control/github.js
+
 
 
 
@@ -34159,8 +34188,8 @@ async function ghApi(method, path, token, body) {
         body: body ? JSON.stringify(body) : undefined,
     });
     if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`GitHub API ${method} ${path} failed (${resp.status}): ${text}`);
+        const body = await resp.text().catch(() => "");
+        throw new errors_ProviderApiError("GitHub", resp.status, resp.statusText, body);
     }
     return resp.json();
 }
@@ -34298,6 +34327,7 @@ function github(config) {
 
 
 
+
 const gitlab_execFileAsync = (0,external_node_util_.promisify)(external_node_child_process_.execFile);
 const gitlabConfigSchema = objectType({
     token: stringType().min(1, "GitLab token is required"),
@@ -34327,8 +34357,8 @@ async function glApi(method, path, baseUrl, token, body) {
         body: body ? JSON.stringify(body) : undefined,
     });
     if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`GitLab API ${method} ${path} failed (${resp.status}): ${text}`);
+        const body = await resp.text().catch(() => "");
+        throw new errors_ProviderApiError("GitLab", resp.status, resp.statusText, body);
     }
     // Some endpoints (204 No Content) return no body
     const contentLength = resp.headers.get("content-length");
@@ -34524,6 +34554,7 @@ function gitlab(config) {
 ;// CONCATENATED MODULE: ../providers/dist/incident/pagerduty.js
 
 
+
 const pagerdutyConfigSchema = objectType({
     apiToken: stringType().min(1, "PagerDuty API token is required"),
     routingKey: stringType().min(1, "PagerDuty routing key (integration key) is required"),
@@ -34554,7 +34585,8 @@ class PagerDutyProvider {
             body: opts?.body ? JSON.stringify(opts.body) : undefined,
         });
         if (!response.ok) {
-            throw new Error(`PagerDuty API error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new ProviderApiError("PagerDuty", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -34581,7 +34613,8 @@ class PagerDutyProvider {
             }),
         });
         if (!response.ok) {
-            throw new Error(`PagerDuty Events API error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new ProviderApiError("PagerDuty", response.status, response.statusText, body);
         }
         const result = (await response.json());
         this.log.info(`PagerDuty incident triggered (dedup_key: ${result.dedup_key})`);
@@ -34637,6 +34670,7 @@ class PagerDutyProvider {
 ;// CONCATENATED MODULE: ../providers/dist/incident/opsgenie.js
 
 
+
 const opsgenieConfigSchema = objectType({
     apiKey: stringType().min(1, "OpsGenie API key is required"),
     region: enumType(["us", "eu"]).default("us"),
@@ -34666,7 +34700,8 @@ class OpsGenieProvider {
             body: opts?.body ? JSON.stringify(opts.body) : undefined,
         });
         if (!response.ok) {
-            throw new Error(`OpsGenie API error: ${response.status} ${response.statusText}`);
+            const body = await response.text().catch(() => "");
+            throw new ProviderApiError("OpsGenie", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -34743,13 +34778,19 @@ class OpsGenieProvider {
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ../providers/dist/messaging/slack.js
 
+
+const slackMessagingConfigSchema = objectType({
+    token: stringType().min(1, "Slack bot token is required"),
+    logger: custom().optional(),
+});
 function slack(config) {
-    const log = config.logger ?? consoleLogger;
+    const parsed = slackMessagingConfigSchema.parse(config);
+    const log = parsed.logger ?? consoleLogger;
     // Lazy-load @slack/web-api to keep it optional
     let clientPromise = null;
     async function getClient() {
         if (!clientPromise) {
-            clientPromise = __nccwpck_require__.e(/* import() */ 461).then(__nccwpck_require__.t.bind(__nccwpck_require__, 3461, 19)).then((mod) => new mod.WebClient(config.token));
+            clientPromise = __nccwpck_require__.e(/* import() */ 461).then(__nccwpck_require__.t.bind(__nccwpck_require__, 3461, 19)).then((mod) => new mod.WebClient(parsed.token));
         }
         return clientPromise;
     }
@@ -34780,6 +34821,7 @@ function slack(config) {
 ;// CONCATENATED MODULE: ../providers/dist/messaging/teams.js
 
 
+
 const teamsConfigSchema = objectType({
     tenantId: stringType().min(1, "Azure AD tenant ID is required"),
     clientId: stringType().min(1, "Azure AD client ID is required"),
@@ -34807,8 +34849,8 @@ function teams(config) {
             body: body.toString(),
         });
         if (!response.ok) {
-            const text = await response.text();
-            throw new Error(`Failed to acquire access token: ${response.status} ${text}`);
+            const body = await response.text().catch(() => "");
+            throw new ProviderApiError("Teams", response.status, response.statusText, body);
         }
         const data = (await response.json());
         // Cache the token with a 5-minute safety margin
@@ -34853,8 +34895,8 @@ function teams(config) {
                     body: JSON.stringify(payload),
                 });
                 if (!response.ok) {
-                    const text = await response.text();
-                    throw new Error(`Failed to send reply to Teams: ${response.status} ${text}`);
+                    const body = await response.text().catch(() => "");
+                    throw new ProviderApiError("Teams", response.status, response.statusText, body);
                 }
                 const data = (await response.json());
                 log.debug(`Sent reply to ${msg.channelId} in thread ${msg.threadId}`);
@@ -34869,8 +34911,8 @@ function teams(config) {
                 body: JSON.stringify(payload),
             });
             if (!response.ok) {
-                const text = await response.text();
-                throw new Error(`Failed to send message to Teams: ${response.status} ${text}`);
+                const body = await response.text().catch(() => "");
+                throw new ProviderApiError("Teams", response.status, response.statusText, body);
             }
             const data = (await response.json());
             log.debug(`Sent message to ${msg.channelId}`);
@@ -34894,8 +34936,8 @@ function teams(config) {
                 }),
             });
             if (!response.ok) {
-                const text = await response.text();
-                throw new Error(`Failed to update Teams message: ${response.status} ${text}`);
+                const body = await response.text().catch(() => "");
+                throw new ProviderApiError("Teams", response.status, response.statusText, body);
             }
             log.debug(`Updated message ${messageId} in ${channelId}`);
         },
@@ -36260,6 +36302,7 @@ function parseServiceMap(filePath, logger) {
 // Investigation Prompt
 // ---------------------------------------------------------------------------
 function buildInvestigationPrompt(config, observability, knownIssuesContent) {
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
     const parts = [];
     parts.push(`You are an autonomous SRE agent investigating production issues.
 You have access to multiple tools and data sources. Your job is to investigate issues,
@@ -36389,10 +36432,10 @@ ${knownIssuesContent}`);
 
 Create these files with your findings:
 
-### 1. \`.github/triage-analysis/investigation-log.md\`
+### 1. \`${analysisDir}/investigation-log.md\`
 Document your investigation process - commands run, what you found, reasoning.
 
-### 2. \`.github/triage-analysis/issues-report.md\`
+### 2. \`${analysisDir}/issues-report.md\`
 For each issue found:
 - Severity, Environment (Production/Staging/Both), Frequency
 - Description, Evidence (logs, stack traces)
@@ -36402,7 +36445,7 @@ For each issue found:
   - If exists: Note the issue identifier (e.g., ENG-123) and URL
   - If not found: Note as "No existing Linear issue found"
 
-### 3. \`.github/triage-analysis/best-candidate.md\`
+### 3. \`${analysisDir}/best-candidate.md\`
 Select the BEST issue to fix based on impact, frequency, fixability.
 Include full technical analysis, exact code changes, test plan, rollback plan.
 
@@ -36449,13 +36492,13 @@ Write files early and update them if needed. Do NOT keep investigating without w
 // ---------------------------------------------------------------------------
 // Implementation Prompt
 // ---------------------------------------------------------------------------
-function buildImplementPrompt(issueIdentifier) {
+function buildImplementPrompt(issueIdentifier, analysisDir = ".github/triage-analysis") {
     return `You are implementing a fix for an issue identified from production logs.
 
 ## Context
 
-Read the best candidate analysis at \`.github/triage-analysis/best-candidate.md\`.
-Also read \`.github/triage-analysis/investigation-log.md\` for context.
+Read the best candidate analysis at \`${analysisDir}/best-candidate.md\`.
+Also read \`${analysisDir}/investigation-log.md\` for context.
 
 ## Your Task
 
@@ -36486,7 +36529,7 @@ Also read \`.github/triage-analysis/investigation-log.md\` for context.
 
 ## Safety Guidelines
 
-- If the fix is too complex or risky, create \`.github/triage-analysis/fix-declined.md\` explaining why
+- If the fix is too complex or risky, create \`${analysisDir}/fix-declined.md\` explaining why
 - Do not make breaking changes
 - Prefer defensive coding patterns
 
@@ -36495,18 +36538,18 @@ Start by reading the best-candidate.md file.`;
 // ---------------------------------------------------------------------------
 // PR Description Prompt
 // ---------------------------------------------------------------------------
-function buildPrDescriptionPrompt(issueIdentifier, issueUrl) {
+function buildPrDescriptionPrompt(issueIdentifier, issueUrl, analysisDir = ".github/triage-analysis") {
     return `Generate a pull request description.
 
 ## Context
 
-1. Read \`.github/triage-analysis/best-candidate.md\` for issue details
-2. Read \`.github/triage-analysis/investigation-log.md\` for context
+1. Read \`${analysisDir}/best-candidate.md\` for issue details
+2. Read \`${analysisDir}/investigation-log.md\` for context
 3. Run \`git diff main..HEAD\` to see the changes made
 
 ## Output
 
-Create \`.github/triage-analysis/pr-description.md\` with:
+Create \`${analysisDir}/pr-description.md\` with:
 
 ## Summary
 <What this PR fixes and why>
@@ -36538,19 +36581,19 @@ Create \`.github/triage-analysis/pr-description.md\` with:
 
 
 
-const ANALYSIS_DIR = ".github/triage-analysis";
 /** Run Claude coding agent to investigate production issues and parse results. */
 async function investigate(ctx) {
     const config = ctx.config;
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
     const observability = ctx.providers.get("observability");
     const codingAgent = ctx.providers.get("codingAgent");
-    external_fs_.mkdirSync(ANALYSIS_DIR, { recursive: true });
+    external_fs_.mkdirSync(analysisDir, { recursive: true });
     // Install coding agent CLI
     await codingAgent.install();
     // Get known issues context from prior step
     const knownIssuesContent = getStepData(ctx, "build-context")?.knownIssuesContent ?? "";
     // Write known issues file for reference
-    const knownIssuesPath = external_path_.join(ANALYSIS_DIR, "known-issues-context.md");
+    const knownIssuesPath = external_path_.join(analysisDir, "known-issues-context.md");
     external_fs_.writeFileSync(knownIssuesPath, knownIssuesContent);
     // Build investigation prompt
     const prompt = buildInvestigationPrompt(config, observability, knownIssuesContent);
@@ -36561,10 +36604,10 @@ async function investigate(ctx) {
         env: { ...config.agentEnv },
     });
     // Parse results
-    const result = parseInvestigationResults(ANALYSIS_DIR);
+    const result = parseInvestigationResults(analysisDir);
     return {
         status: "success",
-        data: result,
+        data: { ...result },
     };
 }
 function parseInvestigationResults(analysisDir) {
@@ -36671,16 +36714,19 @@ async function noveltyGate(ctx) {
 //# sourceMappingURL=novelty-gate.js.map
 ;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/create-issue.js
 
+const TITLE_MAX_LENGTH = 100;
+const DESCRIPTION_MAX_LENGTH = 10000;
 /** Extract issue title from best-candidate.md, then get-or-create an issue in the tracker. */
 async function createIssue(ctx) {
     const config = ctx.config;
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
     const issueTracker = ctx.providers.get("issueTracker");
     // -------------------------------------------------------------------------
     // 1. Extract issue title from best-candidate.md
     // -------------------------------------------------------------------------
     let issueTitle = "SWEny Triage: Automated bug fix";
     if (!config.issueOverride) {
-        const bestCandidatePath = ".github/triage-analysis/best-candidate.md";
+        const bestCandidatePath = `${analysisDir}/best-candidate.md`;
         if (external_fs_.existsSync(bestCandidatePath)) {
             const content = external_fs_.readFileSync(bestCandidatePath, "utf-8");
             const headingMatch = content.match(/^#\s+(.+)$/m);
@@ -36689,7 +36735,7 @@ async function createIssue(ctx) {
                     .replace(/`/g, "")
                     .replace(/^(Best\s+)?(Fix\s+)?(Candidate)(\s+Fix)?[:\s]*/i, "")
                     .trim()
-                    .slice(0, 100);
+                    .slice(0, TITLE_MAX_LENGTH);
             }
             if (!issueTitle) {
                 issueTitle = "SWEny Triage: Automated bug fix";
@@ -36724,9 +36770,9 @@ async function createIssue(ctx) {
         else {
             ctx.logger.info("No existing issue found, creating new one...");
             let description = "";
-            const bestCandidatePath = ".github/triage-analysis/best-candidate.md";
+            const bestCandidatePath = `${analysisDir}/best-candidate.md`;
             if (external_fs_.existsSync(bestCandidatePath)) {
-                description = external_fs_.readFileSync(bestCandidatePath, "utf-8").slice(0, 10000);
+                description = external_fs_.readFileSync(bestCandidatePath, "utf-8").slice(0, DESCRIPTION_MAX_LENGTH);
             }
             const labelIds = [config.bugLabelId];
             if (config.triageLabelId) {
@@ -36736,7 +36782,7 @@ async function createIssue(ctx) {
                 title: issueTitle,
                 projectId: config.projectId,
                 labels: labelIds,
-                priority: 2,
+                priority: config.issuePriority ?? 2,
                 stateId: config.stateBacklog,
                 description,
             });
@@ -36807,6 +36853,7 @@ async function crossRepoCheck(ctx) {
 /** Create branch, run Claude to implement fix, check for changes, and push. */
 async function implementFix(ctx) {
     const config = ctx.config;
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
     const sourceControl = ctx.providers.get("sourceControl");
     const codingAgent = ctx.providers.get("codingAgent");
     const issueData = getStepData(ctx, "create-issue");
@@ -36851,7 +36898,7 @@ async function implementFix(ctx) {
     // 3. Install Claude and implement fix
     // -------------------------------------------------------------------------
     await codingAgent.install();
-    const implementPrompt = buildImplementPrompt(issueIdentifier);
+    const implementPrompt = buildImplementPrompt(issueIdentifier, analysisDir);
     await codingAgent.run({
         prompt: implementPrompt,
         maxTurns: config.maxImplementTurns,
@@ -36861,7 +36908,7 @@ async function implementFix(ctx) {
     // 4. Check for code changes
     // -------------------------------------------------------------------------
     // Check if fix was declined
-    const fixDeclinedPath = ".github/triage-analysis/fix-declined.md";
+    const fixDeclinedPath = `${analysisDir}/fix-declined.md`;
     if (external_fs_.existsSync(fixDeclinedPath)) {
         const reason = external_fs_.readFileSync(fixDeclinedPath, "utf-8").trim();
         ctx.logger.info(`Fix was declined by Claude: ${reason.slice(0, 200)}`);
@@ -36927,20 +36974,21 @@ async function createPr(ctx) {
     const issueTitle = issueData?.issueTitle ?? "";
     const issueUrl = issueData?.issueUrl ?? "";
     const branchName = implementData?.branchName ?? "";
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
     // -------------------------------------------------------------------------
     // 1. Generate PR description with Claude
     // -------------------------------------------------------------------------
-    const prDescPrompt = buildPrDescriptionPrompt(issueIdentifier, issueUrl);
+    const prDescPrompt = buildPrDescriptionPrompt(issueIdentifier, issueUrl, analysisDir);
     await codingAgent.run({
         prompt: prDescPrompt,
-        maxTurns: 10,
+        maxTurns: config.prDescriptionMaxTurns ?? 10,
         env: { ...config.agentEnv },
     });
     // -------------------------------------------------------------------------
     // 2. Create Pull Request
     // -------------------------------------------------------------------------
     let prBody = "";
-    const prDescPath = ".github/triage-analysis/pr-description.md";
+    const prDescPath = `${analysisDir}/pr-description.md`;
     if (external_fs_.existsSync(prDescPath)) {
         prBody = external_fs_.readFileSync(prDescPath, "utf-8");
     }
@@ -36958,8 +37006,8 @@ This PR contains an automated fix for an issue identified in production logs.
         title: prTitle,
         body: prBody,
         head: branchName,
-        base: "main",
-        labels: ["agent", "triage", "needs-review"],
+        base: config.baseBranch ?? "main",
+        labels: config.prLabels ?? ["agent", "triage", "needs-review"],
     });
     ctx.logger.info(`Created PR #${pr.number}: ${pr.url}`);
     // -------------------------------------------------------------------------
@@ -37045,14 +37093,15 @@ async function sendNotification(ctx) {
         lines.push("> **Dry Run**: Analysis only");
     }
     // Append investigation log if it exists
-    const investigationLog = ".github/triage-analysis/investigation-log.md";
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
+    const investigationLog = `${analysisDir}/investigation-log.md`;
     if (external_fs_.existsSync(investigationLog)) {
         lines.push("");
         lines.push("### Investigation Log");
         lines.push(external_fs_.readFileSync(investigationLog, "utf-8"));
     }
     // Append issues report if it exists
-    const issuesReport = ".github/triage-analysis/issues-report.md";
+    const issuesReport = `${analysisDir}/issues-report.md`;
     if (external_fs_.existsSync(issuesReport)) {
         lines.push("");
         lines.push("### Issues Found");
@@ -37126,6 +37175,8 @@ function parseInputs() {
         investigationDepth: core.getInput("investigation-depth") || "standard",
         maxInvestigateTurns: parseInt(core.getInput("max-investigate-turns") || "50", 10),
         maxImplementTurns: parseInt(core.getInput("max-implement-turns") || "30", 10),
+        baseBranch: core.getInput("base-branch") || "main",
+        prLabels: (core.getInput("pr-labels") || "agent,triage,needs-review").split(",").map((l) => l.trim()),
         dryRun: core.getBooleanInput("dry-run"),
         noveltyMode: core.getBooleanInput("novelty-mode"),
         linearIssue: core.getInput("linear-issue"),
@@ -37149,6 +37200,108 @@ function parseInputs() {
         repository: process.env.GITHUB_REPOSITORY || "",
         repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",
     };
+}
+function validateInputs(config) {
+    const errors = [];
+    // Auth: at least one required
+    if (!config.anthropicApiKey && !config.claudeOauthToken) {
+        errors.push("Missing required input: either `anthropic-api-key` or `claude-oauth-token` must be provided");
+    }
+    // Observability credentials by provider
+    switch (config.observabilityProvider) {
+        case "datadog":
+            if (!config.observabilityCredentials.apiKey)
+                errors.push("Missing required input: `dd-api-key` is required when `observability-provider` is `datadog`");
+            if (!config.observabilityCredentials.appKey)
+                errors.push("Missing required input: `dd-app-key` is required when `observability-provider` is `datadog`");
+            break;
+        case "sentry":
+            if (!config.observabilityCredentials.authToken)
+                errors.push("Missing required input: `sentry-auth-token` is required when `observability-provider` is `sentry`");
+            if (!config.observabilityCredentials.organization)
+                errors.push("Missing required input: `sentry-org` is required when `observability-provider` is `sentry`");
+            if (!config.observabilityCredentials.project)
+                errors.push("Missing required input: `sentry-project` is required when `observability-provider` is `sentry`");
+            break;
+        case "cloudwatch":
+            if (!config.observabilityCredentials.logGroupPrefix)
+                errors.push("Missing required input: `cloudwatch-log-group-prefix` is required when `observability-provider` is `cloudwatch`");
+            break;
+        case "splunk":
+            if (!config.observabilityCredentials.baseUrl)
+                errors.push("Missing required input: `splunk-url` is required when `observability-provider` is `splunk`");
+            if (!config.observabilityCredentials.token)
+                errors.push("Missing required input: `splunk-token` is required when `observability-provider` is `splunk`");
+            break;
+        case "elastic":
+            if (!config.observabilityCredentials.baseUrl)
+                errors.push("Missing required input: `elastic-url` is required when `observability-provider` is `elastic`");
+            if (!config.observabilityCredentials.apiKey)
+                errors.push("Missing required input: `elastic-api-key` is required when `observability-provider` is `elastic`");
+            break;
+        case "newrelic":
+            if (!config.observabilityCredentials.apiKey)
+                errors.push("Missing required input: `newrelic-api-key` is required when `observability-provider` is `newrelic`");
+            if (!config.observabilityCredentials.accountId)
+                errors.push("Missing required input: `newrelic-account-id` is required when `observability-provider` is `newrelic`");
+            break;
+        case "loki":
+            if (!config.observabilityCredentials.baseUrl)
+                errors.push("Missing required input: `loki-url` is required when `observability-provider` is `loki`");
+            break;
+    }
+    // Issue tracker credentials by provider
+    switch (config.issueTrackerProvider) {
+        case "linear":
+            if (!config.linearApiKey)
+                errors.push("Missing required input: `linear-api-key` is required when `issue-tracker-provider` is `linear`");
+            if (!config.linearTeamId)
+                errors.push("Missing required input: `linear-team-id` is required when `issue-tracker-provider` is `linear`");
+            break;
+        case "jira":
+            if (!config.jiraBaseUrl)
+                errors.push("Missing required input: `jira-base-url` is required when `issue-tracker-provider` is `jira`");
+            if (!config.jiraEmail)
+                errors.push("Missing required input: `jira-email` is required when `issue-tracker-provider` is `jira`");
+            if (!config.jiraApiToken)
+                errors.push("Missing required input: `jira-api-token` is required when `issue-tracker-provider` is `jira`");
+            break;
+    }
+    // Source control credentials by provider
+    switch (config.sourceControlProvider) {
+        case "gitlab":
+            if (!config.gitlabToken)
+                errors.push("Missing required input: `gitlab-token` is required when `source-control-provider` is `gitlab`");
+            if (!config.gitlabProjectId)
+                errors.push("Missing required input: `gitlab-project-id` is required when `source-control-provider` is `gitlab`");
+            break;
+    }
+    // Notification credentials by provider
+    switch (config.notificationProvider) {
+        case "slack":
+        case "teams":
+        case "discord":
+        case "webhook":
+            if (!config.notificationWebhookUrl)
+                errors.push(`Missing required input: \`notification-webhook-url\` is required when \`notification-provider\` is \`${config.notificationProvider}\``);
+            break;
+        case "email":
+            if (!config.sendgridApiKey)
+                errors.push("Missing required input: `sendgrid-api-key` is required when `notification-provider` is `email`");
+            if (!config.emailFrom)
+                errors.push("Missing required input: `email-from` is required when `notification-provider` is `email`");
+            if (!config.emailTo)
+                errors.push("Missing required input: `email-to` is required when `notification-provider` is `email`");
+            break;
+    }
+    // Integer bounds
+    if (config.maxInvestigateTurns < 1 || config.maxInvestigateTurns > 500) {
+        errors.push("`max-investigate-turns` must be between 1 and 500");
+    }
+    if (config.maxImplementTurns < 1 || config.maxImplementTurns > 500) {
+        errors.push("`max-implement-turns` must be between 1 and 500");
+    }
+    return errors;
 }
 function parseObservabilityCredentials(provider) {
     switch (provider) {
@@ -37361,6 +37514,11 @@ const main_actionsLogger = { info: core.info, debug: core.debug, warn: core.warn
 async function run() {
     try {
         const config = parseInputs();
+        const validationErrors = validateInputs(config);
+        if (validationErrors.length > 0) {
+            core.setFailed(validationErrors.join("\n"));
+            return;
+        }
         const providers = createProviders(config);
         const triageConfig = mapToTriageConfig(config);
         const result = await runWorkflow(triageWorkflow, triageConfig, providers, {
@@ -37453,6 +37611,8 @@ function mapToTriageConfig(config) {
         stateInProgress: config.linearStateInProgress,
         statePeerReview: config.linearStatePeerReview,
         repository: config.repository,
+        baseBranch: config.baseBranch,
+        prLabels: config.prLabels,
         dryRun: config.dryRun,
         noveltyMode: config.noveltyMode,
         issueOverride: config.linearIssue,

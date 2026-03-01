@@ -1,21 +1,25 @@
+import { z } from "zod";
 import type { ChatMessage, MessagingProvider } from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 
-export interface SlackMessagingConfig {
-  token: string;
-  logger?: Logger;
-}
+export const slackMessagingConfigSchema = z.object({
+  token: z.string().min(1, "Slack bot token is required"),
+  logger: z.custom<Logger>().optional(),
+});
+
+export type SlackMessagingConfig = z.infer<typeof slackMessagingConfigSchema>;
 
 export function slack(config: SlackMessagingConfig): MessagingProvider {
-  const log = config.logger ?? consoleLogger;
+  const parsed = slackMessagingConfigSchema.parse(config);
+  const log = parsed.logger ?? consoleLogger;
 
   // Lazy-load @slack/web-api to keep it optional
   let clientPromise: Promise<InstanceType<typeof import("@slack/web-api").WebClient>> | null = null;
 
   async function getClient() {
     if (!clientPromise) {
-      clientPromise = import("@slack/web-api").then((mod) => new mod.WebClient(config.token));
+      clientPromise = import("@slack/web-api").then((mod) => new mod.WebClient(parsed.token));
     }
     return clientPromise;
   }

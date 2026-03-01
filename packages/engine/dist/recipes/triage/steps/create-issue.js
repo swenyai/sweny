@@ -1,14 +1,17 @@
 import * as fs from "fs";
+const TITLE_MAX_LENGTH = 100;
+const DESCRIPTION_MAX_LENGTH = 10000;
 /** Extract issue title from best-candidate.md, then get-or-create an issue in the tracker. */
 export async function createIssue(ctx) {
     const config = ctx.config;
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
     const issueTracker = ctx.providers.get("issueTracker");
     // -------------------------------------------------------------------------
     // 1. Extract issue title from best-candidate.md
     // -------------------------------------------------------------------------
     let issueTitle = "SWEny Triage: Automated bug fix";
     if (!config.issueOverride) {
-        const bestCandidatePath = ".github/triage-analysis/best-candidate.md";
+        const bestCandidatePath = `${analysisDir}/best-candidate.md`;
         if (fs.existsSync(bestCandidatePath)) {
             const content = fs.readFileSync(bestCandidatePath, "utf-8");
             const headingMatch = content.match(/^#\s+(.+)$/m);
@@ -17,7 +20,7 @@ export async function createIssue(ctx) {
                     .replace(/`/g, "")
                     .replace(/^(Best\s+)?(Fix\s+)?(Candidate)(\s+Fix)?[:\s]*/i, "")
                     .trim()
-                    .slice(0, 100);
+                    .slice(0, TITLE_MAX_LENGTH);
             }
             if (!issueTitle) {
                 issueTitle = "SWEny Triage: Automated bug fix";
@@ -52,9 +55,9 @@ export async function createIssue(ctx) {
         else {
             ctx.logger.info("No existing issue found, creating new one...");
             let description = "";
-            const bestCandidatePath = ".github/triage-analysis/best-candidate.md";
+            const bestCandidatePath = `${analysisDir}/best-candidate.md`;
             if (fs.existsSync(bestCandidatePath)) {
-                description = fs.readFileSync(bestCandidatePath, "utf-8").slice(0, 10000);
+                description = fs.readFileSync(bestCandidatePath, "utf-8").slice(0, DESCRIPTION_MAX_LENGTH);
             }
             const labelIds = [config.bugLabelId];
             if (config.triageLabelId) {
@@ -64,7 +67,7 @@ export async function createIssue(ctx) {
                 title: issueTitle,
                 projectId: config.projectId,
                 labels: labelIds,
-                priority: 2,
+                priority: config.issuePriority ?? 2,
                 stateId: config.stateBacklog,
                 description,
             });

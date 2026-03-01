@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
 
 export const splunkConfigSchema = z.object({
@@ -58,7 +59,8 @@ class SplunkProvider implements ObservabilityProvider {
     const response = await fetch(url.toString(), fetchOpts);
 
     if (!response.ok) {
-      throw new Error(`Splunk API error: ${response.status} ${response.statusText}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("Splunk", response.status, response.statusText, body);
     }
 
     return (await response.json()) as T;

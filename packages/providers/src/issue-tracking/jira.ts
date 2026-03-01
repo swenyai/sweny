@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 import type {
   IssueTrackingProvider,
   Issue,
@@ -52,8 +53,8 @@ class JiraProvider implements IssueTrackingProvider, PrLinkCapable {
     });
 
     if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`Jira API error: ${response.status} ${response.statusText}${text ? ` — ${text}` : ""}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("Jira", response.status, response.statusText, body);
     }
 
     // Some endpoints (204 No Content) return no body

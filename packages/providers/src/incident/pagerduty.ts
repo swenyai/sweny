@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 import type { IncidentProvider, Incident, IncidentCreateOptions, OnCallEntry } from "./types.js";
 
 export const pagerdutyConfigSchema = z.object({
@@ -40,7 +41,8 @@ class PagerDutyProvider implements IncidentProvider {
     });
 
     if (!response.ok) {
-      throw new Error(`PagerDuty API error: ${response.status} ${response.statusText}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("PagerDuty", response.status, response.statusText, body);
     }
 
     return (await response.json()) as T;
@@ -74,7 +76,8 @@ class PagerDutyProvider implements IncidentProvider {
     });
 
     if (!response.ok) {
-      throw new Error(`PagerDuty Events API error: ${response.status} ${response.statusText}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("PagerDuty", response.status, response.statusText, body);
     }
 
     const result = (await response.json()) as {

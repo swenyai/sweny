@@ -323,6 +323,7 @@ describe("OpsGenieProvider", () => {
       ok: false,
       status: 401,
       statusText: "Unauthorized",
+      text: async () => "",
     });
     globalThis.fetch = mockFetch;
 

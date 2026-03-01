@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
 
 export const elasticConfigSchema = z
@@ -21,6 +22,11 @@ export type ElasticConfig = z.infer<typeof elasticConfigSchema>;
 export function elastic(config: ElasticConfig): ObservabilityProvider {
   const parsed = elasticConfigSchema.parse(config);
   return new ElasticProvider(parsed);
+}
+
+/** Safely extract a string from an unknown value, returning undefined for non-strings. */
+function str(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
 }
 
 class ElasticProvider implements ObservabilityProvider {
@@ -60,8 +66,8 @@ class ElasticProvider implements ObservabilityProvider {
     });
 
     if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`Elasticsearch API error: ${response.status} ${response.statusText}${text ? ` - ${text}` : ""}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("Elasticsearch", response.status, response.statusText, body);
     }
 
     return (await response.json()) as T;
@@ -137,27 +143,27 @@ class ElasticProvider implements ObservabilityProvider {
     const logs: LogEntry[] = hits.map((hit) => {
       const src = hit._source ?? {};
       const service =
-        (src["service.name"] as string) ??
+        str(src["service.name"]) ??
         (src["service"] && typeof src["service"] === "object"
-          ? ((src["service"] as Record<string, unknown>)["name"] as string)
+          ? str((src["service"] as Record<string, unknown>)["name"])
           : undefined) ??
-        (src["host.name"] as string) ??
+        str(src["host.name"]) ??
         (src["host"] && typeof src["host"] === "object"
-          ? ((src["host"] as Record<string, unknown>)["name"] as string)
+          ? str((src["host"] as Record<string, unknown>)["name"])
           : undefined) ??
         "unknown";
       const level =
-        (src["log.level"] as string) ??
+        str(src["log.level"]) ??
         (src["log"] && typeof src["log"] === "object"
-          ? ((src["log"] as Record<string, unknown>)["level"] as string)
+          ? str((src["log"] as Record<string, unknown>)["level"])
           : undefined) ??
         "unknown";
 
       return {
-        timestamp: (src["@timestamp"] as string) ?? "",
+        timestamp: str(src["@timestamp"]) ?? "",
         service,
         level,
-        message: (src["message"] as string) ?? "",
+        message: str(src["message"]) ?? "",
         attributes: src,
       };
     });

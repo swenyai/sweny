@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 import type {
   IssueTrackingProvider,
   Issue,
@@ -51,7 +52,8 @@ class GitHubIssuesProvider implements IssueTrackingProvider, PrLinkCapable {
     });
 
     if (!response.ok) {
-      throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("GitHub", response.status, response.statusText, body);
     }
 
     return (await response.json()) as T;

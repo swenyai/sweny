@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ChatMessage, MessagingProvider } from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { ProviderApiError } from "../errors.js";
 
 export const teamsConfigSchema = z.object({
   tenantId: z.string().min(1, "Azure AD tenant ID is required"),
@@ -44,8 +45,8 @@ export function teams(config: TeamsMessagingConfig): MessagingProvider {
     });
 
     if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Failed to acquire access token: ${response.status} ${text}`);
+      const body = await response.text().catch(() => "");
+      throw new ProviderApiError("Teams", response.status, response.statusText, body);
     }
 
     const data = (await response.json()) as { access_token: string; expires_in: number };
@@ -100,8 +101,8 @@ export function teams(config: TeamsMessagingConfig): MessagingProvider {
         });
 
         if (!response.ok) {
-          const text = await response.text();
-          throw new Error(`Failed to send reply to Teams: ${response.status} ${text}`);
+          const body = await response.text().catch(() => "");
+          throw new ProviderApiError("Teams", response.status, response.statusText, body);
         }
 
         const data = (await response.json()) as { id: string };
@@ -119,8 +120,8 @@ export function teams(config: TeamsMessagingConfig): MessagingProvider {
       });
 
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Failed to send message to Teams: ${response.status} ${text}`);
+        const body = await response.text().catch(() => "");
+        throw new ProviderApiError("Teams", response.status, response.statusText, body);
       }
 
       const data = (await response.json()) as { id: string };
@@ -149,8 +150,8 @@ export function teams(config: TeamsMessagingConfig): MessagingProvider {
       });
 
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Failed to update Teams message: ${response.status} ${text}`);
+        const body = await response.text().catch(() => "");
+        throw new ProviderApiError("Teams", response.status, response.statusText, body);
       }
 
       log.debug(`Updated message ${messageId} in ${channelId}`);
