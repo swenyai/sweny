@@ -1,5 +1,5 @@
 name: "SWEny Triage"
-description: "Autonomous SRE triage — monitors observability logs, investigates issues, creates Linear tickets, and opens fix PRs using Claude."
+description: "Autonomous SRE triage — monitors logs, investigates issues, creates tickets, and opens fix PRs."
 author: "SWEny"
 
 branding:
