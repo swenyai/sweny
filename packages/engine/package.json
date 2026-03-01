@@ -1,6 +1,6 @@
 {
   "name": "@swenyai/engine",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Workflow engine for SWEny — Learn, Act, Report",
   "type": "module",
   "engines": {
@@ -22,7 +22,7 @@
     ".": "./dist/index.js"
   },
   "dependencies": {
-    "@swenyai/providers": "^0.1.0"
+    "@swenyai/providers": "^0.2.0"
   },
   "peerDependencies": {
     "@swenyai/providers": ">=0.1.0"
