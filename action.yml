@@ -16,7 +16,7 @@ inputs:
 
   # Observability provider
   observability-provider:
-    description: "Observability provider to use (datadog, sentry, cloudwatch)"
+    description: "Observability provider to use (datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki)"
     required: false
     default: "datadog"
 
@@ -56,9 +56,56 @@ inputs:
     description: "CloudWatch log group name or prefix"
     required: false
 
+  # Splunk credentials
+  splunk-url:
+    description: "Splunk REST API base URL (e.g., https://splunk.example.com:8089)"
+    required: false
+  splunk-token:
+    description: "Splunk authentication token"
+    required: false
+  splunk-index:
+    description: "Splunk index to search"
+    required: false
+    default: "main"
+
+  # Elasticsearch credentials
+  elastic-url:
+    description: "Elasticsearch base URL (e.g., https://elastic.example.com:9200)"
+    required: false
+  elastic-api-key:
+    description: "Elasticsearch API key"
+    required: false
+  elastic-index:
+    description: "Elasticsearch index pattern"
+    required: false
+    default: "logs-*"
+
+  # New Relic credentials
+  newrelic-api-key:
+    description: "New Relic API key (NRAK-...)"
+    required: false
+  newrelic-account-id:
+    description: "New Relic account ID"
+    required: false
+  newrelic-region:
+    description: "New Relic region (us or eu)"
+    required: false
+    default: "us"
+
+  # Grafana Loki credentials
+  loki-url:
+    description: "Loki base URL (e.g., https://loki.example.com)"
+    required: false
+  loki-api-key:
+    description: "Loki API key (optional)"
+    required: false
+  loki-org-id:
+    description: "Loki tenant/org ID (optional)"
+    required: false
+
   # Issue tracker provider
   issue-tracker-provider:
-    description: "Issue tracker provider to use (linear)"
+    description: "Issue tracker provider to use (linear, jira, github-issues)"
     required: false
     default: "linear"
   linear-api-key:
@@ -82,6 +129,35 @@ inputs:
   linear-state-peer-review:
     description: "Linear workflow state UUID for Peer Review"
     required: false
+
+  # Jira credentials (when issue-tracker-provider = jira)
+  jira-base-url:
+    description: "Jira base URL (e.g., https://myco.atlassian.net)"
+    required: false
+  jira-email:
+    description: "Jira user email for API authentication"
+    required: false
+  jira-api-token:
+    description: "Jira API token"
+    required: false
+
+  # Source control provider
+  source-control-provider:
+    description: "Source control provider to use (github, gitlab)"
+    required: false
+    default: "github"
+
+  # GitLab credentials (when source-control-provider = gitlab)
+  gitlab-token:
+    description: "GitLab personal access token"
+    required: false
+  gitlab-project-id:
+    description: "GitLab project ID or path (e.g., my-group/my-project)"
+    required: false
+  gitlab-base-url:
+    description: "GitLab instance base URL"
+    required: false
+    default: "https://gitlab.com"
 
   # Investigation parameters
   time-range:

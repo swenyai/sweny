@@ -1,0 +1,39 @@
+name: Release @sweny/engine
+
+on:
+  push:
+    tags:
+      - "engine-v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - name: Build providers (dependency)
+        run: npm run build --workspace=packages/providers
+
+      - name: Build engine
+        run: npm run build --workspace=packages/engine
+
+      - name: Typecheck
+        run: npm run typecheck --workspace=packages/engine
+
+      - name: Test
+        run: npm run test --workspace=packages/engine
+
+      - name: Publish
+        run: npm publish --access public --workspace=packages/engine
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
