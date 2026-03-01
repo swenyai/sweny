@@ -68,13 +68,12 @@ Both modes are powered by SWEny's workflow engine, which manages provider connec
 
 ```yaml
 # .github/workflows/sweny-triage.yml
-- uses: swenyai/sweny@v0.1
+- uses: swenyai/sweny@v0.2
   with:
-    claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
     dd-app-key: ${{ secrets.DD_APP_KEY }}
-    linear-api-key: ${{ secrets.LINEAR_API_KEY }}
-    linear-team-id: ${{ vars.LINEAR_TEAM_ID }}
+    dry-run: true # Remove when ready to create PRs
 ```
 
-That's it. [Full setup guide →](/getting-started/)
+3 secrets. GitHub Issues by default. [Full setup guide →](/getting-started/)
