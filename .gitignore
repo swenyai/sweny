@@ -10,6 +10,7 @@ tasks/
 packages/agent/dist/
 packages/providers/dist/
 packages/action/dist/
+packages/cli/dist/
 
 # Root dist/ is NOT ignored — required for GitHub Action (compiled action entry point)
 # But declaration files from ncc are not needed

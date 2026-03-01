@@ -17,6 +17,8 @@
     "cli:agent": "npm run cli --workspace=packages/agent",
     "dev:web": "npm run dev --workspace=packages/web",
     "build:web": "npm run build --workspace=packages/web",
+    "dev:cli": "npm run dev --workspace=packages/cli",
+    "cli:triage": "npm run dev --workspace=packages/cli -- triage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
