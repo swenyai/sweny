@@ -2,11 +2,22 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { runWorkflow, triageWorkflow } from "@swenyai/engine";
-import type { TriageConfig } from "@swenyai/engine";
+import type { TriageConfig, WorkflowPhase } from "@swenyai/engine";
 import { registerTriageCommand, parseCliInputs, validateInputs } from "./config.js";
 import type { CliConfig } from "./config.js";
 import { createProviders } from "./providers/index.js";
-import { formatResultHuman, formatResultJson } from "./output.js";
+import {
+  c,
+  phaseColor,
+  formatBanner,
+  formatPhaseHeader,
+  getStepDetails,
+  formatStepLine,
+  formatResultHuman,
+  formatResultJson,
+  formatValidationErrors,
+  formatCrashError,
+} from "./output.js";
 
 const program = new Command()
   .name("sweny")
@@ -21,11 +32,8 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   // Validate
   const errors = validateInputs(config);
   if (errors.length > 0) {
-    console.error(chalk.red("\nConfiguration errors:\n"));
-    for (const err of errors) {
-      console.error(chalk.red(`  \u2022 ${err}`));
-    }
-    console.error("");
+    console.error(formatValidationErrors(errors));
+    console.error(c.subtle("\n  Run sweny triage --help for usage information.\n"));
     process.exit(1);
   }
 
@@ -35,27 +43,19 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 
   // Banner
   if (!config.json) {
-    console.log("");
-    console.log(chalk.bold("SWEny Triage"));
-    console.log("\u2500".repeat(40));
-    console.log(`  Repository:    ${config.repository}`);
-    console.log(`  Coding agent:  ${config.codingAgentProvider}`);
-    console.log(`  Observability: ${config.observabilityProvider}`);
-    console.log(`  Time range:    ${config.timeRange}`);
-    console.log(`  Issue tracker: ${config.issueTrackerProvider}`);
-    console.log(`  Dry run:       ${config.dryRun}`);
-    console.log("\u2500".repeat(40));
-    console.log("");
+    console.log(formatBanner(config, program.version() ?? "0.2.0"));
   }
 
-  // ── Spinner state ──────────────────────────────────────────────
-  const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  // ── Spinner state ──────────────────────────────────────────
+  const FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
   const isTTY = !config.json && (process.stderr.isTTY ?? false);
   let spinnerInterval: ReturnType<typeof setInterval> | undefined;
   let spinnerActive = false;
   let frameIdx = 0;
   let stepStart = 0;
   let stepLabel = "";
+  let currentPhaseColor: (s: string) => string = chalk.cyan;
+  let lastPhase: string | null = null;
 
   function formatElapsed(ms: number): string {
     const s = Math.round(ms / 1000);
@@ -78,36 +78,30 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 
     if (isTTY) {
       spinnerInterval = setInterval(() => {
-        const frame = chalk.cyan(FRAMES[frameIdx++ % FRAMES.length]);
-        const elapsed = chalk.dim(formatElapsed(Date.now() - stepStart));
+        const frame = currentPhaseColor(FRAMES[frameIdx++ % FRAMES.length]);
+        const elapsed = c.subtle(formatElapsed(Date.now() - stepStart));
         process.stderr.write(`\r\x1b[K  ${frame} ${stepLabel} ${elapsed}`);
       }, 80);
     } else if (!config.json) {
-      // Non-TTY fallback: periodic heartbeat lines
       spinnerInterval = setInterval(() => {
         const elapsed = formatElapsed(Date.now() - stepStart);
-        process.stderr.write(`  ↳ ${stepLabel} ${elapsed}\n`);
+        process.stderr.write(`  > ${stepLabel} ${elapsed}\n`);
       }, 15_000);
     }
   }
 
-  function stopSpinner(icon: string, suffix: string) {
+  function stopSpinner() {
     if (spinnerInterval) {
       clearInterval(spinnerInterval);
       spinnerInterval = undefined;
     }
-    const elapsed = chalk.dim(formatElapsed(Date.now() - stepStart));
     if (isTTY) {
-      process.stderr.write(`\r\x1b[K  ${icon} ${elapsed}${suffix}\n`);
-    } else if (!config.json) {
-      console.log(`  ${icon} ${elapsed}${suffix}`);
+      process.stderr.write("\r\x1b[K");
     }
     spinnerActive = false;
   }
 
-  // Spinner-aware logger: clears the spinner line before printing
-  // so log output doesn't collide with the animated spinner.
-  // The next spinner tick redraws cleanly below the new output.
+  // Spinner-aware logger
   const logger = {
     info: config.json
       ? () => {}
@@ -135,21 +129,37 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     const result = await runWorkflow(triageWorkflow, triageConfig, providers, {
       logger,
       beforeStep: async (step) => {
-        if (!config.json) {
-          console.log(chalk.dim(`\n[${step.phase}]`) + " " + chalk.bold(step.name));
-          startSpinner(step.name);
+        if (config.json) return;
+
+        // Phase transition header
+        if (step.phase !== lastPhase) {
+          lastPhase = step.phase;
+          currentPhaseColor = phaseColor(step.phase);
+          console.log(formatPhaseHeader(step.phase as WorkflowPhase));
         }
+
+        startSpinner(step.name);
       },
-      afterStep: async (_step, stepResult) => {
-        if (!config.json) {
-          const icon =
-            stepResult.status === "success"
-              ? chalk.green("✓")
-              : stepResult.status === "skipped"
-                ? chalk.dim("−")
-                : chalk.red("✗");
-          const reason = stepResult.reason ? chalk.dim(` — ${stepResult.reason}`) : "";
-          stopSpinner(icon, reason);
+      afterStep: async (step, stepResult) => {
+        if (config.json) return;
+
+        stopSpinner();
+
+        const elapsed = formatElapsed(Date.now() - stepStart);
+        const icon =
+          stepResult.status === "success"
+            ? c.ok("\u2713")
+            : stepResult.status === "skipped"
+              ? c.subtle("\u2212")
+              : c.fail("\u2717");
+        const reason = stepResult.status !== "success" ? stepResult.reason : undefined;
+
+        console.log(formatStepLine(icon, step.name, elapsed, reason));
+
+        // Inline data details
+        const details = getStepDetails(step.name, stepResult.data as Record<string, unknown>);
+        for (const detail of details) {
+          console.log(`    ${c.subtle("\u21B3")} ${c.subtle(detail)}`);
         }
       },
     });
@@ -166,7 +176,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     if (config.json) {
       console.log(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }));
     } else {
-      console.error(chalk.red(`\nError: ${error instanceof Error ? error.message : "Unknown error"}\n`));
+      console.error(formatCrashError(error));
     }
     process.exit(1);
   }
