@@ -29,6 +29,11 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/** Type guard: value is a non-null object (record). */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
 class ElasticProvider implements ObservabilityProvider {
   private readonly baseUrl: string;
   private readonly apiKey: string | undefined;
@@ -144,20 +149,11 @@ class ElasticProvider implements ObservabilityProvider {
       const src = hit._source ?? {};
       const service =
         str(src["service.name"]) ??
-        (src["service"] && typeof src["service"] === "object"
-          ? str((src["service"] as Record<string, unknown>)["name"])
-          : undefined) ??
+        (isRecord(src["service"]) ? str(src["service"]["name"]) : undefined) ??
         str(src["host.name"]) ??
-        (src["host"] && typeof src["host"] === "object"
-          ? str((src["host"] as Record<string, unknown>)["name"])
-          : undefined) ??
+        (isRecord(src["host"]) ? str(src["host"]["name"]) : undefined) ??
         "unknown";
-      const level =
-        str(src["log.level"]) ??
-        (src["log"] && typeof src["log"] === "object"
-          ? str((src["log"] as Record<string, unknown>)["level"])
-          : undefined) ??
-        "unknown";
+      const level = str(src["log.level"]) ?? (isRecord(src["log"]) ? str(src["log"]["level"]) : undefined) ?? "unknown";
 
       return {
         timestamp: str(src["@timestamp"]) ?? "",
