@@ -37,8 +37,18 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     process.exit(1);
   }
 
-  // Create providers
-  const providers = createProviders(config);
+  // ── Shared logger ─────────────────────────────────────────
+  // Created early so providers can capture the same object.
+  // Methods are upgraded to spinner-aware after spinner setup below.
+  const logger = {
+    info: config.json ? () => {} : (...args: unknown[]) => console.log(...args),
+    debug: config.json ? () => {} : (...args: unknown[]) => console.debug(...args),
+    warn: (...args: unknown[]) => console.warn(...args),
+    error: (...args: unknown[]) => console.error(...args),
+  };
+
+  // Create providers (they capture `logger` by reference — method upgrades propagate)
+  const providers = createProviders(config, logger);
   const triageConfig = mapToTriageConfig(config);
 
   // Banner
@@ -115,42 +125,38 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     spinnerActive = false;
   }
 
-  // Spinner-aware logger — info/debug fold into spinner status,
-  // warn/error always print immediately
-  const logger = {
-    info: config.json
-      ? () => {}
-      : (...args: unknown[]) => {
-          const msg = args.map(String).join(" ");
-          // Skip engine runner status messages (already shown by phase headers & step lines)
-          if (msg.startsWith("[triage]")) return;
-          if (spinnerActive && isTTY) {
-            spinnerStatus = msg;
-          } else {
-            clearSpinnerLine();
-            console.log(...args);
-          }
-        },
-    debug: config.json
-      ? () => {}
-      : (...args: unknown[]) => {
-          const msg = args.map(String).join(" ");
-          if (msg.startsWith("[triage]")) return;
-          if (spinnerActive && isTTY) {
-            spinnerStatus = msg;
-          } else {
-            clearSpinnerLine();
-            console.debug(...args);
-          }
-        },
-    warn: (...args: unknown[]) => {
-      clearSpinnerLine();
-      console.warn(...args);
-    },
-    error: (...args: unknown[]) => {
-      clearSpinnerLine();
-      console.error(...args);
-    },
+  // ── Upgrade logger to spinner-aware ──────────────────────
+  // info/debug fold into spinner status text; warn/error always print.
+  if (!config.json) {
+    logger.info = (...args: unknown[]) => {
+      const msg = args.map(String).join(" ");
+      // Skip engine runner status messages (already shown by phase headers & step lines)
+      if (msg.startsWith("[triage]")) return;
+      if (spinnerActive && isTTY) {
+        spinnerStatus = msg;
+      } else {
+        clearSpinnerLine();
+        console.log(...args);
+      }
+    };
+    logger.debug = (...args: unknown[]) => {
+      const msg = args.map(String).join(" ");
+      if (msg.startsWith("[triage]")) return;
+      if (spinnerActive && isTTY) {
+        spinnerStatus = msg;
+      } else {
+        clearSpinnerLine();
+        console.debug(...args);
+      }
+    };
+  }
+  logger.warn = (...args: unknown[]) => {
+    clearSpinnerLine();
+    console.warn(...args);
+  };
+  logger.error = (...args: unknown[]) => {
+    clearSpinnerLine();
+    console.error(...args);
   };
 
   try {

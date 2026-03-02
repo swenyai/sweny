@@ -8,14 +8,14 @@ import { github, gitlab } from "@swenyai/providers/source-control";
 import { slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@swenyai/providers/notification";
 import { claudeCode, openaiCodex, googleGemini } from "@swenyai/providers/coding-agent";
 
-const logger = {
-  info: console.log,
-  debug: console.debug,
-  warn: console.warn,
-  error: console.error,
-};
+export interface CliLogger {
+  info: (...args: unknown[]) => void;
+  debug: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+  error: (...args: unknown[]) => void;
+}
 
-export function createProviders(config: CliConfig): ProviderRegistry {
+export function createProviders(config: CliConfig, logger: CliLogger): ProviderRegistry {
   const registry = createProviderRegistry();
 
   // Observability
