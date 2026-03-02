@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as fs from "fs";
-import type { ObservabilityProvider } from "@swenyai/providers/observability";
+import * as fs from "node:fs";
+import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
 import type { TriageConfig } from "./types.js";
 import { buildInvestigationPrompt, buildImplementPrompt, buildPrDescriptionPrompt } from "./prompts.js";
 import { defaultConfig } from "./test-helpers.js";

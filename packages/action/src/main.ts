@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
-import { runWorkflow, triageWorkflow } from "@swenyai/engine";
-import type { TriageConfig, WorkflowResult } from "@swenyai/engine";
+import { runWorkflow, triageWorkflow } from "@sweny-ai/engine";
+import type { TriageConfig, WorkflowResult } from "@sweny-ai/engine";
 import { parseInputs, validateInputs, ActionConfig } from "./config.js";
 import { createProviders } from "./providers/index.js";
 

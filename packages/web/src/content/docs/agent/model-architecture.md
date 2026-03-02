@@ -10,7 +10,7 @@ SWEny runs coding agents in two different modes depending on the deployment targ
 ```
 GitHub Action                          Interactive Agent / CLI
 ─────────────                          ──────────────────────
-@swenyai/action                          @swenyai/agent
+@sweny-ai/action                          @sweny-ai/agent
      │                                      │
 CodingAgent                            ClaudeRunner
 (subprocess CLI)                       (orchestrator)
@@ -32,8 +32,8 @@ claude CLI process                     ├ Claude Code SDK query()
 The `CodingAgent` interface abstracts subprocess-based coding agents for the GitHub Action:
 
 ```typescript
-import { claudeCode } from "@swenyai/providers/coding-agent";
-import type { CodingAgent } from "@swenyai/providers/coding-agent";
+import { claudeCode } from "@sweny-ai/providers/coding-agent";
+import type { CodingAgent } from "@sweny-ai/providers/coding-agent";
 ```
 
 ### Interface
@@ -67,7 +67,7 @@ const exitCode = await agent.run({
 });
 ```
 
-The factory installs the Claude Code CLI via `npm install -g @anthropic-ai/claude-code`, then shells out to it with `--dangerously-skip-permissions` and `--allowedTools *`. It uses `@actions/exec` (lazy-loaded, only available in GitHub Actions).
+The factory installs the Claude Code CLI via `npm install -g @anthropic-ai/claude-code` (skipped if already installed), then shells out to it with `--dangerously-skip-permissions` and `--allowedTools *`. Uses native `child_process.spawn`. Zero external dependencies.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -79,7 +79,7 @@ The factory installs the Claude Code CLI via `npm install -g @anthropic-ai/claud
 The `ModelRunner` interface abstracts in-process agent SDKs for the interactive agent and CLI:
 
 ```typescript
-import type { ModelRunner, ModelRunOptions, RunResult } from "@swenyai/agent";
+import type { ModelRunner, ModelRunOptions, RunResult } from "@sweny-ai/agent";
 ```
 
 ### Interface
@@ -125,7 +125,7 @@ The `sessionId` is an opaque string used for session resumption. Pass it back in
 The built-in implementation uses the `@anthropic-ai/claude-code` SDK:
 
 ```typescript
-import { ClaudeCodeRunner } from "@swenyai/agent";
+import { ClaudeCodeRunner } from "@sweny-ai/agent";
 
 const runner = new ClaudeCodeRunner({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -137,11 +137,11 @@ It creates an in-process MCP server via `createSdkMcpServer()`, converts `AgentT
 
 ### toSdkTool() adapter
 
-The adapter bridges the SDK-agnostic `AgentTool` from `@swenyai/providers/agent-tool` to the Claude SDK's `tool()` format:
+The adapter bridges the SDK-agnostic `AgentTool` from `@sweny-ai/providers/agent-tool` to the Claude SDK's `tool()` format:
 
 ```typescript
 import { tool } from "@anthropic-ai/claude-code";
-import type { AgentTool } from "@swenyai/providers/agent-tool";
+import type { AgentTool } from "@sweny-ai/providers/agent-tool";
 
 function toSdkTool(agentTool: AgentTool): SdkTool {
   return tool(agentTool.name, agentTool.description, agentTool.schema, agentTool.execute);
@@ -205,7 +205,7 @@ Bash, Write, and Edit are allowed so the agent can execute scripts in `/tmp`. In
 The `ModelRunner` interface is designed for alternative backends. To use a different agent SDK, implement the interface and pass it to `ClaudeRunner`:
 
 ```typescript
-import type { ModelRunner, ModelRunOptions, RunResult } from "@swenyai/agent";
+import type { ModelRunner, ModelRunOptions, RunResult } from "@sweny-ai/agent";
 
 class CustomRunner implements ModelRunner {
   async run(opts: ModelRunOptions): Promise<RunResult> {

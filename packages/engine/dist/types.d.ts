@@ -1,4 +1,4 @@
-import type { Logger } from "@swenyai/providers";
+import type { Logger } from "@sweny-ai/providers";
 /** The three phases of every workflow. */
 export type WorkflowPhase = "learn" | "act" | "report";
 /** Result of executing a single step. */

@@ -1,4 +1,4 @@
-import { canListTriageHistory } from "@swenyai/providers/issue-tracking";
+import { canListTriageHistory } from "@sweny-ai/providers/issue-tracking";
 /** Build known-issues context from issue tracker + source control to prevent duplicates. */
 export async function buildContext(ctx) {
     const issueTracker = ctx.providers.get("issueTracker");

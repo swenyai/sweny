@@ -1,1 +1,1 @@
-export { roleBasedGuard, type RoleMapping } from "@swenyai/providers/access";
+export { roleBasedGuard, type RoleMapping } from "@sweny-ai/providers/access";

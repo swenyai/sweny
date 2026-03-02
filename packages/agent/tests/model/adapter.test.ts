@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
-import type { AgentTool } from "@swenyai/providers/agent-tool";
+import type { AgentTool } from "@sweny-ai/providers/agent-tool";
 
 vi.mock("@anthropic-ai/claude-code", () => ({
   tool: vi.fn((name: string, desc: string, schema: unknown, exec: unknown) => ({

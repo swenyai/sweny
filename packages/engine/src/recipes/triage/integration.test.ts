@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as fs from "fs";
+import * as fs from "node:fs";
 import { runWorkflow, createProviderRegistry } from "../../runner.js";
 import { triageWorkflow } from "./index.js";
 import { defaultConfig, silentLogger } from "./test-helpers.js";

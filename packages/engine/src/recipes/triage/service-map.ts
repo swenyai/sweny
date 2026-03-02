@@ -1,5 +1,5 @@
-import * as fs from "fs";
-import type { Logger } from "@swenyai/providers";
+import * as fs from "node:fs";
+import type { Logger } from "@sweny-ai/providers";
 
 export interface ServiceEntry {
   name: string;

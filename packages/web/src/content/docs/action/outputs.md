@@ -31,7 +31,7 @@ steps:
   - uses: swenyai/sweny@v0.2
     id: triage
     with:
-      claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+      claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       # ... other inputs
 
   - if: steps.triage.outputs.pr-url != ''

@@ -122,9 +122,9 @@ See [Issue Tracking Providers](/providers/issue-tracking/) for full Linear, Jira
 You can also run SWEny locally from your terminal — no CI pipeline required:
 
 ```bash
-npx @swenyai/cli init        # creates .sweny.yml
+npx @sweny-ai/cli init        # creates .sweny.yml
 # edit .sweny.yml + add secrets to .env
-npx @swenyai/cli triage --dry-run
+npx @sweny-ai/cli triage --dry-run
 ```
 
 The CLI auto-loads `.env`, reads settings from `.sweny.yml`, and supports step caching for fast iteration. See the [CLI Quick Start](/cli/) to get started.

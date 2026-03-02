@@ -1,5 +1,5 @@
 {
-  "name": "@swenyai/agent",
+  "name": "@sweny-ai/agent",
   "version": "0.1.0",
   "description": "AI assistant framework powered by Claude Code SDK — Slack bot + CLI with plugin architecture",
   "type": "module",
@@ -61,7 +61,7 @@
   },
   "dependencies": {
     "@slack/bolt": "^4",
-    "@swenyai/providers": "*",
+    "@sweny-ai/providers": "*",
     "express": "^5",
     "zod": "^3.24"
   },
@@ -103,6 +103,9 @@
     "mcp",
     "agent"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "homepage": "https://sweny.ai",
   "repository": {

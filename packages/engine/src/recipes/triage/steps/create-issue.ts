@@ -1,5 +1,5 @@
-import * as fs from "fs";
-import type { Issue, IssueTrackingProvider } from "@swenyai/providers/issue-tracking";
+import * as fs from "node:fs";
+import type { Issue, IssueTrackingProvider } from "@sweny-ai/providers/issue-tracking";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig } from "../types.js";
 

@@ -4,7 +4,7 @@ description: Query logs and aggregate errors from your monitoring stack.
 ---
 
 ```typescript
-import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "@swenyai/providers/observability";
+import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "@sweny-ai/providers/observability";
 ```
 
 ## Interface
@@ -57,7 +57,7 @@ const groups = await obs.aggregate({
   serviceFilter: "*",
 });
 // Returns: AggregateResult[] — grouped by service + error pattern with occurrence counts
-// e.g., [{ key: "payment-api::NullPointerException", count: 312, ... }]
+// e.g., [{ service: "payment-api", count: 312 }]
 ```
 
 ## Sentry

@@ -1,5 +1,5 @@
-import type { IssueTrackingProvider } from "@swenyai/providers/issue-tracking";
-import type { SourceControlProvider } from "@swenyai/providers/source-control";
+import type { IssueTrackingProvider } from "@sweny-ai/providers/issue-tracking";
+import type { SourceControlProvider } from "@sweny-ai/providers/source-control";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig } from "../types.js";
 import { getStepData } from "../results.js";

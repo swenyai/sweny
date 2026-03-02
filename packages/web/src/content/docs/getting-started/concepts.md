@@ -36,10 +36,10 @@ The **ProviderRegistry** is how the engine connects to external services. You re
 This means you can swap Datadog for CloudWatch, or Linear for Jira, without changing your workflow logic.
 
 ```typescript
-import { createProviderRegistry } from "@swenyai/engine";
-import { datadog } from "@swenyai/providers/observability";
-import { linear } from "@swenyai/providers/issue-tracking";
-import { github } from "@swenyai/providers/source-control";
+import { createProviderRegistry } from "@sweny-ai/engine";
+import { datadog } from "@sweny-ai/providers/observability";
+import { linear } from "@sweny-ai/providers/issue-tracking";
+import { github } from "@sweny-ai/providers/source-control";
 
 const providers = createProviderRegistry();
 providers.set("observability", datadog({ apiKey, appKey }));
@@ -57,7 +57,7 @@ Providers map to workflow phases:
 | **Act** | Issue Tracking | Linear, GitHub Issues, Jira |
 | **Act** | Source Control | GitHub, GitLab |
 | **Act** | Incident Management | PagerDuty, OpsGenie |
-| **Act** | Coding Agent | Claude Code |
+| **Act** | Coding Agent | Claude Code, OpenAI Codex, Google Gemini |
 | **Report** | Notification | GitHub Summary, Slack, Teams, Discord, Email, Webhook |
 | **Report** | Messaging | Slack, Microsoft Teams |
 

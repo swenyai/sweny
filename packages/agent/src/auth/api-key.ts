@@ -1,1 +1,1 @@
-export { apiKeyAuth, type ApiKeyAuthOpts } from "@swenyai/providers/auth";
+export { apiKeyAuth, type ApiKeyAuthOpts } from "@sweny-ai/providers/auth";

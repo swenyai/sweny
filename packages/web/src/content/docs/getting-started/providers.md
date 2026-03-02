@@ -10,7 +10,7 @@ SWEny is built on a provider/plugin architecture. The core engine is provider-ag
 Every provider follows the same factory function pattern:
 
 ```typescript
-import { datadog } from "@swenyai/providers/observability";
+import { datadog } from "@sweny-ai/providers/observability";
 
 const obs = datadog({
   apiKey: "your-api-key",
@@ -32,30 +32,31 @@ Config is validated at construction time using Zod. If you pass an invalid confi
 
 | Category | Interface | Implementations |
 |----------|-----------|-----------------|
-| **Observability** | `ObservabilityProvider` | `datadog`, `sentry`, `cloudwatch` |
-| **Issue Tracking** | `IssueTrackingProvider` | `linear`, `githubIssues` |
-| **Source Control** | `SourceControlProvider` | `github` |
-| **Notification** | `NotificationProvider` | `githubSummary`, `slackWebhook`, `teamsWebhook`, `discordWebhook` |
-| **Incident** | `IncidentProvider` | `pagerduty` |
-| **Messaging** | `MessagingProvider` | `slack` |
+| **Observability** | `ObservabilityProvider` | `datadog`, `sentry`, `cloudwatch`, `splunk`, `elastic`, `newrelic`, `loki` |
+| **Issue Tracking** | `IssueTrackingProvider` | `linear`, `githubIssues`, `jira` |
+| **Source Control** | `SourceControlProvider` | `github`, `gitlab` |
+| **Notification** | `NotificationProvider` | `githubSummary`, `slackWebhook`, `teamsWebhook`, `discordWebhook`, `email`, `webhook` |
+| **Incident** | `IncidentProvider` | `pagerduty`, `opsgenie` |
+| **Messaging** | `MessagingProvider` | `slack`, `teams` |
+| **Coding Agent** | `CodingAgent` | `claudeCode`, `openaiCodex`, `googleGemini` |
 | **Auth** | `AuthProvider` | `noAuth`, `apiKeyAuth` |
 | **Access** | `AccessGuard` | `allowAllGuard`, `roleBasedGuard` |
-| **Storage** | `StorageProvider` | `fsStorage`, `s3Storage` |
+| **Storage** | `StorageProvider` | `fsStorage`, `s3Storage`, `csiStorage` |
 
 ## Subpath imports
 
 Each category has its own import path to keep your bundle lean:
 
 ```typescript
-import { datadog } from "@swenyai/providers/observability";
-import { linear } from "@swenyai/providers/issue-tracking";
-import { github } from "@swenyai/providers/source-control";
-import { slackWebhook } from "@swenyai/providers/notification";
-import { pagerduty } from "@swenyai/providers/incident";
-import { slack } from "@swenyai/providers/messaging";
-import { apiKeyAuth } from "@swenyai/providers/auth";
-import { roleBasedGuard } from "@swenyai/providers/access";
-import { s3Storage } from "@swenyai/providers/storage";
+import { datadog } from "@sweny-ai/providers/observability";
+import { linear } from "@sweny-ai/providers/issue-tracking";
+import { github } from "@sweny-ai/providers/source-control";
+import { slackWebhook } from "@sweny-ai/providers/notification";
+import { pagerduty } from "@sweny-ai/providers/incident";
+import { slack } from "@sweny-ai/providers/messaging";
+import { apiKeyAuth } from "@sweny-ai/providers/auth";
+import { roleBasedGuard } from "@sweny-ai/providers/access";
+import { s3Storage } from "@sweny-ai/providers/storage";
 ```
 
 ## Optional capabilities
@@ -63,7 +64,7 @@ import { s3Storage } from "@swenyai/providers/storage";
 Some providers support optional capabilities beyond the base interface. Use type guards to check:
 
 ```typescript
-import { linear, canLinkPr, canListTriageHistory } from "@swenyai/providers/issue-tracking";
+import { linear, canLinkPr, canSearchByFingerprint, canListTriageHistory } from "@sweny-ai/providers/issue-tracking";
 
 const tracker = linear({ apiKey: "..." });
 
@@ -86,20 +87,26 @@ Available capabilities:
 Implement the TypeScript interface and pass your instance wherever a provider is expected:
 
 ```typescript
-import type { ObservabilityProvider } from "@swenyai/providers/observability";
+import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
 
-export function grafanaLoki(config: LokiConfig): ObservabilityProvider {
+export function myObservabilityPlatform(config: MyConfig): ObservabilityProvider {
   return {
     async verifyAccess() {
-      // Check Loki is reachable
+      // Verify credentials are valid
     },
     async queryLogs(opts) {
-      // Query Loki's HTTP API
+      // Query your platform's API
       return [];
     },
     async aggregate(opts) {
       // Aggregate by service
       return [];
+    },
+    getAgentEnv() {
+      return {};
+    },
+    getPromptInstructions() {
+      return "";
     },
   };
 }

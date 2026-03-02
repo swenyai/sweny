@@ -4,7 +4,7 @@ description: Persist sessions, memory, and workspace files.
 ---
 
 ```typescript
-import { fsStorage, s3Storage } from "@swenyai/providers/storage";
+import { fsStorage, s3Storage, csiStorage } from "@sweny-ai/providers/storage";
 ```
 
 ## Interface
@@ -84,3 +84,17 @@ const storage = s3Storage({
 ```
 
 Requires `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` as peer dependencies. Uses AES-256 server-side encryption.
+
+## CSI / Kubernetes PVC Storage
+
+For Kubernetes deployments using a mounted PersistentVolumeClaim:
+
+```typescript
+const storage = csiStorage({
+  mountPath: "/mnt/sweny-data",
+  volumeName: "sweny-pvc",    // optional, used in logs
+  namespace: "production",    // optional, used in logs
+});
+```
+
+Requires `@kubernetes/client-node` as a peer dependency.

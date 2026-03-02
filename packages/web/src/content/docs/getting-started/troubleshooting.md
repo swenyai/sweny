@@ -18,7 +18,7 @@ SWEny's duplicate detection checks your issue tracker for matching issues before
 
 If you see "max turns reached" in the output, the agent hit the iteration limit before finishing:
 
-- Increase `max-turns` (default: 50)
+- Increase `max-investigate-turns` (default: 50) or `max-implement-turns` (default: 30)
 - Use `additional-instructions` to focus the agent on a specific area
 - Check that your repo isn't too large — the agent has to read files to understand the codebase
 
@@ -62,11 +62,11 @@ CLAUDE_CODE_OAUTH_TOKEN=...
 - Verify bot token scopes include `chat:write`, `app_mentions:read`, `im:history`
 - Check the agent logs for connection errors
 
-### "Cannot find module '@swenyai/providers/...'"
+### "Cannot find module '@sweny-ai/providers/...'"
 
 If you see this when building:
 
-- Make sure `@swenyai/providers` is installed
+- Make sure `@sweny-ai/providers` is installed
 - Run `npm run build` in the providers package first (it needs to generate `dist/`)
 - Check that your `tsconfig.json` uses `moduleResolution: "NodeNext"`
 
@@ -80,7 +80,7 @@ With a Claude Max/Pro OAuth token, triage runs are included in your subscription
 
 ### How do I limit costs?
 
-- Set `max-turns` to a lower value (e.g., `20` instead of `50`)
+- Set `max-investigate-turns` to a lower value (e.g., `20` instead of `50`)
 - Use `service-filter` to focus on specific services
 - Use `investigation-depth: quick` for faster, cheaper runs
 - Run less frequently (weekly instead of twice-weekly)

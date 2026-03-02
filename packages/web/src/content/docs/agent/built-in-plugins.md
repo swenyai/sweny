@@ -6,7 +6,7 @@ description: Memory, workspace, and HTTP plugins included with the SWEny agent.
 The agent ships with two built-in plugins and one example plugin. Add them to your config:
 
 ```typescript
-import { memoryPlugin, workspacePlugin } from "@swenyai/agent";
+import { memoryPlugin, workspacePlugin } from "@sweny-ai/agent";
 
 export default defineConfig({
   // ...

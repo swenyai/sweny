@@ -4,7 +4,7 @@ description: Install and run coding agents to implement changes.
 ---
 
 ```typescript
-import { claudeCode } from "@swenyai/providers/coding-agent";
+import { claudeCode, openaiCodex, googleGemini } from "@sweny-ai/providers/coding-agent";
 ```
 
 ## Interface
@@ -43,6 +43,44 @@ const exitCode = await agent.run({
 });
 ```
 
-The `install()` method runs `npm install -g @anthropic-ai/claude-code`. The `run()` method invokes `claude` with `--allowedTools *`, `--dangerously-skip-permissions`, and the configured `--max-turns`.
+The `install()` method runs `npm install -g @anthropic-ai/claude-code` (skipped if already installed). The `run()` method invokes `claude` with `--allowedTools *`, `--dangerously-skip-permissions`, and the configured `--max-turns`.
 
-Requires `@actions/exec` as a peer dependency (available automatically in GitHub Actions).
+Uses native `child_process.spawn`. Zero external dependencies.
+
+## OpenAI Codex
+
+```typescript
+const agent = openaiCodex({
+  cliFlags: [],   // optional extra CLI flags
+  logger: myLogger,
+});
+
+await agent.install();  // npm install -g @openai/codex
+
+const exitCode = await agent.run({
+  prompt: "Fix the failing test in src/utils.test.ts",
+  maxTurns: 10,
+  env: { OPENAI_API_KEY: process.env.OPENAI_API_KEY! },
+});
+```
+
+Requires `OPENAI_API_KEY` in the environment.
+
+## Google Gemini
+
+```typescript
+const agent = googleGemini({
+  cliFlags: [],   // optional extra CLI flags
+  logger: myLogger,
+});
+
+await agent.install();  // npm install -g @google/gemini-cli
+
+const exitCode = await agent.run({
+  prompt: "Fix the failing test in src/utils.test.ts",
+  maxTurns: 10,
+  env: { GEMINI_API_KEY: process.env.GEMINI_API_KEY! },
+});
+```
+
+Requires `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) in the environment.

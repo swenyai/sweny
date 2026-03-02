@@ -1,1 +1,1 @@
-export { allowAllGuard } from "@swenyai/providers/access";
+export { allowAllGuard } from "@sweny-ai/providers/access";

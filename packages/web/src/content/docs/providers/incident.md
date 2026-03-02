@@ -6,7 +6,7 @@ description: Create, acknowledge, and resolve incidents. Check on-call schedules
 The incident provider manages the lifecycle of production incidents. Use it when SWEny discovers a critical error that warrants paging someone — or to check who's on-call before escalating.
 
 ```typescript
-import { pagerduty } from "@swenyai/providers/incident";
+import { pagerduty, opsgenie } from "@sweny-ai/providers/incident";
 ```
 
 ## Interface
@@ -39,8 +39,8 @@ Uses the PagerDuty Events API v2 for incident lifecycle and the REST API for on-
 const incident = await incidents.createIncident({
   title: "payment-api: NullPointerException in WebhookHandler",
   description: "312 occurrences in the last 24h. Affects refund processing.",
-  severity: "high",
-  source: "sweny-triage",
+  urgency: "high",
+  serviceId: "payment-api",  // optional
 });
 // incident.id → "Q1234ABC"
 ```
@@ -49,7 +49,7 @@ const incident = await incidents.createIncident({
 
 ```typescript
 const oncall = await incidents.getOnCall();
-// [{ userId: "P123", name: "Jane Doe", email: "jane@example.com", schedule: "Primary" }]
+// [{ userId: "P123", name: "Jane Doe", email: "jane@example.com" }]
 ```
 
 ### Setup
@@ -60,3 +60,37 @@ You need two PagerDuty credentials:
 |------------|----------------|----------|
 | `routingKey` | Services > Your Service > Integrations > Events API v2 | Creating, acknowledging, resolving incidents |
 | `apiToken` | User Settings > API Access > Create New API Key | On-call lookups |
+
+## OpsGenie
+
+```typescript
+const incidents = opsgenie({
+  apiKey: process.env.OPSGENIE_API_KEY!,
+  region: "us",  // optional, "us" or "eu", defaults to "us"
+  logger: myLogger,
+});
+```
+
+Uses the OpsGenie Alerts API v2. Zero external dependencies — native `fetch` only.
+
+### Creating an alert
+
+```typescript
+const incident = await incidents.createIncident({
+  title: "payment-api: NullPointerException in WebhookHandler",
+  description: "312 occurrences in the last 24h. Affects refund processing.",
+  urgency: "high",
+});
+// incident.id → "abc123..."
+```
+
+### Checking on-call
+
+```typescript
+const oncall = await incidents.getOnCall();
+// Without a scheduleId, uses the first schedule found
+// [{ userId: "abc123", name: "Jane Doe" }]
+
+// Or pass a specific schedule ID:
+const oncall = await incidents.getOnCall("schedule-id");
+```

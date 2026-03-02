@@ -1,6 +1,6 @@
-import * as fs from "fs";
-import type { SourceControlProvider } from "@swenyai/providers/source-control";
-import type { CodingAgent } from "@swenyai/providers/coding-agent";
+import * as fs from "node:fs";
+import type { SourceControlProvider } from "@sweny-ai/providers/source-control";
+import type { CodingAgent } from "@sweny-ai/providers/coding-agent";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig } from "../types.js";
 import { getStepData } from "../results.js";

@@ -1,4 +1,4 @@
-name: Release @swenyai/engine
+name: Release @sweny-ai/engine
 
 on:
   push:

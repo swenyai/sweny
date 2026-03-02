@@ -24,7 +24,7 @@ What actually happened.
 
 ## Environment
 
-- Package: (e.g., `@swenyai/providers@0.1.0`, `swenyai/sweny@v0.1`)
+- Package: (e.g., `@sweny-ai/providers@0.1.0`, `swenyai/sweny@v0.1`)
 - Node version:
 - OS:
 

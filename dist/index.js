@@ -33153,7 +33153,103 @@ curl -s "\${LOKI_URL}/loki/api/v1/label/job/values" \\${curlHeaders}
     }
 }
 //# sourceMappingURL=loki.js.map
+// EXTERNAL MODULE: external "node:fs"
+var external_node_fs_ = __nccwpck_require__(3024);
+;// CONCATENATED MODULE: ../providers/dist/observability/file.js
+
+
+
+const fileConfigSchema = objectType({
+    path: stringType().min(1, "Log file path is required"),
+    logger: custom().optional(),
+});
+function file(config) {
+    const parsed = fileConfigSchema.parse(config);
+    return new FileProvider(parsed);
+}
+class FileProvider {
+    path;
+    log;
+    entries = null;
+    constructor(config) {
+        this.path = config.path;
+        this.log = config.logger ?? consoleLogger;
+    }
+    load() {
+        if (this.entries)
+            return this.entries;
+        this.log.info(`Loading logs from ${this.path}`);
+        const raw = readFileSync(this.path, "utf-8");
+        const parsed = JSON.parse(raw);
+        // Support both array of entries and { logs: [...] } wrapper
+        const entries = Array.isArray(parsed) ? parsed : parsed.logs;
+        if (!Array.isArray(entries)) {
+            throw new Error(`Invalid log file format: expected array or { logs: [...] }`);
+        }
+        this.entries = entries.map((e) => {
+            const entry = e;
+            return {
+                timestamp: String(entry.timestamp ?? new Date().toISOString()),
+                service: String(entry.service ?? "unknown"),
+                level: String(entry.level ?? entry.status ?? "error"),
+                message: String(entry.message ?? ""),
+                attributes: entry.attributes ?? {},
+            };
+        });
+        this.log.info(`Loaded ${this.entries.length} log entries`);
+        return this.entries;
+    }
+    filter(entries, opts) {
+        return entries.filter((e) => {
+            if (opts.serviceFilter && opts.serviceFilter !== "*" && e.service !== opts.serviceFilter)
+                return false;
+            if (opts.severity && e.level !== opts.severity)
+                return false;
+            return true;
+        });
+    }
+    async verifyAccess() {
+        this.load();
+        this.log.info("File provider access verified");
+    }
+    async queryLogs(opts) {
+        const all = this.load();
+        const filtered = this.filter(all, { serviceFilter: opts.serviceFilter, severity: opts.severity });
+        this.log.info(`Found ${filtered.length} ${opts.severity} logs for ${opts.serviceFilter}`);
+        return filtered;
+    }
+    async aggregate(opts) {
+        const all = this.load();
+        const filtered = this.filter(all, { serviceFilter: opts.serviceFilter });
+        const counts = new Map();
+        for (const entry of filtered) {
+            counts.set(entry.service, (counts.get(entry.service) ?? 0) + 1);
+        }
+        const results = Array.from(counts.entries())
+            .map(([service, count]) => ({ service, count }))
+            .sort((a, b) => b.count - a.count);
+        this.log.info(`Aggregated ${results.length} service groups from file`);
+        return results;
+    }
+    getAgentEnv() {
+        return { SWENY_LOG_FILE: this.path };
+    }
+    getPromptInstructions() {
+        return `### Local Log File
+Logs are loaded from a local JSON file at: ${this.path}
+
+The file contains pre-collected log entries. You do NOT need to make any API calls.
+All log data has already been provided to the engine via the file provider.
+
+To inspect the raw file:
+\`\`\`bash
+cat ${this.path} | jq '.[:5]'
+\`\`\``;
+    }
+}
+//# sourceMappingURL=file.js.map
 ;// CONCATENATED MODULE: ../providers/dist/observability/index.js
+
 
 
 
@@ -33880,6 +33976,16 @@ const githubSummaryConfigSchema = objectType({
 function githubSummary(config) {
     return new GitHubSummaryProvider(config?.logger ?? logger_consoleLogger);
 }
+// ---------------------------------------------------------------------------
+// Rendering helpers
+// ---------------------------------------------------------------------------
+const STATUS_EMOJI = {
+    success: "✅",
+    error: "❌",
+    warning: "⚠️",
+    info: "ℹ️",
+    skipped: "⏭️",
+};
 class GitHubSummaryProvider {
     log;
     constructor(logger) {
@@ -33888,10 +33994,42 @@ class GitHubSummaryProvider {
     async send(payload) {
         const core = await Promise.resolve(/* import() */).then(__nccwpck_require__.t.bind(__nccwpck_require__, 7184, 19));
         const summary = core.summary;
+        // Title
         if (payload.title) {
             summary.addHeading(payload.title, 2);
         }
-        summary.addRaw(payload.body);
+        // Status summary
+        if (payload.status || payload.summary) {
+            const emoji = payload.status ? STATUS_EMOJI[payload.status] : "📋";
+            const text = payload.summary ? `${emoji} **${payload.summary}**` : emoji;
+            summary.addRaw(`\n${text}\n\n`);
+        }
+        // Metadata fields as a table
+        if (payload.fields?.length) {
+            summary.addTable([
+                [
+                    { data: "Field", header: true },
+                    { data: "Value", header: true },
+                ],
+                ...payload.fields.map((f) => [f.label, f.value]),
+            ]);
+        }
+        // Action links
+        if (payload.links?.length) {
+            const linkList = payload.links.map((l) => `[${l.label}](${l.url})`).join(" · ");
+            summary.addRaw(`\n${linkList}\n\n`);
+        }
+        // Content sections
+        for (const section of payload.sections ?? []) {
+            if (section.title) {
+                summary.addHeading(section.title, 3);
+            }
+            summary.addRaw(section.content + "\n\n");
+        }
+        // Fallback: if no structured content, write body directly
+        if (!payload.fields?.length && !payload.status && !payload.summary && !payload.sections?.length) {
+            summary.addRaw(payload.body);
+        }
         await summary.write();
         this.log.info("GitHub Action summary written");
     }
@@ -33909,6 +34047,93 @@ function slackWebhook(config) {
     const parsed = slackWebhookConfigSchema.parse(config);
     return new SlackWebhookProvider(parsed);
 }
+// ---------------------------------------------------------------------------
+// Block Kit helpers
+// ---------------------------------------------------------------------------
+const slack_webhook_STATUS_EMOJI = {
+    success: "✅",
+    error: "❌",
+    warning: "⚠️",
+    info: "ℹ️",
+    skipped: "⏭️",
+};
+/** Build the fallback `text` field (used for notifications and screen readers). */
+function buildFallbackText(payload) {
+    if (payload.title && payload.summary)
+        return `*${payload.title}*\n${payload.summary}`;
+    if (payload.title)
+        return `*${payload.title}*\n${payload.body?.slice(0, 150) || ""}`;
+    return payload.body?.slice(0, 150) || "";
+}
+/** Build Slack Block Kit blocks from the structured payload. */
+function buildBlocks(payload) {
+    const blocks = [];
+    // 1. Header block
+    if (payload.title) {
+        blocks.push({
+            type: "header",
+            text: { type: "plain_text", text: payload.title, emoji: true },
+        });
+    }
+    // 2. Status + summary section
+    if (payload.status || payload.summary) {
+        const emoji = payload.status ? slack_webhook_STATUS_EMOJI[payload.status] : "📋";
+        const text = payload.summary ? `${emoji} *${payload.summary}*` : emoji;
+        blocks.push({
+            type: "section",
+            text: { type: "mrkdwn", text },
+        });
+    }
+    // 3. Metadata fields grid (max 10 fields per section block — Slack limit)
+    if (payload.fields?.length) {
+        for (let i = 0; i < payload.fields.length; i += 10) {
+            const chunk = payload.fields.slice(i, i + 10);
+            blocks.push({
+                type: "section",
+                fields: chunk.map((f) => ({
+                    type: "mrkdwn",
+                    text: `*${f.label}*\n${f.value}`,
+                })),
+            });
+        }
+    }
+    // 4. If no structured content at all, fall back to body as a mrkdwn section
+    if (!payload.fields?.length && !payload.status && !payload.summary) {
+        const text = payload.body?.slice(0, 3000) || "";
+        if (text) {
+            blocks.push({
+                type: "section",
+                text: { type: "mrkdwn", text },
+            });
+        }
+    }
+    // 5. Action links as buttons
+    if (payload.links?.length) {
+        blocks.push({
+            type: "actions",
+            elements: payload.links.map((l, i) => ({
+                type: "button",
+                text: { type: "plain_text", text: l.label, emoji: true },
+                url: l.url,
+                action_id: `notify_link_${i}`,
+            })),
+        });
+    }
+    // 6. Content sections (investigation log, issues report, etc.)
+    for (const section of payload.sections ?? []) {
+        blocks.push({ type: "divider" });
+        const header = section.title ? `*${section.title}*\n` : "";
+        const text = `${header}${section.content}`;
+        blocks.push({
+            type: "section",
+            text: { type: "mrkdwn", text: text.slice(0, 3000) },
+        });
+    }
+    return blocks;
+}
+// ---------------------------------------------------------------------------
+// Provider
+// ---------------------------------------------------------------------------
 class SlackWebhookProvider {
     webhookUrl;
     log;
@@ -33917,15 +34142,18 @@ class SlackWebhookProvider {
         this.log = config.logger ?? logger_consoleLogger;
     }
     async send(payload) {
-        const text = payload.title ? `*${payload.title}*\n${payload.body}` : payload.body;
+        const body = JSON.stringify({
+            text: buildFallbackText(payload),
+            blocks: buildBlocks(payload),
+        });
         const response = await fetch(this.webhookUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text }),
+            body,
         });
         if (!response.ok) {
-            const body = await response.text().catch(() => "");
-            throw new errors_ProviderApiError("Slack", response.status, response.statusText, body);
+            const responseBody = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("Slack", response.status, response.statusText, responseBody);
         }
         this.log.info("Slack notification sent");
     }
@@ -33943,6 +34171,90 @@ function teamsWebhook(config) {
     const parsed = teamsWebhookConfigSchema.parse(config);
     return new TeamsWebhookProvider(parsed);
 }
+// ---------------------------------------------------------------------------
+// Adaptive Card helpers
+// ---------------------------------------------------------------------------
+const teams_webhook_STATUS_EMOJI = {
+    success: "✅",
+    error: "❌",
+    warning: "⚠️",
+    info: "ℹ️",
+    skipped: "⏭️",
+};
+function buildAdaptiveCard(payload) {
+    const body = [];
+    const actions = [];
+    // Title
+    if (payload.title) {
+        body.push({
+            type: "TextBlock",
+            text: payload.title,
+            weight: "Bolder",
+            size: "Medium",
+        });
+    }
+    // Status summary
+    if (payload.status || payload.summary) {
+        const emoji = payload.status ? teams_webhook_STATUS_EMOJI[payload.status] : "📋";
+        const text = payload.summary ? `${emoji} ${payload.summary}` : emoji;
+        body.push({
+            type: "TextBlock",
+            text,
+            wrap: true,
+            color: payload.status === "success"
+                ? "Good"
+                : payload.status === "error"
+                    ? "Attention"
+                    : payload.status === "warning"
+                        ? "Warning"
+                        : "Default",
+        });
+    }
+    // Metadata as FactSet
+    if (payload.fields?.length) {
+        body.push({
+            type: "FactSet",
+            facts: payload.fields.map((f) => ({ title: f.label, value: f.value })),
+        });
+    }
+    // Content sections
+    for (const section of payload.sections ?? []) {
+        body.push({
+            type: "Container",
+            separator: true,
+            items: [
+                ...(section.title ? [{ type: "TextBlock", text: section.title, weight: "Bolder", wrap: true }] : []),
+                { type: "TextBlock", text: section.content.slice(0, 3000), wrap: true },
+            ],
+        });
+    }
+    // If no structured content, fall back to body TextBlock
+    if (!payload.fields?.length && !payload.status && !payload.summary && !payload.sections?.length) {
+        body.push({
+            type: "TextBlock",
+            text: payload.body,
+            wrap: true,
+        });
+    }
+    // Action links
+    for (const link of payload.links ?? []) {
+        actions.push({
+            type: "Action.OpenUrl",
+            title: link.label,
+            url: link.url,
+        });
+    }
+    return {
+        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+        type: "AdaptiveCard",
+        version: "1.4",
+        body,
+        ...(actions.length ? { actions } : {}),
+    };
+}
+// ---------------------------------------------------------------------------
+// Provider
+// ---------------------------------------------------------------------------
 class TeamsWebhookProvider {
     webhookUrl;
     log;
@@ -33956,28 +34268,7 @@ class TeamsWebhookProvider {
             attachments: [
                 {
                     contentType: "application/vnd.microsoft.card.adaptive",
-                    content: {
-                        $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-                        type: "AdaptiveCard",
-                        version: "1.4",
-                        body: [
-                            ...(payload.title
-                                ? [
-                                    {
-                                        type: "TextBlock",
-                                        text: payload.title,
-                                        weight: "Bolder",
-                                        size: "Medium",
-                                    },
-                                ]
-                                : []),
-                            {
-                                type: "TextBlock",
-                                text: payload.body,
-                                wrap: true,
-                            },
-                        ],
-                    },
+                    content: buildAdaptiveCard(payload),
                 },
             ],
         };
@@ -34006,6 +34297,65 @@ function discordWebhook(config) {
     const parsed = discordWebhookConfigSchema.parse(config);
     return new DiscordWebhookProvider(parsed);
 }
+// ---------------------------------------------------------------------------
+// Embed helpers
+// ---------------------------------------------------------------------------
+// Discord color integers (decimal)
+const STATUS_COLORS = {
+    success: 5763719, // #57F287 green
+    error: 15548997, // #ED4245 red
+    warning: 16705372, // #FEE75C yellow
+    info: 5793266, // #5865F2 blurple
+    skipped: 9807270, // #95A5A6 gray
+};
+const discord_webhook_STATUS_EMOJI = {
+    success: "✅",
+    error: "❌",
+    warning: "⚠️",
+    info: "ℹ️",
+    skipped: "⏭️",
+};
+const DISCORD_EMBED_DESC_LIMIT = 4096;
+const DISCORD_FIELD_VALUE_LIMIT = 1024;
+const DISCORD_MAX_FIELDS = 25;
+function buildEmbed(payload) {
+    const embed = {};
+    if (payload.title) {
+        embed.title = payload.title.slice(0, 256);
+    }
+    // Description: status summary or body fallback
+    if (payload.summary) {
+        const emoji = payload.status ? discord_webhook_STATUS_EMOJI[payload.status] : "📋";
+        embed.description = `${emoji} ${payload.summary}`.slice(0, DISCORD_EMBED_DESC_LIMIT);
+    }
+    else if (!payload.fields?.length) {
+        embed.description = payload.body.slice(0, DISCORD_EMBED_DESC_LIMIT);
+    }
+    // Color from status
+    if (payload.status) {
+        embed.color = STATUS_COLORS[payload.status];
+    }
+    // Metadata as embed fields (inline)
+    const fields = [];
+    for (const f of payload.fields?.slice(0, DISCORD_MAX_FIELDS) ?? []) {
+        fields.push({
+            name: f.label.slice(0, 256),
+            value: f.value.slice(0, DISCORD_FIELD_VALUE_LIMIT),
+            inline: f.short ?? true,
+        });
+    }
+    if (fields.length) {
+        embed.fields = fields;
+    }
+    // Footer with first section title or run timestamp
+    if (payload.sections?.length || payload.fields?.length) {
+        embed.footer = { text: `SWEny • ${new Date().toUTCString()}` };
+    }
+    return embed;
+}
+// ---------------------------------------------------------------------------
+// Provider
+// ---------------------------------------------------------------------------
 class DiscordWebhookProvider {
     webhookUrl;
     log;
@@ -34014,13 +34364,23 @@ class DiscordWebhookProvider {
         this.log = config.logger ?? logger_consoleLogger;
     }
     async send(payload) {
-        const content = payload.title ? `**${payload.title}**\n${payload.body}` : payload.body;
-        // Discord has a 2000 character limit per message
-        const truncated = content.length > 2000 ? content.slice(0, 1997) + "..." : content;
+        const embed = buildEmbed(payload);
+        const webhookPayload = { embeds: [embed] };
+        // Discord has a single `content` field — combine sections and links into it.
+        const contentParts = [];
+        if (payload.sections?.length) {
+            contentParts.push(payload.sections.map((s) => `**${s.title ?? "Section"}**\n${s.content}`).join("\n\n"));
+        }
+        if (payload.links?.length) {
+            contentParts.push(payload.links.map((l) => `[${l.label}](${l.url})`).join(" • "));
+        }
+        if (contentParts.length) {
+            webhookPayload.content = contentParts.join("\n\n").slice(0, 2000);
+        }
         const response = await fetch(this.webhookUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: truncated }),
+            body: JSON.stringify(webhookPayload),
         });
         if (!response.ok) {
             const body = await response.text().catch(() => "");
@@ -34040,6 +34400,78 @@ const emailConfigSchema = objectType({
     to: unionType([stringType().email(), arrayType(stringType().email()).min(1)]),
     logger: custom().optional(),
 });
+// ---------------------------------------------------------------------------
+// HTML rendering helpers
+// ---------------------------------------------------------------------------
+function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function safeUrl(url) {
+    return /^https?:\/\//i.test(url) ? url : "#";
+}
+const email_STATUS_COLORS = {
+    success: "#28a745",
+    error: "#dc3545",
+    warning: "#ffc107",
+    info: "#17a2b8",
+    skipped: "#6c757d",
+};
+const STATUS_TEXT_COLORS = {
+    success: "#fff",
+    error: "#fff",
+    warning: "#212529",
+    info: "#fff",
+    skipped: "#fff",
+};
+function buildHtml(payload) {
+    const parts = [
+        `<!DOCTYPE html>`,
+        `<html><body style="font-family:sans-serif;max-width:800px;margin:0 auto;padding:16px">`,
+    ];
+    if (payload.title) {
+        parts.push(`<h2 style="margin-top:0">${escapeHtml(payload.title)}</h2>`);
+    }
+    if (payload.status || payload.summary) {
+        const bg = payload.status ? email_STATUS_COLORS[payload.status] : "#6c757d";
+        const fg = payload.status ? STATUS_TEXT_COLORS[payload.status] : "#fff";
+        const text = payload.summary ? escapeHtml(payload.summary) : (payload.status ?? "");
+        parts.push(`<div style="background:${bg};color:${fg};padding:8px 12px;border-radius:4px;margin-bottom:12px">${text}</div>`);
+    }
+    if (payload.fields?.length) {
+        parts.push(`<table style="border-collapse:collapse;width:100%;margin-bottom:12px">`);
+        parts.push(`<thead><tr>` +
+            `<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #dee2e6">Field</th>` +
+            `<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #dee2e6">Value</th>` +
+            `</tr></thead><tbody>`);
+        for (const f of payload.fields) {
+            parts.push(`<tr>` +
+                `<td style="padding:4px 8px;border-bottom:1px solid #dee2e6">${escapeHtml(f.label)}</td>` +
+                `<td style="padding:4px 8px;border-bottom:1px solid #dee2e6">${escapeHtml(f.value)}</td>` +
+                `</tr>`);
+        }
+        parts.push(`</tbody></table>`);
+    }
+    if (payload.links?.length) {
+        const buttons = payload.links
+            .map((l) => `<a href="${safeUrl(l.url)}" style="display:inline-block;padding:6px 12px;margin:0 4px 4px 0;` +
+            `background:#0d6efd;color:#fff;text-decoration:none;border-radius:4px">${escapeHtml(l.label)}</a>`)
+            .join("");
+        parts.push(`<div style="margin-bottom:12px">${buttons}</div>`);
+    }
+    for (const section of payload.sections ?? []) {
+        if (section.title) {
+            parts.push(`<h3>${escapeHtml(section.title)}</h3>`);
+        }
+        parts.push(`<pre style="background:#f8f9fa;padding:12px;border-radius:4px;overflow:auto;white-space:pre-wrap">` +
+            `${escapeHtml(section.content)}</pre>`);
+    }
+    // When no structured content was added, fall back to the body text
+    if (!payload.fields?.length && !payload.status && !payload.summary && !payload.sections?.length) {
+        parts.push(`<div>${payload.body}</div>`);
+    }
+    parts.push(`</body></html>`);
+    return parts.join("\n");
+}
 function email(config) {
     const parsed = emailConfigSchema.parse(config);
     return new EmailProvider(parsed);
@@ -34057,13 +34489,14 @@ class EmailProvider {
     }
     async send(payload) {
         const subject = payload.title ?? "SWEny Notification";
-        const isHtml = payload.format === "html";
-        const content = [
-            {
-                type: isHtml ? "text/html" : "text/plain",
-                value: payload.body,
-            },
-        ];
+        const hasStructuredContent = !!(payload.status ||
+            payload.summary ||
+            payload.fields?.length ||
+            payload.sections?.length ||
+            payload.links?.length);
+        const isHtml = payload.format === "html" || hasStructuredContent;
+        const value = hasStructuredContent ? buildHtml(payload) : payload.body;
+        const content = [{ type: isHtml ? "text/html" : "text/plain", value }];
         const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
             method: "POST",
             headers: {
@@ -34124,6 +34557,11 @@ class WebhookProvider {
             title: payload.title,
             body: payload.body,
             format: payload.format,
+            status: payload.status,
+            summary: payload.summary,
+            fields: payload.fields,
+            sections: payload.sections,
+            links: payload.links,
             timestamp: new Date().toISOString(),
         });
         const headers = {
@@ -35226,8 +35664,6 @@ class fs_FsMemoryStore {
     }
 }
 //# sourceMappingURL=fs.js.map
-// EXTERNAL MODULE: external "node:fs"
-var external_node_fs_ = __nccwpck_require__(3024);
 ;// CONCATENATED MODULE: ../providers/dist/storage/workspace/fs.js
 
 
@@ -35843,26 +36279,70 @@ function csiStorage(config) {
 
 
 //# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../providers/dist/coding-agent/shared.js
+
+function shared_execCommand(cmd, args, opts) {
+    return new Promise((resolve, reject) => {
+        const child = (0,external_node_child_process_.spawn)(cmd, args, {
+            env: opts?.env ?? process.env,
+            stdio: opts?.quiet ? ["ignore", "ignore", "pipe"] : "inherit",
+        });
+        if (opts?.quiet && child.stderr) {
+            let buf = "";
+            child.stderr.on("data", (chunk) => {
+                buf += chunk.toString();
+                const lines = buf.split("\n");
+                buf = lines.pop() ?? "";
+                for (const line of lines) {
+                    if (line.trim())
+                        opts.onStderr?.(line.trim());
+                }
+            });
+            child.stderr.on("end", () => {
+                if (buf.trim())
+                    opts.onStderr?.(buf.trim());
+            });
+        }
+        child.on("error", (err) => reject(err));
+        child.on("close", (code) => {
+            if (code !== 0 && !opts?.ignoreReturnCode) {
+                reject(new Error(`${cmd} exited with code ${code}`));
+            }
+            else {
+                resolve(code ?? 0);
+            }
+        });
+    });
+}
+function shared_isCliInstalled(cmd) {
+    try {
+        (0,external_node_child_process_.execSync)(`${cmd} --version`, { stdio: "ignore" });
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+//# sourceMappingURL=shared.js.map
 ;// CONCATENATED MODULE: ../providers/dist/coding-agent/claude-code.js
+
 
 function claudeCode(config) {
     const log = config?.logger ?? logger_consoleLogger;
     const extraFlags = config?.cliFlags ?? [];
-    // Lazy-load @actions/exec — optional peer dep, only available in GitHub Actions
-    async function exec(cmd, args, opts) {
-        const actionsExec = await Promise.resolve(/* import() */).then(__nccwpck_require__.t.bind(__nccwpck_require__, 9192, 19));
-        return actionsExec.exec(cmd, args, {
-            env: opts?.env,
-            ignoreReturnCode: opts?.ignoreReturnCode,
-        });
-    }
+    const quiet = config?.quiet ?? false;
     return {
         async install() {
+            if (shared_isCliInstalled("claude")) {
+                log.info("Claude Code CLI already installed, skipping");
+                return;
+            }
             log.info("Installing Claude Code CLI...");
-            await exec("npm", ["install", "-g", "@anthropic-ai/claude-code"]);
+            await shared_execCommand("npm", ["install", "-g", "@anthropic-ai/claude-code"], { quiet });
             log.info("Claude Code CLI installed");
         },
         async run(opts) {
+            log.info("Running Claude Code agent...");
             const args = [
                 "-p",
                 opts.prompt,
@@ -35873,15 +36353,79 @@ function claudeCode(config) {
                 String(opts.maxTurns),
                 ...extraFlags,
             ];
-            return exec("claude", args, {
+            return await shared_execCommand("claude", args, {
                 env: { ...process.env, ...opts.env },
                 ignoreReturnCode: true,
+                quiet,
+                onStderr: quiet ? (line) => log.debug(line) : undefined,
             });
         },
     };
 }
 //# sourceMappingURL=claude-code.js.map
+;// CONCATENATED MODULE: ../providers/dist/coding-agent/openai-codex.js
+
+
+function openaiCodex(config) {
+    const log = config?.logger ?? consoleLogger;
+    const extraFlags = config?.cliFlags ?? [];
+    const quiet = config?.quiet ?? false;
+    return {
+        async install() {
+            if (isCliInstalled("codex")) {
+                log.info("OpenAI Codex CLI already installed, skipping");
+                return;
+            }
+            log.info("Installing OpenAI Codex CLI...");
+            await execCommand("npm", ["install", "-g", "@openai/codex"], { quiet });
+            log.info("OpenAI Codex CLI installed");
+        },
+        async run(opts) {
+            log.info("Running OpenAI Codex agent...");
+            const args = ["exec", "--full-auto", opts.prompt, ...extraFlags];
+            return execCommand("codex", args, {
+                env: { ...process.env, ...opts.env },
+                ignoreReturnCode: true,
+                quiet,
+                onStderr: quiet ? (line) => log.debug(line) : undefined,
+            });
+        },
+    };
+}
+//# sourceMappingURL=openai-codex.js.map
+;// CONCATENATED MODULE: ../providers/dist/coding-agent/google-gemini.js
+
+
+function googleGemini(config) {
+    const log = config?.logger ?? consoleLogger;
+    const extraFlags = config?.cliFlags ?? [];
+    const quiet = config?.quiet ?? false;
+    return {
+        async install() {
+            if (isCliInstalled("gemini")) {
+                log.info("Google Gemini CLI already installed, skipping");
+                return;
+            }
+            log.info("Installing Google Gemini CLI...");
+            await execCommand("npm", ["install", "-g", "@google/gemini-cli"], { quiet });
+            log.info("Google Gemini CLI installed");
+        },
+        async run(opts) {
+            log.info("Running Google Gemini agent...");
+            const args = ["-y", "-p", opts.prompt, ...extraFlags];
+            return execCommand("gemini", args, {
+                env: { ...process.env, ...opts.env },
+                ignoreReturnCode: true,
+                quiet,
+                onStderr: quiet ? (line) => log.debug(line) : undefined,
+            });
+        },
+    };
+}
+//# sourceMappingURL=google-gemini.js.map
 ;// CONCATENATED MODULE: ../providers/dist/coding-agent/index.js
+
+
 
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ../providers/dist/credential-vault/aws-secrets-manager.js
@@ -36085,6 +36629,25 @@ async function runWorkflow(workflow, config, providers, options) {
                     continue;
                 }
             }
+            // Cache check — replay cached result if available
+            if (options?.cache) {
+                const entry = await options.cache.get(step.name);
+                if (entry) {
+                    // Replay skipPhase side effects
+                    for (const { phase: p, reason: r } of entry.skippedPhases) {
+                        ctx.skipPhase(p, r);
+                    }
+                    const result = { ...entry.result, cached: true };
+                    results.set(step.name, result);
+                    completedSteps.push({ name: step.name, phase, result });
+                    if (options.afterStep) {
+                        await options.afterStep(step, result, ctx);
+                    }
+                    continue;
+                }
+            }
+            // Snapshot skippedPhases size to detect new skipPhase calls during this step
+            const phasesBefore = skippedPhases.size;
             let result;
             try {
                 logger.info(`[${workflow.name}] ${phase}/${step.name}: starting`);
@@ -36102,6 +36665,22 @@ async function runWorkflow(workflow, config, providers, options) {
             }
             results.set(step.name, result);
             completedSteps.push({ name: step.name, phase, result });
+            // Cache successful results
+            if (result.status === "success" && options?.cache) {
+                // Collect skipPhase calls made during this step
+                const addedSkips = [];
+                if (skippedPhases.size > phasesBefore) {
+                    let seen = 0;
+                    for (const [p, r] of skippedPhases) {
+                        if (++seen > phasesBefore) {
+                            addedSkips.push({ phase: p, reason: r });
+                        }
+                    }
+                }
+                await options.cache
+                    .set(step.name, { result, skippedPhases: addedSkips, createdAt: Date.now() })
+                    .catch(() => { }); // non-fatal
+            }
             // afterStep hook
             if (options?.afterStep) {
                 await options.afterStep(step, result, ctx);
@@ -36219,10 +36798,6 @@ async function buildContext(ctx) {
     };
 }
 //# sourceMappingURL=build-context.js.map
-// EXTERNAL MODULE: external "fs"
-var external_fs_ = __nccwpck_require__(9896);
-// EXTERNAL MODULE: external "path"
-var external_path_ = __nccwpck_require__(6928);
 ;// CONCATENATED MODULE: ../engine/dist/recipes/triage/results.js
 /**
  * Get typed step result data from the workflow context.
@@ -36245,11 +36820,11 @@ function getStepData(ctx, stepName) {
  * Avoids YAML library dependency for ncc bundling simplicity.
  */
 function parseServiceMap(filePath, logger) {
-    if (!external_fs_.existsSync(filePath)) {
+    if (!external_node_fs_.existsSync(filePath)) {
         logger?.warn(`Service map not found at ${filePath}`);
         return { services: [] };
     }
-    const content = external_fs_.readFileSync(filePath, "utf-8");
+    const content = external_node_fs_.readFileSync(filePath, "utf-8");
     const lines = content.split("\n");
     const services = [];
     let current = null;
@@ -36389,8 +36964,8 @@ name in the error logs and match it against the \`owns\` list in the service map
     if (serviceMap.services.length > 0) {
         parts.push("");
         parts.push("### Service Map Reference");
-        if (external_fs_.existsSync(config.serviceMapPath)) {
-            parts.push(external_fs_.readFileSync(config.serviceMapPath, "utf-8"));
+        if (external_node_fs_.existsSync(config.serviceMapPath)) {
+            parts.push(external_node_fs_.readFileSync(config.serviceMapPath, "utf-8"));
         }
     }
     // Target repo identification
@@ -36587,14 +37162,14 @@ async function investigate(ctx) {
     const analysisDir = config.analysisDir ?? ".github/triage-analysis";
     const observability = ctx.providers.get("observability");
     const codingAgent = ctx.providers.get("codingAgent");
-    external_fs_.mkdirSync(analysisDir, { recursive: true });
+    external_node_fs_.mkdirSync(analysisDir, { recursive: true });
     // Install coding agent CLI
     await codingAgent.install();
     // Get known issues context from prior step
     const knownIssuesContent = getStepData(ctx, "build-context")?.knownIssuesContent ?? "";
     // Write known issues file for reference
-    const knownIssuesPath = external_path_.join(analysisDir, "known-issues-context.md");
-    external_fs_.writeFileSync(knownIssuesPath, knownIssuesContent);
+    const knownIssuesPath = external_node_path_.join(analysisDir, "known-issues-context.md");
+    external_node_fs_.writeFileSync(knownIssuesPath, knownIssuesContent);
     // Build investigation prompt
     const prompt = buildInvestigationPrompt(config, observability, knownIssuesContent);
     // Run coding agent investigation
@@ -36611,15 +37186,15 @@ async function investigate(ctx) {
     };
 }
 function parseInvestigationResults(analysisDir) {
-    const issuesReportPath = external_path_.join(analysisDir, "issues-report.md");
-    const bestCandidatePath = external_path_.join(analysisDir, "best-candidate.md");
-    const issuesFound = external_fs_.existsSync(issuesReportPath);
-    const bestCandidate = external_fs_.existsSync(bestCandidatePath);
+    const issuesReportPath = external_node_path_.join(analysisDir, "issues-report.md");
+    const bestCandidatePath = external_node_path_.join(analysisDir, "best-candidate.md");
+    const issuesFound = external_node_fs_.existsSync(issuesReportPath);
+    const bestCandidate = external_node_fs_.existsSync(bestCandidatePath);
     let recommendation = "skip";
     let existingIssue = "";
     let targetRepo = "";
     if (bestCandidate) {
-        const content = external_fs_.readFileSync(bestCandidatePath, "utf-8");
+        const content = external_node_fs_.readFileSync(bestCandidatePath, "utf-8");
         // Extract RECOMMENDATION
         const recMatch = content.match(/^RECOMMENDATION:\s*(.+)$/im);
         if (recMatch) {
@@ -36727,8 +37302,8 @@ async function createIssue(ctx) {
     let issueTitle = "SWEny Triage: Automated bug fix";
     if (!config.issueOverride) {
         const bestCandidatePath = `${analysisDir}/best-candidate.md`;
-        if (external_fs_.existsSync(bestCandidatePath)) {
-            const content = external_fs_.readFileSync(bestCandidatePath, "utf-8");
+        if (external_node_fs_.existsSync(bestCandidatePath)) {
+            const content = external_node_fs_.readFileSync(bestCandidatePath, "utf-8");
             const headingMatch = content.match(/^#\s+(.+)$/m);
             if (headingMatch) {
                 issueTitle = headingMatch[1]
@@ -36771,8 +37346,8 @@ async function createIssue(ctx) {
             ctx.logger.info("No existing issue found, creating new one...");
             let description = "";
             const bestCandidatePath = `${analysisDir}/best-candidate.md`;
-            if (external_fs_.existsSync(bestCandidatePath)) {
-                description = external_fs_.readFileSync(bestCandidatePath, "utf-8").slice(0, DESCRIPTION_MAX_LENGTH);
+            if (external_node_fs_.existsSync(bestCandidatePath)) {
+                description = external_node_fs_.readFileSync(bestCandidatePath, "utf-8").slice(0, DESCRIPTION_MAX_LENGTH);
             }
             const labelIds = [config.bugLabelId];
             if (config.triageLabelId) {
@@ -36909,8 +37484,8 @@ async function implementFix(ctx) {
     // -------------------------------------------------------------------------
     // Check if fix was declined
     const fixDeclinedPath = `${analysisDir}/fix-declined.md`;
-    if (external_fs_.existsSync(fixDeclinedPath)) {
-        const reason = external_fs_.readFileSync(fixDeclinedPath, "utf-8").trim();
+    if (external_node_fs_.existsSync(fixDeclinedPath)) {
+        const reason = external_node_fs_.readFileSync(fixDeclinedPath, "utf-8").trim();
         ctx.logger.info(`Fix was declined by Claude: ${reason.slice(0, 200)}`);
         return {
             status: "skipped",
@@ -36989,8 +37564,8 @@ async function createPr(ctx) {
     // -------------------------------------------------------------------------
     let prBody = "";
     const prDescPath = `${analysisDir}/pr-description.md`;
-    if (external_fs_.existsSync(prDescPath)) {
-        prBody = external_fs_.readFileSync(prDescPath, "utf-8");
+    if (external_node_fs_.existsSync(prDescPath)) {
+        prBody = external_node_fs_.readFileSync(prDescPath, "utf-8");
     }
     else {
         prBody = `## Automated Fix from SWEny Triage
@@ -37059,6 +37634,77 @@ async function sendNotification(ctx) {
     const issueData = getStepData(ctx, "create-issue");
     const crossRepoData = getStepData(ctx, "cross-repo-check");
     const implementResult = ctx.results.get("implement-fix");
+    // -------------------------------------------------------------------------
+    // Determine status and one-line summary
+    // -------------------------------------------------------------------------
+    let status;
+    let summary;
+    if (crossRepoData?.dispatched) {
+        status = "info";
+        summary = `Cross-repo dispatch: Bug belongs to \`${crossRepoData.targetRepo}\` — dispatched for implementation`;
+    }
+    else if (investigation?.recommendation?.toLowerCase().includes("skip")) {
+        status = "skipped";
+        summary = "Skipped: No novel issues found";
+    }
+    else if (investigation?.recommendation?.toLowerCase().includes("+1 existing")) {
+        status = "info";
+        summary = "+1 Existing: Added occurrence to existing issue";
+    }
+    else if (implementResult?.status === "skipped" && implementResult.reason) {
+        status = "skipped";
+        summary = `Skipped: ${implementResult.reason}`;
+    }
+    else if (prData?.prUrl) {
+        status = "success";
+        summary = `Success: New PR created — ${prData.prUrl}`;
+    }
+    else if (config.dryRun) {
+        status = "info";
+        summary = "Dry Run: Analysis only";
+    }
+    else {
+        status = "info";
+        summary = "Completed";
+    }
+    // -------------------------------------------------------------------------
+    // Metadata fields
+    // -------------------------------------------------------------------------
+    const issueIdentifier = prData?.issueIdentifier ?? issueData?.issueIdentifier;
+    const issueUrl = prData?.issueUrl ?? issueData?.issueUrl;
+    const fields = [
+        { label: "Run Date", value: new Date().toISOString(), short: true },
+        { label: "Service Filter", value: `\`${config.serviceFilter}\``, short: true },
+        { label: "Time Range", value: `\`${config.timeRange}\``, short: true },
+        { label: "Dry Run", value: String(config.dryRun), short: true },
+        { label: "Recommendation", value: investigation?.recommendation ?? "unknown", short: true },
+    ];
+    // -------------------------------------------------------------------------
+    // Action links
+    // -------------------------------------------------------------------------
+    const links = [];
+    if (issueIdentifier && issueUrl) {
+        links.push({ label: `Issue: ${issueIdentifier}`, url: issueUrl });
+    }
+    if (prData?.prUrl) {
+        links.push({ label: `PR #${prData.prNumber}`, url: prData.prUrl });
+    }
+    // -------------------------------------------------------------------------
+    // Content sections (from analysis files)
+    // -------------------------------------------------------------------------
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
+    const sections = [];
+    const investigationLog = `${analysisDir}/investigation-log.md`;
+    if (external_node_fs_.existsSync(investigationLog)) {
+        sections.push({ title: "Investigation Log", content: external_node_fs_.readFileSync(investigationLog, "utf-8") });
+    }
+    const issuesReport = `${analysisDir}/issues-report.md`;
+    if (external_node_fs_.existsSync(issuesReport)) {
+        sections.push({ title: "Issues Found", content: external_node_fs_.readFileSync(issuesReport, "utf-8") });
+    }
+    // -------------------------------------------------------------------------
+    // Flat markdown body (fallback for providers that don't use structured fields)
+    // -------------------------------------------------------------------------
     const lines = [];
     lines.push(`**Run Date**: ${new Date().toISOString()}`);
     lines.push(`**Service Filter**: \`${config.serviceFilter}\``);
@@ -37066,51 +37712,28 @@ async function sendNotification(ctx) {
     lines.push(`**Dry Run**: ${config.dryRun}`);
     lines.push(`**Recommendation**: ${investigation?.recommendation ?? "unknown"}`);
     lines.push("");
-    // Issue reference
-    const issueIdentifier = prData?.issueIdentifier ?? issueData?.issueIdentifier;
-    const issueUrl = prData?.issueUrl ?? issueData?.issueUrl;
-    if (issueIdentifier) {
+    if (issueIdentifier && issueUrl) {
         lines.push(`**Issue**: [${issueIdentifier}](${issueUrl})`);
         lines.push("");
     }
-    // Status message
-    if (crossRepoData?.dispatched) {
-        lines.push(`> **Cross-repo dispatch**: Bug belongs to \`${crossRepoData.targetRepo}\` — dispatched for implementation`);
-    }
-    else if (investigation?.recommendation?.toLowerCase().includes("skip")) {
-        lines.push("> **Skipped**: No novel issues found");
-    }
-    else if (investigation?.recommendation?.toLowerCase().includes("+1 existing")) {
-        lines.push("> **+1 Existing**: Added occurrence to existing issue");
-    }
-    else if (implementResult?.status === "skipped" && implementResult.reason) {
-        lines.push(`> **Skipped**: ${implementResult.reason}`);
-    }
-    else if (prData?.prUrl) {
-        lines.push(`> **Success**: New PR created - ${prData.prUrl}`);
-    }
-    else if (config.dryRun) {
-        lines.push("> **Dry Run**: Analysis only");
-    }
-    // Append investigation log if it exists
-    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
-    const investigationLog = `${analysisDir}/investigation-log.md`;
-    if (external_fs_.existsSync(investigationLog)) {
+    lines.push(`> **${summary}**`);
+    for (const section of sections) {
         lines.push("");
-        lines.push("### Investigation Log");
-        lines.push(external_fs_.readFileSync(investigationLog, "utf-8"));
+        lines.push(`### ${section.title}`);
+        lines.push(section.content);
     }
-    // Append issues report if it exists
-    const issuesReport = `${analysisDir}/issues-report.md`;
-    if (external_fs_.existsSync(issuesReport)) {
-        lines.push("");
-        lines.push("### Issues Found");
-        lines.push(external_fs_.readFileSync(issuesReport, "utf-8"));
-    }
+    // -------------------------------------------------------------------------
+    // Send
+    // -------------------------------------------------------------------------
     await notification.send({
         title: "SWEny Triage Summary",
         body: lines.join("\n"),
         format: "markdown",
+        status,
+        summary,
+        fields,
+        sections,
+        links,
     });
     return { status: "success" };
 }

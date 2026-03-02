@@ -1,4 +1,4 @@
-import * as fs from "fs";
+import * as fs from "node:fs";
 /**
  * Parse a service-map.yml file using simple line-based parsing.
  * Avoids YAML library dependency for ncc bundling simplicity.

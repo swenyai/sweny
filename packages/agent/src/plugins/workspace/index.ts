@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { agentTool } from "@swenyai/providers/agent-tool";
-import type { AgentTool } from "@swenyai/providers/agent-tool";
+import { agentTool } from "@sweny-ai/providers/agent-tool";
+import type { AgentTool } from "@sweny-ai/providers/agent-tool";
 import type { ToolPlugin, PluginContext } from "../types.js";
 
 export function workspacePlugin(): ToolPlugin {

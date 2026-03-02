@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/swenyai/sweny/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/swenyai/sweny/ci.yml?style=flat-square&label=CI" /></a>
-  <a href="https://www.npmjs.com/package/@swenyai/providers"><img alt="npm" src="https://img.shields.io/npm/v/@swenyai/providers?style=flat-square&color=orange" /></a>
+  <a href="https://www.npmjs.com/package/@sweny-ai/providers"><img alt="npm" src="https://img.shields.io/npm/v/@sweny-ai/providers?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/releases"><img alt="Release" src="https://img.shields.io/github/v/release/swenyai/sweny?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/swenyai/sweny?style=flat-square" /></a>
   <a href="https://sweny.ai"><img alt="Website" src="https://img.shields.io/badge/sweny.ai-website-blue?style=flat-square" /></a>
@@ -22,12 +22,12 @@ This monorepo contains the SWEny platform:
 
 | Package | Description |
 |---------|-------------|
-| **[@swenyai/engine](packages/engine)** | Workflow engine — Learn, Act, Report |
-| **[@swenyai/cli](packages/cli)** | CLI — run triage from your terminal |
+| **[@sweny-ai/engine](packages/engine)** | Workflow engine — Learn, Act, Report |
+| **[@sweny-ai/cli](packages/cli)** | CLI — run triage from your terminal |
 | **[SWEny Triage](#sweny-triage)** | GitHub Action — autonomous SRE triage |
-| **[@swenyai/providers](packages/providers)** | 30+ provider implementations |
-| **[@swenyai/agent](packages/agent)** | AI assistant — Slack bot + CLI |
-| **[@swenyai/web](packages/web)** | sweny.ai website |
+| **[@sweny-ai/providers](packages/providers)** | 30+ provider implementations |
+| **[@sweny-ai/agent](packages/agent)** | AI assistant — Slack bot + CLI |
+| **[@sweny-ai/web](packages/web)** | sweny.ai website |
 
 ---
 
@@ -44,16 +44,16 @@ SWEny workflows follow three phases:
 │  Entry Points                               │
 │  GitHub Action · Slack Bot · CLI · Cloud     │
 ├─────────────────────────────────────────────┤
-│  @swenyai/engine                              │
+│  @sweny-ai/engine                              │
 │  Workflow Runner · Recipes · Step Context    │
 ├─────────────────────────────────────────────┤
-│  @swenyai/providers                           │
+│  @sweny-ai/providers                           │
 │  Observability · Issue Tracking · Source     │
 │  Control · Notification · Coding Agent      │
 └─────────────────────────────────────────────┘
 ```
 
-Entry points (GitHub Action, Slack Bot, CLI) feed into the **@swenyai/engine**, which orchestrates recipes -- pre-built workflows composed of Learn, Act, and Report steps. Each step delegates to a pluggable provider from **@swenyai/providers**, so you can swap Datadog for CloudWatch or Linear for Jira without changing your workflow.
+Entry points (GitHub Action, Slack Bot, CLI) feed into the **@sweny-ai/engine**, which orchestrates recipes -- pre-built workflows composed of Learn, Act, and Report steps. Each step delegates to a pluggable provider from **@sweny-ai/providers**, so you can swap Datadog for CloudWatch or Linear for Jira without changing your workflow.
 
 ---
 
@@ -384,18 +384,18 @@ The engine is provider-agnostic. Every integration is a pluggable provider that 
 | **Infrastructure** | Filesystem / S3 / K8s CSI (storage) -- Env Vars / AWS Secrets Manager (credentials) -- API Key / No-Auth (auth) |
 | **AI** | Claude Code, OpenAI Codex, Google Gemini CLI (coding agent) |
 
-Implementing a custom provider means implementing a TypeScript interface -- see [`packages/providers/`](packages/providers/) for the full library and [`@swenyai/providers` on npm](https://www.npmjs.com/package/@swenyai/providers).
+Implementing a custom provider means implementing a TypeScript interface -- see [`packages/providers/`](packages/providers/) for the full library and [`@sweny-ai/providers` on npm](https://www.npmjs.com/package/@sweny-ai/providers).
 
 ---
 
-## @swenyai/cli
+## @sweny-ai/cli
 
 Run SWEny triage from your terminal — no CI pipeline required.
 
 ### Install
 
 ```bash
-npm install -g @swenyai/cli
+npm install -g @sweny-ai/cli
 ```
 
 ### Quick start
@@ -481,7 +481,7 @@ See the [CLI documentation](https://sweny.ai/cli/) for the full inputs reference
 
 ---
 
-## @swenyai/agent
+## @sweny-ai/agent
 
 AI assistant framework powered by [Claude Code SDK](https://docs.anthropic.com/en/docs/claude-code/sdk) — deploy as a Slack bot or CLI with a plugin architecture for custom tools.
 

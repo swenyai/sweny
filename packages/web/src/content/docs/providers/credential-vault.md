@@ -8,7 +8,7 @@ The credential vault provides tenant-scoped secret storage. In multi-tenant depl
 If you're running SWEny as a single-tenant GitHub Action, you probably don't need this directly. It's used internally by the action to resolve provider credentials.
 
 ```typescript
-import { envVault } from "@swenyai/providers/credential-vault";
+import { envVault, awsSecretsManager } from "@sweny-ai/providers/credential-vault";
 ```
 
 ## Interface
@@ -46,4 +46,29 @@ Key lookup follows a tenant-scoped convention: `{PREFIX}_{TENANT_ID}_{KEY}` (upp
 
 ### Limitations
 
-The env vault is **read-only** — `setSecret`, `deleteSecret`, and `listKeys` throw errors. This is by design: environment variables are immutable at runtime. For write operations, implement `CredentialVaultProvider` with a database backend.
+The env vault is **read-only** — `setSecret`, `deleteSecret`, and `listKeys` throw errors. This is by design: environment variables are immutable at runtime.
+
+## AWS Secrets Manager
+
+For production multi-tenant deployments with full read/write support:
+
+```typescript
+const vault = awsSecretsManager({
+  region: "us-east-1",  // optional, defaults to "us-east-1"
+  prefix: "sweny",      // optional, defaults to "sweny"
+});
+
+const ddKey = await vault.getSecret("acme", "api-key");
+// Reads the secret named: sweny/acme/api-key
+```
+
+### Secret naming
+
+Secrets are stored as `{prefix}/{tenantId}/{key}`:
+
+| Call | Secret name |
+|------|-------------|
+| `getSecret("acme", "api-key")` | `sweny/acme/api-key` |
+| `setSecret("acme", "dd-app-key", "...")` | `sweny/acme/dd-app-key` |
+
+Requires `@aws-sdk/client-secrets-manager` as a peer dependency. Uses lazy loading — the SDK is only imported on first use.

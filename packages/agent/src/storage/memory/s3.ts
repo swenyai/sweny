@@ -1,1 +1,1 @@
-export { S3MemoryStore } from "@swenyai/providers/storage";
+export { S3MemoryStore } from "@sweny-ai/providers/storage";

@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-export type { Logger } from "@swenyai/providers";
+export type { Logger } from "@sweny-ai/providers";
 
 const LEVELS: Record<string, number> = {
   debug: 0,

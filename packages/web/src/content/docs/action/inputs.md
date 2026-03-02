@@ -21,9 +21,10 @@ Most users should use `claude-oauth-token`. The `anthropic-api-key` option is av
 | `dd-app-key` | Datadog Application key | — |
 | `dd-site` | Datadog site | `datadoghq.com` |
 | `sentry-auth-token` | Sentry auth token | — |
-| `sentry-organization` | Sentry organization slug | — |
+| `sentry-org` | Sentry organization slug | — |
 | `sentry-project` | Sentry project slug | — |
-| `cloudwatch-region` | AWS region for CloudWatch | — |
+| `sentry-base-url` | Sentry base URL | `https://sentry.io` |
+| `cloudwatch-region` | AWS region for CloudWatch | `us-east-1` |
 | `cloudwatch-log-group-prefix` | CloudWatch log group prefix | — |
 | `splunk-url` | Splunk REST API base URL | — |
 | `splunk-token` | Splunk authentication token | — |
@@ -42,7 +43,7 @@ Most users should use `claude-oauth-token`. The `anthropic-api-key` option is av
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `issue-tracker-provider` | Provider to use (`linear`, `github-issues`, `jira`) | `linear` |
+| `issue-tracker-provider` | Provider to use (`linear`, `github-issues`, `jira`) | `github-issues` |
 | `linear-api-key` | Linear API key | — |
 | `linear-team-id` | Linear team UUID | — |
 | `linear-bug-label-id` | Label UUID for bugs | — |
@@ -76,6 +77,17 @@ Note: `github-issues` uses the existing `github-token` input for authentication.
 | `max-investigate-turns` | Max agent turns for investigation | `50` |
 | `max-implement-turns` | Max agent turns for implementation | `30` |
 
+## Notification
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `notification-provider` | Provider to use (`github-summary`, `slack`, `teams`, `discord`, `email`, `webhook`) | `github-summary` |
+| `notification-webhook-url` | Webhook URL for Slack, Teams, Discord, or generic webhook | — |
+| `sendgrid-api-key` | SendGrid API key (when `notification-provider` is `email`) | — |
+| `email-from` | Sender email address (when `notification-provider` is `email`) | — |
+| `email-to` | Recipient email addresses, comma-separated | — |
+| `webhook-signing-secret` | HMAC-SHA256 signing secret for generic webhook notifications | — |
+
 ## Behavior
 
 | Input | Description | Default |
@@ -85,5 +97,7 @@ Note: `github-issues` uses the existing `github-token` input for authentication.
 | `linear-issue` | Work on a specific Linear issue (e.g., `ENG-123`) | — |
 | `additional-instructions` | Extra guidance for the agent | — |
 | `service-map-path` | Path to service ownership map | `.github/service-map.yml` |
+| `base-branch` | Target branch for PRs | `main` |
+| `pr-labels` | Comma-separated labels to apply to created PRs | `agent,triage,needs-review` |
 | `github-token` | GitHub token for PRs | `${{ github.token }}` |
 | `bot-token` | Token with cross-repo permissions | — |

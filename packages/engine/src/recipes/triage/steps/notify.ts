@@ -1,11 +1,11 @@
-import * as fs from "fs";
+import * as fs from "node:fs";
 import type {
   NotificationProvider,
   NotificationField,
   NotificationLink,
   NotificationSection,
   NotificationStatus,
-} from "@swenyai/providers/notification";
+} from "@sweny-ai/providers/notification";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig } from "../types.js";
 import { getStepData } from "../results.js";

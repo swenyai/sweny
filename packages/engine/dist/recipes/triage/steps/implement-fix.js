@@ -1,4 +1,4 @@
-import * as fs from "fs";
+import * as fs from "node:fs";
 import { getStepData } from "../results.js";
 import { buildImplementPrompt } from "../prompts.js";
 /** Create branch, run Claude to implement fix, check for changes, and push. */

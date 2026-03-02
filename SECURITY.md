@@ -23,7 +23,7 @@ We will acknowledge your report within 48 hours and aim to release a fix within 
 
 ## Scope
 
-This policy covers the SWEny monorepo: the GitHub Action, `@swenyai/providers`, `@swenyai/agent`, and the sweny.ai website.
+This policy covers the SWEny monorepo: the GitHub Action, `@sweny-ai/providers`, `@sweny-ai/agent`, and the sweny.ai website.
 
 ## Credential Handling
 

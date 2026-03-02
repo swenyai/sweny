@@ -1,1 +1,1 @@
-export type { SessionStore, PersistedSession, TranscriptEntry } from "@swenyai/providers/storage";
+export type { SessionStore, PersistedSession, TranscriptEntry } from "@sweny-ai/providers/storage";

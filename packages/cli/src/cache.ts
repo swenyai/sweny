@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
-import type { StepCache, CacheEntry, TriageConfig } from "@swenyai/engine";
+import type { StepCache, CacheEntry, TriageConfig } from "@sweny-ai/engine";
 import type { CliConfig } from "./config.js";
 
 /**

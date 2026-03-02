@@ -1,2 +1,2 @@
-export type { WorkspaceStore, WorkspaceFile, WorkspaceManifest } from "@swenyai/providers/storage";
-export { WORKSPACE_LIMITS } from "@swenyai/providers/storage";
+export type { WorkspaceStore, WorkspaceFile, WorkspaceManifest } from "@sweny-ai/providers/storage";
+export { WORKSPACE_LIMITS } from "@sweny-ai/providers/storage";

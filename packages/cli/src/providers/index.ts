@@ -1,12 +1,12 @@
-import { createProviderRegistry } from "@swenyai/engine";
-import type { ProviderRegistry } from "@swenyai/engine";
+import { createProviderRegistry } from "@sweny-ai/engine";
+import type { ProviderRegistry } from "@sweny-ai/engine";
 import type { CliConfig } from "../config.js";
-import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "@swenyai/providers/observability";
-import type { ObservabilityProvider } from "@swenyai/providers/observability";
-import { linear, jira, githubIssues } from "@swenyai/providers/issue-tracking";
-import { github, gitlab } from "@swenyai/providers/source-control";
-import { slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@swenyai/providers/notification";
-import { claudeCode, openaiCodex, googleGemini } from "@swenyai/providers/coding-agent";
+import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "@sweny-ai/providers/observability";
+import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
+import { linear, jira, githubIssues } from "@sweny-ai/providers/issue-tracking";
+import { github, gitlab } from "@sweny-ai/providers/source-control";
+import { slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@sweny-ai/providers/notification";
+import { claudeCode, openaiCodex, googleGemini } from "@sweny-ai/providers/coding-agent";
 
 export interface CliLogger {
   info: (...args: unknown[]) => void;

@@ -1,5 +1,5 @@
 {
-  "name": "@swenyai/engine",
+  "name": "@sweny-ai/engine",
   "version": "0.2.0",
   "description": "Workflow engine for SWEny — Learn, Act, Report",
   "type": "module",
@@ -22,15 +22,18 @@
     ".": "./dist/index.js"
   },
   "dependencies": {
-    "@swenyai/providers": "^0.2.0"
+    "@sweny-ai/providers": "^0.2.0"
   },
   "peerDependencies": {
-    "@swenyai/providers": ">=0.1.0"
+    "@sweny-ai/providers": ">=0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22",
     "typescript": "^5.6",
     "vitest": "^4"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "MIT",
   "homepage": "https://sweny.ai",

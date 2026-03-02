@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { memoryPlugin } from "../../src/plugins/memory/index.js";
 import type { PluginContext } from "../../src/plugins/types.js";
-import type { AgentTool } from "@swenyai/providers/agent-tool";
+import type { AgentTool } from "@sweny-ai/providers/agent-tool";
 
 function makeFakeContext(): PluginContext {
   return {

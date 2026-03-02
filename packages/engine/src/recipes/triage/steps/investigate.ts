@@ -1,7 +1,7 @@
-import * as fs from "fs";
-import * as path from "path";
-import type { ObservabilityProvider } from "@swenyai/providers/observability";
-import type { CodingAgent } from "@swenyai/providers/coding-agent";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
+import type { CodingAgent } from "@sweny-ai/providers/coding-agent";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig, InvestigationResult } from "../types.js";
 import { getStepData } from "../results.js";

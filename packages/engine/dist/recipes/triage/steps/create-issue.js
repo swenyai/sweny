@@ -1,4 +1,4 @@
-import * as fs from "fs";
+import * as fs from "node:fs";
 const TITLE_MAX_LENGTH = 100;
 const DESCRIPTION_MAX_LENGTH = 10000;
 /** Extract issue title from best-candidate.md, then get-or-create an issue in the tracker. */

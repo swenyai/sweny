@@ -4,7 +4,7 @@ description: Define typed tools that coding agents can invoke.
 ---
 
 ```typescript
-import { agentTool } from "@swenyai/providers/agent-tool";
+import { agentTool } from "@sweny-ai/providers/agent-tool";
 ```
 
 ## Interface

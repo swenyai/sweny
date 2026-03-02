@@ -1,5 +1,5 @@
 {
-  "name": "@swenyai/cli",
+  "name": "@sweny-ai/cli",
   "version": "0.2.0",
   "description": "SWEny CLI — run triage workflows locally",
   "type": "module",
@@ -22,8 +22,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@swenyai/engine": "*",
-    "@swenyai/providers": "*",
+    "@sweny-ai/engine": "*",
+    "@sweny-ai/providers": "*",
     "chalk": "^5",
     "commander": "^11"
   },
@@ -32,6 +32,9 @@
     "tsx": "^4",
     "typescript": "^5.6",
     "vitest": "^4"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "MIT",
   "homepage": "https://sweny.ai",

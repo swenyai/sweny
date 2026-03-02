@@ -1,5 +1,5 @@
-import * as fs from "fs";
-import type { ObservabilityProvider } from "@swenyai/providers/observability";
+import * as fs from "node:fs";
+import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
 import type { TriageConfig } from "./types.js";
 import { parseServiceMap } from "./service-map.js";
 

@@ -113,7 +113,7 @@ A typical triage run with `investigation-depth: standard`:
 Costs depend on your Claude plan. With an OAuth token (Max/Pro subscription), triage runs are included. With an API key, expect ~$0.10–$0.50 per run at current Sonnet pricing.
 
 To control costs:
-- Set `max-turns` to cap the agent's iteration count (default: 50)
+- Set `max-investigate-turns` to cap the investigation turn count (default: 50)
 - Use `service-filter` to focus on specific services
 - Use `dry-run: true` to test without creating PRs
 - Use `investigation-depth: quick` for faster, cheaper runs
@@ -126,7 +126,7 @@ To control costs:
 | `severity-focus` | Error level filter | `errors`, `warnings` |
 | `service-filter` | Limit to specific services | `payment-*`, `api-gateway` |
 | `investigation-depth` | How thorough the analysis is | `quick`, `standard`, `thorough` |
-| `max-turns` | Agent iteration limit | `20`, `50` |
+| `max-investigate-turns` | Investigation turn limit | `20`, `50` |
 | `dry-run` | Investigate without creating PRs | `true` |
 
 See [Action Inputs](/action/inputs/) for the complete list.

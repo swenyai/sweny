@@ -37,7 +37,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Reduced ESLint warnings from 173 to 18
-- Added `exports` field to `@swenyai/agent` package.json
+- Added `exports` field to `@sweny-ai/agent` package.json
 - Updated README with complete provider catalog
 
 ## [v0.1] — 2026-02-27
@@ -46,7 +46,7 @@ All notable changes to this project will be documented in this file.
 
 - Initial release
 - **SWEny Triage** GitHub Action — autonomous SRE triage from observability logs
-- **@swenyai/providers** — shared provider interfaces and implementations
+- **@sweny-ai/providers** — shared provider interfaces and implementations
   - Observability: Datadog, Sentry, CloudWatch
   - Issue tracking: Linear, GitHub Issues
   - Source control: GitHub
@@ -56,6 +56,6 @@ All notable changes to this project will be documented in this file.
   - Storage: Filesystem, S3
   - Auth, access control, credential vault
   - Coding agent: Claude Code SDK wrapper
-- **@swenyai/agent** — AI assistant framework with Slack bot + CLI
-- **@swenyai/web** — Astro-based documentation site
+- **@sweny-ai/agent** — AI assistant framework with Slack bot + CLI
+- **@sweny-ai/web** — Astro-based documentation site
 - CI/CD workflows for lint, typecheck, test, release, and deploy

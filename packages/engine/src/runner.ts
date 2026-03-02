@@ -1,4 +1,4 @@
-import { consoleLogger } from "@swenyai/providers";
+import { consoleLogger } from "@sweny-ai/providers";
 import { createProviderRegistry } from "./registry.js";
 import type { CacheEntry } from "./cache.js";
 import type {

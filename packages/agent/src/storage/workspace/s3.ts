@@ -1,1 +1,1 @@
-export { S3WorkspaceStore } from "@swenyai/providers/storage";
+export { S3WorkspaceStore } from "@sweny-ai/providers/storage";

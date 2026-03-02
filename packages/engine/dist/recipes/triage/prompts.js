@@ -1,4 +1,4 @@
-import * as fs from "fs";
+import * as fs from "node:fs";
 import { parseServiceMap } from "./service-map.js";
 // ---------------------------------------------------------------------------
 // Investigation Prompt

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as fs from "fs";
+import * as fs from "node:fs";
 import { createProviderRegistry } from "../../../runner.js";
 import { createPr } from "./create-pr.js";
 import { createCtx, silentLogger } from "../test-helpers.js";
@@ -9,11 +9,11 @@ vi.mock("fs");
 vi.mock("../prompts.js", () => ({
   buildPrDescriptionPrompt: vi.fn().mockReturnValue("mock pr desc prompt"),
 }));
-vi.mock("@swenyai/providers/issue-tracking", () => ({
+vi.mock("@sweny-ai/providers/issue-tracking", () => ({
   canLinkPr: vi.fn(),
 }));
 
-import { canLinkPr } from "@swenyai/providers/issue-tracking";
+import { canLinkPr } from "@sweny-ai/providers/issue-tracking";
 
 describe("createPr", () => {
   const createPullRequest = vi.fn();

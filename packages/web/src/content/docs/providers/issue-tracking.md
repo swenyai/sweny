@@ -4,7 +4,7 @@ description: Create tickets, search for duplicates, and link PRs.
 ---
 
 ```typescript
-import { linear, githubIssues, jira, canLinkPr, canListTriageHistory } from "@swenyai/providers/issue-tracking";
+import { linear, githubIssues, jira, canLinkPr, canSearchByFingerprint, canListTriageHistory } from "@sweny-ai/providers/issue-tracking";
 ```
 
 ## Interface
@@ -61,8 +61,8 @@ Supports all optional capabilities: `PrLinkCapable`, `FingerprintCapable`, `Tria
 const issue = await tracker.createIssue({
   title: "NullPointerException in WebhookHandler.process()",
   description: "312 occurrences in the last 24h. Root cause: missing null check on refund payload.",
-  teamId: "TEAM-UUID",
-  labelIds: ["bug-label-uuid", "triage-label-uuid"],
+  projectId: "TEAM-UUID",
+  labels: ["bug-label-uuid", "triage-label-uuid"],
   priority: 2,  // High
 });
 // issue.identifier → "ENG-456"

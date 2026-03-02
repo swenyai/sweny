@@ -1,20 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { claudeCode } from "../src/coding-agent/claude-code.js";
 import type { CodingAgent } from "../src/coding-agent/types.js";
+import { execCommand, isCliInstalled } from "../src/coding-agent/shared.js";
 
-// Mock @actions/exec — lazy-loaded by claudeCode
-vi.mock("@actions/exec", () => ({
-  exec: vi.fn().mockResolvedValue(0),
+// Mock the shared module that contains execCommand and isCliInstalled
+vi.mock("../src/coding-agent/shared.js", () => ({
+  execCommand: vi.fn().mockResolvedValue(0),
+  isCliInstalled: vi.fn().mockReturnValue(false),
 }));
 
 describe("claudeCode coding agent", () => {
   let agent: CodingAgent;
-  let mockExec: ReturnType<typeof vi.fn>;
+  let mockExecCommand: ReturnType<typeof vi.fn>;
+  let mockIsCliInstalled: ReturnType<typeof vi.fn>;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    const actionsExec = await import("@actions/exec");
-    mockExec = vi.mocked(actionsExec.exec);
+    // Get the mocked functions from the module
+    mockExecCommand = vi.mocked(execCommand);
+    mockIsCliInstalled = vi.mocked(isCliInstalled);
     agent = claudeCode();
   });
 
@@ -27,9 +31,14 @@ describe("claudeCode coding agent", () => {
 
   describe("install", () => {
     it("installs claude-code CLI via npm", async () => {
+      mockIsCliInstalled.mockReturnValue(false);
       await agent.install();
 
-      expect(mockExec).toHaveBeenCalledWith("npm", ["install", "-g", "@anthropic-ai/claude-code"], expect.any(Object));
+      expect(mockExecCommand).toHaveBeenCalledWith(
+        "npm",
+        ["install", "-g", "@anthropic-ai/claude-code"],
+        expect.any(Object),
+      );
     });
   });
 
@@ -41,7 +50,7 @@ describe("claudeCode coding agent", () => {
       });
 
       expect(exitCode).toBe(0);
-      expect(mockExec).toHaveBeenCalledWith(
+      expect(mockExecCommand).toHaveBeenCalledWith(
         "claude",
         expect.arrayContaining(["-p", "Fix the bug", "--max-turns", "10"]),
         expect.objectContaining({
@@ -57,14 +66,14 @@ describe("claudeCode coding agent", () => {
         env: { MY_KEY: "my-value" },
       });
 
-      const callArgs = mockExec.mock.calls[0];
+      const callArgs = mockExecCommand.mock.calls[0];
       expect(callArgs[2].env).toEqual(expect.objectContaining({ MY_KEY: "my-value" }));
     });
 
     it("includes default CLI flags", async () => {
       await agent.run({ prompt: "Test", maxTurns: 5 });
 
-      const args = mockExec.mock.calls[0][1];
+      const args = mockExecCommand.mock.calls[0][1];
       expect(args).toContain("--allowedTools");
       expect(args).toContain("*");
       expect(args).toContain("--dangerously-skip-permissions");
@@ -74,12 +83,12 @@ describe("claudeCode coding agent", () => {
       const customAgent = claudeCode({ cliFlags: ["--verbose"] });
       await customAgent.run({ prompt: "Test", maxTurns: 5 });
 
-      const args = mockExec.mock.calls[0][1];
+      const args = mockExecCommand.mock.calls[0][1];
       expect(args).toContain("--verbose");
     });
 
     it("returns exit code from exec", async () => {
-      mockExec.mockResolvedValueOnce(1);
+      mockExecCommand.mockResolvedValueOnce(1);
 
       const exitCode = await agent.run({ prompt: "Fail", maxTurns: 1 });
       expect(exitCode).toBe(1);

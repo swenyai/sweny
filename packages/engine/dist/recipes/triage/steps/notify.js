@@ -1,4 +1,4 @@
-import * as fs from "fs";
+import * as fs from "node:fs";
 import { getStepData } from "../results.js";
 /** Build summary and send notification with investigation results. */
 export async function sendNotification(ctx) {

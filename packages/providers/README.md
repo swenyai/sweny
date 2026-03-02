@@ -1,6 +1,6 @@
-# @swenyai/providers
+# @sweny-ai/providers
 
-Shared provider interfaces and implementations for [SWEny](https://sweny.ai) — pluggable integrations for the `@swenyai/engine` workflow runner.
+Shared provider interfaces and implementations for [SWEny](https://sweny.ai) — pluggable integrations for the `@sweny-ai/engine` workflow runner.
 
 Providers map to the three workflow phases:
 
@@ -11,7 +11,7 @@ Providers map to the three workflow phases:
 ## Install
 
 ```bash
-npm install @swenyai/providers
+npm install @sweny-ai/providers
 ```
 
 ## Providers
@@ -29,7 +29,7 @@ npm install @swenyai/providers
 | New Relic | `newrelic()` | `apiKey`, `accountId`, `region` |
 
 ```typescript
-import { datadog, splunk, loki } from "@swenyai/providers/observability";
+import { datadog, splunk, loki } from "@sweny-ai/providers/observability";
 ```
 
 ### Issue Tracking (3 providers)
@@ -41,7 +41,7 @@ import { datadog, splunk, loki } from "@swenyai/providers/observability";
 | Jira | `jira()` | `baseUrl`, `email`, `apiToken` |
 
 ```typescript
-import { linear, githubIssues, jira } from "@swenyai/providers/issue-tracking";
+import { linear, githubIssues, jira } from "@sweny-ai/providers/issue-tracking";
 ```
 
 ### Source Control (2 providers)
@@ -52,7 +52,7 @@ import { linear, githubIssues, jira } from "@swenyai/providers/issue-tracking";
 | GitLab | `gitlab()` | `token`, `projectId`, `baseUrl` |
 
 ```typescript
-import { github, gitlab } from "@swenyai/providers/source-control";
+import { github, gitlab } from "@sweny-ai/providers/source-control";
 ```
 
 ### Incident Management (2 providers)
@@ -63,7 +63,7 @@ import { github, gitlab } from "@swenyai/providers/source-control";
 | OpsGenie | `opsgenie()` | `apiKey`, `region` |
 
 ```typescript
-import { pagerduty, opsgenie } from "@swenyai/providers/incident";
+import { pagerduty, opsgenie } from "@sweny-ai/providers/incident";
 ```
 
 ### Messaging (2 providers)
@@ -74,7 +74,7 @@ import { pagerduty, opsgenie } from "@swenyai/providers/incident";
 | Microsoft Teams | `teams()` | `tenantId`, `clientId`, `clientSecret` |
 
 ```typescript
-import { slack, teams } from "@swenyai/providers/messaging";
+import { slack, teams } from "@sweny-ai/providers/messaging";
 ```
 
 ### Notification (6 providers)
@@ -89,7 +89,7 @@ import { slack, teams } from "@swenyai/providers/messaging";
 | Generic Webhook | `webhook()` | `url`, `headers`, `method`, `signingSecret` |
 
 ```typescript
-import { githubSummary, slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@swenyai/providers/notification";
+import { githubSummary, slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@sweny-ai/providers/notification";
 ```
 
 ### Storage (3 backends)
@@ -101,7 +101,7 @@ import { githubSummary, slackWebhook, teamsWebhook, discordWebhook, email, webho
 | CSI / Kubernetes PVC | `csiStorage()` | `mountPath`, `volumeName`, `namespace` |
 
 ```typescript
-import { fsStorage, s3Storage, csiStorage } from "@swenyai/providers/storage";
+import { fsStorage, s3Storage, csiStorage } from "@sweny-ai/providers/storage";
 ```
 
 ### Credential Vault (2 backends)
@@ -112,7 +112,7 @@ import { fsStorage, s3Storage, csiStorage } from "@swenyai/providers/storage";
 | AWS Secrets Manager | `awsSecretsManager()` | `region`, `prefix` |
 
 ```typescript
-import { envVault, awsSecretsManager } from "@swenyai/providers/credential-vault";
+import { envVault, awsSecretsManager } from "@sweny-ai/providers/credential-vault";
 ```
 
 ### Auth (2 providers)
@@ -123,7 +123,7 @@ import { envVault, awsSecretsManager } from "@swenyai/providers/credential-vault
 | API Key Auth | `apiKeyAuth()` |
 
 ```typescript
-import { noAuth, apiKeyAuth } from "@swenyai/providers/auth";
+import { noAuth, apiKeyAuth } from "@sweny-ai/providers/auth";
 ```
 
 ### Access (2 guards)
@@ -134,7 +134,7 @@ import { noAuth, apiKeyAuth } from "@swenyai/providers/auth";
 | Role-Based | `roleBasedGuard()` |
 
 ```typescript
-import { allowAllGuard, roleBasedGuard } from "@swenyai/providers/access";
+import { allowAllGuard, roleBasedGuard } from "@sweny-ai/providers/access";
 ```
 
 ### Coding Agent
@@ -142,9 +142,11 @@ import { allowAllGuard, roleBasedGuard } from "@swenyai/providers/access";
 | Provider | Factory |
 |----------|---------|
 | Claude Code | `claudeCode()` |
+| OpenAI Codex | `openaiCodex()` |
+| Google Gemini | `googleGemini()` |
 
 ```typescript
-import { claudeCode } from "@swenyai/providers/coding-agent";
+import { claudeCode, openaiCodex, googleGemini } from "@sweny-ai/providers/coding-agent";
 ```
 
 ### Agent Tool
@@ -154,7 +156,7 @@ import { claudeCode } from "@swenyai/providers/coding-agent";
 | Agent Tool | `agentTool()` |
 
 ```typescript
-import { agentTool } from "@swenyai/providers/agent-tool";
+import { agentTool } from "@sweny-ai/providers/agent-tool";
 ```
 
 ## Usage
@@ -162,10 +164,10 @@ import { agentTool } from "@swenyai/providers/agent-tool";
 Every provider follows the factory function pattern with Zod-validated config:
 
 ```typescript
-import { datadog } from "@swenyai/providers/observability";
-import { jira } from "@swenyai/providers/issue-tracking";
-import { github } from "@swenyai/providers/source-control";
-import { pagerduty } from "@swenyai/providers/incident";
+import { datadog } from "@sweny-ai/providers/observability";
+import { jira } from "@sweny-ai/providers/issue-tracking";
+import { github } from "@sweny-ai/providers/source-control";
+import { pagerduty } from "@sweny-ai/providers/incident";
 
 const obs = datadog({
   apiKey: process.env.DD_API_KEY!,
@@ -233,9 +235,6 @@ npm install @slack/web-api
 
 # For GitHub Actions notification
 npm install @actions/core
-
-# For Microsoft Teams messaging
-npm install @azure/identity @microsoft/microsoft-graph-client
 ```
 
 ## Implementing a custom provider
@@ -243,13 +242,15 @@ npm install @azure/identity @microsoft/microsoft-graph-client
 Each provider category defines a TypeScript interface. Implement the interface and pass your instance wherever a provider is expected:
 
 ```typescript
-import type { ObservabilityProvider } from "@swenyai/providers/observability";
+import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
 
 export function myCustomProvider(config: MyConfig): ObservabilityProvider {
   return {
     async verifyAccess() { /* ... */ },
     async queryLogs(opts) { /* ... */ },
     async aggregate(opts) { /* ... */ },
+    getAgentEnv() { return {}; },
+    getPromptInstructions() { return ""; },
   };
 }
 ```

@@ -10,7 +10,7 @@ Analyze errors without creating PRs — useful for testing your setup:
 ```yaml
 - uses: swenyai/sweny@v0.2
   with:
-    claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
     dd-app-key: ${{ secrets.DD_APP_KEY }}
     linear-api-key: ${{ secrets.LINEAR_API_KEY }}
@@ -27,7 +27,7 @@ Point SWEny at an existing ticket instead of scanning for new issues:
 ```yaml
 - uses: swenyai/sweny@v0.2
   with:
-    claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     linear-api-key: ${{ secrets.LINEAR_API_KEY }}
     linear-issue: 'ENG-123'
     additional-instructions: 'Focus on the webhook handler timeout'
@@ -40,7 +40,7 @@ Only look at errors from a subset of services:
 ```yaml
 - uses: swenyai/sweny@v0.2
   with:
-    claude-oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
     dd-app-key: ${{ secrets.DD_APP_KEY }}
     linear-api-key: ${{ secrets.LINEAR_API_KEY }}

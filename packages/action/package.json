@@ -1,5 +1,5 @@
 {
-  "name": "@swenyai/action",
+  "name": "@sweny-ai/action",
   "version": "0.1.0",
   "description": "Autonomous SRE triage GitHub Action — monitors logs, creates issues, opens fix PRs",
   "private": true,
@@ -18,8 +18,8 @@
     "@actions/exec": "^1.1",
     "@actions/github": "^6",
     "@actions/io": "^1.1",
-    "@swenyai/engine": "*",
-    "@swenyai/providers": "*"
+    "@sweny-ai/engine": "*",
+    "@sweny-ai/providers": "*"
   },
   "devDependencies": {
     "@types/node": "^22",

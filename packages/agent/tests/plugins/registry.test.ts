@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { PluginRegistry } from "../../src/plugins/registry.js";
-import type { AgentTool } from "@swenyai/providers/agent-tool";
+import type { AgentTool } from "@sweny-ai/providers/agent-tool";
 import type { ToolPlugin, PluginContext } from "../../src/plugins/types.js";
 
 /** Create a minimal PluginContext stub for testing. */

@@ -1,1 +1,1 @@
-export { FsWorkspaceStore } from "@swenyai/providers/storage";
+export { FsWorkspaceStore } from "@sweny-ai/providers/storage";

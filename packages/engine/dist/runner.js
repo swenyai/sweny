@@ -1,4 +1,4 @@
-import { consoleLogger } from "@swenyai/providers";
+import { consoleLogger } from "@sweny-ai/providers";
 import { createProviderRegistry } from "./registry.js";
 /** Phase execution order. */
 const PHASE_ORDER = ["learn", "act", "report"];

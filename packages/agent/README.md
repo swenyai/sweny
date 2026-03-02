@@ -1,11 +1,11 @@
-<h1 align="center">@swenyai/agent</h1>
+<h1 align="center">@sweny-ai/agent</h1>
 
 <p align="center">
   <strong>AI assistant framework powered by Claude Code SDK — Slack bot + CLI with plugin architecture</strong>
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@swenyai/agent"><img alt="npm version" src="https://img.shields.io/npm/v/@swenyai/agent?style=flat-square&color=orange" /></a>
+  <a href="https://www.npmjs.com/package/@sweny-ai/agent"><img alt="npm version" src="https://img.shields.io/npm/v/@sweny-ai/agent?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/swenyai/sweny?style=flat-square" /></a>
   <a href="https://sweny.ai"><img alt="Website" src="https://img.shields.io/badge/sweny.ai-website-blue?style=flat-square" /></a>
 </p>
@@ -14,7 +14,7 @@
 
 ## Overview
 
-`@swenyai/agent` is a framework for building AI assistants on top of the [Claude Code SDK](https://docs.anthropic.com/en/docs/claude-code/sdk). It ships with two ready-to-use interfaces — a **Slack bot** and an **interactive CLI** — and exposes a plugin architecture so you can extend the assistant with custom tools, storage backends, and authentication providers.
+`@sweny-ai/agent` is a framework for building AI assistants on top of the [Claude Code SDK](https://docs.anthropic.com/en/docs/claude-code/sdk). It ships with two ready-to-use interfaces — a **Slack bot** and an **interactive CLI** — and exposes a plugin architecture so you can extend the assistant with custom tools, storage backends, and authentication providers.
 
 Core concepts:
 
@@ -115,7 +115,7 @@ export default defineConfig({
   auth: noAuth(),
   storage: fsStorage({ baseDir: "./.sweny-data" }),
   plugins: [memoryPlugin(), workspacePlugin()],
-  claude: {
+  model: {
     maxTurns: 20,
   },
 });
@@ -131,8 +131,8 @@ export default defineConfig({
 | `plugins` | `ToolPlugin[]` | Array of tool plugins to register |
 | `accessGuard` | `AccessGuard` | Optional role-based access guard |
 | `systemPrompt` | `string` | Optional custom system prompt |
-| `claude.maxTurns` | `number` | Max Claude turns per message (default `20`) |
-| `claude.disallowedTools` | `string[]` | Tool names Claude cannot use |
+| `model.maxTurns` | `number` | Max Claude turns per message (default `20`) |
+| `model.disallowedTools` | `string[]` | Tool names Claude cannot use |
 | `slack.appToken` | `string` | Slack app-level token (overrides env) |
 | `slack.botToken` | `string` | Slack bot token (overrides env) |
 | `slack.signingSecret` | `string` | Slack signing secret (overrides env) |
@@ -153,7 +153,7 @@ Plugins add custom tools that Claude can invoke during conversations. Each plugi
 interface ToolPlugin {
   name: string;
   description?: string;
-  createTools(ctx: PluginContext): SdkTool[] | Promise<SdkTool[]>;
+  createTools(ctx: PluginContext): AgentTool[] | Promise<AgentTool[]>;
   systemPromptSection?(ctx: PluginContext): string;
   destroy?(): Promise<void>;
 }
@@ -378,11 +378,6 @@ interface AuthProvider {
 | `SLACK_BOT_TOKEN` | For Slack | Slack bot token (`xoxb-...`) |
 | `SLACK_SIGNING_SECRET` | For Slack | Slack signing secret |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, or `error` (default: `info`) |
-| `RATE_LIMIT_PER_MINUTE` | No | Max messages per user per minute |
-| `RATE_LIMIT_PER_HOUR` | No | Max messages per user per hour |
-| `ALLOWED_USERS` | No | Comma-separated Slack user IDs to restrict access |
-| `MAX_TURNS` | No | Max Claude turns per message (default: `20`) |
-| `HEALTH_PORT` | No | Health check server port (default: `3000`) |
 
 > Most users should use `CLAUDE_CODE_OAUTH_TOKEN` — this is the token from Claude Max / Pro subscriptions. The `ANTHROPIC_API_KEY` option is available as an alternative for direct API billing.
 

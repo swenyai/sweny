@@ -4,7 +4,7 @@ description: Control what users can do based on roles.
 ---
 
 ```typescript
-import { allowAllGuard, roleBasedGuard, AccessLevel } from "@swenyai/providers/access";
+import { allowAllGuard, roleBasedGuard, AccessLevel } from "@sweny-ai/providers/access";
 ```
 
 ## Interface

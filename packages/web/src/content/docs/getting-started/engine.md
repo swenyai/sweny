@@ -57,11 +57,11 @@ A Recipe is a pre-configured Workflow with sensible defaults. It bundles togethe
 The ProviderRegistry is how the engine discovers and connects to external services. You register providers by category -- observability, issue tracking, source control, notification -- and the engine injects them into steps that need them.
 
 ```typescript
-import { createProviderRegistry } from "@swenyai/engine";
-import { datadog } from "@swenyai/providers/observability";
-import { linear } from "@swenyai/providers/issue-tracking";
-import { github } from "@swenyai/providers/source-control";
-import { slackWebhook } from "@swenyai/providers/notification";
+import { createProviderRegistry } from "@sweny-ai/engine";
+import { datadog } from "@sweny-ai/providers/observability";
+import { linear } from "@sweny-ai/providers/issue-tracking";
+import { github } from "@sweny-ai/providers/source-control";
+import { slackWebhook } from "@sweny-ai/providers/notification";
 
 const providers = createProviderRegistry();
 providers.set("observability", datadog({ apiKey: "...", appKey: "..." }));
@@ -105,12 +105,12 @@ See the [Quick Start](/getting-started/) to set up Triage in your repo.
 ## Running a workflow programmatically
 
 ```typescript
-import { runWorkflow, triageWorkflow, createProviderRegistry } from "@swenyai/engine";
-import { datadog } from "@swenyai/providers/observability";
-import { linear } from "@swenyai/providers/issue-tracking";
-import { github } from "@swenyai/providers/source-control";
-import { githubSummary } from "@swenyai/providers/notification";
-import { claudeCode } from "@swenyai/providers/coding-agent";
+import { runWorkflow, triageWorkflow, createProviderRegistry } from "@sweny-ai/engine";
+import { datadog } from "@sweny-ai/providers/observability";
+import { linear } from "@sweny-ai/providers/issue-tracking";
+import { github } from "@sweny-ai/providers/source-control";
+import { githubSummary } from "@sweny-ai/providers/notification";
+import { claudeCode } from "@sweny-ai/providers/coding-agent";
 
 const providers = createProviderRegistry();
 providers.set("observability", datadog({

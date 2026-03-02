@@ -40,7 +40,7 @@ export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
         ...extraFlags,
       ];
 
-      return execCommand("claude", args, {
+      return await execCommand("claude", args, {
         env: { ...process.env, ...opts.env } as Record<string, string>,
         ignoreReturnCode: true,
         quiet,

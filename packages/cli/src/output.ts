@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import type { WorkflowResult, WorkflowPhase } from "@swenyai/engine";
+import type { WorkflowResult, WorkflowPhase } from "@sweny-ai/engine";
 import type { CliConfig } from "./config.js";
 
 // ── Color palette ───────────────────────────────────────────────

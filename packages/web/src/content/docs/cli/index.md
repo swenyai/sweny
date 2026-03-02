@@ -8,13 +8,13 @@ The SWEny CLI lets you run triage workflows locally — no CI pipeline required.
 ## Install
 
 ```bash
-npm install -g @swenyai/cli
+npm install -g @sweny-ai/cli
 ```
 
 Or run directly with `npx`:
 
 ```bash
-npx @swenyai/cli triage --help
+npx @sweny-ai/cli triage --help
 ```
 
 ## Prerequisites

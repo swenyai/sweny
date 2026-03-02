@@ -8,7 +8,7 @@ The messaging provider sends and updates messages in chat platforms. This is use
 The key difference: **messaging** supports two-way threads (send a message, then update it in-place), while **notification** is fire-and-forget.
 
 ```typescript
-import { slack } from "@swenyai/providers/messaging";
+import { slack, teams } from "@sweny-ai/providers/messaging";
 ```
 
 ## Interface
@@ -76,3 +76,37 @@ await messenger.updateMessage(
 | `im:read` | Access DM channels |
 | `im:write` | Open DM channels |
 | `app_mentions:read` | Respond to @mentions |
+
+## Microsoft Teams
+
+```typescript
+const messenger = teams({
+  tenantId: process.env.AZURE_TENANT_ID!,
+  clientId: process.env.AZURE_CLIENT_ID!,
+  clientSecret: process.env.AZURE_CLIENT_SECRET!,
+  logger: myLogger,
+});
+```
+
+Uses the Microsoft Graph API with Azure AD client credentials flow. Zero external dependencies — native `fetch` only.
+
+### Sending a message
+
+Pass the channel as `"teamId/channelId"`:
+
+```typescript
+const { messageId } = await messenger.sendMessage({
+  channelId: "team-uuid/channel-uuid",
+  text: "Looking into this...",
+});
+```
+
+### Updating in-place
+
+```typescript
+await messenger.updateMessage(
+  "team-uuid/channel-uuid",
+  messageId,
+  "Here's what I found: ...",
+);
+```
