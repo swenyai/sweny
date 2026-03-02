@@ -101,7 +101,7 @@ export function createProviders(config: ActionConfig): ProviderRegistry {
           token: config.gitlabToken,
           projectId: config.gitlabProjectId,
           baseUrl: config.gitlabBaseUrl,
-          baseBranch: "main",
+          baseBranch: config.baseBranch,
           logger: actionsLogger,
         }),
       );

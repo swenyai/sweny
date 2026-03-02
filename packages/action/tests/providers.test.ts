@@ -45,6 +45,8 @@ function makeConfig(overrides: Partial<ActionConfig> = {}): ActionConfig {
     gitlabToken: "",
     gitlabProjectId: "",
     gitlabBaseUrl: "https://gitlab.com",
+    baseBranch: "main",
+    prLabels: ["agent", "triage", "needs-review"],
     notificationProvider: "github-summary",
     notificationWebhookUrl: "",
     sendgridApiKey: "",

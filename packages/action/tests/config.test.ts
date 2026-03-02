@@ -408,8 +408,51 @@ describe("validateInputs", () => {
     expect(errors).toContainEqual(expect.stringContaining("gitlab-project-id"));
   });
 
+  it("validates cloudwatch requires log-group-prefix", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "cloudwatch", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("cloudwatch-log-group-prefix"));
+  });
+
+  it("validates splunk requires url and token", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "splunk", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("splunk-url"));
+    expect(errors).toContainEqual(expect.stringContaining("splunk-token"));
+  });
+
+  it("validates elastic requires url and api-key", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "elastic", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("elastic-url"));
+    expect(errors).toContainEqual(expect.stringContaining("elastic-api-key"));
+  });
+
+  it("validates newrelic requires api-key and account-id", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "newrelic", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("newrelic-api-key"));
+    expect(errors).toContainEqual(expect.stringContaining("newrelic-account-id"));
+  });
+
+  it("validates loki requires url", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "loki", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("loki-url"));
+  });
+
   it("validates slack notification requires webhook-url", () => {
     const errors = validateInputs(baseConfig({ notificationProvider: "slack" }));
+    expect(errors).toContainEqual(expect.stringContaining("notification-webhook-url"));
+  });
+
+  it("validates teams notification requires webhook-url", () => {
+    const errors = validateInputs(baseConfig({ notificationProvider: "teams" }));
+    expect(errors).toContainEqual(expect.stringContaining("notification-webhook-url"));
+  });
+
+  it("validates discord notification requires webhook-url", () => {
+    const errors = validateInputs(baseConfig({ notificationProvider: "discord" }));
+    expect(errors).toContainEqual(expect.stringContaining("notification-webhook-url"));
+  });
+
+  it("validates webhook notification requires webhook-url", () => {
+    const errors = validateInputs(baseConfig({ notificationProvider: "webhook" }));
     expect(errors).toContainEqual(expect.stringContaining("notification-webhook-url"));
   });
 
