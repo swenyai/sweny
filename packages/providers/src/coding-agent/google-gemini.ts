@@ -6,11 +6,14 @@ import { execCommand, isCliInstalled } from "./shared.js";
 export interface GoogleGeminiConfig {
   cliFlags?: string[];
   logger?: Logger;
+  /** Suppress agent stdout; forward stderr through logger */
+  quiet?: boolean;
 }
 
 export function googleGemini(config?: GoogleGeminiConfig): CodingAgent {
   const log = config?.logger ?? consoleLogger;
   const extraFlags = config?.cliFlags ?? [];
+  const quiet = config?.quiet ?? false;
 
   return {
     async install(): Promise<void> {
@@ -19,7 +22,7 @@ export function googleGemini(config?: GoogleGeminiConfig): CodingAgent {
         return;
       }
       log.info("Installing Google Gemini CLI...");
-      await execCommand("npm", ["install", "-g", "@google/gemini-cli"]);
+      await execCommand("npm", ["install", "-g", "@google/gemini-cli"], { quiet });
       log.info("Google Gemini CLI installed");
     },
 
@@ -31,6 +34,8 @@ export function googleGemini(config?: GoogleGeminiConfig): CodingAgent {
       return execCommand("gemini", args, {
         env: { ...process.env, ...opts.env } as Record<string, string>,
         ignoreReturnCode: true,
+        quiet,
+        onStderr: quiet ? (line) => log.debug(line) : undefined,
       });
     },
   };

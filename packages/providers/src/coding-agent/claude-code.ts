@@ -6,11 +6,14 @@ import { execCommand, isCliInstalled } from "./shared.js";
 export interface ClaudeCodeConfig {
   cliFlags?: string[];
   logger?: Logger;
+  /** Suppress agent stdout; forward stderr through logger */
+  quiet?: boolean;
 }
 
 export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
   const log = config?.logger ?? consoleLogger;
   const extraFlags = config?.cliFlags ?? [];
+  const quiet = config?.quiet ?? false;
 
   return {
     async install(): Promise<void> {
@@ -19,7 +22,7 @@ export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
         return;
       }
       log.info("Installing Claude Code CLI...");
-      await execCommand("npm", ["install", "-g", "@anthropic-ai/claude-code"]);
+      await execCommand("npm", ["install", "-g", "@anthropic-ai/claude-code"], { quiet });
       log.info("Claude Code CLI installed");
     },
 
@@ -40,6 +43,8 @@ export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
       return execCommand("claude", args, {
         env: { ...process.env, ...opts.env } as Record<string, string>,
         ignoreReturnCode: true,
+        quiet,
+        onStderr: quiet ? (line) => log.debug(line) : undefined,
       });
     },
   };

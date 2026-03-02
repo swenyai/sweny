@@ -188,17 +188,17 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
       break;
   }
 
-  // Coding agent
+  // Coding agent — quiet mode suppresses agent stdout in CLI
   switch (config.codingAgentProvider) {
     case "codex":
-      registry.set("codingAgent", openaiCodex({ logger }));
+      registry.set("codingAgent", openaiCodex({ logger, quiet: true }));
       break;
     case "gemini":
-      registry.set("codingAgent", googleGemini({ logger }));
+      registry.set("codingAgent", googleGemini({ logger, quiet: true }));
       break;
     case "claude":
     default:
-      registry.set("codingAgent", claudeCode({ logger }));
+      registry.set("codingAgent", claudeCode({ logger, quiet: true }));
       break;
   }
 

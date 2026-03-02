@@ -6,11 +6,14 @@ import { execCommand, isCliInstalled } from "./shared.js";
 export interface OpenAICodexConfig {
   cliFlags?: string[];
   logger?: Logger;
+  /** Suppress agent stdout; forward stderr through logger */
+  quiet?: boolean;
 }
 
 export function openaiCodex(config?: OpenAICodexConfig): CodingAgent {
   const log = config?.logger ?? consoleLogger;
   const extraFlags = config?.cliFlags ?? [];
+  const quiet = config?.quiet ?? false;
 
   return {
     async install(): Promise<void> {
@@ -19,7 +22,7 @@ export function openaiCodex(config?: OpenAICodexConfig): CodingAgent {
         return;
       }
       log.info("Installing OpenAI Codex CLI...");
-      await execCommand("npm", ["install", "-g", "@openai/codex"]);
+      await execCommand("npm", ["install", "-g", "@openai/codex"], { quiet });
       log.info("OpenAI Codex CLI installed");
     },
 
@@ -31,6 +34,8 @@ export function openaiCodex(config?: OpenAICodexConfig): CodingAgent {
       return execCommand("codex", args, {
         env: { ...process.env, ...opts.env } as Record<string, string>,
         ignoreReturnCode: true,
+        quiet,
+        onStderr: quiet ? (line) => log.debug(line) : undefined,
       });
     },
   };
