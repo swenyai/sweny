@@ -117,8 +117,22 @@ Set `issue-tracker-provider` and add the relevant credentials:
 
 See [Issue Tracking Providers](/providers/issue-tracking/) for full Linear, Jira, and GitHub Issues configuration.
 
+## Prefer the CLI?
+
+You can also run SWEny locally from your terminal — no CI pipeline required. The CLI supports all the same providers and options.
+
+```bash
+npx @swenyai/cli triage \
+  --observability-provider file \
+  --log-file ./errors.json \
+  --dry-run
+```
+
+See the [CLI Quick Start](/cli/) to get started.
+
 ## What's next?
 
+- [CLI Quick Start](/cli/) — run SWEny from your terminal
 - [Provider Architecture](/getting-started/providers/) — understand how SWEny's plugin system works
 - [Action Inputs](/action/inputs/) — configure time ranges, severity filters, investigation depth
 - [Examples](/action/examples/) — service filtering, specific issues, cross-repo dispatch

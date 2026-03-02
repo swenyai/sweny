@@ -54,24 +54,44 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     error: console.error,
   };
 
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let stepStart = 0;
+
+  function formatElapsed(ms: number): string {
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    return `${m}m ${s % 60}s`;
+  }
+
   try {
     const result = await runWorkflow(triageWorkflow, triageConfig, providers, {
       logger,
       beforeStep: async (step) => {
         if (!config.json) {
-          process.stdout.write(chalk.dim(`[${step.phase}] `) + chalk.bold(step.name) + chalk.dim(" ..."));
+          stepStart = Date.now();
+          console.log(chalk.dim(`[${step.phase}] `) + chalk.bold(step.name));
+          heartbeat = setInterval(() => {
+            const elapsed = formatElapsed(Date.now() - stepStart);
+            process.stderr.write(chalk.dim(`         ↳ still running... ${elapsed}\n`));
+          }, 15_000);
         }
       },
       afterStep: async (_step, stepResult) => {
+        if (heartbeat) {
+          clearInterval(heartbeat);
+          heartbeat = undefined;
+        }
         if (!config.json) {
+          const elapsed = chalk.dim(` (${formatElapsed(Date.now() - stepStart)})`);
           const icon =
             stepResult.status === "success"
-              ? chalk.green(" done")
+              ? chalk.green("         ✓ done")
               : stepResult.status === "skipped"
-                ? chalk.dim(" skipped")
-                : chalk.red(" failed");
-          const reason = stepResult.reason ? chalk.dim(` \u2014 ${stepResult.reason}`) : "";
-          console.log(icon + reason);
+                ? chalk.dim("         − skipped")
+                : chalk.red("         ✗ failed");
+          const reason = stepResult.reason ? chalk.dim(` — ${stepResult.reason}`) : "";
+          console.log(icon + elapsed + reason);
         }
       },
     });

@@ -36,6 +36,14 @@ export default defineConfig({
           ],
         },
         {
+          label: "CLI",
+          items: [
+            { label: "Quick Start", slug: "cli" },
+            { label: "Inputs", slug: "cli/inputs" },
+            { label: "Examples", slug: "cli/examples" },
+          ],
+        },
+        {
           label: "Agent Reference",
           items: [
             { label: "Plugin System", slug: "agent/plugins" },
