@@ -6,7 +6,7 @@ import type { ObservabilityProvider } from "@swenyai/providers/observability";
 import { linear, jira, githubIssues } from "@swenyai/providers/issue-tracking";
 import { github, gitlab } from "@swenyai/providers/source-control";
 import { slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@swenyai/providers/notification";
-import { claudeCode } from "@swenyai/providers/coding-agent";
+import { claudeCode, openaiCodex, googleGemini } from "@swenyai/providers/coding-agent";
 
 const logger = {
   info: console.log,
@@ -189,7 +189,18 @@ export function createProviders(config: CliConfig): ProviderRegistry {
   }
 
   // Coding agent
-  registry.set("codingAgent", claudeCode({ logger }));
+  switch (config.codingAgentProvider) {
+    case "codex":
+      registry.set("codingAgent", openaiCodex({ logger }));
+      break;
+    case "gemini":
+      registry.set("codingAgent", googleGemini({ logger }));
+      break;
+    case "claude":
+    default:
+      registry.set("codingAgent", claudeCode({ logger }));
+      break;
+  }
 
   return registry;
 }

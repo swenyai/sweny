@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
 import type { CodingAgent, CodingAgentRunOptions } from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
+import { execCommand, isCliInstalled } from "./shared.js";
 
 export interface ClaudeCodeConfig {
   cliFlags?: string[];
@@ -12,36 +12,20 @@ export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
   const log = config?.logger ?? consoleLogger;
   const extraFlags = config?.cliFlags ?? [];
 
-  function execCommand(
-    cmd: string,
-    args: string[],
-    opts?: { env?: Record<string, string>; ignoreReturnCode?: boolean },
-  ): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(cmd, args, {
-        env: opts?.env ?? process.env,
-        stdio: "inherit",
-      });
-
-      child.on("error", (err) => reject(err));
-      child.on("close", (code) => {
-        if (code !== 0 && !opts?.ignoreReturnCode) {
-          reject(new Error(`${cmd} exited with code ${code}`));
-        } else {
-          resolve(code ?? 0);
-        }
-      });
-    });
-  }
-
   return {
     async install(): Promise<void> {
+      if (isCliInstalled("claude")) {
+        log.info("Claude Code CLI already installed, skipping");
+        return;
+      }
       log.info("Installing Claude Code CLI...");
       await execCommand("npm", ["install", "-g", "@anthropic-ai/claude-code"]);
       log.info("Claude Code CLI installed");
     },
 
     async run(opts: CodingAgentRunOptions): Promise<number> {
+      log.info("Running Claude Code agent...");
+
       const args = [
         "-p",
         opts.prompt,

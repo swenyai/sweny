@@ -78,8 +78,14 @@ export type {
 export { WORKSPACE_LIMITS, csiStorage } from "./storage/index.js";
 
 // Coding Agent
-export type { CodingAgent, CodingAgentRunOptions, ClaudeCodeConfig } from "./coding-agent/index.js";
-export { claudeCode } from "./coding-agent/index.js";
+export type {
+  CodingAgent,
+  CodingAgentRunOptions,
+  ClaudeCodeConfig,
+  OpenAICodexConfig,
+  GoogleGeminiConfig,
+} from "./coding-agent/index.js";
+export { claudeCode, openaiCodex, googleGemini } from "./coding-agent/index.js";
 
 // Agent Tool
 export type { AgentTool, ToolResult } from "./agent-tool/index.js";

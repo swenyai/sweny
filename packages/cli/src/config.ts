@@ -2,9 +2,14 @@ import { execSync } from "node:child_process";
 import type { Command } from "commander";
 
 export interface CliConfig {
-  // Claude authentication
+  // Coding agent
+  codingAgentProvider: string;
+
+  // Authentication
   anthropicApiKey: string;
   claudeOauthToken: string;
+  openaiApiKey: string;
+  geminiApiKey: string;
 
   // Observability
   observabilityProvider: string;
@@ -74,6 +79,7 @@ export function registerTriageCommand(program: Command): Command {
   return program
     .command("triage")
     .description("Run the SWEny triage workflow")
+    .option("--coding-agent-provider <provider>", "Coding agent (claude, codex, gemini)", "claude")
     .option("--observability-provider <provider>", "Observability provider", "datadog")
     .option("--issue-tracker-provider <provider>", "Issue tracker provider", "github-issues")
     .option("--source-control-provider <provider>", "Source control provider", "github")
@@ -117,8 +123,12 @@ export function parseCliInputs(options: Record<string, unknown>): CliConfig {
   const obsProvider = (options.observabilityProvider as string) || "datadog";
 
   return {
+    codingAgentProvider: (options.codingAgentProvider as string) || "claude",
+
     anthropicApiKey: env.ANTHROPIC_API_KEY || "",
     claudeOauthToken: env.CLAUDE_CODE_OAUTH_TOKEN || "",
+    openaiApiKey: env.OPENAI_API_KEY || "",
+    geminiApiKey: env.GEMINI_API_KEY || env.GOOGLE_API_KEY || "",
 
     observabilityProvider: obsProvider,
     observabilityCredentials: parseObservabilityCredentials(obsProvider, options),
@@ -177,9 +187,25 @@ export function parseCliInputs(options: Record<string, unknown>): CliConfig {
 export function validateInputs(config: CliConfig): string[] {
   const errors: string[] = [];
 
-  // Auth: at least one required
-  if (!config.anthropicApiKey && !config.claudeOauthToken) {
-    errors.push("Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN must be set");
+  // Auth: validate per coding agent
+  switch (config.codingAgentProvider) {
+    case "claude":
+      if (!config.anthropicApiKey && !config.claudeOauthToken) {
+        errors.push("Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN must be set for claude agent");
+      }
+      break;
+    case "codex":
+      if (!config.openaiApiKey) {
+        errors.push("Missing: OPENAI_API_KEY must be set for codex agent");
+      }
+      break;
+    case "gemini":
+      if (!config.geminiApiKey) {
+        errors.push("Missing: GEMINI_API_KEY or GOOGLE_API_KEY must be set for gemini agent");
+      }
+      break;
+    default:
+      errors.push(`Unsupported coding agent provider: ${config.codingAgentProvider} (use claude, codex, or gemini)`);
   }
 
   // Repository required

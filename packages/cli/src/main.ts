@@ -39,7 +39,8 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     console.log(chalk.bold("SWEny Triage"));
     console.log("\u2500".repeat(40));
     console.log(`  Repository:    ${config.repository}`);
-    console.log(`  Provider:      ${config.observabilityProvider}`);
+    console.log(`  Coding agent:  ${config.codingAgentProvider}`);
+    console.log(`  Observability: ${config.observabilityProvider}`);
     console.log(`  Time range:    ${config.timeRange}`);
     console.log(`  Issue tracker: ${config.issueTrackerProvider}`);
     console.log(`  Dry run:       ${config.dryRun}`);
@@ -119,6 +120,8 @@ function mapToTriageConfig(config: CliConfig): TriageConfig {
   const agentEnv: Record<string, string> = {};
   if (config.anthropicApiKey) agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
   if (config.claudeOauthToken) agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+  if (config.openaiApiKey) agentEnv.OPENAI_API_KEY = config.openaiApiKey;
+  if (config.geminiApiKey) agentEnv.GEMINI_API_KEY = config.geminiApiKey;
 
   // Issue tracker env vars
   if (config.linearApiKey) agentEnv.LINEAR_API_KEY = config.linearApiKey;
