@@ -73,6 +73,7 @@ export interface CliConfig {
 
   // CLI-specific
   json: boolean;
+  bell: boolean;
 }
 
 export function registerTriageCommand(program: Command): Command {
@@ -115,7 +116,8 @@ export function registerTriageCommand(program: Command): Command {
     .option("--elastic-index <index>", "Elasticsearch index", "logs-*")
     .option("--newrelic-region <region>", "New Relic region", "us")
     .option("--gitlab-base-url <url>", "GitLab base URL", "https://gitlab.com")
-    .option("--json", "Output results as JSON", false);
+    .option("--json", "Output results as JSON", false)
+    .option("--bell", "Ring terminal bell on completion", false);
 }
 
 export function parseCliInputs(options: Record<string, unknown>): CliConfig {
@@ -181,6 +183,7 @@ export function parseCliInputs(options: Record<string, unknown>): CliConfig {
     repositoryOwner: env.GITHUB_REPOSITORY_OWNER || "",
 
     json: Boolean(options.json),
+    bell: Boolean(options.bell),
   };
 }
 

@@ -185,10 +185,11 @@ export function getStepDetails(name: string, data?: Record<string, unknown>): st
 }
 
 // ── Format step line ────────────────────────────────────────────
-export function formatStepLine(icon: string, name: string, elapsed: string, reason?: string): string {
-  const pad = Math.max(1, 40 - visLen(name));
+export function formatStepLine(icon: string, counter: string, name: string, elapsed: string, reason?: string): string {
+  const label = `${counter} ${name}`;
+  const pad = Math.max(1, 40 - visLen(label));
   const suffix = reason ? c.subtle(` — ${reason}`) : "";
-  return `  ${icon} ${name}${" ".repeat(pad)}${c.subtle(elapsed)}${suffix}`;
+  return `  ${icon} ${c.subtle(counter)} ${name}${" ".repeat(pad)}${c.subtle(elapsed)}${suffix}`;
 }
 
 // ── Result summary ──────────────────────────────────────────────

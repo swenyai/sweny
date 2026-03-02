@@ -54,8 +54,11 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   let frameIdx = 0;
   let stepStart = 0;
   let stepLabel = "";
+  let spinnerStatus = "";
   let currentPhaseColor: (s: string) => string = chalk.cyan;
   let lastPhase: string | null = null;
+  let stepIndex = 0;
+  const totalSteps = triageWorkflow.steps.length;
 
   function formatElapsed(ms: number): string {
     const s = Math.round(ms / 1000);
@@ -73,19 +76,30 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   function startSpinner(label: string) {
     stepStart = Date.now();
     stepLabel = label;
+    spinnerStatus = "";
     frameIdx = 0;
     spinnerActive = true;
 
     if (isTTY) {
+      const cols = process.stderr.columns || 80;
       spinnerInterval = setInterval(() => {
         const frame = currentPhaseColor(FRAMES[frameIdx++ % FRAMES.length]);
+        const counter = c.subtle(`[${stepIndex}/${totalSteps}]`);
         const elapsed = c.subtle(formatElapsed(Date.now() - stepStart));
-        process.stderr.write(`\r\x1b[K  ${frame} ${stepLabel} ${elapsed}`);
+        const status = spinnerStatus ? ` ${c.subtle("\u2014")} ${c.subtle(spinnerStatus)}` : "";
+        // Truncate to terminal width to prevent line wrapping
+        let line = `  ${frame} ${counter} ${stepLabel}${status} ${elapsed}`;
+        const visibleLen = line.replace(/\x1B\[[0-9;]*m/g, "").length;
+        if (visibleLen > cols) {
+          // Re-render without status if too wide
+          line = `  ${frame} ${counter} ${stepLabel} ${elapsed}`;
+        }
+        process.stderr.write(`\r\x1b[K${line}`);
       }, 80);
     } else if (!config.json) {
       spinnerInterval = setInterval(() => {
         const elapsed = formatElapsed(Date.now() - stepStart);
-        process.stderr.write(`  > ${stepLabel} ${elapsed}\n`);
+        process.stderr.write(`  > [${stepIndex}/${totalSteps}] ${stepLabel} ${elapsed}\n`);
       }, 15_000);
     }
   }
@@ -101,19 +115,33 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     spinnerActive = false;
   }
 
-  // Spinner-aware logger
+  // Spinner-aware logger — info/debug fold into spinner status,
+  // warn/error always print immediately
   const logger = {
     info: config.json
       ? () => {}
       : (...args: unknown[]) => {
-          clearSpinnerLine();
-          console.log(...args);
+          const msg = args.map(String).join(" ");
+          // Skip engine runner status messages (already shown by phase headers & step lines)
+          if (msg.startsWith("[triage]")) return;
+          if (spinnerActive && isTTY) {
+            spinnerStatus = msg;
+          } else {
+            clearSpinnerLine();
+            console.log(...args);
+          }
         },
     debug: config.json
       ? () => {}
       : (...args: unknown[]) => {
-          clearSpinnerLine();
-          console.debug(...args);
+          const msg = args.map(String).join(" ");
+          if (msg.startsWith("[triage]")) return;
+          if (spinnerActive && isTTY) {
+            spinnerStatus = msg;
+          } else {
+            clearSpinnerLine();
+            console.debug(...args);
+          }
         },
     warn: (...args: unknown[]) => {
       clearSpinnerLine();
@@ -130,6 +158,8 @@ triageCmd.action(async (options: Record<string, unknown>) => {
       logger,
       beforeStep: async (step) => {
         if (config.json) return;
+
+        stepIndex++;
 
         // Phase transition header
         if (step.phase !== lastPhase) {
@@ -154,7 +184,8 @@ triageCmd.action(async (options: Record<string, unknown>) => {
               : c.fail("\u2717");
         const reason = stepResult.status !== "success" ? stepResult.reason : undefined;
 
-        console.log(formatStepLine(icon, step.name, elapsed, reason));
+        const counter = `[${stepIndex}/${totalSteps}]`;
+        console.log(formatStepLine(icon, counter, step.name, elapsed, reason));
 
         // Inline data details
         const details = getStepDetails(step.name, stepResult.data as Record<string, unknown>);
@@ -171,6 +202,9 @@ triageCmd.action(async (options: Record<string, unknown>) => {
       console.log(formatResultHuman(result));
     }
 
+    // Terminal bell
+    if (config.bell) process.stderr.write("\x07");
+
     process.exit(result.status === "failed" ? 1 : 0);
   } catch (error) {
     if (config.json) {
@@ -178,6 +212,10 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     } else {
       console.error(formatCrashError(error));
     }
+
+    // Terminal bell even on crash
+    if (config.bell) process.stderr.write("\x07");
+
     process.exit(1);
   }
 });
