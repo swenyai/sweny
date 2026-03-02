@@ -10,6 +10,9 @@ export type {
   RunOptions,
 } from "./types.js";
 
+// Cache
+export type { CacheEntry, StepCache } from "./cache.js";
+
 // Runtime
 export { runWorkflow, createProviderRegistry } from "./runner.js";
 

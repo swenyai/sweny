@@ -74,6 +74,11 @@ export interface CliConfig {
   // CLI-specific
   json: boolean;
   bell: boolean;
+
+  // Cache
+  cacheDir: string;
+  cacheTtl: number;
+  noCache: boolean;
 }
 
 export function registerTriageCommand(program: Command): Command {
@@ -117,7 +122,10 @@ export function registerTriageCommand(program: Command): Command {
     .option("--newrelic-region <region>", "New Relic region", "us")
     .option("--gitlab-base-url <url>", "GitLab base URL", "https://gitlab.com")
     .option("--json", "Output results as JSON", false)
-    .option("--bell", "Ring terminal bell on completion", false);
+    .option("--bell", "Ring terminal bell on completion", false)
+    .option("--cache-dir <path>", "Step cache directory", ".sweny/cache")
+    .option("--cache-ttl <seconds>", "Cache TTL in seconds (0 = infinite)", "86400")
+    .option("--no-cache", "Disable step cache");
 }
 
 export function parseCliInputs(options: Record<string, unknown>): CliConfig {
@@ -184,6 +192,10 @@ export function parseCliInputs(options: Record<string, unknown>): CliConfig {
 
     json: Boolean(options.json),
     bell: Boolean(options.bell),
+
+    cacheDir: (options.cacheDir as string) || env.SWENY_CACHE_DIR || ".sweny/cache",
+    cacheTtl: parseInt(String(options.cacheTtl || "86400"), 10),
+    noCache: options.cache === false,
   };
 }
 

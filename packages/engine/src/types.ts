@@ -11,6 +11,8 @@ export interface StepResult {
   data?: Record<string, unknown>;
   /** Human-readable reason (especially useful for skipped/failed). */
   reason?: string;
+  /** True when this result was replayed from cache rather than freshly executed. */
+  cached?: boolean;
 }
 
 /** A single step in a workflow. */
@@ -77,4 +79,6 @@ export interface RunOptions {
   beforeStep?(step: WorkflowStep, ctx: WorkflowContext): Promise<boolean | void>;
   /** Called after each step completes. */
   afterStep?(step: WorkflowStep, result: StepResult, ctx: WorkflowContext): Promise<void>;
+  /** Step-level cache. When provided, successful results are stored and replayed on re-run. */
+  cache?: import("./cache.js").StepCache;
 }

@@ -60,6 +60,25 @@ export async function runWorkflow(workflow, config, providers, options) {
                     continue;
                 }
             }
+            // Cache check — replay cached result if available
+            if (options?.cache) {
+                const entry = await options.cache.get(step.name);
+                if (entry) {
+                    // Replay skipPhase side effects
+                    for (const { phase: p, reason: r } of entry.skippedPhases) {
+                        ctx.skipPhase(p, r);
+                    }
+                    const result = { ...entry.result, cached: true };
+                    results.set(step.name, result);
+                    completedSteps.push({ name: step.name, phase, result });
+                    if (options.afterStep) {
+                        await options.afterStep(step, result, ctx);
+                    }
+                    continue;
+                }
+            }
+            // Snapshot skippedPhases size to detect new skipPhase calls during this step
+            const phasesBefore = skippedPhases.size;
             let result;
             try {
                 logger.info(`[${workflow.name}] ${phase}/${step.name}: starting`);
@@ -77,6 +96,22 @@ export async function runWorkflow(workflow, config, providers, options) {
             }
             results.set(step.name, result);
             completedSteps.push({ name: step.name, phase, result });
+            // Cache successful results
+            if (result.status === "success" && options?.cache) {
+                // Collect skipPhase calls made during this step
+                const addedSkips = [];
+                if (skippedPhases.size > phasesBefore) {
+                    let seen = 0;
+                    for (const [p, r] of skippedPhases) {
+                        if (++seen > phasesBefore) {
+                            addedSkips.push({ phase: p, reason: r });
+                        }
+                    }
+                }
+                await options.cache
+                    .set(step.name, { result, skippedPhases: addedSkips, createdAt: Date.now() })
+                    .catch(() => { }); // non-fatal
+            }
             // afterStep hook
             if (options?.afterStep) {
                 await options.afterStep(step, result, ctx);

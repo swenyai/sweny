@@ -2,7 +2,8 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { runWorkflow, triageWorkflow } from "@swenyai/engine";
-import type { TriageConfig, WorkflowPhase } from "@swenyai/engine";
+import type { StepCache, TriageConfig, WorkflowPhase } from "@swenyai/engine";
+import { createFsCache, hashConfig } from "./cache.js";
 import { registerTriageCommand, parseCliInputs, validateInputs } from "./config.js";
 import type { CliConfig } from "./config.js";
 import { createProviders } from "./providers/index.js";
@@ -50,6 +51,15 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   // Create providers (they capture `logger` by reference — method upgrades propagate)
   const providers = createProviders(config, logger);
   const triageConfig = mapToTriageConfig(config);
+
+  // ── Step cache ──────────────────────────────────────────
+  let stepCache: StepCache | undefined;
+  if (!config.noCache && config.cacheDir) {
+    const configHash = hashConfig(triageConfig, config);
+    const cacheDir = `${config.cacheDir}/${configHash}`;
+    const ttlMs = config.cacheTtl > 0 ? config.cacheTtl * 1000 : Number.MAX_SAFE_INTEGER;
+    stepCache = createFsCache(cacheDir, ttlMs);
+  }
 
   // Banner
   if (!config.json) {
@@ -162,6 +172,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   try {
     const result = await runWorkflow(triageWorkflow, triageConfig, providers, {
       logger,
+      cache: stepCache,
       beforeStep: async (step) => {
         if (config.json) return;
 
@@ -181,14 +192,16 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 
         stopSpinner();
 
-        const elapsed = formatElapsed(Date.now() - stepStart);
-        const icon =
-          stepResult.status === "success"
+        const isCached = stepResult.cached === true;
+        const elapsed = isCached ? "cached" : formatElapsed(Date.now() - stepStart);
+        const icon = isCached
+          ? c.subtle("\u21BB")
+          : stepResult.status === "success"
             ? c.ok("\u2713")
             : stepResult.status === "skipped"
               ? c.subtle("\u2212")
               : c.fail("\u2717");
-        const reason = stepResult.status !== "success" ? stepResult.reason : undefined;
+        const reason = !isCached && stepResult.status !== "success" ? stepResult.reason : undefined;
 
         const counter = `[${stepIndex}/${totalSteps}]`;
         console.log(formatStepLine(icon, counter, step.name, elapsed, reason));
