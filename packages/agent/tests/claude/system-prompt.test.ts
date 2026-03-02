@@ -81,7 +81,7 @@ describe("buildSystemPrompt", () => {
     });
   });
 
-  // 4. FORMAT_HINTS — all 3 keys resolve correctly
+  // 4. FORMAT_HINTS — all keys resolve correctly
   describe("FORMAT_HINTS", () => {
     it("contains the slack-mrkdwn hint", () => {
       expect(FORMAT_HINTS["slack-mrkdwn"]).toContain("Slack");
@@ -93,9 +93,32 @@ describe("buildSystemPrompt", () => {
       expect(FORMAT_HINTS["discord-markdown"]).toContain("**bold**");
     });
 
+    it("discord-markdown hint mentions 2000-character limit", () => {
+      expect(FORMAT_HINTS["discord-markdown"]).toContain("2000");
+    });
+
     it("contains the plaintext hint", () => {
       expect(FORMAT_HINTS["plaintext"]).toContain("plain text");
       expect(FORMAT_HINTS["plaintext"]).toContain("indentation");
+    });
+
+    it("plaintext hint mentions terminal output", () => {
+      expect(FORMAT_HINTS["plaintext"]).toContain("terminal");
+    });
+
+    it("contains the teams-markdown hint", () => {
+      expect(FORMAT_HINTS["teams-markdown"]).toContain("Teams");
+      expect(FORMAT_HINTS["teams-markdown"]).toContain("**bold**");
+    });
+
+    it("contains the github-markdown hint", () => {
+      expect(FORMAT_HINTS["github-markdown"]).toContain("GitHub");
+      expect(FORMAT_HINTS["github-markdown"]).toContain("GFM");
+    });
+
+    it("github-markdown hint mentions tables and collapsible sections", () => {
+      expect(FORMAT_HINTS["github-markdown"]).toContain("Tables");
+      expect(FORMAT_HINTS["github-markdown"]).toContain("<details>");
     });
 
     it("uses slack-mrkdwn hint when formatHint is 'slack-mrkdwn'", () => {

@@ -16,9 +16,37 @@ export const FORMAT_HINTS: Record<string, string> = {
 - >blockquote for highlighting important information
 - Use *bold text* for section headings — do NOT use ## or ### markdown headers (Slack ignores them)
 - Keep responses concise; Slack renders best with shorter paragraphs and clear structure`,
-  "discord-markdown":
-    "Format your responses using Discord markdown. Use **bold** for emphasis, `code` for inline code, and ``` for code blocks.",
-  plaintext: "Format your responses as plain text. Use simple indentation and dashes for lists.",
+
+  "discord-markdown": `Format your responses for Discord markdown:
+- **bold**, *italic*, __underline__, ~~strikethrough~~
+- \`inline code\` and \`\`\`language\\ncode block\`\`\` with syntax highlighting
+- > blockquote for important notes; bullet lists with - or *, numbered with 1.
+- Discord messages are capped at 2000 characters — keep responses concise and to the point;
+  split very long answers into clearly separated parts
+- Use **bold** for section headings — ## and ### headers are not rendered by Discord
+- Avoid large walls of text; use line breaks between distinct points`,
+
+  plaintext: `Format your responses as plain text for terminal output:
+- No markdown syntax — asterisks and underscores render as literal characters
+- Use simple indentation (2-4 spaces) for nested structure and dashes or numbers for lists
+- Use ALL CAPS for top-level headings, underlines (===) for secondary headings
+- Keep lines under 100 characters for readability in standard terminals
+- Separate sections with a blank line`,
+
+  "teams-markdown": `Format your responses for Microsoft Teams:
+- **bold** and _italic_ are supported; \`inline code\` and \`\`\`code blocks\`\`\` work
+- Bullet lists with - or *, numbered with 1.
+- Use **bold** for section headings; avoid large H1 headings (they render very large in Teams)
+- Keep paragraphs short — Teams renders best with concise, clearly separated points
+- Avoid single large blocks of text; break content into small focused sections`,
+
+  "github-markdown": `Format your responses using GitHub Flavored Markdown (GFM):
+- **bold**, *italic*, ~~strikethrough~~
+- \`inline code\` and \`\`\`language\\nfenced code blocks\`\`\` with syntax highlighting
+- Tables, task lists (- [ ] / - [x]), and :emoji: shortcodes are supported
+- ## Headings render clearly — use H2/H3 for sections (H1 is reserved for the page title)
+- Use <details><summary>Summary text</summary>Long content</details> for collapsible sections
+- Keep heading levels appropriate; avoid skipping levels`,
 };
 
 const DEFAULT_FORMAT_HINT = "slack-mrkdwn";
