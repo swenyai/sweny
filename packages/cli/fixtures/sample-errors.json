@@ -1,0 +1,98 @@
+[
+  {
+    "timestamp": "2026-03-01T12:00:00Z",
+    "service": "api-gateway",
+    "level": "error",
+    "message": "Unhandled promise rejection: TypeError: Cannot read properties of undefined (reading 'userId') at /src/middleware/auth.ts:42",
+    "attributes": {
+      "stack": "TypeError: Cannot read properties of undefined (reading 'userId')\n    at AuthMiddleware.verify (/src/middleware/auth.ts:42:28)\n    at processRequest (/src/server.ts:118:5)",
+      "request_id": "req_abc123",
+      "path": "/api/v1/users/profile",
+      "method": "GET",
+      "status_code": 500
+    }
+  },
+  {
+    "timestamp": "2026-03-01T11:55:00Z",
+    "service": "api-gateway",
+    "level": "error",
+    "message": "Unhandled promise rejection: TypeError: Cannot read properties of undefined (reading 'userId') at /src/middleware/auth.ts:42",
+    "attributes": {
+      "stack": "TypeError: Cannot read properties of undefined (reading 'userId')\n    at AuthMiddleware.verify (/src/middleware/auth.ts:42:28)\n    at processRequest (/src/server.ts:118:5)",
+      "request_id": "req_def456",
+      "path": "/api/v1/users/settings",
+      "method": "GET",
+      "status_code": 500
+    }
+  },
+  {
+    "timestamp": "2026-03-01T11:50:00Z",
+    "service": "api-gateway",
+    "level": "error",
+    "message": "Unhandled promise rejection: TypeError: Cannot read properties of undefined (reading 'userId') at /src/middleware/auth.ts:42",
+    "attributes": {
+      "request_id": "req_ghi789",
+      "path": "/api/v1/orders",
+      "method": "POST",
+      "status_code": 500
+    }
+  },
+  {
+    "timestamp": "2026-03-01T11:30:00Z",
+    "service": "payment-service",
+    "level": "error",
+    "message": "Stripe webhook signature verification failed: No signatures found matching the expected signature for payload",
+    "attributes": {
+      "webhook_id": "evt_1234567890",
+      "endpoint": "/webhooks/stripe",
+      "status_code": 400
+    }
+  },
+  {
+    "timestamp": "2026-03-01T11:00:00Z",
+    "service": "payment-service",
+    "level": "warning",
+    "message": "Payment retry attempt 3/5 for order ord_98765: timeout after 30s",
+    "attributes": {
+      "order_id": "ord_98765",
+      "retry_count": 3,
+      "timeout_ms": 30000
+    }
+  },
+  {
+    "timestamp": "2026-03-01T10:45:00Z",
+    "service": "worker",
+    "level": "error",
+    "message": "Job processing failed: ECONNREFUSED 127.0.0.1:5432 - Connection refused to PostgreSQL",
+    "attributes": {
+      "job_id": "job_abc",
+      "job_type": "send_notification",
+      "retry_count": 0,
+      "error_code": "ECONNREFUSED"
+    }
+  },
+  {
+    "timestamp": "2026-03-01T10:44:00Z",
+    "service": "worker",
+    "level": "error",
+    "message": "Job processing failed: ECONNREFUSED 127.0.0.1:5432 - Connection refused to PostgreSQL",
+    "attributes": {
+      "job_id": "job_def",
+      "job_type": "process_payment",
+      "retry_count": 0,
+      "error_code": "ECONNREFUSED"
+    }
+  },
+  {
+    "timestamp": "2026-03-01T10:30:00Z",
+    "service": "api-gateway",
+    "level": "warning",
+    "message": "Rate limit exceeded for IP 203.0.113.42: 150 requests in 60s (limit: 100)",
+    "attributes": {
+      "ip": "203.0.113.42",
+      "requests": 150,
+      "window_seconds": 60,
+      "limit": 100
+    }
+  }
+]

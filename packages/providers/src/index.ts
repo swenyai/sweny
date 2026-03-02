@@ -6,7 +6,7 @@ export { consoleLogger } from "./logger.js";
 
 // Observability
 export type { ObservabilityProvider, LogEntry, AggregateResult, LogQueryOptions } from "./observability/index.js";
-export { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "./observability/index.js";
+export { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "./observability/index.js";
 
 // Issue Tracking
 export type {

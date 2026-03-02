@@ -98,6 +98,7 @@ export function registerTriageCommand(program: Command): Command {
     .option("--linear-state-backlog <name>", "Linear backlog state name")
     .option("--linear-state-in-progress <name>", "Linear in-progress state name")
     .option("--linear-state-peer-review <name>", "Linear peer-review state name")
+    .option("--log-file <path>", "Path to JSON log file (use with --observability-provider file)")
     .option("--dd-site <site>", "Datadog site", "datadoghq.com")
     .option("--sentry-org <org>", "Sentry organization slug")
     .option("--sentry-project <project>", "Sentry project slug")
@@ -222,6 +223,10 @@ export function validateInputs(config: CliConfig): string[] {
     case "loki":
       if (!config.observabilityCredentials.baseUrl) errors.push("Missing: LOKI_URL is required for loki provider");
       break;
+    case "file":
+      if (!config.observabilityCredentials.path)
+        errors.push("Missing: --log-file <path> is required for file provider");
+      break;
   }
 
   // Issue tracker credentials by provider
@@ -320,6 +325,10 @@ function parseObservabilityCredentials(provider: string, options: Record<string,
         baseUrl: env.LOKI_URL || "",
         apiKey: env.LOKI_API_KEY || "",
         orgId: env.LOKI_ORG_ID || "",
+      };
+    case "file":
+      return {
+        path: (options.logFile as string) || env.SWENY_LOG_FILE || "",
       };
     default:
       return {};

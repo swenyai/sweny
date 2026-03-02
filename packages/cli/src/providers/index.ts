@@ -1,7 +1,7 @@
 import { createProviderRegistry } from "@swenyai/engine";
 import type { ProviderRegistry } from "@swenyai/engine";
 import type { CliConfig } from "../config.js";
-import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "@swenyai/providers/observability";
+import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "@swenyai/providers/observability";
 import type { ObservabilityProvider } from "@swenyai/providers/observability";
 import { linear, jira, githubIssues } from "@swenyai/providers/issue-tracking";
 import { github, gitlab } from "@swenyai/providers/source-control";
@@ -75,6 +75,12 @@ export function createProviders(config: CliConfig): ProviderRegistry {
         baseUrl: obsCreds.baseUrl,
         apiKey: obsCreds.apiKey,
         orgId: obsCreds.orgId,
+        logger,
+      });
+      break;
+    case "file":
+      observability = file({
+        path: obsCreds.path,
         logger,
       });
       break;
