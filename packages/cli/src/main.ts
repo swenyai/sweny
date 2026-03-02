@@ -48,15 +48,14 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     console.log("");
   }
 
-  const logger = {
-    info: config.json ? () => {} : console.log,
-    debug: config.json ? () => {} : console.debug,
-    warn: console.warn,
-    error: console.error,
-  };
-
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  // ── Spinner state ──────────────────────────────────────────────
+  const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const isTTY = !config.json && (process.stderr.isTTY ?? false);
+  let spinnerInterval: ReturnType<typeof setInterval> | undefined;
+  let spinnerActive = false;
+  let frameIdx = 0;
   let stepStart = 0;
+  let stepLabel = "";
 
   function formatElapsed(ms: number): string {
     const s = Math.round(ms / 1000);
@@ -65,34 +64,92 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     return `${m}m ${s % 60}s`;
   }
 
+  function clearSpinnerLine() {
+    if (spinnerActive && isTTY) {
+      process.stderr.write("\r\x1b[K");
+    }
+  }
+
+  function startSpinner(label: string) {
+    stepStart = Date.now();
+    stepLabel = label;
+    frameIdx = 0;
+    spinnerActive = true;
+
+    if (isTTY) {
+      spinnerInterval = setInterval(() => {
+        const frame = chalk.cyan(FRAMES[frameIdx++ % FRAMES.length]);
+        const elapsed = chalk.dim(formatElapsed(Date.now() - stepStart));
+        process.stderr.write(`\r\x1b[K  ${frame} ${stepLabel} ${elapsed}`);
+      }, 80);
+    } else if (!config.json) {
+      // Non-TTY fallback: periodic heartbeat lines
+      spinnerInterval = setInterval(() => {
+        const elapsed = formatElapsed(Date.now() - stepStart);
+        process.stderr.write(`  ↳ ${stepLabel} ${elapsed}\n`);
+      }, 15_000);
+    }
+  }
+
+  function stopSpinner(icon: string, suffix: string) {
+    if (spinnerInterval) {
+      clearInterval(spinnerInterval);
+      spinnerInterval = undefined;
+    }
+    const elapsed = chalk.dim(formatElapsed(Date.now() - stepStart));
+    if (isTTY) {
+      process.stderr.write(`\r\x1b[K  ${icon} ${elapsed}${suffix}\n`);
+    } else if (!config.json) {
+      console.log(`  ${icon} ${elapsed}${suffix}`);
+    }
+    spinnerActive = false;
+  }
+
+  // Spinner-aware logger: clears the spinner line before printing
+  // so log output doesn't collide with the animated spinner.
+  // The next spinner tick redraws cleanly below the new output.
+  const logger = {
+    info: config.json
+      ? () => {}
+      : (...args: unknown[]) => {
+          clearSpinnerLine();
+          console.log(...args);
+        },
+    debug: config.json
+      ? () => {}
+      : (...args: unknown[]) => {
+          clearSpinnerLine();
+          console.debug(...args);
+        },
+    warn: (...args: unknown[]) => {
+      clearSpinnerLine();
+      console.warn(...args);
+    },
+    error: (...args: unknown[]) => {
+      clearSpinnerLine();
+      console.error(...args);
+    },
+  };
+
   try {
     const result = await runWorkflow(triageWorkflow, triageConfig, providers, {
       logger,
       beforeStep: async (step) => {
         if (!config.json) {
-          stepStart = Date.now();
-          console.log(chalk.dim(`[${step.phase}] `) + chalk.bold(step.name));
-          heartbeat = setInterval(() => {
-            const elapsed = formatElapsed(Date.now() - stepStart);
-            process.stderr.write(chalk.dim(`         ↳ still running... ${elapsed}\n`));
-          }, 15_000);
+          console.log(chalk.dim(`\n[${step.phase}]`) + " " + chalk.bold(step.name));
+          startSpinner(step.name);
         }
       },
       afterStep: async (_step, stepResult) => {
-        if (heartbeat) {
-          clearInterval(heartbeat);
-          heartbeat = undefined;
-        }
         if (!config.json) {
-          const elapsed = chalk.dim(` (${formatElapsed(Date.now() - stepStart)})`);
           const icon =
             stepResult.status === "success"
-              ? chalk.green("         ✓ done")
+              ? chalk.green("✓")
               : stepResult.status === "skipped"
-                ? chalk.dim("         − skipped")
-                : chalk.red("         ✗ failed");
+                ? chalk.dim("−")
+                : chalk.red("✗");
           const reason = stepResult.reason ? chalk.dim(` — ${stepResult.reason}`) : "";
-          console.log(icon + elapsed + reason);
+          stopSpinner(icon, reason);
         }
       },
     });
