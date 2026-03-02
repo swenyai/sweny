@@ -3,9 +3,16 @@ import type { ProviderRegistry } from "@sweny-ai/engine";
 import type { CliConfig } from "../config.js";
 import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "@sweny-ai/providers/observability";
 import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
-import { linear, jira, githubIssues } from "@sweny-ai/providers/issue-tracking";
-import { github, gitlab } from "@sweny-ai/providers/source-control";
-import { slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@sweny-ai/providers/notification";
+import { linear, jira, githubIssues, fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
+import { github, gitlab, fileSourceControl } from "@sweny-ai/providers/source-control";
+import {
+  slackWebhook,
+  teamsWebhook,
+  discordWebhook,
+  email,
+  webhook,
+  fileNotification,
+} from "@sweny-ai/providers/notification";
 import { claudeCode, openaiCodex, googleGemini } from "@sweny-ai/providers/coding-agent";
 
 export interface CliLogger {
@@ -109,6 +116,16 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
         }),
       );
       break;
+    case "file":
+      registry.set(
+        "sourceControl",
+        fileSourceControl({
+          outputDir: config.outputDir,
+          baseBranch: config.baseBranch,
+          logger,
+        }),
+      );
+      break;
     default:
       throw new Error(`Unsupported source control provider: ${config.sourceControlProvider}`);
   }
@@ -136,6 +153,15 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
           token: config.githubToken,
           owner: scOwner,
           repo: scRepo,
+          logger,
+        }),
+      );
+      break;
+    case "file":
+      registry.set(
+        "issueTracker",
+        fileIssueTracking({
+          outputDir: config.outputDir,
           logger,
         }),
       );
@@ -172,6 +198,15 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
         webhook({
           url: config.notificationWebhookUrl,
           signingSecret: config.webhookSigningSecret || undefined,
+          logger,
+        }),
+      );
+      break;
+    case "file":
+      registry.set(
+        "notification",
+        fileNotification({
+          outputDir: config.outputDir,
           logger,
         }),
       );

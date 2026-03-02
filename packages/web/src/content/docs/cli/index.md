@@ -20,9 +20,37 @@ npx @sweny-ai/cli triage --help
 ## Prerequisites
 
 - A Claude Max subscription or Anthropic API key
-- A git repository with a remote (SWEny auto-detects `owner/repo` from your git remote)
 
 The coding agent CLI (Claude Code by default) is installed automatically when you run the workflow — no manual pre-installation needed.
+
+## Try it in 60 seconds (local-only mode)
+
+No external services needed — just an LLM API key and a log file:
+
+```yaml
+# .sweny.yml
+observability-provider: file
+log-file: ./sample-errors.json
+issue-tracker-provider: file
+source-control-provider: file
+notification-provider: file
+```
+
+```bash
+# .env
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```bash
+npx @sweny-ai/cli triage --dry-run
+```
+
+Output goes to `.sweny/output/`:
+- `issues/LOCAL-1.md` — Linear-style issue tickets
+- `prs/pr-1.md` — GitHub-style PR descriptions
+- `notifications/summary-*.md` — run summaries
+
+When you're ready, swap in real providers (Datadog, GitHub, Linear, etc.) — the workflow is identical.
 
 ## Quick start
 

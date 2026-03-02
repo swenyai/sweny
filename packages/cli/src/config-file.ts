@@ -125,4 +125,13 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # ── Cache ─────────────────────────────────────────────────────────────
 # cache-dir: .sweny/cache
 # cache-ttl: 86400
+
+# ── Local-only quick start ───────────────────────────────────────────
+# Uncomment to run without any external services (just an LLM API key):
+# observability-provider: file
+# log-file: ./sample-errors.json
+# issue-tracker-provider: file
+# source-control-provider: file
+# notification-provider: file
+# output-dir: .sweny/output
 `;
