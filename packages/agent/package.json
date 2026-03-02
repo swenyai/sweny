@@ -90,7 +90,7 @@
     "@aws-sdk/client-s3": "^3.997.0",
     "@aws-sdk/s3-request-presigner": "^3.997.0",
     "@types/express": "^5",
-    "@types/node": "^22",
+    "@types/node": "^25",
     "tsx": "^4",
     "typescript": "^5.6",
     "vitest": "^4"
