@@ -43,6 +43,11 @@ class WebhookProvider implements NotificationProvider {
       title: payload.title,
       body: payload.body,
       format: payload.format,
+      status: payload.status,
+      summary: payload.summary,
+      fields: payload.fields,
+      sections: payload.sections,
+      links: payload.links,
       timestamp: new Date().toISOString(),
     });
 

@@ -151,4 +151,30 @@ describe("webhook provider", () => {
 
     expect(silentLogger.info).toHaveBeenCalledWith("Webhook notification sent to https://example.com/hook");
   });
+
+  it("forwards all structured fields in JSON payload", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = mockFetch;
+
+    const provider = webhook({ url: "https://example.com/hook", logger: silentLogger });
+    await provider.send({
+      title: "Triage Summary",
+      body: "fallback",
+      status: "success",
+      summary: "PR created",
+      fields: [{ label: "Service", value: "api-*", short: true }],
+      sections: [{ title: "Log", content: "Found 3 errors" }],
+      links: [{ label: "View PR", url: "https://github.com/org/repo/pull/42" }],
+    });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.status).toBe("success");
+    expect(body.summary).toBe("PR created");
+    expect(body.fields).toHaveLength(1);
+    expect(body.fields[0].label).toBe("Service");
+    expect(body.sections).toHaveLength(1);
+    expect(body.sections[0].title).toBe("Log");
+    expect(body.links).toHaveLength(1);
+    expect(body.links[0].url).toBe("https://github.com/org/repo/pull/42");
+  });
 });

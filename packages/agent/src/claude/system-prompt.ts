@@ -9,8 +9,13 @@ export interface SystemPromptOpts {
 }
 
 export const FORMAT_HINTS: Record<string, string> = {
-  "slack-mrkdwn":
-    "Format your responses for Slack using Slack's mrkdwn syntax. Use *bold* for emphasis, `code` for inline code, and ``` for code blocks.",
+  "slack-mrkdwn": `Format your responses for Slack using Slack's mrkdwn syntax:
+- *bold* and _italic_ (NOT **bold** or __italic__ — those are standard markdown, not Slack mrkdwn)
+- \`inline code\` and \`\`\`language\\ncode block\`\`\`
+- Bullet lists with • or - , numbered lists with 1.
+- >blockquote for highlighting important information
+- Use *bold text* for section headings — do NOT use ## or ### markdown headers (Slack ignores them)
+- Keep responses concise; Slack renders best with shorter paragraphs and clear structure`,
   "discord-markdown":
     "Format your responses using Discord markdown. Use **bold** for emphasis, `code` for inline code, and ``` for code blocks.",
   plaintext: "Format your responses as plain text. Use simple indentation and dashes for lists.",

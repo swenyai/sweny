@@ -50,6 +50,11 @@ describe("sendNotification", () => {
     expect(payload.body).toContain("**Recommendation**: implement");
     expect(payload.body).toContain("**Service Filter**: `api-*`");
     expect(payload.format).toBe("markdown");
+    // Structured fields
+    expect(payload.status).toBe("info");
+    expect(payload.fields).toBeDefined();
+    expect(payload.fields.some((f: { label: string }) => f.label === "Recommendation")).toBe(true);
+    expect(payload.fields.some((f: { label: string }) => f.label === "Service Filter")).toBe(true);
   });
 
   it("includes PR URL when PR was created", async () => {
@@ -68,9 +73,14 @@ describe("sendNotification", () => {
 
     await sendNotification(ctx);
 
-    const body = send.mock.calls[0][0].body;
-    expect(body).toContain("**Issue**: [ENG-100](https://linear.app/ENG-100)");
-    expect(body).toContain("**Success**: New PR created - https://github.com/org/repo/pull/42");
+    const payload = send.mock.calls[0][0];
+    expect(payload.body).toContain("**Issue**: [ENG-100](https://linear.app/ENG-100)");
+    expect(payload.body).toContain("Success");
+    // Structured fields
+    expect(payload.status).toBe("success");
+    expect(payload.summary).toContain("PR created");
+    expect(payload.links).toContainEqual(expect.objectContaining({ label: "Issue: ENG-100" }));
+    expect(payload.links).toContainEqual(expect.objectContaining({ label: "PR #42" }));
   });
 
   it("shows cross-repo dispatch status", async () => {
@@ -81,9 +91,11 @@ describe("sendNotification", () => {
 
     await sendNotification(ctx);
 
-    const body = send.mock.calls[0][0].body;
-    expect(body).toContain("**Cross-repo dispatch**");
-    expect(body).toContain("org/other-repo");
+    const payload = send.mock.calls[0][0];
+    expect(payload.body).toContain("Cross-repo dispatch");
+    expect(payload.body).toContain("org/other-repo");
+    expect(payload.status).toBe("info");
+    expect(payload.summary).toContain("org/other-repo");
   });
 
   it("shows skip status when recommendation is skip", async () => {
@@ -93,8 +105,10 @@ describe("sendNotification", () => {
 
     await sendNotification(ctx);
 
-    const body = send.mock.calls[0][0].body;
-    expect(body).toContain("**Skipped**: No novel issues found");
+    const payload = send.mock.calls[0][0];
+    expect(payload.body).toContain("Skipped");
+    expect(payload.status).toBe("skipped");
+    expect(payload.summary).toContain("No novel issues found");
   });
 
   it("shows +1 existing status", async () => {
@@ -104,8 +118,10 @@ describe("sendNotification", () => {
 
     await sendNotification(ctx);
 
-    const body = send.mock.calls[0][0].body;
-    expect(body).toContain("**+1 Existing**: Added occurrence to existing issue");
+    const payload = send.mock.calls[0][0];
+    expect(payload.body).toContain("+1 Existing");
+    expect(payload.status).toBe("info");
+    expect(payload.summary).toContain("+1 Existing");
   });
 
   it("shows dry run status", async () => {
@@ -116,9 +132,10 @@ describe("sendNotification", () => {
 
     await sendNotification(ctx);
 
-    const body = send.mock.calls[0][0].body;
-    expect(body).toContain("**Dry Run**: true");
-    expect(body).toContain("**Dry Run**: Analysis only");
+    const payload = send.mock.calls[0][0];
+    expect(payload.body).toContain("Dry Run");
+    expect(payload.status).toBe("info");
+    expect(payload.summary).toContain("Dry Run");
   });
 
   it("shows implement-fix skip reason", async () => {
@@ -129,8 +146,10 @@ describe("sendNotification", () => {
 
     await sendNotification(ctx);
 
-    const body = send.mock.calls[0][0].body;
-    expect(body).toContain("**Skipped**: Fix declined: not confident");
+    const payload = send.mock.calls[0][0];
+    expect(payload.body).toContain("Fix declined: not confident");
+    expect(payload.status).toBe("skipped");
+    expect(payload.summary).toContain("Fix declined: not confident");
   });
 
   it("appends investigation log when file exists", async () => {
@@ -143,9 +162,11 @@ describe("sendNotification", () => {
 
     await sendNotification(ctx);
 
-    const body = send.mock.calls[0][0].body;
-    expect(body).toContain("### Investigation Log");
-    expect(body).toContain("Found 3 errors in service-api");
+    const payload = send.mock.calls[0][0];
+    expect(payload.body).toContain("Investigation Log");
+    expect(payload.body).toContain("Found 3 errors in service-api");
+    // Also present as a structured section
+    expect(payload.sections).toContainEqual(expect.objectContaining({ title: "Investigation Log" }));
   });
 
   it("appends issues report when file exists", async () => {
@@ -158,9 +179,11 @@ describe("sendNotification", () => {
 
     await sendNotification(ctx);
 
-    const body = send.mock.calls[0][0].body;
-    expect(body).toContain("### Issues Found");
-    expect(body).toContain("Null pointer in auth handler");
+    const payload = send.mock.calls[0][0];
+    expect(payload.body).toContain("Issues Found");
+    expect(payload.body).toContain("Null pointer in auth handler");
+    // Also present as a structured section
+    expect(payload.sections).toContainEqual(expect.objectContaining({ title: "Issues Found" }));
   });
 
   it("falls back to issue data when no PR data exists", async () => {

@@ -202,4 +202,127 @@ describe("email provider", () => {
 
     expect(silentLogger.info).toHaveBeenCalledWith("Email notification sent to team@example.com");
   });
+
+  // ---------------------------------------------------------------------------
+  // HTML rendering from structured payload
+  // ---------------------------------------------------------------------------
+
+  it("sends text/html and builds HTML when status is present", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = mockFetch;
+
+    const provider = createProvider();
+    await provider.send({ body: "fallback", status: "success", summary: "PR created" });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.content[0].type).toBe("text/html");
+    expect(body.content[0].value).toContain("PR created");
+    expect(body.content[0].value).toContain("#28a745"); // success green
+  });
+
+  it("sends text/html and renders fields as an HTML table", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = mockFetch;
+
+    const provider = createProvider();
+    await provider.send({
+      body: "fallback",
+      fields: [
+        { label: "Service", value: "api-*" },
+        { label: "Range", value: "24h" },
+      ],
+    });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.content[0].type).toBe("text/html");
+    const html: string = body.content[0].value;
+    expect(html).toContain("<table");
+    expect(html).toContain("Service");
+    expect(html).toContain("api-*");
+    expect(html).toContain("Range");
+    expect(html).toContain("24h");
+  });
+
+  it("renders links as anchor buttons in HTML", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = mockFetch;
+
+    const provider = createProvider();
+    await provider.send({
+      body: "fallback",
+      links: [
+        { label: "View PR", url: "https://github.com/org/repo/pull/42" },
+        { label: "View Issue", url: "https://linear.app/ENG-100" },
+      ],
+    });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const html: string = body.content[0].value;
+    expect(html).toContain(`href="https://github.com/org/repo/pull/42"`);
+    expect(html).toContain("View PR");
+    expect(html).toContain(`href="https://linear.app/ENG-100"`);
+  });
+
+  it("renders sections as h3 + pre blocks in HTML", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = mockFetch;
+
+    const provider = createProvider();
+    await provider.send({
+      body: "fallback",
+      sections: [{ title: "Investigation Log", content: "Found 3 errors in <service>" }],
+    });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const html: string = body.content[0].value;
+    expect(html).toContain("<h3>Investigation Log</h3>");
+    expect(html).toContain("<pre");
+    // Content should be HTML-escaped
+    expect(html).toContain("Found 3 errors in &lt;service&gt;");
+  });
+
+  it("escapes HTML special chars in field values", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = mockFetch;
+
+    const provider = createProvider();
+    await provider.send({
+      body: "fallback",
+      fields: [{ label: "Query", value: "<script>alert('xss')</script>" }],
+    });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const html: string = body.content[0].value;
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("rejects javascript: links via safeUrl fallback", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = mockFetch;
+
+    const provider = createProvider();
+    await provider.send({
+      body: "fallback",
+
+      links: [{ label: "Evil", url: "javascript:alert(1)" }],
+    });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const html: string = body.content[0].value;
+    expect(html).not.toContain("javascript:");
+    expect(html).toContain('href="#"');
+  });
+
+  it("does not build HTML when no structured content and format is not html", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    globalThis.fetch = mockFetch;
+
+    const provider = createProvider();
+    await provider.send({ body: "plain body", format: "text" });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.content[0].type).toBe("text/plain");
+    expect(body.content[0].value).toBe("plain body");
+  });
 });

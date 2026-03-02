@@ -9,6 +9,77 @@ export async function sendNotification(ctx) {
     const issueData = getStepData(ctx, "create-issue");
     const crossRepoData = getStepData(ctx, "cross-repo-check");
     const implementResult = ctx.results.get("implement-fix");
+    // -------------------------------------------------------------------------
+    // Determine status and one-line summary
+    // -------------------------------------------------------------------------
+    let status;
+    let summary;
+    if (crossRepoData?.dispatched) {
+        status = "info";
+        summary = `Cross-repo dispatch: Bug belongs to \`${crossRepoData.targetRepo}\` — dispatched for implementation`;
+    }
+    else if (investigation?.recommendation?.toLowerCase().includes("skip")) {
+        status = "skipped";
+        summary = "Skipped: No novel issues found";
+    }
+    else if (investigation?.recommendation?.toLowerCase().includes("+1 existing")) {
+        status = "info";
+        summary = "+1 Existing: Added occurrence to existing issue";
+    }
+    else if (implementResult?.status === "skipped" && implementResult.reason) {
+        status = "skipped";
+        summary = `Skipped: ${implementResult.reason}`;
+    }
+    else if (prData?.prUrl) {
+        status = "success";
+        summary = `Success: New PR created — ${prData.prUrl}`;
+    }
+    else if (config.dryRun) {
+        status = "info";
+        summary = "Dry Run: Analysis only";
+    }
+    else {
+        status = "info";
+        summary = "Completed";
+    }
+    // -------------------------------------------------------------------------
+    // Metadata fields
+    // -------------------------------------------------------------------------
+    const issueIdentifier = prData?.issueIdentifier ?? issueData?.issueIdentifier;
+    const issueUrl = prData?.issueUrl ?? issueData?.issueUrl;
+    const fields = [
+        { label: "Run Date", value: new Date().toISOString(), short: true },
+        { label: "Service Filter", value: `\`${config.serviceFilter}\``, short: true },
+        { label: "Time Range", value: `\`${config.timeRange}\``, short: true },
+        { label: "Dry Run", value: String(config.dryRun), short: true },
+        { label: "Recommendation", value: investigation?.recommendation ?? "unknown", short: true },
+    ];
+    // -------------------------------------------------------------------------
+    // Action links
+    // -------------------------------------------------------------------------
+    const links = [];
+    if (issueIdentifier && issueUrl) {
+        links.push({ label: `Issue: ${issueIdentifier}`, url: issueUrl });
+    }
+    if (prData?.prUrl) {
+        links.push({ label: `PR #${prData.prNumber}`, url: prData.prUrl });
+    }
+    // -------------------------------------------------------------------------
+    // Content sections (from analysis files)
+    // -------------------------------------------------------------------------
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
+    const sections = [];
+    const investigationLog = `${analysisDir}/investigation-log.md`;
+    if (fs.existsSync(investigationLog)) {
+        sections.push({ title: "Investigation Log", content: fs.readFileSync(investigationLog, "utf-8") });
+    }
+    const issuesReport = `${analysisDir}/issues-report.md`;
+    if (fs.existsSync(issuesReport)) {
+        sections.push({ title: "Issues Found", content: fs.readFileSync(issuesReport, "utf-8") });
+    }
+    // -------------------------------------------------------------------------
+    // Flat markdown body (fallback for providers that don't use structured fields)
+    // -------------------------------------------------------------------------
     const lines = [];
     lines.push(`**Run Date**: ${new Date().toISOString()}`);
     lines.push(`**Service Filter**: \`${config.serviceFilter}\``);
@@ -16,51 +87,28 @@ export async function sendNotification(ctx) {
     lines.push(`**Dry Run**: ${config.dryRun}`);
     lines.push(`**Recommendation**: ${investigation?.recommendation ?? "unknown"}`);
     lines.push("");
-    // Issue reference
-    const issueIdentifier = prData?.issueIdentifier ?? issueData?.issueIdentifier;
-    const issueUrl = prData?.issueUrl ?? issueData?.issueUrl;
-    if (issueIdentifier) {
+    if (issueIdentifier && issueUrl) {
         lines.push(`**Issue**: [${issueIdentifier}](${issueUrl})`);
         lines.push("");
     }
-    // Status message
-    if (crossRepoData?.dispatched) {
-        lines.push(`> **Cross-repo dispatch**: Bug belongs to \`${crossRepoData.targetRepo}\` — dispatched for implementation`);
-    }
-    else if (investigation?.recommendation?.toLowerCase().includes("skip")) {
-        lines.push("> **Skipped**: No novel issues found");
-    }
-    else if (investigation?.recommendation?.toLowerCase().includes("+1 existing")) {
-        lines.push("> **+1 Existing**: Added occurrence to existing issue");
-    }
-    else if (implementResult?.status === "skipped" && implementResult.reason) {
-        lines.push(`> **Skipped**: ${implementResult.reason}`);
-    }
-    else if (prData?.prUrl) {
-        lines.push(`> **Success**: New PR created - ${prData.prUrl}`);
-    }
-    else if (config.dryRun) {
-        lines.push("> **Dry Run**: Analysis only");
-    }
-    // Append investigation log if it exists
-    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
-    const investigationLog = `${analysisDir}/investigation-log.md`;
-    if (fs.existsSync(investigationLog)) {
+    lines.push(`> **${summary}**`);
+    for (const section of sections) {
         lines.push("");
-        lines.push("### Investigation Log");
-        lines.push(fs.readFileSync(investigationLog, "utf-8"));
+        lines.push(`### ${section.title}`);
+        lines.push(section.content);
     }
-    // Append issues report if it exists
-    const issuesReport = `${analysisDir}/issues-report.md`;
-    if (fs.existsSync(issuesReport)) {
-        lines.push("");
-        lines.push("### Issues Found");
-        lines.push(fs.readFileSync(issuesReport, "utf-8"));
-    }
+    // -------------------------------------------------------------------------
+    // Send
+    // -------------------------------------------------------------------------
     await notification.send({
         title: "SWEny Triage Summary",
         body: lines.join("\n"),
         format: "markdown",
+        status,
+        summary,
+        fields,
+        sections,
+        links,
     });
     return { status: "success" };
 }
