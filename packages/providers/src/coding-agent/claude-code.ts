@@ -20,7 +20,7 @@ export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
     return new Promise((resolve, reject) => {
       const child = spawn(cmd, args, {
         env: opts?.env ?? process.env,
-        stdio: ["ignore", "inherit", "inherit"],
+        stdio: "inherit",
       });
 
       child.on("error", (err) => reject(err));
