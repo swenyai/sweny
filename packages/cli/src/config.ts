@@ -79,6 +79,9 @@ export interface CliConfig {
   cacheDir: string;
   cacheTtl: number;
   noCache: boolean;
+
+  // Output (file providers)
+  outputDir: string;
 }
 
 export function registerTriageCommand(program: Command): Command {
@@ -127,7 +130,8 @@ export function registerTriageCommand(program: Command): Command {
     .option("--bell", "Ring terminal bell on completion", false)
     .option("--cache-dir <path>", "Step cache directory (default: .sweny/cache)")
     .option("--cache-ttl <seconds>", "Cache TTL in seconds, 0 = infinite (default: 86400)")
-    .option("--no-cache", "Disable step cache");
+    .option("--no-cache", "Disable step cache")
+    .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)");
 }
 
 export function parseCliInputs(options: Record<string, unknown>, fileConfig: Record<string, string> = {}): CliConfig {
@@ -214,6 +218,8 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
     cacheDir: (options.cacheDir as string) || env.SWENY_CACHE_DIR || f("cache-dir") || ".sweny/cache",
     cacheTtl: parseInt(String(options.cacheTtl || f("cache-ttl") || "86400"), 10),
     noCache: options.cache === false,
+
+    outputDir: (options.outputDir as string) || env.SWENY_OUTPUT_DIR || f("output-dir") || ".sweny/output",
   };
 }
 
@@ -241,8 +247,9 @@ export function validateInputs(config: CliConfig): string[] {
       errors.push(`Unsupported coding agent provider: ${config.codingAgentProvider} (use claude, codex, or gemini)`);
   }
 
-  // Repository required
-  if (!config.repository) {
+  // Repository required unless all providers are file-based
+  const allLocal = config.issueTrackerProvider === "file" && config.sourceControlProvider === "file";
+  if (!config.repository && !allLocal) {
     errors.push("Missing: --repository <owner/repo> or GITHUB_REPOSITORY (could not auto-detect from git remote)");
   }
 
@@ -300,6 +307,9 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.jiraEmail) errors.push("Missing: JIRA_EMAIL is required for jira issue tracker");
       if (!config.jiraApiToken) errors.push("Missing: JIRA_API_TOKEN is required for jira issue tracker");
       break;
+    case "file":
+      // No external credentials needed
+      break;
   }
 
   // Source control credentials by provider
@@ -310,6 +320,9 @@ export function validateInputs(config: CliConfig): string[] {
     case "gitlab":
       if (!config.gitlabToken) errors.push("Missing: GITLAB_TOKEN is required for gitlab provider");
       if (!config.gitlabProjectId) errors.push("Missing: GITLAB_PROJECT_ID is required for gitlab provider");
+      break;
+    case "file":
+      // No external credentials needed
       break;
   }
 
@@ -326,6 +339,9 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.sendgridApiKey) errors.push("Missing: SENDGRID_API_KEY is required for email notifications");
       if (!config.emailFrom) errors.push("Missing: EMAIL_FROM is required for email notifications");
       if (!config.emailTo) errors.push("Missing: EMAIL_TO is required for email notifications");
+      break;
+    case "file":
+      // No external credentials needed
       break;
   }
 

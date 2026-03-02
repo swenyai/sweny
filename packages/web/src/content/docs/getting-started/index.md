@@ -127,7 +127,28 @@ npx @sweny-ai/cli init        # creates .sweny.yml
 npx @sweny-ai/cli triage --dry-run
 ```
 
-The CLI auto-loads `.env`, reads settings from `.sweny.yml`, and supports step caching for fast iteration. See the [CLI Quick Start](/cli/) to get started.
+The CLI auto-loads `.env`, reads settings from `.sweny.yml`, and supports step caching for fast iteration.
+
+### Local-only mode (no external services)
+
+Want to try SWEny without connecting to anything? Use file-based providers — all output is written as markdown:
+
+```yaml
+# .sweny.yml
+observability-provider: file
+log-file: ./sample-errors.json
+issue-tracker-provider: file
+source-control-provider: file
+notification-provider: file
+```
+
+```bash
+npx @sweny-ai/cli triage --dry-run
+# → .sweny/output/issues/LOCAL-1.md
+# → .sweny/output/notifications/summary-*.md
+```
+
+See the [CLI Quick Start](/cli/) for the full guide.
 
 ## What's next?
 

@@ -13,3 +13,4 @@ export { teamsWebhook, teamsWebhookConfigSchema, type TeamsWebhookConfig } from 
 export { discordWebhook, discordWebhookConfigSchema, type DiscordWebhookConfig } from "./discord-webhook.js";
 export { email, emailConfigSchema, type EmailConfig } from "./email.js";
 export { webhook, webhookConfigSchema, type WebhookConfig } from "./webhook.js";
+export { fileNotification, fileNotificationConfigSchema, type FileNotificationConfig } from "./file.js";

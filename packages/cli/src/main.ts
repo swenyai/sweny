@@ -312,12 +312,12 @@ function mapToTriageConfig(config: CliConfig): TriageConfig {
     maxImplementTurns: config.maxImplementTurns,
     serviceMapPath: config.serviceMapPath,
 
-    projectId: config.linearTeamId,
-    bugLabelId: config.linearBugLabelId,
-    triageLabelId: config.linearTriageLabelId,
-    stateBacklog: config.linearStateBacklog,
-    stateInProgress: config.linearStateInProgress,
-    statePeerReview: config.linearStatePeerReview,
+    projectId: config.linearTeamId || (config.issueTrackerProvider === "file" ? "local" : ""),
+    bugLabelId: config.linearBugLabelId || (config.issueTrackerProvider === "file" ? "bug" : ""),
+    triageLabelId: config.linearTriageLabelId || (config.issueTrackerProvider === "file" ? "triage" : ""),
+    stateBacklog: config.linearStateBacklog || (config.issueTrackerProvider === "file" ? "open" : ""),
+    stateInProgress: config.linearStateInProgress || (config.issueTrackerProvider === "file" ? "in-progress" : ""),
+    statePeerReview: config.linearStatePeerReview || (config.issueTrackerProvider === "file" ? "peer-review" : ""),
 
     repository: config.repository,
 
