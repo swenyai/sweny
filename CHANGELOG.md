@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.2.1] — 2026-03-02
+
+### Added
+
+- **`.sweny.yml` config file** — project-level configuration so `sweny triage --dry-run` works without dozens of flags
+- **`sweny init` command** — scaffolds a starter config file with all options documented
+- **Auto `.env` loading** — CLI loads `.env` at startup, no external tools needed
+- **Step-level caching** — cached step results replay on re-run for crash recovery and fast iteration (`--cache-dir`, `--cache-ttl`, `--no-cache`)
+- **Multi-agent support** — `--coding-agent-provider` flag with `claude`, `codex`, and `gemini` options
+- **CLI spinner UX** — animated progress with step counter `[N/9]`, phase headers, and status folding
+- **`--bell` flag** — terminal bell on completion
+- **Quiet mode** for coding agents — suppresses agent stdout in CLI output
+- **Channel-native notifications** — Slack Block Kit, Teams Adaptive Cards, Discord embeds, HTML email
+
+### Changed
+
+- Provider logs routed through shared spinner-aware logger
+- Config priority: CLI flag > env var > `.sweny.yml` > default
+
 ## [v0.2] — 2026-02-28
 
 ### Added

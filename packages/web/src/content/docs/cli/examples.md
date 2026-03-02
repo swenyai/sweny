@@ -5,46 +5,67 @@ description: Common SWEny CLI configurations and recipes.
 
 ## Test with a local log file
 
-Analyze a JSON log file without any external service credentials:
+The fastest way to try SWEny. Create `.sweny.yml` and `.env`:
+
+```yaml
+# .sweny.yml
+observability-provider: file
+log-file: ./logs/errors.json
+```
 
 ```bash
-export CLAUDE_CODE_OAUTH_TOKEN="your-token"
+# .env
+CLAUDE_CODE_OAUTH_TOKEN=your-token
+```
 
-sweny triage \
-  --observability-provider file \
-  --log-file ./logs/errors.json \
-  --dry-run
+```bash
+sweny triage --dry-run
 ```
 
 ## Datadog with GitHub Issues
 
-The most common setup — scan Datadog for errors and create GitHub Issues:
+The most common production setup:
+
+```yaml
+# .sweny.yml
+observability-provider: datadog
+time-range: 4h
+severity-focus: errors
+```
 
 ```bash
-export CLAUDE_CODE_OAUTH_TOKEN="your-token"
-export DD_API_KEY="your-api-key"
-export DD_APP_KEY="your-app-key"
-export GITHUB_TOKEN="ghp_..."
+# .env
+CLAUDE_CODE_OAUTH_TOKEN=your-token
+DD_API_KEY=your-api-key
+DD_APP_KEY=your-app-key
+GITHUB_TOKEN=ghp_...
+```
 
-sweny triage --time-range 4h --severity-focus errors
+```bash
+sweny triage
 ```
 
 ## Sentry with Linear
 
-Use Sentry for error tracking and Linear for issue management:
+```yaml
+# .sweny.yml
+observability-provider: sentry
+sentry-org: my-org
+sentry-project: my-project
+issue-tracker-provider: linear
+linear-team-id: team-uuid
+```
 
 ```bash
-export CLAUDE_CODE_OAUTH_TOKEN="your-token"
-export SENTRY_AUTH_TOKEN="your-token"
-export LINEAR_API_KEY="lin_api_..."
-export GITHUB_TOKEN="ghp_..."
+# .env
+CLAUDE_CODE_OAUTH_TOKEN=your-token
+SENTRY_AUTH_TOKEN=your-token
+LINEAR_API_KEY=lin_api_...
+GITHUB_TOKEN=ghp_...
+```
 
-sweny triage \
-  --observability-provider sentry \
-  --sentry-org my-org \
-  --sentry-project my-project \
-  --issue-tracker-provider linear \
-  --linear-team-id "team-uuid"
+```bash
+sweny triage
 ```
 
 ## Filter to a specific service
@@ -95,46 +116,49 @@ sweny triage --json | jq '[.steps[] | select(.name == "create-issue") | .result.
 
 ## GitLab with Jira
 
-Use GitLab for source control and Jira for issue tracking:
-
-```bash
-export CLAUDE_CODE_OAUTH_TOKEN="your-token"
-export DD_API_KEY="your-api-key"
-export DD_APP_KEY="your-app-key"
-export GITLAB_TOKEN="glpat-..."
-export GITLAB_PROJECT_ID="my-group/my-project"
-export JIRA_BASE_URL="https://mycompany.atlassian.net"
-export JIRA_EMAIL="bot@mycompany.com"
-export JIRA_API_TOKEN="your-token"
-
-sweny triage \
-  --source-control-provider gitlab \
-  --issue-tracker-provider jira
+```yaml
+# .sweny.yml
+observability-provider: datadog
+source-control-provider: gitlab
+issue-tracker-provider: jira
 ```
-
-## Using an .env file
-
-Keep credentials in a `.env` file (remember to `.gitignore` it):
 
 ```bash
 # .env
 CLAUDE_CODE_OAUTH_TOKEN=your-token
 DD_API_KEY=your-api-key
 DD_APP_KEY=your-app-key
-GITHUB_TOKEN=ghp_...
+GITLAB_TOKEN=glpat-...
+GITLAB_PROJECT_ID=my-group/my-project
+JIRA_BASE_URL=https://mycompany.atlassian.net
+JIRA_EMAIL=bot@mycompany.com
+JIRA_API_TOKEN=your-token
 ```
 
-Then run with your preferred env loader:
+```bash
+sweny triage
+```
+
+## Resume after a crash
+
+Step caching means you don't lose progress. If the workflow crashes after `investigate` completes (3+ minutes), re-run the same command and cached steps replay instantly:
 
 ```bash
-# Using tsx
-npx tsx --env-file=.env node_modules/.bin/sweny triage --dry-run
-
-# Using dotenv
-npx dotenv -- sweny triage --dry-run
-
-# Using direnv (auto-loads .envrc)
+# First run — crashes at step 4
 sweny triage --dry-run
+  ✓ [3/9] investigate         3m 6s   → cached
+  ✗ [4/9] novelty-gate               → crash
+
+# Re-run — steps 1-3 replay from cache
+sweny triage --dry-run
+  ↻ [3/9] investigate         cached
+  ✓ [4/9] novelty-gate           1s   → runs fresh
+```
+
+Force a fresh run with `--no-cache`:
+
+```bash
+sweny triage --dry-run --no-cache
 ```
 
 ## Slack notifications

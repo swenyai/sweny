@@ -23,6 +23,7 @@ This monorepo contains the SWEny platform:
 | Package | Description |
 |---------|-------------|
 | **[@swenyai/engine](packages/engine)** | Workflow engine — Learn, Act, Report |
+| **[@swenyai/cli](packages/cli)** | CLI — run triage from your terminal |
 | **[SWEny Triage](#sweny-triage)** | GitHub Action — autonomous SRE triage |
 | **[@swenyai/providers](packages/providers)** | 30+ provider implementations |
 | **[@swenyai/agent](packages/agent)** | AI assistant — Slack bot + CLI |
@@ -381,9 +382,102 @@ The engine is provider-agnostic. Every integration is a pluggable provider that 
 | **Act** | Linear, GitHub Issues, Jira (issue tracking) -- GitHub, GitLab (source control) -- PagerDuty, OpsGenie (incident) |
 | **Report** | GitHub Summary, Slack, Teams, Discord, Email (SendGrid), Generic Webhook |
 | **Infrastructure** | Filesystem / S3 / K8s CSI (storage) -- Env Vars / AWS Secrets Manager (credentials) -- API Key / No-Auth (auth) |
-| **AI** | Claude Code (coding agent) |
+| **AI** | Claude Code, OpenAI Codex, Google Gemini CLI (coding agent) |
 
 Implementing a custom provider means implementing a TypeScript interface -- see [`packages/providers/`](packages/providers/) for the full library and [`@swenyai/providers` on npm](https://www.npmjs.com/package/@swenyai/providers).
+
+---
+
+## @swenyai/cli
+
+Run SWEny triage from your terminal — no CI pipeline required.
+
+### Install
+
+```bash
+npm install -g @swenyai/cli
+```
+
+### Quick start
+
+**1. Create a config file:**
+
+```bash
+sweny init
+```
+
+This creates `.sweny.yml` — edit it to set your providers:
+
+```yaml
+# .sweny.yml
+observability-provider: datadog
+time-range: 4h
+```
+
+**2. Add secrets to `.env`:**
+
+```bash
+# .env (gitignored)
+CLAUDE_CODE_OAUTH_TOKEN=your-token
+DD_API_KEY=your-api-key
+DD_APP_KEY=your-app-key
+GITHUB_TOKEN=ghp_...
+```
+
+**3. Run:**
+
+```bash
+sweny triage --dry-run
+```
+
+That's it. The CLI auto-loads `.env` and reads settings from `.sweny.yml`. Flags override the config file — use them for one-off changes:
+
+```bash
+sweny triage --dry-run --time-range 1h --service-filter 'billing-*'
+```
+
+### Config file
+
+`.sweny.yml` uses flat kebab-case keys that match CLI flags 1:1:
+
+```yaml
+# .sweny.yml — commit this file. Secrets go in .env.
+observability-provider: file
+log-file: ./logs/errors.json
+issue-tracker-provider: linear
+linear-team-id: your-team-uuid
+cache-dir: .sweny/cache
+```
+
+**Priority:** CLI flag > environment variable > `.sweny.yml` > default
+
+### Step caching
+
+Successful step results are cached to disk. If the workflow crashes or is cancelled after an expensive step (e.g., `investigate` takes 3+ minutes), re-running replays cached steps instantly:
+
+```
+First run:
+  ✓ [1/9] verify-access          0s
+  ✓ [2/9] build-context          1s
+  ✓ [3/9] investigate         3m 6s   → cached
+  ✗ [4/9] novelty-gate           1s   → crash
+
+Re-run:
+  ↻ [1/9] verify-access       cached
+  ↻ [2/9] build-context       cached
+  ↻ [3/9] investigate         cached  → replayed
+  ✓ [4/9] novelty-gate           1s   → runs fresh
+```
+
+Cache flags:
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--cache-dir` | Cache directory | `.sweny/cache` |
+| `--cache-ttl` | TTL in seconds (0 = infinite) | `86400` (24h) |
+| `--no-cache` | Disable caching | — |
+
+See the [CLI documentation](https://sweny.ai/cli/) for the full inputs reference.
 
 ---
 
@@ -401,15 +495,24 @@ See [`packages/agent/`](packages/agent/) for documentation.
 # Install dependencies
 npm install
 
+# Build all packages
+npm run build
+
 # Type-check all packages
 npm run typecheck
+
+# Run all tests
+npm test
+
+# Run the CLI locally (auto-loads .env)
+npx tsx packages/cli/src/main.ts triage --dry-run
+
+# Run the agent locally
+npm run cli:agent
 
 # Build the action
 cd packages/action
 npm run package    # Produces dist/index.js via ncc
-
-# Run the agent locally
-npm run cli:agent
 ```
 
 > **Note:** The root `dist/` directory is committed intentionally — GitHub Actions require a compiled entry point (`dist/index.js` built via [ncc](https://github.com/vercel/ncc)). Do not remove it.

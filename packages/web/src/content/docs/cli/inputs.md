@@ -3,7 +3,13 @@ title: CLI Inputs
 description: All flags and environment variables for the SWEny CLI.
 ---
 
-The CLI accepts configuration through flags and environment variables. Secrets (API keys, tokens) are always read from environment variables — never passed as flags.
+The CLI accepts configuration through three layers (highest priority wins):
+
+1. **CLI flags** — one-off overrides (e.g., `--time-range 1h`)
+2. **Environment variables** — secrets and per-machine settings (loaded from `.env` automatically)
+3. **`.sweny.yml` config file** — project defaults (committed to your repo)
+
+Secrets (API keys, tokens) are always read from environment variables — never from the config file or flags.
 
 ## Authentication
 
@@ -11,8 +17,16 @@ The CLI accepts configuration through flags and environment variables. Secrets (
 |---------------------|-------------|----------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token (Max/Pro subscriptions) | Recommended |
 | `ANTHROPIC_API_KEY` | Anthropic API key (pay-per-use) | Alternative |
+| `OPENAI_API_KEY` | OpenAI API key (for `--coding-agent-provider codex`) | Codex only |
+| `GEMINI_API_KEY` | Google Gemini API key (for `--coding-agent-provider gemini`) | Gemini only |
 
 At least one authentication method is required.
+
+## Coding Agent
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--coding-agent-provider` | Agent to use for investigation and implementation (`claude`, `codex`, `gemini`) | `claude` |
 
 ## Observability
 
@@ -56,9 +70,9 @@ The `file` provider reads a local JSON file and requires no credentials — idea
 | `--linear-team-id` | Linear team UUID | — |
 | `--linear-bug-label-id` | Label UUID for bugs | — |
 | `--linear-triage-label-id` | Label UUID for agent-triage | — |
-| `--linear-state-backlog` | State name for Backlog | — |
-| `--linear-state-in-progress` | State name for In Progress | — |
-| `--linear-state-peer-review` | State name for Peer Review | — |
+| `--linear-state-backlog` | State UUID for Backlog | — |
+| `--linear-state-in-progress` | State UUID for In Progress | — |
+| `--linear-state-peer-review` | State UUID for Peer Review | — |
 
 | Environment Variable | Description | Provider |
 |---------------------|-------------|----------|
@@ -69,7 +83,7 @@ The `file` provider reads a local JSON file and requires no credentials — idea
 | `JIRA_EMAIL` | Jira bot account email | `jira` |
 | `JIRA_API_TOKEN` | Jira API token | `jira` |
 
-Note: The CLI defaults to `github-issues` (the GitHub Action defaults to `linear`).
+Note: Both the CLI and the GitHub Action default to `github-issues`.
 
 ## Source Control
 
@@ -109,6 +123,7 @@ Note: The CLI defaults to `github-issues` (the GitHub Action defaults to `linear
 | `--base-branch` | Base branch for PRs | `main` |
 | `--pr-labels` | Comma-separated PR labels | `agent,triage,needs-review` |
 | `--json` | Output results as JSON | `false` |
+| `--bell` | Ring terminal bell on completion | `false` |
 
 ## Notification
 
@@ -125,3 +140,30 @@ Note: The CLI defaults to `github-issues` (the GitHub Action defaults to `linear
 | `WEBHOOK_SIGNING_SECRET` | HMAC signing secret for webhook payloads | `webhook` |
 
 The CLI defaults to `console` — results are printed to stdout.
+
+## Cache
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--cache-dir` | Step cache directory | `.sweny/cache` |
+| `--cache-ttl` | Cache TTL in seconds (0 = infinite) | `86400` |
+| `--no-cache` | Disable step cache entirely | — |
+
+| Environment Variable | Description |
+|---------------------|-------------|
+| `SWENY_CACHE_DIR` | Step cache directory (fallback for `--cache-dir`) |
+
+Step caching is enabled by default. Successful step results are cached to disk and replayed on re-run with the same config. Use `--no-cache` to force fresh execution.
+
+## Config file
+
+Run `sweny init` to generate a starter `.sweny.yml`. All non-secret, non-boolean flags can be set in the config file using kebab-case keys:
+
+```yaml
+# .sweny.yml
+observability-provider: datadog
+time-range: 4h
+cache-dir: .sweny/cache
+```
+
+Per-invocation flags (`--dry-run`, `--json`, `--bell`, `--no-cache`, `--issue-override`, `--additional-instructions`) are CLI-only and cannot be set in the config file.

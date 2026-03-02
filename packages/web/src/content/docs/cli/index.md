@@ -19,68 +19,117 @@ npx @swenyai/cli triage --help
 
 ## Prerequisites
 
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code/overview) installed (`npm install -g @anthropic-ai/claude-code`)
 - A Claude Max subscription or Anthropic API key
 - A git repository with a remote (SWEny auto-detects `owner/repo` from your git remote)
 
-## Quick start with a log file
+The coding agent CLI (Claude Code by default) is installed automatically when you run the workflow — no manual pre-installation needed.
 
-The fastest way to try SWEny locally is with a JSON log file — no observability platform credentials needed.
+## Quick start
 
-**1. Create a log file** with entries matching this format:
-
-```json
-[
-  {
-    "timestamp": "2026-03-01T12:00:00Z",
-    "service": "api-gateway",
-    "level": "error",
-    "message": "TypeError: Cannot read properties of undefined (reading 'userId')",
-    "attributes": {
-      "stack": "TypeError: Cannot read properties of undefined...",
-      "path": "/api/v1/users/profile",
-      "status_code": 500
-    }
-  }
-]
-```
-
-**2. Set your auth** in the environment:
+**1. Create a config file:**
 
 ```bash
-export CLAUDE_CODE_OAUTH_TOKEN="your-token"
-# or
-export ANTHROPIC_API_KEY="your-key"
+sweny init
 ```
+
+This creates `.sweny.yml` with all available options commented out. Uncomment and edit what you need:
+
+```yaml
+# .sweny.yml — commit this file. Secrets go in .env (gitignored).
+observability-provider: file
+log-file: ./logs/errors.json
+```
+
+**2. Add secrets to `.env`:**
+
+```bash
+# .env
+CLAUDE_CODE_OAUTH_TOKEN=your-token
+```
+
+The CLI auto-loads `.env` at startup — no external tools needed.
 
 **3. Run a dry-run triage:**
 
 ```bash
-sweny triage \
-  --observability-provider file \
-  --log-file ./errors.json \
-  --dry-run
+sweny triage --dry-run
 ```
 
-SWEny will analyze the logs, investigate root causes, and print a full report — without creating any issues or PRs.
+SWEny reads settings from `.sweny.yml`, loads secrets from `.env`, analyzes your logs, and prints a full investigation report — without creating any issues or PRs.
+
+### Config priority
+
+Settings are resolved in this order (highest wins):
+
+```
+CLI flag  >  environment variable  >  .sweny.yml  >  default
+```
+
+Use flags for one-off overrides without editing your config file:
+
+```bash
+sweny triage --dry-run --time-range 1h --service-filter 'billing-*'
+```
+
+## Config file reference
+
+`.sweny.yml` uses flat kebab-case keys that match CLI flags 1:1. You can copy any flag from `--help` directly into the YAML:
+
+```yaml
+# .sweny.yml
+
+# Providers
+observability-provider: datadog
+issue-tracker-provider: github-issues
+source-control-provider: github
+coding-agent-provider: claude
+notification-provider: console
+
+# Investigation
+time-range: 24h
+severity-focus: errors
+service-filter: "*"
+investigation-depth: standard
+
+# PR / branch
+base-branch: main
+pr-labels: agent,triage,needs-review
+
+# Paths
+service-map-path: .github/service-map.yml
+log-file: ./logs/errors.json
+
+# Cache
+cache-dir: .sweny/cache
+cache-ttl: 86400
+
+# Provider-specific (non-secret)
+dd-site: datadoghq.com
+sentry-org: my-org
+sentry-project: my-project
+linear-team-id: your-team-uuid
+```
+
+Secrets (API keys, tokens) are **never** read from the config file — always use environment variables or `.env`.
 
 ## Connecting to your observability platform
 
-Once you're comfortable with the output, point SWEny at your real logs:
+Once you're comfortable with the output, point SWEny at your real logs. Set the provider in `.sweny.yml`:
+
+```yaml
+observability-provider: datadog
+```
+
+And add the credentials to `.env`:
 
 ```bash
-# Datadog
-export DD_API_KEY="your-api-key"
-export DD_APP_KEY="your-app-key"
-sweny triage --observability-provider datadog --dry-run
+# .env
+DD_API_KEY=your-api-key
+DD_APP_KEY=your-app-key
+```
 
-# Sentry
-export SENTRY_AUTH_TOKEN="your-token"
-sweny triage \
-  --observability-provider sentry \
-  --sentry-org my-org \
-  --sentry-project my-project \
-  --dry-run
+```bash
+sweny triage --dry-run
 ```
 
 See [Observability Providers](/providers/observability/) for all supported platforms and their required credentials.
@@ -90,30 +139,60 @@ See [Observability Providers](/providers/observability/) for all supported platf
 Remove `--dry-run` and add a `GITHUB_TOKEN` to let SWEny create issues and open fix PRs:
 
 ```bash
-export GITHUB_TOKEN="ghp_..."
-sweny triage --observability-provider file --log-file ./errors.json
+# .env
+GITHUB_TOKEN=ghp_...
 ```
 
-For Linear or Jira instead of GitHub Issues:
+```bash
+sweny triage
+```
+
+For Linear or Jira instead of GitHub Issues, set the provider in `.sweny.yml`:
+
+```yaml
+# Linear
+issue-tracker-provider: linear
+linear-team-id: your-team-uuid
+```
+
+```yaml
+# Jira
+issue-tracker-provider: jira
+```
+
+And add the credentials to `.env`:
 
 ```bash
 # Linear
-export LINEAR_API_KEY="lin_api_..."
-sweny triage \
-  --issue-tracker-provider linear \
-  --linear-team-id "your-team-uuid" \
-  --observability-provider file \
-  --log-file ./errors.json
+LINEAR_API_KEY=lin_api_...
 
 # Jira
-export JIRA_BASE_URL="https://mycompany.atlassian.net"
-export JIRA_EMAIL="bot@mycompany.com"
-export JIRA_API_TOKEN="your-token"
-sweny triage \
-  --issue-tracker-provider jira \
-  --observability-provider file \
-  --log-file ./errors.json
+JIRA_BASE_URL=https://mycompany.atlassian.net
+JIRA_EMAIL=bot@mycompany.com
+JIRA_API_TOKEN=your-token
 ```
+
+## Step caching
+
+The CLI caches successful step results to disk. If the workflow crashes or you cancel mid-run, re-running replays cached steps instantly instead of re-executing expensive operations like `investigate` (which can take 3+ minutes):
+
+```
+First run:
+  ✓ [3/9] investigate         3m 6s   → result cached
+
+Re-run (same config):
+  ↻ [3/9] investigate         cached  → replayed from disk
+```
+
+Cache is keyed on your config — changing providers, time range, or other settings produces a fresh cache. Caching is enabled by default.
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--cache-dir` | Cache directory | `.sweny/cache` |
+| `--cache-ttl` | TTL in seconds (0 = infinite) | `86400` (24h) |
+| `--no-cache` | Disable caching entirely | — |
+
+You can also set `cache-dir` and `cache-ttl` in `.sweny.yml`.
 
 ## JSON output
 

@@ -18,7 +18,7 @@ npm install
 Packages must be built in dependency order:
 
 ```
-providers → agent → action
+providers → engine → cli → agent → action
 ```
 
 ```bash
@@ -27,6 +27,8 @@ npm run build
 
 # Or individually
 npm run build --workspace=packages/providers
+npm run build --workspace=packages/engine
+npm run build --workspace=packages/cli
 npm run build --workspace=packages/agent
 npm run build --workspace=packages/action
 ```
@@ -38,9 +40,35 @@ npm run build --workspace=packages/action
 npm test
 
 # Individual
+npm test --workspace=packages/engine
 npm test --workspace=packages/providers
 npm test --workspace=packages/agent
 npm test --workspace=packages/action
+```
+
+## Running the CLI locally
+
+The CLI auto-loads `.env` and `.sweny.yml` from your working directory:
+
+```bash
+# Create a config file (if you don't have one)
+npx tsx packages/cli/src/main.ts init
+
+# Run a dry-run triage
+npx tsx packages/cli/src/main.ts triage --dry-run
+```
+
+For quick iteration, step caching replays completed steps on re-run:
+
+```bash
+# First run populates cache (~3 min for investigate)
+npx tsx packages/cli/src/main.ts triage --dry-run
+
+# Second run replays from cache (~0s)
+npx tsx packages/cli/src/main.ts triage --dry-run
+
+# Force fresh execution
+npx tsx packages/cli/src/main.ts triage --dry-run --no-cache
 ```
 
 ## Adding a new provider
@@ -59,4 +87,4 @@ npm test --workspace=packages/action
 - Branch from `main`
 - Run `npm run typecheck` and `npm test` before submitting
 - Keep PRs focused — one feature or fix per PR
-- Update the CHANGELOG if modifying `@swenyai/providers`
+- Update the CHANGELOG if modifying published packages
