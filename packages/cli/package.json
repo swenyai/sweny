@@ -25,7 +25,7 @@
     "@sweny-ai/engine": "*",
     "@sweny-ai/providers": "*",
     "chalk": "^5",
-    "commander": "^11"
+    "commander": "^14"
   },
   "devDependencies": {
     "@types/node": "^22",
