@@ -2,6 +2,7 @@ node_modules/
 .env
 *.tsbuildinfo
 .sweny/
+.sweny.yml
 .sweny-data/
 .github/triage-analysis/
 tasks/

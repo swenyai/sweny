@@ -1,9 +1,12 @@
 #!/usr/bin/env node
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { Command } from "commander";
 import chalk from "chalk";
 import { runWorkflow, triageWorkflow } from "@swenyai/engine";
 import type { StepCache, TriageConfig, WorkflowPhase } from "@swenyai/engine";
 import { createFsCache, hashConfig } from "./cache.js";
+import { loadDotenv, loadConfigFile, STARTER_CONFIG } from "./config-file.js";
 import { registerTriageCommand, parseCliInputs, validateInputs } from "./config.js";
 import type { CliConfig } from "./config.js";
 import { createProviders } from "./providers/index.js";
@@ -20,15 +23,34 @@ import {
   formatCrashError,
 } from "./output.js";
 
+// Auto-load .env before Commander parses (so env vars are available for defaults)
+loadDotenv();
+
 const program = new Command()
   .name("sweny")
   .description("SWEny CLI \u2014 autonomous engineering workflows")
   .version("0.2.0");
 
+// ── sweny init ────────────────────────────────────────────────────────
+program
+  .command("init")
+  .description("Create a starter .sweny.yml config file")
+  .action(() => {
+    const target = path.join(process.cwd(), ".sweny.yml");
+    if (fs.existsSync(target)) {
+      console.error(chalk.yellow("  .sweny.yml already exists — skipping."));
+      process.exit(1);
+    }
+    fs.writeFileSync(target, STARTER_CONFIG, "utf-8");
+    console.log(chalk.green("  Created .sweny.yml"));
+    console.log(chalk.dim("  Add your secrets to .env and run: sweny triage --dry-run"));
+  });
+
 const triageCmd = registerTriageCommand(program);
 
 triageCmd.action(async (options: Record<string, unknown>) => {
-  const config = parseCliInputs(options);
+  const fileConfig = loadConfigFile();
+  const config = parseCliInputs(options, fileConfig);
 
   // Validate
   const errors = validateInputs(config);

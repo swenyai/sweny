@@ -82,27 +82,29 @@ export interface CliConfig {
 }
 
 export function registerTriageCommand(program: Command): Command {
+  // NOTE: File-eligible options omit Commander defaults so parseCliInputs() can
+  // distinguish "user passed flag" from "not passed" and fall through to .sweny.yml.
   return program
     .command("triage")
     .description("Run the SWEny triage workflow")
-    .option("--coding-agent-provider <provider>", "Coding agent (claude, codex, gemini)", "claude")
-    .option("--observability-provider <provider>", "Observability provider", "datadog")
-    .option("--issue-tracker-provider <provider>", "Issue tracker provider", "github-issues")
-    .option("--source-control-provider <provider>", "Source control provider", "github")
-    .option("--notification-provider <provider>", "Notification provider", "console")
-    .option("--time-range <range>", "Time range to analyze", "24h")
-    .option("--severity-focus <focus>", "Severity level focus", "errors")
-    .option("--service-filter <filter>", "Service filter pattern", "*")
-    .option("--investigation-depth <depth>", "Investigation depth", "standard")
-    .option("--max-investigate-turns <n>", "Max Claude turns for investigation", "50")
-    .option("--max-implement-turns <n>", "Max Claude turns for implementation", "30")
-    .option("--base-branch <branch>", "Base branch for PRs", "main")
-    .option("--pr-labels <labels>", "Comma-separated PR labels", "agent,triage,needs-review")
+    .option("--coding-agent-provider <provider>", "Coding agent (default: claude)")
+    .option("--observability-provider <provider>", "Observability provider (default: datadog)")
+    .option("--issue-tracker-provider <provider>", "Issue tracker provider (default: github-issues)")
+    .option("--source-control-provider <provider>", "Source control provider (default: github)")
+    .option("--notification-provider <provider>", "Notification provider (default: console)")
+    .option("--time-range <range>", "Time range to analyze (default: 24h)")
+    .option("--severity-focus <focus>", "Severity level focus (default: errors)")
+    .option("--service-filter <filter>", "Service filter pattern (default: *)")
+    .option("--investigation-depth <depth>", "Investigation depth (default: standard)")
+    .option("--max-investigate-turns <n>", "Max Claude turns for investigation (default: 50)")
+    .option("--max-implement-turns <n>", "Max Claude turns for implementation (default: 30)")
+    .option("--base-branch <branch>", "Base branch for PRs (default: main)")
+    .option("--pr-labels <labels>", "Comma-separated PR labels (default: agent,triage,needs-review)")
     .option("--dry-run", "Analyze only, do not create issues or PRs", false)
     .option("--no-novelty-mode", "Disable novelty mode (allow +1 on existing issues)")
     .option("--issue-override <issue>", "Work on a specific existing issue")
     .option("--additional-instructions <text>", "Extra instructions for the Claude agent")
-    .option("--service-map-path <path>", "Path to service map YAML", ".github/service-map.yml")
+    .option("--service-map-path <path>", "Path to service map YAML (default: .github/service-map.yml)")
     .option("--repository <owner/repo>", "Repository (auto-detected from git remote)")
     .option("--linear-team-id <id>", "Linear team ID")
     .option("--linear-bug-label-id <id>", "Linear bug label ID")
@@ -111,76 +113,91 @@ export function registerTriageCommand(program: Command): Command {
     .option("--linear-state-in-progress <name>", "Linear in-progress state name")
     .option("--linear-state-peer-review <name>", "Linear peer-review state name")
     .option("--log-file <path>", "Path to JSON log file (use with --observability-provider file)")
-    .option("--dd-site <site>", "Datadog site", "datadoghq.com")
+    .option("--dd-site <site>", "Datadog site (default: datadoghq.com)")
     .option("--sentry-org <org>", "Sentry organization slug")
     .option("--sentry-project <project>", "Sentry project slug")
-    .option("--sentry-base-url <url>", "Sentry base URL", "https://sentry.io")
-    .option("--cloudwatch-region <region>", "AWS CloudWatch region", "us-east-1")
+    .option("--sentry-base-url <url>", "Sentry base URL (default: https://sentry.io)")
+    .option("--cloudwatch-region <region>", "AWS CloudWatch region (default: us-east-1)")
     .option("--cloudwatch-log-group-prefix <prefix>", "CloudWatch log group prefix")
-    .option("--splunk-index <index>", "Splunk index", "main")
-    .option("--elastic-index <index>", "Elasticsearch index", "logs-*")
-    .option("--newrelic-region <region>", "New Relic region", "us")
-    .option("--gitlab-base-url <url>", "GitLab base URL", "https://gitlab.com")
+    .option("--splunk-index <index>", "Splunk index (default: main)")
+    .option("--elastic-index <index>", "Elasticsearch index (default: logs-*)")
+    .option("--newrelic-region <region>", "New Relic region (default: us)")
+    .option("--gitlab-base-url <url>", "GitLab base URL (default: https://gitlab.com)")
     .option("--json", "Output results as JSON", false)
     .option("--bell", "Ring terminal bell on completion", false)
-    .option("--cache-dir <path>", "Step cache directory", ".sweny/cache")
-    .option("--cache-ttl <seconds>", "Cache TTL in seconds (0 = infinite)", "86400")
+    .option("--cache-dir <path>", "Step cache directory (default: .sweny/cache)")
+    .option("--cache-ttl <seconds>", "Cache TTL in seconds, 0 = infinite (default: 86400)")
     .option("--no-cache", "Disable step cache");
 }
 
-export function parseCliInputs(options: Record<string, unknown>): CliConfig {
+export function parseCliInputs(options: Record<string, unknown>, fileConfig: Record<string, string> = {}): CliConfig {
   const env = process.env;
-  const obsProvider = (options.observabilityProvider as string) || "datadog";
+  // Config file lookup helper: CLI flag > env var > file > default
+  const f = (key: string): string | undefined => fileConfig[key] || undefined;
+
+  const obsProvider = (options.observabilityProvider as string) || f("observability-provider") || "datadog";
 
   return {
-    codingAgentProvider: (options.codingAgentProvider as string) || "claude",
+    codingAgentProvider: (options.codingAgentProvider as string) || f("coding-agent-provider") || "claude",
 
+    // Secrets: env only — never from config file
     anthropicApiKey: env.ANTHROPIC_API_KEY || "",
     claudeOauthToken: env.CLAUDE_CODE_OAUTH_TOKEN || "",
     openaiApiKey: env.OPENAI_API_KEY || "",
     geminiApiKey: env.GEMINI_API_KEY || env.GOOGLE_API_KEY || "",
 
     observabilityProvider: obsProvider,
-    observabilityCredentials: parseObservabilityCredentials(obsProvider, options),
+    observabilityCredentials: parseObservabilityCredentials(obsProvider, options, fileConfig),
 
-    issueTrackerProvider: (options.issueTrackerProvider as string) || "github-issues",
+    issueTrackerProvider: (options.issueTrackerProvider as string) || f("issue-tracker-provider") || "github-issues",
     linearApiKey: env.LINEAR_API_KEY || "",
-    linearTeamId: (options.linearTeamId as string) || env.LINEAR_TEAM_ID || "",
-    linearBugLabelId: (options.linearBugLabelId as string) || env.LINEAR_BUG_LABEL_ID || "",
-    linearTriageLabelId: (options.linearTriageLabelId as string) || env.LINEAR_TRIAGE_LABEL_ID || "",
-    linearStateBacklog: (options.linearStateBacklog as string) || env.LINEAR_STATE_BACKLOG || "",
-    linearStateInProgress: (options.linearStateInProgress as string) || env.LINEAR_STATE_IN_PROGRESS || "",
-    linearStatePeerReview: (options.linearStatePeerReview as string) || env.LINEAR_STATE_PEER_REVIEW || "",
+    linearTeamId: (options.linearTeamId as string) || env.LINEAR_TEAM_ID || f("linear-team-id") || "",
+    linearBugLabelId: (options.linearBugLabelId as string) || env.LINEAR_BUG_LABEL_ID || f("linear-bug-label-id") || "",
+    linearTriageLabelId:
+      (options.linearTriageLabelId as string) || env.LINEAR_TRIAGE_LABEL_ID || f("linear-triage-label-id") || "",
+    linearStateBacklog:
+      (options.linearStateBacklog as string) || env.LINEAR_STATE_BACKLOG || f("linear-state-backlog") || "",
+    linearStateInProgress:
+      (options.linearStateInProgress as string) || env.LINEAR_STATE_IN_PROGRESS || f("linear-state-in-progress") || "",
+    linearStatePeerReview:
+      (options.linearStatePeerReview as string) || env.LINEAR_STATE_PEER_REVIEW || f("linear-state-peer-review") || "",
 
-    timeRange: (options.timeRange as string) || "24h",
-    severityFocus: (options.severityFocus as string) || "errors",
-    serviceFilter: (options.serviceFilter as string) || "*",
-    investigationDepth: (options.investigationDepth as string) || "standard",
-    maxInvestigateTurns: parseInt(String(options.maxInvestigateTurns || "50"), 10),
-    maxImplementTurns: parseInt(String(options.maxImplementTurns || "30"), 10),
+    timeRange: (options.timeRange as string) || f("time-range") || "24h",
+    severityFocus: (options.severityFocus as string) || f("severity-focus") || "errors",
+    serviceFilter: (options.serviceFilter as string) || f("service-filter") || "*",
+    investigationDepth: (options.investigationDepth as string) || f("investigation-depth") || "standard",
+    maxInvestigateTurns: parseInt(String(options.maxInvestigateTurns || f("max-investigate-turns") || "50"), 10),
+    maxImplementTurns: parseInt(String(options.maxImplementTurns || f("max-implement-turns") || "30"), 10),
 
-    baseBranch: (options.baseBranch as string) || "main",
-    prLabels: ((options.prLabels as string) || "agent,triage,needs-review").split(",").map((l) => l.trim()),
+    baseBranch: (options.baseBranch as string) || f("base-branch") || "main",
+    prLabels: ((options.prLabels as string) || f("pr-labels") || "agent,triage,needs-review")
+      .split(",")
+      .map((l) => l.trim()),
 
+    // Per-invocation flags: CLI only — never from config file
     dryRun: Boolean(options.dryRun),
     noveltyMode: options.noveltyMode !== false,
     issueOverride: (options.issueOverride as string) || "",
     additionalInstructions: (options.additionalInstructions as string) || "",
-    serviceMapPath: (options.serviceMapPath as string) || ".github/service-map.yml",
+
+    serviceMapPath: (options.serviceMapPath as string) || f("service-map-path") || ".github/service-map.yml",
     githubToken: env.GITHUB_TOKEN || "",
     botToken: env.BOT_TOKEN || "",
 
-    sourceControlProvider: (options.sourceControlProvider as string) || "github",
+    sourceControlProvider: (options.sourceControlProvider as string) || f("source-control-provider") || "github",
 
+    // Secrets: env only
     jiraBaseUrl: env.JIRA_BASE_URL || "",
     jiraEmail: env.JIRA_EMAIL || "",
     jiraApiToken: env.JIRA_API_TOKEN || "",
 
     gitlabToken: env.GITLAB_TOKEN || "",
     gitlabProjectId: env.GITLAB_PROJECT_ID || "",
-    gitlabBaseUrl: (options.gitlabBaseUrl as string) || env.GITLAB_BASE_URL || "https://gitlab.com",
+    gitlabBaseUrl:
+      (options.gitlabBaseUrl as string) || env.GITLAB_BASE_URL || f("gitlab-base-url") || "https://gitlab.com",
 
-    notificationProvider: (options.notificationProvider as string) || "console",
+    notificationProvider: (options.notificationProvider as string) || f("notification-provider") || "console",
+    // Secrets: env only
     notificationWebhookUrl: env.NOTIFICATION_WEBHOOK_URL || "",
     sendgridApiKey: env.SENDGRID_API_KEY || "",
     emailFrom: env.EMAIL_FROM || "",
@@ -190,11 +207,12 @@ export function parseCliInputs(options: Record<string, unknown>): CliConfig {
     repository: (options.repository as string) || env.GITHUB_REPOSITORY || detectRepository(),
     repositoryOwner: env.GITHUB_REPOSITORY_OWNER || "",
 
+    // Per-invocation flags: CLI only
     json: Boolean(options.json),
     bell: Boolean(options.bell),
 
-    cacheDir: (options.cacheDir as string) || env.SWENY_CACHE_DIR || ".sweny/cache",
-    cacheTtl: parseInt(String(options.cacheTtl || "86400"), 10),
+    cacheDir: (options.cacheDir as string) || env.SWENY_CACHE_DIR || f("cache-dir") || ".sweny/cache",
+    cacheTtl: parseInt(String(options.cacheTtl || f("cache-ttl") || "86400"), 10),
     noCache: options.cache === false,
   };
 }
@@ -322,44 +340,55 @@ export function validateInputs(config: CliConfig): string[] {
   return errors;
 }
 
-function parseObservabilityCredentials(provider: string, options: Record<string, unknown>): Record<string, string> {
+function parseObservabilityCredentials(
+  provider: string,
+  options: Record<string, unknown>,
+  fileConfig: Record<string, string> = {},
+): Record<string, string> {
   const env = process.env;
+  const f = (key: string): string | undefined => fileConfig[key] || undefined;
+
   switch (provider) {
     case "datadog":
       return {
         apiKey: env.DD_API_KEY || "",
         appKey: env.DD_APP_KEY || "",
-        site: (options.ddSite as string) || env.DD_SITE || "datadoghq.com",
+        site: (options.ddSite as string) || env.DD_SITE || f("dd-site") || "datadoghq.com",
       };
     case "sentry":
       return {
         authToken: env.SENTRY_AUTH_TOKEN || "",
-        organization: (options.sentryOrg as string) || env.SENTRY_ORG || "",
-        project: (options.sentryProject as string) || env.SENTRY_PROJECT || "",
-        baseUrl: (options.sentryBaseUrl as string) || env.SENTRY_BASE_URL || "https://sentry.io",
+        organization: (options.sentryOrg as string) || env.SENTRY_ORG || f("sentry-org") || "",
+        project: (options.sentryProject as string) || env.SENTRY_PROJECT || f("sentry-project") || "",
+        baseUrl:
+          (options.sentryBaseUrl as string) || env.SENTRY_BASE_URL || f("sentry-base-url") || "https://sentry.io",
       };
     case "cloudwatch":
       return {
-        region: (options.cloudwatchRegion as string) || env.AWS_REGION || "us-east-1",
-        logGroupPrefix: (options.cloudwatchLogGroupPrefix as string) || env.CLOUDWATCH_LOG_GROUP_PREFIX || "",
+        region: (options.cloudwatchRegion as string) || env.AWS_REGION || f("cloudwatch-region") || "us-east-1",
+        logGroupPrefix:
+          (options.cloudwatchLogGroupPrefix as string) ||
+          env.CLOUDWATCH_LOG_GROUP_PREFIX ||
+          f("cloudwatch-log-group-prefix") ||
+          "",
       };
     case "splunk":
       return {
         baseUrl: env.SPLUNK_URL || "",
         token: env.SPLUNK_TOKEN || "",
-        index: (options.splunkIndex as string) || env.SPLUNK_INDEX || "main",
+        index: (options.splunkIndex as string) || env.SPLUNK_INDEX || f("splunk-index") || "main",
       };
     case "elastic":
       return {
         baseUrl: env.ELASTIC_URL || "",
         apiKey: env.ELASTIC_API_KEY || "",
-        index: (options.elasticIndex as string) || env.ELASTIC_INDEX || "logs-*",
+        index: (options.elasticIndex as string) || env.ELASTIC_INDEX || f("elastic-index") || "logs-*",
       };
     case "newrelic":
       return {
         apiKey: env.NR_API_KEY || "",
         accountId: env.NR_ACCOUNT_ID || "",
-        region: (options.newrelicRegion as string) || env.NR_REGION || "us",
+        region: (options.newrelicRegion as string) || env.NR_REGION || f("newrelic-region") || "us",
       };
     case "loki":
       return {
@@ -369,7 +398,7 @@ function parseObservabilityCredentials(provider: string, options: Record<string,
       };
     case "file":
       return {
-        path: (options.logFile as string) || env.SWENY_LOG_FILE || "",
+        path: (options.logFile as string) || env.SWENY_LOG_FILE || f("log-file") || "",
       };
     default:
       return {};
