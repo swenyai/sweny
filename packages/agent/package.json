@@ -63,7 +63,7 @@
     "@slack/bolt": "^4",
     "@sweny-ai/providers": "*",
     "express": "^5",
-    "zod": "^3.24"
+    "zod": "^4.3"
   },
   "peerDependencies": {
     "@anthropic-ai/claude-code": "^1",
