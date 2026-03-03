@@ -43,6 +43,8 @@ function mapToTriageConfig(config: ActionConfig): TriageConfig {
   const agentEnv: Record<string, string> = {};
   if (config.anthropicApiKey) agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
   if (config.claudeOauthToken) agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+  if (config.openaiApiKey) agentEnv.OPENAI_API_KEY = config.openaiApiKey;
+  if (config.geminiApiKey) agentEnv.GEMINI_API_KEY = config.geminiApiKey;
 
   // Issue tracker env vars (only set when relevant)
   if (config.linearApiKey) agentEnv.LINEAR_API_KEY = config.linearApiKey;

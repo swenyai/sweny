@@ -12,11 +12,19 @@ description: All configuration inputs for the SWEny Triage GitHub Action.
 
 Most users should use `claude-oauth-token`. The `anthropic-api-key` option is available for direct API billing.
 
+## Coding Agent
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `coding-agent-provider` | Agent to use for implementation (`claude`, `codex`, `gemini`) | `claude` |
+| `openai-api-key` | OpenAI API key (required when `coding-agent-provider` is `codex`) | — |
+| `gemini-api-key` | Google Gemini API key (required when `coding-agent-provider` is `gemini`) | — |
+
 ## Observability
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `observability-provider` | Provider to use (`datadog`, `sentry`, `cloudwatch`, `splunk`, `elastic`, `newrelic`, `loki`) | `datadog` |
+| `observability-provider` | Provider to use (`datadog`, `sentry`, `cloudwatch`, `splunk`, `elastic`, `newrelic`, `loki`, `file`) | `datadog` |
 | `dd-api-key` | Datadog API key | — |
 | `dd-app-key` | Datadog Application key | — |
 | `dd-site` | Datadog site | `datadoghq.com` |
@@ -38,6 +46,7 @@ Most users should use `claude-oauth-token`. The `anthropic-api-key` option is av
 | `loki-url` | Grafana Loki base URL | — |
 | `loki-api-key` | Grafana Loki API key | — |
 | `loki-org-id` | Grafana Loki tenant/org ID | — |
+| `log-file-path` | Path to a local JSON log file (required when `observability-provider` is `file`) | — |
 
 ## Issue Tracker
 

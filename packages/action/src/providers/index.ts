@@ -2,7 +2,7 @@ import * as core from "@actions/core";
 import { createProviderRegistry } from "@sweny-ai/engine";
 import type { ProviderRegistry } from "@sweny-ai/engine";
 import { ActionConfig } from "../config.js";
-import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "@sweny-ai/providers/observability";
+import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "@sweny-ai/providers/observability";
 import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
 import { linear, jira, githubIssues } from "@sweny-ai/providers/issue-tracking";
 import { github, gitlab } from "@sweny-ai/providers/source-control";
@@ -14,7 +14,7 @@ import {
   email,
   webhook,
 } from "@sweny-ai/providers/notification";
-import { claudeCode } from "@sweny-ai/providers/coding-agent";
+import { claudeCode, openaiCodex, googleGemini } from "@sweny-ai/providers/coding-agent";
 
 const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
 
@@ -78,6 +78,12 @@ export function createProviders(config: ActionConfig): ProviderRegistry {
         baseUrl: obsCreds.baseUrl,
         apiKey: obsCreds.apiKey,
         orgId: obsCreds.orgId,
+        logger: actionsLogger,
+      });
+      break;
+    case "file":
+      observability = file({
+        path: obsCreds.path,
         logger: actionsLogger,
       });
       break;
@@ -182,7 +188,18 @@ export function createProviders(config: ActionConfig): ProviderRegistry {
   }
 
   // Coding agent
-  registry.set("codingAgent", claudeCode({ logger: actionsLogger }));
+  switch (config.codingAgentProvider) {
+    case "codex":
+      registry.set("codingAgent", openaiCodex({ logger: actionsLogger }));
+      break;
+    case "gemini":
+      registry.set("codingAgent", googleGemini({ logger: actionsLogger }));
+      break;
+    case "claude":
+    default:
+      registry.set("codingAgent", claudeCode({ logger: actionsLogger }));
+      break;
+  }
 
   return registry;
 }

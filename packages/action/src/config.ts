@@ -31,6 +31,11 @@ export interface ActionConfig {
   baseBranch: string;
   prLabels: string[];
 
+  // Coding agent
+  codingAgentProvider: string;
+  openaiApiKey: string;
+  geminiApiKey: string;
+
   // Behavior
   dryRun: boolean;
   noveltyMode: boolean;
@@ -64,12 +69,17 @@ export interface ActionConfig {
   // Runtime context
   repository: string;
   repositoryOwner: string;
+  logFilePath: string;
 }
 
 export function parseInputs(): ActionConfig {
   return {
     anthropicApiKey: core.getInput("anthropic-api-key"),
     claudeOauthToken: core.getInput("claude-oauth-token"),
+
+    codingAgentProvider: core.getInput("coding-agent-provider") || "claude",
+    openaiApiKey: core.getInput("openai-api-key"),
+    geminiApiKey: core.getInput("gemini-api-key"),
 
     observabilityProvider: core.getInput("observability-provider") || "datadog",
     observabilityCredentials: parseObservabilityCredentials(core.getInput("observability-provider") || "datadog"),
@@ -120,6 +130,7 @@ export function parseInputs(): ActionConfig {
 
     repository: process.env.GITHUB_REPOSITORY || "",
     repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",
+    logFilePath: core.getInput("log-file-path"),
   };
 }
 
@@ -234,6 +245,18 @@ export function validateInputs(config: ActionConfig): string[] {
       break;
   }
 
+  // Coding agent credentials by provider
+  switch (config.codingAgentProvider) {
+    case "codex":
+      if (!config.openaiApiKey)
+        errors.push("Missing required input: `openai-api-key` is required when `coding-agent-provider` is `codex`");
+      break;
+    case "gemini":
+      if (!config.geminiApiKey)
+        errors.push("Missing required input: `gemini-api-key` is required when `coding-agent-provider` is `gemini`");
+      break;
+  }
+
   // Integer bounds
   if (config.maxInvestigateTurns < 1 || config.maxInvestigateTurns > 500) {
     errors.push("`max-investigate-turns` must be between 1 and 500");
@@ -288,6 +311,10 @@ function parseObservabilityCredentials(provider: string): Record<string, string>
         baseUrl: core.getInput("loki-url"),
         apiKey: core.getInput("loki-api-key"),
         orgId: core.getInput("loki-org-id"),
+      };
+    case "file":
+      return {
+        path: core.getInput("log-file-path"),
       };
     default:
       return {};
