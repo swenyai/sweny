@@ -11,7 +11,11 @@ function makeConfig(overrides: Partial<ActionConfig> = {}): ActionConfig {
   return {
     anthropicApiKey: "",
     claudeOauthToken: "",
+    codingAgentProvider: "claude",
+    openaiApiKey: "",
+    geminiApiKey: "",
     observabilityProvider: "datadog",
+    logFilePath: "",
     observabilityCredentials: {
       apiKey: "test-api-key",
       appKey: "test-app-key",
@@ -368,5 +372,46 @@ describe("createProviders", () => {
     expect(() => createProviders(makeConfig({ sourceControlProvider: "bitbucket" }))).toThrow(
       "Unsupported source control provider: bitbucket",
     );
+  });
+
+  it("creates providers with file observability", () => {
+    const registry = createProviders(
+      makeConfig({
+        observabilityProvider: "file",
+        observabilityCredentials: { path: "/tmp/logs.json" },
+        logFilePath: "/tmp/logs.json",
+      }),
+    );
+    const obs = registry.get<ObservabilityProvider>("observability");
+    expect(obs).toBeDefined();
+    expect(typeof obs.queryLogs).toBe("function");
+    expect(typeof obs.aggregate).toBe("function");
+    expect(typeof obs.getAgentEnv).toBe("function");
+    const env = obs.getAgentEnv();
+    expect(env.SWENY_LOG_FILE).toBe("/tmp/logs.json");
+  });
+
+  it("creates claude coding agent by default", () => {
+    const registry = createProviders(makeConfig());
+    const agent = registry.get<CodingAgent>("codingAgent");
+    expect(agent).toBeDefined();
+    expect(typeof agent.install).toBe("function");
+    expect(typeof agent.run).toBe("function");
+  });
+
+  it("creates codex coding agent when codingAgentProvider is codex", () => {
+    const registry = createProviders(makeConfig({ codingAgentProvider: "codex" }));
+    const agent = registry.get<CodingAgent>("codingAgent");
+    expect(agent).toBeDefined();
+    expect(typeof agent.install).toBe("function");
+    expect(typeof agent.run).toBe("function");
+  });
+
+  it("creates gemini coding agent when codingAgentProvider is gemini", () => {
+    const registry = createProviders(makeConfig({ codingAgentProvider: "gemini" }));
+    const agent = registry.get<CodingAgent>("codingAgent");
+    expect(agent).toBeDefined();
+    expect(typeof agent.install).toBe("function");
+    expect(typeof agent.run).toBe("function");
   });
 });

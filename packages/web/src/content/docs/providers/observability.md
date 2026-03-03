@@ -4,7 +4,7 @@ description: Query logs and aggregate errors from your monitoring stack.
 ---
 
 ```typescript
-import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki } from "@sweny-ai/providers/observability";
+import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "@sweny-ai/providers/observability";
 ```
 
 ## Interface
@@ -129,4 +129,58 @@ const obs = loki({
   orgId: "tenant-1",  // optional
   logger: myLogger,
 });
+```
+
+## File
+
+Reads log entries from a local JSON file. Useful for:
+- CI workflows that export logs to disk before running triage
+- Testing triage against captured production log snapshots
+- Offline or air-gapped environments
+
+```typescript
+const provider = file({ path: "./logs/errors.json" });
+```
+
+### Log file format
+
+The file must contain either a JSON array of entries or a `{ "logs": [...] }` wrapper:
+
+```json
+[
+  {
+    "timestamp": "2024-01-15T10:30:00Z",
+    "service": "api",
+    "level": "error",
+    "message": "NullPointerException in WebhookHandler.process()",
+    "attributes": { "trace_id": "abc123" }
+  }
+]
+```
+
+Required fields per entry: `timestamp`, `service`, `level`, `message`.
+`attributes` is optional.
+
+### GitHub Action usage
+
+```yaml
+- name: Export recent errors
+  run: ./scripts/export-logs.sh > /tmp/logs.json
+
+- uses: swenyai/sweny@main
+  with:
+    observability-provider: file
+    log-file-path: /tmp/logs.json
+```
+
+### CLI usage
+
+```yaml
+# .sweny.yml
+observability-provider: file
+log-file: ./logs/errors.json
+```
+
+```bash
+sweny triage --observability-provider file --log-file ./logs/errors.json
 ```

@@ -66,12 +66,16 @@
     "zod": "^4.3"
   },
   "peerDependencies": {
-    "@anthropic-ai/claude-code": "^1",
+    "@anthropic-ai/claude-agent-sdk": "^0.2",
+    "@anthropic-ai/claude-code": "^2",
     "@aws-sdk/client-s3": "^3",
     "@aws-sdk/credential-provider-node": "^3",
     "@aws-sdk/s3-request-presigner": "^3"
   },
   "peerDependenciesMeta": {
+    "@anthropic-ai/claude-agent-sdk": {
+      "optional": true
+    },
     "@anthropic-ai/claude-code": {
       "optional": true
     },
@@ -86,7 +90,7 @@
     }
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "^1",
+    "@anthropic-ai/claude-agent-sdk": "^0.2",
     "@aws-sdk/client-s3": "^3.1000.0",
     "@aws-sdk/s3-request-presigner": "^3.1000.0",
     "@types/express": "^5",

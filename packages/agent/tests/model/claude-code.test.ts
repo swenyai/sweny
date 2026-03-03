@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockQuery = vi.hoisted(() => vi.fn());
 const mockCreateSdkMcpServer = vi.hoisted(() => vi.fn(() => ({ fake: "mcp" })));
 
-vi.mock("@anthropic-ai/claude-code", () => ({
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   query: mockQuery,
   createSdkMcpServer: mockCreateSdkMcpServer,
   tool: vi.fn((name: string, desc: string, schema: any, exec: any) => ({
