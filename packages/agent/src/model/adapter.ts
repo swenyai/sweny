@@ -1,4 +1,4 @@
-import { tool } from "@anthropic-ai/claude-code";
+import { tool } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentTool } from "@sweny-ai/providers/agent-tool";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK generic requires any

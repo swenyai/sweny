@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import type { AgentTool } from "@sweny-ai/providers/agent-tool";
 
-vi.mock("@anthropic-ai/claude-code", () => ({
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   tool: vi.fn((name: string, desc: string, schema: unknown, exec: unknown) => ({
     name,
     description: desc,
@@ -11,7 +11,7 @@ vi.mock("@anthropic-ai/claude-code", () => ({
   })),
 }));
 
-import { tool } from "@anthropic-ai/claude-code";
+import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { toSdkTool, toSdkTools } from "../../src/model/adapter.js";
 
 function fakeAgentTool(name: string): AgentTool {

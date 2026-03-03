@@ -1,4 +1,9 @@
-import { query, createSdkMcpServer, type SDKAssistantMessage, type SDKResultMessage } from "@anthropic-ai/claude-code";
+import {
+  query,
+  createSdkMcpServer,
+  type SDKAssistantMessage,
+  type SDKResultMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import type { ModelRunner, ModelRunOptions, RunResult, ToolCall } from "./types.js";
 import { toSdkTools } from "./adapter.js";
 
@@ -45,7 +50,7 @@ export class ClaudeCodeRunner implements ModelRunner {
       prompt: opts.prompt,
       options: {
         maxTurns: opts.maxTurns,
-        customSystemPrompt: opts.systemPrompt,
+        systemPrompt: opts.systemPrompt,
         cwd: opts.cwd ?? "/tmp",
         env,
         permissionMode: "bypassPermissions",
