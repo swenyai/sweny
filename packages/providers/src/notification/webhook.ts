@@ -8,7 +8,7 @@ import type { NotificationProvider, NotificationPayload } from "./types.js";
 export const webhookConfigSchema = z.object({
   url: z.string().url("Webhook URL is required"),
   /** Extra headers merged into the request (e.g., Authorization). */
-  headers: z.record(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
   /** HTTP method — defaults to POST. */
   method: z.enum(["POST", "PUT"]).default("POST"),
   /** Optional HMAC secret for signing the payload (X-Signature-256 header). */

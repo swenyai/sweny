@@ -36,7 +36,7 @@ export function httpPlugin(opts: HttpPluginOpts = {}): ToolPlugin {
           {
             method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).describe("HTTP method"),
             url: z.string().url().describe("Full URL to request"),
-            headers: z.record(z.string()).optional().describe("Request headers"),
+            headers: z.record(z.string(), z.string()).optional().describe("Request headers"),
             body: z.string().optional().describe("Request body (for POST/PUT/PATCH)"),
           },
           async (args) => {
