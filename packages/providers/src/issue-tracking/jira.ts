@@ -9,6 +9,9 @@ import type {
   IssueUpdateOptions,
   IssueSearchOptions,
   PrLinkCapable,
+  FingerprintCapable,
+  TriageHistoryCapable,
+  TriageHistoryEntry,
 } from "./types.js";
 
 export const jiraConfigSchema = z.object({
@@ -23,12 +26,14 @@ export const jiraConfigSchema = z.object({
 
 export type JiraConfig = z.infer<typeof jiraConfigSchema>;
 
-export function jira(config: JiraConfig): IssueTrackingProvider & PrLinkCapable {
+export function jira(
+  config: JiraConfig,
+): IssueTrackingProvider & PrLinkCapable & FingerprintCapable & TriageHistoryCapable {
   const parsed = jiraConfigSchema.parse(config);
   return new JiraProvider(parsed);
 }
 
-class JiraProvider implements IssueTrackingProvider, PrLinkCapable {
+class JiraProvider implements IssueTrackingProvider, PrLinkCapable, FingerprintCapable, TriageHistoryCapable {
   private readonly baseUrl: string;
   private readonly authHeader: string;
   private readonly log: Logger;
@@ -274,6 +279,104 @@ class JiraProvider implements IssueTrackingProvider, PrLinkCapable {
     await this.addComment(issueId, `Pull Request Created: PR #${prNumber} — ${prUrl}`);
 
     this.log.info(`PR #${prNumber} linked to issue ${issueId}`);
+  }
+
+  // ------------------------------------------------------------------
+  // FingerprintCapable
+  // ------------------------------------------------------------------
+
+  async searchByFingerprint(
+    projectId: string,
+    errorPattern: string,
+    opts?: { labelId?: string; service?: string },
+  ): Promise<Issue[]> {
+    this.log.info(`Searching Jira by fingerprint: "${errorPattern}" in project ${projectId}`);
+
+    const jqlParts: string[] = [`project = "${projectId}"`, `summary ~ "${errorPattern}"`];
+
+    if (opts?.labelId) {
+      jqlParts.push(`labels = "${opts.labelId}"`);
+    }
+
+    const jql = jqlParts.join(" AND ");
+
+    const result = await this.request<{
+      issues: Array<{
+        id: string;
+        key: string;
+        fields: {
+          summary: string;
+          status: { name: string };
+        };
+      }>;
+    }>(`/search?jql=${encodeURIComponent(jql)}&maxResults=10&fields=summary,status`);
+
+    const issues = result.issues ?? [];
+    this.log.info(`Found ${issues.length} issues matching fingerprint`);
+
+    return issues.map((i) => ({
+      id: i.id,
+      identifier: i.key,
+      title: i.fields.summary,
+      url: `${this.baseUrl}/browse/${i.key}`,
+      branchName: `fix/${i.key}`,
+      state: i.fields.status.name,
+    }));
+  }
+
+  // ------------------------------------------------------------------
+  // TriageHistoryCapable
+  // ------------------------------------------------------------------
+
+  async listTriageHistory(projectId: string, labelId: string, days: number = 30): Promise<TriageHistoryEntry[]> {
+    this.log.info(`Listing Jira triage history for project ${projectId} (last ${days} days)`);
+
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split("T")[0]; // YYYY-MM-DD format for Jira JQL
+
+    const jql = `project = "${projectId}" AND labels = "${labelId}" AND created >= "${since}" ORDER BY created DESC`;
+
+    const result = await this.request<{
+      issues: Array<{
+        id: string;
+        key: string;
+        fields: {
+          summary: string;
+          status: { name: string; statusCategory: { key: string } };
+          description: unknown | null;
+          labels: string[];
+          created: string;
+        };
+      }>;
+    }>(`/search?jql=${encodeURIComponent(jql)}&maxResults=50&fields=summary,status,description,labels,created`);
+
+    const issues = result.issues ?? [];
+    this.log.info(`Found ${issues.length} triage history entries`);
+
+    return issues.map((i) => {
+      // Extract plain text from Atlassian Document Format description
+      let descriptionSnippet: string | null = null;
+      if (i.fields.description) {
+        const doc = i.fields.description as { content?: Array<{ content?: Array<{ text?: string }> }> };
+        const text = doc.content
+          ?.flatMap((block) => block.content ?? [])
+          .map((node) => node.text ?? "")
+          .join(" ")
+          .trim();
+        descriptionSnippet = text ? text.slice(0, 200) : null;
+      }
+
+      return {
+        identifier: i.key,
+        title: i.fields.summary,
+        state: i.fields.status.name,
+        stateType: i.fields.status.statusCategory.key,
+        url: `${this.baseUrl}/browse/${i.key}`,
+        descriptionSnippet,
+        fingerprint: null, // Jira has no native fingerprint field
+        createdAt: i.fields.created,
+        labels: i.fields.labels,
+      };
+    });
   }
 
   // ------------------------------------------------------------------
