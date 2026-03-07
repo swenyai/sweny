@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/providers",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Shared provider interfaces and implementations for SWEny",
   "type": "module",
   "engines": {
