@@ -284,6 +284,12 @@ function mapToTriageConfig(config: CliConfig): TriageConfig {
       break;
     case "sentry":
       if (obsCreds.authToken) agentEnv.SENTRY_AUTH_TOKEN = obsCreds.authToken;
+      if (obsCreds.organization) agentEnv.SENTRY_ORG = obsCreds.organization;
+      if (obsCreds.project) agentEnv.SENTRY_PROJECT = obsCreds.project;
+      break;
+    case "cloudwatch":
+      if (obsCreds.region) agentEnv.AWS_REGION = obsCreds.region;
+      if (obsCreds.logGroupPrefix) agentEnv.CLOUDWATCH_LOG_GROUP_PREFIX = obsCreds.logGroupPrefix;
       break;
     case "splunk":
       if (obsCreds.baseUrl) agentEnv.SPLUNK_URL = obsCreds.baseUrl;
@@ -300,6 +306,7 @@ function mapToTriageConfig(config: CliConfig): TriageConfig {
     case "loki":
       if (obsCreds.baseUrl) agentEnv.LOKI_URL = obsCreds.baseUrl;
       if (obsCreds.apiKey) agentEnv.LOKI_API_KEY = obsCreds.apiKey;
+      if (obsCreds.orgId) agentEnv.LOKI_ORG_ID = obsCreds.orgId;
       break;
   }
 

@@ -387,14 +387,39 @@ describe("mapToTriageConfig", () => {
     expect(env.DD_SITE).toBe("datadoghq.eu");
   });
 
-  it("maps Sentry auth token to SENTRY_AUTH_TOKEN", async () => {
+  it("maps Sentry credentials to SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT", async () => {
     const triageConfig = await runWithConfig({
       ...BASE_CONFIG,
       observabilityProvider: "sentry",
-      observabilityCredentials: { authToken: "sntryu_secret" },
+      observabilityCredentials: { authToken: "sntryu_secret", organization: "acme-org", project: "api-prod" },
     });
     const env = triageConfig.agentEnv as Record<string, string>;
     expect(env.SENTRY_AUTH_TOKEN).toBe("sntryu_secret");
+    expect(env.SENTRY_ORG).toBe("acme-org");
+    expect(env.SENTRY_PROJECT).toBe("api-prod");
+  });
+
+  it("maps CloudWatch credentials to AWS_REGION and CLOUDWATCH_LOG_GROUP_PREFIX", async () => {
+    const triageConfig = await runWithConfig({
+      ...BASE_CONFIG,
+      observabilityProvider: "cloudwatch",
+      observabilityCredentials: { region: "eu-west-1", logGroupPrefix: "/ecs/api" },
+    });
+    const env = triageConfig.agentEnv as Record<string, string>;
+    expect(env.AWS_REGION).toBe("eu-west-1");
+    expect(env.CLOUDWATCH_LOG_GROUP_PREFIX).toBe("/ecs/api");
+  });
+
+  it("maps Loki credentials including LOKI_ORG_ID", async () => {
+    const triageConfig = await runWithConfig({
+      ...BASE_CONFIG,
+      observabilityProvider: "loki",
+      observabilityCredentials: { baseUrl: "https://loki.acme.com", apiKey: "loki-key", orgId: "tenant-1" },
+    });
+    const env = triageConfig.agentEnv as Record<string, string>;
+    expect(env.LOKI_URL).toBe("https://loki.acme.com");
+    expect(env.LOKI_API_KEY).toBe("loki-key");
+    expect(env.LOKI_ORG_ID).toBe("tenant-1");
   });
 
   it("maps Linear API key to LINEAR_API_KEY in agentEnv", async () => {
