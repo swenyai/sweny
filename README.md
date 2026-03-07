@@ -83,7 +83,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v0.2
+      - uses: swenyai/sweny@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -120,7 +120,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v0.2
+      - uses: swenyai/sweny@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -301,7 +301,7 @@ If using cross-repo dispatch, pass a `bot-token` with `repo` and `actions` scope
 #### Deep investigation of last 7 days
 
 ```yaml
-- uses: swenyai/sweny@v0.2
+- uses: swenyai/sweny@v1
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -313,7 +313,7 @@ If using cross-repo dispatch, pass a `bot-token` with `repo` and `actions` scope
 #### Filter to a specific service
 
 ```yaml
-- uses: swenyai/sweny@v0.2
+- uses: swenyai/sweny@v1
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -326,7 +326,7 @@ If using cross-repo dispatch, pass a `bot-token` with `repo` and `actions` scope
 #### Use Linear for issue tracking
 
 ```yaml
-- uses: swenyai/sweny@v0.2
+- uses: swenyai/sweny@v1
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -339,7 +339,7 @@ If using cross-repo dispatch, pass a `bot-token` with `repo` and `actions` scope
 #### Work on a specific Linear issue
 
 ```yaml
-- uses: swenyai/sweny@v0.2
+- uses: swenyai/sweny@v1
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     issue-tracker-provider: 'linear'

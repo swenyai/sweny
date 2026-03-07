@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.1.0] — 2026-03-07
+
+### Added
+
+- **Multi-agent support** — `coding-agent-provider` input with `claude`, `codex`, and `gemini` options
+- **Implement recipe** — engine now runs full investigate → implement → PR workflow end-to-end
+- **File-based local providers** — zero-external-service quick start using local JSON log files
+- **Engine step caching** — crash recovery and fast iteration with step-level cache
+- **Action config validation** — Zod validation on all action inputs with clear error messages
+- **`sentry-organization` input alias** — README now documents correct `sentry-org` input name
+
+### Fixed
+
+- **Missing env mappings** — `SENTRY_ORG`, `SENTRY_PROJECT`, `AWS_REGION`, `CLOUDWATCH_LOG_GROUP_PREFIX`, and `LOKI_ORG_ID` were not wired in CLI and action (Sentry, CloudWatch, and Loki users affected)
+- **GitLab `baseBranch`** — base branch was not passed to GitLab PR creation
+- **Security fixes** — hardened action inputs and engine execution
+
+### Changed
+
+- Migrated to `@anthropic-ai/claude-agent-sdk`
+- Bumped `@actions/core`, `@actions/github`, `@actions/exec`, `@actions/io` to latest major versions
+- Dependency security updates (commander, zod, @types/node)
+
 ## [v0.2.1] — 2026-03-02
 
 ### Added

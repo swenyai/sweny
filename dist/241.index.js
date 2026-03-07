@@ -7,7 +7,7 @@ export const modules = {
 
 
 
-var sharedIniFileLoader = __webpack_require__(504);
+var sharedIniFileLoader = __webpack_require__(8123);
 var propertyProvider = __webpack_require__(2074);
 var client = __webpack_require__(9300);
 var credentialProviderLogin = __webpack_require__(2844);
@@ -240,12 +240,12 @@ exports.fromIni = fromIni;
 
 var client = __webpack_require__(9300);
 var propertyProvider = __webpack_require__(2074);
-var sharedIniFileLoader = __webpack_require__(504);
+var sharedIniFileLoader = __webpack_require__(8123);
 var protocolHttp = __webpack_require__(9752);
 var node_crypto = __webpack_require__(7598);
 var node_fs = __webpack_require__(3024);
 var node_os = __webpack_require__(8161);
-var node_path = __webpack_require__(6760);
+var node_path = __webpack_require__(4379);
 
 class LoginCredentialsFetcher {
     profileData;
