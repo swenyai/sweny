@@ -12,6 +12,8 @@ export interface Issue {
   branchName: string;
   /** Current workflow state (e.g., "open", "in progress", "done"). */
   state?: string;
+  /** Full markdown description body. */
+  description?: string;
 }
 
 /** Options for creating a new issue. */
