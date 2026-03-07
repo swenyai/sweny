@@ -1,0 +1,53 @@
+name: Post-Release Docs Update
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-docs:
+    name: Update docs for ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Update docs with Claude
+        uses: anthropic-ai/claude-code-action@beta
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            A new release (${{ github.ref_name }}) was just published.
+
+            Update the docs so they reflect the new release:
+
+            1. Read CHANGELOG.md — find the ${{ github.ref_name }} section and note what changed.
+            2. In packages/web/src/content/docs/**/*.md and README.md, find all version
+               references like `swenyai/sweny@vX.Y` or `@sweny-ai/...@X.Y` and update them
+               to ${{ github.ref_name }}.
+            3. Review the docs for any descriptions of inputs, providers, or behavior that
+               changed in ${{ github.ref_name }} per the CHANGELOG — update those sections.
+            4. Only change what is factually stale. Do not rewrite or expand docs beyond
+               what changed.
+
+            After making all edits, stop. Do not commit or push.
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: docs/post-release-${{ github.ref_name }}
+          title: "docs: update for ${{ github.ref_name }}"
+          body: |
+            Auto-generated docs update for release **${{ github.ref_name }}**.
+
+            Claude reviewed the CHANGELOG and updated stale version references and doc sections.
+            Please review before merging.
+          commit-message: "docs: update for ${{ github.ref_name }}"
+          labels: documentation
+          delete-branch: true

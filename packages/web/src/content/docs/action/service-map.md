@@ -39,7 +39,7 @@ services:
 For cross-repo dispatch, you need a `bot-token` with `repo` and `actions` scopes for all target repositories:
 
 ```yaml
-- uses: swenyai/sweny@v0.2
+- uses: swenyai/sweny@v1
   with:
     bot-token: ${{ secrets.BOT_TOKEN }}
     # ... other inputs
@@ -50,7 +50,7 @@ For cross-repo dispatch, you need a `bot-token` with `repo` and `actions` scopes
 By default, SWEny looks for the service map at `.github/service-map.yml`. Override with:
 
 ```yaml
-- uses: swenyai/sweny@v0.2
+- uses: swenyai/sweny@v1
   with:
     service-map-path: 'config/services.yml'
     # ... other inputs

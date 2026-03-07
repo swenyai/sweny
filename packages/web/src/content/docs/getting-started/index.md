@@ -35,7 +35,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v0.2
+      - uses: swenyai/sweny@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -86,7 +86,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v0.2
+      - uses: swenyai/sweny@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -105,7 +105,7 @@ Set `issue-tracker-provider` and add the relevant credentials:
 
 ```yaml
 # Linear
-- uses: swenyai/sweny@v0.2
+- uses: swenyai/sweny@v1
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}

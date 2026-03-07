@@ -8,7 +8,7 @@ description: Common SWEny Triage configurations.
 Analyze errors without creating PRs — useful for testing your setup:
 
 ```yaml
-- uses: swenyai/sweny@v0.2
+- uses: swenyai/sweny@v1
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -25,7 +25,7 @@ Analyze errors without creating PRs — useful for testing your setup:
 Point SWEny at an existing ticket instead of scanning for new issues:
 
 ```yaml
-- uses: swenyai/sweny@v0.2
+- uses: swenyai/sweny@v1
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     linear-api-key: ${{ secrets.LINEAR_API_KEY }}
@@ -38,7 +38,7 @@ Point SWEny at an existing ticket instead of scanning for new issues:
 Only look at errors from a subset of services:
 
 ```yaml
-- uses: swenyai/sweny@v0.2
+- uses: swenyai/sweny@v1
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}

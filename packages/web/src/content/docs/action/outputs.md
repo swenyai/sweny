@@ -28,7 +28,7 @@ After a triage run, these outputs are available for subsequent workflow steps. U
 
 ```yaml
 steps:
-  - uses: swenyai/sweny@v0.2
+  - uses: swenyai/sweny@v1
     id: triage
     with:
       claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
