@@ -1,5 +1,5 @@
-name: "SWEny Triage"
-description: "Autonomous SRE triage — monitors logs, investigates issues, creates tickets, and opens fix PRs."
+name: "SWEny"
+description: "Autonomous SRE workflows — monitor logs, investigate issues, create tickets, and open fix PRs."
 author: "SWEny"
 
 branding:

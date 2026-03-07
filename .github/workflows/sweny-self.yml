@@ -1,0 +1,131 @@
+name: SWEny Self-Triage
+
+on:
+  workflow_dispatch:
+    inputs:
+      time-range:
+        description: "How far back to look for CI failures (e.g. 1h, 24h, 7d)"
+        default: "7d"
+        required: false
+      dry-run:
+        description: "Dry run — analyze only, no PRs or issues"
+        default: "true"
+        required: false
+      investigation-depth:
+        description: "Investigation depth (quick, standard, thorough)"
+        default: "standard"
+        required: false
+
+jobs:
+  self-triage:
+    name: SWEny Self-Triage
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: github.actor == 'wickdninja'
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect CI failure logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'EOF'
+          import subprocess, json, sys
+
+          repo = "swenyai/sweny"
+
+          # Fetch recent failed runs
+          result = subprocess.run(
+            ["gh", "run", "list", "--repo", repo,
+             "--status", "failure", "--limit", "30",
+             "--json", "databaseId,name,createdAt,headBranch,workflowName"],
+            capture_output=True, text=True,
+          )
+          runs = json.loads(result.stdout) if result.stdout.strip() else []
+          print(f"Found {len(runs)} failed runs", flush=True)
+
+          entries = []
+          for run in runs:
+            run_id   = str(run["databaseId"])
+            job_name = run.get("name") or run.get("workflowName", "unknown")
+            wf_name  = run.get("workflowName", job_name)
+            created  = run["createdAt"]
+            branch   = run.get("headBranch", "unknown")
+
+            logs = subprocess.run(
+              ["gh", "run", "view", run_id, "--repo", repo, "--log-failed"],
+              capture_output=True, text=True,
+            )
+            lines = [l.strip() for l in logs.stdout.splitlines() if l.strip()]
+            print(f"  run {run_id} ({wf_name}): {len(lines)} log lines", flush=True)
+
+            for line in lines:
+              # Skip pure debug/runner noise
+              if any(line.startswith(p) for p in ("##[debug]", "##[group]", "##[endgroup]")):
+                continue
+              entries.append({
+                "timestamp": created,
+                "service":   "sweny-ci",
+                "level":     "error",
+                "message":   f"[{wf_name} / {branch}] {line}",
+                "attributes": {
+                  "run_id":   run_id,
+                  "workflow": wf_name,
+                  "job":      job_name,
+                  "branch":   branch,
+                },
+              })
+
+          with open("/tmp/ci-logs.json", "w") as f:
+            json.dump(entries, f, indent=2)
+
+          print(f"Wrote {len(entries)} entries to /tmp/ci-logs.json", flush=True)
+          if not entries:
+            print("No CI failures found — nothing for SWEny to triage.")
+            sys.exit(0)
+          EOF
+
+      - name: Check log file exists and is non-empty
+        id: check-logs
+        run: |
+          COUNT=$(python3 -c "import json; d=json.load(open('/tmp/ci-logs.json')); print(len(d))" 2>/dev/null || echo 0)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "CI failure log entries: $COUNT"
+
+      - name: Run SWEny against our own CI logs
+        if: steps.check-logs.outputs.count != '0'
+        uses: swenyai/sweny@v1
+        with:
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          observability-provider: file
+          log-file-path: /tmp/ci-logs.json
+          issue-tracker-provider: github-issues
+          github-token: ${{ github.token }}
+          dry-run: ${{ inputs.dry-run }}
+          time-range: ${{ inputs.time-range }}
+          investigation-depth: ${{ inputs.investigation-depth }}
+          additional-instructions: |
+            You are analyzing CI/CD failure logs from the SWEny GitHub Actions workflows.
+            The logs come from failed runs of our own CI pipeline (lint, typecheck, test, release).
+            Common failure patterns to look for:
+              - TypeScript type errors (TS2307 missing modules, TS2322 type mismatches)
+              - Test failures in vitest (look for "FAIL" and assertion errors)
+              - Build failures (ncc, tsc errors)
+              - Missing build steps (e.g. providers not built before typecheck)
+            When implementing fixes you are working directly on the SWEny source code.
+            The repo is a TypeScript monorepo — packages/providers, packages/engine,
+            packages/action, packages/agent, packages/cli.
+            Prioritize the highest-frequency or most-blocking failure first.
+
+      - name: No failures to triage
+        if: steps.check-logs.outputs.count == '0'
+        run: echo "No CI failures found in the selected time range. CI is healthy!"
