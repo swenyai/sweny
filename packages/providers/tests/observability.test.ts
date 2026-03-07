@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { datadog, datadogConfigSchema } from "../src/observability/datadog.js";
 import { sentry, sentryConfigSchema } from "../src/observability/sentry.js";
+import { loki, lokiConfigSchema } from "../src/observability/loki.js";
 import type { ObservabilityProvider } from "../src/observability/types.js";
 
 // ---------------------------------------------------------------------------
@@ -388,5 +389,223 @@ describe("DatadogProvider", () => {
     });
 
     await expect(provider.verifyAccess()).rejects.toThrow("Datadog API error: 403 Forbidden");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Loki config schema
+// ---------------------------------------------------------------------------
+
+describe("lokiConfigSchema", () => {
+  it("validates a complete config", () => {
+    const result = lokiConfigSchema.safeParse({
+      baseUrl: "https://loki.example.com",
+      apiKey: "tok",
+      orgId: "tenant1",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("validates minimal config (baseUrl only)", () => {
+    const result = lokiConfigSchema.safeParse({ baseUrl: "https://loki.example.com" });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects missing baseUrl", () => {
+    const result = lokiConfigSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty baseUrl", () => {
+    const result = lokiConfigSchema.safeParse({ baseUrl: "" });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Loki factory
+// ---------------------------------------------------------------------------
+
+describe("loki factory", () => {
+  it("returns an ObservabilityProvider with all required methods", () => {
+    const provider = loki({ baseUrl: "https://loki.example.com" });
+    expect(typeof provider.verifyAccess).toBe("function");
+    expect(typeof provider.queryLogs).toBe("function");
+    expect(typeof provider.aggregate).toBe("function");
+    expect(typeof provider.getAgentEnv).toBe("function");
+    expect(typeof provider.getPromptInstructions).toBe("function");
+  });
+
+  it("getAgentEnv returns LOKI_URL", () => {
+    const provider = loki({ baseUrl: "https://loki.example.com" });
+    const env = provider.getAgentEnv();
+    expect(env).toEqual({ LOKI_URL: "https://loki.example.com" });
+  });
+
+  it("getAgentEnv includes LOKI_API_KEY and LOKI_ORG_ID when configured", () => {
+    const provider = loki({ baseUrl: "https://loki.example.com", apiKey: "tok", orgId: "tenant1" });
+    const env = provider.getAgentEnv();
+    expect(env.LOKI_API_KEY).toBe("tok");
+    expect(env.LOKI_ORG_ID).toBe("tenant1");
+  });
+
+  it("getPromptInstructions contains Loki and curl examples", () => {
+    const provider = loki({ baseUrl: "https://loki.example.com" });
+    const instructions = provider.getPromptInstructions();
+    expect(instructions).toContain("Loki");
+    expect(instructions).toContain("curl");
+    expect(instructions).toContain("LOKI_URL");
+  });
+
+  it("throws on invalid config (empty baseUrl)", () => {
+    expect(() => loki({ baseUrl: "" } as any)).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Loki API calls (mocked fetch)
+// ---------------------------------------------------------------------------
+
+describe("LokiProvider", () => {
+  const originalFetch = globalThis.fetch;
+  const silentLogger = { info: () => {}, debug: () => {}, warn: () => {} };
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function makeLoki(extra?: { apiKey?: string; orgId?: string }) {
+    return loki({
+      baseUrl: "https://loki.example.com",
+      logger: silentLogger,
+      ...extra,
+    });
+  }
+
+  it("verifyAccess calls /ready endpoint and returns true on 200", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    globalThis.fetch = mockFetch;
+
+    await makeLoki().verifyAccess();
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("/ready");
+    expect(url).toContain("loki.example.com");
+  });
+
+  it("verifyAccess throws ProviderAuthError on non-2xx from /ready (falls through to labels)", async () => {
+    // First call (/ready) returns 401, second call (/loki/api/v1/labels) also returns 401
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        text: async () => "",
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        text: async () => "",
+      });
+    globalThis.fetch = mockFetch;
+
+    await expect(makeLoki().verifyAccess()).rejects.toThrow("Loki API error: 401 Unauthorized");
+  });
+
+  it("queryLogs sends request to /loki/api/v1/query_range", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { result: [] } }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await makeLoki().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "error" });
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain("/loki/api/v1/query_range");
+  });
+
+  it("queryLogs includes LogQL query parameter", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { result: [] } }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await makeLoki().queryLogs({ timeRange: "24h", serviceFilter: "api", severity: "error" });
+
+    const [url] = mockFetch.mock.calls[0];
+    // URL should contain the query param
+    expect(url).toContain("query=");
+    expect(decodeURIComponent(url)).toContain("error");
+  });
+
+  it("queryLogs returns mapped LogEntry array from Loki stream results", async () => {
+    const tsNano = "1704067200000000000"; // 2024-01-01T00:00:00Z in nanoseconds
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          result: [
+            {
+              stream: { job: "api-service", level: "error" },
+              values: [[tsNano, "connection refused"]],
+            },
+          ],
+        },
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const logs = await makeLoki().queryLogs({ timeRange: "1h", serviceFilter: "api", severity: "error" });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0].service).toBe("api-service");
+    expect(logs[0].level).toBe("error");
+    expect(logs[0].message).toBe("connection refused");
+    expect(logs[0].timestamp).toBe(new Date(Math.floor(parseInt(tsNano, 10) / 1_000_000)).toISOString());
+  });
+
+  it("queryLogs includes X-Scope-OrgID header when orgId is configured", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { result: [] } }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await makeLoki({ orgId: "tenant1" }).queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "error" });
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers["X-Scope-OrgID"]).toBe("tenant1");
+  });
+
+  it("queryLogs does not include X-Scope-OrgID when orgId is not set", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { result: [] } }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await makeLoki().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "error" });
+
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers["X-Scope-OrgID"]).toBeUndefined();
+  });
+
+  it("queryLogs throws ProviderApiError on non-2xx", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: "Unauthorized",
+      text: async () => "",
+    });
+
+    await expect(makeLoki().queryLogs({ timeRange: "1h", serviceFilter: "api", severity: "error" })).rejects.toThrow(
+      "Loki API error: 401 Unauthorized",
+    );
   });
 });
