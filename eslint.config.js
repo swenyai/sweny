@@ -40,6 +40,14 @@ export default [
     },
   },
 
+  // CLI — console output is intentional in a CLI tool
+  {
+    files: ["packages/cli/src/**/*.ts"],
+    rules: {
+      "no-console": "off",
+    },
+  },
+
   // Test files — relax rules that add noise without value in tests
   {
     files: ["**/tests/**/*.ts", "**/*.test.ts"],

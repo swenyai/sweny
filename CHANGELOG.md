@@ -44,7 +44,7 @@ All notable changes to this project will be documented in this file.
 - Provider logs routed through shared spinner-aware logger
 - Config priority: CLI flag > env var > `.sweny.yml` > default
 
-## [v0.2] — 2026-02-28
+## [v0.2.0] — 2026-02-28
 
 ### Added
 
@@ -63,7 +63,7 @@ All notable changes to this project will be documented in this file.
 - Added `exports` field to `@sweny-ai/agent` package.json
 - Updated README with complete provider catalog
 
-## [v0.1] — 2026-02-27
+## [v0.1.0] — 2026-02-27
 
 ### Added
 

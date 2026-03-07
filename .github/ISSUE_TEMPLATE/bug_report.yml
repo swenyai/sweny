@@ -1,0 +1,63 @@
+name: Bug Report
+description: Report a bug in SWEny
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened. Include any error output or logs.
+    validations:
+      required: true
+
+  - type: input
+    id: package
+    attributes:
+      label: Package / version
+      placeholder: "e.g. @sweny-ai/providers@0.2.0 or swenyai/sweny@v0.2"
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node version
+      placeholder: "e.g. 22.0.0"
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "e.g. macOS 15, Ubuntu 24.04"
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else — full logs, config snippets, screenshots.
