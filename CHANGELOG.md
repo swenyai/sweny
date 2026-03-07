@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.1.1] — 2026-03-07
+
+### Changed
+
+- Renamed GitHub Action from "SWEny Triage" to "SWEny" — the action is the platform, not a single recipe. Marketplace listing moves to [github.com/marketplace/actions/sweny](https://github.com/marketplace/actions/sweny).
+
+### Added
+
+- **Self-triage workflow** — `.github/workflows/sweny-self.yml` runs SWEny against its own CI failure logs. Manual trigger only (maintainer-restricted). SWEny now dogfoods itself.
+
 ## [v1.1.0] — 2026-03-07
 
 ### Added
