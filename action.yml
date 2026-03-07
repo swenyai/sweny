@@ -14,9 +14,25 @@ inputs:
     description: "Claude Code OAuth token (use this OR anthropic-api-key)"
     required: false
 
+  # Coding agent provider
+  coding-agent-provider:
+    description: "Coding agent to use for implementation (claude, codex, gemini)"
+    required: false
+    default: "claude"
+
+  # OpenAI credentials (when coding-agent-provider = codex)
+  openai-api-key:
+    description: "OpenAI API key (required when coding-agent-provider is codex)"
+    required: false
+
+  # Google credentials (when coding-agent-provider = gemini)
+  gemini-api-key:
+    description: "Google Gemini API key (required when coding-agent-provider is gemini)"
+    required: false
+
   # Observability provider
   observability-provider:
-    description: "Observability provider to use (datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki)"
+    description: "Observability provider to use (datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file)"
     required: false
     default: "datadog"
 
@@ -101,6 +117,11 @@ inputs:
     required: false
   loki-org-id:
     description: "Loki tenant/org ID (optional)"
+    required: false
+
+  # File provider (when observability-provider = file)
+  log-file-path:
+    description: "Path to a local JSON log file (required when observability-provider is file)"
     required: false
 
   # Issue tracker provider
