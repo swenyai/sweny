@@ -160,4 +160,26 @@ describe("FileProvider", () => {
     const provider = file({ path: "/tmp/logs.json" });
     expect(provider.getPromptInstructions()).toContain("/tmp/logs.json");
   });
+
+  it("getPromptInstructions includes cat and grep commands", () => {
+    const provider = file({ path: "/var/log/app.log" });
+    const instructions = provider.getPromptInstructions();
+    expect(instructions).toContain("/var/log/app.log");
+    expect(instructions).toContain("cat");
+    expect(instructions).toContain("grep");
+    expect(instructions).toContain("tail");
+  });
+
+  it("queryLogs returns empty array when file does not exist", async () => {
+    const provider = file({ path: "/nonexistent-file-xyz.log", logger: silentLogger });
+    const results = await provider.queryLogs({ serviceFilter: "*", timeRange: "24h", severity: "" });
+    expect(results).toEqual([]);
+  });
+
+  it("queryLogs returns empty array when file contains invalid JSON", async () => {
+    const p = tmp("this is not json at all");
+    const provider = file({ path: p, logger: silentLogger });
+    const results = await provider.queryLogs({ serviceFilter: "*", timeRange: "24h", severity: "" });
+    expect(results).toEqual([]);
+  });
 });

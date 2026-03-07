@@ -68,7 +68,13 @@ class FileProvider implements ObservabilityProvider {
   }
 
   async queryLogs(opts: LogQueryOptions): Promise<LogEntry[]> {
-    const all = this.load();
+    let all: LogEntry[];
+    try {
+      all = this.load();
+    } catch (err) {
+      this.log.warn(`Could not load log file: ${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    }
     const filtered = this.filter(all, { serviceFilter: opts.serviceFilter, severity: opts.severity });
     this.log.info(`Found ${filtered.length} ${opts.severity} logs for ${opts.serviceFilter}`);
     return filtered;
@@ -97,14 +103,29 @@ class FileProvider implements ObservabilityProvider {
 
   getPromptInstructions(): string {
     return `### Local Log File
-Logs are loaded from a local JSON file at: ${this.path}
 
-The file contains pre-collected log entries. You do NOT need to make any API calls.
-All log data has already been provided to the engine via the file provider.
+Your log data is in a local file. Use standard shell commands to read it.
 
-To inspect the raw file:
+**Log file path**: \`${this.path}\`
+
 \`\`\`bash
-cat ${this.path} | jq '.[:5]'
-\`\`\``;
+# View the whole file
+cat "${this.path}"
+
+# View the last 200 lines (useful for large files)
+tail -200 "${this.path}"
+
+# Filter for errors
+grep -i "error\\|exception\\|fatal" "${this.path}"
+
+# If the file contains JSON lines (one JSON object per line):
+cat "${this.path}" | jq 'select(.level == "error")' 2>/dev/null || grep -i error "${this.path}"
+
+# If the file is a JSON array (e.g. exported from a monitoring tool):
+cat "${this.path}" | jq '.[:10]'
+\`\`\`
+
+Read the file, identify the top errors by frequency and severity, and proceed
+with the standard investigation output format.`;
   }
 }
