@@ -190,30 +190,39 @@ SWEny creates GitHub Issues by default — zero additional config. Want Linear o
 
 > Use `claude-oauth-token` with a Claude Max subscription for predictable monthly costs. Set it as a repository secret named `CLAUDE_CODE_OAUTH_TOKEN`. The `anthropic-api-key` option is available if you prefer direct API billing.
 
+#### Coding Agent
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `coding-agent-provider` | Coding agent to use for implementation (`claude`, `codex`, `gemini`) | `claude` |
+| `openai-api-key` | OpenAI API key (required when `coding-agent-provider` is `codex`) | — |
+| `gemini-api-key` | Google Gemini API key (required when `coding-agent-provider` is `gemini`) | — |
+
 #### Observability Provider
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `observability-provider` | Provider to use | `datadog` |
+| `observability-provider` | Provider to use (`datadog`, `sentry`, `cloudwatch`, `splunk`, `elastic`, `newrelic`, `loki`, `file`) | `datadog` |
 | **Datadog** | | |
 | `dd-api-key` | Datadog API key | — |
 | `dd-app-key` | Datadog Application key | — |
 | `dd-site` | Datadog site | `datadoghq.com` |
 | **Sentry** | | |
 | `sentry-auth-token` | Sentry auth token | — |
-| `sentry-organization` | Sentry organization slug | — |
+| `sentry-org` | Sentry organization slug | — |
 | `sentry-project` | Sentry project slug | — |
+| `sentry-base-url` | Sentry base URL | `https://sentry.io` |
 | **CloudWatch** | | |
-| `cloudwatch-region` | AWS region | — |
+| `cloudwatch-region` | AWS region | `us-east-1` |
 | `cloudwatch-log-group-prefix` | Log group prefix to scan | — |
 | **Splunk** | | |
 | `splunk-url` | Splunk instance URL | — |
 | `splunk-token` | Splunk HEC token | — |
-| `splunk-index` | Splunk index to query | — |
+| `splunk-index` | Splunk index to query | `main` |
 | **Elasticsearch** | | |
 | `elastic-url` | Elasticsearch URL | — |
 | `elastic-api-key` | Elasticsearch API key | — |
-| `elastic-index` | Elasticsearch index pattern | — |
+| `elastic-index` | Elasticsearch index pattern | `logs-*` |
 | **New Relic** | | |
 | `newrelic-api-key` | New Relic API key | — |
 | `newrelic-account-id` | New Relic account ID | — |
@@ -222,6 +231,8 @@ SWEny creates GitHub Issues by default — zero additional config. Want Linear o
 | `loki-url` | Loki endpoint URL | — |
 | `loki-api-key` | Loki API key | — |
 | `loki-org-id` | Loki tenant/org ID | — |
+| **File** | | |
+| `log-file-path` | Path to a local JSON log file (required when `observability-provider` is `file`) | — |
 
 #### Issue Tracker
 
@@ -262,6 +273,24 @@ SWEny creates GitHub Issues by default — zero additional config. Want Linear o
 | `investigation-depth` | How deep Claude goes (`quick`, `standard`, `thorough`) | `standard` |
 | `max-investigate-turns` | Max Claude turns for investigation | `50` |
 | `max-implement-turns` | Max Claude turns for implementation | `30` |
+
+#### Notification
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `notification-provider` | Notification channel (`github-summary`, `slack`, `teams`, `discord`, `email`, `webhook`) | `github-summary` |
+| `notification-webhook-url` | Webhook URL for Slack, Teams, Discord, or generic webhook notifications | — |
+| `sendgrid-api-key` | SendGrid API key (when `notification-provider` is `email`) | — |
+| `email-from` | Sender email address (when `notification-provider` is `email`) | — |
+| `email-to` | Recipient email addresses, comma-separated (when `notification-provider` is `email`) | — |
+| `webhook-signing-secret` | HMAC-SHA256 signing secret for generic webhook notifications | — |
+
+#### PR / Branch Settings
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `base-branch` | Target branch for pull requests | `main` |
+| `pr-labels` | Comma-separated labels to apply to created PRs | `agent,triage,needs-review` |
 
 #### Behavior
 
@@ -479,7 +508,7 @@ See the [CLI documentation](https://sweny.ai/cli/) for the full inputs reference
 
 ## @sweny-ai/agent
 
-AI assistant framework powered by [Claude Code SDK](https://docs.anthropic.com/en/docs/claude-code/sdk) — deploy as a Slack bot or CLI with a plugin architecture for custom tools.
+AI assistant framework powered by [`@anthropic-ai/claude-agent-sdk`](https://docs.anthropic.com/en/docs/claude-code/sdk) — deploy as a Slack bot or CLI with a plugin architecture for custom tools.
 
 See [`packages/agent/`](packages/agent/) for documentation.
 
