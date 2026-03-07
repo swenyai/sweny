@@ -10,7 +10,7 @@
   <a href="https://github.com/swenyai/sweny/releases"><img alt="Release" src="https://img.shields.io/github/v/release/swenyai/sweny?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/swenyai/sweny?style=flat-square" /></a>
   <a href="https://sweny.ai"><img alt="Website" src="https://img.shields.io/badge/sweny.ai-website-blue?style=flat-square" /></a>
-  <a href="https://github.com/marketplace/actions/sweny"><img alt="Marketplace" src="https://img.shields.io/badge/GitHub%20Marketplace-SWEny-orange?style=flat-square&logo=github" /></a>
+  <a href="https://github.com/marketplace/actions/sweny-triage"><img alt="Marketplace" src="https://img.shields.io/badge/GitHub%20Marketplace-SWEny%20Triage-orange?style=flat-square&logo=github" /></a>
 </p>
 
 ---
