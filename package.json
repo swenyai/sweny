@@ -23,7 +23,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepare": "husky"
+    "prepare": "husky",
+    "release": "changeset publish"
   },
   "license": "MIT",
   "homepage": "https://sweny.ai",
@@ -44,6 +45,7 @@
     "svgo": "^4.0.1"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.30.0",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
     "eslint": "^10.0.2",
