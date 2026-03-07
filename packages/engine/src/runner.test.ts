@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { runWorkflow, createProviderRegistry } from "./runner.js";
 import type { Workflow, WorkflowStep, StepResult, WorkflowContext, RunOptions } from "./types.js";
+import type { CacheEntry, StepCache } from "./cache.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -374,5 +375,173 @@ describe("runWorkflow", () => {
     // Should not throw — falls back to consoleLogger
     const result = await runWorkflow(wf, {}, createProviderRegistry());
     expect(result.status).toBe("completed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cache
+// ---------------------------------------------------------------------------
+
+describe("cache", () => {
+  function makeCache(entries: Record<string, CacheEntry> = {}): StepCache & { set: ReturnType<typeof vi.fn> } {
+    const store = new Map(Object.entries(entries));
+    return {
+      get: vi.fn(async (name: string) => store.get(name)),
+      set: vi.fn(async (name: string, entry: CacheEntry) => {
+        store.set(name, entry);
+      }),
+    };
+  }
+
+  it("replays a cached step result without calling step.run", async () => {
+    const run = vi.fn(async () => ({ status: "success" as const, data: { fresh: true } }));
+    const cached: CacheEntry = {
+      result: { status: "success", data: { fromCache: true } },
+      skippedPhases: [],
+      createdAt: Date.now(),
+    };
+    const cache = makeCache({ "step-a": cached });
+
+    const wf = workflow("test", [step("step-a", "learn", run)]);
+
+    const result = await runWorkflow(wf, {}, createProviderRegistry(), { logger: silentLogger, cache });
+
+    expect(run).not.toHaveBeenCalled();
+    const stepResult = result.steps.find((s) => s.name === "step-a")?.result;
+    expect(stepResult?.status).toBe("success");
+    expect(stepResult?.cached).toBe(true);
+    expect(stepResult?.data).toEqual({ fromCache: true });
+  });
+
+  it("runs step normally on cache miss and stores result", async () => {
+    const cache = makeCache();
+
+    const wf = workflow("test", [step("step-b", "learn", async () => ({ status: "success", data: { x: 1 } }))]);
+
+    await runWorkflow(wf, {}, createProviderRegistry(), { logger: silentLogger, cache });
+
+    expect(cache.set).toHaveBeenCalledWith(
+      "step-b",
+      expect.objectContaining({
+        result: expect.objectContaining({ status: "success", data: { x: 1 } }),
+        skippedPhases: [],
+        createdAt: expect.any(Number),
+      }),
+    );
+  });
+
+  it("does not cache failed step results", async () => {
+    const cache = makeCache();
+
+    const wf = workflow("test", [
+      step("fail-step", "learn", async () => {
+        throw new Error("oops");
+      }),
+    ]);
+
+    await runWorkflow(wf, {}, createProviderRegistry(), { logger: silentLogger, cache });
+
+    expect(cache.set).not.toHaveBeenCalled();
+  });
+
+  it("replays skipPhase side effects from cached entry", async () => {
+    const actRun = vi.fn(async () => ({ status: "success" as const }));
+    const cached: CacheEntry = {
+      result: { status: "success" },
+      skippedPhases: [{ phase: "act", reason: "nothing to do" }],
+      createdAt: Date.now(),
+    };
+    const cache = makeCache({ gate: cached });
+
+    const wf = workflow("test", [step("gate", "learn"), step("act-1", "act", actRun), step("report-1", "report")]);
+
+    const result = await runWorkflow(wf, {}, createProviderRegistry(), { logger: silentLogger, cache });
+
+    expect(actRun).not.toHaveBeenCalled();
+    const actStep = result.steps.find((s) => s.name === "act-1");
+    expect(actStep?.result.status).toBe("skipped");
+    expect(actStep?.result.reason).toBe("nothing to do");
+  });
+
+  it("stores skipPhase calls made during a successful step", async () => {
+    const cache = makeCache();
+
+    const wf = workflow("test", [
+      step("gate", "learn", async (ctx) => {
+        ctx.skipPhase("act", "dry run");
+        return { status: "success" };
+      }),
+      step("act-1", "act"),
+    ]);
+
+    await runWorkflow(wf, {}, createProviderRegistry(), { logger: silentLogger, cache });
+
+    expect(cache.set).toHaveBeenCalledWith(
+      "gate",
+      expect.objectContaining({
+        skippedPhases: [{ phase: "act", reason: "dry run" }],
+      }),
+    );
+  });
+
+  it("cached result is passed to afterStep hook", async () => {
+    const afterStep = vi.fn();
+    const cached: CacheEntry = {
+      result: { status: "success", data: { v: 42 } },
+      skippedPhases: [],
+      createdAt: Date.now(),
+    };
+    const cache = makeCache({ "step-x": cached });
+
+    const wf = workflow("test", [step("step-x", "learn")]);
+
+    await runWorkflow(wf, {}, createProviderRegistry(), {
+      logger: silentLogger,
+      cache,
+      afterStep,
+    });
+
+    expect(afterStep).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "step-x" }),
+      expect.objectContaining({ status: "success", cached: true }),
+      expect.anything(),
+    );
+  });
+
+  it("non-fatal: cache.set error does not fail the workflow", async () => {
+    const cache: StepCache = {
+      get: vi.fn(async () => undefined),
+      set: vi.fn(async () => {
+        throw new Error("disk full");
+      }),
+    };
+
+    const wf = workflow("test", [step("step-y", "learn")]);
+
+    const result = await runWorkflow(wf, {}, createProviderRegistry(), { logger: silentLogger, cache });
+
+    expect(result.status).toBe("completed");
+  });
+
+  it("cached result is available to downstream steps via ctx.results", async () => {
+    let downstream: unknown;
+    const cached: CacheEntry = {
+      result: { status: "success", data: { answer: 99 } },
+      skippedPhases: [],
+      createdAt: Date.now(),
+    };
+    const cache = makeCache({ producer: cached });
+
+    const wf = workflow("test", [
+      step("producer", "learn"),
+      step("consumer", "act", async (ctx) => {
+        downstream = ctx.results.get("producer")?.data;
+        return { status: "success" };
+      }),
+    ]);
+
+    await runWorkflow(wf, {}, createProviderRegistry(), { logger: silentLogger, cache });
+
+    expect(downstream).toEqual({ answer: 99 });
   });
 });

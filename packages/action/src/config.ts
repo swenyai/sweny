@@ -192,6 +192,10 @@ export function validateInputs(config: ActionConfig): string[] {
       if (!config.observabilityCredentials.baseUrl)
         errors.push("Missing required input: `loki-url` is required when `observability-provider` is `loki`");
       break;
+    case "file":
+      if (!config.logFilePath)
+        errors.push("Missing required input: `log-file-path` is required when `observability-provider` is `file`");
+      break;
   }
 
   // Issue tracker credentials by provider

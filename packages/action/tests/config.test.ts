@@ -477,4 +477,47 @@ describe("validateInputs", () => {
     const errors = validateInputs(baseConfig({ issueTrackerProvider: "github-issues" }));
     expect(errors.some((e) => e.includes("issue-tracker"))).toBe(false);
   });
+
+  it("validates file observability requires log-file-path", () => {
+    const errors = validateInputs(
+      baseConfig({ observabilityProvider: "file", observabilityCredentials: { path: "" }, logFilePath: "" }),
+    );
+    expect(errors).toContainEqual(expect.stringContaining("log-file-path"));
+  });
+
+  it("passes file observability when log-file-path provided", () => {
+    const errors = validateInputs(
+      baseConfig({
+        observabilityProvider: "file",
+        observabilityCredentials: { path: "/tmp/logs.json" },
+        logFilePath: "/tmp/logs.json",
+      }),
+    );
+    expect(errors.filter((e) => e.includes("log-file-path"))).toHaveLength(0);
+  });
+
+  it("validates codex requires openai-api-key", () => {
+    const errors = validateInputs(baseConfig({ codingAgentProvider: "codex", openaiApiKey: "" }));
+    expect(errors).toContainEqual(expect.stringContaining("openai-api-key"));
+  });
+
+  it("passes codex when openai-api-key provided", () => {
+    const errors = validateInputs(baseConfig({ codingAgentProvider: "codex", openaiApiKey: "sk-openai-xxx" }));
+    expect(errors.filter((e) => e.includes("openai-api-key"))).toHaveLength(0);
+  });
+
+  it("validates gemini requires gemini-api-key", () => {
+    const errors = validateInputs(baseConfig({ codingAgentProvider: "gemini", geminiApiKey: "" }));
+    expect(errors).toContainEqual(expect.stringContaining("gemini-api-key"));
+  });
+
+  it("passes gemini when gemini-api-key provided", () => {
+    const errors = validateInputs(baseConfig({ codingAgentProvider: "gemini", geminiApiKey: "gemini-xxx" }));
+    expect(errors.filter((e) => e.includes("gemini-api-key"))).toHaveLength(0);
+  });
+
+  it("no coding agent key errors when claude selected", () => {
+    const errors = validateInputs(baseConfig({ codingAgentProvider: "claude" }));
+    expect(errors.filter((e) => e.includes("openai") || e.includes("gemini"))).toHaveLength(0);
+  });
 });

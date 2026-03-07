@@ -40,6 +40,9 @@
       "prettier --write"
     ]
   },
+  "overrides": {
+    "svgo": "^4.0.1"
+  },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
