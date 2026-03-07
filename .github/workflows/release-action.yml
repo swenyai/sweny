@@ -21,6 +21,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Build providers
+        run: npm run build --workspace=packages/providers
+
       - name: Verify dist is current
         run: |
           npm run package --workspace=packages/action
