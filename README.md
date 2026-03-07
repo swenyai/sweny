@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://sweny.ai/logo.png" alt="SWEny" width="120" />
-</p>
-
 <h1 align="center">SWEny</h1>
 
 <p align="center">
