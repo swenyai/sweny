@@ -1,284 +1,337 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Mocks — declared before imports
+// Persistent mock functions (survive vi.resetModules())
 // ---------------------------------------------------------------------------
 
-vi.mock("@actions/core", () => ({
-  startGroup: vi.fn(),
-  endGroup: vi.fn(),
-  info: vi.fn(),
-  warning: vi.fn(),
-  notice: vi.fn(),
-  debug: vi.fn(),
-  error: vi.fn(),
-  setOutput: vi.fn(),
-  setFailed: vi.fn(),
-  getInput: vi.fn().mockReturnValue(""),
-  getBooleanInput: vi.fn().mockReturnValue(false),
-}));
-
-const mockInvestigate = vi.fn();
-const mockImplement = vi.fn();
-const mockNotify = vi.fn();
+const mockSetFailed = vi.fn();
+const mockSetOutput = vi.fn();
+const mockStartGroup = vi.fn();
+const mockEndGroup = vi.fn();
+const mockInfo = vi.fn();
 const mockParseInputs = vi.fn();
+const mockValidateInputs = vi.fn();
 const mockCreateProviders = vi.fn();
-
-vi.mock("../src/phases/investigate.js", () => ({
-  investigate: mockInvestigate,
-}));
-
-vi.mock("../src/phases/implement.js", () => ({
-  implement: mockImplement,
-}));
-
-vi.mock("../src/phases/notify.js", () => ({
-  notify: mockNotify,
-}));
-
-vi.mock("../src/config.js", () => ({
-  parseInputs: mockParseInputs,
-}));
-
-vi.mock("../src/providers/index.js", () => ({
-  createProviders: mockCreateProviders,
-}));
-
-import * as core from "@actions/core";
-
-// We need to import after mocks are set up, but main.ts calls run() at
-// module level, so we test via dynamic import or by extracting the run fn.
-// Since main.ts calls run() at import time, we test the logic by calling the
-// individual mocked functions and verifying the orchestration.
+const mockRunWorkflow = vi.fn();
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helper: re-register all doMocks and dynamically import main.ts fresh
 // ---------------------------------------------------------------------------
 
-function makeConfig() {
-  return {
-    dryRun: false,
-    repository: "org/repo",
-    serviceFilter: "*",
-    timeRange: "24h",
-  };
-}
-
-function makeFakeProviders() {
-  return { fake: true };
-}
-
-function makeInvestigationResult(overrides = {}) {
-  return {
-    issuesFound: true,
-    bestCandidate: true,
-    recommendation: "implement",
-    existingIssue: "",
-    targetRepo: "",
-    shouldImplement: true,
-    ...overrides,
-  };
-}
-
-function makeImplementResult(overrides = {}) {
-  return {
-    issueIdentifier: "ENG-999",
-    issueUrl: "https://linear.app/ENG-999",
-    prUrl: "https://github.com/org/repo/pull/42",
-    prNumber: 42,
-    skipped: false,
-    ...overrides,
-  };
+async function loadMain() {
+  vi.resetModules();
+  vi.doMock("@actions/core", () => ({
+    getInput: vi.fn().mockReturnValue(""),
+    getBooleanInput: vi.fn().mockReturnValue(false),
+    setFailed: mockSetFailed,
+    setOutput: mockSetOutput,
+    startGroup: mockStartGroup,
+    endGroup: mockEndGroup,
+    info: mockInfo,
+    debug: vi.fn(),
+    warning: vi.fn(),
+    error: vi.fn(),
+  }));
+  vi.doMock("@sweny-ai/engine", () => ({
+    runWorkflow: mockRunWorkflow,
+    triageWorkflow: { name: "triage" },
+  }));
+  vi.doMock("../src/config.js", () => ({
+    parseInputs: mockParseInputs,
+    validateInputs: mockValidateInputs,
+  }));
+  vi.doMock("../src/providers/index.js", () => ({
+    createProviders: mockCreateProviders,
+  }));
+  await import("../src/main.js");
 }
 
 // ---------------------------------------------------------------------------
-// Since main.ts calls run() at module level on import, we replicate the
-// run() logic here using the same mocked dependencies to verify orchestration.
-// This avoids side-effect issues from dynamic import.
+// Default config returned by parseInputs in most tests
 // ---------------------------------------------------------------------------
 
-async function runMain(): Promise<void> {
-  try {
-    const config = mockParseInputs();
-    const providers = mockCreateProviders(config);
+const DEFAULT_CONFIG = {
+  anthropicApiKey: "sk-ant-test",
+  claudeOauthToken: "",
+  observabilityProvider: "datadog",
+  observabilityCredentials: { apiKey: "k", appKey: "a", site: "datadoghq.com" },
+  issueTrackerProvider: "github-issues",
+  sourceControlProvider: "github",
+  codingAgentProvider: "claude",
+  notificationProvider: "github-summary",
+  repository: "org/repo",
+  repositoryOwner: "org",
+  linearApiKey: "",
+  linearTeamId: "",
+  linearBugLabelId: "",
+  linearTriageLabelId: "",
+  linearStateBacklog: "",
+  linearStateInProgress: "",
+  linearStatePeerReview: "",
+  timeRange: "24h",
+  severityFocus: "errors",
+  serviceFilter: "*",
+  investigationDepth: "standard",
+  maxInvestigateTurns: 50,
+  maxImplementTurns: 30,
+  baseBranch: "main",
+  prLabels: [],
+  dryRun: false,
+  noveltyMode: false,
+  linearIssue: "",
+  additionalInstructions: "",
+  serviceMapPath: ".github/service-map.yml",
+  githubToken: "gh_test",
+  botToken: "",
+  jiraBaseUrl: "",
+  jiraEmail: "",
+  jiraApiToken: "",
+  gitlabToken: "",
+  gitlabProjectId: "",
+  gitlabBaseUrl: "https://gitlab.com",
+  notificationWebhookUrl: "",
+  sendgridApiKey: "",
+  emailFrom: "",
+  emailTo: "",
+  webhookSigningSecret: "",
+  openaiApiKey: "",
+  geminiApiKey: "",
+  logFilePath: "",
+};
 
-    core.startGroup("Phase 1: Investigate Production Logs");
-    const findings = await mockInvestigate(config, providers);
-    core.endGroup();
-
-    core.setOutput("issues-found", String(findings.issuesFound));
-    core.setOutput("recommendation", findings.recommendation);
-
-    let implementation;
-    if (findings.shouldImplement && !config.dryRun) {
-      core.startGroup("Phase 2: Implement Fix");
-      implementation = await mockImplement(config, providers, findings);
-      core.endGroup();
-
-      if (!implementation.skipped) {
-        core.setOutput("issue-identifier", implementation.issueIdentifier);
-        core.setOutput("issue-url", implementation.issueUrl);
-        core.setOutput("pr-url", implementation.prUrl);
-        core.setOutput("pr-number", String(implementation.prNumber));
-      }
-    }
-
-    core.startGroup("Phase 3: Create Summary");
-    await mockNotify(config, providers, findings, implementation);
-    core.endGroup();
-  } catch (error) {
-    if (error instanceof Error) {
-      core.setFailed(error.message);
-    } else {
-      core.setFailed("An unexpected error occurred");
-    }
-  }
-}
+const DEFAULT_PROVIDERS = new Map();
 
 // ---------------------------------------------------------------------------
-// Tests
+// Shared beforeEach: reset all mocks and set up happy-path defaults
 // ---------------------------------------------------------------------------
 
-describe("main run()", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockParseInputs.mockReturnValue(DEFAULT_CONFIG);
+  mockValidateInputs.mockReturnValue([]);
+  mockCreateProviders.mockReturnValue(DEFAULT_PROVIDERS);
+  mockRunWorkflow.mockResolvedValue({ steps: [] });
+});
 
-    mockParseInputs.mockReturnValue(makeConfig());
-    mockCreateProviders.mockReturnValue(makeFakeProviders());
-    mockInvestigate.mockResolvedValue(makeInvestigationResult());
-    mockImplement.mockResolvedValue(makeImplementResult());
-    mockNotify.mockResolvedValue(undefined);
-  });
+// ---------------------------------------------------------------------------
+// describe: run() orchestration
+// ---------------------------------------------------------------------------
 
-  // -----------------------------------------------------------------------
-  // 3-phase orchestration
-  // -----------------------------------------------------------------------
-
-  it("runs investigate -> implement -> notify in order", async () => {
+describe("run() orchestration", () => {
+  it("calls parseInputs, validateInputs, createProviders, and runWorkflow in sequence", async () => {
     const callOrder: string[] = [];
-    mockInvestigate.mockImplementation(async () => {
-      callOrder.push("investigate");
-      return makeInvestigationResult();
+    mockParseInputs.mockImplementation(() => {
+      callOrder.push("parseInputs");
+      return DEFAULT_CONFIG;
     });
-    mockImplement.mockImplementation(async () => {
-      callOrder.push("implement");
-      return makeImplementResult();
+    mockValidateInputs.mockImplementation(() => {
+      callOrder.push("validateInputs");
+      return [];
     });
-    mockNotify.mockImplementation(async () => {
-      callOrder.push("notify");
+    mockCreateProviders.mockImplementation(() => {
+      callOrder.push("createProviders");
+      return DEFAULT_PROVIDERS;
+    });
+    mockRunWorkflow.mockImplementation(async () => {
+      callOrder.push("runWorkflow");
+      return { steps: [] };
     });
 
-    await runMain();
+    await loadMain();
 
-    expect(callOrder).toEqual(["investigate", "implement", "notify"]);
+    expect(callOrder).toEqual(["parseInputs", "validateInputs", "createProviders", "runWorkflow"]);
   });
 
-  it("passes config and providers to all phases", async () => {
-    await runMain();
+  it("calls core.setFailed with joined validation errors and skips runWorkflow", async () => {
+    mockValidateInputs.mockReturnValue(["Error 1", "Error 2"]);
 
-    const config = makeConfig();
-    const providers = makeFakeProviders();
+    await loadMain();
 
-    expect(mockInvestigate).toHaveBeenCalledWith(config, providers);
-    expect(mockImplement).toHaveBeenCalledWith(config, providers, makeInvestigationResult());
-    expect(mockNotify).toHaveBeenCalledWith(config, providers, makeInvestigationResult(), makeImplementResult());
+    expect(mockSetFailed).toHaveBeenCalledWith("Error 1\nError 2");
+    expect(mockRunWorkflow).not.toHaveBeenCalled();
   });
 
-  // -----------------------------------------------------------------------
-  // GitHub Action outputs
-  // -----------------------------------------------------------------------
+  it("passes triageWorkflow as first arg and providers as third arg to runWorkflow", async () => {
+    const fakeProviders = new Map([["obs", {}]]);
+    mockCreateProviders.mockReturnValue(fakeProviders);
 
-  it("sets issues-found and recommendation outputs from investigation", async () => {
-    mockInvestigate.mockResolvedValue(
-      makeInvestigationResult({ issuesFound: false, recommendation: "skip", shouldImplement: false }),
+    await loadMain();
+
+    const [firstArg, , thirdArg] = mockRunWorkflow.mock.calls[0];
+    expect(firstArg).toEqual({ name: "triage" });
+    expect(thirdArg).toBe(fakeProviders);
+  });
+
+  it("calls core.setFailed with error.message when runWorkflow throws Error", async () => {
+    mockRunWorkflow.mockRejectedValue(new Error("workflow exploded"));
+
+    await loadMain();
+
+    expect(mockSetFailed).toHaveBeenCalledWith("workflow exploded");
+  });
+
+  it("calls core.setFailed with generic message when runWorkflow throws non-Error", async () => {
+    mockRunWorkflow.mockRejectedValue("plain string error");
+
+    await loadMain();
+
+    expect(mockSetFailed).toHaveBeenCalledWith("An unexpected error occurred");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// describe: beforeStep / afterStep hooks
+// ---------------------------------------------------------------------------
+
+describe("beforeStep / afterStep hooks", () => {
+  it("beforeStep calls core.startGroup with phase and step name", async () => {
+    await loadMain();
+
+    const options = mockRunWorkflow.mock.calls[0][3];
+    await options.beforeStep({ phase: "investigate", name: "fetch-logs" });
+
+    expect(mockStartGroup).toHaveBeenCalledWith("investigate: fetch-logs");
+  });
+
+  it("afterStep calls core.info with step name and status, then core.endGroup", async () => {
+    await loadMain();
+
+    const options = mockRunWorkflow.mock.calls[0][3];
+    await options.afterStep({ phase: "investigate", name: "fetch-logs" }, { status: "success" });
+
+    expect(mockInfo).toHaveBeenCalledWith("fetch-logs: success");
+    expect(mockEndGroup).toHaveBeenCalled();
+  });
+
+  it("afterStep includes reason in log message when stepResult.reason is set", async () => {
+    await loadMain();
+
+    const options = mockRunWorkflow.mock.calls[0][3];
+    await options.afterStep(
+      { phase: "investigate", name: "fetch-logs" },
+      { status: "skipped", reason: "no logs found" },
     );
 
-    await runMain();
+    expect(mockInfo).toHaveBeenCalledWith("fetch-logs: skipped — no logs found");
+  });
+});
 
-    expect(core.setOutput).toHaveBeenCalledWith("issues-found", "false");
-    expect(core.setOutput).toHaveBeenCalledWith("recommendation", "skip");
+// ---------------------------------------------------------------------------
+// describe: setGitHubOutputs
+// ---------------------------------------------------------------------------
+
+describe("setGitHubOutputs", () => {
+  it("sets issues-found and recommendation from investigate step", async () => {
+    mockRunWorkflow.mockResolvedValue({
+      steps: [
+        {
+          name: "investigate",
+          phase: "investigate",
+          result: { status: "success", data: { issuesFound: true, recommendation: "implement" } },
+        },
+      ],
+    });
+
+    await loadMain();
+
+    expect(mockSetOutput).toHaveBeenCalledWith("issues-found", "true");
+    expect(mockSetOutput).toHaveBeenCalledWith("recommendation", "implement");
   });
 
-  it("sets PR and issue outputs on successful implementation", async () => {
-    await runMain();
+  it("sets pr outputs from create-pr step", async () => {
+    mockRunWorkflow.mockResolvedValue({
+      steps: [
+        {
+          name: "create-pr",
+          phase: "implement",
+          result: {
+            status: "success",
+            data: {
+              issueIdentifier: "ENG-42",
+              issueUrl: "https://linear.app/ENG-42",
+              prUrl: "https://github.com/org/repo/pull/7",
+              prNumber: 7,
+            },
+          },
+        },
+      ],
+    });
 
-    expect(core.setOutput).toHaveBeenCalledWith("issue-identifier", "ENG-999");
-    expect(core.setOutput).toHaveBeenCalledWith("issue-url", "https://linear.app/ENG-999");
-    expect(core.setOutput).toHaveBeenCalledWith("pr-url", "https://github.com/org/repo/pull/42");
-    expect(core.setOutput).toHaveBeenCalledWith("pr-number", "42");
+    await loadMain();
+
+    expect(mockSetOutput).toHaveBeenCalledWith("issue-identifier", "ENG-42");
+    expect(mockSetOutput).toHaveBeenCalledWith("issue-url", "https://linear.app/ENG-42");
+    expect(mockSetOutput).toHaveBeenCalledWith("pr-url", "https://github.com/org/repo/pull/7");
+    expect(mockSetOutput).toHaveBeenCalledWith("pr-number", "7");
   });
 
-  it("does not set PR outputs when implementation is skipped", async () => {
-    mockImplement.mockResolvedValue(makeImplementResult({ skipped: true, prUrl: "", prNumber: 0 }));
+  it("sets issue-only outputs from create-issue step when no create-pr", async () => {
+    mockRunWorkflow.mockResolvedValue({
+      steps: [
+        {
+          name: "create-issue",
+          phase: "implement",
+          result: {
+            status: "success",
+            data: {
+              issueIdentifier: "ENG-99",
+              issueUrl: "https://linear.app/ENG-99",
+            },
+          },
+        },
+      ],
+    });
 
-    await runMain();
+    await loadMain();
 
-    expect(core.setOutput).not.toHaveBeenCalledWith("pr-url", expect.anything());
-    expect(core.setOutput).not.toHaveBeenCalledWith("pr-number", expect.anything());
+    expect(mockSetOutput).toHaveBeenCalledWith("issue-identifier", "ENG-99");
+    expect(mockSetOutput).toHaveBeenCalledWith("issue-url", "https://linear.app/ENG-99");
+    expect(mockSetOutput).not.toHaveBeenCalledWith("pr-url", expect.anything());
+    expect(mockSetOutput).not.toHaveBeenCalledWith("pr-number", expect.anything());
   });
 
-  // -----------------------------------------------------------------------
-  // Dry run skip
-  // -----------------------------------------------------------------------
+  it("does not set pr outputs when no create-pr step exists", async () => {
+    mockRunWorkflow.mockResolvedValue({
+      steps: [
+        {
+          name: "investigate",
+          phase: "investigate",
+          result: { status: "success", data: { issuesFound: false, recommendation: "skip" } },
+        },
+      ],
+    });
 
-  it("skips implement phase when dryRun is true", async () => {
-    mockParseInputs.mockReturnValue({ ...makeConfig(), dryRun: true });
+    await loadMain();
 
-    await runMain();
-
-    expect(mockImplement).not.toHaveBeenCalled();
-    // Notify is still called
-    expect(mockNotify).toHaveBeenCalledWith(
-      expect.objectContaining({ dryRun: true }),
-      expect.anything(),
-      expect.anything(),
-      undefined,
-    );
+    expect(mockSetOutput).not.toHaveBeenCalledWith("pr-url", expect.anything());
+    expect(mockSetOutput).not.toHaveBeenCalledWith("pr-number", expect.anything());
   });
 
-  // -----------------------------------------------------------------------
-  // shouldImplement = false skip
-  // -----------------------------------------------------------------------
+  it("does not crash when investigate step is absent", async () => {
+    mockRunWorkflow.mockResolvedValue({
+      steps: [
+        {
+          name: "create-pr",
+          phase: "implement",
+          result: {
+            status: "success",
+            data: {
+              issueIdentifier: "ENG-1",
+              issueUrl: "https://linear.app/ENG-1",
+              prUrl: "https://github.com/org/repo/pull/1",
+              prNumber: 1,
+            },
+          },
+        },
+      ],
+    });
 
-  it("skips implement phase when shouldImplement is false", async () => {
-    mockInvestigate.mockResolvedValue(makeInvestigationResult({ shouldImplement: false, recommendation: "skip" }));
+    await loadMain();
 
-    await runMain();
-
-    expect(mockImplement).not.toHaveBeenCalled();
-    expect(mockNotify).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ shouldImplement: false }),
-      undefined,
-    );
-  });
-
-  // -----------------------------------------------------------------------
-  // Error handling
-  // -----------------------------------------------------------------------
-
-  it("calls core.setFailed with Error message on failure", async () => {
-    mockInvestigate.mockRejectedValue(new Error("Investigation blew up"));
-
-    await runMain();
-
-    expect(core.setFailed).toHaveBeenCalledWith("Investigation blew up");
-  });
-
-  it("calls core.setFailed with generic message for non-Error throws", async () => {
-    mockInvestigate.mockRejectedValue("string error");
-
-    await runMain();
-
-    expect(core.setFailed).toHaveBeenCalledWith("An unexpected error occurred");
-  });
-
-  it("still calls notify even when implement is skipped", async () => {
-    mockInvestigate.mockResolvedValue(makeInvestigationResult({ shouldImplement: false }));
-
-    await runMain();
-
-    expect(mockNotify).toHaveBeenCalledOnce();
+    // Should not throw and should NOT set investigate outputs
+    expect(mockSetOutput).not.toHaveBeenCalledWith("issues-found", expect.anything());
+    expect(mockSetOutput).not.toHaveBeenCalledWith("recommendation", expect.anything());
+    // But should still set PR outputs
+    expect(mockSetOutput).toHaveBeenCalledWith("pr-url", "https://github.com/org/repo/pull/1");
   });
 });
