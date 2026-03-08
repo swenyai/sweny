@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { createProviderRegistry } from "../../runner.js";
+import { createProviderRegistry } from "../../runner-recipe.js";
 export const silentLogger = {
     info: vi.fn(),
     debug: vi.fn(),
@@ -34,8 +34,6 @@ export function createCtx(overrides) {
         logger: silentLogger,
         results: overrides?.results ?? new Map(),
         providers: overrides?.providers ?? createProviderRegistry(),
-        skipPhase: vi.fn(),
-        isPhaseSkipped: vi.fn(() => false),
     };
 }
 //# sourceMappingURL=test-helpers.js.map

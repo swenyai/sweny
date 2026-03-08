@@ -1,40 +1,30 @@
 import type { Logger } from "@sweny-ai/providers";
-/** The three phases of every workflow. */
+/** The three phases of every recipe. */
 export type WorkflowPhase = "learn" | "act" | "report";
-/** Result of executing a single step. */
+/** Result returned by a node after execution. */
 export interface StepResult {
-    /** Whether the step succeeded, was skipped, or failed. */
+    /** Whether the node succeeded, was skipped, or failed. */
     status: "success" | "skipped" | "failed";
-    /** Arbitrary output data — downstream steps read this via context.results. */
+    /**
+     * Arbitrary output data — downstream nodes read this via ctx.results.
+     * Set data.outcome (string) to drive on: routing in the runner.
+     */
     data?: Record<string, unknown>;
     /** Human-readable reason (especially useful for skipped/failed). */
     reason?: string;
     /** True when this result was replayed from cache rather than freshly executed. */
     cached?: boolean;
 }
-/** A single step in a workflow. */
-export interface WorkflowStep<TConfig = unknown> {
-    /** Unique name within the workflow (used as key in context.results). */
-    name: string;
-    /** Which phase this step belongs to. */
-    phase: WorkflowPhase;
-    /** Execute the step. Return result. Throw to fail. */
-    run(ctx: WorkflowContext<TConfig>): Promise<StepResult>;
-}
-/** Mutable context threaded through all steps in a run. */
+/** Mutable context threaded through every node in a recipe run. */
 export interface WorkflowContext<TConfig = unknown> {
     /** Recipe-specific configuration. */
     config: TConfig;
     /** Logger for structured output. */
     logger: Logger;
-    /** Accumulated results from completed steps, keyed by step name. */
+    /** Accumulated results from completed nodes, keyed by node id. */
     results: Map<string, StepResult>;
-    /** Bag of instantiated providers keyed by role. */
+    /** Instantiated providers, keyed by role ("observability", "issueTracker", etc.). */
     providers: ProviderRegistry;
-    /** Signal to short-circuit remaining steps in a phase. */
-    skipPhase(phase: WorkflowPhase, reason: string): void;
-    /** Check if a phase has been skipped. */
-    isPhaseSkipped(phase: WorkflowPhase): boolean;
 }
 /** Type-safe provider bag. */
 export interface ProviderRegistry {
@@ -45,20 +35,11 @@ export interface ProviderRegistry {
     /** Register a provider under a role key. */
     set(key: string, provider: unknown): void;
 }
-/** A complete workflow definition — an ordered list of steps grouped by phase. */
-export interface Workflow<TConfig = unknown> {
-    /** Human-readable workflow name. */
-    name: string;
-    /** Optional description of what this workflow does. */
-    description?: string;
-    /** Ordered list of steps. Steps are executed in array order but grouped by phase. */
-    steps: WorkflowStep<TConfig>[];
-}
-/** Overall result of running a workflow. */
+/** Overall result of running a recipe. */
 export interface WorkflowResult {
-    /** Completed = all steps done, failed = a learn step failed, partial = act/report failed. */
+    /** completed = all nodes finished, failed = critical node failed, partial = non-critical failure. */
     status: "completed" | "failed" | "partial";
-    /** Results for every step that was attempted. */
+    /** Every node that was attempted, in execution order. */
     steps: Array<{
         name: string;
         phase: WorkflowPhase;
@@ -67,26 +48,38 @@ export interface WorkflowResult {
     /** Total wall-clock milliseconds. */
     duration: number;
 }
-/** Options for the workflow runner. */
+/** Minimal node identity passed to beforeStep / afterStep hooks. */
+export interface StepMeta {
+    /** The node's unique id within the recipe. */
+    id: string;
+    /** The phase this node belongs to. */
+    phase: WorkflowPhase;
+}
+/** Options for runRecipe. */
 export interface RunOptions {
     /** Logger instance. Falls back to console. */
     logger?: Logger;
-    /** Called before each step. Return false to skip the step. */
-    beforeStep?(step: WorkflowStep, ctx: WorkflowContext): Promise<boolean | void>;
-    /** Called after each step completes. */
-    afterStep?(step: WorkflowStep, result: StepResult, ctx: WorkflowContext): Promise<void>;
+    /**
+     * Called before each node executes.
+     * Return false to skip the node (it will be recorded as "skipped" and routing continues normally).
+     */
+    beforeStep?(step: StepMeta, ctx: WorkflowContext): Promise<boolean | void>;
+    /** Called after each node completes (including skipped and cached). */
+    afterStep?(step: StepMeta, result: StepResult, ctx: WorkflowContext): Promise<void>;
     /** Step-level cache. When provided, successful results are stored and replayed on re-run. */
     cache?: import("./cache.js").StepCache;
 }
 /**
- * A single node in a recipe DAG.
- * Nodes are atomic, reusable units that run and return a StepResult.
- * Routing to the next node is determined by the outcome (see on).
+ * A single node in a Recipe.
+ *
+ * Nodes are atomic, reusable units: they receive context, do work, and return
+ * a StepResult. The same node can be wired into multiple recipes. Routing to
+ * the next node is determined by the `on` transition map.
  */
 export interface RecipeStep<TConfig = unknown> {
-    /** Unique id within the DAG (used as key in results map and transition targets). */
+    /** Unique id within the recipe (used as key in ctx.results and as transition target). */
     id: string;
-    /** Phase for logging and failure semantics (learn failure = abort). */
+    /** Phase for logging and failure semantics (critical nodes in any phase abort on failure). */
     phase: WorkflowPhase;
     /** Execute the node. Throw to fail. */
     run: (ctx: WorkflowContext<TConfig>) => Promise<StepResult>;
@@ -94,27 +87,36 @@ export interface RecipeStep<TConfig = unknown> {
      * Outcome → next node id.
      *
      * Outcome is resolved in order:
-     *   1. result.data?.outcome (string) — explicit outcome returned by the node
-     *   2. result.status ("success" | "skipped" | "failed")
+     *   1. result.data?.outcome (string) — explicit outcome set by the node
+     *   2. result.status           ("success" | "skipped" | "failed")
      *
-     * Special target id "end" stops the DAG.
-     * If the outcome has no matching transition, the runner continues to the
-     * next node in declaration order (for "success") or stops (for "failed").
+     * Reserved target: "end" — stops the recipe immediately (success).
+     * No match: falls back to the next node in declaration order for
+     * success/skipped, or stops for failed.
      */
     on?: Record<string, string>;
     /**
-     * If true, a failure aborts the entire DAG immediately (same semantics as
-     * learn phase in the sequential runner). Default: false.
+     * If true, any failure immediately aborts the entire recipe (status: "failed").
+     * Use for nodes whose output is required by everything that follows.
+     * Default: false.
      */
     critical?: boolean;
 }
-/** A complete recipe as a directed acyclic graph of nodes. */
+/**
+ * A complete recipe — a named, composable workflow defined as a DAG of nodes.
+ *
+ * The runner starts at `start`, executes each node, and follows `on` transitions
+ * to determine the next node. Shared nodes (e.g. create-pr, notify) can be
+ * imported by multiple recipes without duplication.
+ */
 export interface Recipe<TConfig = unknown> {
+    /** Human-readable name used in logs. */
     name: string;
+    /** Optional description of what this recipe does. */
     description?: string;
     /** Id of the first node to execute. */
     start: string;
-    /** All nodes in declaration order. Used for default sequencing when no transition matches. */
+    /** All nodes in declaration order. Order is the default routing fallback. */
     nodes: RecipeStep<TConfig>[];
 }
 //# sourceMappingURL=types.d.ts.map

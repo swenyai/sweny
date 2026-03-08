@@ -20,4 +20,6 @@ export interface SharedNodeConfig {
   timeRange?: string;
   /** Triage-specific: if set, skip duplicate-PR check for merged PRs. */
   issueOverride?: string;
+  /** Issue tracker provider key (e.g. "linear", "github-issues", "jira") — used for dynamic prompt/template labels. */
+  issueTrackerName?: string;
 }

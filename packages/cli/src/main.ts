@@ -207,7 +207,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
           console.log(formatPhaseHeader(step.phase as WorkflowPhase));
         }
 
-        startSpinner(step.name);
+        startSpinner(step.id);
       },
       afterStep: async (step, stepResult) => {
         if (config.json) return;
@@ -226,10 +226,10 @@ triageCmd.action(async (options: Record<string, unknown>) => {
         const reason = !isCached && stepResult.status !== "success" ? stepResult.reason : undefined;
 
         const counter = `[${stepIndex}/${totalSteps}]`;
-        console.log(formatStepLine(icon, counter, step.name, elapsed, reason));
+        console.log(formatStepLine(icon, counter, step.id, elapsed, reason));
 
         // Inline data details
-        const details = getStepDetails(step.name, stepResult.data as Record<string, unknown>);
+        const details = getStepDetails(step.id, stepResult.data as Record<string, unknown>);
         for (const detail of details) {
           console.log(`    ${c.subtle("\u21B3")} ${c.subtle(detail)}`);
         }
@@ -416,6 +416,7 @@ function mapToTriageConfig(config: CliConfig): TriageConfig {
     noveltyMode: config.noveltyMode,
     issueOverride: config.issueOverride,
     additionalInstructions: config.additionalInstructions,
+    issueTrackerName: config.issueTrackerProvider,
 
     agentEnv,
   };

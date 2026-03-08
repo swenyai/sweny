@@ -40,6 +40,9 @@ export interface TriageConfig {
   /** Default priority for new issues (default: 2). */
   issuePriority?: number;
 
+  // Issue tracker display name for prompts and templates (e.g. "linear", "github-issues", "jira", "file")
+  issueTrackerName?: string;
+
   // Coding agent auth (passed through as env vars)
   agentEnv: Record<string, string>;
 }

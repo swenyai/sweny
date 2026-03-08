@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
-import { createProviderRegistry } from "../../../runner.js";
+import { createProviderRegistry } from "../../../runner-recipe.js";
 import { investigate } from "./investigate.js";
 import { createCtx } from "../test-helpers.js";
 import type { StepResult } from "../../../types.js";

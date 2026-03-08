@@ -1,30 +1,29 @@
 import { consoleLogger } from "@sweny-ai/providers";
 import { createProviderRegistry } from "./registry.js";
-import type { CacheEntry } from "./cache.js";
 import type {
   ProviderRegistry,
   Recipe,
   RecipeStep,
   RunOptions,
+  StepMeta,
   StepResult,
   WorkflowContext,
-  WorkflowPhase,
   WorkflowResult,
 } from "./types.js";
 
 /**
  * Execute a Recipe as a state machine.
  *
- * Starts at dag.start, executes each node, then follows on to
- * determine the next node. Stops when a transition resolves to "end",
- * there is no next node, or a critical node fails.
+ * Starts at recipe.start, executes each node, then follows on: transitions to
+ * determine the next node. Stops when a transition resolves to "end", there is
+ * no next node, or a critical node fails.
  *
- * Outcome resolution order for on:
- *   1. result.data?.outcome (string) — explicit from the node
- *   2. result.status ("success" | "skipped" | "failed")
+ * Outcome resolution order (for on: routing):
+ *   1. result.data?.outcome (string) — explicit outcome set by the node
+ *   2. result.status        ("success" | "skipped" | "failed")
  */
 export async function runRecipe<TConfig>(
-  dag: Recipe<TConfig>,
+  recipe: Recipe<TConfig>,
   config: TConfig,
   providers: ProviderRegistry,
   options?: RunOptions,
@@ -35,97 +34,75 @@ export async function runRecipe<TConfig>(
   const results = new Map<string, StepResult>();
   const completedSteps: WorkflowResult["steps"] = [];
 
-  // Build lookup map
+  // Build id → node lookup and preserve declaration order for default routing
   const nodeMap = new Map<string, RecipeStep<TConfig>>();
   const nodeOrder: string[] = [];
-  for (const node of dag.nodes) {
+  for (const node of recipe.nodes) {
     nodeMap.set(node.id, node);
     nodeOrder.push(node.id);
   }
 
-  // Context (no skipPhase needed — routing is explicit via on)
-  const ctx: WorkflowContext<TConfig> = {
-    config,
-    logger,
-    results,
-    providers,
-    skipPhase(_phase: WorkflowPhase, _reason: string) {
-      // No-op in DAG mode — use node on instead
-    },
-    isPhaseSkipped(_phase: WorkflowPhase): boolean {
-      return false;
-    },
-  };
+  const ctx: WorkflowContext<TConfig> = { config, logger, results, providers };
 
-  let currentId: string | undefined = dag.start;
+  let currentId: string | undefined = recipe.start;
   let hasFailed = false;
   let aborted = false;
-  const visitedInRun: string[] = [];
+  const visited = new Set<string>();
 
   while (currentId && currentId !== "end") {
     const node = nodeMap.get(currentId);
     if (!node) {
-      logger.error(`[${dag.name}] Unknown node id: "${currentId}" — stopping`);
+      logger.error(`[${recipe.name}] Unknown node id: "${currentId}" — aborting`);
       aborted = true;
       break;
     }
 
-    if (visitedInRun.includes(currentId)) {
-      logger.error(`[${dag.name}] Cycle detected at node "${currentId}" — stopping`);
+    if (visited.has(currentId)) {
+      logger.error(`[${recipe.name}] Cycle detected at node "${currentId}" — aborting`);
       aborted = true;
       break;
     }
-    visitedInRun.push(currentId);
+    visited.add(currentId);
 
-    // beforeStep hook
+    const meta: StepMeta = { id: node.id, phase: node.phase };
+
+    // beforeStep hook — return false to skip this node
     if (options?.beforeStep) {
-      const stepShim = { name: node.id, phase: node.phase, run: node.run };
-      const proceed = await options.beforeStep(stepShim, ctx);
+      const proceed = await options.beforeStep(meta, ctx);
       if (proceed === false) {
         const result: StepResult = { status: "skipped", reason: "Skipped by beforeStep hook" };
         results.set(node.id, result);
         completedSteps.push({ name: node.id, phase: node.phase, result });
+        if (options.afterStep) await options.afterStep(meta, result, ctx);
         currentId = resolveNext(node, result, nodeOrder);
         continue;
       }
     }
 
-    // Cache check
+    // Cache check — replay a previously cached result if available
     if (options?.cache) {
       const entry = await options.cache.get(node.id);
       if (entry) {
         const result: StepResult = { ...entry.result, cached: true };
         results.set(node.id, result);
         completedSteps.push({ name: node.id, phase: node.phase, result });
-
-        if (options.afterStep) {
-          const stepShim = { name: node.id, phase: node.phase, run: node.run };
-          await options.afterStep(stepShim, result, ctx);
-        }
-
+        if (options.afterStep) await options.afterStep(meta, result, ctx);
         currentId = resolveNext(node, result, nodeOrder);
         continue;
       }
     }
 
-    // Execute
+    // Execute the node — result is always assigned (either from run or catch)
     let result: StepResult;
     try {
-      logger.info(`[${dag.name}] ${node.phase}/${node.id}: starting`);
+      logger.info(`[${recipe.name}] ${node.phase}/${node.id}: starting`);
       result = await node.run(ctx);
-      logger.info(`[${dag.name}] ${node.phase}/${node.id}: ${result.status}`);
+      logger.info(`[${recipe.name}] ${node.phase}/${node.id}: ${result.status}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error(`[${dag.name}] ${node.phase}/${node.id}: failed — ${message}`);
+      logger.error(`[${recipe.name}] ${node.phase}/${node.id}: failed — ${message}`);
       result = { status: "failed", reason: message };
       hasFailed = true;
-
-      if (node.critical) {
-        results.set(node.id, result);
-        completedSteps.push({ name: node.id, phase: node.phase, result });
-        aborted = true;
-        break;
-      }
     }
 
     results.set(node.id, result);
@@ -136,18 +113,12 @@ export async function runRecipe<TConfig>(
       break;
     }
 
-    // Cache successful results
+    // Persist successful results to cache
     if (result.status === "success" && options?.cache) {
-      await options.cache
-        .set(node.id, { result, skippedPhases: [], createdAt: Date.now() } satisfies CacheEntry)
-        .catch(() => {});
+      await options.cache.set(node.id, { result, createdAt: Date.now() }).catch(() => {}); // cache failures are non-fatal
     }
 
-    // afterStep hook
-    if (options?.afterStep) {
-      const stepShim = { name: node.id, phase: node.phase, run: node.run };
-      await options.afterStep(stepShim, result, ctx);
-    }
+    if (options?.afterStep) await options.afterStep(meta, result, ctx);
 
     currentId = resolveNext(node, result, nodeOrder);
   }
@@ -156,19 +127,23 @@ export async function runRecipe<TConfig>(
   return { status, steps: completedSteps, duration: Date.now() - start };
 }
 
-/** Resolve the next node id from on or default sequencing. */
+/**
+ * Resolve the id of the next node to execute.
+ *
+ * Priority:
+ *   1. Explicit on: match for result.data?.outcome
+ *   2. Explicit on: match for result.status
+ *   3. Next node in declaration order (success/skipped only)
+ *   4. undefined — stop the recipe
+ */
 function resolveNext<TConfig>(node: RecipeStep<TConfig>, result: StepResult, nodeOrder: string[]): string | undefined {
-  // Determine outcome key (explicit outcome first, then status)
   const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : result.status;
 
-  // Check explicit on
   if (node.on) {
-    if (outcome in node.on) return node.on[outcome] || undefined;
-    // Fall back to status if outcome didn't match
-    if (result.status in node.on) return node.on[result.status] || undefined;
+    if (outcome in node.on) return node.on[outcome];
+    if (result.status in node.on) return node.on[result.status];
   }
 
-  // Default: next node in declaration order (for success/skipped), stop for failed
   if (result.status === "failed") return undefined;
 
   const idx = nodeOrder.indexOf(node.id);

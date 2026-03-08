@@ -10,10 +10,11 @@ import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { runRecipe } from "../../runner-recipe.js";
-import { createProviderRegistry } from "../../runner.js";
+import { createProviderRegistry } from "../../runner-recipe.js";
 import { implementRecipe } from "./index.js";
 import { fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
 import { fileSourceControl } from "@sweny-ai/providers/source-control";
+import type { SourceControlProvider } from "@sweny-ai/providers/source-control";
 import type { CodingAgent, CodingAgentRunOptions } from "@sweny-ai/providers/coding-agent";
 import type { ImplementConfig } from "./types.js";
 
@@ -48,6 +49,7 @@ vi.mock("../triage/prompts.js", () => ({
   buildInvestigationPrompt: vi.fn().mockReturnValue("mock investigation prompt"),
   buildImplementPrompt: vi.fn().mockReturnValue("mock implement prompt"),
   buildPrDescriptionPrompt: vi.fn().mockReturnValue("mock pr description prompt"),
+  issueLink: vi.fn().mockReturnValue("[IDENTIFIER](https://issue.url)"),
 }));
 
 const silentLogger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -206,5 +208,151 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const implementStep = result.steps.find((s) => s.name === "implement-fix");
     expect(implementStep?.result.status).toBe("skipped");
     expect(implementStep?.result.reason).toContain("Fix declined");
+  });
+});
+
+// ── create-pr path coverage ───────────────────────────────────────────────────
+//
+// The file source control provider returns no commits when inGitRepo=false, so
+// implement-fix always skips in the default setup. These tests inject a custom
+// sourceControl that simulates having commits, letting implement-fix succeed and
+// create-pr run with the real file provider's PR creation logic.
+
+/**
+ * Build a source control provider that wraps fileSourceControl but overrides the
+ * git-state methods to simulate a branch with commits. createPullRequest still
+ * delegates to the real file provider so we get a real .pr-N.md file on disk.
+ */
+function buildSourceControlWithCommits(outputDir: string): SourceControlProvider {
+  const real = fileSourceControl({
+    outputDir,
+    logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  });
+  return {
+    async verifyAccess() {
+      return real.verifyAccess();
+    },
+    async findExistingPr() {
+      return null;
+    },
+    async hasNewCommits() {
+      return true;
+    },
+    async hasChanges() {
+      return false;
+    },
+    async getChangedFiles() {
+      return ["src/checkout.ts"];
+    },
+    async configureBotIdentity() {},
+    async createBranch() {},
+    async pushBranch() {},
+    async resetPaths() {},
+    async stageAndCommit() {},
+    async createPullRequest(opts) {
+      return real.createPullRequest(opts);
+    },
+    async listPullRequests(opts) {
+      return real.listPullRequests(opts);
+    },
+    async dispatchWorkflow(opts) {
+      return real.dispatchWorkflow(opts);
+    },
+  };
+}
+
+function buildProvidersWithCommits(outputDir: string) {
+  const registry = createProviderRegistry();
+  registry.set(
+    "issueTracker",
+    fileIssueTracking({ outputDir, logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } }),
+  );
+  registry.set("sourceControl", buildSourceControlWithCommits(outputDir));
+  registry.set("codingAgent", makeMockAgent());
+  registry.set("notification", { send: vi.fn().mockResolvedValue(undefined) });
+  return registry;
+}
+
+describe("implement workflow e2e — create-pr path", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-e2e-pr-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("create-pr step completes with status success when implement-fix succeeds", async () => {
+    const issueId = await seedIssue(tmpDir);
+    const providers = buildProvidersWithCommits(tmpDir);
+    const config = buildConfig(issueId, tmpDir);
+
+    // Ensure prs dir is created (verifyAccess on sourceControl does this)
+    await providers.get<SourceControlProvider>("sourceControl").verifyAccess();
+
+    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+
+    const implementStep = result.steps.find((s) => s.name === "implement-fix");
+    expect(implementStep?.result.status).toBe("success");
+
+    const createPrStep = result.steps.find((s) => s.name === "create-pr");
+    expect(createPrStep?.result.status).toBe("success");
+  });
+
+  it("create-pr result data contains prUrl, prNumber, and issueIdentifier", async () => {
+    const issueId = await seedIssue(tmpDir);
+    const providers = buildProvidersWithCommits(tmpDir);
+    const config = buildConfig(issueId, tmpDir);
+
+    await providers.get<SourceControlProvider>("sourceControl").verifyAccess();
+
+    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+
+    const createPrStep = result.steps.find((s) => s.name === "create-pr");
+    expect(createPrStep?.result.status).toBe("success");
+
+    const data = createPrStep?.result.data as Record<string, unknown>;
+    expect(data).toBeDefined();
+    expect(typeof data.prUrl).toBe("string");
+    expect(data.prUrl).toMatch(/^file:\/\//); // fileSourceControl returns a local file URL
+    expect(typeof data.prNumber).toBe("number");
+    expect(data.issueIdentifier).toBe(issueId);
+  });
+
+  it("fileSourceControl writes a .md file to prs/ dir when PR is created", async () => {
+    const issueId = await seedIssue(tmpDir);
+    const providers = buildProvidersWithCommits(tmpDir);
+    const config = buildConfig(issueId, tmpDir);
+
+    await providers.get<SourceControlProvider>("sourceControl").verifyAccess();
+
+    await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+
+    const prsDir = path.join(tmpDir, "prs");
+    const prFiles = fs.readdirSync(prsDir).filter((f) => f.endsWith(".md"));
+    expect(prFiles.length).toBeGreaterThanOrEqual(1);
+
+    const prContent = fs.readFileSync(path.join(prsDir, prFiles[0]!), "utf-8");
+    expect(prContent).toContain(`fix(${issueId})`);
+    expect(prContent).toContain("open");
+  });
+
+  it("notify step runs after create-pr completes", async () => {
+    const issueId = await seedIssue(tmpDir);
+    const providers = buildProvidersWithCommits(tmpDir);
+    const config = buildConfig(issueId, tmpDir);
+
+    await providers.get<SourceControlProvider>("sourceControl").verifyAccess();
+
+    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+
+    const notifyStep = result.steps.find((s) => s.name === "notify");
+    expect(notifyStep).toBeDefined();
+    expect(notifyStep?.result.status).toBe("success");
+
+    // Workflow as a whole should be completed
+    expect(result.status).toBe("completed");
   });
 });

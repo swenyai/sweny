@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { runRecipe } from "./runner-recipe.js";
-import { createProviderRegistry } from "./runner.js";
+import { createProviderRegistry } from "./runner-recipe.js";
 import type { Recipe, RecipeStep, StepResult, WorkflowContext } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -325,7 +325,7 @@ describe("runRecipe — hooks", () => {
     await runRecipe(r, {}, providers, {
       ...opts,
       beforeStep: async (step) => {
-        beforeIds.push(step.name);
+        beforeIds.push(step.id);
       },
     });
 
@@ -347,7 +347,7 @@ describe("runRecipe — hooks", () => {
 
     await runRecipe(r, {}, providers, {
       ...opts,
-      beforeStep: async (step) => (step.name === "a" ? false : undefined),
+      beforeStep: async (step) => (step.id === "a" ? false : undefined),
     });
 
     expect(ran).toEqual(["b"]);
@@ -360,7 +360,7 @@ describe("runRecipe — hooks", () => {
     await runRecipe(r, {}, providers, {
       ...opts,
       afterStep: async (step) => {
-        afterIds.push(step.name);
+        afterIds.push(step.id);
       },
     });
 

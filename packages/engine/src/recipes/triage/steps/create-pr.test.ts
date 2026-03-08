@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
-import { createProviderRegistry } from "../../../runner.js";
+import { createProviderRegistry } from "../../../runner-recipe.js";
 import { createPr } from "./create-pr.js";
 import { createCtx, silentLogger } from "../test-helpers.js";
 import type { StepResult } from "../../../types.js";
@@ -8,6 +8,7 @@ import type { StepResult } from "../../../types.js";
 vi.mock("fs");
 vi.mock("../prompts.js", () => ({
   buildPrDescriptionPrompt: vi.fn().mockReturnValue("mock pr desc prompt"),
+  issueLink: vi.fn().mockReturnValue("[IDENTIFIER](https://issue.url)"),
 }));
 vi.mock("@sweny-ai/providers/issue-tracking", () => ({
   canLinkPr: vi.fn(),

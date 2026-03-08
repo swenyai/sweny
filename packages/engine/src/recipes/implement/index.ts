@@ -31,7 +31,4 @@ export const implementRecipe: Recipe<ImplementConfig> = {
   ],
 };
 
-// Backwards compat alias
-export { implementRecipe as implementWorkflow };
-
 export type { ImplementConfig } from "./types.js";

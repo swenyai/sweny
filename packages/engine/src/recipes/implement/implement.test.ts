@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
 import { runRecipe } from "../../runner-recipe.js";
-import { createProviderRegistry } from "../../runner.js";
+import { createProviderRegistry } from "../../runner-recipe.js";
 import { implementRecipe } from "./index.js";
 import { fetchIssue } from "./steps/fetch-issue.js";
 import { verifyAccess } from "./steps/verify-access.js";
@@ -146,8 +146,6 @@ describe("fetchIssue step", () => {
       logger: silentLogger,
       results: new Map(),
       providers,
-      skipPhase: vi.fn(),
-      isPhaseSkipped: vi.fn(() => false),
     };
 
     const result = await fetchIssue(ctx);
@@ -169,8 +167,6 @@ describe("verifyAccess step (implement)", () => {
       logger: silentLogger,
       results: new Map(),
       providers,
-      skipPhase: vi.fn(),
-      isPhaseSkipped: vi.fn(() => false),
     };
 
     const result = await verifyAccess(ctx);

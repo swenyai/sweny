@@ -1,63 +1,35 @@
 import * as fs from "node:fs";
 import { parseServiceMap } from "./service-map.js";
 // ---------------------------------------------------------------------------
-// Investigation Prompt
+// Issue tracker label helpers
 // ---------------------------------------------------------------------------
-export function buildInvestigationPrompt(config, observability, knownIssuesContent) {
-    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
-    const parts = [];
-    parts.push(`You are an autonomous SRE agent investigating production issues.
-You have access to multiple tools and data sources. Your job is to investigate issues,
-understand problems, and prepare fixes.
-
-## CURRENT REPO
-You are running inside: **${config.repository}**
-
-## YOUR INPUTS - REVIEW THESE FIRST
-
-### Linear Issue
-${config.issueOverride || "(none provided)"}
-
-### Additional Instructions
-${config.additionalInstructions || "(none provided)"}
-
-### Cross-Repo Dispatch
-Dispatched from: (not dispatched — this is a direct run)
-Context from dispatcher: (none)
-
-### Investigation Parameters
-- Service Pattern: ${config.serviceFilter}
-- Time Range: ${config.timeRange}
-- Focus Area: ${config.severityFocus}
-- Investigation Depth: ${config.investigationDepth}
-
-## DECIDE YOUR APPROACH
-
-Based on the inputs above, decide how to proceed:
-
-1. **If a Linear Issue is provided** (e.g., ENG-123):
-   - Fetch the issue details and comments from Linear using the API
-   - Understand what the issue is about and any context from comments
-   - You may still query the observability provider for related logs if helpful
-   - Focus your investigation on this specific issue
-
-2. **If Additional Instructions are provided**:
-   - Follow them as your primary guide
-   - They may tell you to skip log investigation, focus on specific areas, etc.
-   - Use your judgment to combine with other inputs
-
-3. **If neither is provided** (default mode):
-   - Query the observability provider for recent errors
-   - Investigate the top issues
-   - Identify the best candidate for fixing
-
-4. **You can combine approaches** - e.g., work on a Linear issue AND check observability logs for related errors
-
-## AVAILABLE TOOLS
-
-${observability.getPromptInstructions()}
-
-### Linear API
+/** Human-readable label for the issue tracker, e.g. "GitHub Issues", "Linear", "Jira". */
+function issueTrackerLabel(name) {
+    switch (name) {
+        case "linear":
+            return "Linear";
+        case "github-issues":
+            return "GitHub Issues";
+        case "jira":
+            return "Jira";
+        case "file":
+            return "Issue Tracker";
+        default:
+            return "Issue Tracker";
+    }
+}
+/** Issue link format for the PR footer — uses GitHub's magic "Closes" keyword when applicable. */
+export function issueLink(name, identifier, url) {
+    if (name === "github-issues")
+        return `Closes ${identifier}`;
+    const label = issueTrackerLabel(name);
+    return `**${label}**: [${identifier}](${url})`;
+}
+/** API instructions block for the investigation prompt, tailored to the active issue tracker. */
+function issueTrackerApiInstructions(name) {
+    switch (name) {
+        case "linear":
+            return `### Linear API
 The \`LINEAR_API_KEY\` environment variable is set. Use the Linear GraphQL API directly via curl:
 
 \`\`\`bash
@@ -77,7 +49,110 @@ curl -s -X POST "https://api.linear.app/graphql" \\
 **Environment variables available:**
 - \`LINEAR_API_KEY\` - API key (already configured)
 - \`LINEAR_TEAM_ID\` - Team ID
-- \`LINEAR_BUG_LABEL_ID\` - Bug label ID
+- \`LINEAR_BUG_LABEL_ID\` - Bug label ID`;
+        case "github-issues":
+            return `### GitHub Issues API
+The \`GITHUB_TOKEN\` environment variable is set. Use the GitHub REST API directly via curl:
+
+\`\`\`bash
+# Get issue details by number (e.g., #20)
+curl -s -H "Authorization: token \${GITHUB_TOKEN}" \\
+  "https://api.github.com/repos/\${GITHUB_REPOSITORY}/issues/20"
+
+# Search for existing issues by keyword
+curl -s -H "Authorization: token \${GITHUB_TOKEN}" \\
+  "https://api.github.com/search/issues?q=KEYWORD+repo:\${GITHUB_REPOSITORY}+is:issue+is:open"
+
+# List open issues
+curl -s -H "Authorization: token \${GITHUB_TOKEN}" \\
+  "https://api.github.com/repos/\${GITHUB_REPOSITORY}/issues?state=open"
+\`\`\`
+
+**Environment variables available:**
+- \`GITHUB_TOKEN\` - GitHub token (already configured)
+- \`GITHUB_REPOSITORY\` - Repository in \`owner/repo\` format`;
+        case "jira":
+            return `### Jira API
+The \`JIRA_API_TOKEN\`, \`JIRA_BASE_URL\`, and \`JIRA_EMAIL\` environment variables are set. Use the Jira REST API via curl:
+
+\`\`\`bash
+# Get issue details by key (e.g., PROJ-123)
+curl -s -u "\${JIRA_EMAIL}:\${JIRA_API_TOKEN}" \\
+  "\${JIRA_BASE_URL}/rest/api/3/issue/PROJ-123"
+
+# Search for existing issues by keyword
+curl -s -u "\${JIRA_EMAIL}:\${JIRA_API_TOKEN}" \\
+  "\${JIRA_BASE_URL}/rest/api/3/issue/search?jql=text~\\"KEYWORD\\"&fields=id,key,summary,status,description"
+\`\`\`
+
+**Environment variables available:**
+- \`JIRA_API_TOKEN\` - API token (already configured)
+- \`JIRA_EMAIL\` - Account email
+- \`JIRA_BASE_URL\` - Jira instance URL`;
+        default:
+            return `### Issue Tracker
+Check the issue tracker for existing issues related to what you find. Use whatever tools are available in your environment.`;
+    }
+}
+// ---------------------------------------------------------------------------
+// Investigation Prompt
+// ---------------------------------------------------------------------------
+export function buildInvestigationPrompt(config, observability, knownIssuesContent) {
+    const analysisDir = config.analysisDir ?? ".github/triage-analysis";
+    const parts = [];
+    const tracker = issueTrackerLabel(config.issueTrackerName);
+    parts.push(`You are an autonomous SRE agent investigating production issues.
+You have access to multiple tools and data sources. Your job is to investigate issues,
+understand problems, and prepare fixes.
+
+## CURRENT REPO
+You are running inside: **${config.repository}**
+
+## YOUR INPUTS - REVIEW THESE FIRST
+
+### ${tracker} Issue Override
+${config.issueOverride || "(none provided)"}
+
+### Additional Instructions
+${config.additionalInstructions || "(none provided)"}
+
+### Cross-Repo Dispatch
+Dispatched from: (not dispatched — this is a direct run)
+Context from dispatcher: (none)
+
+### Investigation Parameters
+- Service Pattern: ${config.serviceFilter}
+- Time Range: ${config.timeRange}
+- Focus Area: ${config.severityFocus}
+- Investigation Depth: ${config.investigationDepth}
+
+## DECIDE YOUR APPROACH
+
+Based on the inputs above, decide how to proceed:
+
+1. **If a ${tracker} issue is provided** (e.g., an issue identifier or URL):
+   - Fetch the issue details and comments from ${tracker} using the API
+   - Understand what the issue is about and any context from comments
+   - You may still query the observability provider for related logs if helpful
+   - Focus your investigation on this specific issue
+
+2. **If Additional Instructions are provided**:
+   - Follow them as your primary guide
+   - They may tell you to skip log investigation, focus on specific areas, etc.
+   - Use your judgment to combine with other inputs
+
+3. **If neither is provided** (default mode):
+   - Query the observability provider for recent errors
+   - Investigate the top issues
+   - Identify the best candidate for fixing
+
+4. **You can combine approaches** - e.g., work on a ${tracker} issue AND check observability logs for related errors
+
+## AVAILABLE TOOLS
+
+${observability.getPromptInstructions()}
+
+${issueTrackerApiInstructions(config.issueTrackerName)}
 
 ## SERVICE OWNERSHIP MAP
 
@@ -143,15 +218,15 @@ For each issue found:
 - Description, Evidence (logs, stack traces)
 - Root Cause Analysis, Impact, Suggested Fix
 - Files to Modify, Confidence Level
-- **Linear Status**: Check if this issue already exists in Linear
-  - If exists: Note the issue identifier (e.g., ENG-123) and URL
-  - If not found: Note as "No existing Linear issue found"
+- **${tracker} Status**: Check if this issue already exists in ${tracker}
+  - If exists: Note the issue identifier and URL
+  - If not found: Note as "No existing ${tracker} issue found"
 
 ### 3. \`${analysisDir}/best-candidate.md\`
 Select the BEST issue to fix based on impact, frequency, fixability.
 Include full technical analysis, exact code changes, test plan, rollback plan.
 
-**CRITICAL - Title Format**: The first \`#\` heading in this file becomes the Linear issue title and PR title.
+**CRITICAL - Title Format**: The first \`#\` heading in this file becomes the issue title and PR title.
 Do NOT prefix it with "Best Candidate Fix:", "Best Fix Candidate:", or any boilerplate.
 Write a concise, descriptive bug title like you would for a real bug ticket. Examples:
 - \`# extractUserFromResult Null Guard in EmitsEvent Decorator\`
@@ -159,9 +234,9 @@ Write a concise, descriptive bug title like you would for a real bug ticket. Exa
 - \`# PostgreSQL Vector Cast Syntax Error in Embedding Repository\`
 Do NOT include backticks (\\\`) in the heading — they cause shell injection in CI.
 
-**Important**: Include Linear Status at the top showing if this issue already exists:
-- If exists: \`**Linear Issue**: [ENG-123](url) - Issue already tracked\`
-- If not found: \`**Linear Issue**: None found - New issue will be created\`
+**Important**: Include ${tracker} status at the top showing if this issue already exists:
+- If exists: \`**${tracker} Issue**: [identifier](url) - Issue already tracked\`
+- If not found: \`**${tracker} Issue**: None found - New issue will be created\`
 
 **Required**: Include a TRIAGE_FINGERPRINT block in an HTML comment at the very top of best-candidate.md:
 \`\`\`
@@ -194,7 +269,8 @@ Write files early and update them if needed. Do NOT keep investigating without w
 // ---------------------------------------------------------------------------
 // Implementation Prompt
 // ---------------------------------------------------------------------------
-export function buildImplementPrompt(issueIdentifier, analysisDir = ".github/triage-analysis") {
+export function buildImplementPrompt(issueIdentifier, analysisDir = ".github/triage-analysis", issueTrackerName) {
+    const tracker = issueTrackerLabel(issueTrackerName);
     return `You are implementing a fix for an issue identified from production logs.
 
 ## Context
@@ -226,7 +302,7 @@ Also read \`${analysisDir}/investigation-log.md\` for context.
    - <change 2>
 
    Identified by SWEny Triage
-   Linear: ${issueIdentifier}
+   ${tracker}: ${issueIdentifier}
    \`\`\`
 
 ## Safety Guidelines
@@ -240,7 +316,7 @@ Start by reading the best-candidate.md file.`;
 // ---------------------------------------------------------------------------
 // PR Description Prompt
 // ---------------------------------------------------------------------------
-export function buildPrDescriptionPrompt(issueIdentifier, issueUrl, analysisDir = ".github/triage-analysis") {
+export function buildPrDescriptionPrompt(issueIdentifier, issueUrl, analysisDir = ".github/triage-analysis", issueTrackerName) {
     return `Generate a pull request description.
 
 ## Context
@@ -274,7 +350,7 @@ Create \`${analysisDir}/pr-description.md\` with:
 <How to rollback>
 
 ---
-**Linear Issue**: [${issueIdentifier}](${issueUrl})
+${issueLink(issueTrackerName, issueIdentifier, issueUrl)}
 > Generated by SWEny Triage`;
 }
 //# sourceMappingURL=prompts.js.map

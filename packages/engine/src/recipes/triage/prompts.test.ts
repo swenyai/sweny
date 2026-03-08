@@ -216,7 +216,13 @@ describe("buildImplementPrompt", () => {
 
   it("embeds the issue identifier in the commit template", () => {
     const result = buildImplementPrompt("PROJ-42");
-    expect(result).toContain("Linear: PROJ-42");
+    expect(result).toContain("PROJ-42");
+  });
+
+  it("uses provider-specific label in commit template", () => {
+    expect(buildImplementPrompt("ENG-1", ".github/triage-analysis", "linear")).toContain("Linear: ENG-1");
+    expect(buildImplementPrompt("#20", ".github/triage-analysis", "github-issues")).toContain("GitHub Issues: #20");
+    expect(buildImplementPrompt("PROJ-5", ".github/triage-analysis", "jira")).toContain("Jira: PROJ-5");
   });
 });
 

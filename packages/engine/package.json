@@ -1,7 +1,7 @@
 {
   "name": "@sweny-ai/engine",
-  "version": "0.2.0",
-  "description": "Workflow engine for SWEny — Learn, Act, Report",
+  "version": "0.3.0",
+  "description": "Recipe engine for SWEny — composable DAG-based workflows",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
