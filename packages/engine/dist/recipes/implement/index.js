@@ -8,6 +8,9 @@ import { sendNotification } from "../../nodes/notify.js";
  *
  * Given a known issue identifier, fetches the issue, implements a fix,
  * and opens a PR. Skips the investigation/novelty phases of triage.
+ *
+ * Shared nodes (implement-fix, create-pr, notify) are typed to SharedNodeConfig,
+ * which ImplementConfig satisfies — no type casts needed.
  */
 export const implementWorkflow = {
     name: "implement",

@@ -14,8 +14,11 @@ export interface SharedNodeConfig {
     projectId: string;
     stateInProgress: string;
     statePeerReview: string;
+    /** Triage-specific: optional in implement context (undefined → omitted from notification). */
     serviceFilter?: string;
+    /** Triage-specific: optional in implement context (undefined → omitted from notification). */
     timeRange?: string;
+    /** Triage-specific: if set, skip duplicate-PR check for merged PRs. */
     issueOverride?: string;
 }
 //# sourceMappingURL=types.d.ts.map

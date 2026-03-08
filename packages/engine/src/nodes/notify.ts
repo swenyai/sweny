@@ -57,15 +57,16 @@ export async function sendNotification(ctx: WorkflowContext<SharedNodeConfig>): 
 
   const fields: NotificationField[] = [
     { label: "Run Date", value: new Date().toISOString(), short: true },
-    ...(config.serviceFilter !== undefined
-      ? [{ label: "Service Filter", value: `\`${config.serviceFilter}\``, short: true } as NotificationField]
-      : []),
-    ...(config.timeRange !== undefined
-      ? [{ label: "Time Range", value: `\`${config.timeRange}\``, short: true } as NotificationField]
-      : []),
     { label: "Dry Run", value: String(config.dryRun), short: true },
     { label: "Recommendation", value: investigation?.recommendation ?? "unknown", short: true },
   ];
+
+  if (config.serviceFilter !== undefined) {
+    fields.splice(1, 0, { label: "Service Filter", value: `\`${config.serviceFilter}\``, short: true });
+  }
+  if (config.timeRange !== undefined) {
+    fields.splice(config.serviceFilter !== undefined ? 2 : 1, 0, { label: "Time Range", value: `\`${config.timeRange}\``, short: true });
+  }
 
   // -------------------------------------------------------------------------
   // Action links
