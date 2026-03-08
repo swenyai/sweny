@@ -144,6 +144,7 @@ export function mapToTriageConfig(config: ActionConfig): TriageConfig {
     noveltyMode: config.noveltyMode,
     issueOverride: config.linearIssue,
     additionalInstructions: config.additionalInstructions,
+    issueTrackerName: config.issueTrackerProvider,
 
     agentEnv,
   };

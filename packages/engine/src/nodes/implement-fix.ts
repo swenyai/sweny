@@ -61,7 +61,7 @@ export async function implementFix(ctx: WorkflowContext<SharedNodeConfig>): Prom
   // -------------------------------------------------------------------------
   await codingAgent.install();
 
-  const implementPrompt = buildImplementPrompt(issueIdentifier, analysisDir);
+  const implementPrompt = buildImplementPrompt(issueIdentifier, analysisDir, config.issueTrackerName);
   await codingAgent.run({
     prompt: implementPrompt,
     maxTurns: config.maxImplementTurns,

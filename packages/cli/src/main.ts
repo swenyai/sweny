@@ -416,6 +416,7 @@ function mapToTriageConfig(config: CliConfig): TriageConfig {
     noveltyMode: config.noveltyMode,
     issueOverride: config.issueOverride,
     additionalInstructions: config.additionalInstructions,
+    issueTrackerName: config.issueTrackerProvider,
 
     agentEnv,
   };
