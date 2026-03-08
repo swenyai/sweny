@@ -1,4 +1,4 @@
-name: "SWEny Triage"
+name: "SWEny AI"
 description: "Autonomous SRE triage — monitors logs, investigates issues, creates tickets, and opens fix PRs."
 author: "SWEny"
 

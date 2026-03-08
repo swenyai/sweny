@@ -3,13 +3,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Command } from "commander";
 import chalk from "chalk";
-import { runWorkflow, triageWorkflow } from "@sweny-ai/engine";
-import type { StepCache, TriageConfig, WorkflowPhase } from "@sweny-ai/engine";
+import { runWorkflow, triageWorkflow, implementWorkflow, createProviderRegistry } from "@sweny-ai/engine";
+import type { StepCache, TriageConfig, WorkflowPhase, ImplementConfig } from "@sweny-ai/engine";
 import { createFsCache, hashConfig } from "./cache.js";
 import { loadDotenv, loadConfigFile, STARTER_CONFIG } from "./config-file.js";
-import { registerTriageCommand, parseCliInputs, validateInputs } from "./config.js";
+import { registerTriageCommand, registerImplementCommand, parseCliInputs, validateInputs } from "./config.js";
 import type { CliConfig } from "./config.js";
-import { createProviders } from "./providers/index.js";
+import { createProviders, createImplementProviders } from "./providers/index.js";
 import {
   c,
   phaseColor,
@@ -260,6 +260,87 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     process.exit(1);
   }
 });
+
+// ── sweny implement ───────────────────────────────────────────────────
+const implementCmd = registerImplementCommand(program);
+
+implementCmd.action(async (issueId: string, options: Record<string, unknown>) => {
+  const fileConfig = loadConfigFile();
+  // Build a minimal CliConfig for the implement command by merging CLI opts with env/file
+  const config: CliConfig = {
+    ...parseCliInputs(options, fileConfig),
+    // Override specific fields that differ for implement
+    issueTrackerProvider: (options.issueTrackerProvider as string) || fileConfig["issue-tracker-provider"] || "linear",
+    sourceControlProvider:
+      (options.sourceControlProvider as string) || fileConfig["source-control-provider"] || "github",
+    codingAgentProvider: (options.codingAgentProvider as string) || fileConfig["coding-agent-provider"] || "claude",
+    dryRun: Boolean(options.dryRun),
+    maxImplementTurns: parseInt(String(options.maxImplementTurns || fileConfig["max-implement-turns"] || "40"), 10),
+    baseBranch: (options.baseBranch as string) || fileConfig["base-branch"] || "main",
+    repository: (options.repository as string) || process.env.GITHUB_REPOSITORY || "",
+    outputDir:
+      (options.outputDir as string) || process.env.SWENY_OUTPUT_DIR || fileConfig["output-dir"] || ".sweny/output",
+  };
+
+  const logger = {
+    info: (...args: unknown[]) => console.log(...args),
+    debug: () => {},
+    warn: (...args: unknown[]) => console.warn(...args),
+    error: (...args: unknown[]) => console.error(...args),
+  };
+
+  const providers = createImplementProviders(config, logger);
+  const implementConfig = mapToImplementConfig(issueId, config);
+
+  console.log(chalk.cyan(`\n  sweny implement ${issueId}\n`));
+
+  try {
+    const result = await runWorkflow(implementWorkflow, implementConfig, providers, { logger });
+    if (result.status === "failed") {
+      console.error(chalk.red(`\n  Implement workflow failed\n`));
+      process.exit(1);
+    }
+    const prStep = result.steps.find((s) => s.name === "create-pr");
+    const prUrl = prStep?.result.data?.prUrl as string | undefined;
+    if (prUrl) {
+      console.log(chalk.green(`\n  PR created: ${prUrl}\n`));
+    } else {
+      console.log(chalk.green(`\n  Implement workflow completed (${result.status})\n`));
+    }
+    process.exit(0);
+  } catch (err) {
+    console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+    process.exit(1);
+  }
+});
+
+function mapToImplementConfig(issueId: string, config: CliConfig): ImplementConfig {
+  const agentEnv: Record<string, string> = {};
+  if (config.anthropicApiKey) agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
+  if (config.claudeOauthToken) agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+  if (config.openaiApiKey) agentEnv.OPENAI_API_KEY = config.openaiApiKey;
+  if (config.geminiApiKey) agentEnv.GEMINI_API_KEY = config.geminiApiKey;
+  if (config.githubToken) agentEnv.GITHUB_TOKEN = config.githubToken;
+  if (config.linearApiKey) agentEnv.LINEAR_API_KEY = config.linearApiKey;
+  if (config.linearTeamId) agentEnv.LINEAR_TEAM_ID = config.linearTeamId;
+  if (config.jiraBaseUrl) agentEnv.JIRA_BASE_URL = config.jiraBaseUrl;
+  if (config.jiraEmail) agentEnv.JIRA_EMAIL = config.jiraEmail;
+  if (config.jiraApiToken) agentEnv.JIRA_API_TOKEN = config.jiraApiToken;
+  if (config.gitlabToken) agentEnv.GITLAB_TOKEN = config.gitlabToken;
+
+  return {
+    issueIdentifier: issueId,
+    repository: config.repository,
+    dryRun: config.dryRun,
+    maxImplementTurns: config.maxImplementTurns,
+    baseBranch: config.baseBranch,
+    prLabels: config.prLabels,
+    projectId: config.linearTeamId || (config.issueTrackerProvider === "file" ? "local" : ""),
+    stateInProgress: config.linearStateInProgress || (config.issueTrackerProvider === "file" ? "in-progress" : ""),
+    statePeerReview: config.linearStatePeerReview || (config.issueTrackerProvider === "file" ? "peer-review" : ""),
+    agentEnv,
+  };
+}
 
 function mapToTriageConfig(config: CliConfig): TriageConfig {
   // Build agent env vars for coding agent auth

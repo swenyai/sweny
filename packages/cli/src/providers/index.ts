@@ -239,3 +239,64 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
 
   return registry;
 }
+
+/**
+ * Create providers for the implement workflow.
+ * Only issueTracker, sourceControl, and codingAgent are needed — no observability.
+ */
+export function createImplementProviders(config: CliConfig, logger: CliLogger): ProviderRegistry {
+  const registry = createProviderRegistry();
+
+  // Issue tracker
+  switch (config.issueTrackerProvider) {
+    case "linear":
+      registry.set("issueTracker", linear({ apiKey: config.linearApiKey, logger }));
+      break;
+    case "jira":
+      registry.set(
+        "issueTracker",
+        jira({ baseUrl: config.jiraBaseUrl, email: config.jiraEmail, apiToken: config.jiraApiToken, logger }),
+      );
+      break;
+    case "github-issues":
+      registry.set("issueTracker", githubIssues({ token: config.githubToken || config.botToken, logger }));
+      break;
+    case "file":
+    default:
+      registry.set("issueTracker", fileIssueTracking({ outputDir: config.outputDir, logger }));
+      break;
+  }
+
+  // Source control
+  switch (config.sourceControlProvider) {
+    case "gitlab":
+      registry.set(
+        "sourceControl",
+        gitlab({ token: config.gitlabToken, projectId: config.gitlabProjectId, baseUrl: config.gitlabBaseUrl, logger }),
+      );
+      break;
+    case "file":
+      registry.set("sourceControl", fileSourceControl({ outputDir: config.outputDir, logger }));
+      break;
+    case "github":
+    default:
+      registry.set("sourceControl", github({ token: config.githubToken || config.botToken, logger }));
+      break;
+  }
+
+  // Coding agent
+  switch (config.codingAgentProvider) {
+    case "codex":
+      registry.set("codingAgent", openaiCodex({ logger, quiet: true }));
+      break;
+    case "gemini":
+      registry.set("codingAgent", googleGemini({ logger, quiet: true }));
+      break;
+    case "claude":
+    default:
+      registry.set("codingAgent", claudeCode({ logger, quiet: true }));
+      break;
+  }
+
+  return registry;
+}

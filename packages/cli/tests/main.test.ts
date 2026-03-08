@@ -115,15 +115,21 @@ async function loadMain(argv: string[]) {
         return {};
       },
     })),
+    registerImplementCommand: vi.fn().mockImplementation(() => ({
+      action: () => ({}),
+    })),
     parseCliInputs: mockParseCliInputs,
     validateInputs: mockValidateInputs,
   }));
   vi.doMock("@sweny-ai/engine", () => ({
     runWorkflow: mockRunWorkflow,
     triageWorkflow: { name: "triage", steps: [] },
+    implementWorkflow: { name: "implement", steps: [] },
+    createProviderRegistry: vi.fn(() => ({ set: vi.fn(), get: vi.fn(), has: vi.fn() })),
   }));
   vi.doMock("../src/providers/index.js", () => ({
     createProviders: mockCreateProviders,
+    createImplementProviders: vi.fn(() => ({ set: vi.fn(), get: vi.fn(), has: vi.fn() })),
   }));
   vi.doMock("../src/cache.js", () => ({
     createFsCache: vi.fn().mockReturnValue({ get: vi.fn(), set: vi.fn() }),

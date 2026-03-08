@@ -421,6 +421,23 @@ function parseObservabilityCredentials(
   }
 }
 
+export function registerImplementCommand(program: Command): Command {
+  return program
+    .command("implement <issueId>")
+    .description("Implement a fix for a specific issue and open a PR")
+    .option("--coding-agent-provider <provider>", "Coding agent (default: claude)")
+    .option("--issue-tracker-provider <provider>", "Issue tracker (linear|jira|github-issues|file)")
+    .option("--source-control-provider <provider>", "Source control (github|gitlab|file)")
+    .option("--dry-run", "Skip creating PR — report only", false)
+    .option("--max-implement-turns <n>", "Max coding agent turns (default: 40)")
+    .option("--base-branch <branch>", "Base branch for PRs (default: main)")
+    .option("--repository <owner/repo>", "Repository (auto-detected from git remote)")
+    .option("--linear-team-id <id>", "Linear team ID")
+    .option("--linear-state-in-progress <name>", "Linear in-progress state name")
+    .option("--linear-state-peer-review <name>", "Linear peer-review state name")
+    .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)");
+}
+
 function detectRepository(): string {
   try {
     const remote = execSync("git remote get-url origin", { encoding: "utf-8" }).trim();
