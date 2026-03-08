@@ -9,8 +9,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { runWorkflow, createProviderRegistry } from "../../runner.js";
-import { implementWorkflow } from "./index.js";
+import { runRecipe } from "../../runner-recipe.js";
+import { createProviderRegistry } from "../../runner.js";
+import { implementRecipe } from "./index.js";
 import { fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
 import { fileSourceControl } from "@sweny-ai/providers/source-control";
 import type { CodingAgent, CodingAgentRunOptions } from "@sweny-ai/providers/coding-agent";
@@ -112,7 +113,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir);
     const config = buildConfig(issueId, tmpDir);
 
-    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
+    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
 
     const verifyStep = result.steps.find((s) => s.name === "verify-access");
     expect(verifyStep?.result.status).toBe("success");
@@ -123,7 +124,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir);
     const config = buildConfig(issueId, tmpDir);
 
-    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
+    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
 
     const fetchStep = result.steps.find((s) => s.name === "create-issue");
     expect(fetchStep?.result.status).toBe("success");
@@ -135,7 +136,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir);
     const config = buildConfig(issueId, tmpDir);
 
-    await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
+    await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
 
     const analysisDir = path.join(tmpDir, "analysis");
     const bestCandidatePath = path.join(analysisDir, "best-candidate.md");
@@ -150,7 +151,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir, onRun);
     const config = buildConfig(issueId, tmpDir);
 
-    await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
+    await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
 
     expect(onRun).toHaveBeenCalled();
     const [callOpts] = onRun.mock.calls[0];
@@ -164,7 +165,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const config = buildConfig(issueId, tmpDir);
 
     // Should not throw
-    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
+    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
 
     // All learn steps should succeed; act steps may be skipped (no git changes)
     const verifyStep = result.steps.find((s) => s.name === "verify-access");
@@ -179,7 +180,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir);
     const config = buildConfig("LOCAL-999", tmpDir);
 
-    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
+    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
 
     // create-issue is in learn phase — failure aborts the workflow
     expect(result.status).toBe("failed");
@@ -200,7 +201,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir, agentOnRun);
     const config = buildConfig(issueId, tmpDir);
 
-    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
+    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
 
     const implementStep = result.steps.find((s) => s.name === "implement-fix");
     expect(implementStep?.result.status).toBe("skipped");
