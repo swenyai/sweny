@@ -183,6 +183,7 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
     },
 
     async findExistingPr(searchTerm: string): Promise<PullRequest | null> {
+      if (!searchTerm) return null;
       // Search open PRs
       const openPrs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?state=open&per_page=20`, token)) as {
         number: number;

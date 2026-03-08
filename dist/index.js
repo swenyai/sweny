@@ -48318,6 +48318,8 @@ function github(config) {
             return results;
         },
         async findExistingPr(searchTerm) {
+            if (!searchTerm)
+                return null;
             // Search open PRs
             const openPrs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?state=open&per_page=20`, token));
             for (const pr of openPrs) {
@@ -50226,6 +50228,7 @@ function googleGemini(config) {
 
 
 
+
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ../providers/dist/credential-vault/aws-secrets-manager.js
 
@@ -51148,10 +51151,7 @@ async function createIssue(ctx) {
             if (external_node_fs_.existsSync(bestCandidatePath)) {
                 description = external_node_fs_.readFileSync(bestCandidatePath, "utf-8").slice(0, DESCRIPTION_MAX_LENGTH);
             }
-            const labelIds = [config.bugLabelId];
-            if (config.triageLabelId) {
-                labelIds.push(config.triageLabelId);
-            }
+            const labelIds = [config.bugLabelId, config.triageLabelId].filter((l) => !!l);
             issue = await issueTracker.createIssue({
                 title: issueTitle,
                 projectId: config.projectId,
@@ -51568,10 +51568,96 @@ const triageWorkflow = {
 };
 
 //# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/implement/steps/verify-access.js
+/** Verify that issue tracker and source control providers are reachable. */
+async function verify_access_verifyAccess(ctx) {
+    const issueTracker = ctx.providers.get("issueTracker");
+    await issueTracker.verifyAccess();
+    ctx.logger.info("Issue tracker access verified");
+    const sourceControl = ctx.providers.get("sourceControl");
+    await sourceControl.verifyAccess();
+    ctx.logger.info("Source control access verified");
+    return { status: "success" };
+}
+//# sourceMappingURL=verify-access.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/implement/steps/fetch-issue.js
+
+/** Fetch issue details from the tracker and write a context file for the coding agent. */
+async function fetchIssue(ctx) {
+    const issueTracker = ctx.providers.get("issueTracker");
+    const issue = await issueTracker.getIssue(ctx.config.issueIdentifier);
+    ctx.logger.info(`Fetched issue: ${issue.identifier} — ${issue.title}`);
+    const analysisDir = ctx.config.analysisDir ?? ".github/triage-analysis";
+    external_node_fs_.mkdirSync(analysisDir, { recursive: true });
+    external_node_fs_.writeFileSync(`${analysisDir}/best-candidate.md`, [
+        `# ${issue.title}`,
+        ``,
+        `**Issue**: ${issue.identifier}`,
+        `**URL**: ${issue.url}`,
+        ``,
+        `## Description`,
+        ``,
+        issue.description ?? "(no description provided)",
+    ].join("\n"));
+    return {
+        status: "success",
+        data: {
+            issueId: issue.id,
+            issueIdentifier: issue.identifier,
+            issueTitle: issue.title,
+            issueUrl: issue.url,
+            issueBranchName: issue.branchName,
+        },
+    };
+}
+//# sourceMappingURL=fetch-issue.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/implement/index.js
+
+
+
+
+
+/**
+ * The implement recipe.
+ *
+ * Given a known issue identifier, fetches the issue, implements a fix,
+ * and opens a PR. Skips the investigation/novelty phases of triage.
+ *
+ * Steps that were written for TriageConfig are reused via cast — they only
+ * access the config fields that ImplementConfig also provides.
+ */
+const implementWorkflow = {
+    name: "implement",
+    description: "Implement a fix for a specific issue and open a pull request",
+    steps: [
+        { name: "verify-access", phase: "learn", run: verify_access_verifyAccess },
+        // Named "create-issue" so that implementFix and createPr find it via getStepData
+        { name: "create-issue", phase: "learn", run: fetchIssue },
+        // Cast: implementFix/createPr use TriageConfig but only access fields
+        // that ImplementConfig provides (agentEnv, dryRun, maxImplementTurns, etc.)
+        {
+            name: "implement-fix",
+            phase: "act",
+            run: implementFix,
+        },
+        {
+            name: "create-pr",
+            phase: "act",
+            run: createPr,
+        },
+        {
+            name: "notify",
+            phase: "report",
+            run: sendNotification,
+        },
+    ],
+};
+//# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ../engine/dist/index.js
 // Runtime
 
 // Recipes
+
 
 
 //# sourceMappingURL=index.js.map
