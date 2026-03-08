@@ -286,11 +286,17 @@ export function createImplementProviders(config: CliConfig, logger: CliLogger): 
       );
       break;
     case "file":
-      registry.set("sourceControl", fileSourceControl({ outputDir: config.outputDir, baseBranch: config.baseBranch, logger }));
+      registry.set(
+        "sourceControl",
+        fileSourceControl({ outputDir: config.outputDir, baseBranch: config.baseBranch, logger }),
+      );
       break;
     case "github":
     default:
-      registry.set("sourceControl", github({ token: config.githubToken || config.botToken, owner: implOwner, repo: implRepo, logger }));
+      registry.set(
+        "sourceControl",
+        github({ token: config.githubToken || config.botToken, owner: implOwner, repo: implRepo, logger }),
+      );
       break;
   }
 

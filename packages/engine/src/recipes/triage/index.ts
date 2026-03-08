@@ -18,15 +18,17 @@ export const triageRecipe: Recipe<TriageConfig> = {
   start: "verify-access",
   nodes: [
     // Learn phase — gather data
-    { id: "verify-access",   phase: "learn", run: verifyAccess,   critical: true },
-    { id: "build-context",   phase: "learn", run: buildContext,   critical: true },
-    { id: "investigate",     phase: "learn", run: investigate,    critical: true },
+    { id: "verify-access", phase: "learn", run: verifyAccess, critical: true },
+    { id: "build-context", phase: "learn", run: buildContext, critical: true },
+    { id: "investigate", phase: "learn", run: investigate, critical: true },
 
     // Act phase — novelty gate routes to create-issue or directly to notify
     {
-      id: "novelty-gate", phase: "act", run: noveltyGate,
+      id: "novelty-gate",
+      phase: "act",
+      run: noveltyGate,
       on: {
-        skip:      "notify",        // dry-run, skip, or +1 all go straight to report
+        skip: "notify", // dry-run, skip, or +1 all go straight to report
         implement: "create-issue",
       },
     },
@@ -34,14 +36,16 @@ export const triageRecipe: Recipe<TriageConfig> = {
 
     // Cross-repo check routes to implement-fix or to notify
     {
-      id: "cross-repo-check", phase: "act", run: crossRepoCheck,
+      id: "cross-repo-check",
+      phase: "act",
+      run: crossRepoCheck,
       on: {
-        local:      "implement-fix",
+        local: "implement-fix",
         dispatched: "notify",
       },
     },
-    { id: "implement-fix", phase: "act",    run: implementFix },
-    { id: "create-pr",     phase: "act",    run: createPr },
+    { id: "implement-fix", phase: "act", run: implementFix },
+    { id: "create-pr", phase: "act", run: createPr },
 
     // Report phase — notify stakeholders
     { id: "notify", phase: "report", run: sendNotification },
