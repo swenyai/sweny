@@ -122,7 +122,9 @@ async function loadMain(argv: string[]) {
     validateInputs: mockValidateInputs,
   }));
   vi.doMock("@sweny-ai/engine", () => ({
-    runWorkflow: mockRunWorkflow,
+    runRecipe: mockRunWorkflow,
+    triageRecipe: { nodes: [], edges: [] },
+    implementRecipe: { nodes: [], edges: [] },
     triageWorkflow: { name: "triage", steps: [] },
     implementWorkflow: { name: "implement", steps: [] },
     createProviderRegistry: vi.fn(() => ({ set: vi.fn(), get: vi.fn(), has: vi.fn() })),
