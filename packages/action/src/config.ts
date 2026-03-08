@@ -1,6 +1,9 @@
 import * as core from "@actions/core";
 
 export interface ActionConfig {
+  // Recipe selection
+  recipe: "triage" | "implement";
+
   // Claude authentication
   anthropicApiKey: string;
   claudeOauthToken: string;
@@ -73,7 +76,9 @@ export interface ActionConfig {
 }
 
 export function parseInputs(): ActionConfig {
+  const recipeRaw = core.getInput("recipe") || "triage";
   return {
+    recipe: (recipeRaw === "implement" ? "implement" : "triage") as "triage" | "implement",
     anthropicApiKey: core.getInput("anthropic-api-key"),
     claudeOauthToken: core.getInput("claude-oauth-token"),
 
@@ -136,6 +141,11 @@ export function parseInputs(): ActionConfig {
 
 export function validateInputs(config: ActionConfig): string[] {
   const errors: string[] = [];
+
+  // Implement recipe requires an issue identifier
+  if (config.recipe === "implement" && !config.linearIssue) {
+    errors.push("Missing required input: `linear-issue` is required when `recipe` is `implement`");
+  }
 
   // Auth: at least one required
   if (!config.anthropicApiKey && !config.claudeOauthToken) {

@@ -31096,6 +31096,7 @@ var __webpack_exports__ = {};
 
 // EXPORTS
 __nccwpck_require__.d(__webpack_exports__, {
+  n: () => (/* binding */ mapToImplementConfig),
   g: () => (/* binding */ mapToTriageConfig)
 });
 
@@ -50372,7 +50373,7 @@ function createProviderRegistry() {
 
 
 /** Phase execution order. */
-const PHASE_ORDER = ["learn", "act", "report"];
+const PHASE_ORDER = (/* unused pure expression or super */ null && (["learn", "act", "report"]));
 /**
  * Run a workflow end-to-end: learn → act → report.
  *
@@ -50381,7 +50382,7 @@ const PHASE_ORDER = ["learn", "act", "report"];
  * If an act or report step fails, remaining steps continue (status: "partial").
  */
 async function runWorkflow(workflow, config, providers, options) {
-    const logger = options?.logger ?? logger_consoleLogger;
+    const logger = options?.logger ?? consoleLogger;
     const start = Date.now();
     const skippedPhases = new Map();
     const results = new Map();
@@ -50502,6 +50503,280 @@ async function runWorkflow(workflow, config, providers, options) {
 /** Re-export for convenience. */
 
 //# sourceMappingURL=runner.js.map
+;// CONCATENATED MODULE: ../engine/dist/runner-dag.js
+
+
+/**
+ * Execute a RecipeDAG as a state machine.
+ *
+ * Starts at dag.start, executes each node, then follows transitions to
+ * determine the next node. Stops when a transition resolves to "end",
+ * there is no next node, or a critical node fails.
+ *
+ * Outcome resolution order for transitions:
+ *   1. result.data?.outcome (string) — explicit from the node
+ *   2. result.status ("success" | "skipped" | "failed")
+ */
+async function runDAG(dag, config, providers, options) {
+    const logger = options?.logger ?? consoleLogger;
+    const start = Date.now();
+    const results = new Map();
+    const completedSteps = [];
+    // Build lookup map
+    const nodeMap = new Map();
+    const nodeOrder = [];
+    for (const node of dag.nodes) {
+        nodeMap.set(node.id, node);
+        nodeOrder.push(node.id);
+    }
+    // Context (no skipPhase needed — routing is explicit via transitions)
+    const ctx = {
+        config,
+        logger,
+        results,
+        providers,
+        skipPhase(_phase, _reason) {
+            // No-op in DAG mode — use node transitions instead
+        },
+        isPhaseSkipped(_phase) {
+            return false;
+        },
+    };
+    let currentId = dag.start;
+    let hasFailed = false;
+    let aborted = false;
+    while (currentId && currentId !== "end") {
+        const node = nodeMap.get(currentId);
+        if (!node) {
+            logger.error(`[${dag.name}] Unknown node id: "${currentId}" — stopping`);
+            aborted = true;
+            break;
+        }
+        // beforeStep hook
+        if (options?.beforeStep) {
+            const stepShim = { name: node.id, phase: node.phase, run: node.run };
+            const proceed = await options.beforeStep(stepShim, ctx);
+            if (proceed === false) {
+                const result = { status: "skipped", reason: "Skipped by beforeStep hook" };
+                results.set(node.id, result);
+                completedSteps.push({ name: node.id, phase: node.phase, result });
+                currentId = resolveNext(node, result, nodeOrder);
+                continue;
+            }
+        }
+        // Cache check
+        if (options?.cache) {
+            const entry = await options.cache.get(node.id);
+            if (entry) {
+                const result = { ...entry.result, cached: true };
+                results.set(node.id, result);
+                completedSteps.push({ name: node.id, phase: node.phase, result });
+                if (options.afterStep) {
+                    const stepShim = { name: node.id, phase: node.phase, run: node.run };
+                    await options.afterStep(stepShim, result, ctx);
+                }
+                currentId = resolveNext(node, result, nodeOrder);
+                continue;
+            }
+        }
+        // Execute
+        let result;
+        try {
+            logger.info(`[${dag.name}] ${node.phase}/${node.id}: starting`);
+            result = await node.run(ctx);
+            logger.info(`[${dag.name}] ${node.phase}/${node.id}: ${result.status}`);
+        }
+        catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.error(`[${dag.name}] ${node.phase}/${node.id}: failed — ${message}`);
+            result = { status: "failed", reason: message };
+            hasFailed = true;
+            if (node.critical) {
+                results.set(node.id, result);
+                completedSteps.push({ name: node.id, phase: node.phase, result });
+                aborted = true;
+                break;
+            }
+        }
+        results.set(node.id, result);
+        completedSteps.push({ name: node.id, phase: node.phase, result });
+        if (result.status === "failed" && node.critical) {
+            aborted = true;
+            break;
+        }
+        // Cache successful results
+        if (result.status === "success" && options?.cache) {
+            await options.cache
+                .set(node.id, { result, skippedPhases: [], createdAt: Date.now() })
+                .catch(() => { });
+        }
+        // afterStep hook
+        if (options?.afterStep) {
+            const stepShim = { name: node.id, phase: node.phase, run: node.run };
+            await options.afterStep(stepShim, result, ctx);
+        }
+        currentId = resolveNext(node, result, nodeOrder);
+    }
+    const status = aborted ? "failed" : hasFailed ? "partial" : "completed";
+    return { status, steps: completedSteps, duration: Date.now() - start };
+}
+/** Resolve the next node id from transitions or default sequencing. */
+function resolveNext(node, result, nodeOrder) {
+    // Determine outcome key (explicit outcome first, then status)
+    const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : result.status;
+    // Check explicit transitions
+    if (node.transitions) {
+        if (outcome in node.transitions)
+            return node.transitions[outcome] || undefined;
+        // Fall back to status if outcome didn't match
+        if (result.status in node.transitions)
+            return node.transitions[result.status] || undefined;
+    }
+    // Default: next node in declaration order (for success/skipped), stop for failed
+    if (result.status === "failed")
+        return undefined;
+    const idx = nodeOrder.indexOf(node.id);
+    return idx >= 0 && idx + 1 < nodeOrder.length ? nodeOrder[idx + 1] : undefined;
+}
+
+//# sourceMappingURL=runner-dag.js.map
+;// CONCATENATED MODULE: ../engine/dist/runner-recipe.js
+
+
+/**
+ * Execute a Recipe as a state machine.
+ *
+ * Starts at dag.start, executes each node, then follows on to
+ * determine the next node. Stops when a transition resolves to "end",
+ * there is no next node, or a critical node fails.
+ *
+ * Outcome resolution order for on:
+ *   1. result.data?.outcome (string) — explicit from the node
+ *   2. result.status ("success" | "skipped" | "failed")
+ */
+async function runRecipe(dag, config, providers, options) {
+    const logger = options?.logger ?? logger_consoleLogger;
+    const start = Date.now();
+    const results = new Map();
+    const completedSteps = [];
+    // Build lookup map
+    const nodeMap = new Map();
+    const nodeOrder = [];
+    for (const node of dag.nodes) {
+        nodeMap.set(node.id, node);
+        nodeOrder.push(node.id);
+    }
+    // Context (no skipPhase needed — routing is explicit via on)
+    const ctx = {
+        config,
+        logger,
+        results,
+        providers,
+        skipPhase(_phase, _reason) {
+            // No-op in DAG mode — use node on instead
+        },
+        isPhaseSkipped(_phase) {
+            return false;
+        },
+    };
+    let currentId = dag.start;
+    let hasFailed = false;
+    let aborted = false;
+    while (currentId && currentId !== "end") {
+        const node = nodeMap.get(currentId);
+        if (!node) {
+            logger.error(`[${dag.name}] Unknown node id: "${currentId}" — stopping`);
+            aborted = true;
+            break;
+        }
+        // beforeStep hook
+        if (options?.beforeStep) {
+            const stepShim = { name: node.id, phase: node.phase, run: node.run };
+            const proceed = await options.beforeStep(stepShim, ctx);
+            if (proceed === false) {
+                const result = { status: "skipped", reason: "Skipped by beforeStep hook" };
+                results.set(node.id, result);
+                completedSteps.push({ name: node.id, phase: node.phase, result });
+                currentId = runner_recipe_resolveNext(node, result, nodeOrder);
+                continue;
+            }
+        }
+        // Cache check
+        if (options?.cache) {
+            const entry = await options.cache.get(node.id);
+            if (entry) {
+                const result = { ...entry.result, cached: true };
+                results.set(node.id, result);
+                completedSteps.push({ name: node.id, phase: node.phase, result });
+                if (options.afterStep) {
+                    const stepShim = { name: node.id, phase: node.phase, run: node.run };
+                    await options.afterStep(stepShim, result, ctx);
+                }
+                currentId = runner_recipe_resolveNext(node, result, nodeOrder);
+                continue;
+            }
+        }
+        // Execute
+        let result;
+        try {
+            logger.info(`[${dag.name}] ${node.phase}/${node.id}: starting`);
+            result = await node.run(ctx);
+            logger.info(`[${dag.name}] ${node.phase}/${node.id}: ${result.status}`);
+        }
+        catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.error(`[${dag.name}] ${node.phase}/${node.id}: failed — ${message}`);
+            result = { status: "failed", reason: message };
+            hasFailed = true;
+            if (node.critical) {
+                results.set(node.id, result);
+                completedSteps.push({ name: node.id, phase: node.phase, result });
+                aborted = true;
+                break;
+            }
+        }
+        results.set(node.id, result);
+        completedSteps.push({ name: node.id, phase: node.phase, result });
+        if (result.status === "failed" && node.critical) {
+            aborted = true;
+            break;
+        }
+        // Cache successful results
+        if (result.status === "success" && options?.cache) {
+            await options.cache
+                .set(node.id, { result, skippedPhases: [], createdAt: Date.now() })
+                .catch(() => { });
+        }
+        // afterStep hook
+        if (options?.afterStep) {
+            const stepShim = { name: node.id, phase: node.phase, run: node.run };
+            await options.afterStep(stepShim, result, ctx);
+        }
+        currentId = runner_recipe_resolveNext(node, result, nodeOrder);
+    }
+    const status = aborted ? "failed" : hasFailed ? "partial" : "completed";
+    return { status, steps: completedSteps, duration: Date.now() - start };
+}
+/** Resolve the next node id from on or default sequencing. */
+function runner_recipe_resolveNext(node, result, nodeOrder) {
+    // Determine outcome key (explicit outcome first, then status)
+    const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : result.status;
+    // Check explicit on
+    if (node.on) {
+        if (outcome in node.on)
+            return node.on[outcome] || undefined;
+        // Fall back to status if outcome didn't match
+        if (result.status in node.on)
+            return node.on[result.status] || undefined;
+    }
+    // Default: next node in declaration order (for success/skipped), stop for failed
+    if (result.status === "failed")
+        return undefined;
+    const idx = nodeOrder.indexOf(node.id);
+    return idx >= 0 && idx + 1 < nodeOrder.length ? nodeOrder[idx + 1] : undefined;
+}
+
+//# sourceMappingURL=runner-recipe.js.map
 ;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/verify-access.js
 /** Verify that observability and issue tracker providers are reachable. */
 async function verifyAccess(ctx) {
@@ -51034,27 +51309,24 @@ function parseInvestigationResults(analysisDir) {
 async function noveltyGate(ctx) {
     const issueTracker = ctx.providers.get("issueTracker");
     const investigation = getStepData(ctx, "investigate");
-    // Dry run — skip the entire act phase
+    // Dry run — route to notify via DAG on
     if (ctx.config.dryRun) {
         ctx.logger.info("Dry run mode — skipping act phase");
-        ctx.skipPhase("act", "Dry run mode");
         return {
             status: "success",
-            data: { action: "dry-run", recommendation: investigation?.recommendation ?? "unknown" },
+            data: { outcome: "skip", action: "dry-run", recommendation: investigation?.recommendation ?? "unknown" },
         };
     }
     if (!investigation) {
-        ctx.skipPhase("act", "No investigation result");
         return { status: "failed", reason: "No investigation result available" };
     }
     const recommendation = investigation.recommendation;
     // SKIP — no novel issues
     if (/skip/i.test(recommendation)) {
         ctx.logger.info("Recommendation is SKIP — no novel issues found");
-        ctx.skipPhase("act", "Recommendation: skip");
         return {
             status: "success",
-            data: { action: "skip", recommendation },
+            data: { outcome: "skip", action: "skip", recommendation },
         };
     }
     // +1 EXISTING — add occurrence to existing issue
@@ -51071,10 +51343,10 @@ async function noveltyGate(ctx) {
                 ctx.logger.warn(`Failed to add occurrence: ${err}`);
             }
         }
-        ctx.skipPhase("act", `+1 existing ${investigation.existingIssue}`);
         return {
             status: "success",
             data: {
+                outcome: "skip",
                 action: "+1",
                 recommendation,
                 issueIdentifier: investigation.existingIssue,
@@ -51085,7 +51357,7 @@ async function noveltyGate(ctx) {
     ctx.logger.info("Recommendation is IMPLEMENT — proceeding with fix");
     return {
         status: "success",
-        data: { action: "implement", recommendation },
+        data: { outcome: "implement", action: "implement", recommendation },
     };
 }
 //# sourceMappingURL=novelty-gate.js.map
@@ -51188,7 +51460,7 @@ async function crossRepoCheck(ctx) {
     const currentRepo = config.repository;
     if (!targetRepo || targetRepo === currentRepo) {
         ctx.logger.info(`Bug belongs to this repo (${currentRepo}) — implementing locally`);
-        return { status: "success", data: { dispatched: false } };
+        return { status: "success", data: { outcome: "local", dispatched: false } };
     }
     // Cross-repo dispatch
     ctx.logger.info(`Bug belongs to ${targetRepo} (current: ${currentRepo}) — dispatching cross-repo`);
@@ -51212,15 +51484,13 @@ async function crossRepoCheck(ctx) {
     catch (err) {
         ctx.logger.warn(`Cross-repo dispatch failed: ${err}`);
     }
-    // Skip remaining act steps — implementation happens in the target repo
-    ctx.skipPhase("act", `Cross-repo dispatch to ${targetRepo}`);
     return {
         status: "success",
-        data: { dispatched: true, targetRepo },
+        data: { outcome: "dispatched", dispatched: true, targetRepo },
     };
 }
 //# sourceMappingURL=cross-repo-check.js.map
-;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/implement-fix.js
+;// CONCATENATED MODULE: ../engine/dist/nodes/implement-fix.js
 
 
 
@@ -51322,7 +51592,10 @@ async function implementFix(ctx) {
     };
 }
 //# sourceMappingURL=implement-fix.js.map
-;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/create-pr.js
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/implement-fix.js
+
+//# sourceMappingURL=implement-fix.js.map
+;// CONCATENATED MODULE: ../engine/dist/nodes/create-pr.js
 
 
 
@@ -51421,7 +51694,10 @@ This PR contains an automated fix for an issue identified in production logs.
     };
 }
 //# sourceMappingURL=create-pr.js.map
-;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/notify.js
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/create-pr.js
+
+//# sourceMappingURL=create-pr.js.map
+;// CONCATENATED MODULE: ../engine/dist/nodes/notify.js
 
 
 /** Build summary and send notification with investigation results. */
@@ -51473,11 +51749,15 @@ async function sendNotification(ctx) {
     const issueUrl = prData?.issueUrl ?? issueData?.issueUrl;
     const fields = [
         { label: "Run Date", value: new Date().toISOString(), short: true },
-        { label: "Service Filter", value: `\`${config.serviceFilter}\``, short: true },
-        { label: "Time Range", value: `\`${config.timeRange}\``, short: true },
         { label: "Dry Run", value: String(config.dryRun), short: true },
         { label: "Recommendation", value: investigation?.recommendation ?? "unknown", short: true },
     ];
+    if (config.serviceFilter !== undefined) {
+        fields.splice(1, 0, { label: "Service Filter", value: `\`${config.serviceFilter}\``, short: true });
+    }
+    if (config.timeRange !== undefined) {
+        fields.splice(config.serviceFilter !== undefined ? 2 : 1, 0, { label: "Time Range", value: `\`${config.timeRange}\``, short: true });
+    }
     // -------------------------------------------------------------------------
     // Action links
     // -------------------------------------------------------------------------
@@ -51506,8 +51786,12 @@ async function sendNotification(ctx) {
     // -------------------------------------------------------------------------
     const lines = [];
     lines.push(`**Run Date**: ${new Date().toISOString()}`);
-    lines.push(`**Service Filter**: \`${config.serviceFilter}\``);
-    lines.push(`**Time Range**: \`${config.timeRange}\``);
+    if (config.serviceFilter !== undefined) {
+        lines.push(`**Service Filter**: \`${config.serviceFilter}\``);
+    }
+    if (config.timeRange !== undefined) {
+        lines.push(`**Time Range**: \`${config.timeRange}\``);
+    }
     lines.push(`**Dry Run**: ${config.dryRun}`);
     lines.push(`**Recommendation**: ${investigation?.recommendation ?? "unknown"}`);
     lines.push("");
@@ -51537,6 +51821,9 @@ async function sendNotification(ctx) {
     return { status: "success" };
 }
 //# sourceMappingURL=notify.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/notify.js
+
+//# sourceMappingURL=notify.js.map
 ;// CONCATENATED MODULE: ../engine/dist/recipes/triage/index.js
 
 
@@ -51547,25 +51834,42 @@ async function sendNotification(ctx) {
 
 
 
-/** The triage recipe — first workflow on the SWEny platform. */
-const triageWorkflow = {
+/** The triage recipe — DAG with explicit on transitions. */
+const triageRecipe = {
     name: "triage",
     description: "Investigate production issues, implement fixes, and report results",
-    steps: [
+    start: "verify-access",
+    nodes: [
         // Learn phase — gather data
-        { name: "verify-access", phase: "learn", run: verifyAccess },
-        { name: "build-context", phase: "learn", run: buildContext },
-        { name: "investigate", phase: "learn", run: investigate },
-        // Act phase — fix the problem
-        { name: "novelty-gate", phase: "act", run: noveltyGate },
-        { name: "create-issue", phase: "act", run: createIssue },
-        { name: "cross-repo-check", phase: "act", run: crossRepoCheck },
-        { name: "implement-fix", phase: "act", run: implementFix },
-        { name: "create-pr", phase: "act", run: createPr },
+        { id: "verify-access", phase: "learn", run: verifyAccess, critical: true },
+        { id: "build-context", phase: "learn", run: buildContext, critical: true },
+        { id: "investigate", phase: "learn", run: investigate, critical: true },
+        // Act phase — novelty gate routes to create-issue or directly to notify
+        {
+            id: "novelty-gate", phase: "act", run: noveltyGate,
+            on: {
+                skip: "notify", // dry-run, skip, or +1 all go straight to report
+                implement: "create-issue",
+            },
+        },
+        { id: "create-issue", phase: "act", run: createIssue },
+        // Cross-repo check routes to implement-fix or to notify
+        {
+            id: "cross-repo-check", phase: "act", run: crossRepoCheck,
+            on: {
+                local: "implement-fix",
+                dispatched: "notify",
+            },
+        },
+        { id: "implement-fix", phase: "act", run: implementFix },
+        { id: "create-pr", phase: "act", run: createPr },
         // Report phase — notify stakeholders
-        { name: "notify", phase: "report", run: sendNotification },
+        { id: "notify", phase: "report", run: sendNotification },
     ],
 };
+// Backwards-compatible alias — callers that used runWorkflow(triageWorkflow, …)
+// should migrate to runRecipe(triageRecipe, …).
+
 
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ../engine/dist/recipes/implement/steps/verify-access.js
@@ -51623,38 +51927,29 @@ async function fetchIssue(ctx) {
  * Given a known issue identifier, fetches the issue, implements a fix,
  * and opens a PR. Skips the investigation/novelty phases of triage.
  *
- * Steps that were written for TriageConfig are reused via cast — they only
- * access the config fields that ImplementConfig also provides.
+ * Shared nodes (implement-fix, create-pr, notify) are typed to SharedNodeConfig,
+ * which ImplementConfig satisfies — no type casts needed.
  */
-const implementWorkflow = {
+const implementRecipe = {
     name: "implement",
     description: "Implement a fix for a specific issue and open a pull request",
-    steps: [
-        { name: "verify-access", phase: "learn", run: verify_access_verifyAccess },
+    start: "verify-access",
+    nodes: [
+        { id: "verify-access", phase: "learn", run: verify_access_verifyAccess, critical: true },
         // Named "create-issue" so that implementFix and createPr find it via getStepData
-        { name: "create-issue", phase: "learn", run: fetchIssue },
-        // Cast: implementFix/createPr use TriageConfig but only access fields
-        // that ImplementConfig provides (agentEnv, dryRun, maxImplementTurns, etc.)
-        {
-            name: "implement-fix",
-            phase: "act",
-            run: implementFix,
-        },
-        {
-            name: "create-pr",
-            phase: "act",
-            run: createPr,
-        },
-        {
-            name: "notify",
-            phase: "report",
-            run: sendNotification,
-        },
+        { id: "create-issue", phase: "learn", run: fetchIssue, critical: true },
+        { id: "implement-fix", phase: "act", run: implementFix },
+        { id: "create-pr", phase: "act", run: createPr },
+        { id: "notify", phase: "report", run: sendNotification },
     ],
 };
+// Backwards compat alias
+
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ../engine/dist/index.js
 // Runtime
+
+
 
 // Recipes
 
@@ -51664,7 +51959,9 @@ const implementWorkflow = {
 ;// CONCATENATED MODULE: ./src/config.ts
 
 function parseInputs() {
+    const recipeRaw = lib_core.getInput("recipe") || "triage";
     return {
+        recipe: (recipeRaw === "implement" ? "implement" : "triage"),
         anthropicApiKey: lib_core.getInput("anthropic-api-key"),
         claudeOauthToken: lib_core.getInput("claude-oauth-token"),
         codingAgentProvider: lib_core.getInput("coding-agent-provider") || "claude",
@@ -51715,6 +52012,10 @@ function parseInputs() {
 }
 function validateInputs(config) {
     const errors = [];
+    // Implement recipe requires an issue identifier
+    if (config.recipe === "implement" && !config.linearIssue) {
+        errors.push("Missing required input: `linear-issue` is required when `recipe` is `implement`");
+    }
     // Auth: at least one required
     if (!config.anthropicApiKey && !config.claudeOauthToken) {
         errors.push("Missing required input: either `anthropic-api-key` or `claude-oauth-token` must be provided");
@@ -52068,8 +52369,7 @@ async function run() {
             return;
         }
         const providers = createProviders(config);
-        const triageConfig = mapToTriageConfig(config);
-        const result = await runWorkflow(triageWorkflow, triageConfig, providers, {
+        const runOptions = {
             logger: main_actionsLogger,
             beforeStep: async (step) => {
                 lib_core.startGroup(`${step.phase}: ${step.name}`);
@@ -52078,7 +52378,16 @@ async function run() {
                 lib_core.info(`${step.name}: ${stepResult.status}${stepResult.reason ? ` — ${stepResult.reason}` : ""}`);
                 lib_core.endGroup();
             },
-        });
+        };
+        let result;
+        if (config.recipe === "implement") {
+            const implementConfig = mapToImplementConfig(config);
+            result = await runRecipe(implementRecipe, implementConfig, providers, runOptions);
+        }
+        else {
+            const triageConfig = mapToTriageConfig(config);
+            result = await runRecipe(triageRecipe, triageConfig, providers, runOptions);
+        }
         setGitHubOutputs(result);
     }
     catch (error) {
@@ -52089,6 +52398,35 @@ async function run() {
             lib_core.setFailed("An unexpected error occurred");
         }
     }
+}
+function mapToImplementConfig(config) {
+    const agentEnv = {};
+    if (config.anthropicApiKey)
+        agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
+    if (config.claudeOauthToken)
+        agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+    if (config.openaiApiKey)
+        agentEnv.OPENAI_API_KEY = config.openaiApiKey;
+    if (config.geminiApiKey)
+        agentEnv.GEMINI_API_KEY = config.geminiApiKey;
+    if (config.githubToken)
+        agentEnv.GITHUB_TOKEN = config.githubToken;
+    if (config.linearApiKey)
+        agentEnv.LINEAR_API_KEY = config.linearApiKey;
+    if (config.linearTeamId)
+        agentEnv.LINEAR_TEAM_ID = config.linearTeamId;
+    return {
+        issueIdentifier: config.linearIssue,
+        repository: config.repository,
+        dryRun: config.dryRun,
+        maxImplementTurns: config.maxImplementTurns,
+        baseBranch: config.baseBranch,
+        prLabels: config.prLabels,
+        projectId: config.linearTeamId,
+        stateInProgress: config.linearStateInProgress,
+        statePeerReview: config.linearStatePeerReview,
+        agentEnv,
+    };
 }
 function mapToTriageConfig(config) {
     // Build agent env vars for coding agent auth
@@ -52207,7 +52545,8 @@ function setGitHubOutputs(result) {
 }
 run();
 
+var __webpack_exports__mapToImplementConfig = __webpack_exports__.n;
 var __webpack_exports__mapToTriageConfig = __webpack_exports__.g;
-export { __webpack_exports__mapToTriageConfig as mapToTriageConfig };
+export { __webpack_exports__mapToImplementConfig as mapToImplementConfig, __webpack_exports__mapToTriageConfig as mapToTriageConfig };
 
 //# sourceMappingURL=index.js.map

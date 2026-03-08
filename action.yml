@@ -7,6 +7,11 @@ branding:
   color: "orange"
 
 inputs:
+  recipe:
+    description: "Recipe to run (triage, implement). Default: triage."
+    required: false
+    default: "triage"
+
   anthropic-api-key:
     description: "Anthropic API key for Claude (use this OR claude-oauth-token)"
     required: false
