@@ -182,6 +182,12 @@ SWEny creates GitHub Issues by default — zero additional config. Want Linear o
 
 ### Inputs
 
+#### Recipe
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `recipe` | Recipe to run (`triage`, `implement`) | `triage` |
+
 #### Authentication
 
 | Input | Description | Required |
@@ -299,7 +305,7 @@ SWEny creates GitHub Issues by default — zero additional config. Want Linear o
 |-------|-------------|---------|
 | `dry-run` | Analyze only, don't create PRs | `false` |
 | `novelty-mode` | Only report issues not already tracked | `true` |
-| `linear-issue` | Work on a specific Linear issue (e.g., `ENG-123`) | — |
+| `linear-issue` | Issue to implement (e.g., `ENG-123`). Required when `recipe` is `implement`. | — |
 | `additional-instructions` | Extra guidance for Claude | — |
 | `service-map-path` | Path to service ownership map | `.github/service-map.yml` |
 | `github-token` | GitHub token for PRs | `${{ github.token }}` |
@@ -376,6 +382,18 @@ If using cross-repo dispatch, pass a `bot-token` with `repo` and `actions` scope
     linear-api-key: ${{ secrets.LINEAR_API_KEY }}
     linear-issue: 'ENG-123'
     additional-instructions: 'Focus on the webhook handler timeout'
+```
+
+#### Implement a Linear issue (implement recipe)
+
+```yaml
+- uses: swenyai/sweny@v1
+  with:
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    recipe: implement
+    linear-issue: ENG-123
+    linear-api-key: ${{ secrets.LINEAR_API_KEY }}
+    linear-team-id: ${{ vars.LINEAR_TEAM_ID }}
 ```
 
 ### Service Map
