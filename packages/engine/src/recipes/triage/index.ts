@@ -1,4 +1,3 @@
-import { runRecipe } from "../../runner-recipe.js";
 import type { Recipe } from "../../types.js";
 import type { TriageConfig } from "./types.js";
 import { verifyAccess } from "./steps/verify-access.js";
@@ -51,10 +50,6 @@ export const triageRecipe: Recipe<TriageConfig> = {
     { id: "notify", phase: "report", run: sendNotification },
   ],
 };
-
-// Backwards-compatible alias — callers that used runWorkflow(triageWorkflow, …)
-// should migrate to runRecipe(triageRecipe, …).
-export { triageRecipe as triageWorkflow };
 
 export type {
   TriageConfig,

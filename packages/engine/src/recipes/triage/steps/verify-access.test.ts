@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createProviderRegistry } from "../../../runner.js";
+import { createProviderRegistry } from "../../../runner-recipe.js";
 import { verifyAccess } from "./verify-access.js";
 import { createCtx, silentLogger } from "../test-helpers.js";
 

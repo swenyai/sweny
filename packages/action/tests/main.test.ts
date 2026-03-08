@@ -199,7 +199,7 @@ describe("beforeStep / afterStep hooks", () => {
     await loadMain();
 
     const options = mockRunRecipe.mock.calls[0][3];
-    await options.beforeStep({ phase: "investigate", name: "fetch-logs" });
+    await options.beforeStep({ phase: "investigate", id: "fetch-logs" });
 
     expect(mockStartGroup).toHaveBeenCalledWith("investigate: fetch-logs");
   });
@@ -208,7 +208,7 @@ describe("beforeStep / afterStep hooks", () => {
     await loadMain();
 
     const options = mockRunRecipe.mock.calls[0][3];
-    await options.afterStep({ phase: "investigate", name: "fetch-logs" }, { status: "success" });
+    await options.afterStep({ phase: "investigate", id: "fetch-logs" }, { status: "success" });
 
     expect(mockInfo).toHaveBeenCalledWith("fetch-logs: success");
     expect(mockEndGroup).toHaveBeenCalled();
@@ -219,7 +219,7 @@ describe("beforeStep / afterStep hooks", () => {
 
     const options = mockRunRecipe.mock.calls[0][3];
     await options.afterStep(
-      { phase: "investigate", name: "fetch-logs" },
+      { phase: "investigate", id: "fetch-logs" },
       { status: "skipped", reason: "no logs found" },
     );
 

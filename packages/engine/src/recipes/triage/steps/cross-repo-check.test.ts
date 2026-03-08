@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createProviderRegistry } from "../../../runner.js";
+import { createProviderRegistry } from "../../../runner-recipe.js";
 import { crossRepoCheck } from "./cross-repo-check.js";
 import { createCtx, silentLogger } from "../test-helpers.js";
 import type { StepResult } from "../../../types.js";
@@ -90,7 +90,6 @@ describe("crossRepoCheck", () => {
         novelty_mode: "false",
       },
     });
-    expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
   it("cross-repo adds comment to issue via updateIssue", async () => {

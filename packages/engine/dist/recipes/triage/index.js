@@ -40,8 +40,5 @@ export const triageRecipe = {
         { id: "notify", phase: "report", run: sendNotification },
     ],
 };
-// Backwards-compatible alias — callers that used runWorkflow(triageWorkflow, …)
-// should migrate to runRecipe(triageRecipe, …).
-export { triageRecipe as triageWorkflow };
 export { getStepData } from "./results.js";
 //# sourceMappingURL=index.js.map

@@ -10,6 +10,5 @@ import type { ImplementConfig } from "./types.js";
  * which ImplementConfig satisfies — no type casts needed.
  */
 export declare const implementRecipe: Recipe<ImplementConfig>;
-export { implementRecipe as implementWorkflow };
 export type { ImplementConfig } from "./types.js";
 //# sourceMappingURL=index.d.ts.map

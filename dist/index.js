@@ -50369,233 +50369,87 @@ function createProviderRegistry() {
     };
 }
 //# sourceMappingURL=registry.js.map
-;// CONCATENATED MODULE: ../engine/dist/runner.js
-
-
-/** Phase execution order. */
-const PHASE_ORDER = (/* unused pure expression or super */ null && (["learn", "act", "report"]));
-/**
- * Run a workflow end-to-end: learn → act → report.
- *
- * Steps execute in array order within their phase.
- * If a learn step fails, the workflow is aborted (status: "failed").
- * If an act or report step fails, remaining steps continue (status: "partial").
- */
-async function runWorkflow(workflow, config, providers, options) {
-    const logger = options?.logger ?? consoleLogger;
-    const start = Date.now();
-    const skippedPhases = new Map();
-    const results = new Map();
-    const completedSteps = [];
-    const ctx = {
-        config,
-        logger,
-        results,
-        providers,
-        skipPhase(phase, reason) {
-            skippedPhases.set(phase, reason);
-        },
-        isPhaseSkipped(phase) {
-            return skippedPhases.has(phase);
-        },
-    };
-    // Group steps by phase
-    const stepsByPhase = new Map();
-    for (const phase of PHASE_ORDER) {
-        stepsByPhase.set(phase, workflow.steps.filter((s) => s.phase === phase));
-    }
-    let hasFailed = false;
-    let failedInLearn = false;
-    for (const phase of PHASE_ORDER) {
-        // If a learn step failed, abort entirely
-        if (failedInLearn)
-            break;
-        const steps = stepsByPhase.get(phase) ?? [];
-        for (const step of steps) {
-            // Check if this phase was skipped
-            if (skippedPhases.has(phase)) {
-                const result = {
-                    status: "skipped",
-                    reason: skippedPhases.get(phase),
-                };
-                results.set(step.name, result);
-                completedSteps.push({ name: step.name, phase, result });
-                continue;
-            }
-            // beforeStep hook — return false to skip
-            if (options?.beforeStep) {
-                const proceed = await options.beforeStep(step, ctx);
-                if (proceed === false) {
-                    const result = { status: "skipped", reason: "Skipped by beforeStep hook" };
-                    results.set(step.name, result);
-                    completedSteps.push({ name: step.name, phase, result });
-                    continue;
-                }
-            }
-            // Cache check — replay cached result if available
-            if (options?.cache) {
-                const entry = await options.cache.get(step.name);
-                if (entry) {
-                    // Replay skipPhase side effects
-                    for (const { phase: p, reason: r } of entry.skippedPhases) {
-                        ctx.skipPhase(p, r);
-                    }
-                    const result = { ...entry.result, cached: true };
-                    results.set(step.name, result);
-                    completedSteps.push({ name: step.name, phase, result });
-                    if (options.afterStep) {
-                        await options.afterStep(step, result, ctx);
-                    }
-                    continue;
-                }
-            }
-            // Snapshot skippedPhases size to detect new skipPhase calls during this step
-            const phasesBefore = skippedPhases.size;
-            let result;
-            try {
-                logger.info(`[${workflow.name}] ${phase}/${step.name}: starting`);
-                result = await step.run(ctx);
-                logger.info(`[${workflow.name}] ${phase}/${step.name}: ${result.status}`);
-            }
-            catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                logger.error(`[${workflow.name}] ${phase}/${step.name}: failed — ${message}`);
-                result = { status: "failed", reason: message };
-                hasFailed = true;
-                if (phase === "learn") {
-                    failedInLearn = true;
-                }
-            }
-            results.set(step.name, result);
-            completedSteps.push({ name: step.name, phase, result });
-            // Cache successful results
-            if (result.status === "success" && options?.cache) {
-                // Collect skipPhase calls made during this step
-                const addedSkips = [];
-                if (skippedPhases.size > phasesBefore) {
-                    let seen = 0;
-                    for (const [p, r] of skippedPhases) {
-                        if (++seen > phasesBefore) {
-                            addedSkips.push({ phase: p, reason: r });
-                        }
-                    }
-                }
-                await options.cache
-                    .set(step.name, { result, skippedPhases: addedSkips, createdAt: Date.now() })
-                    .catch(() => { }); // non-fatal
-            }
-            // afterStep hook
-            if (options?.afterStep) {
-                await options.afterStep(step, result, ctx);
-            }
-            // Abort remaining steps if learn phase failed
-            if (failedInLearn)
-                break;
-        }
-    }
-    const status = failedInLearn ? "failed" : hasFailed ? "partial" : "completed";
-    return {
-        status,
-        steps: completedSteps,
-        duration: Date.now() - start,
-    };
-}
-/** Re-export for convenience. */
-
-//# sourceMappingURL=runner.js.map
 ;// CONCATENATED MODULE: ../engine/dist/runner-recipe.js
 
 
 /**
  * Execute a Recipe as a state machine.
  *
- * Starts at dag.start, executes each node, then follows on to
- * determine the next node. Stops when a transition resolves to "end",
- * there is no next node, or a critical node fails.
+ * Starts at recipe.start, executes each node, then follows on: transitions to
+ * determine the next node. Stops when a transition resolves to "end", there is
+ * no next node, or a critical node fails.
  *
- * Outcome resolution order for on:
- *   1. result.data?.outcome (string) — explicit from the node
- *   2. result.status ("success" | "skipped" | "failed")
+ * Outcome resolution order (for on: routing):
+ *   1. result.data?.outcome (string) — explicit outcome set by the node
+ *   2. result.status        ("success" | "skipped" | "failed")
  */
-async function runRecipe(dag, config, providers, options) {
+async function runRecipe(recipe, config, providers, options) {
     const logger = options?.logger ?? logger_consoleLogger;
     const start = Date.now();
     const results = new Map();
     const completedSteps = [];
-    // Build lookup map
+    // Build id → node lookup and preserve declaration order for default routing
     const nodeMap = new Map();
     const nodeOrder = [];
-    for (const node of dag.nodes) {
+    for (const node of recipe.nodes) {
         nodeMap.set(node.id, node);
         nodeOrder.push(node.id);
     }
-    // Context (no skipPhase needed — routing is explicit via on)
-    const ctx = {
-        config,
-        logger,
-        results,
-        providers,
-        skipPhase(_phase, _reason) {
-            // No-op in DAG mode — use node on instead
-        },
-        isPhaseSkipped(_phase) {
-            return false;
-        },
-    };
-    let currentId = dag.start;
+    const ctx = { config, logger, results, providers };
+    let currentId = recipe.start;
     let hasFailed = false;
     let aborted = false;
-    const visitedInRun = [];
+    const visited = new Set();
     while (currentId && currentId !== "end") {
         const node = nodeMap.get(currentId);
         if (!node) {
-            logger.error(`[${dag.name}] Unknown node id: "${currentId}" — stopping`);
+            logger.error(`[${recipe.name}] Unknown node id: "${currentId}" — aborting`);
             aborted = true;
             break;
         }
-        if (visitedInRun.includes(currentId)) {
-            logger.error(`[${dag.name}] Cycle detected at node "${currentId}" — stopping`);
+        if (visited.has(currentId)) {
+            logger.error(`[${recipe.name}] Cycle detected at node "${currentId}" — aborting`);
             aborted = true;
             break;
         }
-        visitedInRun.push(currentId);
-        // beforeStep hook
+        visited.add(currentId);
+        const meta = { id: node.id, phase: node.phase };
+        // beforeStep hook — return false to skip this node
         if (options?.beforeStep) {
-            const stepShim = { name: node.id, phase: node.phase, run: node.run };
-            const proceed = await options.beforeStep(stepShim, ctx);
+            const proceed = await options.beforeStep(meta, ctx);
             if (proceed === false) {
                 const result = { status: "skipped", reason: "Skipped by beforeStep hook" };
                 results.set(node.id, result);
                 completedSteps.push({ name: node.id, phase: node.phase, result });
+                if (options.afterStep)
+                    await options.afterStep(meta, result, ctx);
                 currentId = resolveNext(node, result, nodeOrder);
                 continue;
             }
         }
-        // Cache check
+        // Cache check — replay a previously cached result if available
         if (options?.cache) {
             const entry = await options.cache.get(node.id);
             if (entry) {
                 const result = { ...entry.result, cached: true };
                 results.set(node.id, result);
                 completedSteps.push({ name: node.id, phase: node.phase, result });
-                if (options.afterStep) {
-                    const stepShim = { name: node.id, phase: node.phase, run: node.run };
-                    await options.afterStep(stepShim, result, ctx);
-                }
+                if (options.afterStep)
+                    await options.afterStep(meta, result, ctx);
                 currentId = resolveNext(node, result, nodeOrder);
                 continue;
             }
         }
-        // Execute
+        // Execute the node
         let result;
         try {
-            logger.info(`[${dag.name}] ${node.phase}/${node.id}: starting`);
+            logger.info(`[${recipe.name}] ${node.phase}/${node.id}: starting`);
             result = await node.run(ctx);
-            logger.info(`[${dag.name}] ${node.phase}/${node.id}: ${result.status}`);
+            logger.info(`[${recipe.name}] ${node.phase}/${node.id}: ${result.status}`);
         }
         catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            logger.error(`[${dag.name}] ${node.phase}/${node.id}: failed — ${message}`);
+            logger.error(`[${recipe.name}] ${node.phase}/${node.id}: failed — ${message}`);
             result = { status: "failed", reason: message };
             hasFailed = true;
             if (node.critical) {
@@ -50606,40 +50460,41 @@ async function runRecipe(dag, config, providers, options) {
             }
         }
         results.set(node.id, result);
-        completedSteps.push({ name: node.id, phase: node.phase, result });
+        completedSteps.push({ name: node.id, phase: node.phase, result: result });
         if (result.status === "failed" && node.critical) {
             aborted = true;
             break;
         }
-        // Cache successful results
+        // Persist successful results to cache
         if (result.status === "success" && options?.cache) {
             await options.cache
-                .set(node.id, { result, skippedPhases: [], createdAt: Date.now() })
-                .catch(() => { });
+                .set(node.id, { result: result, createdAt: Date.now() })
+                .catch(() => { }); // cache failures are non-fatal
         }
-        // afterStep hook
-        if (options?.afterStep) {
-            const stepShim = { name: node.id, phase: node.phase, run: node.run };
-            await options.afterStep(stepShim, result, ctx);
-        }
+        if (options?.afterStep)
+            await options.afterStep(meta, result, ctx);
         currentId = resolveNext(node, result, nodeOrder);
     }
     const status = aborted ? "failed" : hasFailed ? "partial" : "completed";
     return { status, steps: completedSteps, duration: Date.now() - start };
 }
-/** Resolve the next node id from on or default sequencing. */
+/**
+ * Resolve the id of the next node to execute.
+ *
+ * Priority:
+ *   1. Explicit on: match for result.data?.outcome
+ *   2. Explicit on: match for result.status
+ *   3. Next node in declaration order (success/skipped only)
+ *   4. undefined — stop the recipe
+ */
 function resolveNext(node, result, nodeOrder) {
-    // Determine outcome key (explicit outcome first, then status)
     const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : result.status;
-    // Check explicit on
     if (node.on) {
-        if (outcome in node.on)
-            return node.on[outcome] || undefined;
-        // Fall back to status if outcome didn't match
-        if (result.status in node.on)
-            return node.on[result.status] || undefined;
+        if (outcome in node.on && node.on[outcome])
+            return node.on[outcome];
+        if (result.status in node.on && node.on[result.status])
+            return node.on[result.status];
     }
-    // Default: next node in declaration order (for success/skipped), stop for failed
     if (result.status === "failed")
         return undefined;
     const idx = nodeOrder.indexOf(node.id);
@@ -51737,9 +51592,6 @@ const triageRecipe = {
         { id: "notify", phase: "report", run: sendNotification },
     ],
 };
-// Backwards-compatible alias — callers that used runWorkflow(triageWorkflow, …)
-// should migrate to runRecipe(triageRecipe, …).
-
 
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ../engine/dist/recipes/implement/steps/verify-access.js
@@ -51813,14 +51665,11 @@ const implementRecipe = {
         { id: "notify", phase: "report", run: sendNotification },
     ],
 };
-// Backwards compat alias
-
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ../engine/dist/index.js
-// Runtime
+// Runner
 
-
-// Recipes
+// Built-in recipes
 
 
 
@@ -52241,10 +52090,10 @@ async function run() {
         const runOptions = {
             logger: main_actionsLogger,
             beforeStep: async (step) => {
-                lib_core.startGroup(`${step.phase}: ${step.name}`);
+                lib_core.startGroup(`${step.phase}: ${step.id}`);
             },
             afterStep: async (step, stepResult) => {
-                lib_core.info(`${step.name}: ${stepResult.status}${stepResult.reason ? ` — ${stepResult.reason}` : ""}`);
+                lib_core.info(`${step.id}: ${stepResult.status}${stepResult.reason ? ` — ${stepResult.reason}` : ""}`);
                 lib_core.endGroup();
             },
         };

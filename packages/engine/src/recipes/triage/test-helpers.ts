@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type { WorkflowContext, StepResult } from "../../types.js";
-import { createProviderRegistry } from "../../runner.js";
+import { createProviderRegistry } from "../../runner-recipe.js";
 import type { TriageConfig } from "./types.js";
 
 export const silentLogger = {
@@ -43,7 +43,5 @@ export function createCtx(overrides?: {
     logger: silentLogger,
     results: overrides?.results ?? new Map(),
     providers: overrides?.providers ?? createProviderRegistry(),
-    skipPhase: vi.fn(),
-    isPhaseSkipped: vi.fn(() => false),
   };
 }

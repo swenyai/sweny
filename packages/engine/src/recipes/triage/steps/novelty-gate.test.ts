@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createProviderRegistry } from "../../../runner.js";
+import { createProviderRegistry } from "../../../runner-recipe.js";
 import { noveltyGate } from "./novelty-gate.js";
 import { createCtx, silentLogger } from "../test-helpers.js";
 import type { InvestigationResult } from "../types.js";
@@ -35,7 +35,6 @@ describe("noveltyGate", () => {
     expect(result.status).toBe("success");
     expect(result.data?.action).toBe("dry-run");
     expect(result.data?.outcome).toBe("skip");
-    expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
   it("returns outcome: skip when recommendation is 'skip'", async () => {
@@ -52,7 +51,6 @@ describe("noveltyGate", () => {
     expect(result.status).toBe("success");
     expect(result.data?.action).toBe("skip");
     expect(result.data?.outcome).toBe("skip");
-    expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
   it("adds +1 comment and returns outcome: skip for existing issue", async () => {
@@ -78,7 +76,6 @@ describe("noveltyGate", () => {
     expect(result.data?.issueIdentifier).toBe("ENG-123");
     expect(getIssue).toHaveBeenCalledWith("ENG-123");
     expect(addComment).toHaveBeenCalledWith("issue-id-1", expect.stringContaining("+1 detected on"));
-    expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
   it("handles +1 comment failure gracefully", async () => {
@@ -117,7 +114,6 @@ describe("noveltyGate", () => {
     expect(result.status).toBe("success");
     expect(result.data?.action).toBe("implement");
     expect(result.data?.outcome).toBe("implement");
-    expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
   it("fails when investigation result is missing", async () => {
@@ -129,7 +125,6 @@ describe("noveltyGate", () => {
 
     expect(result.status).toBe("failed");
     expect(result.reason).toBe("No investigation result available");
-    expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
   it("handles +1 with no existing issue identifier", async () => {

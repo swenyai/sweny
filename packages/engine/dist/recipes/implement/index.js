@@ -25,6 +25,4 @@ export const implementRecipe = {
         { id: "notify", phase: "report", run: sendNotification },
     ],
 };
-// Backwards compat alias
-export { implementRecipe as implementWorkflow };
 //# sourceMappingURL=index.js.map

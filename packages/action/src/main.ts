@@ -18,11 +18,11 @@ async function run(): Promise<void> {
 
     const runOptions = {
       logger: actionsLogger,
-      beforeStep: async (step: { phase: string; name: string }) => {
-        core.startGroup(`${step.phase}: ${step.name}`);
+      beforeStep: async (step: { id: string; phase: string }) => {
+        core.startGroup(`${step.phase}: ${step.id}`);
       },
-      afterStep: async (step: { name: string }, stepResult: { status: string; reason?: string }) => {
-        core.info(`${step.name}: ${stepResult.status}${stepResult.reason ? ` — ${stepResult.reason}` : ""}`);
+      afterStep: async (step: { id: string }, stepResult: { status: string; reason?: string }) => {
+        core.info(`${step.id}: ${stepResult.status}${stepResult.reason ? ` — ${stepResult.reason}` : ""}`);
         core.endGroup();
       },
     };

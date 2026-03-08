@@ -1,5 +1,5 @@
 import type { WorkflowContext, StepResult } from "../../types.js";
-import { createProviderRegistry } from "../../runner.js";
+import { createProviderRegistry } from "../../runner-recipe.js";
 import type { TriageConfig } from "./types.js";
 export declare const silentLogger: {
     info: import("vitest").Mock<import("@vitest/spy").Procedure>;

@@ -1,26 +1,27 @@
-// Types
+// Core types
 export type {
   WorkflowPhase,
   StepResult,
-  WorkflowStep,
+  StepMeta,
   WorkflowContext,
   ProviderRegistry,
-  Workflow,
   WorkflowResult,
   RunOptions,
+  RecipeStep,
+  Recipe,
 } from "./types.js";
 
 // Cache
 export type { CacheEntry, StepCache } from "./cache.js";
 
-// Runtime
-export { runWorkflow, createProviderRegistry } from "./runner.js";
-export { runRecipe } from "./runner-recipe.js";
-export type { Recipe, RecipeStep } from "./types.js";
+// Runner
+export { runRecipe, createProviderRegistry } from "./runner-recipe.js";
 
-// Recipes
-export { triageWorkflow, triageRecipe } from "./recipes/triage/index.js";
-export { implementWorkflow, implementRecipe } from "./recipes/implement/index.js";
+// Built-in recipes
+export { triageRecipe } from "./recipes/triage/index.js";
+export { implementRecipe } from "./recipes/implement/index.js";
+
+// Recipe configs and types
 export type { ImplementConfig } from "./recipes/implement/index.js";
 export type {
   TriageConfig,
