@@ -19,23 +19,28 @@ export const triageRecipe = {
         { id: "investigate", phase: "learn", run: investigate, critical: true },
         // Act phase — novelty gate routes to create-issue or directly to notify
         {
-            id: "novelty-gate", phase: "act", run: noveltyGate,
+            id: "novelty-gate",
+            phase: "act",
+            run: noveltyGate,
             on: {
                 skip: "notify", // dry-run, skip, or +1 all go straight to report
                 implement: "create-issue",
             },
         },
-        { id: "create-issue", phase: "act", run: createIssue },
+        { id: "create-issue", phase: "act", run: createIssue, on: { failed: "notify" } },
         // Cross-repo check routes to implement-fix or to notify
         {
-            id: "cross-repo-check", phase: "act", run: crossRepoCheck,
+            id: "cross-repo-check",
+            phase: "act",
+            run: crossRepoCheck,
             on: {
                 local: "implement-fix",
                 dispatched: "notify",
+                failed: "notify",
             },
         },
-        { id: "implement-fix", phase: "act", run: implementFix },
-        { id: "create-pr", phase: "act", run: createPr },
+        { id: "implement-fix", phase: "act", run: implementFix, on: { failed: "notify" } },
+        { id: "create-pr", phase: "act", run: createPr, on: { failed: "notify" } },
         // Report phase — notify stakeholders
         { id: "notify", phase: "report", run: sendNotification },
     ],

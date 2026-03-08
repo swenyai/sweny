@@ -218,10 +218,7 @@ describe("beforeStep / afterStep hooks", () => {
     await loadMain();
 
     const options = mockRunRecipe.mock.calls[0][3];
-    await options.afterStep(
-      { phase: "investigate", id: "fetch-logs" },
-      { status: "skipped", reason: "no logs found" },
-    );
+    await options.afterStep({ phase: "investigate", id: "fetch-logs" }, { status: "skipped", reason: "no logs found" });
 
     expect(mockInfo).toHaveBeenCalledWith("fetch-logs: skipped — no logs found");
   });

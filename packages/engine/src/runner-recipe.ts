@@ -92,7 +92,7 @@ export async function runRecipe<TConfig>(
       }
     }
 
-    // Execute the node
+    // Execute the node — result is always assigned (either from run or catch)
     let result: StepResult;
     try {
       logger.info(`[${recipe.name}] ${node.phase}/${node.id}: starting`);
@@ -103,33 +103,24 @@ export async function runRecipe<TConfig>(
       logger.error(`[${recipe.name}] ${node.phase}/${node.id}: failed — ${message}`);
       result = { status: "failed", reason: message };
       hasFailed = true;
-
-      if (node.critical) {
-        results.set(node.id, result);
-        completedSteps.push({ name: node.id, phase: node.phase, result });
-        aborted = true;
-        break;
-      }
     }
 
-    results.set(node.id, result!);
-    completedSteps.push({ name: node.id, phase: node.phase, result: result! });
+    results.set(node.id, result);
+    completedSteps.push({ name: node.id, phase: node.phase, result });
 
-    if (result!.status === "failed" && node.critical) {
+    if (result.status === "failed" && node.critical) {
       aborted = true;
       break;
     }
 
     // Persist successful results to cache
-    if (result!.status === "success" && options?.cache) {
-      await options.cache
-        .set(node.id, { result: result!, createdAt: Date.now() })
-        .catch(() => {}); // cache failures are non-fatal
+    if (result.status === "success" && options?.cache) {
+      await options.cache.set(node.id, { result, createdAt: Date.now() }).catch(() => {}); // cache failures are non-fatal
     }
 
-    if (options?.afterStep) await options.afterStep(meta, result!, ctx);
+    if (options?.afterStep) await options.afterStep(meta, result, ctx);
 
-    currentId = resolveNext(node, result!, nodeOrder);
+    currentId = resolveNext(node, result, nodeOrder);
   }
 
   const status = aborted ? "failed" : hasFailed ? "partial" : "completed";
@@ -145,17 +136,12 @@ export async function runRecipe<TConfig>(
  *   3. Next node in declaration order (success/skipped only)
  *   4. undefined — stop the recipe
  */
-function resolveNext<TConfig>(
-  node: RecipeStep<TConfig>,
-  result: StepResult,
-  nodeOrder: string[],
-): string | undefined {
-  const outcome =
-    typeof result.data?.outcome === "string" ? result.data.outcome : result.status;
+function resolveNext<TConfig>(node: RecipeStep<TConfig>, result: StepResult, nodeOrder: string[]): string | undefined {
+  const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : result.status;
 
   if (node.on) {
-    if (outcome in node.on && node.on[outcome]) return node.on[outcome];
-    if (result.status in node.on && node.on[result.status]) return node.on[result.status];
+    if (outcome in node.on) return node.on[outcome];
+    if (result.status in node.on) return node.on[result.status];
   }
 
   if (result.status === "failed") return undefined;

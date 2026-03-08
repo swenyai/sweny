@@ -68,7 +68,7 @@ export async function runRecipe(recipe, config, providers, options) {
                 continue;
             }
         }
-        // Execute the node
+        // Execute the node — result is always assigned (either from run or catch)
         let result;
         try {
             logger.info(`[${recipe.name}] ${node.phase}/${node.id}: starting`);
@@ -80,24 +80,16 @@ export async function runRecipe(recipe, config, providers, options) {
             logger.error(`[${recipe.name}] ${node.phase}/${node.id}: failed — ${message}`);
             result = { status: "failed", reason: message };
             hasFailed = true;
-            if (node.critical) {
-                results.set(node.id, result);
-                completedSteps.push({ name: node.id, phase: node.phase, result });
-                aborted = true;
-                break;
-            }
         }
         results.set(node.id, result);
-        completedSteps.push({ name: node.id, phase: node.phase, result: result });
+        completedSteps.push({ name: node.id, phase: node.phase, result });
         if (result.status === "failed" && node.critical) {
             aborted = true;
             break;
         }
         // Persist successful results to cache
         if (result.status === "success" && options?.cache) {
-            await options.cache
-                .set(node.id, { result: result, createdAt: Date.now() })
-                .catch(() => { }); // cache failures are non-fatal
+            await options.cache.set(node.id, { result, createdAt: Date.now() }).catch(() => { }); // cache failures are non-fatal
         }
         if (options?.afterStep)
             await options.afterStep(meta, result, ctx);
@@ -118,9 +110,9 @@ export async function runRecipe(recipe, config, providers, options) {
 function resolveNext(node, result, nodeOrder) {
     const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : result.status;
     if (node.on) {
-        if (outcome in node.on && node.on[outcome])
+        if (outcome in node.on)
             return node.on[outcome];
-        if (result.status in node.on && node.on[result.status])
+        if (result.status in node.on)
             return node.on[result.status];
     }
     if (result.status === "failed")

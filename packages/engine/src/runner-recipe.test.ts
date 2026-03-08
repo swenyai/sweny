@@ -45,9 +45,18 @@ describe("runRecipe — basic execution", () => {
   it("executes all nodes in declaration order when no on: transitions", async () => {
     const order: string[] = [];
     const r = recipe("test", [
-      node("a", "learn", async () => { order.push("a"); return { status: "success" }; }),
-      node("b", "act",   async () => { order.push("b"); return { status: "success" }; }),
-      node("c", "report",async () => { order.push("c"); return { status: "success" }; }),
+      node("a", "learn", async () => {
+        order.push("a");
+        return { status: "success" };
+      }),
+      node("b", "act", async () => {
+        order.push("b");
+        return { status: "success" };
+      }),
+      node("c", "report", async () => {
+        order.push("c");
+        return { status: "success" };
+      }),
     ]);
 
     const result = await runRecipe(r, {}, providers, opts);
@@ -108,12 +117,17 @@ describe("runRecipe — on: transition routing", () => {
   it("follows on: transition when result.data.outcome matches", async () => {
     const order: string[] = [];
     const r = recipe("test", [
-      node("gate", "act",
-        async () => ({ status: "success", data: { outcome: "branch-b" } }),
-        { on: { "branch-a": "node-a", "branch-b": "node-b" } },
-      ),
-      node("node-a", "act", async () => { order.push("a"); return { status: "success" }; }),
-      node("node-b", "act", async () => { order.push("b"); return { status: "success" }; }),
+      node("gate", "act", async () => ({ status: "success", data: { outcome: "branch-b" } }), {
+        on: { "branch-a": "node-a", "branch-b": "node-b" },
+      }),
+      node("node-a", "act", async () => {
+        order.push("a");
+        return { status: "success" };
+      }),
+      node("node-b", "act", async () => {
+        order.push("b");
+        return { status: "success" };
+      }),
     ]);
 
     await runRecipe(r, {}, providers, opts);
@@ -124,12 +138,17 @@ describe("runRecipe — on: transition routing", () => {
   it("falls back to status when data.outcome has no matching on: key", async () => {
     const order: string[] = [];
     const r = recipe("test", [
-      node("gate", "act",
-        async () => ({ status: "success", data: { outcome: "unknown-outcome" } }),
-        { on: { success: "node-b" } },
-      ),
-      node("node-a", "act", async () => { order.push("a"); return { status: "success" }; }),
-      node("node-b", "act", async () => { order.push("b"); return { status: "success" }; }),
+      node("gate", "act", async () => ({ status: "success", data: { outcome: "unknown-outcome" } }), {
+        on: { success: "node-b" },
+      }),
+      node("node-a", "act", async () => {
+        order.push("a");
+        return { status: "success" };
+      }),
+      node("node-b", "act", async () => {
+        order.push("b");
+        return { status: "success" };
+      }),
     ]);
 
     await runRecipe(r, {}, providers, opts);
@@ -140,11 +159,13 @@ describe("runRecipe — on: transition routing", () => {
   it("stops when on: transition resolves to 'end'", async () => {
     const order: string[] = [];
     const r = recipe("test", [
-      node("gate", "act",
-        async () => ({ status: "success", data: { outcome: "skip" } }),
-        { on: { skip: "end", implement: "next" } },
-      ),
-      node("next", "act", async () => { order.push("next"); return { status: "success" }; }),
+      node("gate", "act", async () => ({ status: "success", data: { outcome: "skip" } }), {
+        on: { skip: "end", implement: "next" },
+      }),
+      node("next", "act", async () => {
+        order.push("next");
+        return { status: "success" };
+      }),
     ]);
 
     const result = await runRecipe(r, {}, providers, opts);
@@ -156,10 +177,17 @@ describe("runRecipe — on: transition routing", () => {
   it("skips intervening nodes when jumping via on:", async () => {
     const order: string[] = [];
     const r = recipe("test", [
-      node("a", "learn", async () => ({ status: "success", data: { outcome: "skip" } }),
-        { on: { skip: "c", proceed: "b" } }),
-      node("b", "act",    async () => { order.push("b"); return { status: "success" }; }),
-      node("c", "report", async () => { order.push("c"); return { status: "success" }; }),
+      node("a", "learn", async () => ({ status: "success", data: { outcome: "skip" } }), {
+        on: { skip: "c", proceed: "b" },
+      }),
+      node("b", "act", async () => {
+        order.push("b");
+        return { status: "success" };
+      }),
+      node("c", "report", async () => {
+        order.push("c");
+        return { status: "success" };
+      }),
     ]);
 
     await runRecipe(r, {}, providers, opts);
@@ -176,7 +204,9 @@ describe("runRecipe — failure semantics", () => {
   it("marks result as partial when a non-critical node throws", async () => {
     const r = recipe("test", [
       node("a", "learn"),
-      node("b", "act", async () => { throw new Error("boom"); }),
+      node("b", "act", async () => {
+        throw new Error("boom");
+      }),
       node("c", "report"),
     ]);
 
@@ -188,8 +218,18 @@ describe("runRecipe — failure semantics", () => {
   it("aborts immediately when a critical node throws", async () => {
     const order: string[] = [];
     const r = recipe("test", [
-      node("a", "learn", async () => { throw new Error("critical fail"); }, { critical: true }),
-      node("b", "act", async () => { order.push("b"); return { status: "success" }; }),
+      node(
+        "a",
+        "learn",
+        async () => {
+          throw new Error("critical fail");
+        },
+        { critical: true },
+      ),
+      node("b", "act", async () => {
+        order.push("b");
+        return { status: "success" };
+      }),
     ]);
 
     const result = await runRecipe(r, {}, providers, opts);
@@ -202,7 +242,10 @@ describe("runRecipe — failure semantics", () => {
     const order: string[] = [];
     const r = recipe("test", [
       node("a", "act", async () => ({ status: "failed", reason: "no-op" })),
-      node("b", "act", async () => { order.push("b"); return { status: "success" }; }),
+      node("b", "act", async () => {
+        order.push("b");
+        return { status: "success" };
+      }),
     ]);
 
     await runRecipe(r, {}, providers, opts);
@@ -212,7 +255,9 @@ describe("runRecipe — failure semantics", () => {
 
   it("records failed step in steps array", async () => {
     const r = recipe("test", [
-      node("a", "act", async () => { throw new Error("fail"); }),
+      node("a", "act", async () => {
+        throw new Error("fail");
+      }),
     ]);
 
     const result = await runRecipe(r, {}, providers, opts);
@@ -241,9 +286,7 @@ describe("runRecipe — cycle detection", () => {
     const result = await runRecipe(r, {}, providers, opts);
 
     expect(result.status).toBe("failed");
-    expect(silentLogger.error).toHaveBeenCalledWith(
-      expect.stringContaining("Cycle detected"),
-    );
+    expect(silentLogger.error).toHaveBeenCalledWith(expect.stringContaining("Cycle detected"));
   });
 });
 
@@ -258,15 +301,11 @@ describe("runRecipe — unknown node id", () => {
     const result = await runRecipe(r, {}, providers, opts);
 
     expect(result.status).toBe("failed");
-    expect(silentLogger.error).toHaveBeenCalledWith(
-      expect.stringContaining('"nonexistent"'),
-    );
+    expect(silentLogger.error).toHaveBeenCalledWith(expect.stringContaining('"nonexistent"'));
   });
 
   it("aborts when on: transition points to a nonexistent node id", async () => {
-    const r = recipe("test", [
-      node("a", "act", async () => ({ status: "success" }), { on: { success: "ghost" } }),
-    ]);
+    const r = recipe("test", [node("a", "act", async () => ({ status: "success" }), { on: { success: "ghost" } })]);
 
     const result = await runRecipe(r, {}, providers, opts);
 
@@ -285,7 +324,9 @@ describe("runRecipe — hooks", () => {
 
     await runRecipe(r, {}, providers, {
       ...opts,
-      beforeStep: async (step) => { beforeIds.push(step.id); },
+      beforeStep: async (step) => {
+        beforeIds.push(step.id);
+      },
     });
 
     expect(beforeIds).toEqual(["a", "b"]);
@@ -294,13 +335,19 @@ describe("runRecipe — hooks", () => {
   it("skips node execution when beforeStep returns false", async () => {
     const ran: string[] = [];
     const r = recipe("test", [
-      node("a", "learn", async () => { ran.push("a"); return { status: "success" }; }),
-      node("b", "act",   async () => { ran.push("b"); return { status: "success" }; }),
+      node("a", "learn", async () => {
+        ran.push("a");
+        return { status: "success" };
+      }),
+      node("b", "act", async () => {
+        ran.push("b");
+        return { status: "success" };
+      }),
     ]);
 
     await runRecipe(r, {}, providers, {
       ...opts,
-      beforeStep: async (step) => step.id === "a" ? false : undefined,
+      beforeStep: async (step) => (step.id === "a" ? false : undefined),
     });
 
     expect(ran).toEqual(["b"]);
@@ -312,7 +359,9 @@ describe("runRecipe — hooks", () => {
 
     await runRecipe(r, {}, providers, {
       ...opts,
-      afterStep: async (step) => { afterIds.push(step.id); },
+      afterStep: async (step) => {
+        afterIds.push(step.id);
+      },
     });
 
     expect(afterIds).toEqual(["a", "b"]);
@@ -328,7 +377,10 @@ describe("runRecipe — resolveNext edge cases", () => {
     const order: string[] = [];
     const r = recipe("test", [
       node("a", "act", async () => ({ status: "skipped", reason: "nothing to do" })),
-      node("b", "act", async () => { order.push("b"); return { status: "success" }; }),
+      node("b", "act", async () => {
+        order.push("b");
+        return { status: "success" };
+      }),
     ]);
 
     await runRecipe(r, {}, providers, opts);

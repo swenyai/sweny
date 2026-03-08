@@ -49,7 +49,7 @@ export async function implementFix(ctx) {
     // 3. Install Claude and implement fix
     // -------------------------------------------------------------------------
     await codingAgent.install();
-    const implementPrompt = buildImplementPrompt(issueIdentifier, analysisDir);
+    const implementPrompt = buildImplementPrompt(issueIdentifier, analysisDir, config.issueTrackerName);
     await codingAgent.run({
         prompt: implementPrompt,
         maxTurns: config.maxImplementTurns,

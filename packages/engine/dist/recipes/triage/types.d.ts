@@ -28,6 +28,7 @@ export interface TriageConfig {
     prDescriptionMaxTurns?: number;
     /** Default priority for new issues (default: 2). */
     issuePriority?: number;
+    issueTrackerName?: string;
     agentEnv: Record<string, string>;
 }
 /** Result of the investigation (learn) phase. */

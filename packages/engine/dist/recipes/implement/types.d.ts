@@ -17,5 +17,6 @@ export interface ImplementConfig {
     projectId: string;
     stateInProgress: string;
     statePeerReview: string;
+    issueTrackerName?: string;
 }
 //# sourceMappingURL=types.d.ts.map
