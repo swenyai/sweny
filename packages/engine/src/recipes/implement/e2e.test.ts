@@ -27,6 +27,21 @@ function makeMockAgent(onRun?: (opts: CodingAgentRunOptions) => void | Promise<v
   };
 }
 
+// Prevent fileSourceControl from detecting the monorepo's git repo —
+// this ensures all git operations in the file provider become no-ops.
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    execSync: (cmd: string, opts?: unknown) => {
+      if (typeof cmd === "string" && cmd.startsWith("git")) {
+        throw new Error("not a git repository (mocked)");
+      }
+      return actual.execSync(cmd as string, opts as Parameters<typeof actual.execSync>[1]);
+    },
+  };
+});
+
 // Mock prompts to avoid fs reads inside buildImplementPrompt
 vi.mock("../triage/prompts.js", () => ({
   buildInvestigationPrompt: vi.fn().mockReturnValue("mock investigation prompt"),
