@@ -49,6 +49,7 @@ vi.mock("../triage/prompts.js", () => ({
   buildInvestigationPrompt: vi.fn().mockReturnValue("mock investigation prompt"),
   buildImplementPrompt: vi.fn().mockReturnValue("mock implement prompt"),
   buildPrDescriptionPrompt: vi.fn().mockReturnValue("mock pr description prompt"),
+  issueLink: vi.fn().mockReturnValue("[IDENTIFIER](https://issue.url)"),
 }));
 
 const silentLogger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -223,27 +224,49 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
  * delegates to the real file provider so we get a real .pr-N.md file on disk.
  */
 function buildSourceControlWithCommits(outputDir: string): SourceControlProvider {
-  const real = fileSourceControl({ outputDir, logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } });
+  const real = fileSourceControl({
+    outputDir,
+    logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  });
   return {
-    async verifyAccess() { return real.verifyAccess(); },
-    async findExistingPr() { return null; },
-    async hasNewCommits() { return true; },
-    async hasChanges() { return false; },
-    async getChangedFiles() { return ["src/checkout.ts"]; },
+    async verifyAccess() {
+      return real.verifyAccess();
+    },
+    async findExistingPr() {
+      return null;
+    },
+    async hasNewCommits() {
+      return true;
+    },
+    async hasChanges() {
+      return false;
+    },
+    async getChangedFiles() {
+      return ["src/checkout.ts"];
+    },
     async configureBotIdentity() {},
     async createBranch() {},
     async pushBranch() {},
     async resetPaths() {},
     async stageAndCommit() {},
-    async createPullRequest(opts) { return real.createPullRequest(opts); },
-    async listPullRequests(opts) { return real.listPullRequests(opts); },
-    async dispatchWorkflow(opts) { return real.dispatchWorkflow(opts); },
+    async createPullRequest(opts) {
+      return real.createPullRequest(opts);
+    },
+    async listPullRequests(opts) {
+      return real.listPullRequests(opts);
+    },
+    async dispatchWorkflow(opts) {
+      return real.dispatchWorkflow(opts);
+    },
   };
 }
 
 function buildProvidersWithCommits(outputDir: string) {
   const registry = createProviderRegistry();
-  registry.set("issueTracker", fileIssueTracking({ outputDir, logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+  registry.set(
+    "issueTracker",
+    fileIssueTracking({ outputDir, logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } }),
+  );
   registry.set("sourceControl", buildSourceControlWithCommits(outputDir));
   registry.set("codingAgent", makeMockAgent());
   registry.set("notification", { send: vi.fn().mockResolvedValue(undefined) });
@@ -293,7 +316,7 @@ describe("implement workflow e2e — create-pr path", () => {
     const data = createPrStep?.result.data as Record<string, unknown>;
     expect(data).toBeDefined();
     expect(typeof data.prUrl).toBe("string");
-    expect(data.prUrl).toMatch(/^file:\/\//);   // fileSourceControl returns a local file URL
+    expect(data.prUrl).toMatch(/^file:\/\//); // fileSourceControl returns a local file URL
     expect(typeof data.prNumber).toBe("number");
     expect(data.issueIdentifier).toBe(issueId);
   });

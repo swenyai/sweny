@@ -43,6 +43,7 @@ vi.mock("./prompts.js", () => ({
   buildInvestigationPrompt: vi.fn().mockReturnValue("mocked investigation prompt"),
   buildImplementPrompt: vi.fn().mockReturnValue("mocked implement prompt"),
   buildPrDescriptionPrompt: vi.fn().mockReturnValue("mocked pr description prompt"),
+  issueLink: vi.fn().mockReturnValue("[IDENTIFIER](https://issue.url)"),
 }));
 
 vi.mock("./service-map.js", () => ({
@@ -60,10 +61,25 @@ import { mockAgent } from "@sweny-ai/providers/coding-agent";
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
 const LOG_FIXTURE: unknown[] = [
-  { timestamp: "2024-01-01T00:00:00Z", service: "api", level: "error", message: "TypeError: Cannot read properties of undefined (reading 'id') in /checkout" },
-  { timestamp: "2024-01-01T00:01:00Z", service: "api", level: "error", message: "TypeError: Cannot read properties of undefined (reading 'id') in /checkout" },
+  {
+    timestamp: "2024-01-01T00:00:00Z",
+    service: "api",
+    level: "error",
+    message: "TypeError: Cannot read properties of undefined (reading 'id') in /checkout",
+  },
+  {
+    timestamp: "2024-01-01T00:01:00Z",
+    service: "api",
+    level: "error",
+    message: "TypeError: Cannot read properties of undefined (reading 'id') in /checkout",
+  },
   { timestamp: "2024-01-01T00:02:00Z", service: "worker", level: "warn", message: "Job timeout after 30s" },
-  { timestamp: "2024-01-01T00:03:00Z", service: "api", level: "error", message: "Database connection failed: ECONNREFUSED 127.0.0.1:5432" },
+  {
+    timestamp: "2024-01-01T00:03:00Z",
+    service: "api",
+    level: "error",
+    message: "Database connection failed: ECONNREFUSED 127.0.0.1:5432",
+  },
 ];
 
 // best-candidate.md written by the mock agent into analysisDir
@@ -302,19 +318,35 @@ describe("triageRecipe E2E (file providers + mock agent)", () => {
 function buildSourceControlWithCommits(outputDir: string): SourceControlProvider {
   const real = fileSourceControl({ outputDir, logger: silentLogger });
   return {
-    async verifyAccess() { return real.verifyAccess(); },
-    async findExistingPr() { return null; },
-    async hasNewCommits() { return true; },
-    async hasChanges() { return false; },
-    async getChangedFiles() { return ["src/checkout.ts"]; },
+    async verifyAccess() {
+      return real.verifyAccess();
+    },
+    async findExistingPr() {
+      return null;
+    },
+    async hasNewCommits() {
+      return true;
+    },
+    async hasChanges() {
+      return false;
+    },
+    async getChangedFiles() {
+      return ["src/checkout.ts"];
+    },
     async configureBotIdentity() {},
     async createBranch() {},
     async pushBranch() {},
     async resetPaths() {},
     async stageAndCommit() {},
-    async createPullRequest(opts) { return real.createPullRequest(opts); },
-    async listPullRequests(opts) { return real.listPullRequests(opts); },
-    async dispatchWorkflow(opts) { return real.dispatchWorkflow(opts); },
+    async createPullRequest(opts) {
+      return real.createPullRequest(opts);
+    },
+    async listPullRequests(opts) {
+      return real.listPullRequests(opts);
+    },
+    async dispatchWorkflow(opts) {
+      return real.dispatchWorkflow(opts);
+    },
   };
 }
 

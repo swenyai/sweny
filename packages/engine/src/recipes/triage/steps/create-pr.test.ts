@@ -8,6 +8,7 @@ import type { StepResult } from "../../../types.js";
 vi.mock("fs");
 vi.mock("../prompts.js", () => ({
   buildPrDescriptionPrompt: vi.fn().mockReturnValue("mock pr desc prompt"),
+  issueLink: vi.fn().mockReturnValue("[IDENTIFIER](https://issue.url)"),
 }));
 vi.mock("@sweny-ai/providers/issue-tracking", () => ({
   canLinkPr: vi.fn(),
