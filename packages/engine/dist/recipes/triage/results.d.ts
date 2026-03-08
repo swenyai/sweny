@@ -1,5 +1,5 @@
 import type { WorkflowContext } from "../../types.js";
-import type { TriageConfig, TriageStepDataMap } from "./types.js";
+import type { TriageStepDataMap } from "./types.js";
 /**
  * Get typed step result data from the workflow context.
  *
@@ -10,5 +10,5 @@ import type { TriageConfig, TriageStepDataMap } from "./types.js";
  * const investigation = getStepData(ctx, "investigate");
  * //    ^? InvestigationResult | undefined
  */
-export declare function getStepData<K extends keyof TriageStepDataMap>(ctx: WorkflowContext<TriageConfig>, stepName: K): TriageStepDataMap[K] | undefined;
+export declare function getStepData<K extends keyof TriageStepDataMap>(ctx: WorkflowContext<unknown>, stepName: K): TriageStepDataMap[K] | undefined;
 //# sourceMappingURL=results.d.ts.map

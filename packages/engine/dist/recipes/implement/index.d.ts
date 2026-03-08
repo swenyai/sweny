@@ -6,8 +6,8 @@ import type { ImplementConfig } from "./types.js";
  * Given a known issue identifier, fetches the issue, implements a fix,
  * and opens a PR. Skips the investigation/novelty phases of triage.
  *
- * Steps that were written for TriageConfig are reused via cast — they only
- * access the config fields that ImplementConfig also provides.
+ * Shared nodes (implement-fix, create-pr, notify) are typed to SharedNodeConfig,
+ * which ImplementConfig satisfies — no type casts needed.
  */
 export declare const implementWorkflow: Workflow<ImplementConfig>;
 export type { ImplementConfig } from "./types.js";
