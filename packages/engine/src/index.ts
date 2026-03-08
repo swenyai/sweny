@@ -15,6 +15,8 @@ export type { CacheEntry, StepCache } from "./cache.js";
 
 // Runtime
 export { runWorkflow, createProviderRegistry } from "./runner.js";
+export { runDAG } from "./runner-dag.js";
+export type { RecipeDAG, RecipeNode } from "./types.js";
 
 // Recipes
 export { triageWorkflow } from "./recipes/triage/index.js";

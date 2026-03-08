@@ -1,1 +1,1 @@
-{"version":3,"file":"results.js","sourceRoot":"","sources":["../../../src/recipes/triage/results.ts"],"names":[],"mappings":"AAGA;;;;;;;;;GASG;AACH,MAAM,UAAU,WAAW,CACzB,GAAkC,EAClC,QAAW;IAEX,OAAO,GAAG,CAAC,OAAO,CAAC,GAAG,CAAC,QAAQ,CAAC,EAAE,IAAwC,CAAC;AAC7E,CAAC"}
+{"version":3,"file":"results.js","sourceRoot":"","sources":["../../../src/recipes/triage/results.ts"],"names":[],"mappings":"AAGA;;;;;;;;;GASG;AACH,MAAM,UAAU,WAAW,CACzB,GAA6B,EAC7B,QAAW;IAEX,OAAO,GAAG,CAAC,OAAO,CAAC,GAAG,CAAC,QAAQ,CAAC,EAAE,IAAwC,CAAC;AAC7E,CAAC"}
