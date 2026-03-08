@@ -39,6 +39,7 @@ export async function runRecipe(dag, config, providers, options) {
     let currentId = dag.start;
     let hasFailed = false;
     let aborted = false;
+    const visitedInRun = [];
     while (currentId && currentId !== "end") {
         const node = nodeMap.get(currentId);
         if (!node) {
@@ -46,6 +47,12 @@ export async function runRecipe(dag, config, providers, options) {
             aborted = true;
             break;
         }
+        if (visitedInRun.includes(currentId)) {
+            logger.error(`[${dag.name}] Cycle detected at node "${currentId}" — stopping`);
+            aborted = true;
+            break;
+        }
+        visitedInRun.push(currentId);
         // beforeStep hook
         if (options?.beforeStep) {
             const stepShim = { name: node.id, phase: node.phase, run: node.run };

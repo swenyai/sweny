@@ -60,6 +60,7 @@ export async function runRecipe<TConfig>(
   let currentId: string | undefined = dag.start;
   let hasFailed = false;
   let aborted = false;
+  const visitedInRun: string[] = [];
 
   while (currentId && currentId !== "end") {
     const node = nodeMap.get(currentId);
@@ -68,6 +69,13 @@ export async function runRecipe<TConfig>(
       aborted = true;
       break;
     }
+
+    if (visitedInRun.includes(currentId)) {
+      logger.error(`[${dag.name}] Cycle detected at node "${currentId}" — stopping`);
+      aborted = true;
+      break;
+    }
+    visitedInRun.push(currentId);
 
     // beforeStep hook
     if (options?.beforeStep) {

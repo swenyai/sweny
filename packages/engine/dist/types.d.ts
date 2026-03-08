@@ -81,45 +81,6 @@ export interface RunOptions {
 /**
  * A single node in a recipe DAG.
  * Nodes are atomic, reusable units that run and return a StepResult.
- * Routing to the next node is determined by the outcome (see transitions).
- */
-export interface RecipeNode<TConfig = unknown> {
-    /** Unique id within the DAG (used as key in results map and transition targets). */
-    id: string;
-    /** Phase for logging and failure semantics (learn failure = abort). */
-    phase: WorkflowPhase;
-    /** Execute the node. Throw to fail. */
-    run: (ctx: WorkflowContext<TConfig>) => Promise<StepResult>;
-    /**
-     * Outcome → next node id.
-     *
-     * Outcome is resolved in order:
-     *   1. result.data?.outcome (string) — explicit outcome returned by the node
-     *   2. result.status ("success" | "skipped" | "failed")
-     *
-     * Special target id "end" stops the DAG.
-     * If the outcome has no matching transition, the runner continues to the
-     * next node in declaration order (for "success") or stops (for "failed").
-     */
-    transitions?: Record<string, string>;
-    /**
-     * If true, a failure aborts the entire DAG immediately (same semantics as
-     * learn phase in the sequential runner). Default: false.
-     */
-    critical?: boolean;
-}
-/** A complete recipe as a directed acyclic graph of nodes. */
-export interface RecipeDAG<TConfig = unknown> {
-    name: string;
-    description?: string;
-    /** Id of the first node to execute. */
-    start: string;
-    /** All nodes in declaration order. Used for default sequencing when no transition matches. */
-    nodes: RecipeNode<TConfig>[];
-}
-/**
- * A single node in a recipe DAG.
- * Nodes are atomic, reusable units that run and return a StepResult.
  * Routing to the next node is determined by the outcome (see on).
  */
 export interface RecipeStep<TConfig = unknown> {

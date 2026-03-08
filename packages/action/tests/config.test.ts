@@ -29,6 +29,7 @@ describe("parseInputs", () => {
 
     const config = parseInputs();
 
+    expect(config.recipe).toBe("triage");
     expect(config.observabilityProvider).toBe("datadog");
     expect(config.observabilityCredentials.site).toBe("datadoghq.com");
     expect(config.issueTrackerProvider).toBe("github-issues"); // default changed from linear
@@ -73,6 +74,20 @@ describe("parseInputs", () => {
     expect(config.serviceMapPath).toBe("custom/map.yml");
     expect(config.anthropicApiKey).toBe("sk-ant-test");
     expect(config.linearApiKey).toBe("lin_test");
+  });
+
+  it("parses recipe=implement correctly", () => {
+    mockGetInput.mockImplementation((name: string) => name === "recipe" ? "implement" : "");
+    mockGetBooleanInput.mockReturnValue(false);
+    const config = parseInputs();
+    expect(config.recipe).toBe("implement");
+  });
+
+  it("defaults recipe to triage for unknown values", () => {
+    mockGetInput.mockImplementation((name: string) => name === "recipe" ? "unknown-recipe" : "");
+    mockGetBooleanInput.mockReturnValue(false);
+    const config = parseInputs();
+    expect(config.recipe).toBe("triage");
   });
 
   it("parses maxInvestigateTurns and maxImplementTurns as integers", () => {
@@ -316,6 +331,7 @@ describe("parseInputs", () => {
 describe("validateInputs", () => {
   function baseConfig(overrides?: Partial<ActionConfig>): ActionConfig {
     return {
+      recipe: "triage",
       anthropicApiKey: "sk-ant-test",
       claudeOauthToken: "",
       observabilityProvider: "datadog",
@@ -519,5 +535,21 @@ describe("validateInputs", () => {
   it("no coding agent key errors when claude selected", () => {
     const errors = validateInputs(baseConfig({ codingAgentProvider: "claude" }));
     expect(errors.filter((e) => e.includes("openai") || e.includes("gemini"))).toHaveLength(0);
+  });
+
+  // recipe validation
+  it("requires linear-issue when recipe is implement", () => {
+    const errors = validateInputs(baseConfig({ recipe: "implement", linearIssue: "" }));
+    expect(errors).toContainEqual(expect.stringContaining("linear-issue"));
+  });
+
+  it("passes implement recipe when linear-issue is provided", () => {
+    const errors = validateInputs(baseConfig({ recipe: "implement", linearIssue: "ENG-123" }));
+    expect(errors.filter((e) => e.includes("linear-issue"))).toHaveLength(0);
+  });
+
+  it("does not require linear-issue for triage recipe", () => {
+    const errors = validateInputs(baseConfig({ recipe: "triage", linearIssue: "" }));
+    expect(errors.filter((e) => e.includes("linear-issue"))).toHaveLength(0);
   });
 });

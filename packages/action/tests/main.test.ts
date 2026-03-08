@@ -164,6 +164,15 @@ describe("run() orchestration", () => {
     expect(thirdArg).toBe(fakeProviders);
   });
 
+  it("routes to implementRecipe when config.recipe is 'implement'", async () => {
+    mockParseInputs.mockReturnValue({ ...DEFAULT_CONFIG, recipe: "implement" as const });
+
+    await loadMain();
+
+    const [firstArg] = mockRunRecipe.mock.calls[0];
+    expect(firstArg).toMatchObject({ name: "implement" });
+  });
+
   it("calls core.setFailed with error.message when runRecipe throws Error", async () => {
     mockRunRecipe.mockRejectedValue(new Error("workflow exploded"));
 
