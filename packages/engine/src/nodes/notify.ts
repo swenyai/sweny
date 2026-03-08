@@ -65,7 +65,11 @@ export async function sendNotification(ctx: WorkflowContext<SharedNodeConfig>): 
     fields.splice(1, 0, { label: "Service Filter", value: `\`${config.serviceFilter}\``, short: true });
   }
   if (config.timeRange !== undefined) {
-    fields.splice(config.serviceFilter !== undefined ? 2 : 1, 0, { label: "Time Range", value: `\`${config.timeRange}\``, short: true });
+    fields.splice(config.serviceFilter !== undefined ? 2 : 1, 0, {
+      label: "Time Range",
+      value: `\`${config.timeRange}\``,
+      short: true,
+    });
   }
 
   // -------------------------------------------------------------------------

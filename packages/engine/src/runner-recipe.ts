@@ -157,14 +157,9 @@ export async function runRecipe<TConfig>(
 }
 
 /** Resolve the next node id from on or default sequencing. */
-function resolveNext<TConfig>(
-  node: RecipeStep<TConfig>,
-  result: StepResult,
-  nodeOrder: string[],
-): string | undefined {
+function resolveNext<TConfig>(node: RecipeStep<TConfig>, result: StepResult, nodeOrder: string[]): string | undefined {
   // Determine outcome key (explicit outcome first, then status)
-  const outcome =
-    typeof result.data?.outcome === "string" ? result.data.outcome : result.status;
+  const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : result.status;
 
   // Check explicit on
   if (node.on) {

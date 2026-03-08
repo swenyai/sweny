@@ -67,6 +67,8 @@ const baseConfig: Partial<CliConfig> = {
   outputDir: ".sweny/output",
   observabilityProvider: "datadog",
   observabilityCredentials: {},
+  repository: "swenyai/sweny",
+  baseBranch: "main",
 };
 
 describe("createImplementProviders", () => {

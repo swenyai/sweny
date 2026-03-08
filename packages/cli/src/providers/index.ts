@@ -246,6 +246,7 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
  */
 export function createImplementProviders(config: CliConfig, logger: CliLogger): ProviderRegistry {
   const registry = createProviderRegistry();
+  const [implOwner = "", implRepo = ""] = config.repository.split("/");
 
   // Issue tracker
   switch (config.issueTrackerProvider) {
@@ -259,7 +260,10 @@ export function createImplementProviders(config: CliConfig, logger: CliLogger): 
       );
       break;
     case "github-issues":
-      registry.set("issueTracker", githubIssues({ token: config.githubToken || config.botToken, logger }));
+      registry.set(
+        "issueTracker",
+        githubIssues({ token: config.githubToken || config.botToken, owner: implOwner, repo: implRepo, logger }),
+      );
       break;
     case "file":
     default:
@@ -272,15 +276,27 @@ export function createImplementProviders(config: CliConfig, logger: CliLogger): 
     case "gitlab":
       registry.set(
         "sourceControl",
-        gitlab({ token: config.gitlabToken, projectId: config.gitlabProjectId, baseUrl: config.gitlabBaseUrl, logger }),
+        gitlab({
+          token: config.gitlabToken,
+          projectId: config.gitlabProjectId,
+          baseUrl: config.gitlabBaseUrl,
+          baseBranch: config.baseBranch,
+          logger,
+        }),
       );
       break;
     case "file":
-      registry.set("sourceControl", fileSourceControl({ outputDir: config.outputDir, logger }));
+      registry.set(
+        "sourceControl",
+        fileSourceControl({ outputDir: config.outputDir, baseBranch: config.baseBranch, logger }),
+      );
       break;
     case "github":
     default:
-      registry.set("sourceControl", github({ token: config.githubToken || config.botToken, logger }));
+      registry.set(
+        "sourceControl",
+        github({ token: config.githubToken || config.botToken, owner: implOwner, repo: implRepo, logger }),
+      );
       break;
   }
 

@@ -77,14 +77,14 @@ describe("parseInputs", () => {
   });
 
   it("parses recipe=implement correctly", () => {
-    mockGetInput.mockImplementation((name: string) => name === "recipe" ? "implement" : "");
+    mockGetInput.mockImplementation((name: string) => (name === "recipe" ? "implement" : ""));
     mockGetBooleanInput.mockReturnValue(false);
     const config = parseInputs();
     expect(config.recipe).toBe("implement");
   });
 
   it("defaults recipe to triage for unknown values", () => {
-    mockGetInput.mockImplementation((name: string) => name === "recipe" ? "unknown-recipe" : "");
+    mockGetInput.mockImplementation((name: string) => (name === "recipe" ? "unknown-recipe" : ""));
     mockGetBooleanInput.mockReturnValue(false);
     const config = parseInputs();
     expect(config.recipe).toBe("triage");
