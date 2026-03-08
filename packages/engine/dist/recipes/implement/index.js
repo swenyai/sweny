@@ -12,16 +12,19 @@ import { sendNotification } from "../../nodes/notify.js";
  * Shared nodes (implement-fix, create-pr, notify) are typed to SharedNodeConfig,
  * which ImplementConfig satisfies — no type casts needed.
  */
-export const implementWorkflow = {
+export const implementRecipe = {
     name: "implement",
     description: "Implement a fix for a specific issue and open a pull request",
-    steps: [
-        { name: "verify-access", phase: "learn", run: verifyAccess },
+    start: "verify-access",
+    nodes: [
+        { id: "verify-access", phase: "learn", run: verifyAccess, critical: true },
         // Named "create-issue" so that implementFix and createPr find it via getStepData
-        { name: "create-issue", phase: "learn", run: fetchIssue },
-        { name: "implement-fix", phase: "act", run: implementFix },
-        { name: "create-pr", phase: "act", run: createPr },
-        { name: "notify", phase: "report", run: sendNotification },
+        { id: "create-issue", phase: "learn", run: fetchIssue, critical: true },
+        { id: "implement-fix", phase: "act", run: implementFix },
+        { id: "create-pr", phase: "act", run: createPr },
+        { id: "notify", phase: "report", run: sendNotification },
     ],
 };
+// Backwards compat alias
+export { implementRecipe as implementWorkflow };
 //# sourceMappingURL=index.js.map

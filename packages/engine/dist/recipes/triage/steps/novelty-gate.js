@@ -3,27 +3,24 @@ import { getStepData } from "../results.js";
 export async function noveltyGate(ctx) {
     const issueTracker = ctx.providers.get("issueTracker");
     const investigation = getStepData(ctx, "investigate");
-    // Dry run — skip the entire act phase
+    // Dry run — route to notify via DAG on
     if (ctx.config.dryRun) {
         ctx.logger.info("Dry run mode — skipping act phase");
-        ctx.skipPhase("act", "Dry run mode");
         return {
             status: "success",
-            data: { action: "dry-run", recommendation: investigation?.recommendation ?? "unknown" },
+            data: { outcome: "skip", action: "dry-run", recommendation: investigation?.recommendation ?? "unknown" },
         };
     }
     if (!investigation) {
-        ctx.skipPhase("act", "No investigation result");
         return { status: "failed", reason: "No investigation result available" };
     }
     const recommendation = investigation.recommendation;
     // SKIP — no novel issues
     if (/skip/i.test(recommendation)) {
         ctx.logger.info("Recommendation is SKIP — no novel issues found");
-        ctx.skipPhase("act", "Recommendation: skip");
         return {
             status: "success",
-            data: { action: "skip", recommendation },
+            data: { outcome: "skip", action: "skip", recommendation },
         };
     }
     // +1 EXISTING — add occurrence to existing issue
@@ -40,10 +37,10 @@ export async function noveltyGate(ctx) {
                 ctx.logger.warn(`Failed to add occurrence: ${err}`);
             }
         }
-        ctx.skipPhase("act", `+1 existing ${investigation.existingIssue}`);
         return {
             status: "success",
             data: {
+                outcome: "skip",
                 action: "+1",
                 recommendation,
                 issueIdentifier: investigation.existingIssue,
@@ -54,7 +51,7 @@ export async function noveltyGate(ctx) {
     ctx.logger.info("Recommendation is IMPLEMENT — proceeding with fix");
     return {
         status: "success",
-        data: { action: "implement", recommendation },
+        data: { outcome: "implement", action: "implement", recommendation },
     };
 }
 //# sourceMappingURL=novelty-gate.js.map

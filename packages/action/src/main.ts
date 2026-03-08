@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
-import { runWorkflow, triageWorkflow } from "@sweny-ai/engine";
-import type { TriageConfig, WorkflowResult } from "@sweny-ai/engine";
+import { runRecipe, triageRecipe, implementRecipe } from "@sweny-ai/engine";
+import type { TriageConfig, ImplementConfig, WorkflowResult } from "@sweny-ai/engine";
 import { parseInputs, validateInputs, ActionConfig } from "./config.js";
 import { createProviders } from "./providers/index.js";
 
@@ -15,18 +15,26 @@ async function run(): Promise<void> {
       return;
     }
     const providers = createProviders(config);
-    const triageConfig = mapToTriageConfig(config);
 
-    const result = await runWorkflow(triageWorkflow, triageConfig, providers, {
+    const runOptions = {
       logger: actionsLogger,
-      beforeStep: async (step) => {
+      beforeStep: async (step: { phase: string; name: string }) => {
         core.startGroup(`${step.phase}: ${step.name}`);
       },
-      afterStep: async (step, stepResult) => {
+      afterStep: async (step: { name: string }, stepResult: { status: string; reason?: string }) => {
         core.info(`${step.name}: ${stepResult.status}${stepResult.reason ? ` — ${stepResult.reason}` : ""}`);
         core.endGroup();
       },
-    });
+    };
+
+    let result: WorkflowResult;
+    if (config.recipe === "implement") {
+      const implementConfig = mapToImplementConfig(config);
+      result = await runRecipe(implementRecipe, implementConfig, providers, runOptions);
+    } else {
+      const triageConfig = mapToTriageConfig(config);
+      result = await runRecipe(triageRecipe, triageConfig, providers, runOptions);
+    }
 
     setGitHubOutputs(result);
   } catch (error) {
@@ -36,6 +44,30 @@ async function run(): Promise<void> {
       core.setFailed("An unexpected error occurred");
     }
   }
+}
+
+export function mapToImplementConfig(config: ActionConfig): ImplementConfig {
+  const agentEnv: Record<string, string> = {};
+  if (config.anthropicApiKey) agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
+  if (config.claudeOauthToken) agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+  if (config.openaiApiKey) agentEnv.OPENAI_API_KEY = config.openaiApiKey;
+  if (config.geminiApiKey) agentEnv.GEMINI_API_KEY = config.geminiApiKey;
+  if (config.githubToken) agentEnv.GITHUB_TOKEN = config.githubToken;
+  if (config.linearApiKey) agentEnv.LINEAR_API_KEY = config.linearApiKey;
+  if (config.linearTeamId) agentEnv.LINEAR_TEAM_ID = config.linearTeamId;
+
+  return {
+    issueIdentifier: config.linearIssue,
+    repository: config.repository,
+    dryRun: config.dryRun,
+    maxImplementTurns: config.maxImplementTurns,
+    baseBranch: config.baseBranch,
+    prLabels: config.prLabels,
+    projectId: config.linearTeamId,
+    stateInProgress: config.linearStateInProgress,
+    statePeerReview: config.linearStatePeerReview,
+    agentEnv,
+  };
 }
 
 export function mapToTriageConfig(config: ActionConfig): TriageConfig {

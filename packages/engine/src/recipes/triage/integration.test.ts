@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
-import { runWorkflow, createProviderRegistry } from "../../runner.js";
-import { triageWorkflow } from "./index.js";
+import { runRecipe, createProviderRegistry } from "../../runner-recipe.js";
+import { triageRecipe } from "./index.js";
 import { defaultConfig, silentLogger } from "./test-helpers.js";
 import type { TriageConfig } from "./types.js";
 import type { ProviderRegistry, WorkflowResult } from "../../types.js";
@@ -163,7 +163,7 @@ function stepResult(result: WorkflowResult, stepName: string) {
 // Integration Tests
 // ---------------------------------------------------------------------------
 
-describe("triage workflow integration", () => {
+describe("triage recipe integration", () => {
   let providers: ProviderRegistry;
   let config: TriageConfig;
 
@@ -177,34 +177,34 @@ describe("triage workflow integration", () => {
   // 1. Full successful triage run (dry-run)
   // =========================================================================
 
-  it("completes a full dry-run: learn succeeds, act phase is skipped, notify runs", async () => {
+  it("completes a full dry-run: learn succeeds, novelty-gate routes to notify", async () => {
     config.dryRun = true;
     mockFsForInvestigation("implement");
 
-    const result = await runWorkflow(triageWorkflow, config, providers, {
+    const result = await runRecipe(triageRecipe, config, providers, {
       logger: silentLogger,
     });
 
     // Overall status
     expect(result.status).toBe("completed");
 
-    // All 9 steps should be present
-    expect(result.steps).toHaveLength(9);
-
-    // Learn phase — all succeed
+    // Learn phase — all succeed (3 nodes)
     expect(stepResult(result, "verify-access")?.result.status).toBe("success");
     expect(stepResult(result, "build-context")?.result.status).toBe("success");
     expect(stepResult(result, "investigate")?.result.status).toBe("success");
 
-    // Act phase — novelty-gate succeeds (it calls skipPhase), rest are skipped
+    // novelty-gate routes to notify (outcome: "skip")
     expect(stepResult(result, "novelty-gate")?.result.status).toBe("success");
     expect(stepResult(result, "novelty-gate")?.result.data).toMatchObject({
       action: "dry-run",
+      outcome: "skip",
     });
-    expect(stepResult(result, "create-issue")?.result.status).toBe("skipped");
-    expect(stepResult(result, "cross-repo-check")?.result.status).toBe("skipped");
-    expect(stepResult(result, "implement-fix")?.result.status).toBe("skipped");
-    expect(stepResult(result, "create-pr")?.result.status).toBe("skipped");
+
+    // create-issue, cross-repo-check, implement-fix, create-pr are NOT visited
+    expect(stepResult(result, "create-issue")).toBeUndefined();
+    expect(stepResult(result, "cross-repo-check")).toBeUndefined();
+    expect(stepResult(result, "implement-fix")).toBeUndefined();
+    expect(stepResult(result, "create-pr")).toBeUndefined();
 
     // Report phase — notify runs
     expect(stepResult(result, "notify")?.result.status).toBe("success");
@@ -224,10 +224,10 @@ describe("triage workflow integration", () => {
   // 2. Skip recommendation flow
   // =========================================================================
 
-  it("handles skip recommendation: novelty-gate skips act, notify still runs", async () => {
+  it("handles skip recommendation: novelty-gate routes to notify", async () => {
     mockFsForInvestigation("skip");
 
-    const result = await runWorkflow(triageWorkflow, config, providers, {
+    const result = await runRecipe(triageRecipe, config, providers, {
       logger: silentLogger,
     });
 
@@ -238,16 +238,19 @@ describe("triage workflow integration", () => {
     expect(stepResult(result, "build-context")?.result.status).toBe("success");
     expect(stepResult(result, "investigate")?.result.status).toBe("success");
 
-    // Act phase — novelty-gate runs and calls skipPhase, rest skipped
+    // novelty-gate routes to notify via outcome: "skip"
     expect(stepResult(result, "novelty-gate")?.result.status).toBe("success");
     expect(stepResult(result, "novelty-gate")?.result.data).toMatchObject({
       action: "skip",
+      outcome: "skip",
       recommendation: "skip",
     });
-    expect(stepResult(result, "create-issue")?.result.status).toBe("skipped");
-    expect(stepResult(result, "cross-repo-check")?.result.status).toBe("skipped");
-    expect(stepResult(result, "implement-fix")?.result.status).toBe("skipped");
-    expect(stepResult(result, "create-pr")?.result.status).toBe("skipped");
+
+    // Intermediate act steps not visited
+    expect(stepResult(result, "create-issue")).toBeUndefined();
+    expect(stepResult(result, "cross-repo-check")).toBeUndefined();
+    expect(stepResult(result, "implement-fix")).toBeUndefined();
+    expect(stepResult(result, "create-pr")).toBeUndefined();
 
     // Report phase — notify runs
     expect(stepResult(result, "notify")?.result.status).toBe("success");
@@ -263,7 +266,7 @@ describe("triage workflow integration", () => {
   // 3. +1 existing issue flow
   // =========================================================================
 
-  it("handles +1 existing issue: adds comment, skips act, notify runs", async () => {
+  it("handles +1 existing issue: adds comment, routes to notify", async () => {
     mockFsForInvestigation("+1 existing ENG-123");
 
     const issueTracker = getProvider<{
@@ -278,7 +281,7 @@ describe("triage workflow integration", () => {
       branchName: "eng-123-fix",
     });
 
-    const result = await runWorkflow(triageWorkflow, config, providers, {
+    const result = await runRecipe(triageRecipe, config, providers, {
       logger: silentLogger,
     });
 
@@ -289,10 +292,11 @@ describe("triage workflow integration", () => {
     expect(stepResult(result, "build-context")?.result.status).toBe("success");
     expect(stepResult(result, "investigate")?.result.status).toBe("success");
 
-    // Act phase — novelty-gate adds comment and skips
+    // novelty-gate adds comment and routes to notify
     expect(stepResult(result, "novelty-gate")?.result.status).toBe("success");
     expect(stepResult(result, "novelty-gate")?.result.data).toMatchObject({
       action: "+1",
+      outcome: "skip",
       issueIdentifier: "ENG-123",
     });
 
@@ -300,11 +304,11 @@ describe("triage workflow integration", () => {
     expect(issueTracker.getIssue).toHaveBeenCalledWith("ENG-123");
     expect(issueTracker.addComment).toHaveBeenCalledWith("existing-id", expect.stringContaining("+1 detected on"));
 
-    // Remaining act steps skipped
-    expect(stepResult(result, "create-issue")?.result.status).toBe("skipped");
-    expect(stepResult(result, "cross-repo-check")?.result.status).toBe("skipped");
-    expect(stepResult(result, "implement-fix")?.result.status).toBe("skipped");
-    expect(stepResult(result, "create-pr")?.result.status).toBe("skipped");
+    // Intermediate act steps not visited
+    expect(stepResult(result, "create-issue")).toBeUndefined();
+    expect(stepResult(result, "cross-repo-check")).toBeUndefined();
+    expect(stepResult(result, "implement-fix")).toBeUndefined();
+    expect(stepResult(result, "create-pr")).toBeUndefined();
 
     // Report phase — notify runs
     expect(stepResult(result, "notify")?.result.status).toBe("success");
@@ -326,18 +330,18 @@ describe("triage workflow integration", () => {
     const observability = getProvider<{ verifyAccess: ReturnType<typeof vi.fn> }>(providers, "observability");
     observability.verifyAccess.mockRejectedValue(new Error("Datadog API key invalid"));
 
-    const result = await runWorkflow(triageWorkflow, config, providers, {
+    const result = await runRecipe(triageRecipe, config, providers, {
       logger: silentLogger,
     });
 
-    // Workflow should be failed (learn phase failure aborts everything)
+    // Workflow should be failed (critical node failure aborts everything)
     expect(result.status).toBe("failed");
 
     // verify-access should have failed
     expect(stepResult(result, "verify-access")?.result.status).toBe("failed");
     expect(stepResult(result, "verify-access")?.result.reason).toBe("Datadog API key invalid");
 
-    // No other steps should have run — learn failure aborts immediately
+    // No other steps should have run — critical failure aborts immediately
     expect(result.steps).toHaveLength(1);
 
     // Verify no other providers were called
@@ -379,7 +383,7 @@ describe("triage workflow integration", () => {
     sourceControl.getChangedFiles.mockResolvedValue(["src/fix.ts"]);
     sourceControl.createPullRequest.mockResolvedValue(mockPr);
 
-    const result = await runWorkflow(triageWorkflow, config, providers, {
+    const result = await runRecipe(triageRecipe, config, providers, {
       logger: silentLogger,
     });
 
@@ -389,7 +393,7 @@ describe("triage workflow integration", () => {
     // All 9 steps should be present
     expect(result.steps).toHaveLength(9);
 
-    // Verify step order matches the workflow definition
+    // Verify step order matches the recipe definition
     const stepNames = result.steps.map((s) => s.name);
     expect(stepNames).toEqual([
       "verify-access",
@@ -422,6 +426,7 @@ describe("triage workflow integration", () => {
     // Verify data propagation: investigate → novelty-gate
     expect(stepResult(result, "novelty-gate")?.result.data).toMatchObject({
       action: "implement",
+      outcome: "implement",
     });
 
     // Verify data propagation: create-issue → implement-fix → create-pr

@@ -7,24 +7,41 @@ import { crossRepoCheck } from "./steps/cross-repo-check.js";
 import { implementFix } from "./steps/implement-fix.js";
 import { createPr } from "./steps/create-pr.js";
 import { sendNotification } from "./steps/notify.js";
-/** The triage recipe — first workflow on the SWEny platform. */
-export const triageWorkflow = {
+/** The triage recipe — DAG with explicit on transitions. */
+export const triageRecipe = {
     name: "triage",
     description: "Investigate production issues, implement fixes, and report results",
-    steps: [
+    start: "verify-access",
+    nodes: [
         // Learn phase — gather data
-        { name: "verify-access", phase: "learn", run: verifyAccess },
-        { name: "build-context", phase: "learn", run: buildContext },
-        { name: "investigate", phase: "learn", run: investigate },
-        // Act phase — fix the problem
-        { name: "novelty-gate", phase: "act", run: noveltyGate },
-        { name: "create-issue", phase: "act", run: createIssue },
-        { name: "cross-repo-check", phase: "act", run: crossRepoCheck },
-        { name: "implement-fix", phase: "act", run: implementFix },
-        { name: "create-pr", phase: "act", run: createPr },
+        { id: "verify-access", phase: "learn", run: verifyAccess, critical: true },
+        { id: "build-context", phase: "learn", run: buildContext, critical: true },
+        { id: "investigate", phase: "learn", run: investigate, critical: true },
+        // Act phase — novelty gate routes to create-issue or directly to notify
+        {
+            id: "novelty-gate", phase: "act", run: noveltyGate,
+            on: {
+                skip: "notify", // dry-run, skip, or +1 all go straight to report
+                implement: "create-issue",
+            },
+        },
+        { id: "create-issue", phase: "act", run: createIssue },
+        // Cross-repo check routes to implement-fix or to notify
+        {
+            id: "cross-repo-check", phase: "act", run: crossRepoCheck,
+            on: {
+                local: "implement-fix",
+                dispatched: "notify",
+            },
+        },
+        { id: "implement-fix", phase: "act", run: implementFix },
+        { id: "create-pr", phase: "act", run: createPr },
         // Report phase — notify stakeholders
-        { name: "notify", phase: "report", run: sendNotification },
+        { id: "notify", phase: "report", run: sendNotification },
     ],
 };
+// Backwards-compatible alias — callers that used runWorkflow(triageWorkflow, …)
+// should migrate to runRecipe(triageRecipe, …).
+export { triageRecipe as triageWorkflow };
 export { getStepData } from "./results.js";
 //# sourceMappingURL=index.js.map

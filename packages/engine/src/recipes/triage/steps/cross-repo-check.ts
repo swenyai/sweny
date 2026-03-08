@@ -17,7 +17,7 @@ export async function crossRepoCheck(ctx: WorkflowContext<TriageConfig>): Promis
 
   if (!targetRepo || targetRepo === currentRepo) {
     ctx.logger.info(`Bug belongs to this repo (${currentRepo}) — implementing locally`);
-    return { status: "success", data: { dispatched: false } };
+    return { status: "success", data: { outcome: "local", dispatched: false } };
   }
 
   // Cross-repo dispatch
@@ -44,11 +44,8 @@ export async function crossRepoCheck(ctx: WorkflowContext<TriageConfig>): Promis
     ctx.logger.warn(`Cross-repo dispatch failed: ${err}`);
   }
 
-  // Skip remaining act steps — implementation happens in the target repo
-  ctx.skipPhase("act", `Cross-repo dispatch to ${targetRepo}`);
-
   return {
     status: "success",
-    data: { dispatched: true, targetRepo },
+    data: { outcome: "dispatched", dispatched: true, targetRepo },
   };
 }

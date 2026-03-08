@@ -21,7 +21,7 @@ describe("noveltyGate", () => {
     vi.restoreAllMocks();
   });
 
-  it("skips act phase in dry run mode", async () => {
+  it("returns outcome: skip in dry run mode", async () => {
     const investigation = investigationResult();
     const results = new Map([
       ["investigate", { status: "success" as const, data: investigation as unknown as Record<string, unknown> }],
@@ -34,10 +34,11 @@ describe("noveltyGate", () => {
 
     expect(result.status).toBe("success");
     expect(result.data?.action).toBe("dry-run");
-    expect(ctx.skipPhase).toHaveBeenCalledWith("act", "Dry run mode");
+    expect(result.data?.outcome).toBe("skip");
+    expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
-  it("skips act phase when recommendation is 'skip'", async () => {
+  it("returns outcome: skip when recommendation is 'skip'", async () => {
     const investigation = investigationResult({ recommendation: "skip", shouldImplement: false });
     const results = new Map([
       ["investigate", { status: "success" as const, data: investigation as unknown as Record<string, unknown> }],
@@ -50,10 +51,11 @@ describe("noveltyGate", () => {
 
     expect(result.status).toBe("success");
     expect(result.data?.action).toBe("skip");
-    expect(ctx.skipPhase).toHaveBeenCalledWith("act", "Recommendation: skip");
+    expect(result.data?.outcome).toBe("skip");
+    expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
-  it("adds +1 comment and skips act phase for existing issue", async () => {
+  it("adds +1 comment and returns outcome: skip for existing issue", async () => {
     const investigation = investigationResult({
       recommendation: "+1 existing ENG-123",
       existingIssue: "ENG-123",
@@ -72,10 +74,11 @@ describe("noveltyGate", () => {
 
     expect(result.status).toBe("success");
     expect(result.data?.action).toBe("+1");
+    expect(result.data?.outcome).toBe("skip");
     expect(result.data?.issueIdentifier).toBe("ENG-123");
     expect(getIssue).toHaveBeenCalledWith("ENG-123");
     expect(addComment).toHaveBeenCalledWith("issue-id-1", expect.stringContaining("+1 detected on"));
-    expect(ctx.skipPhase).toHaveBeenCalledWith("act", "+1 existing ENG-123");
+    expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
   it("handles +1 comment failure gracefully", async () => {
@@ -100,7 +103,7 @@ describe("noveltyGate", () => {
     expect(silentLogger.warn).toHaveBeenCalledWith(expect.stringContaining("Failed to add occurrence"));
   });
 
-  it("proceeds with implement when recommendation is 'implement'", async () => {
+  it("returns outcome: implement when recommendation is 'implement'", async () => {
     const investigation = investigationResult({ recommendation: "implement" });
     const results = new Map([
       ["investigate", { status: "success" as const, data: investigation as unknown as Record<string, unknown> }],
@@ -113,6 +116,7 @@ describe("noveltyGate", () => {
 
     expect(result.status).toBe("success");
     expect(result.data?.action).toBe("implement");
+    expect(result.data?.outcome).toBe("implement");
     expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
@@ -125,7 +129,7 @@ describe("noveltyGate", () => {
 
     expect(result.status).toBe("failed");
     expect(result.reason).toBe("No investigation result available");
-    expect(ctx.skipPhase).toHaveBeenCalledWith("act", "No investigation result");
+    expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
   it("handles +1 with no existing issue identifier", async () => {

@@ -52,23 +52,25 @@ describe("crossRepoCheck", () => {
     updateIssue.mockReset().mockResolvedValue(undefined);
   });
 
-  it("same repo returns dispatched: false, no dispatch call", async () => {
+  it("same repo returns outcome: local and dispatched: false, no dispatch call", async () => {
     const ctx = buildCtx({ targetRepo: "org/repo", repository: "org/repo" });
     const result = await crossRepoCheck(ctx);
     expect(result.status).toBe("success");
     expect(result.data?.dispatched).toBe(false);
+    expect(result.data?.outcome).toBe("local");
     expect(dispatchWorkflow).not.toHaveBeenCalled();
   });
 
-  it("empty targetRepo returns dispatched: false", async () => {
+  it("empty targetRepo returns outcome: local and dispatched: false", async () => {
     const ctx = buildCtx({ targetRepo: "" });
     const result = await crossRepoCheck(ctx);
     expect(result.status).toBe("success");
     expect(result.data?.dispatched).toBe(false);
+    expect(result.data?.outcome).toBe("local");
     expect(dispatchWorkflow).not.toHaveBeenCalled();
   });
 
-  it("different repo dispatches workflow with correct params and calls skipPhase", async () => {
+  it("different repo dispatches workflow with correct params and returns outcome: dispatched", async () => {
     const ctx = buildCtx({
       targetRepo: "other-org/other-repo",
       issueId: "issue-1",
@@ -77,6 +79,7 @@ describe("crossRepoCheck", () => {
     const result = await crossRepoCheck(ctx);
     expect(result.status).toBe("success");
     expect(result.data?.dispatched).toBe(true);
+    expect(result.data?.outcome).toBe("dispatched");
     expect(result.data?.targetRepo).toBe("other-org/other-repo");
     expect(dispatchWorkflow).toHaveBeenCalledWith({
       targetRepo: "other-org/other-repo",
@@ -87,7 +90,7 @@ describe("crossRepoCheck", () => {
         novelty_mode: "false",
       },
     });
-    expect(ctx.skipPhase).toHaveBeenCalledWith("act", expect.stringContaining("other-org/other-repo"));
+    expect(ctx.skipPhase).not.toHaveBeenCalled();
   });
 
   it("cross-repo adds comment to issue via updateIssue", async () => {

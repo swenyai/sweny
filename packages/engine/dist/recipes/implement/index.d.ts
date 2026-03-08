@@ -1,4 +1,4 @@
-import type { Workflow } from "../../types.js";
+import type { Recipe } from "../../types.js";
 import type { ImplementConfig } from "./types.js";
 /**
  * The implement recipe.
@@ -9,6 +9,7 @@ import type { ImplementConfig } from "./types.js";
  * Shared nodes (implement-fix, create-pr, notify) are typed to SharedNodeConfig,
  * which ImplementConfig satisfies — no type casts needed.
  */
-export declare const implementWorkflow: Workflow<ImplementConfig>;
+export declare const implementRecipe: Recipe<ImplementConfig>;
+export { implementRecipe as implementWorkflow };
 export type { ImplementConfig } from "./types.js";
 //# sourceMappingURL=index.d.ts.map

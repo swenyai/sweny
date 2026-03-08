@@ -10,7 +10,7 @@ export async function crossRepoCheck(ctx) {
     const currentRepo = config.repository;
     if (!targetRepo || targetRepo === currentRepo) {
         ctx.logger.info(`Bug belongs to this repo (${currentRepo}) — implementing locally`);
-        return { status: "success", data: { dispatched: false } };
+        return { status: "success", data: { outcome: "local", dispatched: false } };
     }
     // Cross-repo dispatch
     ctx.logger.info(`Bug belongs to ${targetRepo} (current: ${currentRepo}) — dispatching cross-repo`);
@@ -34,11 +34,9 @@ export async function crossRepoCheck(ctx) {
     catch (err) {
         ctx.logger.warn(`Cross-repo dispatch failed: ${err}`);
     }
-    // Skip remaining act steps — implementation happens in the target repo
-    ctx.skipPhase("act", `Cross-repo dispatch to ${targetRepo}`);
     return {
         status: "success",
-        data: { dispatched: true, targetRepo },
+        data: { outcome: "dispatched", dispatched: true, targetRepo },
     };
 }
 //# sourceMappingURL=cross-repo-check.js.map

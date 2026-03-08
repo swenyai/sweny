@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Command } from "commander";
 import chalk from "chalk";
-import { runWorkflow, triageWorkflow, implementWorkflow, createProviderRegistry } from "@sweny-ai/engine";
+import { runRecipe, triageRecipe, implementRecipe, createProviderRegistry } from "@sweny-ai/engine";
 import type { StepCache, TriageConfig, WorkflowPhase, ImplementConfig } from "@sweny-ai/engine";
 import { createFsCache, hashConfig } from "./cache.js";
 import { loadDotenv, loadConfigFile, STARTER_CONFIG } from "./config-file.js";
@@ -100,7 +100,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   let currentPhaseColor: (s: string) => string = chalk.cyan;
   let lastPhase: string | null = null;
   let stepIndex = 0;
-  const totalSteps = triageWorkflow.steps.length;
+  const totalSteps = triageRecipe.nodes.length;
 
   function formatElapsed(ms: number): string {
     const s = Math.round(ms / 1000);
@@ -192,7 +192,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   };
 
   try {
-    const result = await runWorkflow(triageWorkflow, triageConfig, providers, {
+    const result = await runRecipe(triageRecipe, triageConfig, providers, {
       logger,
       cache: stepCache,
       beforeStep: async (step) => {
@@ -295,7 +295,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   console.log(chalk.cyan(`\n  sweny implement ${issueId}\n`));
 
   try {
-    const result = await runWorkflow(implementWorkflow, implementConfig, providers, { logger });
+    const result = await runRecipe(implementRecipe, implementConfig, providers, { logger });
     if (result.status === "failed") {
       console.error(chalk.red(`\n  Implement workflow failed\n`));
       process.exit(1);
