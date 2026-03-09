@@ -1,6 +1,7 @@
 import { consoleLogger } from "@sweny-ai/providers";
 import type { Logger } from "@sweny-ai/providers";
 import { createProviderRegistry } from "./registry.js";
+import { validateDefinition } from "./validate.js";
 import type {
   DefinitionError,
   ExecutionEvent,
@@ -28,47 +29,8 @@ async function emit(observer: RunObserver | undefined, event: ExecutionEvent, lo
   }
 }
 
-/**
- * Validate a RecipeDefinition for structural correctness.
- * Returns an array of errors (empty array = valid).
- * Does NOT check implementations (use createRecipe for that).
- */
-export function validateDefinition(def: RecipeDefinition): DefinitionError[] {
-  const errors: DefinitionError[] = [];
-  const stateIds = new Set(Object.keys(def.states));
-
-  // initial must exist
-  if (!stateIds.has(def.initial)) {
-    errors.push({
-      code: "MISSING_INITIAL",
-      message: `initial state "${def.initial}" does not exist in states`,
-    });
-  }
-
-  // all on/next targets must be valid state ids or "end"
-  for (const [stateId, state] of Object.entries(def.states)) {
-    if (state.next && state.next !== "end" && !stateIds.has(state.next)) {
-      errors.push({
-        code: "UNKNOWN_TARGET",
-        message: `state "${stateId}" next target "${state.next}" does not exist`,
-        stateId,
-        targetId: state.next,
-      });
-    }
-    for (const [outcome, target] of Object.entries(state.on ?? {})) {
-      if (target !== "end" && !stateIds.has(target)) {
-        errors.push({
-          code: "UNKNOWN_TARGET",
-          message: `state "${stateId}" on["${outcome}"] target "${target}" does not exist`,
-          stateId,
-          targetId: target,
-        });
-      }
-    }
-  }
-
-  return errors;
-}
+// Re-export validateDefinition so existing imports from runner-recipe are not broken
+export { validateDefinition };
 
 /**
  * Create a Recipe by combining a definition with implementations.
@@ -134,12 +96,16 @@ export async function runRecipe<TConfig>(
 
   const ctx: WorkflowContext<TConfig> = { config, logger, results, providers };
 
-  await emit(options?.observer, {
-    type: "recipe:start",
-    recipeId: definition.id,
-    recipeName: definition.name,
-    timestamp: Date.now(),
-  }, logger);
+  await emit(
+    options?.observer,
+    {
+      type: "recipe:start",
+      recipeId: definition.id,
+      recipeName: definition.name,
+      timestamp: Date.now(),
+    },
+    logger,
+  );
 
   let currentId: string | undefined = definition.initial;
   let hasFailed = false;
@@ -164,12 +130,16 @@ export async function runRecipe<TConfig>(
     const stateId = currentId;
     const meta: StepMeta = { id: stateId, phase: state.phase };
 
-    await emit(options?.observer, {
-      type: "state:enter",
-      stateId,
-      phase: state.phase,
-      timestamp: Date.now(),
-    }, logger);
+    await emit(
+      options?.observer,
+      {
+        type: "state:enter",
+        stateId,
+        phase: state.phase,
+        timestamp: Date.now(),
+      },
+      logger,
+    );
 
     // beforeStep hook — return false to skip this state
     if (options?.beforeStep) {
@@ -178,14 +148,18 @@ export async function runRecipe<TConfig>(
         const result: StepResult = { status: "skipped", reason: "Skipped by beforeStep hook" };
         results.set(stateId, result);
         completedSteps.push({ name: stateId, phase: state.phase, result });
-        await emit(options?.observer, {
-          type: "state:exit",
-          stateId,
-          phase: state.phase,
-          result: { status: "skipped", reason: "Skipped by beforeStep hook" },
-          cached: false,
-          timestamp: Date.now(),
-        }, logger);
+        await emit(
+          options?.observer,
+          {
+            type: "state:exit",
+            stateId,
+            phase: state.phase,
+            result: { status: "skipped", reason: "Skipped by beforeStep hook" },
+            cached: false,
+            timestamp: Date.now(),
+          },
+          logger,
+        );
         if (options.afterStep) await options.afterStep(meta, result, ctx);
         currentId = resolveNext(stateId, state, result);
         continue;
@@ -199,14 +173,18 @@ export async function runRecipe<TConfig>(
         const result: StepResult = { ...entry.result, cached: true };
         results.set(stateId, result);
         completedSteps.push({ name: stateId, phase: state.phase, result });
-        await emit(options?.observer, {
-          type: "state:exit",
-          stateId,
-          phase: state.phase,
-          result,
-          cached: true,
-          timestamp: Date.now(),
-        }, logger);
+        await emit(
+          options?.observer,
+          {
+            type: "state:exit",
+            stateId,
+            phase: state.phase,
+            result,
+            cached: true,
+            timestamp: Date.now(),
+          },
+          logger,
+        );
         if (options.afterStep) await options.afterStep(meta, result, ctx);
         currentId = resolveNext(stateId, state, result);
         continue;
@@ -228,14 +206,18 @@ export async function runRecipe<TConfig>(
     results.set(stateId, result);
     completedSteps.push({ name: stateId, phase: state.phase, result });
 
-    await emit(options?.observer, {
-      type: "state:exit",
-      stateId,
-      phase: state.phase,
-      result,
-      cached: result.cached ?? false,
-      timestamp: Date.now(),
-    }, logger);
+    await emit(
+      options?.observer,
+      {
+        type: "state:exit",
+        stateId,
+        phase: state.phase,
+        result,
+        cached: result.cached ?? false,
+        timestamp: Date.now(),
+      },
+      logger,
+    );
 
     if (result.status === "failed") {
       hasFailed = true;
@@ -257,12 +239,16 @@ export async function runRecipe<TConfig>(
 
   const status = aborted ? "failed" : hasFailed ? "partial" : "completed";
 
-  await emit(options?.observer, {
-    type: "recipe:end",
-    status,
-    duration: Date.now() - start,
-    timestamp: Date.now(),
-  }, logger);
+  await emit(
+    options?.observer,
+    {
+      type: "recipe:end",
+      status,
+      duration: Date.now() - start,
+      timestamp: Date.now(),
+    },
+    logger,
+  );
 
   return { status, steps: completedSteps, duration: Date.now() - start };
 }

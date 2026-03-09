@@ -18,9 +18,7 @@ export class CollectingObserver implements RunObserver {
 
   /** All state:exit events, in execution order. */
   get stateResults(): Array<Extract<ExecutionEvent, { type: "state:exit" }>> {
-    return this.events.filter(
-      (e): e is Extract<ExecutionEvent, { type: "state:exit" }> => e.type === "state:exit",
-    );
+    return this.events.filter((e): e is Extract<ExecutionEvent, { type: "state:exit" }> => e.type === "state:exit");
   }
 }
 
