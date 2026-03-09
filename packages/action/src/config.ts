@@ -42,6 +42,7 @@ export interface ActionConfig {
   // Behavior
   dryRun: boolean;
   noveltyMode: boolean;
+  reviewMode: "auto" | "review" | "notify";
   linearIssue: string;
   additionalInstructions: string;
   serviceMapPath: string;
@@ -110,6 +111,7 @@ export function parseInputs(): ActionConfig {
 
     dryRun: core.getBooleanInput("dry-run"),
     noveltyMode: core.getBooleanInput("novelty-mode"),
+    reviewMode: (core.getInput("review-mode") || "review") as "auto" | "review" | "notify",
     linearIssue: core.getInput("linear-issue"),
     additionalInstructions: core.getInput("additional-instructions"),
     serviceMapPath: core.getInput("service-map-path") || ".github/service-map.yml",

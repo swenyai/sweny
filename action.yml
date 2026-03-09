@@ -247,6 +247,10 @@ inputs:
     description: "Dry run mode — analyze only, do not create PRs"
     required: false
     default: "false"
+  review-mode:
+    description: "PR merge behavior: 'auto' (merge when CI passes), 'review' (human approves), 'notify' (same as review)"
+    required: false
+    default: "review"
   novelty-mode:
     description: "Only report novel issues not already tracked in Linear/GitHub"
     required: false

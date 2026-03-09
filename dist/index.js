@@ -46516,7 +46516,280 @@ with the standard investigation output format.`;
     }
 }
 //# sourceMappingURL=file.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/prometheus.js
+
+
+
+const prometheusConfigSchema = object({
+    url: schemas_string().url("Prometheus base URL is required"),
+    token: schemas_string().optional(),
+    logger: custom().optional(),
+});
+function prometheus(config) {
+    const parsed = prometheusConfigSchema.parse(config);
+    return new PrometheusProvider(parsed);
+}
+class PrometheusProvider {
+    url;
+    token;
+    log;
+    constructor(config) {
+        this.url = config.url.replace(/\/$/, "");
+        this.token = config.token;
+        this.log = config.logger ?? consoleLogger;
+    }
+    buildHeaders() {
+        const headers = {};
+        if (this.token) {
+            headers["Authorization"] = `Bearer ${this.token}`;
+        }
+        return headers;
+    }
+    async get(path) {
+        const url = `${this.url}${path}`;
+        const response = await fetch(url, {
+            method: "GET",
+            headers: this.buildHeaders(),
+        });
+        if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            throw new ProviderApiError("Prometheus", response.status, response.statusText, body);
+        }
+        return (await response.json());
+    }
+    alertToLogEntry(alert) {
+        return {
+            timestamp: alert.activeAt ?? new Date().toISOString(),
+            service: alert.labels?.service ?? alert.labels?.job ?? "unknown",
+            level: alert.labels?.severity ?? "warning",
+            message: alert.annotations?.summary ?? alert.labels?.alertname ?? "",
+            attributes: {
+                alertname: alert.labels?.alertname,
+                labels: alert.labels,
+                annotations: alert.annotations,
+                state: alert.state,
+            },
+        };
+    }
+    async verifyAccess() {
+        this.log.info(`Verifying Prometheus access (url: ${this.url})`);
+        await this.get("/api/v1/status/buildinfo");
+        this.log.info("Prometheus API access verified");
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying Prometheus alerts (severity: ${opts.severity}, service: ${opts.serviceFilter})`);
+        const result = await this.get("/api/v1/alerts");
+        let alerts = result.data.alerts ?? [];
+        if (opts.severity !== "*") {
+            alerts = alerts.filter((a) => a.labels?.severity === opts.severity);
+        }
+        if (opts.serviceFilter !== "*") {
+            alerts = alerts.filter((a) => a.labels?.service === opts.serviceFilter ||
+                a.labels?.job === opts.serviceFilter ||
+                a.labels?.namespace === opts.serviceFilter);
+        }
+        const entries = alerts.map((a) => this.alertToLogEntry(a));
+        this.log.info(`Found ${entries.length} alerts`);
+        return entries;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating Prometheus alerts for ${opts.serviceFilter}`);
+        const result = await this.get("/api/v1/alerts");
+        let alerts = result.data.alerts ?? [];
+        if (opts.serviceFilter !== "*") {
+            alerts = alerts.filter((a) => a.labels?.service === opts.serviceFilter ||
+                a.labels?.job === opts.serviceFilter ||
+                a.labels?.namespace === opts.serviceFilter);
+        }
+        const counts = new Map();
+        for (const alert of alerts) {
+            const service = alert.labels?.service ?? alert.labels?.job ?? "unknown";
+            counts.set(service, (counts.get(service) ?? 0) + 1);
+        }
+        const groups = Array.from(counts.entries()).map(([service, count]) => ({
+            service,
+            count,
+        }));
+        this.log.info(`Aggregated ${groups.length} service groups`);
+        return groups;
+    }
+    getAgentEnv() {
+        return {
+            PROMETHEUS_URL: this.url,
+            ...(this.token ? { PROMETHEUS_TOKEN: this.token } : {}),
+        };
+    }
+    getPromptInstructions() {
+        const authHeader = this.token
+            ? `  -H "Authorization: Bearer $PROMETHEUS_TOKEN" \\`
+            : "";
+        const authNote = this.token
+            ? `- \`PROMETHEUS_TOKEN\` - Bearer token (include as \`Authorization: Bearer $PROMETHEUS_TOKEN\` header)`
+            : "";
+        return `### Prometheus Alerts API
+- \`PROMETHEUS_URL\` - Base URL of the Prometheus server (e.g., http://localhost:9090)
+${authNote}
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+You have DIRECT ACCESS to the Prometheus HTTP API via curl commands.
+
+#### Example: List all currently firing alerts
+\`\`\`bash
+curl -s \\
+${authHeader ? authHeader + "\n" : ""}  "$PROMETHEUS_URL/api/v1/alerts"
+\`\`\`
+
+#### Example: Run an instant PromQL query
+\`\`\`bash
+curl -s \\
+${authHeader ? authHeader + "\n" : ""}  "$PROMETHEUS_URL/api/v1/query?query=up"
+\`\`\``;
+    }
+}
+//# sourceMappingURL=prometheus.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/pagerduty.js
+
+
+
+const pagerdutyConfigSchema = object({
+    apiKey: schemas_string().min(1, "PagerDuty API key is required"),
+    logger: custom().optional(),
+});
+function pagerduty(config) {
+    const parsed = pagerdutyConfigSchema.parse(config);
+    return new PagerDutyProvider(parsed);
+}
+const BASE_URL = "https://api.pagerduty.com";
+class PagerDutyProvider {
+    apiKey;
+    log;
+    constructor(config) {
+        this.apiKey = config.apiKey;
+        this.log = config.logger ?? consoleLogger;
+    }
+    get headers() {
+        return {
+            Authorization: `Token token=${this.apiKey}`,
+            Accept: "application/vnd.pagerduty+json;version=2",
+            "Content-Type": "application/json",
+        };
+    }
+    async get(path) {
+        const response = await fetch(`${BASE_URL}${path}`, {
+            method: "GET",
+            headers: this.headers,
+        });
+        if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            throw new ProviderApiError("PagerDuty", response.status, response.statusText, body);
+        }
+        return (await response.json());
+    }
+    async verifyAccess() {
+        this.log.info("Verifying PagerDuty access");
+        await this.get("/users/me");
+        this.log.info("PagerDuty API access verified");
+    }
+    timeRangeToIso(timeRange) {
+        const now = Date.now();
+        const match = /^(\d+)([hdm])$/.exec(timeRange);
+        if (!match)
+            return new Date(now - 24 * 60 * 60 * 1000).toISOString();
+        const value = parseInt(match[1], 10);
+        const unit = match[2];
+        const ms = unit === "m"
+            ? value * 60 * 1000
+            : unit === "h"
+                ? value * 60 * 60 * 1000
+                : value * 24 * 60 * 60 * 1000;
+        return new Date(now - ms).toISOString();
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying PagerDuty incidents (range: ${opts.timeRange}, severity: ${opts.severity})`);
+        const since = this.timeRangeToIso(opts.timeRange);
+        const until = new Date().toISOString();
+        const params = new URLSearchParams({
+            "statuses[]": "triggered",
+            time_zone: "UTC",
+            since,
+            until,
+            limit: "100",
+        });
+        params.append("statuses[]", "acknowledged");
+        const severityLower = opts.severity.toLowerCase();
+        if (severityLower === "error" || severityLower === "critical") {
+            params.set("urgency", "high");
+        }
+        if (opts.serviceFilter && opts.serviceFilter !== "*") {
+            params.append("service_names[]", opts.serviceFilter);
+        }
+        const result = await this.get(`/incidents?${params.toString()}`);
+        const logs = (result.incidents ?? []).map((incident) => ({
+            timestamp: incident.created_at,
+            service: incident.service?.summary ?? "unknown",
+            level: incident.urgency === "high" ? "error" : "warning",
+            message: incident.title,
+            attributes: {
+                id: incident.id,
+                status: incident.status,
+                html_url: incident.html_url,
+                urgency: incident.urgency,
+            },
+        }));
+        this.log.info(`Found ${logs.length} incidents for ${opts.serviceFilter} in last ${opts.timeRange}`);
+        return logs;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating PagerDuty incidents for ${opts.serviceFilter} (range: ${opts.timeRange})`);
+        const incidents = await this.queryLogs({ ...opts, severity: "" });
+        const counts = new Map();
+        for (const incident of incidents) {
+            counts.set(incident.service, (counts.get(incident.service) ?? 0) + 1);
+        }
+        const results = Array.from(counts.entries()).map(([service, count]) => ({
+            service,
+            count,
+        }));
+        this.log.info(`Aggregated ${results.length} service groups`);
+        return results;
+    }
+    getAgentEnv() {
+        return {
+            PAGERDUTY_API_KEY: this.apiKey,
+        };
+    }
+    getPromptInstructions() {
+        return `### PagerDuty Incidents API
+- \`PAGERDUTY_API_KEY\` - API key (use in Authorization header as \`Token token=<key>\`)
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+Investigate incidents from PagerDuty to find ongoing or recent issues.
+You have DIRECT ACCESS to PagerDuty's REST API via curl commands.
+
+Use this environment variable in your curl commands:
+- \`PAGERDUTY_API_KEY\` - PagerDuty API key
+
+#### Example: List recent triggered and acknowledged incidents
+\`\`\`bash
+curl -s "https://api.pagerduty.com/incidents?statuses[]=triggered&statuses[]=acknowledged&time_zone=UTC&since=$(date -u -v-24H +%Y-%m-%dT%H:%M:%SZ)&until=$(date -u +%Y-%m-%dT%H:%M:%SZ)&limit=100" \\
+  -H "Authorization: Token token=\${PAGERDUTY_API_KEY}" \\
+  -H "Accept: application/vnd.pagerduty+json;version=2"
+\`\`\`
+
+#### Example: List incidents filtered by service name
+\`\`\`bash
+curl -s "https://api.pagerduty.com/incidents?statuses[]=triggered&statuses[]=acknowledged&service_names[]=my-service&time_zone=UTC&since=$(date -u -v-24H +%Y-%m-%dT%H:%M:%SZ)&until=$(date -u +%Y-%m-%dT%H:%M:%SZ)&limit=100" \\
+  -H "Authorization: Token token=\${PAGERDUTY_API_KEY}" \\
+  -H "Accept: application/vnd.pagerduty+json;version=2"
+\`\`\``;
+    }
+}
+//# sourceMappingURL=pagerduty.js.map
 ;// CONCATENATED MODULE: ../providers/dist/observability/index.js
+
+
 
 
 
@@ -48247,7 +48520,9 @@ function github(config) {
         },
         async hasChanges() {
             const unstaged = await git(["diff", "--name-only", "--", ".", ":!.github/workflows"], { ignoreReturnCode: true });
-            const staged = await git(["diff", "--cached", "--name-only", "--", ".", ":!.github/workflows"], { ignoreReturnCode: true });
+            const staged = await git(["diff", "--cached", "--name-only", "--", ".", ":!.github/workflows"], {
+                ignoreReturnCode: true,
+            });
             return unstaged.trim().length > 0 || staged.trim().length > 0;
         },
         async hasNewCommits() {
@@ -48350,6 +48625,21 @@ function github(config) {
             const targetRepoName = targetParts[1] ?? opts.targetRepo;
             await ghApi("POST", `/repos/${targetOwner}/${targetRepoName}/actions/workflows/${encodeURIComponent(opts.workflow)}/dispatches`, token, { ref: baseBranch, inputs: opts.inputs ?? {} });
             log.info(`Dispatched workflow "${opts.workflow}" to ${opts.targetRepo}`);
+        },
+        async enableAutoMerge(prNumber) {
+            // Use gh CLI directly — simpler and works without GraphQL auth
+            const { execFile: execFileNode } = await Promise.resolve(/* import() */).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1421, 19));
+            const { promisify: promisifyNode } = await Promise.resolve(/* import() */).then(__nccwpck_require__.t.bind(__nccwpck_require__, 7975, 19));
+            const execFileAsyncNode = promisifyNode(execFileNode);
+            try {
+                await execFileAsyncNode("gh", ["pr", "merge", String(prNumber), "--auto", "--squash", "--repo", `${owner}/${repo}`], { env: { ...process.env, GH_TOKEN: token } });
+                log.info(`Auto-merge enabled on PR #${prNumber}`);
+            }
+            catch (err) {
+                // Non-fatal: auto-merge may fail if branch protection is not configured.
+                // The PR is still open and a human can merge manually.
+                log.warn(`Could not enable auto-merge on PR #${prNumber}: ${err}`);
+            }
         },
     };
 }
@@ -48797,16 +49087,16 @@ class FileSourceControlProvider {
 
 
 
-const pagerdutyConfigSchema = object({
+const pagerduty_pagerdutyConfigSchema = object({
     apiToken: schemas_string().min(1, "PagerDuty API token is required"),
     routingKey: schemas_string().min(1, "PagerDuty routing key (integration key) is required"),
     logger: custom().optional(),
 });
-function pagerduty(config) {
-    const parsed = pagerdutyConfigSchema.parse(config);
-    return new PagerDutyProvider(parsed);
+function pagerduty_pagerduty(config) {
+    const parsed = pagerduty_pagerdutyConfigSchema.parse(config);
+    return new pagerduty_PagerDutyProvider(parsed);
 }
-class PagerDutyProvider {
+class pagerduty_PagerDutyProvider {
     apiToken;
     routingKey;
     log;
@@ -50373,127 +50663,236 @@ function createProviderRegistry() {
 
 
 /**
+ * Validate a RecipeDefinition for structural correctness.
+ * Returns an array of errors (empty array = valid).
+ * Does NOT check implementations (use createRecipe for that).
+ */
+function validateDefinition(def) {
+    const errors = [];
+    const stateIds = new Set(Object.keys(def.states));
+    // initial must exist
+    if (!stateIds.has(def.initial)) {
+        errors.push({
+            code: "MISSING_INITIAL",
+            message: `initial state "${def.initial}" does not exist in states`,
+        });
+    }
+    // all on/next targets must be valid state ids or "end"
+    for (const [stateId, state] of Object.entries(def.states)) {
+        if (state.next && state.next !== "end" && !stateIds.has(state.next)) {
+            errors.push({
+                code: "UNKNOWN_TARGET",
+                message: `state "${stateId}" next target "${state.next}" does not exist`,
+                stateId,
+                targetId: state.next,
+            });
+        }
+        for (const [outcome, target] of Object.entries(state.on ?? {})) {
+            if (target !== "end" && !stateIds.has(target)) {
+                errors.push({
+                    code: "UNKNOWN_TARGET",
+                    message: `state "${stateId}" on["${outcome}"] target "${target}" does not exist`,
+                    stateId,
+                    targetId: target,
+                });
+            }
+        }
+    }
+    return errors;
+}
+/**
+ * Create a Recipe by combining a definition with implementations.
+ * Validates the definition and that all state ids have implementations.
+ * Throws a descriptive Error if validation fails.
+ */
+function createRecipe(definition, implementations) {
+    const defErrors = validateDefinition(definition);
+    if (defErrors.length > 0) {
+        throw new Error(`Invalid recipe definition "${definition.id}":\n` +
+            defErrors.map((e) => `  [${e.code}] ${e.message}`).join("\n"));
+    }
+    const implErrors = [];
+    for (const stateId of Object.keys(definition.states)) {
+        if (!implementations[stateId]) {
+            implErrors.push({
+                code: "MISSING_IMPLEMENTATION",
+                message: `state "${stateId}" has no implementation`,
+                stateId,
+            });
+        }
+    }
+    if (implErrors.length > 0) {
+        throw new Error(`Missing implementations for recipe "${definition.id}":\n` +
+            implErrors.map((e) => `  [${e.code}] ${e.message}`).join("\n"));
+    }
+    return { definition, implementations };
+}
+/**
  * Execute a Recipe as a state machine.
  *
- * Starts at recipe.start, executes each node, then follows on: transitions to
- * determine the next node. Stops when a transition resolves to "end", there is
- * no next node, or a critical node fails.
+ * Starts at recipe.definition.initial, executes each state, then follows
+ * on: transitions to determine the next state. Stops when a transition
+ * resolves to "end", there is no next state, or a critical state fails.
  *
  * Outcome resolution order (for on: routing):
- *   1. result.data?.outcome (string) — explicit outcome set by the node
+ *   1. result.data?.outcome (string) — explicit outcome set by the implementation
  *   2. result.status        ("success" | "skipped" | "failed")
+ *   3. "*"                  — wildcard default
+ *   4. next                 — fallback for success/skipped
  */
 async function runRecipe(recipe, config, providers, options) {
     const logger = options?.logger ?? logger_consoleLogger;
     const start = Date.now();
+    const { definition, implementations } = recipe;
     const results = new Map();
     const completedSteps = [];
-    // Build id → node lookup and preserve declaration order for default routing
-    const nodeMap = new Map();
-    const nodeOrder = [];
-    for (const node of recipe.nodes) {
-        nodeMap.set(node.id, node);
-        nodeOrder.push(node.id);
-    }
     const ctx = { config, logger, results, providers };
-    let currentId = recipe.start;
+    let currentId = definition.initial;
     let hasFailed = false;
     let aborted = false;
     const visited = new Set();
     while (currentId && currentId !== "end") {
-        const node = nodeMap.get(currentId);
-        if (!node) {
-            logger.error(`[${recipe.name}] Unknown node id: "${currentId}" — aborting`);
+        const state = definition.states[currentId];
+        if (!state) {
+            logger.error(`[${definition.name}] Unknown state id: "${currentId}" — aborting`);
             aborted = true;
             break;
         }
         if (visited.has(currentId)) {
-            logger.error(`[${recipe.name}] Cycle detected at node "${currentId}" — aborting`);
+            logger.error(`[${definition.name}] Cycle detected at node "${currentId}" — aborting`);
             aborted = true;
             break;
         }
         visited.add(currentId);
-        const meta = { id: node.id, phase: node.phase };
-        // beforeStep hook — return false to skip this node
+        const stateId = currentId;
+        const meta = { id: stateId, phase: state.phase };
+        // beforeStep hook — return false to skip this state
         if (options?.beforeStep) {
             const proceed = await options.beforeStep(meta, ctx);
             if (proceed === false) {
                 const result = { status: "skipped", reason: "Skipped by beforeStep hook" };
-                results.set(node.id, result);
-                completedSteps.push({ name: node.id, phase: node.phase, result });
+                results.set(stateId, result);
+                completedSteps.push({ name: stateId, phase: state.phase, result });
                 if (options.afterStep)
                     await options.afterStep(meta, result, ctx);
-                currentId = resolveNext(node, result, nodeOrder);
+                currentId = resolveNext(stateId, state, result);
                 continue;
             }
         }
         // Cache check — replay a previously cached result if available
         if (options?.cache) {
-            const entry = await options.cache.get(node.id);
+            const entry = await options.cache.get(stateId);
             if (entry) {
                 const result = { ...entry.result, cached: true };
-                results.set(node.id, result);
-                completedSteps.push({ name: node.id, phase: node.phase, result });
+                results.set(stateId, result);
+                completedSteps.push({ name: stateId, phase: state.phase, result });
                 if (options.afterStep)
                     await options.afterStep(meta, result, ctx);
-                currentId = resolveNext(node, result, nodeOrder);
+                currentId = resolveNext(stateId, state, result);
                 continue;
             }
         }
-        // Execute the node — result is always assigned (either from run or catch)
+        // Execute the state — result is always assigned (either from run or catch)
         let result;
         try {
-            logger.info(`[${recipe.name}] ${node.phase}/${node.id}: starting`);
-            result = await node.run(ctx);
-            logger.info(`[${recipe.name}] ${node.phase}/${node.id}: ${result.status}`);
+            logger.info(`[${definition.name}] ${state.phase}/${stateId}: starting`);
+            result = await implementations[stateId](ctx);
+            logger.info(`[${definition.name}] ${state.phase}/${stateId}: ${result.status}`);
         }
         catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            logger.error(`[${recipe.name}] ${node.phase}/${node.id}: failed — ${message}`);
+            logger.error(`[${definition.name}] ${state.phase}/${stateId}: failed — ${message}`);
             result = { status: "failed", reason: message };
-            hasFailed = true;
         }
-        results.set(node.id, result);
-        completedSteps.push({ name: node.id, phase: node.phase, result });
-        if (result.status === "failed" && node.critical) {
-            aborted = true;
-            break;
+        results.set(stateId, result);
+        completedSteps.push({ name: stateId, phase: state.phase, result });
+        if (result.status === "failed") {
+            hasFailed = true;
+            if (state.critical) {
+                aborted = true;
+                break;
+            }
         }
         // Persist successful results to cache
         if (result.status === "success" && options?.cache) {
-            await options.cache.set(node.id, { result, createdAt: Date.now() }).catch(() => { }); // cache failures are non-fatal
+            await options.cache.set(stateId, { result, createdAt: Date.now() }).catch(() => { }); // cache failures are non-fatal
         }
         if (options?.afterStep)
             await options.afterStep(meta, result, ctx);
-        currentId = resolveNext(node, result, nodeOrder);
+        currentId = resolveNext(stateId, state, result);
     }
     const status = aborted ? "failed" : hasFailed ? "partial" : "completed";
     return { status, steps: completedSteps, duration: Date.now() - start };
 }
 /**
- * Resolve the id of the next node to execute.
+ * Resolve the id of the next state to execute.
  *
  * Priority:
  *   1. Explicit on: match for result.data?.outcome
  *   2. Explicit on: match for result.status
- *   3. Next node in declaration order (success/skipped only)
- *   4. undefined — stop the recipe
+ *   3. Wildcard on["*"]
+ *   4. next (success/skipped only)
+ *   5. undefined — stop the recipe
  */
-function resolveNext(node, result, nodeOrder) {
-    const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : result.status;
-    if (node.on) {
-        if (outcome in node.on)
-            return node.on[outcome];
-        if (result.status in node.on)
-            return node.on[result.status];
+function resolveNext(stateId, state, result) {
+    const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : undefined;
+    if (state.on) {
+        // 1. explicit outcome
+        if (outcome && outcome in state.on)
+            return state.on[outcome];
+        // 2. status
+        if (result.status in state.on)
+            return state.on[result.status];
+        // 3. wildcard
+        if ("*" in state.on)
+            return state.on["*"];
     }
-    if (result.status === "failed")
-        return undefined;
-    const idx = nodeOrder.indexOf(node.id);
-    return idx >= 0 && idx + 1 < nodeOrder.length ? nodeOrder[idx + 1] : undefined;
+    // 4. next (only for non-failure)
+    if (result.status !== "failed" && state.next)
+        return state.next;
+    // 5. stop
+    return undefined;
 }
 
 //# sourceMappingURL=runner-recipe.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/triage/definition.js
+const triageDefinition = {
+    id: "triage",
+    version: "1.0.0",
+    name: "triage",
+    description: "Investigate production issues, implement fixes, and report results",
+    initial: "verify-access",
+    states: {
+        // Learn phase — gather data
+        "verify-access": { phase: "learn", critical: true, next: "build-context" },
+        "build-context": { phase: "learn", critical: true, next: "investigate" },
+        investigate: { phase: "learn", critical: true, next: "novelty-gate" },
+        // Act phase — novelty gate routes to create-issue or directly to notify
+        "novelty-gate": {
+            phase: "act",
+            on: {
+                skip: "notify",
+                implement: "create-issue",
+                failed: "notify",
+            },
+        },
+        "create-issue": { phase: "act", next: "cross-repo-check", on: { failed: "notify" } },
+        // Cross-repo check routes to implement-fix or to notify
+        "cross-repo-check": {
+            phase: "act",
+            on: {
+                local: "implement-fix",
+                dispatched: "notify",
+                failed: "notify",
+            },
+        },
+        "implement-fix": { phase: "act", next: "create-pr", on: { failed: "notify" } },
+        "create-pr": { phase: "act", next: "notify", on: { failed: "notify" } },
+        // Report phase — notify stakeholders
+        notify: { phase: "report" },
+    },
+};
+//# sourceMappingURL=definition.js.map
 ;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/verify-access.js
 /** Verify that observability and issue tracker providers are reachable. */
 async function verifyAccess(ctx) {
@@ -51360,7 +51759,8 @@ async function implementFix(ctx) {
         const hasUncommitted = await sourceControl.hasChanges();
         if (hasUncommitted) {
             ctx.logger.info("Found uncommitted code changes, creating fallback commit");
-            await sourceControl.stageAndCommit(`fix: automated fix from log analysis\n\nPartial implementation by Claude (reached max turns before completion)\n\nIdentified by SWEny Triage\nLinear: ${issueIdentifier}`);
+            const trackerLabel = issueTrackerLabel(config.issueTrackerName);
+            await sourceControl.stageAndCommit(`fix: automated fix from log analysis\n\nPartial implementation by Claude (reached max turns before completion)\n\nIdentified by SWEny Triage\n${trackerLabel}: ${issueIdentifier}`);
             hasCodeChanges = true;
         }
         else {
@@ -51388,7 +51788,42 @@ async function implementFix(ctx) {
 ;// CONCATENATED MODULE: ../engine/dist/recipes/triage/steps/implement-fix.js
 
 //# sourceMappingURL=implement-fix.js.map
+;// CONCATENATED MODULE: ../engine/dist/nodes/risk-assessor.js
+/** Patterns that indicate a high-risk change requiring human review. */
+const HIGH_RISK_PATTERNS = [
+    /migrations?\//i,
+    /\bauth\//i,
+    /\bcrypto\//i,
+    /\bsecurity\//i,
+    /\.github\/workflows\//i,
+    /^package\.json$/,
+    /^package-lock\.json$/,
+    /^pnpm-lock\.yaml$/,
+    /^yarn\.lock$/,
+    /schema\.(ts|js|sql|prisma)$/i,
+];
+/** Assess the risk of a set of changed file paths. */
+function assessRisk(changedFiles) {
+    const reasons = [];
+    if (changedFiles.length > 10) {
+        reasons.push(`Large change scope: ${changedFiles.length} files modified`);
+    }
+    for (const file of changedFiles) {
+        for (const pattern of HIGH_RISK_PATTERNS) {
+            if (pattern.test(file)) {
+                reasons.push(`High-risk file: ${file}`);
+                break;
+            }
+        }
+    }
+    return {
+        level: reasons.length > 0 ? "high" : "low",
+        reasons,
+    };
+}
+//# sourceMappingURL=risk-assessor.js.map
 ;// CONCATENATED MODULE: ../engine/dist/nodes/create-pr.js
+
 
 
 
@@ -51450,6 +51885,19 @@ ${issueIdentifier && issueUrl ? issueLink(config.issueTrackerName, issueIdentifi
         labels: config.prLabels ?? ["agent", "triage", "needs-review"],
     });
     ctx.logger.info(`Created PR #${pr.number}: ${pr.url}`);
+    // -------------------------------------------------------------------------
+    // 5. Auto-merge if configured (and risk is low)
+    // -------------------------------------------------------------------------
+    if (config.reviewMode === "auto" && sourceControl.enableAutoMerge) {
+        const changedFiles = await sourceControl.getChangedFiles().catch(() => []);
+        const risk = assessRisk(changedFiles);
+        if (risk.level === "high") {
+            ctx.logger.warn(`Auto-merge disabled due to high-risk changes: ${risk.reasons.join(", ")}`);
+        }
+        else {
+            await sourceControl.enableAutoMerge(pr.number);
+        }
+    }
     // -------------------------------------------------------------------------
     // 3. Link PR to issue
     // -------------------------------------------------------------------------
@@ -51631,46 +52079,39 @@ async function sendNotification(ctx) {
 
 
 
-/** The triage recipe — DAG with explicit on transitions. */
-const triageRecipe = {
-    name: "triage",
-    description: "Investigate production issues, implement fixes, and report results",
-    start: "verify-access",
-    nodes: [
-        // Learn phase — gather data
-        { id: "verify-access", phase: "learn", run: verifyAccess, critical: true },
-        { id: "build-context", phase: "learn", run: buildContext, critical: true },
-        { id: "investigate", phase: "learn", run: investigate, critical: true },
-        // Act phase — novelty gate routes to create-issue or directly to notify
-        {
-            id: "novelty-gate",
-            phase: "act",
-            run: noveltyGate,
-            on: {
-                skip: "notify", // dry-run, skip, or +1 all go straight to report
-                implement: "create-issue",
-            },
-        },
-        { id: "create-issue", phase: "act", run: createIssue, on: { failed: "notify" } },
-        // Cross-repo check routes to implement-fix or to notify
-        {
-            id: "cross-repo-check",
-            phase: "act",
-            run: crossRepoCheck,
-            on: {
-                local: "implement-fix",
-                dispatched: "notify",
-                failed: "notify",
-            },
-        },
-        { id: "implement-fix", phase: "act", run: implementFix, on: { failed: "notify" } },
-        { id: "create-pr", phase: "act", run: createPr, on: { failed: "notify" } },
-        // Report phase — notify stakeholders
-        { id: "notify", phase: "report", run: sendNotification },
-    ],
-};
+
+
+
+const triageRecipe = createRecipe(triageDefinition, {
+    "verify-access": verifyAccess,
+    "build-context": buildContext,
+    investigate: investigate,
+    "novelty-gate": noveltyGate,
+    "create-issue": createIssue,
+    "cross-repo-check": crossRepoCheck,
+    "implement-fix": implementFix,
+    "create-pr": createPr,
+    notify: sendNotification,
+});
 
 //# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../engine/dist/recipes/implement/definition.js
+const implementDefinition = {
+    id: "implement",
+    version: "1.0.0",
+    name: "implement",
+    description: "Implement a fix for a specific issue and open a pull request",
+    initial: "verify-access",
+    states: {
+        "verify-access": { phase: "learn", critical: true, next: "create-issue" },
+        // Named "create-issue" so that implementFix and createPr find it via getStepData
+        "create-issue": { phase: "learn", critical: true, next: "implement-fix", description: "Fetch the issue details" },
+        "implement-fix": { phase: "act", next: "create-pr", on: { failed: "notify" } },
+        "create-pr": { phase: "act", next: "notify", on: { failed: "notify" } },
+        notify: { phase: "report" },
+    },
+};
+//# sourceMappingURL=definition.js.map
 ;// CONCATENATED MODULE: ../engine/dist/recipes/implement/steps/verify-access.js
 /** Verify that issue tracker and source control providers are reachable. */
 async function verify_access_verifyAccess(ctx) {
@@ -51720,28 +52161,16 @@ async function fetchIssue(ctx) {
 
 
 
-/**
- * The implement recipe.
- *
- * Given a known issue identifier, fetches the issue, implements a fix,
- * and opens a PR. Skips the investigation/novelty phases of triage.
- *
- * Shared nodes (implement-fix, create-pr, notify) are typed to SharedNodeConfig,
- * which ImplementConfig satisfies — no type casts needed.
- */
-const implementRecipe = {
-    name: "implement",
-    description: "Implement a fix for a specific issue and open a pull request",
-    start: "verify-access",
-    nodes: [
-        { id: "verify-access", phase: "learn", run: verify_access_verifyAccess, critical: true },
-        // Named "create-issue" so that implementFix and createPr find it via getStepData
-        { id: "create-issue", phase: "learn", run: fetchIssue, critical: true },
-        { id: "implement-fix", phase: "act", run: implementFix },
-        { id: "create-pr", phase: "act", run: createPr },
-        { id: "notify", phase: "report", run: sendNotification },
-    ],
-};
+
+
+
+const implementRecipe = createRecipe(implementDefinition, {
+    "verify-access": verify_access_verifyAccess,
+    "create-issue": fetchIssue,
+    "implement-fix": implementFix,
+    "create-pr": createPr,
+    notify: sendNotification,
+});
 //# sourceMappingURL=index.js.map
 ;// CONCATENATED MODULE: ../engine/dist/index.js
 // Runner
@@ -51782,6 +52211,7 @@ function parseInputs() {
         prLabels: (lib_core.getInput("pr-labels") || "agent,triage,needs-review").split(",").map((l) => l.trim()),
         dryRun: lib_core.getBooleanInput("dry-run"),
         noveltyMode: lib_core.getBooleanInput("novelty-mode"),
+        reviewMode: (lib_core.getInput("review-mode") || "review"),
         linearIssue: lib_core.getInput("linear-issue"),
         additionalInstructions: lib_core.getInput("additional-instructions"),
         serviceMapPath: lib_core.getInput("service-map-path") || ".github/service-map.yml",
@@ -52214,6 +52644,7 @@ function mapToImplementConfig(config) {
         issueIdentifier: config.linearIssue,
         repository: config.repository,
         dryRun: config.dryRun,
+        reviewMode: config.reviewMode,
         maxImplementTurns: config.maxImplementTurns,
         baseBranch: config.baseBranch,
         prLabels: config.prLabels,
@@ -52312,6 +52743,7 @@ function mapToTriageConfig(config) {
         baseBranch: config.baseBranch,
         prLabels: config.prLabels,
         dryRun: config.dryRun,
+        reviewMode: config.reviewMode,
         noveltyMode: config.noveltyMode,
         issueOverride: config.linearIssue,
         additionalInstructions: config.additionalInstructions,

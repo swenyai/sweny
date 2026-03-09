@@ -51,6 +51,7 @@ vi.mock("../src/config.js", () => ({
     baseBranch: "main",
     prLabels: [],
     dryRun: false,
+    reviewMode: "review",
     noveltyMode: false,
     linearIssue: "",
     additionalInstructions: "",
@@ -116,6 +117,7 @@ const BASE: ActionConfig = {
   baseBranch: "main",
   prLabels: [],
   dryRun: false,
+  reviewMode: "review",
   noveltyMode: false,
   linearIssue: "",
   additionalInstructions: "",
@@ -141,6 +143,20 @@ const BASE: ActionConfig = {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe("mapToTriageConfig — reviewMode", () => {
+  it("passes reviewMode 'auto' through to triageConfig", () => {
+    const config: ActionConfig = { ...BASE, reviewMode: "auto" };
+    const triageConfig = mapToTriageConfig(config);
+    expect(triageConfig.reviewMode).toBe("auto");
+  });
+
+  it("defaults reviewMode to 'review' when not explicitly set", () => {
+    const config: ActionConfig = { ...BASE, reviewMode: "review" };
+    const triageConfig = mapToTriageConfig(config);
+    expect(triageConfig.reviewMode).toBe("review");
+  });
+});
 
 describe("mapToTriageConfig — observability agentEnv", () => {
   it("maps Sentry credentials to SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT", () => {

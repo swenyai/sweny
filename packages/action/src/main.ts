@@ -60,6 +60,7 @@ export function mapToImplementConfig(config: ActionConfig): ImplementConfig {
     issueIdentifier: config.linearIssue,
     repository: config.repository,
     dryRun: config.dryRun,
+    reviewMode: config.reviewMode,
     maxImplementTurns: config.maxImplementTurns,
     baseBranch: config.baseBranch,
     prLabels: config.prLabels,
@@ -142,6 +143,7 @@ export function mapToTriageConfig(config: ActionConfig): TriageConfig {
     prLabels: config.prLabels,
 
     dryRun: config.dryRun,
+    reviewMode: config.reviewMode,
     noveltyMode: config.noveltyMode,
     issueOverride: config.linearIssue,
     additionalInstructions: config.additionalInstructions,
