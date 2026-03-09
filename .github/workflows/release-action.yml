@@ -27,14 +27,13 @@ jobs:
       - name: Build dist
         run: npm run package --workspace=packages/action
 
-      - name: Commit and retag if dist changed
+      - name: Retag with fresh dist if changed
         run: |
           if [ -n "$(git status dist/ --porcelain)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add dist/
             git commit -m "chore: rebuild dist for ${GITHUB_REF_NAME}"
-            git push origin HEAD:main
             git tag -f "${GITHUB_REF_NAME}"
             git push origin "${GITHUB_REF_NAME}" --force
           fi
