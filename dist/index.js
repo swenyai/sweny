@@ -48247,7 +48247,9 @@ function github(config) {
         },
         async hasChanges() {
             const unstaged = await git(["diff", "--name-only", "--", ".", ":!.github/workflows"], { ignoreReturnCode: true });
-            const staged = await git(["diff", "--cached", "--name-only", "--", ".", ":!.github/workflows"], { ignoreReturnCode: true });
+            const staged = await git(["diff", "--cached", "--name-only", "--", ".", ":!.github/workflows"], {
+                ignoreReturnCode: true,
+            });
             return unstaged.trim().length > 0 || staged.trim().length > 0;
         },
         async hasNewCommits() {
