@@ -8,3 +8,5 @@ export { elastic, elasticConfigSchema, type ElasticConfig } from "./elastic.js";
 export { newrelic, newrelicConfigSchema, type NewRelicConfig } from "./newrelic.js";
 export { loki, lokiConfigSchema, type LokiConfig } from "./loki.js";
 export { file, fileConfigSchema, type FileConfig } from "./file.js";
+export { prometheus, prometheusConfigSchema, type PrometheusConfig } from "./prometheus.js";
+export { pagerduty, pagerdutyConfigSchema, type PagerDutyConfig } from "./pagerduty.js";
