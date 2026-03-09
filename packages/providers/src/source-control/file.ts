@@ -259,4 +259,8 @@ class FileSourceControlProvider implements SourceControlProvider {
   async dispatchWorkflow(_opts: DispatchWorkflowOptions): Promise<void> {
     this.log.info("Skipping workflow dispatch (file provider — local only)");
   }
+
+  async enableAutoMerge(_prNumber: number): Promise<void> {
+    this.log.info("Skipping auto-merge (file provider — local only)");
+  }
 }
