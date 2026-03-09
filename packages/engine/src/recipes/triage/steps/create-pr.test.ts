@@ -13,23 +13,33 @@ vi.mock("../prompts.js", () => ({
 vi.mock("@sweny-ai/providers/issue-tracking", () => ({
   canLinkPr: vi.fn(),
 }));
+vi.mock("../../../nodes/risk-assessor.js", () => ({
+  assessRisk: vi.fn().mockReturnValue({ level: "low", reasons: [] }),
+}));
 
 import { canLinkPr } from "@sweny-ai/providers/issue-tracking";
+import { assessRisk } from "../../../nodes/risk-assessor.js";
 
 describe("createPr", () => {
   const createPullRequest = vi.fn();
+  const getChangedFiles = vi.fn().mockResolvedValue([]);
+  const enableAutoMerge = vi.fn().mockResolvedValue(undefined);
   const updateIssue = vi.fn().mockResolvedValue(undefined);
   const linkPr = vi.fn().mockResolvedValue(undefined);
   const install = vi.fn().mockResolvedValue(undefined);
   const run = vi.fn().mockResolvedValue(undefined);
 
-  function buildRegistry(opts?: { withLinkPr?: boolean }) {
+  function buildRegistry(opts?: { withLinkPr?: boolean; withAutoMerge?: boolean }) {
     const registry = createProviderRegistry();
     const issueTracker: Record<string, unknown> = { updateIssue };
     if (opts?.withLinkPr) {
       issueTracker.linkPr = linkPr;
     }
-    registry.set("sourceControl", { createPullRequest });
+    const sourceControl: Record<string, unknown> = { createPullRequest, getChangedFiles };
+    if (opts?.withAutoMerge !== false) {
+      sourceControl.enableAutoMerge = enableAutoMerge;
+    }
+    registry.set("sourceControl", sourceControl);
     registry.set("issueTracker", issueTracker);
     registry.set("codingAgent", { install, run });
     return registry;
@@ -44,7 +54,9 @@ describe("createPr", () => {
     issueUrl?: string;
     branchName?: string;
     withLinkPr?: boolean;
+    withAutoMerge?: boolean;
     skipImplementResult?: boolean;
+    reviewMode?: "auto" | "review" | "notify";
   }) {
     const results = new Map<string, StepResult>();
     results.set("create-issue", {
@@ -63,7 +75,11 @@ describe("createPr", () => {
         data: { branchName: opts?.branchName ?? "eng-1-triage-fix", hasCodeChanges: true },
       });
     }
-    return createCtx({ results, providers: buildRegistry({ withLinkPr: opts?.withLinkPr }) });
+    return createCtx({
+      results,
+      providers: buildRegistry({ withLinkPr: opts?.withLinkPr, withAutoMerge: opts?.withAutoMerge }),
+      config: opts?.reviewMode ? { reviewMode: opts.reviewMode } : undefined,
+    });
   }
 
   beforeEach(() => {
@@ -71,6 +87,8 @@ describe("createPr", () => {
     createPullRequest
       .mockReset()
       .mockResolvedValue({ number: 42, url: "https://github.com/org/repo/pull/42", state: "open", title: "fix" });
+    getChangedFiles.mockReset().mockResolvedValue([]);
+    enableAutoMerge.mockReset().mockResolvedValue(undefined);
     updateIssue.mockReset().mockResolvedValue(undefined);
     linkPr.mockReset().mockResolvedValue(undefined);
     install.mockReset().mockResolvedValue(undefined);
@@ -78,6 +96,7 @@ describe("createPr", () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     vi.mocked(fs.readFileSync).mockReturnValue("");
     vi.mocked(canLinkPr).mockReturnValue(false);
+    vi.mocked(assessRisk).mockReturnValue({ level: "low", reasons: [] });
   });
 
   it("skip when implement-fix was skipped", async () => {
@@ -188,5 +207,37 @@ describe("createPr", () => {
       prUrl: "https://github.com/org/repo/pull/77",
       prNumber: 77,
     });
+  });
+
+  it("calls enableAutoMerge when reviewMode=auto and risk is low", async () => {
+    vi.mocked(assessRisk).mockReturnValue({ level: "low", reasons: [] });
+    const ctx = buildCtx({ reviewMode: "auto" });
+    await createPr(ctx);
+    expect(enableAutoMerge).toHaveBeenCalledWith(42);
+  });
+
+  it("does NOT call enableAutoMerge when reviewMode=auto and risk is high", async () => {
+    vi.mocked(assessRisk).mockReturnValue({
+      level: "high",
+      reasons: ["High-risk file: src/migrations/001.sql"],
+    });
+    const ctx = buildCtx({ reviewMode: "auto" });
+    await createPr(ctx);
+    expect(enableAutoMerge).not.toHaveBeenCalled();
+    expect(silentLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Auto-merge disabled due to high-risk changes"),
+    );
+  });
+
+  it("does NOT call enableAutoMerge when reviewMode=review", async () => {
+    const ctx = buildCtx({ reviewMode: "review" });
+    await createPr(ctx);
+    expect(enableAutoMerge).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call enableAutoMerge when reviewMode is not set", async () => {
+    const ctx = buildCtx();
+    await createPr(ctx);
+    expect(enableAutoMerge).not.toHaveBeenCalled();
   });
 });

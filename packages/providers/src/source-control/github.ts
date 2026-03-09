@@ -236,5 +236,24 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
       );
       log.info(`Dispatched workflow "${opts.workflow}" to ${opts.targetRepo}`);
     },
+
+    async enableAutoMerge(prNumber: number): Promise<void> {
+      // Use gh CLI directly — simpler and works without GraphQL auth
+      const { execFile: execFileNode } = await import("node:child_process");
+      const { promisify: promisifyNode } = await import("node:util");
+      const execFileAsyncNode = promisifyNode(execFileNode);
+      try {
+        await execFileAsyncNode(
+          "gh",
+          ["pr", "merge", String(prNumber), "--auto", "--squash", "--repo", `${owner}/${repo}`],
+          { env: { ...process.env, GH_TOKEN: token } },
+        );
+        log.info(`Auto-merge enabled on PR #${prNumber}`);
+      } catch (err) {
+        // Non-fatal: auto-merge may fail if branch protection is not configured.
+        // The PR is still open and a human can merge manually.
+        log.warn(`Could not enable auto-merge on PR #${prNumber}: ${err}`);
+      }
+    },
   };
 }

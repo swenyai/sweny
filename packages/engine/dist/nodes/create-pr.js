@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { canLinkPr } from "@sweny-ai/providers/issue-tracking";
 import { getStepData } from "../recipes/triage/results.js";
 import { buildPrDescriptionPrompt, issueLink } from "../recipes/triage/prompts.js";
+import { assessRisk } from "./risk-assessor.js";
 /** Generate PR description with Claude, create PR, link to issue, update issue state. */
 export async function createPr(ctx) {
     const config = ctx.config;
@@ -59,6 +60,19 @@ ${issueIdentifier && issueUrl ? issueLink(config.issueTrackerName, issueIdentifi
         labels: config.prLabels ?? ["agent", "triage", "needs-review"],
     });
     ctx.logger.info(`Created PR #${pr.number}: ${pr.url}`);
+    // -------------------------------------------------------------------------
+    // 5. Auto-merge if configured (and risk is low)
+    // -------------------------------------------------------------------------
+    if (config.reviewMode === "auto" && sourceControl.enableAutoMerge) {
+        const changedFiles = await sourceControl.getChangedFiles().catch(() => []);
+        const risk = assessRisk(changedFiles);
+        if (risk.level === "high") {
+            ctx.logger.warn(`Auto-merge disabled due to high-risk changes: ${risk.reasons.join(", ")}`);
+        }
+        else {
+            await sourceControl.enableAutoMerge(pr.number);
+        }
+    }
     // -------------------------------------------------------------------------
     // 3. Link PR to issue
     // -------------------------------------------------------------------------

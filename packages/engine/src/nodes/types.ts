@@ -22,4 +22,6 @@ export interface SharedNodeConfig {
   issueOverride?: string;
   /** Issue tracker provider key (e.g. "linear", "github-issues", "jira") — used for dynamic prompt/template labels. */
   issueTrackerName?: string;
+  /** Controls PR merge behavior. "auto" enables GitHub auto-merge after CI. */
+  reviewMode?: "auto" | "review" | "notify";
 }

@@ -127,4 +127,11 @@ export interface SourceControlProvider {
    * @param opts - Workflow dispatch options.
    */
   dispatchWorkflow(opts: DispatchWorkflowOptions): Promise<void>;
+
+  /**
+   * Enable auto-merge on the given pull request number.
+   * The PR merges automatically once all required status checks pass.
+   * Optional — providers that do not support auto-merge can omit this.
+   */
+  enableAutoMerge?(prNumber: number): Promise<void>;
 }

@@ -15,6 +15,12 @@ export interface TriageConfig {
     statePeerReview: string;
     repository: string;
     dryRun: boolean;
+    /** Controls PR merge behavior after creation.
+     *  - "auto"   — enable GitHub auto-merge (merges when CI passes)
+     *  - "review" — open PR and wait for human approval (default)
+     *  - "notify" — same as review, intended for notification integrations
+     */
+    reviewMode?: "auto" | "review" | "notify";
     noveltyMode: boolean;
     issueOverride: string;
     additionalInstructions: string;

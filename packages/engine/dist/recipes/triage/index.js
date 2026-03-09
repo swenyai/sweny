@@ -21,7 +21,7 @@ export const triageRecipe = createRecipe({
         // Learn phase — gather data
         "verify-access": { phase: "learn", critical: true, next: "build-context" },
         "build-context": { phase: "learn", critical: true, next: "investigate" },
-        "investigate": { phase: "learn", critical: true, next: "novelty-gate" },
+        investigate: { phase: "learn", critical: true, next: "novelty-gate" },
         // Act phase — novelty gate routes to create-issue or directly to notify
         "novelty-gate": {
             phase: "act",
@@ -44,18 +44,18 @@ export const triageRecipe = createRecipe({
         "implement-fix": { phase: "act", next: "create-pr", on: { failed: "notify" } },
         "create-pr": { phase: "act", next: "notify", on: { failed: "notify" } },
         // Report phase — notify stakeholders
-        "notify": { phase: "report" },
+        notify: { phase: "report" },
     },
 }, {
     "verify-access": verifyAccess,
     "build-context": buildContext,
-    "investigate": investigate,
+    investigate: investigate,
     "novelty-gate": noveltyGate,
     "create-issue": createIssue,
     "cross-repo-check": crossRepoCheck,
     "implement-fix": implementFix,
     "create-pr": createPr,
-    "notify": sendNotification,
+    notify: sendNotification,
 });
 export { getStepData } from "./results.js";
 //# sourceMappingURL=index.js.map
