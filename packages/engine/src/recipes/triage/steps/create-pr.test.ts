@@ -56,7 +56,7 @@ describe("createPr", () => {
     withLinkPr?: boolean;
     withAutoMerge?: boolean;
     skipImplementResult?: boolean;
-    reviewMode?: "auto" | "review" | "notify";
+    reviewMode?: "auto" | "review";
   }) {
     const results = new Map<string, StepResult>();
     results.set("create-issue", {
