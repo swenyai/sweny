@@ -5,6 +5,8 @@ import { RecipeViewer } from "./RecipeViewer.js";
 import { PropertiesPanel } from "./components/PropertiesPanel.js";
 import { Toolbar } from "./components/Toolbar.js";
 import { DropOverlay } from "./components/DropOverlay.js";
+import { SimulationPanel } from "./components/SimulationPanel.js";
+import { LiveConnectPanel } from "./components/LiveConnectPanel.js";
 import type { RecipeDefinition } from "@sweny-ai/engine";
 
 const PRESET_RECIPES: Array<{ id: string; name: string; definition: RecipeDefinition }> = [
@@ -14,6 +16,7 @@ const PRESET_RECIPES: Array<{ id: string; name: string; definition: RecipeDefini
 
 export function App() {
   const setDefinition = useEditorStore((s) => s.setDefinition);
+  const mode = useEditorStore((s) => s.mode);
   const [activeId, setActiveId] = useState("triage");
   const [showImport, setShowImport] = useState(false);
 
@@ -83,10 +86,16 @@ export function App() {
         onShowImportChange={setShowImport}
       />
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <RecipeViewer />
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: 1 }}>
+            <RecipeViewer />
+          </div>
+          {/* Bottom execution panel */}
+          {mode === "simulate" && <SimulationPanel />}
+          {mode === "live" && <LiveConnectPanel />}
         </div>
-        <PropertiesPanel />
+        {/* Right sidebar — design mode only */}
+        {mode === "design" && <PropertiesPanel />}
       </div>
       <DropOverlay onImport={handleDropImport} />
     </div>

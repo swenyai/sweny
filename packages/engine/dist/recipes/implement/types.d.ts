@@ -8,7 +8,7 @@ export interface ImplementConfig {
     issueIdentifier: string;
     repository: string;
     dryRun: boolean;
-    reviewMode?: "auto" | "review" | "notify";
+    reviewMode?: "auto" | "review";
     maxImplementTurns: number;
     prDescriptionMaxTurns?: number;
     baseBranch?: string;

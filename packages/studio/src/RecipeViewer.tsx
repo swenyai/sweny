@@ -9,10 +9,12 @@ import {
   type Connection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { StateNode, type StateNodeType, type StateNodeData } from "./components/StateNode.js";
+import { StateNode, type StateNodeType, type StateNodeData, type NodeExecStatus } from "./components/StateNode.js";
 import { TransitionEdge, type TransitionEdgeData } from "./components/TransitionEdge.js";
 import { layoutDefinition } from "./layout/elk.js";
 import { useEditorStore } from "./store/editor-store.js";
+import type { StepResult } from "@sweny-ai/engine";
+import type { StudioMode } from "./store/editor-store.js";
 
 const nodeTypes = { stateNode: StateNode };
 const edgeTypes = { transitionEdge: TransitionEdge };
@@ -25,8 +27,31 @@ function nodeColor(node: RFNode): string {
   return "#e5e7eb";
 }
 
+function getNodeExecStatus(
+  nodeId: string,
+  currentStateId: string | null,
+  completedStates: Record<string, StepResult>,
+  mode: StudioMode,
+): NodeExecStatus {
+  if (mode === "design") return "pending";
+  if (nodeId === currentStateId) return "current";
+  const result = completedStates[nodeId];
+  if (!result) return "pending";
+  return result.status; // "success" | "failed" | "skipped"
+}
+
 export function RecipeViewer() {
-  const { definition, selection, setSelection, addTransition, isLayoutStale, markLayoutFresh } = useEditorStore();
+  const {
+    definition,
+    selection,
+    setSelection,
+    addTransition,
+    isLayoutStale,
+    markLayoutFresh,
+    currentStateId,
+    completedStates,
+    mode,
+  } = useEditorStore();
   const [nodes, setNodes] = useState<StateNodeType[]>([]);
   const [edges, setEdges] = useState<Edge<TransitionEdgeData>[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +67,10 @@ export function RecipeViewer() {
           n.map((node) => ({
             ...node,
             selected: selection?.kind === "state" && selection.id === node.id,
+            data: {
+              ...node.data,
+              execStatus: getNodeExecStatus(node.id, currentStateId, completedStates, mode),
+            },
           })),
         );
         setEdges(e);
@@ -54,15 +83,19 @@ export function RecipeViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [definition, isLayoutStale]);
 
-  // Keep selection highlight in sync without re-running ELK
+  // Keep selection highlight and execStatus in sync without re-running ELK
   useEffect(() => {
     setNodes((prev) =>
       prev.map((node) => ({
         ...node,
         selected: selection?.kind === "state" && selection.id === node.id,
+        data: {
+          ...node.data,
+          execStatus: getNodeExecStatus(node.id, currentStateId, completedStates, mode),
+        },
       })),
     );
-  }, [selection]);
+  }, [currentStateId, completedStates, mode, selection]);
 
   function onNodeClick(_: React.MouseEvent, node: RFNode) {
     setSelection({ kind: "state", id: node.id });

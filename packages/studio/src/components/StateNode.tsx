@@ -1,11 +1,14 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import type { StateDefinition, WorkflowPhase } from "@sweny-ai/engine";
 
+export type NodeExecStatus = "current" | "success" | "failed" | "skipped" | "pending";
+
 export type StateNodeData = {
   stateId: string;
   state: StateDefinition;
   isInitial: boolean;
   isTerminal: boolean;
+  execStatus: NodeExecStatus;
 };
 
 // In @xyflow/react v12, custom node types use: type MyNode = Node<Data, "typeName">
@@ -23,15 +26,33 @@ const phaseBorderColors: Record<WorkflowPhase, string> = {
   report: "border-green-300",
 };
 
+const execRing: Record<NodeExecStatus, string> = {
+  current: "ring-2 ring-blue-500 ring-offset-1 animate-pulse",
+  success: "ring-2 ring-green-400",
+  failed: "ring-2 ring-red-500",
+  skipped: "ring-2 ring-gray-400",
+  pending: "",
+};
+
+const execBg: Record<NodeExecStatus, string> = {
+  current: "bg-blue-50",
+  success: "bg-green-50",
+  failed: "bg-red-50",
+  skipped: "bg-gray-50",
+  pending: "bg-white",
+};
+
 export function StateNode({ data }: NodeProps<StateNodeType>) {
-  const { stateId, state, isInitial, isTerminal } = data;
+  const { stateId, state, isInitial, isTerminal, execStatus } = data;
 
   const borderStyle = isInitial ? "border-4 border-double" : isTerminal ? "border-2 border-dashed" : "border-2";
 
   const phaseBorder = phaseBorderColors[state.phase];
+  const ring = execRing[execStatus];
+  const bg = execBg[execStatus];
 
   return (
-    <div className={`rounded-lg bg-white shadow-md p-3 min-w-[180px] max-w-[220px] ${borderStyle} ${phaseBorder}`}>
+    <div className={`rounded-lg shadow-md p-3 min-w-[180px] max-w-[220px] ${borderStyle} ${phaseBorder} ${ring} ${bg}`}>
       {/* Target handle (left) */}
       <Handle type="target" position={Position.Left} />
 

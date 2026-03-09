@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import type { WorkflowPhase } from "@sweny-ai/engine";
 import type { RecipeDefinition } from "@sweny-ai/engine";
 import { useEditorStore, useTemporalStore } from "../store/editor-store.js";
+import type { StudioMode } from "../store/editor-store.js";
 import { ImportModal } from "./ImportModal.js";
 
 interface ToolbarProps {
@@ -29,8 +30,18 @@ export function Toolbar({
   const definition = useEditorStore((s) => s.definition);
   const setDefinition = useEditorStore((s) => s.setDefinition);
   const addState = useEditorStore((s) => s.addState);
+  const mode = useEditorStore((s) => s.mode);
+  const setMode = useEditorStore((s) => s.setMode);
+  const resetExecution = useEditorStore((s) => s.resetExecution);
   const [newStateId, setNewStateId] = useState("");
   const [newStatePhase, setNewStatePhase] = useState<WorkflowPhase>("act");
+
+  function switchMode(newMode: StudioMode) {
+    if (newMode !== mode) {
+      resetExecution();
+      setMode(newMode);
+    }
+  }
 
   function handleImport(def: RecipeDefinition) {
     temporalStore.getState().clear();
@@ -71,6 +82,19 @@ export function Toolbar({
             }`}
           >
             {r.name}
+          </button>
+        ))}
+      </div>
+
+      {/* Mode toggle: Design | Simulate | Live */}
+      <div className="flex rounded overflow-hidden border border-gray-600 mr-2">
+        {(["design", "simulate", "live"] as StudioMode[]).map((m) => (
+          <button
+            key={m}
+            onClick={() => switchMode(m)}
+            className={`px-3 py-1 text-xs ${mode === m ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
+          >
+            {m}
           </button>
         ))}
       </div>

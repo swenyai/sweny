@@ -1,13 +1,38 @@
 import { create } from "zustand";
 import { temporal } from "zundo";
 import { produce } from "immer";
-import type { RecipeDefinition, StateDefinition, WorkflowPhase } from "@sweny-ai/engine";
+import type { RecipeDefinition, StateDefinition, WorkflowPhase, ExecutionEvent, StepResult } from "@sweny-ai/engine";
 import { triageDefinition } from "@sweny-ai/engine";
+
+export type StudioMode = "design" | "simulate" | "live";
+
+export interface ExecutionSlice {
+  mode: StudioMode;
+  // Which state is currently executing (entered but not yet exited)
+  currentStateId: string | null;
+  // Results of states that have completed
+  completedStates: Record<string, StepResult>;
+  // Overall recipe status
+  executionStatus: "idle" | "running" | "completed" | "failed" | "partial";
+  // For live mode: connection info
+  liveConnection: {
+    url: string;
+    transport: "websocket" | "sse";
+    status: "disconnected" | "connecting" | "connected" | "error";
+    error?: string;
+  } | null;
+
+  // Actions
+  setMode(mode: StudioMode): void;
+  applyEvent(event: ExecutionEvent): void;
+  resetExecution(): void;
+  setLiveConnection(conn: ExecutionSlice["liveConnection"]): void;
+}
 
 // What the user has selected on the canvas
 export type Selection = { kind: "state"; id: string } | { kind: "edge"; source: string; outcome: string } | null;
 
-export interface EditorState {
+export interface EditorState extends ExecutionSlice {
   definition: RecipeDefinition;
   selection: Selection;
   isLayoutStale: boolean; // true when structure changed and ELK needs to re-run
@@ -34,10 +59,63 @@ export interface EditorState {
 
 export const useEditorStore = create<EditorState>()(
   temporal(
-    (set, get) => ({
+    (set, _get) => ({
       definition: triageDefinition as RecipeDefinition,
       selection: null,
       isLayoutStale: false,
+
+      // ExecutionSlice initial state
+      mode: "design" as StudioMode,
+      currentStateId: null,
+      completedStates: {},
+      executionStatus: "idle" as const,
+      liveConnection: null,
+
+      setMode: (mode: StudioMode) =>
+        set(
+          produce((s: EditorState) => {
+            s.mode = mode;
+          }),
+        ),
+
+      applyEvent: (event: ExecutionEvent) =>
+        set(
+          produce((s: EditorState) => {
+            if (event.type === "recipe:start") {
+              s.currentStateId = null;
+              s.completedStates = {};
+              s.executionStatus = "running";
+            }
+            if (event.type === "state:enter") {
+              s.currentStateId = event.stateId;
+            }
+            if (event.type === "state:exit") {
+              s.currentStateId = null;
+              s.completedStates[event.stateId] = event.result;
+            }
+            if (event.type === "recipe:end") {
+              s.currentStateId = null;
+              s.executionStatus = event.status;
+            }
+          }),
+        ),
+
+      resetExecution: () =>
+        set(
+          produce((s: EditorState) => {
+            s.currentStateId = null;
+            s.completedStates = {};
+            s.executionStatus = "idle";
+            s.liveConnection = null;
+          }),
+        ),
+
+      setLiveConnection: (conn: ExecutionSlice["liveConnection"]) =>
+        set(
+          produce((s: EditorState) => {
+            s.liveConnection = conn;
+          }),
+        ),
 
       setDefinition: (def: RecipeDefinition) =>
         set(

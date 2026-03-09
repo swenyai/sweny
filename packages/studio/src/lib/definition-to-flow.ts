@@ -1,6 +1,6 @@
 import type { RecipeDefinition } from "@sweny-ai/engine";
 import type { Edge } from "@xyflow/react";
-import type { StateNodeData, StateNodeType } from "../components/StateNode.js";
+import type { NodeExecStatus, StateNodeData, StateNodeType } from "../components/StateNode.js";
 import type { TransitionEdgeData } from "../components/TransitionEdge.js";
 
 export type FlowTransition = {
@@ -63,12 +63,15 @@ export function definitionToFlow(def: RecipeDefinition): {
 } {
   const transitions = extractTransitions(def);
 
+  const defaultExecStatus: NodeExecStatus = "pending";
+
   const nodes: StateNodeType[] = Object.entries(def.states).map(([stateId, state]) => {
     const data: StateNodeData = {
       stateId,
       state,
       isInitial: stateId === def.initial,
       isTerminal: isTerminal(stateId, def),
+      execStatus: defaultExecStatus,
     };
     return {
       id: stateId,

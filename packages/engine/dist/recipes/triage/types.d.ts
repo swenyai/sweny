@@ -20,7 +20,7 @@ export interface TriageConfig {
      *  - "review" — open PR and wait for human approval (default)
      *  - "notify" — same as review, intended for notification integrations
      */
-    reviewMode?: "auto" | "review" | "notify";
+    reviewMode?: "auto" | "review";
     noveltyMode: boolean;
     issueOverride: string;
     additionalInstructions: string;
