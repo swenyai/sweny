@@ -414,6 +414,7 @@ function mapToTriageConfig(config: CliConfig): TriageConfig {
     prLabels: config.prLabels,
 
     dryRun: config.dryRun,
+    reviewMode: config.reviewMode,
     noveltyMode: config.noveltyMode,
     issueOverride: config.issueOverride,
     additionalInstructions: config.additionalInstructions,

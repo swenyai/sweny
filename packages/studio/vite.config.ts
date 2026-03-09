@@ -13,6 +13,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // In the browser, redirect "elkjs" to the bundled (no-worker) version
+      elkjs: resolve(__dirname, "../../node_modules/elkjs/lib/elk.bundled.js"),
       // Redirect @sweny-ai/engine to its browser-safe entry point,
       // which exports only pure serializable data (no Node.js implementations).
       "@sweny-ai/engine": resolve(__dirname, "../../packages/engine/dist/browser.js"),

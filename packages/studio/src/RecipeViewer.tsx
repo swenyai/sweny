@@ -55,7 +55,6 @@ export function RecipeViewer({ definition, activeStateIds = [] }: RecipeViewerPr
         edgeTypes={edgeTypes}
         fitView
         fitViewOptions={{ padding: 0.2 }}
-        proOptions={{ hideAttribution: false }}
       >
         <Background />
         <Controls />
