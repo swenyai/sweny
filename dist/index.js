@@ -48246,8 +48246,8 @@ function github(config) {
             log.info(`Pushed branch: ${name}`);
         },
         async hasChanges() {
-            const unstaged = await git(["diff", "--name-only", "--", ".", ":!.github/triage-analysis", ":!.github/workflows"], { ignoreReturnCode: true });
-            const staged = await git(["diff", "--cached", "--name-only", "--", ".", ":!.github/triage-analysis", ":!.github/workflows"], { ignoreReturnCode: true });
+            const unstaged = await git(["diff", "--name-only", "--", ".", ":!.github/workflows"], { ignoreReturnCode: true });
+            const staged = await git(["diff", "--cached", "--name-only", "--", ".", ":!.github/workflows"], { ignoreReturnCode: true });
             return unstaged.trim().length > 0 || staged.trim().length > 0;
         },
         async hasNewCommits() {
@@ -48266,7 +48266,7 @@ function github(config) {
             log.debug(`Reset paths: ${paths.join(", ")}`);
         },
         async stageAndCommit(message) {
-            await git(["add", "-A", "--", ".", ":!.github/triage-analysis", ":!.github/workflows"]);
+            await git(["add", "-A", "--", ".", ":!.github/workflows"]);
             await git(["commit", "-m", message]);
         },
         async createPullRequest(opts) {
@@ -52220,6 +52220,7 @@ function mapToImplementConfig(config) {
         projectId: config.linearTeamId,
         stateInProgress: config.linearStateInProgress,
         statePeerReview: config.linearStatePeerReview,
+        issueTrackerName: config.issueTrackerProvider,
         agentEnv,
     };
 }
