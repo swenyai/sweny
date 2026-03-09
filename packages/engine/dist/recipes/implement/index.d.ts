@@ -1,4 +1,3 @@
-import type { Recipe } from "../../types.js";
 import type { ImplementConfig } from "./types.js";
 /**
  * The implement recipe.
@@ -9,6 +8,6 @@ import type { ImplementConfig } from "./types.js";
  * Shared nodes (implement-fix, create-pr, notify) are typed to SharedNodeConfig,
  * which ImplementConfig satisfies — no type casts needed.
  */
-export declare const implementRecipe: Recipe<ImplementConfig>;
+export declare const implementRecipe: import("../../types.js").Recipe<ImplementConfig>;
 export type { ImplementConfig } from "./types.js";
 //# sourceMappingURL=index.d.ts.map

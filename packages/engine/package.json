@@ -19,7 +19,8 @@
     "test:watch": "vitest"
   },
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./browser": "./dist/browser.js"
   },
   "dependencies": {
     "@sweny-ai/providers": "^0.2.0"

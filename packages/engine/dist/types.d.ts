@@ -70,53 +70,75 @@ export interface RunOptions {
     cache?: import("./cache.js").StepCache;
 }
 /**
- * A single node in a Recipe.
- *
- * Nodes are atomic, reusable units: they receive context, do work, and return
- * a StepResult. The same node can be wired into multiple recipes. Routing to
- * the next node is determined by the `on` transition map.
+ * A pure-data recipe definition. Fully serializable — no functions.
+ * Can be stored in JSON, versioned, and rendered as a visual graph.
+ * Implementations are injected separately via createRecipe().
  */
-export interface RecipeStep<TConfig = unknown> {
-    /** Unique id within the recipe (used as key in ctx.results and as transition target). */
+export interface RecipeDefinition {
+    /** Unique machine-readable identifier (for persistence and import/export). */
     id: string;
-    /** Phase for logging and failure semantics (critical nodes in any phase abort on failure). */
-    phase: WorkflowPhase;
-    /** Execute the node. Throw to fail. */
-    run: (ctx: WorkflowContext<TConfig>) => Promise<StepResult>;
-    /**
-     * Outcome → next node id.
-     *
-     * Outcome is resolved in order:
-     *   1. result.data?.outcome (string) — explicit outcome set by the node
-     *   2. result.status           ("success" | "skipped" | "failed")
-     *
-     * Reserved target: "end" — stops the recipe immediately (success).
-     * No match: falls back to the next node in declaration order for
-     * success/skipped, or stops for failed.
-     */
-    on?: Record<string, string>;
-    /**
-     * If true, any failure immediately aborts the entire recipe (status: "failed").
-     * Use for nodes whose output is required by everything that follows.
-     * Default: false.
-     */
-    critical?: boolean;
-}
-/**
- * A complete recipe — a named, composable workflow defined as a DAG of nodes.
- *
- * The runner starts at `start`, executes each node, and follows `on` transitions
- * to determine the next node. Shared nodes (e.g. create-pr, notify) can be
- * imported by multiple recipes without duplication.
- */
-export interface Recipe<TConfig = unknown> {
+    /** Semver string, e.g. "1.0.0". Increment when the shape changes. */
+    version: string;
     /** Human-readable name used in logs. */
     name: string;
     /** Optional description of what this recipe does. */
     description?: string;
-    /** Id of the first node to execute. */
-    start: string;
-    /** All nodes in declaration order. Order is the default routing fallback. */
-    nodes: RecipeStep<TConfig>[];
+    /** Id of the first state to execute. Must be a key in `states`. */
+    initial: string;
+    /**
+     * All states keyed by their unique id.
+     * Order is irrelevant — all routing is explicit via `on` and `next`.
+     */
+    states: Record<string, StateDefinition>;
+}
+export interface StateDefinition {
+    /** Phase for swimlane grouping and failure semantics. */
+    phase: WorkflowPhase;
+    /** Human-readable description (shown in visual editor, not executed). */
+    description?: string;
+    /**
+     * If true, any failure immediately aborts the entire recipe (status: "failed").
+     * Use for states whose output is required by everything downstream.
+     */
+    critical?: boolean;
+    /**
+     * Explicit default successor state (for linear chains).
+     * Used when no `on` key matches the resolved outcome.
+     * Shorthand for `on: { success: "...", skipped: "..." }`.
+     */
+    next?: string;
+    /**
+     * Outcome-based transition map.
+     *
+     * Key resolution order:
+     *   1. result.data?.outcome (string)  — explicit outcome set by implementation
+     *   2. result.status                  — "success" | "skipped" | "failed"
+     *   3. "*"                            — wildcard default
+     *
+     * After `on` is exhausted, falls back to `next` (success/skipped only).
+     *
+     * Reserved target value: "end" — stops the recipe successfully.
+     */
+    on?: Record<string, string>;
+}
+/**
+ * Implementation functions keyed by state id.
+ * Every state id in RecipeDefinition.states must have an entry here.
+ */
+export type StateImplementations<TConfig> = Record<string, (ctx: WorkflowContext<TConfig>) => Promise<StepResult>>;
+/**
+ * A complete wired recipe ready to run.
+ * Definition is pure data; implementations are the actual async functions.
+ */
+export interface Recipe<TConfig = unknown> {
+    definition: RecipeDefinition;
+    implementations: StateImplementations<TConfig>;
+}
+/** Validation error describing a structural problem with a RecipeDefinition. */
+export interface DefinitionError {
+    code: "MISSING_INITIAL" | "UNKNOWN_TARGET" | "MISSING_IMPLEMENTATION";
+    message: string;
+    stateId?: string;
+    targetId?: string;
 }
 //# sourceMappingURL=types.d.ts.map

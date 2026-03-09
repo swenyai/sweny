@@ -10,6 +10,9 @@ import { createPr } from "./steps/create-pr.js";
 import { sendNotification } from "./steps/notify.js";
 import { createRecipe } from "../../runner-recipe.js";
 
+// Re-export the pure serializable definition (browser-safe)
+export { triageDefinition } from "./definition.js";
+
 /** The triage recipe — DAG with explicit on transitions. */
 export const triageRecipe = createRecipe<TriageConfig>(
   {
@@ -22,7 +25,7 @@ export const triageRecipe = createRecipe<TriageConfig>(
       // Learn phase — gather data
       "verify-access": { phase: "learn", critical: true, next: "build-context" },
       "build-context": { phase: "learn", critical: true, next: "investigate" },
-      "investigate": { phase: "learn", critical: true, next: "novelty-gate" },
+      investigate: { phase: "learn", critical: true, next: "novelty-gate" },
 
       // Act phase — novelty gate routes to create-issue or directly to notify
       "novelty-gate": {
@@ -48,19 +51,19 @@ export const triageRecipe = createRecipe<TriageConfig>(
       "create-pr": { phase: "act", next: "notify", on: { failed: "notify" } },
 
       // Report phase — notify stakeholders
-      "notify": { phase: "report" },
+      notify: { phase: "report" },
     },
   },
   {
     "verify-access": verifyAccess,
     "build-context": buildContext,
-    "investigate": investigate,
+    investigate: investigate,
     "novelty-gate": noveltyGate,
     "create-issue": createIssue,
     "cross-repo-check": crossRepoCheck,
     "implement-fix": implementFix,
     "create-pr": createPr,
-    "notify": sendNotification,
+    notify: sendNotification,
   },
 );
 

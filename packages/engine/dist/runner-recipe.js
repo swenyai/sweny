@@ -1,126 +1,195 @@
 import { consoleLogger } from "@sweny-ai/providers";
 import { createProviderRegistry } from "./registry.js";
 /**
+ * Validate a RecipeDefinition for structural correctness.
+ * Returns an array of errors (empty array = valid).
+ * Does NOT check implementations (use createRecipe for that).
+ */
+export function validateDefinition(def) {
+    const errors = [];
+    const stateIds = new Set(Object.keys(def.states));
+    // initial must exist
+    if (!stateIds.has(def.initial)) {
+        errors.push({
+            code: "MISSING_INITIAL",
+            message: `initial state "${def.initial}" does not exist in states`,
+        });
+    }
+    // all on/next targets must be valid state ids or "end"
+    for (const [stateId, state] of Object.entries(def.states)) {
+        if (state.next && state.next !== "end" && !stateIds.has(state.next)) {
+            errors.push({
+                code: "UNKNOWN_TARGET",
+                message: `state "${stateId}" next target "${state.next}" does not exist`,
+                stateId,
+                targetId: state.next,
+            });
+        }
+        for (const [outcome, target] of Object.entries(state.on ?? {})) {
+            if (target !== "end" && !stateIds.has(target)) {
+                errors.push({
+                    code: "UNKNOWN_TARGET",
+                    message: `state "${stateId}" on["${outcome}"] target "${target}" does not exist`,
+                    stateId,
+                    targetId: target,
+                });
+            }
+        }
+    }
+    return errors;
+}
+/**
+ * Create a Recipe by combining a definition with implementations.
+ * Validates the definition and that all state ids have implementations.
+ * Throws a descriptive Error if validation fails.
+ */
+export function createRecipe(definition, implementations) {
+    const defErrors = validateDefinition(definition);
+    if (defErrors.length > 0) {
+        throw new Error(`Invalid recipe definition "${definition.id}":\n` +
+            defErrors.map((e) => `  [${e.code}] ${e.message}`).join("\n"));
+    }
+    const implErrors = [];
+    for (const stateId of Object.keys(definition.states)) {
+        if (!implementations[stateId]) {
+            implErrors.push({
+                code: "MISSING_IMPLEMENTATION",
+                message: `state "${stateId}" has no implementation`,
+                stateId,
+            });
+        }
+    }
+    if (implErrors.length > 0) {
+        throw new Error(`Missing implementations for recipe "${definition.id}":\n` +
+            implErrors.map((e) => `  [${e.code}] ${e.message}`).join("\n"));
+    }
+    return { definition, implementations };
+}
+/**
  * Execute a Recipe as a state machine.
  *
- * Starts at recipe.start, executes each node, then follows on: transitions to
- * determine the next node. Stops when a transition resolves to "end", there is
- * no next node, or a critical node fails.
+ * Starts at recipe.definition.initial, executes each state, then follows
+ * on: transitions to determine the next state. Stops when a transition
+ * resolves to "end", there is no next state, or a critical state fails.
  *
  * Outcome resolution order (for on: routing):
- *   1. result.data?.outcome (string) — explicit outcome set by the node
+ *   1. result.data?.outcome (string) — explicit outcome set by the implementation
  *   2. result.status        ("success" | "skipped" | "failed")
+ *   3. "*"                  — wildcard default
+ *   4. next                 — fallback for success/skipped
  */
 export async function runRecipe(recipe, config, providers, options) {
     const logger = options?.logger ?? consoleLogger;
     const start = Date.now();
+    const { definition, implementations } = recipe;
     const results = new Map();
     const completedSteps = [];
-    // Build id → node lookup and preserve declaration order for default routing
-    const nodeMap = new Map();
-    const nodeOrder = [];
-    for (const node of recipe.nodes) {
-        nodeMap.set(node.id, node);
-        nodeOrder.push(node.id);
-    }
     const ctx = { config, logger, results, providers };
-    let currentId = recipe.start;
+    let currentId = definition.initial;
     let hasFailed = false;
     let aborted = false;
     const visited = new Set();
     while (currentId && currentId !== "end") {
-        const node = nodeMap.get(currentId);
-        if (!node) {
-            logger.error(`[${recipe.name}] Unknown node id: "${currentId}" — aborting`);
+        const state = definition.states[currentId];
+        if (!state) {
+            logger.error(`[${definition.name}] Unknown state id: "${currentId}" — aborting`);
             aborted = true;
             break;
         }
         if (visited.has(currentId)) {
-            logger.error(`[${recipe.name}] Cycle detected at node "${currentId}" — aborting`);
+            logger.error(`[${definition.name}] Cycle detected at node "${currentId}" — aborting`);
             aborted = true;
             break;
         }
         visited.add(currentId);
-        const meta = { id: node.id, phase: node.phase };
-        // beforeStep hook — return false to skip this node
+        const stateId = currentId;
+        const meta = { id: stateId, phase: state.phase };
+        // beforeStep hook — return false to skip this state
         if (options?.beforeStep) {
             const proceed = await options.beforeStep(meta, ctx);
             if (proceed === false) {
                 const result = { status: "skipped", reason: "Skipped by beforeStep hook" };
-                results.set(node.id, result);
-                completedSteps.push({ name: node.id, phase: node.phase, result });
+                results.set(stateId, result);
+                completedSteps.push({ name: stateId, phase: state.phase, result });
                 if (options.afterStep)
                     await options.afterStep(meta, result, ctx);
-                currentId = resolveNext(node, result, nodeOrder);
+                currentId = resolveNext(stateId, state, result);
                 continue;
             }
         }
         // Cache check — replay a previously cached result if available
         if (options?.cache) {
-            const entry = await options.cache.get(node.id);
+            const entry = await options.cache.get(stateId);
             if (entry) {
                 const result = { ...entry.result, cached: true };
-                results.set(node.id, result);
-                completedSteps.push({ name: node.id, phase: node.phase, result });
+                results.set(stateId, result);
+                completedSteps.push({ name: stateId, phase: state.phase, result });
                 if (options.afterStep)
                     await options.afterStep(meta, result, ctx);
-                currentId = resolveNext(node, result, nodeOrder);
+                currentId = resolveNext(stateId, state, result);
                 continue;
             }
         }
-        // Execute the node — result is always assigned (either from run or catch)
+        // Execute the state — result is always assigned (either from run or catch)
         let result;
         try {
-            logger.info(`[${recipe.name}] ${node.phase}/${node.id}: starting`);
-            result = await node.run(ctx);
-            logger.info(`[${recipe.name}] ${node.phase}/${node.id}: ${result.status}`);
+            logger.info(`[${definition.name}] ${state.phase}/${stateId}: starting`);
+            result = await implementations[stateId](ctx);
+            logger.info(`[${definition.name}] ${state.phase}/${stateId}: ${result.status}`);
         }
         catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            logger.error(`[${recipe.name}] ${node.phase}/${node.id}: failed — ${message}`);
+            logger.error(`[${definition.name}] ${state.phase}/${stateId}: failed — ${message}`);
             result = { status: "failed", reason: message };
         }
-        results.set(node.id, result);
-        completedSteps.push({ name: node.id, phase: node.phase, result });
+        results.set(stateId, result);
+        completedSteps.push({ name: stateId, phase: state.phase, result });
         if (result.status === "failed") {
             hasFailed = true;
-            if (node.critical) {
+            if (state.critical) {
                 aborted = true;
                 break;
             }
         }
         // Persist successful results to cache
         if (result.status === "success" && options?.cache) {
-            await options.cache.set(node.id, { result, createdAt: Date.now() }).catch(() => { }); // cache failures are non-fatal
+            await options.cache.set(stateId, { result, createdAt: Date.now() }).catch(() => { }); // cache failures are non-fatal
         }
         if (options?.afterStep)
             await options.afterStep(meta, result, ctx);
-        currentId = resolveNext(node, result, nodeOrder);
+        currentId = resolveNext(stateId, state, result);
     }
     const status = aborted ? "failed" : hasFailed ? "partial" : "completed";
     return { status, steps: completedSteps, duration: Date.now() - start };
 }
 /**
- * Resolve the id of the next node to execute.
+ * Resolve the id of the next state to execute.
  *
  * Priority:
  *   1. Explicit on: match for result.data?.outcome
  *   2. Explicit on: match for result.status
- *   3. Next node in declaration order (success/skipped only)
- *   4. undefined — stop the recipe
+ *   3. Wildcard on["*"]
+ *   4. next (success/skipped only)
+ *   5. undefined — stop the recipe
  */
-function resolveNext(node, result, nodeOrder) {
-    const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : result.status;
-    if (node.on) {
-        if (outcome in node.on)
-            return node.on[outcome];
-        if (result.status in node.on)
-            return node.on[result.status];
+function resolveNext(stateId, state, result) {
+    const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : undefined;
+    if (state.on) {
+        // 1. explicit outcome
+        if (outcome && outcome in state.on)
+            return state.on[outcome];
+        // 2. status
+        if (result.status in state.on)
+            return state.on[result.status];
+        // 3. wildcard
+        if ("*" in state.on)
+            return state.on["*"];
     }
-    if (result.status === "failed")
-        return undefined;
-    const idx = nodeOrder.indexOf(node.id);
-    return idx >= 0 && idx + 1 < nodeOrder.length ? nodeOrder[idx + 1] : undefined;
+    // 4. next (only for non-failure)
+    if (result.status !== "failed" && state.next)
+        return state.next;
+    // 5. stop
+    return undefined;
 }
 export { createProviderRegistry };
 //# sourceMappingURL=runner-recipe.js.map
