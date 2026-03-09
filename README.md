@@ -19,11 +19,12 @@ This monorepo contains the SWEny platform:
 
 | Package | Description |
 |---------|-------------|
-| **[@sweny-ai/engine](packages/engine)** | Workflow engine — Learn, Act, Report |
-| **[@sweny-ai/cli](packages/cli)** | CLI — run triage from your terminal |
+| **[@sweny-ai/engine](packages/engine)** | Recipe engine — DAG runner, built-in triage and implement recipes |
+| **[@sweny-ai/cli](packages/cli)** | CLI — run triage and implement from your terminal |
 | **[SWEny Triage](#sweny-triage)** | GitHub Action — autonomous SRE triage |
 | **[@sweny-ai/providers](packages/providers)** | 30+ provider implementations |
 | **[@sweny-ai/agent](packages/agent)** | AI assistant — Slack bot + CLI |
+| **[Studio](#studio)** | Visual recipe editor and execution monitor |
 | **[@sweny-ai/web](packages/web)** | sweny.ai website |
 
 ---
@@ -42,7 +43,7 @@ SWEny workflows follow three phases:
 │  GitHub Action · Slack Bot · CLI · Cloud     │
 ├─────────────────────────────────────────────┤
 │  @sweny-ai/engine                              │
-│  Workflow Runner · Recipes · Step Context    │
+│  Recipe Runner · DAG Executor · Step Context │
 ├─────────────────────────────────────────────┤
 │  @sweny-ai/providers                           │
 │  Observability · Issue Tracking · Source     │
@@ -305,6 +306,7 @@ SWEny creates GitHub Issues by default — zero additional config. Want Linear o
 |-------|-------------|---------|
 | `dry-run` | Analyze only, don't create PRs | `false` |
 | `novelty-mode` | Only report issues not already tracked | `true` |
+| `review-mode` | PR merge behavior: `auto` (GitHub auto-merge when CI passes, suppressed for high-risk changes) or `review` (human approval) | `review` |
 | `linear-issue` | Issue to implement (e.g., `ENG-123`). Required when `recipe` is `implement`. | — |
 | `additional-instructions` | Extra guidance for Claude | — |
 | `service-map-path` | Path to service ownership map | `.github/service-map.yml` |
@@ -533,6 +535,32 @@ See [`packages/agent/`](packages/agent/) for documentation.
 
 ---
 
+## Studio
+
+Studio is the visual editor and execution monitor for SWEny recipes. It renders any `RecipeDefinition` as an interactive DAG — nodes are color-coded by phase (blue=learn, amber=act, green=report), edges show transition outcomes, and execution state is overlaid in real time.
+
+```bash
+npm run dev --workspace=packages/studio
+```
+
+**Three modes:**
+
+- **Design** — edit the graph, add/remove states, configure transitions and properties, undo/redo. Import and export recipe definitions as JSON.
+- **Simulate** — run the recipe locally in the browser using mock providers. Watch states execute with live status rings.
+- **Live** — connect to a running engine instance over WebSocket or SSE and stream execution events in real time.
+
+Studio uses the same `RecipeDefinition` type the engine executes, so what you see is what runs. The `RecipeViewer` component is also embeddable in dashboards and documentation:
+
+```ts
+import { RecipeViewer } from "@sweny-ai/studio/viewer";
+
+<RecipeViewer definition={myDefinition} executionState={executionState} height={500} />
+```
+
+See [`docs/studio.md`](docs/studio.md) for the full guide.
+
+---
+
 ## Development
 
 ```bash
@@ -576,6 +604,18 @@ is open source — you can audit exactly what code runs on your data.
 | TEE Attestation | Enterprise tier | N/A |
 
 [Deploy your own worker →](docs/self-hosted-worker.md)
+
+---
+
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Recipe Authoring](docs/recipe-authoring.md) | Write, wire, run, and test custom recipes |
+| [Provider Authoring](docs/provider-authoring.md) | Build new observability, issue-tracking, or notification providers |
+| [Studio](docs/studio.md) | Visual recipe editor and execution monitor |
+| [Self-Hosted Worker](docs/self-hosted-worker.md) | Run the engine on your own infrastructure |
+| [Recipe System Spec](packages/engine/SPEC.md) | Formal specification — data model, execution semantics, observer protocol |
 
 ---
 
