@@ -13,6 +13,7 @@ export interface ImplementConfig {
 
   // Behavior
   dryRun: boolean;
+  reviewMode?: "auto" | "review" | "notify";
   maxImplementTurns: number;
   prDescriptionMaxTurns?: number;
 
