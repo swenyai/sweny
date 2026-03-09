@@ -5,6 +5,8 @@ import type { RecipeDefinition } from "@sweny-ai/engine";
 import { useEditorStore, useTemporalStore } from "../store/editor-store.js";
 import type { StudioMode } from "../store/editor-store.js";
 import { ImportModal } from "./ImportModal.js";
+import { exportAsTypescript } from "../lib/export-typescript.js";
+import { buildPermalinkUrl } from "../lib/permalink.js";
 
 interface ToolbarProps {
   onRecipeChange(id: string): void;
@@ -55,6 +57,18 @@ export function Toolbar({
     const a = document.createElement("a");
     a.href = url;
     a.download = `${definition.id}.recipe.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleExportTs() {
+    const { definition: def } = useEditorStore.getState();
+    const content = exportAsTypescript(def);
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${def.id}.ts`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -152,6 +166,11 @@ export function Toolbar({
       {/* Export */}
       <button onClick={handleExport} className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs ml-2">
         ↓ Export JSON
+      </button>
+
+      {/* Export TS */}
+      <button onClick={handleExportTs} className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs">
+        ↓ Export TS
       </button>
 
       {showImport && <ImportModal onImport={handleImport} onClose={() => onShowImportChange(false)} />}
