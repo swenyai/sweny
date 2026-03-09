@@ -115,6 +115,9 @@ jobs:
           time-range: ${{ inputs.time-range || '7d' }}
           investigation-depth: ${{ inputs.investigation-depth || 'thorough' }}
           novelty-mode: "true"
+          # Auto-merge: SWEny's fix PRs merge automatically once CI passes.
+          # Requires "Allow auto-merge" enabled in repo settings + branch protection rules.
+          review-mode: auto
 
           additional-instructions: |
             You are the autonomous improvement agent for the SWEny codebase itself.
