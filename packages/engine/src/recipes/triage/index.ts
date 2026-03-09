@@ -1,4 +1,3 @@
-import type { Recipe } from "../../types.js";
 import type { TriageConfig } from "./types.js";
 import { verifyAccess } from "./steps/verify-access.js";
 import { buildContext } from "./steps/build-context.js";
@@ -9,49 +8,61 @@ import { crossRepoCheck } from "./steps/cross-repo-check.js";
 import { implementFix } from "./steps/implement-fix.js";
 import { createPr } from "./steps/create-pr.js";
 import { sendNotification } from "./steps/notify.js";
+import { createRecipe } from "../../runner-recipe.js";
 
 /** The triage recipe — DAG with explicit on transitions. */
-export const triageRecipe: Recipe<TriageConfig> = {
-  name: "triage",
-  description: "Investigate production issues, implement fixes, and report results",
-  start: "verify-access",
-  nodes: [
-    // Learn phase — gather data
-    { id: "verify-access", phase: "learn", run: verifyAccess, critical: true },
-    { id: "build-context", phase: "learn", run: buildContext, critical: true },
-    { id: "investigate", phase: "learn", run: investigate, critical: true },
+export const triageRecipe = createRecipe<TriageConfig>(
+  {
+    id: "triage",
+    version: "1.0.0",
+    name: "triage",
+    description: "Investigate production issues, implement fixes, and report results",
+    initial: "verify-access",
+    states: {
+      // Learn phase — gather data
+      "verify-access": { phase: "learn", critical: true, next: "build-context" },
+      "build-context": { phase: "learn", critical: true, next: "investigate" },
+      "investigate": { phase: "learn", critical: true, next: "novelty-gate" },
 
-    // Act phase — novelty gate routes to create-issue or directly to notify
-    {
-      id: "novelty-gate",
-      phase: "act",
-      run: noveltyGate,
-      on: {
-        skip: "notify", // dry-run, skip, or +1 all go straight to report
-        implement: "create-issue",
-        failed: "notify",
+      // Act phase — novelty gate routes to create-issue or directly to notify
+      "novelty-gate": {
+        phase: "act",
+        on: {
+          skip: "notify", // dry-run, skip, or +1 all go straight to report
+          implement: "create-issue",
+          failed: "notify",
+        },
       },
-    },
-    { id: "create-issue", phase: "act", run: createIssue, on: { failed: "notify" } },
+      "create-issue": { phase: "act", next: "cross-repo-check", on: { failed: "notify" } },
 
-    // Cross-repo check routes to implement-fix or to notify (failed also goes to notify)
-    {
-      id: "cross-repo-check",
-      phase: "act",
-      run: crossRepoCheck,
-      on: {
-        local: "implement-fix",
-        dispatched: "notify",
-        failed: "notify",
+      // Cross-repo check routes to implement-fix or to notify (failed also goes to notify)
+      "cross-repo-check": {
+        phase: "act",
+        on: {
+          local: "implement-fix",
+          dispatched: "notify",
+          failed: "notify",
+        },
       },
-    },
-    { id: "implement-fix", phase: "act", run: implementFix, on: { failed: "notify" } },
-    { id: "create-pr", phase: "act", run: createPr, on: { failed: "notify" } },
+      "implement-fix": { phase: "act", next: "create-pr", on: { failed: "notify" } },
+      "create-pr": { phase: "act", next: "notify", on: { failed: "notify" } },
 
-    // Report phase — notify stakeholders
-    { id: "notify", phase: "report", run: sendNotification },
-  ],
-};
+      // Report phase — notify stakeholders
+      "notify": { phase: "report" },
+    },
+  },
+  {
+    "verify-access": verifyAccess,
+    "build-context": buildContext,
+    "investigate": investigate,
+    "novelty-gate": noveltyGate,
+    "create-issue": createIssue,
+    "cross-repo-check": crossRepoCheck,
+    "implement-fix": implementFix,
+    "create-pr": createPr,
+    "notify": sendNotification,
+  },
+);
 
 export type {
   TriageConfig,

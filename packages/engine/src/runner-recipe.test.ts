@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { runRecipe } from "./runner-recipe.js";
+import { runRecipe, createRecipe, validateDefinition } from "./runner-recipe.js";
 import { createProviderRegistry } from "./runner-recipe.js";
-import type { Recipe, RecipeStep, StepResult, WorkflowContext } from "./types.js";
+import type { StepResult, WorkflowContext } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,24 +16,6 @@ const silentLogger = {
 
 type Cfg = Record<string, unknown>;
 
-function node(
-  id: string,
-  phase: RecipeStep["phase"],
-  fn?: (ctx: WorkflowContext) => Promise<StepResult>,
-  opts?: Partial<Pick<RecipeStep, "on" | "critical">>,
-): RecipeStep<Cfg> {
-  return {
-    id,
-    phase,
-    run: fn ?? (() => Promise.resolve({ status: "success" })),
-    ...opts,
-  };
-}
-
-function recipe(name: string, nodes: RecipeStep<Cfg>[], start?: string): Recipe<Cfg> {
-  return { name, start: start ?? nodes[0]?.id ?? "start", nodes };
-}
-
 const providers = createProviderRegistry();
 const opts = { logger: silentLogger };
 
@@ -44,20 +26,24 @@ const opts = { logger: silentLogger };
 describe("runRecipe — basic execution", () => {
   it("executes all nodes in declaration order when no on: transitions", async () => {
     const order: string[] = [];
-    const r = recipe("test", [
-      node("a", "learn", async () => {
-        order.push("a");
-        return { status: "success" };
-      }),
-      node("b", "act", async () => {
-        order.push("b");
-        return { status: "success" };
-      }),
-      node("c", "report", async () => {
-        order.push("c");
-        return { status: "success" };
-      }),
-    ]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: {
+          a: { phase: "learn", next: "b" },
+          b: { phase: "act", next: "c" },
+          c: { phase: "report" },
+        },
+      },
+      {
+        a: async () => { order.push("a"); return { status: "success" }; },
+        b: async () => { order.push("b"); return { status: "success" }; },
+        c: async () => { order.push("c"); return { status: "success" }; },
+      },
+    );
 
     const result = await runRecipe(r, {}, providers, opts);
 
@@ -67,26 +53,62 @@ describe("runRecipe — basic execution", () => {
   });
 
   it("returns completed status when all steps succeed", async () => {
-    const r = recipe("test", [node("a", "learn"), node("b", "act")]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: {
+          a: { phase: "learn", next: "b" },
+          b: { phase: "act" },
+        },
+      },
+      {
+        a: async () => ({ status: "success" }),
+        b: async () => ({ status: "success" }),
+      },
+    );
     const result = await runRecipe(r, {}, providers, opts);
     expect(result.status).toBe("completed");
   });
 
   it("includes duration in result", async () => {
-    const r = recipe("test", [node("a", "learn")]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: { a: { phase: "learn" } },
+      },
+      { a: async () => ({ status: "success" }) },
+    );
     const result = await runRecipe(r, {}, providers, opts);
     expect(result.duration).toBeGreaterThanOrEqual(0);
   });
 
   it("accumulates step results in WorkflowContext.results", async () => {
     let seenResults: Map<string, StepResult> | undefined;
-    const r = recipe("test", [
-      node("first", "learn", async () => ({ status: "success", data: { x: 1 } })),
-      node("second", "act", async (ctx) => {
-        seenResults = new Map(ctx.results);
-        return { status: "success" };
-      }),
-    ]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "first",
+        states: {
+          first: { phase: "learn", next: "second" },
+          second: { phase: "act" },
+        },
+      },
+      {
+        first: async () => ({ status: "success", data: { x: 1 } }),
+        second: async (ctx) => {
+          seenResults = new Map(ctx.results);
+          return { status: "success" };
+        },
+      },
+    );
 
     await runRecipe(r, {}, providers, opts);
 
@@ -96,12 +118,21 @@ describe("runRecipe — basic execution", () => {
   it("passes config to each step via ctx.config", async () => {
     const config = { myKey: "myValue" };
     let receivedConfig: unknown;
-    const r = recipe("test", [
-      node("a", "learn", async (ctx) => {
-        receivedConfig = ctx.config;
-        return { status: "success" };
-      }),
-    ]);
+    const r = createRecipe<typeof config>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: { a: { phase: "learn" } },
+      },
+      {
+        a: async (ctx) => {
+          receivedConfig = ctx.config;
+          return { status: "success" };
+        },
+      },
+    );
 
     await runRecipe(r, config, providers, opts);
 
@@ -116,19 +147,24 @@ describe("runRecipe — basic execution", () => {
 describe("runRecipe — on: transition routing", () => {
   it("follows on: transition when result.data.outcome matches", async () => {
     const order: string[] = [];
-    const r = recipe("test", [
-      node("gate", "act", async () => ({ status: "success", data: { outcome: "branch-b" } }), {
-        on: { "branch-a": "node-a", "branch-b": "node-b" },
-      }),
-      node("node-a", "act", async () => {
-        order.push("a");
-        return { status: "success" };
-      }),
-      node("node-b", "act", async () => {
-        order.push("b");
-        return { status: "success" };
-      }),
-    ]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "gate",
+        states: {
+          gate: { phase: "act", on: { "branch-a": "node-a", "branch-b": "node-b" } },
+          "node-a": { phase: "act" },
+          "node-b": { phase: "act" },
+        },
+      },
+      {
+        gate: async () => ({ status: "success", data: { outcome: "branch-b" } }),
+        "node-a": async () => { order.push("a"); return { status: "success" }; },
+        "node-b": async () => { order.push("b"); return { status: "success" }; },
+      },
+    );
 
     await runRecipe(r, {}, providers, opts);
 
@@ -137,19 +173,24 @@ describe("runRecipe — on: transition routing", () => {
 
   it("falls back to status when data.outcome has no matching on: key", async () => {
     const order: string[] = [];
-    const r = recipe("test", [
-      node("gate", "act", async () => ({ status: "success", data: { outcome: "unknown-outcome" } }), {
-        on: { success: "node-b" },
-      }),
-      node("node-a", "act", async () => {
-        order.push("a");
-        return { status: "success" };
-      }),
-      node("node-b", "act", async () => {
-        order.push("b");
-        return { status: "success" };
-      }),
-    ]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "gate",
+        states: {
+          gate: { phase: "act", on: { success: "node-b" } },
+          "node-a": { phase: "act" },
+          "node-b": { phase: "act" },
+        },
+      },
+      {
+        gate: async () => ({ status: "success", data: { outcome: "unknown-outcome" } }),
+        "node-a": async () => { order.push("a"); return { status: "success" }; },
+        "node-b": async () => { order.push("b"); return { status: "success" }; },
+      },
+    );
 
     await runRecipe(r, {}, providers, opts);
 
@@ -158,15 +199,22 @@ describe("runRecipe — on: transition routing", () => {
 
   it("stops when on: transition resolves to 'end'", async () => {
     const order: string[] = [];
-    const r = recipe("test", [
-      node("gate", "act", async () => ({ status: "success", data: { outcome: "skip" } }), {
-        on: { skip: "end", implement: "next" },
-      }),
-      node("next", "act", async () => {
-        order.push("next");
-        return { status: "success" };
-      }),
-    ]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "gate",
+        states: {
+          gate: { phase: "act", on: { skip: "end", implement: "next" } },
+          next: { phase: "act" },
+        },
+      },
+      {
+        gate: async () => ({ status: "success", data: { outcome: "skip" } }),
+        next: async () => { order.push("next"); return { status: "success" }; },
+      },
+    );
 
     const result = await runRecipe(r, {}, providers, opts);
 
@@ -176,19 +224,24 @@ describe("runRecipe — on: transition routing", () => {
 
   it("skips intervening nodes when jumping via on:", async () => {
     const order: string[] = [];
-    const r = recipe("test", [
-      node("a", "learn", async () => ({ status: "success", data: { outcome: "skip" } }), {
-        on: { skip: "c", proceed: "b" },
-      }),
-      node("b", "act", async () => {
-        order.push("b");
-        return { status: "success" };
-      }),
-      node("c", "report", async () => {
-        order.push("c");
-        return { status: "success" };
-      }),
-    ]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: {
+          a: { phase: "learn", on: { skip: "c", proceed: "b" } },
+          b: { phase: "act" },
+          c: { phase: "report" },
+        },
+      },
+      {
+        a: async () => ({ status: "success", data: { outcome: "skip" } }),
+        b: async () => { order.push("b"); return { status: "success" }; },
+        c: async () => { order.push("c"); return { status: "success" }; },
+      },
+    );
 
     await runRecipe(r, {}, providers, opts);
 
@@ -202,13 +255,24 @@ describe("runRecipe — on: transition routing", () => {
 
 describe("runRecipe — failure semantics", () => {
   it("marks result as partial when a non-critical node throws", async () => {
-    const r = recipe("test", [
-      node("a", "learn"),
-      node("b", "act", async () => {
-        throw new Error("boom");
-      }),
-      node("c", "report"),
-    ]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: {
+          a: { phase: "learn", next: "b" },
+          b: { phase: "act", next: "c" },
+          c: { phase: "report" },
+        },
+      },
+      {
+        a: async () => ({ status: "success" }),
+        b: async () => { throw new Error("boom"); },
+        c: async () => ({ status: "success" }),
+      },
+    );
 
     const result = await runRecipe(r, {}, providers, opts);
 
@@ -217,20 +281,22 @@ describe("runRecipe — failure semantics", () => {
 
   it("aborts immediately when a critical node throws", async () => {
     const order: string[] = [];
-    const r = recipe("test", [
-      node(
-        "a",
-        "learn",
-        async () => {
-          throw new Error("critical fail");
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: {
+          a: { phase: "learn", critical: true, next: "b" },
+          b: { phase: "act" },
         },
-        { critical: true },
-      ),
-      node("b", "act", async () => {
-        order.push("b");
-        return { status: "success" };
-      }),
-    ]);
+      },
+      {
+        a: async () => { throw new Error("critical fail"); },
+        b: async () => { order.push("b"); return { status: "success" }; },
+      },
+    );
 
     const result = await runRecipe(r, {}, providers, opts);
 
@@ -240,13 +306,22 @@ describe("runRecipe — failure semantics", () => {
 
   it("stops default sequencing when a non-critical node returns status=failed", async () => {
     const order: string[] = [];
-    const r = recipe("test", [
-      node("a", "act", async () => ({ status: "failed", reason: "no-op" })),
-      node("b", "act", async () => {
-        order.push("b");
-        return { status: "success" };
-      }),
-    ]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: {
+          a: { phase: "act", next: "b" },
+          b: { phase: "act" },
+        },
+      },
+      {
+        a: async () => ({ status: "failed", reason: "no-op" }),
+        b: async () => { order.push("b"); return { status: "success" }; },
+      },
+    );
 
     const result = await runRecipe(r, {}, providers, opts);
 
@@ -255,11 +330,18 @@ describe("runRecipe — failure semantics", () => {
   });
 
   it("records failed step in steps array", async () => {
-    const r = recipe("test", [
-      node("a", "act", async () => {
-        throw new Error("fail");
-      }),
-    ]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: { a: { phase: "act" } },
+      },
+      {
+        a: async () => { throw new Error("fail"); },
+      },
+    );
 
     const result = await runRecipe(r, {}, providers, opts);
 
@@ -275,14 +357,22 @@ describe("runRecipe — failure semantics", () => {
 
 describe("runRecipe — cycle detection", () => {
   it("aborts and logs an error when a transition creates a cycle", async () => {
-    const r: Recipe<Cfg> = {
-      name: "cyclic",
-      start: "a",
-      nodes: [
-        { id: "a", phase: "act", run: async () => ({ status: "success" }), on: { success: "b" } },
-        { id: "b", phase: "act", run: async () => ({ status: "success" }), on: { success: "a" } },
-      ],
-    };
+    const r = createRecipe<Cfg>(
+      {
+        id: "cyclic",
+        version: "1.0.0",
+        name: "cyclic",
+        initial: "a",
+        states: {
+          a: { phase: "act", on: { success: "b" } },
+          b: { phase: "act", on: { success: "a" } },
+        },
+      },
+      {
+        a: async () => ({ status: "success" }),
+        b: async () => ({ status: "success" }),
+      },
+    );
 
     const result = await runRecipe(r, {}, providers, opts);
 
@@ -292,25 +382,99 @@ describe("runRecipe — cycle detection", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Unknown node id
+// validateDefinition and createRecipe errors
 // ---------------------------------------------------------------------------
 
-describe("runRecipe — unknown node id", () => {
-  it("aborts when start node does not exist", async () => {
-    const r: Recipe<Cfg> = { name: "bad", start: "nonexistent", nodes: [] };
-
-    const result = await runRecipe(r, {}, providers, opts);
-
-    expect(result.status).toBe("failed");
-    expect(silentLogger.error).toHaveBeenCalledWith(expect.stringContaining('"nonexistent"'));
+describe("validateDefinition", () => {
+  it("returns empty array for a valid definition", () => {
+    const errors = validateDefinition({
+      id: "test",
+      version: "1.0.0",
+      name: "test",
+      initial: "a",
+      states: { a: { phase: "learn", next: "b" }, b: { phase: "act" } },
+    });
+    expect(errors).toHaveLength(0);
   });
 
-  it("aborts when on: transition points to a nonexistent node id", async () => {
-    const r = recipe("test", [node("a", "act", async () => ({ status: "success" }), { on: { success: "ghost" } })]);
+  it("returns MISSING_INITIAL when initial does not exist in states", () => {
+    const errors = validateDefinition({
+      id: "test",
+      version: "1.0.0",
+      name: "test",
+      initial: "nonexistent",
+      states: {},
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0].code).toBe("MISSING_INITIAL");
+  });
 
-    const result = await runRecipe(r, {}, providers, opts);
+  it("returns UNKNOWN_TARGET when next target does not exist", () => {
+    const errors = validateDefinition({
+      id: "test",
+      version: "1.0.0",
+      name: "test",
+      initial: "a",
+      states: { a: { phase: "learn", next: "ghost" } },
+    });
+    expect(errors.some((e) => e.code === "UNKNOWN_TARGET" && e.targetId === "ghost")).toBe(true);
+  });
 
-    expect(result.status).toBe("failed");
+  it("returns UNKNOWN_TARGET when on: target does not exist", () => {
+    const errors = validateDefinition({
+      id: "test",
+      version: "1.0.0",
+      name: "test",
+      initial: "a",
+      states: { a: { phase: "learn", on: { success: "ghost" } } },
+    });
+    expect(errors.some((e) => e.code === "UNKNOWN_TARGET" && e.targetId === "ghost")).toBe(true);
+  });
+
+  it("allows 'end' as a valid target in on: and next", () => {
+    const errors = validateDefinition({
+      id: "test",
+      version: "1.0.0",
+      name: "test",
+      initial: "a",
+      states: { a: { phase: "learn", on: { success: "end" }, next: "end" } },
+    });
+    expect(errors).toHaveLength(0);
+  });
+});
+
+describe("createRecipe", () => {
+  it("throws when initial state does not exist", () => {
+    expect(() =>
+      createRecipe(
+        { id: "bad", version: "1.0.0", name: "bad", initial: "nonexistent", states: {} },
+        {},
+      ),
+    ).toThrow(/MISSING_INITIAL/);
+  });
+
+  it("throws when a state has no implementation", () => {
+    expect(() =>
+      createRecipe(
+        {
+          id: "bad",
+          version: "1.0.0",
+          name: "bad",
+          initial: "a",
+          states: { a: { phase: "learn" } },
+        },
+        {},
+      ),
+    ).toThrow(/MISSING_IMPLEMENTATION/);
+  });
+
+  it("throws with recipe id in the error message", () => {
+    expect(() =>
+      createRecipe(
+        { id: "my-recipe-id", version: "1.0.0", name: "bad", initial: "nope", states: {} },
+        {},
+      ),
+    ).toThrow(/my-recipe-id/);
   });
 });
 
@@ -321,7 +485,22 @@ describe("runRecipe — unknown node id", () => {
 describe("runRecipe — hooks", () => {
   it("calls beforeStep before each node executes", async () => {
     const beforeIds: string[] = [];
-    const r = recipe("test", [node("a", "learn"), node("b", "act")]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: {
+          a: { phase: "learn", next: "b" },
+          b: { phase: "act" },
+        },
+      },
+      {
+        a: async () => ({ status: "success" }),
+        b: async () => ({ status: "success" }),
+      },
+    );
 
     await runRecipe(r, {}, providers, {
       ...opts,
@@ -335,16 +514,22 @@ describe("runRecipe — hooks", () => {
 
   it("skips node execution when beforeStep returns false", async () => {
     const ran: string[] = [];
-    const r = recipe("test", [
-      node("a", "learn", async () => {
-        ran.push("a");
-        return { status: "success" };
-      }),
-      node("b", "act", async () => {
-        ran.push("b");
-        return { status: "success" };
-      }),
-    ]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: {
+          a: { phase: "learn", next: "b" },
+          b: { phase: "act" },
+        },
+      },
+      {
+        a: async () => { ran.push("a"); return { status: "success" }; },
+        b: async () => { ran.push("b"); return { status: "success" }; },
+      },
+    );
 
     await runRecipe(r, {}, providers, {
       ...opts,
@@ -356,7 +541,22 @@ describe("runRecipe — hooks", () => {
 
   it("calls afterStep after each node completes", async () => {
     const afterIds: string[] = [];
-    const r = recipe("test", [node("a", "learn"), node("b", "act")]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: {
+          a: { phase: "learn", next: "b" },
+          b: { phase: "act" },
+        },
+      },
+      {
+        a: async () => ({ status: "success" }),
+        b: async () => ({ status: "success" }),
+      },
+    );
 
     await runRecipe(r, {}, providers, {
       ...opts,
@@ -374,15 +574,24 @@ describe("runRecipe — hooks", () => {
 // ---------------------------------------------------------------------------
 
 describe("runRecipe — resolveNext edge cases", () => {
-  it("continues to next node in order when skipped (no on)", async () => {
+  it("continues to next node when skipped (via next:)", async () => {
     const order: string[] = [];
-    const r = recipe("test", [
-      node("a", "act", async () => ({ status: "skipped", reason: "nothing to do" })),
-      node("b", "act", async () => {
-        order.push("b");
-        return { status: "success" };
-      }),
-    ]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: {
+          a: { phase: "act", next: "b" },
+          b: { phase: "act" },
+        },
+      },
+      {
+        a: async () => ({ status: "skipped", reason: "nothing to do" }),
+        b: async () => { order.push("b"); return { status: "success" }; },
+      },
+    );
 
     await runRecipe(r, {}, providers, opts);
 
@@ -390,9 +599,42 @@ describe("runRecipe — resolveNext edge cases", () => {
   });
 
   it("stops after the last node with no next node", async () => {
-    const r = recipe("test", [node("only", "act")]);
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "only",
+        states: { only: { phase: "act" } },
+      },
+      { only: async () => ({ status: "success" }) },
+    );
     const result = await runRecipe(r, {}, providers, opts);
     expect(result.status).toBe("completed");
     expect(result.steps).toHaveLength(1);
+  });
+
+  it("uses wildcard on['*'] when no specific key matches", async () => {
+    const order: string[] = [];
+    const r = createRecipe<Cfg>(
+      {
+        id: "test",
+        version: "1.0.0",
+        name: "test",
+        initial: "a",
+        states: {
+          a: { phase: "act", on: { "*": "b" } },
+          b: { phase: "act" },
+        },
+      },
+      {
+        a: async () => ({ status: "success" }),
+        b: async () => { order.push("b"); return { status: "success" }; },
+      },
+    );
+
+    await runRecipe(r, {}, providers, opts);
+
+    expect(order).toEqual(["b"]);
   });
 });

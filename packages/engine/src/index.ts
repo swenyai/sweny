@@ -7,15 +7,18 @@ export type {
   ProviderRegistry,
   WorkflowResult,
   RunOptions,
-  RecipeStep,
   Recipe,
+  RecipeDefinition,
+  StateDefinition,
+  StateImplementations,
+  DefinitionError,
 } from "./types.js";
 
 // Cache
 export type { CacheEntry, StepCache } from "./cache.js";
 
 // Runner
-export { runRecipe, createProviderRegistry } from "./runner-recipe.js";
+export { runRecipe, createProviderRegistry, validateDefinition, createRecipe } from "./runner-recipe.js";
 
 // Built-in recipes
 export { triageRecipe } from "./recipes/triage/index.js";
