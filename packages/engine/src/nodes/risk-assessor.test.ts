@@ -26,11 +26,34 @@ describe("assessRisk", () => {
     expect(result.reasons.some((r) => r.includes(".github/workflows/ci.yml"))).toBe(true);
   });
 
-  it("returns high when > 10 files changed", () => {
-    const files = Array.from({ length: 11 }, (_, i) => `src/file${i}.ts`);
+  it("returns high when > 20 countable files changed", () => {
+    const files = Array.from({ length: 21 }, (_, i) => `src/file${i}.ts`);
     const result = assessRisk(files);
     expect(result.level).toBe("high");
     expect(result.reasons.some((r) => r.includes("Large change scope"))).toBe(true);
+  });
+
+  it("excludes analysis artifacts, docs, and dist from the file count", () => {
+    // 15 real code files + many excluded files — should stay low
+    const codeFiles = Array.from({ length: 15 }, (_, i) => `src/file${i}.ts`);
+    const excluded = [
+      ".github/triage-analysis/best-candidate.md",
+      ".github/triage-analysis/investigation-log.md",
+      ".github/triage-analysis/issues-report.md",
+      "README.md",
+      "CHANGELOG.md",
+      "dist/index.js",
+      "dist/index.d.ts",
+      "dist/index.js.map",
+    ];
+    const result = assessRisk([...codeFiles, ...excluded]);
+    expect(result.level).toBe("low");
+  });
+
+  it("does not suppress high-risk pattern matches even for excluded-count files", () => {
+    // A .md file in a migrations folder is still high-risk by pattern
+    const result = assessRisk(["src/migrations/README.md"]);
+    expect(result.level).toBe("high");
   });
 
   it("returns multiple reasons when multiple risk factors apply", () => {

@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { runRecipe, createRecipe, validateDefinition } from "./runner-recipe.js";
 import { createProviderRegistry } from "./runner-recipe.js";
 import type { StepResult, WorkflowContext } from "./types.js";
+import type { ExecutionEvent, RunObserver } from "./types.js";
+import { CollectingObserver, CallbackObserver, composeObservers } from "./observer.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -2120,5 +2122,85 @@ describe("edge cases", () => {
     );
     await runRecipe(r, {}, providers, opts);
     expect(order).toEqual(["b"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RunObserver
+// ---------------------------------------------------------------------------
+
+describe("RunObserver", () => {
+  it("receives recipe:start and recipe:end events", async () => {
+    const obs = new CollectingObserver();
+    const r = createRecipe<Cfg>({ id: "t", version: "1.0.0", name: "t", initial: "a",
+      states: { a: { phase: "learn" } } }, { a: async () => ({ status: "success" }) });
+    await runRecipe(r, {}, providers, { ...opts, observer: obs });
+
+    expect(obs.events[0]?.type).toBe("recipe:start");
+    expect(obs.events.at(-1)?.type).toBe("recipe:end");
+  });
+
+  it("receives state:enter and state:exit for each executed state", async () => {
+    const obs = new CollectingObserver();
+    const r = createRecipe<Cfg>({ id: "t", version: "1.0.0", name: "t", initial: "a",
+      states: { a: { phase: "learn", next: "b" }, b: { phase: "act" } } },
+      { a: async () => ({ status: "success" }), b: async () => ({ status: "success" }) });
+    await runRecipe(r, {}, providers, { ...opts, observer: obs });
+
+    const types = obs.events.map((e) => e.type);
+    expect(types).toEqual(["recipe:start", "state:enter", "state:exit", "state:enter", "state:exit", "recipe:end"]);
+  });
+
+  it("state:exit includes the StepResult", async () => {
+    const obs = new CollectingObserver();
+    const r = createRecipe<Cfg>({ id: "t", version: "1.0.0", name: "t", initial: "a",
+      states: { a: { phase: "learn" } } },
+      { a: async () => ({ status: "success", data: { outcome: "done" } }) });
+    await runRecipe(r, {}, providers, { ...opts, observer: obs });
+
+    const exit = obs.stateResults[0];
+    expect(exit?.result.status).toBe("success");
+    expect(exit?.result.data?.outcome).toBe("done");
+  });
+
+  it("observer errors do not abort the recipe", async () => {
+    const obs: RunObserver = { onEvent: () => { throw new Error("observer boom"); } };
+    const r = createRecipe<Cfg>({ id: "t", version: "1.0.0", name: "t", initial: "a",
+      states: { a: { phase: "learn" } } },
+      { a: async () => ({ status: "success" }) });
+    const result = await runRecipe(r, {}, providers, { ...opts, observer: obs });
+    expect(result.status).toBe("completed"); // recipe continues despite observer error
+  });
+
+  it("recipe:end status matches the WorkflowResult status", async () => {
+    const obs = new CollectingObserver();
+    const r = createRecipe<Cfg>({ id: "t", version: "1.0.0", name: "t", initial: "a",
+      states: { a: { phase: "learn", critical: true } } },
+      { a: async () => ({ status: "failed", reason: "bad" }) });
+    await runRecipe(r, {}, providers, { ...opts, observer: obs });
+
+    const end = obs.events.find((e) => e.type === "recipe:end") as Extract<ExecutionEvent, { type: "recipe:end" }>;
+    expect(end.status).toBe("failed");
+  });
+
+  it("CollectingObserver.stateResults filters to state:exit events only", async () => {
+    const obs = new CollectingObserver();
+    const r = createRecipe<Cfg>({ id: "t", version: "1.0.0", name: "t", initial: "a",
+      states: { a: { phase: "learn" } } },
+      { a: async () => ({ status: "success" }) });
+    await runRecipe(r, {}, providers, { ...opts, observer: obs });
+    expect(obs.stateResults).toHaveLength(1);
+    expect(obs.stateResults[0]?.type).toBe("state:exit");
+  });
+
+  it("composeObservers delivers events to all observers", async () => {
+    const obs1 = new CollectingObserver();
+    const obs2 = new CollectingObserver();
+    const composed = composeObservers(obs1, obs2);
+    const r = createRecipe<Cfg>({ id: "t", version: "1.0.0", name: "t", initial: "a",
+      states: { a: { phase: "learn" } } },
+      { a: async () => ({ status: "success" }) });
+    await runRecipe(r, {}, providers, { ...opts, observer: composed });
+    expect(obs1.events).toHaveLength(obs2.events.length);
   });
 });

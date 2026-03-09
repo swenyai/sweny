@@ -1,10 +1,13 @@
 import { consoleLogger } from "@sweny-ai/providers";
+import type { Logger } from "@sweny-ai/providers";
 import { createProviderRegistry } from "./registry.js";
 import type {
   DefinitionError,
+  ExecutionEvent,
   ProviderRegistry,
   Recipe,
   RecipeDefinition,
+  RunObserver,
   RunOptions,
   StateDefinition,
   StateImplementations,
@@ -13,6 +16,17 @@ import type {
   WorkflowContext,
   WorkflowResult,
 } from "./types.js";
+
+/** Calls observer.onEvent safely — errors are logged, not thrown. */
+async function emit(observer: RunObserver | undefined, event: ExecutionEvent, logger: Logger): Promise<void> {
+  if (!observer) return;
+  try {
+    await observer.onEvent(event);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`[observer] onEvent threw for "${event.type}": ${msg}`);
+  }
+}
 
 /**
  * Validate a RecipeDefinition for structural correctness.
@@ -120,6 +134,13 @@ export async function runRecipe<TConfig>(
 
   const ctx: WorkflowContext<TConfig> = { config, logger, results, providers };
 
+  await emit(options?.observer, {
+    type: "recipe:start",
+    recipeId: definition.id,
+    recipeName: definition.name,
+    timestamp: Date.now(),
+  }, logger);
+
   let currentId: string | undefined = definition.initial;
   let hasFailed = false;
   let aborted = false;
@@ -143,6 +164,13 @@ export async function runRecipe<TConfig>(
     const stateId = currentId;
     const meta: StepMeta = { id: stateId, phase: state.phase };
 
+    await emit(options?.observer, {
+      type: "state:enter",
+      stateId,
+      phase: state.phase,
+      timestamp: Date.now(),
+    }, logger);
+
     // beforeStep hook — return false to skip this state
     if (options?.beforeStep) {
       const proceed = await options.beforeStep(meta, ctx);
@@ -150,6 +178,14 @@ export async function runRecipe<TConfig>(
         const result: StepResult = { status: "skipped", reason: "Skipped by beforeStep hook" };
         results.set(stateId, result);
         completedSteps.push({ name: stateId, phase: state.phase, result });
+        await emit(options?.observer, {
+          type: "state:exit",
+          stateId,
+          phase: state.phase,
+          result: { status: "skipped", reason: "Skipped by beforeStep hook" },
+          cached: false,
+          timestamp: Date.now(),
+        }, logger);
         if (options.afterStep) await options.afterStep(meta, result, ctx);
         currentId = resolveNext(stateId, state, result);
         continue;
@@ -163,6 +199,14 @@ export async function runRecipe<TConfig>(
         const result: StepResult = { ...entry.result, cached: true };
         results.set(stateId, result);
         completedSteps.push({ name: stateId, phase: state.phase, result });
+        await emit(options?.observer, {
+          type: "state:exit",
+          stateId,
+          phase: state.phase,
+          result,
+          cached: true,
+          timestamp: Date.now(),
+        }, logger);
         if (options.afterStep) await options.afterStep(meta, result, ctx);
         currentId = resolveNext(stateId, state, result);
         continue;
@@ -184,6 +228,15 @@ export async function runRecipe<TConfig>(
     results.set(stateId, result);
     completedSteps.push({ name: stateId, phase: state.phase, result });
 
+    await emit(options?.observer, {
+      type: "state:exit",
+      stateId,
+      phase: state.phase,
+      result,
+      cached: result.cached ?? false,
+      timestamp: Date.now(),
+    }, logger);
+
     if (result.status === "failed") {
       hasFailed = true;
       if (state.critical) {
@@ -203,6 +256,14 @@ export async function runRecipe<TConfig>(
   }
 
   const status = aborted ? "failed" : hasFailed ? "partial" : "completed";
+
+  await emit(options?.observer, {
+    type: "recipe:end",
+    status,
+    duration: Date.now() - start,
+    timestamp: Date.now(),
+  }, logger);
+
   return { status, steps: completedSteps, duration: Date.now() - start };
 }
 

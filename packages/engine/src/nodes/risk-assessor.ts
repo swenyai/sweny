@@ -12,6 +12,23 @@ const HIGH_RISK_PATTERNS: RegExp[] = [
   /schema\.(ts|js|sql|prisma)$/i,
 ];
 
+/**
+ * Paths that don't represent meaningful code changes and should be excluded
+ * from the file-count threshold. Agent analysis artifacts, docs, and build
+ * outputs inflate the count without adding real risk.
+ */
+const EXCLUDED_FROM_COUNT: RegExp[] = [
+  /\.github\/triage-analysis\//,
+  /\.md$/i,
+  /^dist\//,
+  /\.map$/,
+  /\.d\.ts$/,
+];
+
+function isCountable(file: string): boolean {
+  return !EXCLUDED_FROM_COUNT.some((p) => p.test(file));
+}
+
 export interface RiskAssessment {
   level: "low" | "high";
   reasons: string[];
@@ -21,8 +38,9 @@ export interface RiskAssessment {
 export function assessRisk(changedFiles: string[]): RiskAssessment {
   const reasons: string[] = [];
 
-  if (changedFiles.length > 10) {
-    reasons.push(`Large change scope: ${changedFiles.length} files modified`);
+  const countableFiles = changedFiles.filter(isCountable);
+  if (countableFiles.length > 20) {
+    reasons.push(`Large change scope: ${countableFiles.length} code files modified`);
   }
 
   for (const file of changedFiles) {

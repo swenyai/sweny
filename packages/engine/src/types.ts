@@ -71,6 +71,64 @@ export interface RunOptions {
   afterStep?(step: StepMeta, result: StepResult, ctx: WorkflowContext): Promise<void>;
   /** Step-level cache. When provided, successful results are stored and replayed on re-run. */
   cache?: import("./cache.js").StepCache;
+  /** Optional observer for real-time execution events. */
+  observer?: RunObserver;
+}
+
+// ---------------------------------------------------------------------------
+// Execution observer protocol
+// ---------------------------------------------------------------------------
+
+/**
+ * A discrete, serializable event emitted at each lifecycle point of a recipe run.
+ *
+ * Events are JSON-serializable so they can be forwarded over WebSocket, SSE,
+ * or any other transport without transformation.
+ */
+export type ExecutionEvent =
+  | {
+      type: "recipe:start";
+      recipeId: string;
+      recipeName: string;
+      timestamp: number;
+    }
+  | {
+      type: "state:enter";
+      stateId: string;
+      phase: WorkflowPhase;
+      timestamp: number;
+    }
+  | {
+      type: "state:exit";
+      stateId: string;
+      phase: WorkflowPhase;
+      result: StepResult;
+      /** True when replayed from cache, not freshly executed. */
+      cached: boolean;
+      timestamp: number;
+    }
+  | {
+      type: "recipe:end";
+      status: WorkflowResult["status"];
+      duration: number;
+      timestamp: number;
+    };
+
+/**
+ * Observer that receives ExecutionEvents in real-time during a recipe run.
+ *
+ * Implementations:
+ *  - In-memory (for local simulation and testing)
+ *  - WebSocket (broadcast to connected studio clients)
+ *  - SSE (stream to browser over HTTP)
+ *
+ * The runner awaits each onEvent call. Keep implementations fast; defer heavy
+ * work (e.g. DB writes) asynchronously so they don't block the runner.
+ *
+ * Errors thrown by onEvent are caught and logged — they do NOT abort the recipe.
+ */
+export interface RunObserver {
+  onEvent(event: ExecutionEvent): void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

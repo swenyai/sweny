@@ -12,6 +12,8 @@ export type {
   StateDefinition,
   StateImplementations,
   DefinitionError,
+  ExecutionEvent,
+  RunObserver,
 } from "./types.js";
 
 // Cache
@@ -19,6 +21,9 @@ export type { CacheEntry, StepCache } from "./cache.js";
 
 // Runner
 export { runRecipe, createProviderRegistry, validateDefinition, createRecipe } from "./runner-recipe.js";
+
+// Observer utilities
+export { CollectingObserver, CallbackObserver, composeObservers } from "./observer.js";
 
 // Built-in recipes
 export { triageRecipe, triageDefinition } from "./recipes/triage/index.js";
