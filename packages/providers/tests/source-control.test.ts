@@ -528,7 +528,7 @@ describe("github source-control provider", () => {
       expect(mockExecFile).toHaveBeenNthCalledWith(
         1,
         "git",
-        ["add", "-A", "--", ".", ":!.github/triage-analysis", ":!.github/workflows"],
+        ["add", "-A", "--", ".", ":!.github/workflows"],
         expect.any(Function),
       );
       expect(mockExecFile).toHaveBeenNthCalledWith(
