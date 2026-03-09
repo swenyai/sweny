@@ -48627,18 +48627,14 @@ function github(config) {
             log.info(`Dispatched workflow "${opts.workflow}" to ${opts.targetRepo}`);
         },
         async enableAutoMerge(prNumber) {
-            // Use gh CLI directly — simpler and works without GraphQL auth
-            const { execFile: execFileNode } = await Promise.resolve(/* import() */).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1421, 19));
-            const { promisify: promisifyNode } = await Promise.resolve(/* import() */).then(__nccwpck_require__.t.bind(__nccwpck_require__, 7975, 19));
-            const execFileAsyncNode = promisifyNode(execFileNode);
+            // Use gh CLI — auto-merge requires branch protection + "Allow auto-merge" in repo settings.
+            // Non-fatal: if either is missing, the PR stays open for manual merge.
             try {
-                await execFileAsyncNode("gh", ["pr", "merge", String(prNumber), "--auto", "--squash", "--repo", `${owner}/${repo}`], { env: { ...process.env, GH_TOKEN: token } });
+                await execFileAsync("gh", ["pr", "merge", String(prNumber), "--auto", "--squash", "--repo", `${owner}/${repo}`], { env: { ...process.env, GH_TOKEN: token } });
                 log.info(`Auto-merge enabled on PR #${prNumber}`);
             }
             catch (err) {
-                // Non-fatal: auto-merge may fail if branch protection is not configured.
-                // The PR is still open and a human can merge manually.
-                log.warn(`Could not enable auto-merge on PR #${prNumber}: ${err}`);
+                log.warn(`Could not enable auto-merge on PR #${prNumber} (check repo settings): ${err}`);
             }
         },
     };
@@ -49075,6 +49071,9 @@ class FileSourceControlProvider {
     }
     async dispatchWorkflow(_opts) {
         this.log.info("Skipping workflow dispatch (file provider — local only)");
+    }
+    async enableAutoMerge(_prNumber) {
+        this.log.info("Skipping auto-merge (file provider — local only)");
     }
 }
 //# sourceMappingURL=file.js.map
