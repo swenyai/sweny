@@ -248,7 +248,7 @@ inputs:
     required: false
     default: "false"
   review-mode:
-    description: "PR merge behavior: 'auto' (enable GitHub auto-merge, merges when CI passes), 'review' (open PR and wait for human approval)"
+    description: "PR merge behavior: 'auto' (enable GitHub auto-merge when CI passes — automatically suppressed for high-risk changes such as migrations, auth, lockfiles, or >20 files), 'review' (open PR and wait for human approval)"
     required: false
     default: "review"
   novelty-mode:

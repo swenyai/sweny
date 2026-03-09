@@ -447,7 +447,12 @@ export function registerImplementCommand(program: Command): Command {
     .option("--linear-team-id <id>", "Linear team ID")
     .option("--linear-state-in-progress <name>", "Linear in-progress state name")
     .option("--linear-state-peer-review <name>", "Linear peer-review state name")
-    .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)");
+    .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
+    .option(
+      "--review-mode <mode>",
+      "PR merge behavior: auto (GitHub auto-merge when CI passes) | review (human approval, default)",
+      "review",
+    );
 }
 
 function detectRepository(): string {

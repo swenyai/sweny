@@ -26,8 +26,9 @@ const mockFormatResultJson = vi.fn().mockReturnValue('{"status":"success"}');
 const mockFormatValidationErrors = vi.fn().mockReturnValue("validation errors");
 const mockFormatCrashError = vi.fn().mockReturnValue("crash error");
 
-// Triage action handler captured by the mock registerTriageCommand
+// Action handlers captured by mock command registrations
 let capturedTriageAction: ((opts: Record<string, unknown>) => Promise<void>) | null = null;
+let capturedImplementAction: ((issueId: string, opts: Record<string, unknown>) => Promise<void>) | null = null;
 
 // ── Base CliConfig ─────────────────────────────────────────────────────────────
 const BASE_CONFIG = {
@@ -84,6 +85,7 @@ const BASE_CONFIG = {
 async function loadMain(argv: string[]) {
   process.argv = argv;
   capturedTriageAction = null;
+  capturedImplementAction = null;
 
   vi.doMock("node:fs", () => ({
     existsSync: mockExistsSync,
@@ -94,11 +96,13 @@ async function loadMain(argv: string[]) {
   }));
   vi.doMock("chalk", () => ({
     default: Object.assign((s: string) => s, {
+      red: (s: string) => s,
       green: (s: string) => s,
       yellow: (s: string) => s,
       dim: (s: string) => s,
       cyan: (s: string) => s,
     }),
+    red: (s: string) => s,
     green: (s: string) => s,
     yellow: (s: string) => s,
     dim: (s: string) => s,
@@ -117,7 +121,10 @@ async function loadMain(argv: string[]) {
       },
     })),
     registerImplementCommand: vi.fn().mockImplementation(() => ({
-      action: () => ({}),
+      action: (handler: (issueId: string, opts: Record<string, unknown>) => Promise<void>) => {
+        capturedImplementAction = handler;
+        return {};
+      },
     })),
     parseCliInputs: mockParseCliInputs,
     validateInputs: mockValidateInputs,
@@ -450,5 +457,40 @@ describe("mapToTriageConfig", () => {
   it("defaults reviewMode to 'review' when not specified", async () => {
     const triageConfig = await runWithConfig({ ...BASE_CONFIG, reviewMode: "review" });
     expect(triageConfig.reviewMode).toBe("review");
+  });
+});
+
+// ── mapToImplementConfig ────────────────────────────────────────────────────
+
+describe("mapToImplementConfig", () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    await loadMain(["node", "sweny"]);
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+  });
+
+  async function runImplementWithConfig(config: typeof BASE_CONFIG) {
+    mockParseCliInputs.mockReturnValue(config);
+    mockValidateInputs.mockReturnValue([]);
+    mockRunWorkflow.mockResolvedValue({ status: "success" });
+    await capturedImplementAction!("ENG-1", {});
+    return mockRunWorkflow.mock.calls[0][1] as Record<string, unknown>;
+  }
+
+  it("maps reviewMode 'auto' to implementConfig.reviewMode", async () => {
+    const implementConfig = await runImplementWithConfig({ ...BASE_CONFIG, reviewMode: "auto" });
+    expect(implementConfig.reviewMode).toBe("auto");
+  });
+
+  it("defaults reviewMode to 'review'", async () => {
+    const implementConfig = await runImplementWithConfig({ ...BASE_CONFIG, reviewMode: "review" });
+    expect(implementConfig.reviewMode).toBe("review");
   });
 });
