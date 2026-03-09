@@ -24,12 +24,19 @@ jobs:
       - name: Build providers
         run: npm run build --workspace=packages/providers
 
-      - name: Verify dist is current
+      - name: Build dist
+        run: npm run package --workspace=packages/action
+
+      - name: Commit and retag if dist changed
         run: |
-          npm run package --workspace=packages/action
           if [ -n "$(git status dist/ --porcelain)" ]; then
-            echo "::error::dist/index.js is out of date. Run 'npm run package' and commit."
-            exit 1
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add dist/
+            git commit -m "chore: rebuild dist for ${GITHUB_REF_NAME}"
+            git push origin HEAD:main
+            git tag -f "${GITHUB_REF_NAME}"
+            git push origin "${GITHUB_REF_NAME}" --force
           fi
 
       - name: Create GitHub Release
