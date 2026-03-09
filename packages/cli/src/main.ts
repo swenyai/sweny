@@ -100,7 +100,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   let currentPhaseColor: (s: string) => string = chalk.cyan;
   let lastPhase: string | null = null;
   let stepIndex = 0;
-  const totalSteps = triageRecipe.nodes.length;
+  const totalSteps = Object.keys(triageRecipe.definition.states).length;
 
   function formatElapsed(ms: number): string {
     const s = Math.round(ms / 1000);
