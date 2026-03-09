@@ -68,8 +68,7 @@ export function createRecipe<TConfig>(
   const defErrors = validateDefinition(definition);
   if (defErrors.length > 0) {
     throw new Error(
-      `Invalid recipe definition "${definition.id}":\n` +
-        defErrors.map((e) => `  [${e.code}] ${e.message}`).join("\n"),
+      `Invalid recipe definition "${definition.id}":\n` + defErrors.map((e) => `  [${e.code}] ${e.message}`).join("\n"),
     );
   }
 
@@ -217,11 +216,7 @@ export async function runRecipe<TConfig>(
  *   4. next (success/skipped only)
  *   5. undefined — stop the recipe
  */
-function resolveNext(
-  stateId: string,
-  state: StateDefinition,
-  result: StepResult,
-): string | undefined {
+function resolveNext(stateId: string, state: StateDefinition, result: StepResult): string | undefined {
   const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : undefined;
 
   if (state.on) {

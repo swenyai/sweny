@@ -146,10 +146,7 @@ describe("PrometheusProvider", () => {
 
   it("queryLogs maps firing alerts to LogEntry[]", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      return new Response(
-        JSON.stringify({ data: { alerts: [firingAlert] } }),
-        { status: 200 },
-      );
+      return new Response(JSON.stringify({ data: { alerts: [firingAlert] } }), { status: 200 });
     });
 
     const logs = await makePrometheus().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "*" });
@@ -170,10 +167,7 @@ describe("PrometheusProvider", () => {
     };
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      return new Response(
-        JSON.stringify({ data: { alerts: [firingAlert, criticalAlert] } }),
-        { status: 200 },
-      );
+      return new Response(JSON.stringify({ data: { alerts: [firingAlert, criticalAlert] } }), { status: 200 });
     });
 
     const logs = await makePrometheus().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "critical" });
@@ -190,10 +184,7 @@ describe("PrometheusProvider", () => {
     };
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      return new Response(
-        JSON.stringify({ data: { alerts: [firingAlert, workerAlert] } }),
-        { status: 200 },
-      );
+      return new Response(JSON.stringify({ data: { alerts: [firingAlert, workerAlert] } }), { status: 200 });
     });
 
     const logs = await makePrometheus().queryLogs({ timeRange: "1h", serviceFilter: "worker", severity: "*" });
@@ -211,10 +202,7 @@ describe("PrometheusProvider", () => {
     };
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      return new Response(
-        JSON.stringify({ data: { alerts: [firingAlert, alertWithJob] } }),
-        { status: 200 },
-      );
+      return new Response(JSON.stringify({ data: { alerts: [firingAlert, alertWithJob] } }), { status: 200 });
     });
 
     const logs = await makePrometheus().queryLogs({ timeRange: "1h", serviceFilter: "database", severity: "*" });
@@ -241,10 +229,7 @@ describe("PrometheusProvider", () => {
     };
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      return new Response(
-        JSON.stringify({ data: { alerts: [alertNoService] } }),
-        { status: 200 },
-      );
+      return new Response(JSON.stringify({ data: { alerts: [alertNoService] } }), { status: 200 });
     });
 
     const logs = await makePrometheus().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "*" });
@@ -260,10 +245,7 @@ describe("PrometheusProvider", () => {
     };
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      return new Response(
-        JSON.stringify({ data: { alerts: [alertNoLabels] } }),
-        { status: 200 },
-      );
+      return new Response(JSON.stringify({ data: { alerts: [alertNoLabels] } }), { status: 200 });
     });
 
     const logs = await makePrometheus().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "*" });
@@ -282,10 +264,7 @@ describe("PrometheusProvider", () => {
     };
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      return new Response(
-        JSON.stringify({ data: { alerts: [firingAlert, alert2, alert3] } }),
-        { status: 200 },
-      );
+      return new Response(JSON.stringify({ data: { alerts: [firingAlert, alert2, alert3] } }), { status: 200 });
     });
 
     const results = await makePrometheus().aggregate({ timeRange: "1h", serviceFilter: "*" });
@@ -313,10 +292,7 @@ describe("PrometheusProvider", () => {
     };
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      return new Response(
-        JSON.stringify({ data: { alerts: [firingAlert, workerAlert] } }),
-        { status: 200 },
-      );
+      return new Response(JSON.stringify({ data: { alerts: [firingAlert, workerAlert] } }), { status: 200 });
     });
 
     const results = await makePrometheus().aggregate({ timeRange: "1h", serviceFilter: "api" });

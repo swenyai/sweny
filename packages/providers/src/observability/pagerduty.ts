@@ -71,12 +71,7 @@ class PagerDutyProvider implements ObservabilityProvider {
     if (!match) return new Date(now - 24 * 60 * 60 * 1000).toISOString();
     const value = parseInt(match[1], 10);
     const unit = match[2];
-    const ms =
-      unit === "m"
-        ? value * 60 * 1000
-        : unit === "h"
-          ? value * 60 * 60 * 1000
-          : value * 24 * 60 * 60 * 1000;
+    const ms = unit === "m" ? value * 60 * 1000 : unit === "h" ? value * 60 * 60 * 1000 : value * 24 * 60 * 60 * 1000;
     return new Date(now - ms).toISOString();
   }
 
@@ -104,9 +99,7 @@ class PagerDutyProvider implements ObservabilityProvider {
       params.append("service_names[]", opts.serviceFilter);
     }
 
-    const result = await this.get<{ incidents: PagerDutyIncident[] }>(
-      `/incidents?${params.toString()}`,
-    );
+    const result = await this.get<{ incidents: PagerDutyIncident[] }>(`/incidents?${params.toString()}`);
 
     const logs: LogEntry[] = (result.incidents ?? []).map((incident) => ({
       timestamp: incident.created_at,

@@ -141,9 +141,7 @@ class PrometheusProvider implements ObservabilityProvider {
   }
 
   getPromptInstructions(): string {
-    const authHeader = this.token
-      ? `  -H "Authorization: Bearer $PROMETHEUS_TOKEN" \\`
-      : "";
+    const authHeader = this.token ? `  -H "Authorization: Bearer $PROMETHEUS_TOKEN" \\` : "";
     const authNote = this.token
       ? `- \`PROMETHEUS_TOKEN\` - Bearer token (include as \`Authorization: Bearer $PROMETHEUS_TOKEN\` header)`
       : "";
