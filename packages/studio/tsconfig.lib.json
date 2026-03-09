@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "declarationDir": "dist/lib/types",
+    "emitDeclarationOnly": true,
+    "rootDir": "src"
+  },
+  "include": [
+    "src/lib-viewer.ts",
+    "src/lib-editor.ts",
+    "src/components/**/*.ts",
+    "src/components/**/*.tsx",
+    "src/layout/**/*.ts",
+    "src/lib/**/*.ts",
+    "src/store/**/*.ts"
+  ]
+}
