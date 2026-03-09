@@ -107,9 +107,9 @@ jobs:
 
           # Issue tracking: GitHub Issues on this repo
           issue-tracker-provider: github-issues
-          # PAT required — github.token PRs are authored by github-actions[bot] which
-          # GitHub blocks from triggering pull_request CI events.
-          github-token: ${{ secrets.GH_PAT }}
+          # GH_PAT preferred — PRs authored by a real user trigger CI.
+          # Falls back to github.token (PRs won't trigger CI, but workflow won't crash).
+          github-token: ${{ secrets.GH_PAT || github.token }}
 
           dry-run: ${{ inputs.dry-run || 'false' }}
           time-range: ${{ inputs.time-range || '7d' }}
