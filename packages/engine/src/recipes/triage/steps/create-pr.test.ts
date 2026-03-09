@@ -240,4 +240,25 @@ describe("createPr", () => {
     await createPr(ctx);
     expect(enableAutoMerge).not.toHaveBeenCalled();
   });
+
+  it("does NOT call enableAutoMerge when provider does not implement it", async () => {
+    const ctx = buildCtx({ reviewMode: "auto", withAutoMerge: false });
+    await createPr(ctx);
+    expect(enableAutoMerge).not.toHaveBeenCalled();
+  });
+
+  it("does not throw when getChangedFiles rejects", async () => {
+    getChangedFiles.mockRejectedValue(new Error("git error"));
+    const ctx = buildCtx({ reviewMode: "auto" });
+    await expect(createPr(ctx)).resolves.toMatchObject({ status: "success" });
+    // Falls back to [] → low risk → auto-merge proceeds
+    expect(enableAutoMerge).toHaveBeenCalledWith(42);
+  });
+
+  it("does not fail PR creation when enableAutoMerge rejects", async () => {
+    enableAutoMerge.mockRejectedValue(new Error("auto-merge not allowed"));
+    const ctx = buildCtx({ reviewMode: "auto" });
+    // enableAutoMerge throws but createPr should not propagate it
+    await expect(createPr(ctx)).resolves.toMatchObject({ status: "success" });
+  });
 });

@@ -205,12 +205,18 @@ describe("validateInputs", () => {
       repository: "acme/api",
       maxInvestigateTurns: 50,
       maxImplementTurns: 30,
+      reviewMode: "review",
       ...overrides,
     } as Parameters<typeof validateInputs>[0];
   }
 
   it("returns no errors for a valid configuration", () => {
     expect(validateInputs(base())).toEqual([]);
+  });
+
+  it("rejects invalid --review-mode values", () => {
+    const errors = validateInputs(base({ reviewMode: "invalid" }));
+    expect(errors).toContainEqual(expect.stringContaining("review-mode"));
   });
 
   // ── Coding agent ─────────────────────────────────────────────────

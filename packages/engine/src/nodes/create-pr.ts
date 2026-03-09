@@ -74,7 +74,7 @@ ${issueIdentifier && issueUrl ? issueLink(config.issueTrackerName, issueIdentifi
   ctx.logger.info(`Created PR #${pr.number}: ${pr.url}`);
 
   // -------------------------------------------------------------------------
-  // 5. Auto-merge if configured (and risk is low)
+  // 3. Auto-merge if configured (and risk is low)
   // -------------------------------------------------------------------------
   if (config.reviewMode === "auto" && sourceControl.enableAutoMerge) {
     const changedFiles = await sourceControl.getChangedFiles().catch(() => []);
@@ -83,12 +83,16 @@ ${issueIdentifier && issueUrl ? issueLink(config.issueTrackerName, issueIdentifi
     if (risk.level === "high") {
       ctx.logger.warn(`Auto-merge disabled due to high-risk changes: ${risk.reasons.join(", ")}`);
     } else {
-      await sourceControl.enableAutoMerge(pr.number);
+      try {
+        await sourceControl.enableAutoMerge(pr.number);
+      } catch (err) {
+        ctx.logger.warn(`Failed to enable auto-merge on PR #${pr.number}: ${err}`);
+      }
     }
   }
 
   // -------------------------------------------------------------------------
-  // 3. Link PR to issue
+  // 4. Link PR to issue
   // -------------------------------------------------------------------------
   if (issueId && canLinkPr(issueTracker)) {
     try {
@@ -100,7 +104,7 @@ ${issueIdentifier && issueUrl ? issueLink(config.issueTrackerName, issueIdentifi
   }
 
   // -------------------------------------------------------------------------
-  // 4. Update issue state to Peer Review
+  // 5. Update issue state to Peer Review
   // -------------------------------------------------------------------------
   if (issueId) {
     try {

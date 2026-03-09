@@ -273,6 +273,11 @@ export function validateInputs(config: ActionConfig): string[] {
       break;
   }
 
+  // Enum validation
+  if (!["auto", "review", "notify"].includes(config.reviewMode)) {
+    errors.push("`review-mode` must be one of: auto, review, notify");
+  }
+
   // Integer bounds
   if (config.maxInvestigateTurns < 1 || config.maxInvestigateTurns > 500) {
     errors.push("`max-investigate-turns` must be between 1 and 500");

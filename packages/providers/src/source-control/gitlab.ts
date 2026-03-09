@@ -282,6 +282,10 @@ export function gitlab(config: GitLabSourceControlConfig): SourceControlProvider
       return null;
     },
 
+    async enableAutoMerge(_prNumber: number): Promise<void> {
+      log.info("Skipping auto-merge (GitLab provider — set merge_when_pipeline_succeeds manually if needed)");
+    },
+
     async dispatchWorkflow(opts: DispatchWorkflowOptions): Promise<void> {
       // GitLab triggers pipelines via POST /projects/:id/pipeline
       // The targetRepo can override the project; the workflow field is used as the ref

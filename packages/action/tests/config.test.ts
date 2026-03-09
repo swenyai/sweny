@@ -374,12 +374,22 @@ describe("validateInputs", () => {
       webhookSigningSecret: "",
       repository: "org/repo",
       repositoryOwner: "org",
+      reviewMode: "review",
+      codingAgentProvider: "claude",
+      openaiApiKey: "",
+      geminiApiKey: "",
+      logFilePath: "",
       ...overrides,
     };
   }
 
   it("returns no errors for valid config", () => {
     expect(validateInputs(baseConfig())).toEqual([]);
+  });
+
+  it("rejects invalid review-mode values", () => {
+    const errors = validateInputs(baseConfig({ reviewMode: "invalid" as "auto" }));
+    expect(errors).toContainEqual(expect.stringContaining("review-mode"));
   });
 
   it("requires auth: either anthropic-api-key or claude-oauth-token", () => {
