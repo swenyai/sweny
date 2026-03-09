@@ -2,6 +2,7 @@ import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps }
 
 export type TransitionEdgeData = {
   label: string;
+  isError?: boolean; // true when the target state doesn't exist
 };
 
 // In @xyflow/react v12, custom edge types use: type MyEdge = Edge<Data, "typeName">
@@ -31,6 +32,7 @@ export function TransitionEdge({
   markerEnd,
 }: EdgeProps<TransitionEdgeType>) {
   const label = data?.label ?? "";
+  const isError = data?.isError ?? false;
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -41,12 +43,22 @@ export function TransitionEdge({
     targetPosition,
   });
 
-  const strokeColor = getEdgeColor(label);
-  const labelClasses = getLabelColor(label);
+  const strokeColor = isError ? "#ef4444" : getEdgeColor(label);
+  const labelClasses = isError ? "text-red-700 bg-red-100 border-red-300" : getLabelColor(label);
+  const displayLabel = isError ? `⚠ ${label}` : label;
 
   return (
     <>
-      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={{ stroke: strokeColor, strokeWidth: 1.5 }} />
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerEnd={markerEnd}
+        style={{
+          stroke: strokeColor,
+          strokeWidth: 1.5,
+          ...(isError ? { strokeDasharray: "6 3" } : {}),
+        }}
+      />
       {label && (
         <EdgeLabelRenderer>
           <div
@@ -57,7 +69,7 @@ export function TransitionEdge({
             }}
             className="nodrag nopan"
           >
-            <span className={`text-xs font-medium px-1.5 py-0.5 rounded border ${labelClasses}`}>{label}</span>
+            <span className={`text-xs font-medium px-1.5 py-0.5 rounded border ${labelClasses}`}>{displayLabel}</span>
           </div>
         </EdgeLabelRenderer>
       )}

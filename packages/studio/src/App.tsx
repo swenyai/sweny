@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from "react";
-import { triageDefinition, implementDefinition } from "@sweny-ai/engine";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { triageDefinition, implementDefinition, validateDefinition } from "@sweny-ai/engine";
 import { useEditorStore, useTemporalStore } from "./store/editor-store.js";
 import { RecipeViewer } from "./RecipeViewer.js";
 import { PropertiesPanel } from "./components/PropertiesPanel.js";
@@ -8,6 +8,7 @@ import { DropOverlay } from "./components/DropOverlay.js";
 import { SimulationPanel } from "./components/SimulationPanel.js";
 import { LiveConnectPanel } from "./components/LiveConnectPanel.js";
 import type { RecipeDefinition } from "@sweny-ai/engine";
+import { readPermalinkFromHash, encodeRecipe } from "./lib/permalink.js";
 
 const PRESET_RECIPES: Array<{ id: string; name: string; definition: RecipeDefinition }> = [
   { id: "triage", name: "triage", definition: triageDefinition },
@@ -16,9 +17,30 @@ const PRESET_RECIPES: Array<{ id: string; name: string; definition: RecipeDefini
 
 export function App() {
   const setDefinition = useEditorStore((s) => s.setDefinition);
+  const definition = useEditorStore((s) => s.definition);
   const mode = useEditorStore((s) => s.mode);
   const [activeId, setActiveId] = useState("triage");
   const [showImport, setShowImport] = useState(false);
+  const validationErrors = useMemo(() => validateDefinition(definition), [definition]);
+
+  // On mount, load recipe from URL hash if present
+  useEffect(() => {
+    const fromLink = readPermalinkFromHash();
+    if (fromLink) {
+      setDefinition(fromLink);
+      // Clear undo history so the user doesn't undo back to the default recipe
+      useEditorStore.temporal.getState().clear();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep URL hash in sync as user edits (use replaceState to avoid polluting history)
+  useEffect(() => {
+    const encoded = encodeRecipe(definition);
+    const newHash = `#def=${encoded}`;
+    if (window.location.hash !== newHash) {
+      window.history.replaceState(null, "", newHash);
+    }
+  }, [definition]);
 
   const handleRecipeChange = useCallback(
     (id: string) => {
@@ -85,6 +107,14 @@ export function App() {
         showImport={showImport}
         onShowImportChange={setShowImport}
       />
+      {mode === "design" && validationErrors.length > 0 && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-1.5 flex items-center gap-2 flex-shrink-0">
+          <span className="text-amber-600 text-xs font-medium">
+            ⚠ {validationErrors.length} validation {validationErrors.length === 1 ? "error" : "errors"}:
+          </span>
+          <span className="text-amber-700 text-xs">{validationErrors.map((e) => e.message).join(" · ")}</span>
+        </div>
+      )}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <div style={{ flex: 1 }}>

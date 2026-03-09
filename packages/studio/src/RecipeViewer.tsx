@@ -13,11 +13,30 @@ import { StateNode, type StateNodeType, type StateNodeData, type NodeExecStatus 
 import { TransitionEdge, type TransitionEdgeData } from "./components/TransitionEdge.js";
 import { layoutDefinition } from "./layout/elk.js";
 import { useEditorStore } from "./store/editor-store.js";
-import type { StepResult } from "@sweny-ai/engine";
+import { validateDefinition } from "@sweny-ai/engine";
+import type { RecipeDefinition, StepResult } from "@sweny-ai/engine";
 import type { StudioMode } from "./store/editor-store.js";
 
 const nodeTypes = { stateNode: StateNode };
 const edgeTypes = { transitionEdge: TransitionEdge };
+
+function annotateEdgesWithErrors(
+  edges: Edge<TransitionEdgeData>[],
+  definition: RecipeDefinition,
+): Edge<TransitionEdgeData>[] {
+  const errors = validateDefinition(definition);
+  const unknownTargets = new Set(
+    errors
+      .filter((e) => e.code === "UNKNOWN_TARGET" && e.stateId && e.targetId)
+      .map((e) => `${e.stateId}::${e.targetId}`),
+  );
+  return edges.map((edge) => {
+    const sourceState = definition.states[edge.source];
+    const target = edge.data?.label === "→" ? sourceState?.next : sourceState?.on?.[edge.data?.label ?? ""];
+    const isError = !!target && unknownTargets.has(`${edge.source}::${target}`);
+    return { ...edge, data: { ...(edge.data ?? { label: "" }), isError } };
+  });
+}
 
 function nodeColor(node: RFNode): string {
   const data = node.data as StateNodeData;
@@ -73,7 +92,7 @@ export function RecipeViewer() {
             },
           })),
         );
-        setEdges(e);
+        setEdges(annotateEdgesWithErrors(e, definition));
         markLayoutFresh();
         initialLayoutDone.current = true;
       })
@@ -82,6 +101,12 @@ export function RecipeViewer() {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [definition, isLayoutStale]);
+
+  // Re-annotate edges with isError when definition changes, without re-running ELK
+  useEffect(() => {
+    if (!initialLayoutDone.current) return;
+    setEdges((prev) => annotateEdgesWithErrors(prev, definition));
+  }, [definition]);
 
   // Keep selection highlight and execStatus in sync without re-running ELK
   useEffect(() => {

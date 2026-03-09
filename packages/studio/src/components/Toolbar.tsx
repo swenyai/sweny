@@ -37,6 +37,7 @@ export function Toolbar({
   const resetExecution = useEditorStore((s) => s.resetExecution);
   const [newStateId, setNewStateId] = useState("");
   const [newStatePhase, setNewStatePhase] = useState<WorkflowPhase>("act");
+  const [copied, setCopied] = useState(false);
 
   function switchMode(newMode: StudioMode) {
     if (newMode !== mode) {
@@ -71,6 +72,15 @@ export function Toolbar({
     a.download = `${def.id}.ts`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function handleCopyLink() {
+    const { definition: def } = useEditorStore.getState();
+    const url = buildPermalinkUrl(def);
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   }
 
   function handleAddState(e: React.FormEvent) {
@@ -171,6 +181,14 @@ export function Toolbar({
       {/* Export TS */}
       <button onClick={handleExportTs} className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs">
         ↓ Export TS
+      </button>
+
+      {/* Share link */}
+      <button
+        onClick={handleCopyLink}
+        className="px-3 py-1 text-xs bg-gray-700 text-gray-200 rounded hover:bg-gray-600"
+      >
+        {copied ? "Copied!" : "Share link"}
       </button>
 
       {showImport && <ImportModal onImport={handleImport} onClose={() => onShowImportChange(false)} />}
