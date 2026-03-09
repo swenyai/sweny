@@ -14,8 +14,8 @@ export type { ExecutionEvent, RunObserver } from "./types.js";
 // Observer utilities
 export { CollectingObserver, CallbackObserver, composeObservers } from "./observer.js";
 
-// Runner — no Node.js deps, safe for browser simulation
-export { runRecipe, createRecipe, validateDefinition, createProviderRegistry } from "./runner-recipe.js";
+// Pure validation — no Node.js deps, safe for browser use
+export { validateDefinition } from "./validate.js";
 
 // Pure definition objects (no implementation functions)
 export { triageDefinition } from "./recipes/triage/definition.js";

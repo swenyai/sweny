@@ -238,18 +238,11 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
     },
 
     async enableAutoMerge(prNumber: number): Promise<void> {
-      // Use gh CLI — auto-merge requires branch protection + "Allow auto-merge" in repo settings.
-      // Non-fatal: if either is missing, the PR stays open for manual merge.
-      try {
-        await execFileAsync(
-          "gh",
-          ["pr", "merge", String(prNumber), "--auto", "--squash", "--repo", `${owner}/${repo}`],
-          { env: { ...process.env, GH_TOKEN: token } },
-        );
-        log.info(`Auto-merge enabled on PR #${prNumber}`);
-      } catch (err) {
-        log.warn(`Could not enable auto-merge on PR #${prNumber} (check repo settings): ${err}`);
-      }
+      // Requires "Allow auto-merge" enabled in repo settings and branch protection with status checks.
+      await execFileAsync("gh", ["pr", "merge", String(prNumber), "--auto", "--squash", "--repo", `${owner}/${repo}`], {
+        env: { ...process.env, GH_TOKEN: token },
+      });
+      log.info(`Auto-merge enabled on PR #${prNumber}`);
     },
   };
 }

@@ -11,11 +11,29 @@ const HIGH_RISK_PATTERNS = [
     /^yarn\.lock$/,
     /schema\.(ts|js|sql|prisma)$/i,
 ];
+/**
+ * Files above this count indicate a broadly-scoped change that warrants human
+ * review. 20 was chosen as a practical ceiling: typical agentic fixes touch
+ * 1–10 source files; anything larger risks unintended side-effects across
+ * subsystems. Non-code files (docs, artifacts, build outputs) are excluded
+ * from this count via EXCLUDED_FROM_COUNT so they don't inflate the total.
+ */
+const LARGE_CHANGE_THRESHOLD = 20;
+/**
+ * Paths that don't represent meaningful code changes and should be excluded
+ * from the file-count threshold. Agent analysis artifacts, docs, and build
+ * outputs inflate the count without adding real risk.
+ */
+const EXCLUDED_FROM_COUNT = [/\.github\/triage-analysis\//, /\.md$/i, /^dist\//, /\.map$/, /\.d\.ts$/];
+function isCountable(file) {
+    return !EXCLUDED_FROM_COUNT.some((p) => p.test(file));
+}
 /** Assess the risk of a set of changed file paths. */
 export function assessRisk(changedFiles) {
     const reasons = [];
-    if (changedFiles.length > 10) {
-        reasons.push(`Large change scope: ${changedFiles.length} files modified`);
+    const countableFiles = changedFiles.filter(isCountable);
+    if (countableFiles.length > LARGE_CHANGE_THRESHOLD) {
+        reasons.push(`Large change scope: ${countableFiles.length} code files modified`);
     }
     for (const file of changedFiles) {
         for (const pattern of HIGH_RISK_PATTERNS) {

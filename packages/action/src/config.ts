@@ -42,7 +42,7 @@ export interface ActionConfig {
   // Behavior
   dryRun: boolean;
   noveltyMode: boolean;
-  reviewMode: "auto" | "review" | "notify";
+  reviewMode: "auto" | "review";
   linearIssue: string;
   additionalInstructions: string;
   serviceMapPath: string;
@@ -111,7 +111,7 @@ export function parseInputs(): ActionConfig {
 
     dryRun: core.getBooleanInput("dry-run"),
     noveltyMode: core.getBooleanInput("novelty-mode"),
-    reviewMode: (core.getInput("review-mode") || "review") as "auto" | "review" | "notify",
+    reviewMode: (core.getInput("review-mode") || "review") as "auto" | "review",
     linearIssue: core.getInput("linear-issue"),
     additionalInstructions: core.getInput("additional-instructions"),
     serviceMapPath: core.getInput("service-map-path") || ".github/service-map.yml",
@@ -274,8 +274,8 @@ export function validateInputs(config: ActionConfig): string[] {
   }
 
   // Enum validation
-  if (!["auto", "review", "notify"].includes(config.reviewMode)) {
-    errors.push("`review-mode` must be one of: auto, review, notify");
+  if (!["auto", "review"].includes(config.reviewMode)) {
+    errors.push("`review-mode` must be one of: auto, review");
   }
 
   // Integer bounds

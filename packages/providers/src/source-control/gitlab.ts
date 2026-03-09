@@ -283,7 +283,9 @@ export function gitlab(config: GitLabSourceControlConfig): SourceControlProvider
     },
 
     async enableAutoMerge(_prNumber: number): Promise<void> {
-      log.info("Skipping auto-merge (GitLab provider — set merge_when_pipeline_succeeds manually if needed)");
+      log.warn(
+        "Auto-merge is not supported by the GitLab provider. Enable 'Merge when pipeline succeeds' on the MR manually.",
+      );
     },
 
     async dispatchWorkflow(opts: DispatchWorkflowOptions): Promise<void> {

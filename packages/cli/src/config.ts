@@ -39,7 +39,7 @@ export interface CliConfig {
 
   // Behavior
   dryRun: boolean;
-  reviewMode: "auto" | "review" | "notify";
+  reviewMode: "auto" | "review";
   noveltyMode: boolean;
   issueOverride: string;
   additionalInstructions: string;
@@ -105,7 +105,11 @@ export function registerTriageCommand(program: Command): Command {
     .option("--base-branch <branch>", "Base branch for PRs (default: main)")
     .option("--pr-labels <labels>", "Comma-separated PR labels (default: agent,triage,needs-review)")
     .option("--dry-run", "Analyze only, do not create issues or PRs", false)
-    .option("--review-mode <mode>", "PR merge behavior: auto | review | notify", "review")
+    .option(
+      "--review-mode <mode>",
+      "PR merge behavior: auto (merge when CI passes) | review (human approval, default)",
+      "review",
+    )
     .option("--no-novelty-mode", "Disable novelty mode (allow +1 on existing issues)")
     .option("--issue-override <issue>", "Work on a specific existing issue")
     .option("--additional-instructions <text>", "Extra instructions for the Claude agent")
@@ -182,7 +186,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
 
     // Per-invocation flags: CLI only — never from config file
     dryRun: Boolean(options.dryRun),
-    reviewMode: (options.reviewMode || f("review-mode") || "review") as "auto" | "review" | "notify",
+    reviewMode: (options.reviewMode || f("review-mode") || "review") as "auto" | "review",
     noveltyMode: options.noveltyMode !== false,
     issueOverride: (options.issueOverride as string) || "",
     additionalInstructions: (options.additionalInstructions as string) || "",
@@ -349,8 +353,8 @@ export function validateInputs(config: CliConfig): string[] {
   }
 
   // Enum validation
-  if (!["auto", "review", "notify"].includes(config.reviewMode)) {
-    errors.push("--review-mode must be one of: auto, review, notify");
+  if (!["auto", "review"].includes(config.reviewMode)) {
+    errors.push("--review-mode must be one of: auto, review");
   }
 
   // Integer bounds

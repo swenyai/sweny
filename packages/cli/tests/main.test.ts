@@ -447,11 +447,6 @@ describe("mapToTriageConfig", () => {
     expect(triageConfig.reviewMode).toBe("auto");
   });
 
-  it("maps reviewMode 'notify' to triageConfig.reviewMode", async () => {
-    const triageConfig = await runWithConfig({ ...BASE_CONFIG, reviewMode: "notify" });
-    expect(triageConfig.reviewMode).toBe("notify");
-  });
-
   it("defaults reviewMode to 'review' when not specified", async () => {
     const triageConfig = await runWithConfig({ ...BASE_CONFIG, reviewMode: "review" });
     expect(triageConfig.reviewMode).toBe("review");

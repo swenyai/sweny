@@ -1,6 +1,7 @@
-export type { WorkflowPhase, StepResult, StepMeta, WorkflowContext, ProviderRegistry, WorkflowResult, RunOptions, Recipe, RecipeDefinition, StateDefinition, StateImplementations, DefinitionError, } from "./types.js";
+export type { WorkflowPhase, StepResult, StepMeta, WorkflowContext, ProviderRegistry, WorkflowResult, RunOptions, Recipe, RecipeDefinition, StateDefinition, StateImplementations, DefinitionError, ExecutionEvent, RunObserver, } from "./types.js";
 export type { CacheEntry, StepCache } from "./cache.js";
 export { runRecipe, createProviderRegistry, validateDefinition, createRecipe } from "./runner-recipe.js";
+export { CollectingObserver, CallbackObserver, composeObservers } from "./observer.js";
 export { triageRecipe, triageDefinition } from "./recipes/triage/index.js";
 export { implementRecipe, implementDefinition } from "./recipes/implement/index.js";
 export type { ImplementConfig } from "./recipes/implement/index.js";

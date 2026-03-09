@@ -1,43 +1,20 @@
 import { consoleLogger } from "@sweny-ai/providers";
 import { createProviderRegistry } from "./registry.js";
-/**
- * Validate a RecipeDefinition for structural correctness.
- * Returns an array of errors (empty array = valid).
- * Does NOT check implementations (use createRecipe for that).
- */
-export function validateDefinition(def) {
-    const errors = [];
-    const stateIds = new Set(Object.keys(def.states));
-    // initial must exist
-    if (!stateIds.has(def.initial)) {
-        errors.push({
-            code: "MISSING_INITIAL",
-            message: `initial state "${def.initial}" does not exist in states`,
-        });
+import { validateDefinition } from "./validate.js";
+/** Calls observer.onEvent safely — errors are logged, not thrown. */
+async function emit(observer, event, logger) {
+    if (!observer)
+        return;
+    try {
+        await observer.onEvent(event);
     }
-    // all on/next targets must be valid state ids or "end"
-    for (const [stateId, state] of Object.entries(def.states)) {
-        if (state.next && state.next !== "end" && !stateIds.has(state.next)) {
-            errors.push({
-                code: "UNKNOWN_TARGET",
-                message: `state "${stateId}" next target "${state.next}" does not exist`,
-                stateId,
-                targetId: state.next,
-            });
-        }
-        for (const [outcome, target] of Object.entries(state.on ?? {})) {
-            if (target !== "end" && !stateIds.has(target)) {
-                errors.push({
-                    code: "UNKNOWN_TARGET",
-                    message: `state "${stateId}" on["${outcome}"] target "${target}" does not exist`,
-                    stateId,
-                    targetId: target,
-                });
-            }
-        }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(`[observer] onEvent threw for "${event.type}": ${msg}`);
     }
-    return errors;
 }
+// Re-export validateDefinition so existing imports from runner-recipe are not broken
+export { validateDefinition };
 /**
  * Create a Recipe by combining a definition with implementations.
  * Validates the definition and that all state ids have implementations.
@@ -46,8 +23,7 @@ export function validateDefinition(def) {
 export function createRecipe(definition, implementations) {
     const defErrors = validateDefinition(definition);
     if (defErrors.length > 0) {
-        throw new Error(`Invalid recipe definition "${definition.id}":\n` +
-            defErrors.map((e) => `  [${e.code}] ${e.message}`).join("\n"));
+        throw new Error(`Invalid recipe definition "${definition.id}":\n` + defErrors.map((e) => `  [${e.code}] ${e.message}`).join("\n"));
     }
     const implErrors = [];
     for (const stateId of Object.keys(definition.states)) {
@@ -85,6 +61,12 @@ export async function runRecipe(recipe, config, providers, options) {
     const results = new Map();
     const completedSteps = [];
     const ctx = { config, logger, results, providers };
+    await emit(options?.observer, {
+        type: "recipe:start",
+        recipeId: definition.id,
+        recipeName: definition.name,
+        timestamp: Date.now(),
+    }, logger);
     let currentId = definition.initial;
     let hasFailed = false;
     let aborted = false;
@@ -104,6 +86,12 @@ export async function runRecipe(recipe, config, providers, options) {
         visited.add(currentId);
         const stateId = currentId;
         const meta = { id: stateId, phase: state.phase };
+        await emit(options?.observer, {
+            type: "state:enter",
+            stateId,
+            phase: state.phase,
+            timestamp: Date.now(),
+        }, logger);
         // beforeStep hook — return false to skip this state
         if (options?.beforeStep) {
             const proceed = await options.beforeStep(meta, ctx);
@@ -111,6 +99,14 @@ export async function runRecipe(recipe, config, providers, options) {
                 const result = { status: "skipped", reason: "Skipped by beforeStep hook" };
                 results.set(stateId, result);
                 completedSteps.push({ name: stateId, phase: state.phase, result });
+                await emit(options?.observer, {
+                    type: "state:exit",
+                    stateId,
+                    phase: state.phase,
+                    result: { status: "skipped", reason: "Skipped by beforeStep hook" },
+                    cached: false,
+                    timestamp: Date.now(),
+                }, logger);
                 if (options.afterStep)
                     await options.afterStep(meta, result, ctx);
                 currentId = resolveNext(stateId, state, result);
@@ -124,6 +120,14 @@ export async function runRecipe(recipe, config, providers, options) {
                 const result = { ...entry.result, cached: true };
                 results.set(stateId, result);
                 completedSteps.push({ name: stateId, phase: state.phase, result });
+                await emit(options?.observer, {
+                    type: "state:exit",
+                    stateId,
+                    phase: state.phase,
+                    result,
+                    cached: true,
+                    timestamp: Date.now(),
+                }, logger);
                 if (options.afterStep)
                     await options.afterStep(meta, result, ctx);
                 currentId = resolveNext(stateId, state, result);
@@ -144,6 +148,14 @@ export async function runRecipe(recipe, config, providers, options) {
         }
         results.set(stateId, result);
         completedSteps.push({ name: stateId, phase: state.phase, result });
+        await emit(options?.observer, {
+            type: "state:exit",
+            stateId,
+            phase: state.phase,
+            result,
+            cached: result.cached ?? false,
+            timestamp: Date.now(),
+        }, logger);
         if (result.status === "failed") {
             hasFailed = true;
             if (state.critical) {
@@ -160,6 +172,12 @@ export async function runRecipe(recipe, config, providers, options) {
         currentId = resolveNext(stateId, state, result);
     }
     const status = aborted ? "failed" : hasFailed ? "partial" : "completed";
+    await emit(options?.observer, {
+        type: "recipe:end",
+        status,
+        duration: Date.now() - start,
+        timestamp: Date.now(),
+    }, logger);
     return { status, steps: completedSteps, duration: Date.now() - start };
 }
 /**

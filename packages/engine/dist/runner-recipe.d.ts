@@ -1,11 +1,7 @@
 import { createProviderRegistry } from "./registry.js";
-import type { DefinitionError, ProviderRegistry, Recipe, RecipeDefinition, RunOptions, StateImplementations, WorkflowResult } from "./types.js";
-/**
- * Validate a RecipeDefinition for structural correctness.
- * Returns an array of errors (empty array = valid).
- * Does NOT check implementations (use createRecipe for that).
- */
-export declare function validateDefinition(def: RecipeDefinition): DefinitionError[];
+import { validateDefinition } from "./validate.js";
+import type { ProviderRegistry, Recipe, RecipeDefinition, RunOptions, StateImplementations, WorkflowResult } from "./types.js";
+export { validateDefinition };
 /**
  * Create a Recipe by combining a definition with implementations.
  * Validates the definition and that all state ids have implementations.

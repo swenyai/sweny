@@ -76,7 +76,7 @@ ${issueIdentifier && issueUrl ? issueLink(config.issueTrackerName, issueIdentifi
   // -------------------------------------------------------------------------
   // 3. Auto-merge if configured (and risk is low)
   // -------------------------------------------------------------------------
-  if (config.reviewMode === "auto" && sourceControl.enableAutoMerge) {
+  if (config.reviewMode === "auto") {
     const changedFiles = await sourceControl.getChangedFiles().catch(() => []);
     const risk = assessRisk(changedFiles);
 
@@ -84,9 +84,9 @@ ${issueIdentifier && issueUrl ? issueLink(config.issueTrackerName, issueIdentifi
       ctx.logger.warn(`Auto-merge disabled due to high-risk changes: ${risk.reasons.join(", ")}`);
     } else {
       try {
-        await sourceControl.enableAutoMerge(pr.number);
+        await sourceControl.enableAutoMerge?.(pr.number);
       } catch (err) {
-        ctx.logger.warn(`Failed to enable auto-merge on PR #${pr.number}: ${err}`);
+        ctx.logger.warn(`Auto-merge failed for PR #${pr.number} — check repo settings: ${err}`);
       }
     }
   }

@@ -4,6 +4,7 @@ import { useEditorStore, useTemporalStore } from "./store/editor-store.js";
 import { RecipeViewer } from "./RecipeViewer.js";
 import { PropertiesPanel } from "./components/PropertiesPanel.js";
 import { Toolbar } from "./components/Toolbar.js";
+import { DropOverlay } from "./components/DropOverlay.js";
 import type { RecipeDefinition } from "@sweny-ai/engine";
 
 const PRESET_RECIPES: Array<{ id: string; name: string; definition: RecipeDefinition }> = [
@@ -14,6 +15,7 @@ const PRESET_RECIPES: Array<{ id: string; name: string; definition: RecipeDefini
 export function App() {
   const setDefinition = useEditorStore((s) => s.setDefinition);
   const [activeId, setActiveId] = useState("triage");
+  const [showImport, setShowImport] = useState(false);
 
   const handleRecipeChange = useCallback(
     (id: string) => {
@@ -27,6 +29,14 @@ export function App() {
     [setDefinition],
   );
 
+  const handleDropImport = useCallback(
+    (def: RecipeDefinition) => {
+      useEditorStore.temporal.getState().clear();
+      setDefinition(def);
+    },
+    [setDefinition],
+  );
+
   // Keyboard shortcuts
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -34,6 +44,11 @@ export function App() {
       const { undo, redo } = useEditorStore.temporal.getState();
       const { selection, deleteState, setSelection } = useEditorStore.getState();
 
+      if (meta && e.key === "o") {
+        e.preventDefault();
+        setShowImport(true);
+        return;
+      }
       if (meta && e.shiftKey && e.key === "z") {
         e.preventDefault();
         redo();
@@ -60,13 +75,20 @@ export function App() {
 
   return (
     <div style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column" }}>
-      <Toolbar availableRecipes={PRESET_RECIPES} activeRecipeId={activeId} onRecipeChange={handleRecipeChange} />
+      <Toolbar
+        availableRecipes={PRESET_RECIPES}
+        activeRecipeId={activeId}
+        onRecipeChange={handleRecipeChange}
+        showImport={showImport}
+        onShowImportChange={setShowImport}
+      />
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <RecipeViewer />
         </div>
         <PropertiesPanel />
       </div>
+      <DropOverlay onImport={handleDropImport} />
     </div>
   );
 }

@@ -1,15 +1,25 @@
 import { useState } from "react";
 import { useStore } from "zustand";
 import type { WorkflowPhase } from "@sweny-ai/engine";
+import type { RecipeDefinition } from "@sweny-ai/engine";
 import { useEditorStore, useTemporalStore } from "../store/editor-store.js";
+import { ImportModal } from "./ImportModal.js";
 
 interface ToolbarProps {
   onRecipeChange(id: string): void;
   activeRecipeId: string;
   availableRecipes: Array<{ id: string; name: string }>;
+  showImport: boolean;
+  onShowImportChange(open: boolean): void;
 }
 
-export function Toolbar({ onRecipeChange, activeRecipeId, availableRecipes }: ToolbarProps) {
+export function Toolbar({
+  onRecipeChange,
+  activeRecipeId,
+  availableRecipes,
+  showImport,
+  onShowImportChange,
+}: ToolbarProps) {
   const temporalStore = useTemporalStore();
 
   // Subscribe reactively to pastStates/futureStates
@@ -17,9 +27,15 @@ export function Toolbar({ onRecipeChange, activeRecipeId, availableRecipes }: To
   const futureStates = useStore(temporalStore, (s) => s.futureStates);
 
   const definition = useEditorStore((s) => s.definition);
+  const setDefinition = useEditorStore((s) => s.setDefinition);
   const addState = useEditorStore((s) => s.addState);
   const [newStateId, setNewStateId] = useState("");
   const [newStatePhase, setNewStatePhase] = useState<WorkflowPhase>("act");
+
+  function handleImport(def: RecipeDefinition) {
+    temporalStore.getState().clear();
+    setDefinition(def);
+  }
 
   function handleExport() {
     const json = JSON.stringify(definition, null, 2);
@@ -101,10 +117,20 @@ export function Toolbar({ onRecipeChange, activeRecipeId, availableRecipes }: To
         </button>
       </form>
 
+      {/* Import */}
+      <button
+        onClick={() => onShowImportChange(true)}
+        className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs"
+      >
+        ↑ Import
+      </button>
+
       {/* Export */}
       <button onClick={handleExport} className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs ml-2">
         ↓ Export JSON
       </button>
+
+      {showImport && <ImportModal onImport={handleImport} onClose={() => onShowImportChange(false)} />}
     </div>
   );
 }

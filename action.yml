@@ -248,7 +248,7 @@ inputs:
     required: false
     default: "false"
   review-mode:
-    description: "PR merge behavior: 'auto' (merge when CI passes), 'review' (human approves), 'notify' (same as review)"
+    description: "PR merge behavior: 'auto' (enable GitHub auto-merge, merges when CI passes), 'review' (open PR and wait for human approval)"
     required: false
     default: "review"
   novelty-mode:
