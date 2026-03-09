@@ -77,10 +77,17 @@ export function Toolbar({
   function handleCopyLink() {
     const { definition: def } = useEditorStore.getState();
     const url = buildPermalinkUrl(def);
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+    navigator.clipboard.writeText(url).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      },
+      () => {
+        // Clipboard write failed (non-HTTPS or browser security policy).
+        // The URL bar already reflects the current recipe via the hash sync in App.tsx,
+        // so the user can still copy it manually. No additional action needed.
+      },
+    );
   }
 
   function handleAddState(e: React.FormEvent) {

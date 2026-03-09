@@ -22,10 +22,11 @@ function isValidIdentifier(key: string): boolean {
 
 /**
  * Format an object key for a TypeScript object literal.
- * Simple identifiers are unquoted; anything else gets double-quoted.
+ * Simple identifiers are unquoted; anything else is JSON-encoded (handles
+ * embedded quotes, backslashes, and other special characters correctly).
  */
 function formatKey(key: string): string {
-  return isValidIdentifier(key) ? key : `"${key}"`;
+  return isValidIdentifier(key) ? key : JSON.stringify(key);
 }
 
 /**
@@ -36,10 +37,11 @@ function serializeState(state: StateDefinition, indent: string): string {
   const inner = `${indent}  `;
   const lines: string[] = ["{"];
 
-  lines.push(`${inner}phase: "${state.phase}",`);
+  // JSON.stringify produces a correctly escaped TS string literal (handles \n, \t, \, ", etc.)
+  lines.push(`${inner}phase: ${JSON.stringify(state.phase)},`);
 
   if (state.description !== undefined) {
-    lines.push(`${inner}description: "${state.description.replace(/"/g, '\\"')}",`);
+    lines.push(`${inner}description: ${JSON.stringify(state.description)},`);
   }
 
   if (state.critical === true) {
@@ -47,7 +49,7 @@ function serializeState(state: StateDefinition, indent: string): string {
   }
 
   if (state.next !== undefined) {
-    lines.push(`${inner}next: "${state.next}",`);
+    lines.push(`${inner}next: ${JSON.stringify(state.next)},`);
   }
 
   if (state.on !== undefined) {
@@ -56,11 +58,11 @@ function serializeState(state: StateDefinition, indent: string): string {
       lines.push(`${inner}on: {},`);
     } else if (onEntries.length === 1) {
       const [k, v] = onEntries[0];
-      lines.push(`${inner}on: { ${formatKey(k)}: "${v}" },`);
+      lines.push(`${inner}on: { ${formatKey(k)}: ${JSON.stringify(v)} },`);
     } else {
       lines.push(`${inner}on: {`);
       for (const [k, v] of onEntries) {
-        lines.push(`${inner}  ${formatKey(k)}: "${v}",`);
+        lines.push(`${inner}  ${formatKey(k)}: ${JSON.stringify(v)},`);
       }
       lines.push(`${inner}},`);
     }
@@ -76,15 +78,15 @@ function serializeState(state: StateDefinition, indent: string): string {
 function serializeDefinition(def: RecipeDefinition, constName: string): string {
   const lines: string[] = [];
   lines.push(`export const ${constName}Definition: RecipeDefinition = {`);
-  lines.push(`  id: "${def.id}",`);
-  lines.push(`  version: "${def.version}",`);
-  lines.push(`  name: "${def.name}",`);
+  lines.push(`  id: ${JSON.stringify(def.id)},`);
+  lines.push(`  version: ${JSON.stringify(def.version)},`);
+  lines.push(`  name: ${JSON.stringify(def.name)},`);
 
   if (def.description !== undefined) {
-    lines.push(`  description: "${def.description.replace(/"/g, '\\"')}",`);
+    lines.push(`  description: ${JSON.stringify(def.description)},`);
   }
 
-  lines.push(`  initial: "${def.initial}",`);
+  lines.push(`  initial: ${JSON.stringify(def.initial)},`);
   lines.push(`  states: {`);
 
   for (const [stateId, stateDef] of Object.entries(def.states)) {

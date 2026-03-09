@@ -25,7 +25,23 @@ export function decodeRecipe(encoded: string): RecipeDefinition | null {
         .map((c) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0"))
         .join(""),
     );
-    const def = JSON.parse(json) as RecipeDefinition;
+    const raw: unknown = JSON.parse(json);
+    // Guard the minimum required fields before treating as RecipeDefinition
+    if (
+      !raw ||
+      typeof raw !== "object" ||
+      typeof (raw as Record<string, unknown>).id !== "string" ||
+      typeof (raw as Record<string, unknown>).name !== "string" ||
+      typeof (raw as Record<string, unknown>).version !== "string" ||
+      typeof (raw as Record<string, unknown>).initial !== "string" ||
+      typeof (raw as Record<string, unknown>).states !== "object" ||
+      (raw as Record<string, unknown>).states === null
+    ) {
+      return null;
+    }
+    const def = raw as RecipeDefinition;
+    // Reject only structural errors (MISSING_INITIAL); allow UNKNOWN_TARGET so users
+    // can load and fix broken recipes in the editor.
     if (validateDefinition(def).some((e) => e.code === "MISSING_INITIAL")) return null;
     return def;
   } catch {
