@@ -20,4 +20,16 @@ export default defineConfig({
       "@sweny-ai/engine": resolve(__dirname, "../../packages/engine/dist/browser.js"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom"],
+          xyflow: ["@xyflow/react"],
+          elk: ["elkjs"],
+          zustand: ["zustand", "immer", "zundo"],
+        },
+      },
+    },
+  },
 });
