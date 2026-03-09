@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import { getStepData } from "../recipes/triage/results.js";
-import { buildImplementPrompt } from "../recipes/triage/prompts.js";
+import { buildImplementPrompt, issueTrackerLabel } from "../recipes/triage/prompts.js";
 /** Create branch, run Claude to implement fix, check for changes, and push. */
 export async function implementFix(ctx) {
     const config = ctx.config;
@@ -74,7 +74,8 @@ export async function implementFix(ctx) {
         const hasUncommitted = await sourceControl.hasChanges();
         if (hasUncommitted) {
             ctx.logger.info("Found uncommitted code changes, creating fallback commit");
-            await sourceControl.stageAndCommit(`fix: automated fix from log analysis\n\nPartial implementation by Claude (reached max turns before completion)\n\nIdentified by SWEny Triage\nLinear: ${issueIdentifier}`);
+            const trackerLabel = issueTrackerLabel(config.issueTrackerName);
+            await sourceControl.stageAndCommit(`fix: automated fix from log analysis\n\nPartial implementation by Claude (reached max turns before completion)\n\nIdentified by SWEny Triage\n${trackerLabel}: ${issueIdentifier}`);
             hasCodeChanges = true;
         }
         else {

@@ -79,13 +79,15 @@ export async function runRecipe(recipe, config, providers, options) {
             const message = err instanceof Error ? err.message : String(err);
             logger.error(`[${recipe.name}] ${node.phase}/${node.id}: failed — ${message}`);
             result = { status: "failed", reason: message };
-            hasFailed = true;
         }
         results.set(node.id, result);
         completedSteps.push({ name: node.id, phase: node.phase, result });
-        if (result.status === "failed" && node.critical) {
-            aborted = true;
-            break;
+        if (result.status === "failed") {
+            hasFailed = true;
+            if (node.critical) {
+                aborted = true;
+                break;
+            }
         }
         // Persist successful results to cache
         if (result.status === "success" && options?.cache) {

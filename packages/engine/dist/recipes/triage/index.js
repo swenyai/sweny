@@ -25,10 +25,11 @@ export const triageRecipe = {
             on: {
                 skip: "notify", // dry-run, skip, or +1 all go straight to report
                 implement: "create-issue",
+                failed: "notify",
             },
         },
         { id: "create-issue", phase: "act", run: createIssue, on: { failed: "notify" } },
-        // Cross-repo check routes to implement-fix or to notify
+        // Cross-repo check routes to implement-fix or to notify (failed also goes to notify)
         {
             id: "cross-repo-check",
             phase: "act",

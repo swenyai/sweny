@@ -4,7 +4,7 @@ import { parseServiceMap } from "./service-map.js";
 // Issue tracker label helpers
 // ---------------------------------------------------------------------------
 /** Human-readable label for the issue tracker, e.g. "GitHub Issues", "Linear", "Jira". */
-function issueTrackerLabel(name) {
+export function issueTrackerLabel(name) {
     switch (name) {
         case "linear":
             return "Linear";
