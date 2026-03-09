@@ -561,6 +561,24 @@ npm run package    # Produces dist/index.js via ncc
 
 > **Note:** The root `dist/` directory is committed intentionally — GitHub Actions require a compiled entry point (`dist/index.js` built via [ncc](https://github.com/vercel/ncc)). Do not remove it.
 
+## Cloud vs. Self-Hosted
+
+sweny.ai cloud manages job execution for you. The worker that runs your jobs
+is open source — you can audit exactly what code runs on your data.
+
+| | sweny.ai Cloud | Self-Hosted Worker |
+|---|---|---|
+| Engine & Providers | Managed | Your infra |
+| Execution | Managed | Your infra |
+| Orchestration UI | Included | Not included |
+| Results History | Included | Not included |
+| BYOK Encryption | Team+ tier | N/A (you control all) |
+| TEE Attestation | Enterprise tier | N/A |
+
+[Deploy your own worker →](docs/self-hosted-worker.md)
+
+---
+
 ## License
 
 [MIT](LICENSE)
