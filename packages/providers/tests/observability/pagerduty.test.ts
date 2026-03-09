@@ -252,9 +252,33 @@ describe("PagerDutyProvider", () => {
   // aggregate
   it("aggregate groups incidents by service and returns counts", async () => {
     const incidents = [
-      { id: "1", title: "A", status: "triggered", urgency: "high", created_at: "2026-03-08T10:00:00Z", html_url: "", service: { summary: "api" } },
-      { id: "2", title: "B", status: "triggered", urgency: "low", created_at: "2026-03-08T09:00:00Z", html_url: "", service: { summary: "api" } },
-      { id: "3", title: "C", status: "acknowledged", urgency: "high", created_at: "2026-03-08T08:00:00Z", html_url: "", service: { summary: "database" } },
+      {
+        id: "1",
+        title: "A",
+        status: "triggered",
+        urgency: "high",
+        created_at: "2026-03-08T10:00:00Z",
+        html_url: "",
+        service: { summary: "api" },
+      },
+      {
+        id: "2",
+        title: "B",
+        status: "triggered",
+        urgency: "low",
+        created_at: "2026-03-08T09:00:00Z",
+        html_url: "",
+        service: { summary: "api" },
+      },
+      {
+        id: "3",
+        title: "C",
+        status: "acknowledged",
+        urgency: "high",
+        created_at: "2026-03-08T08:00:00Z",
+        html_url: "",
+        service: { summary: "database" },
+      },
     ];
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
@@ -280,8 +304,8 @@ describe("PagerDutyProvider", () => {
       text: async () => "",
     }));
 
-    await expect(
-      makeProvider().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "error" }),
-    ).rejects.toThrow("PagerDuty API error: 403 Forbidden");
+    await expect(makeProvider().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "error" })).rejects.toThrow(
+      "PagerDuty API error: 403 Forbidden",
+    );
   });
 });

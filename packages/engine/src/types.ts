@@ -135,10 +135,7 @@ export interface StateDefinition {
  * Implementation functions keyed by state id.
  * Every state id in RecipeDefinition.states must have an entry here.
  */
-export type StateImplementations<TConfig> = Record<
-  string,
-  (ctx: WorkflowContext<TConfig>) => Promise<StepResult>
->;
+export type StateImplementations<TConfig> = Record<string, (ctx: WorkflowContext<TConfig>) => Promise<StepResult>>;
 
 /**
  * A complete wired recipe ready to run.
@@ -152,8 +149,8 @@ export interface Recipe<TConfig = unknown> {
 /** Validation error describing a structural problem with a RecipeDefinition. */
 export interface DefinitionError {
   code:
-    | "MISSING_INITIAL"      // initial does not exist in states
-    | "UNKNOWN_TARGET"       // an on/next target does not exist in states and isn't "end"
+    | "MISSING_INITIAL" // initial does not exist in states
+    | "UNKNOWN_TARGET" // an on/next target does not exist in states and isn't "end"
     | "MISSING_IMPLEMENTATION"; // a state id has no implementation (checked by createRecipe)
   message: string;
   stateId?: string;

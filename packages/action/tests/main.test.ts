@@ -34,8 +34,8 @@ async function loadMain() {
   }));
   vi.doMock("@sweny-ai/engine", () => ({
     runRecipe: mockRunRecipe,
-    triageRecipe: { name: "triage", start: "verify-access", nodes: [] },
-    implementRecipe: { name: "implement", start: "verify-access", nodes: [] },
+    triageRecipe: { name: "triage", start: "verify-access", definition: { states: {} }, implementations: {} },
+    implementRecipe: { name: "implement", start: "verify-access", definition: { states: {} }, implementations: {} },
   }));
   vi.doMock("../src/config.js", () => ({
     parseInputs: mockParseInputs,
