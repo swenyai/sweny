@@ -1,13 +1,6 @@
 import type { ImplementConfig } from "./types.js";
-/**
- * The implement recipe.
- *
- * Given a known issue identifier, fetches the issue, implements a fix,
- * and opens a PR. Skips the investigation/novelty phases of triage.
- *
- * Shared nodes (implement-fix, create-pr, notify) are typed to SharedNodeConfig,
- * which ImplementConfig satisfies — no type casts needed.
- */
+import { implementDefinition } from "./definition.js";
+export { implementDefinition };
 export declare const implementRecipe: import("../../types.js").Recipe<ImplementConfig>;
 export type { ImplementConfig } from "./types.js";
 //# sourceMappingURL=index.d.ts.map

@@ -6,4 +6,5 @@
  */
 export type { RecipeDefinition, StateDefinition, WorkflowPhase, StepResult, WorkflowResult } from "./types.js";
 export { triageDefinition } from "./recipes/triage/definition.js";
+export { implementDefinition } from "./recipes/implement/definition.js";
 //# sourceMappingURL=browser.d.ts.map

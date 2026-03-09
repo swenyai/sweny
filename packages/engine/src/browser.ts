@@ -10,3 +10,4 @@ export type { RecipeDefinition, StateDefinition, WorkflowPhase, StepResult, Work
 
 // Pure definition objects (no implementation functions)
 export { triageDefinition } from "./recipes/triage/definition.js";
+export { implementDefinition } from "./recipes/implement/definition.js";

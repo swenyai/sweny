@@ -22,7 +22,7 @@ export { runRecipe, createProviderRegistry, validateDefinition, createRecipe } f
 
 // Built-in recipes
 export { triageRecipe, triageDefinition } from "./recipes/triage/index.js";
-export { implementRecipe } from "./recipes/implement/index.js";
+export { implementRecipe, implementDefinition } from "./recipes/implement/index.js";
 
 // Recipe configs and types
 export type { ImplementConfig } from "./recipes/implement/index.js";
