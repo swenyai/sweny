@@ -40,6 +40,11 @@ function annotateEdgesWithErrors(
 
 function nodeColor(node: RFNode): string {
   const data = node.data as StateNodeData;
+  // Execution status takes priority over phase color in simulate/live modes
+  if (data?.execStatus === "current") return "#93c5fd"; // blue-300
+  if (data?.execStatus === "success") return "#86efac"; // green-300
+  if (data?.execStatus === "failed") return "#fca5a5"; // red-300
+  if (data?.execStatus === "skipped") return "#d1d5db"; // gray-300
   if (data?.state?.phase === "learn") return "#bfdbfe";
   if (data?.state?.phase === "act") return "#fde68a";
   if (data?.state?.phase === "report") return "#bbf7d0";
