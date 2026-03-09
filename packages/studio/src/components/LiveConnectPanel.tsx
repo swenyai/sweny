@@ -19,49 +19,61 @@ export function LiveConnectPanel() {
 
   function connect() {
     resetExecution();
-    setLiveConnection({ url, transport, status: "connecting" });
+    // Capture url/transport at connect time — closures below must not close over state variables
+    const connUrl = url;
+    const connTransport = transport;
+    setLiveConnection({ url: connUrl, transport: connTransport, status: "connecting" });
 
-    if (transport === "websocket") {
-      const ws = new WebSocket(url);
+    if (connTransport === "websocket") {
+      const ws = new WebSocket(connUrl);
       wsRef.current = ws;
 
-      ws.onopen = () => setLiveConnection({ url, transport, status: "connected" });
+      ws.onopen = () => setLiveConnection({ url: connUrl, transport: connTransport, status: "connected" });
 
       ws.onmessage = (e) => {
         try {
           const event = JSON.parse(e.data as string) as ExecutionEvent;
           applyEvent(event);
         } catch {
-          /* ignore malformed */
+          /* ignore malformed messages */
         }
       };
 
-      ws.onerror = () => setLiveConnection({ url, transport, status: "error", error: "WebSocket error" });
+      ws.onerror = () =>
+        setLiveConnection({ url: connUrl, transport: connTransport, status: "error", error: "WebSocket error" });
 
-      ws.onclose = () => setLiveConnection(liveConnection ? { ...liveConnection, status: "disconnected" } : null);
+      ws.onclose = () => {
+        wsRef.current = null;
+        setLiveConnection({ url: connUrl, transport: connTransport, status: "disconnected" });
+      };
     } else {
       // SSE
-      const es = new EventSource(url);
+      const es = new EventSource(connUrl);
       evsRef.current = es;
 
-      es.onopen = () => setLiveConnection({ url, transport, status: "connected" });
+      es.onopen = () => setLiveConnection({ url: connUrl, transport: connTransport, status: "connected" });
 
       es.onmessage = (e) => {
         try {
           const event = JSON.parse(e.data as string) as ExecutionEvent;
           applyEvent(event);
         } catch {
-          /* ignore malformed */
+          /* ignore malformed messages */
         }
       };
 
-      es.onerror = () => setLiveConnection({ url, transport, status: "error", error: "SSE error" });
+      es.onerror = () => {
+        evsRef.current = null;
+        setLiveConnection({ url: connUrl, transport: connTransport, status: "error", error: "SSE error" });
+      };
     }
   }
 
   function disconnect() {
     wsRef.current?.close();
+    wsRef.current = null;
     evsRef.current?.close();
+    evsRef.current = null;
     setLiveConnection(null);
     setMode("design");
     resetExecution();

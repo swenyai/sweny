@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useEditorStore } from "../store/editor-store.js";
 import { createRecipe, runRecipe, createProviderRegistry } from "@sweny-ai/engine";
 import type { StepResult, RunObserver } from "@sweny-ai/engine";
@@ -14,58 +14,79 @@ class StepLatch {
   }
 }
 
-// Store one latch per simulation run (only one state runs at a time)
-let activeLatch: StepLatch | null = null;
-
-function createMockImplementations(stateIds: string[]): Record<string, () => Promise<StepResult>> {
+function createMockImplementations(
+  stateIds: string[],
+  latchRef: React.MutableRefObject<StepLatch | null>,
+): Record<string, () => Promise<StepResult>> {
   return Object.fromEntries(
     stateIds.map((id) => [
       id,
       async (): Promise<StepResult> => {
-        activeLatch = new StepLatch();
-        return activeLatch.promise;
+        const latch = new StepLatch();
+        latchRef.current = latch;
+        return latch.promise;
       },
     ]),
   );
 }
 
-async function startSimulation(): Promise<void> {
-  const { definition, applyEvent, resetExecution } = useEditorStore.getState();
-  resetExecution();
-
-  const mockImpls = createMockImplementations(Object.keys(definition.states));
-  const recipe = createRecipe(definition, mockImpls);
-  const providers = createProviderRegistry();
-
-  const observer: RunObserver = {
-    onEvent(event) {
-      applyEvent(event);
-    },
-  };
-
-  await runRecipe(recipe, {}, providers, { observer });
-}
-
 export function SimulationPanel() {
   const { currentStateId, completedStates, executionStatus, definition, resetExecution } = useEditorStore();
-  const [outcome, setOutcome] = useState("success");
+  const [outcome, setOutcome] = useState<StepResult["status"]>("success");
   const [customOutcome, setCustomOutcome] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+  const [simError, setSimError] = useState<string | null>(null);
+  const activeLatchRef = useRef<StepLatch | null>(null);
 
   const currentState = currentStateId ? definition.states[currentStateId] : null;
   const completedList = Object.entries(completedStates);
 
   function handleStart() {
+    setSimError(null);
     setIsRunning(true);
-    startSimulation().finally(() => setIsRunning(false));
+    activeLatchRef.current = null;
+
+    const { definition: def, applyEvent } = useEditorStore.getState();
+    resetExecution();
+
+    let recipe;
+    try {
+      const mockImpls = createMockImplementations(Object.keys(def.states), activeLatchRef);
+      recipe = createRecipe(def, mockImpls);
+    } catch (err) {
+      setSimError(err instanceof Error ? err.message : String(err));
+      setIsRunning(false);
+      return;
+    }
+
+    const providers = createProviderRegistry();
+    const observer: RunObserver = { onEvent: applyEvent };
+
+    runRecipe(recipe, {}, providers, { observer })
+      .catch((err: unknown) => {
+        setSimError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        setIsRunning(false);
+        activeLatchRef.current = null;
+      });
   }
 
   function handleStep() {
-    activeLatch?.complete({
-      status: outcome as StepResult["status"],
+    activeLatchRef.current?.complete({
+      status: outcome,
       data: customOutcome.trim() ? { outcome: customOutcome.trim() } : undefined,
     });
     setCustomOutcome("");
+  }
+
+  function handleReset() {
+    // Resolve any waiting latch so the async loop can exit cleanly
+    activeLatchRef.current?.complete({ status: "failed", reason: "Simulation reset" });
+    activeLatchRef.current = null;
+    resetExecution();
+    setIsRunning(false);
+    setSimError(null);
   }
 
   return (
@@ -98,17 +119,14 @@ export function SimulationPanel() {
             ▶ Start
           </button>
         ) : (
-          <button
-            onClick={() => {
-              resetExecution();
-              setIsRunning(false);
-            }}
-            className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500"
-          >
+          <button onClick={handleReset} className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500">
             ↺ Reset
           </button>
         )}
       </div>
+
+      {/* Error display */}
+      {simError && <p className="text-xs text-red-600 mb-2">{simError}</p>}
 
       {/* Current state + step controls */}
       {currentState && currentStateId && (
@@ -126,7 +144,7 @@ export function SimulationPanel() {
           />
           <select
             value={outcome}
-            onChange={(e) => setOutcome(e.target.value)}
+            onChange={(e) => setOutcome(e.target.value as StepResult["status"])}
             className="px-2 py-1 text-xs border border-gray-300 rounded"
           >
             <option value="success">success</option>

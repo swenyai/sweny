@@ -1,17 +1,17 @@
 /**
  * Browser-safe runner utilities.
  *
- * Re-implements createProviderRegistry and a minimal runRecipe/createRecipe
- * without importing @sweny-ai/providers (which pulls in Node.js-only code).
+ * Mirrors runner-recipe.ts but avoids importing @sweny-ai/providers
+ * (which pulls in Node.js-only code). Uses a console-based logger instead.
  *
  * This module is only used by the browser entry point (browser.ts).
  */
 
 import { validateDefinition } from "./validate.js";
+import { createProviderRegistry } from "./registry.js";
 import type {
   DefinitionError,
   ExecutionEvent,
-  ProviderRegistry,
   Recipe,
   RecipeDefinition,
   RunObserver,
@@ -24,6 +24,8 @@ import type {
   WorkflowResult,
 } from "./types.js";
 
+export { createProviderRegistry };
+
 // Minimal console-based logger — avoids importing @sweny-ai/providers
 /* eslint-disable no-console */
 const browserLogger = {
@@ -33,28 +35,6 @@ const browserLogger = {
   error: (msg: string, ...args: unknown[]) => console.error(msg, ...args),
 };
 /* eslint-enable no-console */
-
-/** Create an empty provider registry. */
-export function createProviderRegistry(): ProviderRegistry {
-  const store = new Map<string, unknown>();
-
-  return {
-    get<T>(key: string): T {
-      if (!store.has(key)) {
-        throw new Error(`Provider "${key}" is not registered`);
-      }
-      return store.get(key) as T;
-    },
-
-    has(key: string): boolean {
-      return store.has(key);
-    },
-
-    set(key: string, provider: unknown): void {
-      store.set(key, provider);
-    },
-  };
-}
 
 /** Calls observer.onEvent safely — errors are logged, not thrown. */
 async function emit(observer: RunObserver | undefined, event: ExecutionEvent): Promise<void> {
@@ -107,12 +87,19 @@ export function createRecipe<TConfig>(
  * Execute a Recipe as a state machine (browser-safe version).
  *
  * Starts at recipe.definition.initial, executes each state, then follows
- * on: transitions to determine the next state.
+ * on: transitions to determine the next state. Stops when a transition
+ * resolves to "end", there is no next state, or a critical state fails.
+ *
+ * Outcome resolution order (for on: routing):
+ *   1. result.data?.outcome (string) — explicit outcome set by the implementation
+ *   2. result.status        ("success" | "skipped" | "failed")
+ *   3. "*"                  — wildcard default
+ *   4. next                 — fallback for success/skipped
  */
 export async function runRecipe<TConfig>(
   recipe: Recipe<TConfig>,
   config: TConfig,
-  providers: ProviderRegistry,
+  providers: ReturnType<typeof createProviderRegistry>,
   options?: RunOptions,
 ): Promise<WorkflowResult> {
   const logger = options?.logger ?? browserLogger;
@@ -172,17 +159,38 @@ export async function runRecipe<TConfig>(
           type: "state:exit",
           stateId,
           phase: state.phase,
-          result: { status: "skipped", reason: "Skipped by beforeStep hook" },
+          result,
           cached: false,
           timestamp: Date.now(),
         });
         if (options.afterStep) await options.afterStep(meta, result, ctx);
-        currentId = resolveNext(state, result);
+        currentId = resolveNext(stateId, state, result);
         continue;
       }
     }
 
-    // Execute the state
+    // Cache check — replay a previously cached result if available
+    if (options?.cache) {
+      const entry = await options.cache.get(stateId);
+      if (entry) {
+        const result: StepResult = { ...entry.result, cached: true };
+        results.set(stateId, result);
+        completedSteps.push({ name: stateId, phase: state.phase, result });
+        await emit(options?.observer, {
+          type: "state:exit",
+          stateId,
+          phase: state.phase,
+          result,
+          cached: true,
+          timestamp: Date.now(),
+        });
+        if (options.afterStep) await options.afterStep(meta, result, ctx);
+        currentId = resolveNext(stateId, state, result);
+        continue;
+      }
+    }
+
+    // Execute the state — result is always assigned (either from run or catch)
     let result: StepResult;
     try {
       logger.info(`[${definition.name}] ${state.phase}/${stateId}: starting`);
@@ -214,9 +222,14 @@ export async function runRecipe<TConfig>(
       }
     }
 
+    // Persist successful results to cache
+    if (result.status === "success" && options?.cache) {
+      await options.cache.set(stateId, { result, createdAt: Date.now() }).catch(() => {}); // cache failures are non-fatal
+    }
+
     if (options?.afterStep) await options.afterStep(meta, result, ctx);
 
-    currentId = resolveNext(state, result);
+    currentId = resolveNext(stateId, state, result);
   }
 
   const status = aborted ? "failed" : hasFailed ? "partial" : "completed";
@@ -233,17 +246,30 @@ export async function runRecipe<TConfig>(
 
 /**
  * Resolve the id of the next state to execute.
+ *
+ * Priority:
+ *   1. Explicit on: match for result.data?.outcome
+ *   2. Explicit on: match for result.status
+ *   3. Wildcard on["*"]
+ *   4. next (success/skipped only)
+ *   5. undefined — stop the recipe
  */
-function resolveNext(state: StateDefinition, result: StepResult): string | undefined {
+function resolveNext(stateId: string, state: StateDefinition, result: StepResult): string | undefined {
   const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : undefined;
 
   if (state.on) {
+    // 1. explicit outcome
     if (outcome && outcome in state.on) return state.on[outcome];
+    // 2. status
     if (result.status in state.on) return state.on[result.status];
+    // 3. wildcard
     if ("*" in state.on) return state.on["*"];
   }
 
+  // 4. next (only for non-failure)
   if (result.status !== "failed" && state.next) return state.next;
 
+  // 5. stop
+  void stateId; // used by callers for logging context
   return undefined;
 }
