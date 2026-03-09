@@ -338,6 +338,7 @@ function mapToImplementConfig(issueId: string, config: CliConfig): ImplementConf
     projectId: config.linearTeamId || (config.issueTrackerProvider === "file" ? "local" : ""),
     stateInProgress: config.linearStateInProgress || (config.issueTrackerProvider === "file" ? "in-progress" : ""),
     statePeerReview: config.linearStatePeerReview || (config.issueTrackerProvider === "file" ? "peer-review" : ""),
+    issueTrackerName: config.issueTrackerProvider,
     agentEnv,
   };
 }

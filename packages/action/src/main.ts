@@ -66,6 +66,7 @@ export function mapToImplementConfig(config: ActionConfig): ImplementConfig {
     projectId: config.linearTeamId,
     stateInProgress: config.linearStateInProgress,
     statePeerReview: config.linearStatePeerReview,
+    issueTrackerName: config.issueTrackerProvider,
     agentEnv,
   };
 }

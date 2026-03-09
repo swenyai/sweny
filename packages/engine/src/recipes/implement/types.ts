@@ -30,4 +30,7 @@ export interface ImplementConfig {
   projectId: string;
   stateInProgress: string;
   statePeerReview: string;
+
+  // Issue tracker provider key (e.g. "linear", "github-issues") — used for prompt/template labels
+  issueTrackerName?: string;
 }

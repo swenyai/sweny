@@ -4,7 +4,7 @@ import type { CodingAgent } from "@sweny-ai/providers/coding-agent";
 import type { StepResult, WorkflowContext } from "../types.js";
 import type { SharedNodeConfig } from "./types.js";
 import { getStepData } from "../recipes/triage/results.js";
-import { buildImplementPrompt } from "../recipes/triage/prompts.js";
+import { buildImplementPrompt, issueTrackerLabel } from "../recipes/triage/prompts.js";
 
 /** Create branch, run Claude to implement fix, check for changes, and push. */
 export async function implementFix(ctx: WorkflowContext<SharedNodeConfig>): Promise<StepResult> {
@@ -90,8 +90,9 @@ export async function implementFix(ctx: WorkflowContext<SharedNodeConfig>): Prom
     const hasUncommitted = await sourceControl.hasChanges();
     if (hasUncommitted) {
       ctx.logger.info("Found uncommitted code changes, creating fallback commit");
+      const trackerLabel = issueTrackerLabel(config.issueTrackerName);
       await sourceControl.stageAndCommit(
-        `fix: automated fix from log analysis\n\nPartial implementation by Claude (reached max turns before completion)\n\nIdentified by SWEny Triage\nLinear: ${issueIdentifier}`,
+        `fix: automated fix from log analysis\n\nPartial implementation by Claude (reached max turns before completion)\n\nIdentified by SWEny Triage\n${trackerLabel}: ${issueIdentifier}`,
       );
       hasCodeChanges = true;
     } else {

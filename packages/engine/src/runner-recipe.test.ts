@@ -248,9 +248,10 @@ describe("runRecipe — failure semantics", () => {
       }),
     ]);
 
-    await runRecipe(r, {}, providers, opts);
+    const result = await runRecipe(r, {}, providers, opts);
 
     expect(order).toEqual([]);
+    expect(result.status).toBe("partial");
   });
 
   it("records failed step in steps array", async () => {

@@ -8,6 +8,7 @@ import type { StepResult } from "../../../types.js";
 vi.mock("fs");
 vi.mock("../prompts.js", () => ({
   buildImplementPrompt: vi.fn().mockReturnValue("mock implement prompt"),
+  issueTrackerLabel: vi.fn().mockReturnValue("Issue Tracker"),
 }));
 
 describe("implementFix", () => {

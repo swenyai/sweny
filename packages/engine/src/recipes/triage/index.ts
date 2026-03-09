@@ -29,11 +29,12 @@ export const triageRecipe: Recipe<TriageConfig> = {
       on: {
         skip: "notify", // dry-run, skip, or +1 all go straight to report
         implement: "create-issue",
+        failed: "notify",
       },
     },
-    { id: "create-issue", phase: "act", run: createIssue },
+    { id: "create-issue", phase: "act", run: createIssue, on: { failed: "notify" } },
 
-    // Cross-repo check routes to implement-fix or to notify
+    // Cross-repo check routes to implement-fix or to notify (failed also goes to notify)
     {
       id: "cross-repo-check",
       phase: "act",
@@ -41,10 +42,11 @@ export const triageRecipe: Recipe<TriageConfig> = {
       on: {
         local: "implement-fix",
         dispatched: "notify",
+        failed: "notify",
       },
     },
-    { id: "implement-fix", phase: "act", run: implementFix },
-    { id: "create-pr", phase: "act", run: createPr },
+    { id: "implement-fix", phase: "act", run: implementFix, on: { failed: "notify" } },
+    { id: "create-pr", phase: "act", run: createPr, on: { failed: "notify" } },
 
     // Report phase — notify stakeholders
     { id: "notify", phase: "report", run: sendNotification },

@@ -25,8 +25,8 @@ export const implementRecipe: Recipe<ImplementConfig> = {
     // Named "create-issue" so that implementFix and createPr find it via getStepData
     { id: "create-issue", phase: "learn", run: fetchIssue, critical: true },
 
-    { id: "implement-fix", phase: "act", run: implementFix },
-    { id: "create-pr", phase: "act", run: createPr },
+    { id: "implement-fix", phase: "act", run: implementFix, on: { failed: "notify" } },
+    { id: "create-pr", phase: "act", run: createPr, on: { failed: "notify" } },
     { id: "notify", phase: "report", run: sendNotification },
   ],
 };
