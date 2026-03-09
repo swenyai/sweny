@@ -27,7 +27,26 @@ if [[ -z "$IMAGE" || -z "$COMMIT" ]]; then
 fi
 
 echo "Fetching manifest for: $IMAGE"
-DIGEST=$(docker manifest inspect "$IMAGE" 2>/dev/null | jq -r '.config.digest // empty')
+# Use `.manifests[0].digest` for multi-arch manifests (OCI index), falling back
+# to `.schemaVersion` check for single-arch manifests.
+# `.config.digest` is the image config hash — not the same as the image manifest
+# digest that registries expose as the canonical "image digest".
+MANIFEST=$(docker manifest inspect "$IMAGE" 2>/dev/null)
+DIGEST=$(echo "$MANIFEST" | jq -r '
+  if .manifests then
+    # OCI image index (multi-arch): use the amd64 manifest digest
+    (.manifests[] | select(.platform.architecture == "amd64" and .platform.os == "linux") | .digest) // .manifests[0].digest
+  else
+    # Single-arch manifest: the digest comes from the registry — use docker inspect
+    empty
+  end
+')
+
+if [[ -z "$DIGEST" ]]; then
+  # Single-arch image: pull and inspect to get the repo digest
+  docker pull --quiet "$IMAGE" >/dev/null 2>&1 || true
+  DIGEST=$(docker inspect "$IMAGE" --format='{{index .RepoDigests 0}}' 2>/dev/null | cut -d@ -f2)
+fi
 
 if [[ -z "$DIGEST" ]]; then
   echo "Error: could not retrieve manifest for $IMAGE"
@@ -49,5 +68,8 @@ echo ""
 echo "To verify locally, rebuild from source and compare digests:"
 echo "  git checkout $COMMIT"
 echo "  cd packages/worker"
-echo "  docker buildx build --platform linux/amd64 -t swenyai/worker:local ."
+echo "  docker buildx build --platform linux/amd64 --load -t swenyai/worker:local ."
 echo "  docker inspect swenyai/worker:local --format='{{index .RepoDigests 0}}'"
+echo "  # Note: for an exact manifest digest match, push to a registry first:"
+echo "  docker buildx build --platform linux/amd64 --push -t <registry>/worker:local ."
+echo "  docker manifest inspect <registry>/worker:local | jq -r '.manifests[0].digest'"
