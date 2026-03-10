@@ -22,7 +22,7 @@ export function mockAgent(config?: MockCodingAgentConfig): CodingAgent {
     async run(opts: CodingAgentRunOptions): Promise<number> {
       await config?.onRun?.(opts);
       if (config?.onEvent) {
-        await Promise.resolve(config.onEvent({ type: "text", text: "mock agent run" })).catch(() => {});
+        await config.onEvent({ type: "text", text: "mock agent run" });
       }
       return config?.exitCode ?? 0;
     },

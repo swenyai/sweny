@@ -39,7 +39,7 @@ function recipeStats(definition: RecipeDefinition) {
   };
 }
 
-function outboundTransitions(stateId: string, state: StateDefinition, definition: RecipeDefinition) {
+function outboundTransitions(state: StateDefinition) {
   const transitions: { label: string; target: string }[] = [];
   if (state.on) {
     for (const [outcome, target] of Object.entries(state.on)) {
@@ -49,7 +49,6 @@ function outboundTransitions(stateId: string, state: StateDefinition, definition
   if (state.next && !transitions.some((t) => t.target === state.next)) {
     transitions.push({ label: "→", target: state.next });
   }
-  // Check who points to this state
   return transitions;
 }
 
@@ -84,12 +83,11 @@ interface NodeDetailProps {
   stateId: string;
   state: StateDefinition;
   isInitial: boolean;
-  definition: RecipeDefinition;
   onClose: () => void;
 }
 
-function NodeDetail({ stateId, state, isInitial, definition, onClose }: NodeDetailProps) {
-  const transitions = outboundTransitions(stateId, state, definition);
+function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
+  const transitions = outboundTransitions(state);
 
   return (
     <div
@@ -308,6 +306,12 @@ function RecipeOverview({ recipe }: { recipe: (typeof RECIPES)[number] }) {
   );
 }
 
+// ── Layout constants ──────────────────────────────────────────────────────────
+
+const GRAPH_HEIGHT = 520;
+const PANEL_WIDTH_DETAIL = 240;
+const PANEL_WIDTH_OVERVIEW = 200;
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function RecipeExplorer() {
@@ -381,13 +385,13 @@ export function RecipeExplorer() {
       </div>
 
       {/* Body: graph + side panel */}
-      <div style={{ display: "flex", height: 520 }}>
+      <div style={{ display: "flex", height: GRAPH_HEIGHT }}>
         {/* Graph */}
         <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
           <RecipeViewer
             key={recipe.id}
             definition={recipe.definition}
-            height={520}
+            height={GRAPH_HEIGHT}
             onNodeClick={(id) => setSelectedStateId((prev) => (prev === id ? null : id))}
           />
         </div>
@@ -395,7 +399,7 @@ export function RecipeExplorer() {
         {/* Side panel */}
         <div
           style={{
-            width: selectedState ? 240 : 200,
+            width: selectedState ? PANEL_WIDTH_DETAIL : PANEL_WIDTH_OVERVIEW,
             flexShrink: 0,
             borderLeft: "1px solid rgba(255,255,255,0.08)",
             overflowY: "auto",
@@ -407,7 +411,6 @@ export function RecipeExplorer() {
               stateId={selectedStateId!}
               state={selectedState}
               isInitial={selectedStateId === recipe.definition.initial}
-              definition={recipe.definition}
               onClose={() => setSelectedStateId(null)}
             />
           ) : (

@@ -16,6 +16,9 @@
   "files": [
     "dist-lib"
   ],
+  "sideEffects": [
+    "dist-lib/style.css"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

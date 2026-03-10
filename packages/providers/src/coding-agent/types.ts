@@ -2,6 +2,8 @@ export interface CodingAgentRunOptions {
   prompt: string;
   maxTurns: number;
   env?: Record<string, string>;
+  /** Kill the agent process after this many milliseconds. No limit if omitted. */
+  timeoutMs?: number;
 }
 
 export interface CodingAgent {

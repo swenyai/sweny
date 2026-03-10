@@ -51,10 +51,14 @@ function findBaseCommit() {
     const log = run(`git log --oneline --grep="^chore: release packages" --max-count=1 --format="%H"`);
     if (log) return log;
   } catch {
-    /* no match */
+    /* no match — fall through to first-commit fallback */
   }
-  // Fall back to the first commit
-  return run("git rev-list --max-parents=0 HEAD");
+  // Fall back to the first commit in the repository
+  try {
+    return run("git rev-list --max-parents=0 HEAD");
+  } catch (err) {
+    throw new Error(`Could not determine base commit: ${err.message}`);
+  }
 }
 
 // ── 2. Get commits since base ────────────────────────────────────────────────
@@ -80,8 +84,10 @@ function getCommitsSince(base) {
 function getChangedPackages(commit) {
   let files;
   try {
-    files = run(`git diff-tree --no-commit-id -r --name-only ${commit.hash}`).split("\n");
-  } catch {
+    const output = run(`git diff-tree --no-commit-id -r --name-only ${commit.hash}`);
+    files = output ? output.split("\n") : [];
+  } catch (err) {
+    console.warn(`Warning: could not diff commit ${commit.hash}: ${err.message}`);
     return [];
   }
 

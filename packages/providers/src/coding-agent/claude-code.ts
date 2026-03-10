@@ -1,17 +1,28 @@
-import { spawn } from "node:child_process";
 import type { CodingAgent, CodingAgentRunOptions, AgentEvent, AgentEventHandler } from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
-import { execCommand, isCliInstalled } from "./shared.js";
+import { execCommand, spawnLines, isCliInstalled } from "./shared.js";
 
 export interface ClaudeCodeConfig {
   cliFlags?: string[];
   logger?: Logger;
-  /** Suppress agent stdout; forward stderr through logger */
+  /**
+   * Suppress agent stdout; forward stderr through logger.
+   * Ignored when onEvent is set (event mode always captures stdout).
+   */
   quiet?: boolean;
+  /**
+   * Receive structured events during run(). When provided, Claude is invoked
+   * with `--output-format stream-json` and each event is parsed and forwarded.
+   * Omit to use the default passthrough (stdout → terminal).
+   */
   onEvent?: AgentEventHandler;
 }
 
+/**
+ * Maps a raw Claude stream-json event object to an AgentEvent.
+ * Returns null for event types we do not expose (e.g. system, result).
+ */
 function mapClaudeEvent(raw: unknown): AgentEvent | null {
   if (typeof raw !== "object" || raw === null) return null;
   const r = raw as Record<string, unknown>;
@@ -90,37 +101,27 @@ export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
 
       if (onEvent) {
         args.push("--output-format", "stream-json");
-        return new Promise((resolve, reject) => {
-          const child = spawn("claude", args, {
-            env: { ...process.env, ...opts.env } as NodeJS.ProcessEnv,
-            stdio: ["ignore", "pipe", "pipe"],
-          });
-          let buf = "";
-          child.stdout?.on("data", (chunk: Buffer) => {
-            buf += chunk.toString();
-            const lines = buf.split("\n");
-            buf = lines.pop() ?? "";
-            for (const line of lines) {
-              if (!line.trim()) continue;
-              try {
-                const evt = JSON.parse(line);
-                const mapped = mapClaudeEvent(evt);
-                if (mapped) Promise.resolve(onEvent(mapped)).catch(() => {});
-              } catch {
-                /* skip malformed lines */
-              }
+        return spawnLines("claude", args, {
+          env: opts.env,
+          timeoutMs: opts.timeoutMs,
+          logger: log,
+          onLine(line) {
+            try {
+              const evt = JSON.parse(line);
+              const mapped = mapClaudeEvent(evt);
+              if (mapped) return onEvent(mapped);
+            } catch {
+              /* skip malformed JSON lines */
             }
-          });
-          child.on("error", reject);
-          child.on("close", (code) => resolve(code ?? 0));
+          },
         });
       }
 
-      // No onEvent — use shared execCommand (stdio: inherit)
       return execCommand("claude", args, {
         env: { ...process.env, ...opts.env } as Record<string, string>,
         ignoreReturnCode: true,
         quiet,
+        timeoutMs: opts.timeoutMs,
         onStderr: quiet ? (line) => log.debug(line) : undefined,
       });
     },

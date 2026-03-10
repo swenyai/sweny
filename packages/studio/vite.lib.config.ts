@@ -26,6 +26,7 @@ export default defineConfig({
   build: {
     outDir: "dist-lib",
     emptyOutDir: true,
+    sourcemap: true,
     lib: {
       entry: {
         viewer: resolve(__dirname, "src/lib-viewer.ts"),
