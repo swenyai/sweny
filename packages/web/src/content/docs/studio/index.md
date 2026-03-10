@@ -5,10 +5,7 @@ description: Visual editor and execution monitor for SWEny recipes — design, s
 
 Studio is the visual editor and execution monitor for SWEny recipes. It renders any `RecipeDefinition` as an interactive DAG — nodes are colour-coded by phase, edges show transition outcomes, and execution state is overlaid in real time.
 
-```bash
-# Run locally from the monorepo
-npm run dev --workspace=packages/studio
-```
+Studio is available as part of [SWEny Cloud](https://cloud.sweny.ai). See the [Live Recipe Explorer](/studio/explorer/) to interact with the built-in recipes directly in these docs.
 
 ## Three modes
 
