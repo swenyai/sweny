@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "packages/web/**"
+      - "packages/studio/src/**"
+      - "packages/studio/package.json"
+      - "packages/studio/vite.lib.config.ts"
       - ".github/workflows/deploy-web.yml"
   workflow_dispatch:
 
@@ -29,6 +32,9 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - name: Build studio library
+        run: npm run build:lib --workspace=packages/studio
 
       - name: Build site
         run: npm run build --workspace=packages/web
