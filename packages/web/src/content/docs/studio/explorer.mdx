@@ -1,0 +1,62 @@
+---
+title: Live Recipe Explorer
+description: Interactive DAG viewer — explore the built-in Triage and Implement recipes without installing anything.
+---
+
+import { RecipeExplorer } from "../../../components/RecipeExplorer.tsx";
+
+Explore SWEny's built-in recipes as interactive DAGs. Nodes are colour-coded by phase — **blue** = learn, **amber** = act, **green** = report. Edges show transition outcomes.
+
+<RecipeExplorer client:only="react" />
+
+## Reading the graph
+
+Each node is a **state** — a single unit of work with a declared phase, optional `critical` flag, and outbound transitions.
+
+Edges represent transitions. An edge labelled `→` is an unconditional default (`next:`). Labelled edges (e.g. `implement`, `escalate`, `skip`) are outcome-based routes defined in `on:`.
+
+The engine follows this priority order at each step:
+
+1. `data.outcome` — explicit outcome string returned by the implementation
+2. `data.status` — `success`, `skipped`, or `failed`
+3. `on["*"]` — wildcard fallback
+4. `next` — default unconditional successor
+5. Undefined → recipe terminates
+
+## Triage recipe
+
+The Triage recipe automates the SRE on-call loop:
+
+| State                | Phase  | What it does                                     |
+| -------------------- | ------ | ------------------------------------------------ |
+| `verify-access`      | learn  | Check connectivity to all providers              |
+| `query-logs`         | learn  | Fetch errors from the observability provider     |
+| `deduplicate-issues` | learn  | Filter out issues already tracked                |
+| `investigate`        | act    | Claude AI traces root cause through the codebase |
+| `create-issue`       | act    | File a ticket with root cause analysis           |
+| `create-pr`          | act    | Branch, implement fix, open PR                   |
+| `notify`             | report | Post summary to Slack / Teams / Discord / email  |
+
+The `investigate` state emits an outcome of `implement`, `escalate`, or `skip` which routes to the appropriate next state.
+
+## Implement recipe
+
+The Implement recipe takes an existing issue identifier and produces a fix PR:
+
+| State           | Phase  | What it does                                  |
+| --------------- | ------ | --------------------------------------------- |
+| `verify-access` | learn  | Check connectivity                            |
+| `create-issue`  | learn  | Fetch issue details from the tracker          |
+| `implement-fix` | act    | Claude AI reads the issue and writes the fix  |
+| `create-pr`     | act    | Push branch and open PR (optional auto-merge) |
+| `notify`        | report | Post result to notification channel           |
+
+## Open in Studio
+
+To edit these recipes or build your own, run Studio locally:
+
+```bash
+npm run dev --workspace=packages/studio
+```
+
+See [Recipe Authoring](/studio/recipe-authoring/) for the full `createRecipe` / `runRecipe` API.

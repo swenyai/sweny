@@ -24,7 +24,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "dist/lib",
+    outDir: "dist-lib",
     emptyOutDir: true,
     lib: {
       entry: {

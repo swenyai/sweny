@@ -1,10 +1,12 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import react from "@astrojs/react";
 
 export default defineConfig({
   site: "https://docs.sweny.ai",
   integrations: [
+    react(),
     starlight({
       title: "SWEny",
       description: "Autonomous engineering tools powered by Claude AI",
@@ -50,6 +52,14 @@ export default defineConfig({
             { label: "Built-in Plugins", slug: "agent/built-in-plugins" },
             { label: "Model Architecture", slug: "agent/model-architecture" },
             { label: "Configuration", slug: "agent/configuration" },
+          ],
+        },
+        {
+          label: "Studio",
+          items: [
+            { label: "Overview", slug: "studio" },
+            { label: "Recipe Authoring", slug: "studio/recipe-authoring" },
+            { label: "Live Recipe Explorer", slug: "studio/explorer" },
           ],
         },
         {
