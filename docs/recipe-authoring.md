@@ -154,7 +154,7 @@ The reserved target `"end"` stops the recipe successfully from any `on:` entry.
 
 ```ts
 // packages/engine/src/recipes/my-recipe/index.ts
-import { createRecipe } from "../../runner-recipe.js";
+import { createRecipe } from "@sweny-ai/engine";
 import { myRecipeDefinition } from "./definition.js";
 import { verifySetup } from "./steps/verify-setup.js";
 import { doWork } from "../../nodes/do-work.js";

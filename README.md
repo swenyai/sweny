@@ -549,13 +549,7 @@ npm run dev --workspace=packages/studio
 - **Simulate** — run the recipe locally in the browser using mock providers. Watch states execute with live status rings.
 - **Live** — connect to a running engine instance over WebSocket or SSE and stream execution events in real time.
 
-Studio uses the same `RecipeDefinition` type the engine executes, so what you see is what runs. The `RecipeViewer` component is also embeddable in dashboards and documentation:
-
-```ts
-import { RecipeViewer } from "@sweny-ai/studio/viewer";
-
-<RecipeViewer definition={myDefinition} executionState={executionState} height={500} />
-```
+Studio uses the same `RecipeDefinition` type the engine executes, so what you see is what runs. The `RecipeViewer` component is embeddable in dashboards and documentation via `@sweny-ai/studio/viewer` — see [`docs/studio.md`](docs/studio.md#embedding-the-viewer).
 
 See [`docs/studio.md`](docs/studio.md) for the full guide.
 

@@ -111,11 +111,13 @@ Once connected, execution events from the engine are forwarded to Studio via the
 The engine emits `ExecutionEvent` values over the transport:
 
 ```ts
+type WorkflowPhase = "learn" | "act" | "report";
+
 type ExecutionEvent =
   | { type: "recipe:start";  recipeId: string; recipeName: string; timestamp: number }
-  | { type: "state:enter";   stateId: string;  phase: string;  timestamp: number }
-  | { type: "state:exit";    stateId: string;  phase: string;  result: StepResult; cached: boolean; timestamp: number }
-  | { type: "recipe:end";    status: string;   duration: number; timestamp: number };
+  | { type: "state:enter";   stateId: string;  phase: WorkflowPhase; timestamp: number }
+  | { type: "state:exit";    stateId: string;  phase: WorkflowPhase; result: StepResult; cached: boolean; timestamp: number }
+  | { type: "recipe:end";    status: "completed" | "failed" | "partial"; duration: number; timestamp: number };
 ```
 
 Wire your engine to forward these events using `CallbackObserver`:
@@ -164,17 +166,26 @@ Edges show the outcome key that triggers them. A plain `→` arrow with no label
 
 ## Embedding the viewer
 
-Studio exports a read-only `RecipeViewer` component for embedding in dashboards or documentation sites.
+`@sweny-ai/studio` ships two library entry points built via `npm run build:lib`:
+
+| Entry | Import path | Contents |
+|-------|-------------|----------|
+| **viewer** | `@sweny-ai/studio/viewer` | `RecipeViewer` component — read-only graph display |
+| **editor** | `@sweny-ai/studio/editor` | `StandaloneViewer`, `useEditorStore`, `EditorState`, `Selection` — for full editing integration |
+
+Import the CSS once in your app (`dist/lib/style.css`) to get the ReactFlow base styles.
+
+### `RecipeViewer`
 
 ```ts
-// Install from the monorepo or your own registry
 import { RecipeViewer } from "@sweny-ai/studio/viewer";
+import "@sweny-ai/studio/dist/lib/style.css";
 import type { RecipeDefinition } from "@sweny-ai/engine";
-import type { ExecutionState } from "@sweny-ai/studio/viewer";
 
-const executionState: ExecutionState = {
-  "verify-access": { status: "success" },
-  "investigate":   { status: "running" },
+// executionState maps state ids to their current execution status
+const executionState: Record<string, "current" | "success" | "failed" | "skipped"> = {
+  "verify-access": "success",
+  "investigate":   "current",  // currently executing
 };
 
 <RecipeViewer
@@ -184,7 +195,25 @@ const executionState: ExecutionState = {
 />
 ```
 
-`RecipeViewer` has no external dependencies beyond React and ReactFlow — safe to embed in any React app.
+`RecipeViewer` accepts:
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `definition` | `RecipeDefinition` | required | Recipe to display |
+| `executionState` | `Record<string, "current" \| "success" \| "failed" \| "skipped">` | `{}` | Live execution highlights |
+| `height` | `string \| number` | `"100%"` | Canvas height |
+
+### `useEditorStore` (advanced)
+
+For embedding the full editor store in a custom UI:
+
+```ts
+import { useEditorStore } from "@sweny-ai/studio/editor";
+
+const { definition, addState, deleteState, applyEvent } = useEditorStore();
+```
+
+**Peer dependencies:** `react`, `react-dom`, `@sweny-ai/engine`. Everything else (`@xyflow/react`, `elkjs`, `zustand`, `immer`, `zundo`) is bundled.
 
 ---
 

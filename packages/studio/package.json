@@ -1,20 +1,36 @@
 {
   "name": "@sweny-ai/studio",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
+  "exports": {
+    "./viewer": {
+      "import": "./dist/lib/viewer.js",
+      "types": "./dist/lib/types/lib-viewer.d.ts"
+    },
+    "./editor": {
+      "import": "./dist/lib/editor.js",
+      "types": "./dist/lib/types/lib-editor.d.ts"
+    }
+  },
+  "files": [
+    "dist/lib"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
+  "peerDependencies": {
     "@sweny-ai/engine": "*",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "dependencies": {
     "@xyflow/react": "^12.0.0",
     "elkjs": "^0.9.0",
     "immer": "^11.1.4",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
+    "zustand": "^4.3.0",
     "zundo": "^2.3.0"
   },
   "devDependencies": {
