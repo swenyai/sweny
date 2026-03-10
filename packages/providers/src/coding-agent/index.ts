@@ -1,4 +1,4 @@
-export type { CodingAgent, CodingAgentRunOptions } from "./types.js";
+export type { CodingAgent, CodingAgentRunOptions, AgentEvent, AgentEventHandler } from "./types.js";
 export type { ClaudeCodeConfig } from "./claude-code.js";
 export type { OpenAICodexConfig } from "./openai-codex.js";
 export type { GoogleGeminiConfig } from "./google-gemini.js";

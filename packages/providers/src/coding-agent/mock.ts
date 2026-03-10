@@ -1,4 +1,4 @@
-import type { CodingAgent, CodingAgentRunOptions } from "./types.js";
+import type { CodingAgent, CodingAgentRunOptions, AgentEventHandler } from "./types.js";
 
 export interface MockCodingAgentConfig {
   /**
@@ -8,6 +8,7 @@ export interface MockCodingAgentConfig {
   onRun?: (opts: CodingAgentRunOptions) => void | Promise<void>;
   /** Exit code returned from run(). Defaults to 0 (success). */
   exitCode?: number;
+  onEvent?: AgentEventHandler;
 }
 
 /**
@@ -20,6 +21,9 @@ export function mockAgent(config?: MockCodingAgentConfig): CodingAgent {
 
     async run(opts: CodingAgentRunOptions): Promise<number> {
       await config?.onRun?.(opts);
+      if (config?.onEvent) {
+        await Promise.resolve(config.onEvent({ type: "text", text: "mock agent run" })).catch(() => {});
+      }
       return config?.exitCode ?? 0;
     },
   };
