@@ -1,0 +1,55 @@
+name: Auto Changeset
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/engine/src/**"
+      - "packages/studio/src/**"
+      - "packages/cli/src/**"
+      - "packages/providers/src/**"
+      - "packages/agent/src/**"
+
+concurrency:
+  group: auto-changeset
+  cancel-in-progress: false
+
+jobs:
+  auto-changeset:
+    name: Generate missing changeset
+    runs-on: ubuntu-latest
+    # Skip if this commit is itself a changeset commit or a release commit
+    if: |
+      !startsWith(github.event.head_commit.message, 'chore: release packages') &&
+      !startsWith(github.event.head_commit.message, 'chore: add changesets') &&
+      !startsWith(github.event.head_commit.message, 'chore(changeset)')
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Run auto-changeset script
+        id: changeset
+        run: |
+          node scripts/auto-changeset.mjs 2>&1 | tee /tmp/changeset-output.txt
+          if grep -q "^Created:" /tmp/changeset-output.txt; then
+            echo "created=true" >> $GITHUB_OUTPUT
+            echo "file=$(grep '^Created:' /tmp/changeset-output.txt | sed 's/Created: //')" >> $GITHUB_OUTPUT
+          else
+            echo "created=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit changeset
+        if: steps.changeset.outputs.created == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .changeset/
+          git commit -m "chore(changeset): auto-generate changeset for ${{ github.sha }}"
+          git push
