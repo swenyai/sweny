@@ -126,7 +126,16 @@ export function RecipeViewer({
   }
 
   return (
-    <div style={{ width: "100%", height, position: "relative" }}>
+    <div
+      style={{
+        width: "100%",
+        height,
+        position: "relative",
+        background: "#0f172a",
+        borderRadius: 8,
+        overflow: "hidden",
+      }}
+    >
       {loading && (
         <div
           style={{
@@ -136,7 +145,7 @@ export function RecipeViewer({
             alignItems: "center",
             justifyContent: "center",
             zIndex: 10,
-            background: "rgba(0,0,0,0.15)",
+            background: "rgba(0,0,0,0.35)",
             borderRadius: "inherit",
           }}
         >
@@ -144,7 +153,7 @@ export function RecipeViewer({
             style={{
               width: 32,
               height: 32,
-              border: "3px solid rgba(99,102,241,0.3)",
+              border: "3px solid rgba(99,102,241,0.25)",
               borderTopColor: "#6366f1",
               borderRadius: "50%",
               animation: "spin 0.7s linear infinite",
@@ -163,17 +172,20 @@ export function RecipeViewer({
         elementsSelectable={true}
         onNodeClick={onNodeClick ? handleNodeClick : undefined}
         fitView={false}
+        colorMode="dark"
       >
         <AutoFitView nodeCount={nodes.length} />
-        <Background />
-        <Controls showInteractive={false} />
+        <Background color="#1e293b" gap={20} />
+        <Controls showInteractive={false} style={{ background: "#1e293b", border: "1px solid #334155" }} />
         <MiniMap
+          style={{ background: "#0f172a", border: "1px solid #334155" }}
+          maskColor="rgba(15,23,42,0.75)"
           nodeColor={(node) => {
             const d = node.data as StateNodeData;
-            if (d?.state?.phase === "learn") return "#bfdbfe";
-            if (d?.state?.phase === "act") return "#fde68a";
-            if (d?.state?.phase === "report") return "#bbf7d0";
-            return "#e5e7eb";
+            if (d?.state?.phase === "learn") return "#3b82f6";
+            if (d?.state?.phase === "act") return "#f59e0b";
+            if (d?.state?.phase === "report") return "#10b981";
+            return "#475569";
           }}
         />
       </ReactFlow>

@@ -1,5 +1,6 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import type { StateDefinition, WorkflowPhase } from "@sweny-ai/engine";
+import type { CSSProperties } from "react";
 
 export type NodeExecStatus = "current" | "success" | "failed" | "skipped" | "pending";
 
@@ -14,71 +15,100 @@ export type StateNodeData = {
 // In @xyflow/react v12, custom node types use: type MyNode = Node<Data, "typeName">
 export type StateNodeType = Node<StateNodeData, "stateNode">;
 
-const phaseColors: Record<WorkflowPhase, string> = {
-  learn: "bg-blue-100 text-blue-800",
-  act: "bg-amber-100 text-amber-800",
-  report: "bg-green-100 text-green-800",
+const phaseStyle: Record<WorkflowPhase, { border: string; badgeBg: string; badgeText: string }> = {
+  learn: { border: "#3b82f6", badgeBg: "rgba(59,130,246,0.18)", badgeText: "#93c5fd" },
+  act: { border: "#f59e0b", badgeBg: "rgba(245,158,11,0.18)", badgeText: "#fcd34d" },
+  report: { border: "#10b981", badgeBg: "rgba(16,185,129,0.18)", badgeText: "#6ee7b7" },
 };
 
-const phaseBorderColors: Record<WorkflowPhase, string> = {
-  learn: "border-blue-300",
-  act: "border-amber-300",
-  report: "border-green-300",
+const execStyle: Record<NodeExecStatus, { ring: string; bg: string }> = {
+  current: { ring: "0 0 0 2.5px #3b82f6, 0 0 14px rgba(59,130,246,0.55)", bg: "rgba(59,130,246,0.10)" },
+  success: { ring: "0 0 0 2px #22c55e", bg: "rgba(34,197,94,0.07)" },
+  failed: { ring: "0 0 0 2px #ef4444", bg: "rgba(239,68,68,0.09)" },
+  skipped: { ring: "0 0 0 2px #6b7280", bg: "rgba(107,114,128,0.06)" },
+  pending: { ring: "none", bg: "#1e293b" },
 };
 
-const execRing: Record<NodeExecStatus, string> = {
-  current: "ring-2 ring-blue-500 ring-offset-1 animate-pulse",
-  success: "ring-2 ring-green-400",
-  failed: "ring-2 ring-red-500",
-  skipped: "ring-2 ring-gray-400",
-  pending: "",
-};
-
-const execBg: Record<NodeExecStatus, string> = {
-  current: "bg-blue-50",
-  success: "bg-green-50",
-  failed: "bg-red-50",
-  skipped: "bg-gray-50",
-  pending: "bg-white",
+const badgeBase: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  borderRadius: 4,
+  padding: "1px 5px",
+  lineHeight: 1.6,
+  display: "inline-block",
 };
 
 export function StateNode({ data }: NodeProps<StateNodeType>) {
   const { stateId, state, isInitial, isTerminal, execStatus } = data;
 
-  const borderStyle = isInitial ? "border-4 border-double" : isTerminal ? "border-2 border-dashed" : "border-2";
+  const phase = phaseStyle[state.phase];
+  const exec = execStyle[execStatus];
+  const borderStyle = isInitial ? "3px double" : isTerminal ? "2px dashed" : "2px solid";
 
-  const phaseBorder = phaseBorderColors[state.phase];
-  const ring = execRing[execStatus];
-  const bg = execBg[execStatus];
+  const containerStyle: CSSProperties = {
+    borderRadius: 8,
+    padding: "10px 12px",
+    minWidth: 180,
+    maxWidth: 220,
+    border: `${borderStyle} ${phase.border}`,
+    background: exec.bg,
+    boxShadow: `0 4px 14px rgba(0,0,0,0.45), ${exec.ring}`,
+    fontFamily: "inherit",
+  };
 
   return (
-    <div className={`rounded-lg shadow-md p-3 min-w-[180px] max-w-[220px] ${borderStyle} ${phaseBorder} ${ring} ${bg}`}>
+    <div style={containerStyle}>
       {/* Target handle (left) */}
       <Handle type="target" position={Position.Left} />
 
       {/* Header row: state id + critical badge */}
-      <div className="flex items-center gap-1 flex-wrap mb-1">
-        <span className="font-bold text-gray-800 text-sm truncate flex-1">{stateId}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginBottom: 5 }}>
+        <span
+          style={{
+            fontWeight: 700,
+            color: "#e2e8f0",
+            fontSize: 13,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flex: 1,
+          }}
+        >
+          {stateId}
+        </span>
         {state.critical && (
-          <span className="text-xs font-semibold bg-red-100 text-red-700 rounded px-1 py-0.5">critical</span>
+          <span style={{ ...badgeBase, background: "rgba(239,68,68,0.18)", color: "#fca5a5" }}>critical</span>
         )}
       </div>
 
       {/* Phase badge */}
-      <div className="mb-1">
-        <span className={`text-xs font-medium rounded px-1.5 py-0.5 ${phaseColors[state.phase]}`}>{state.phase}</span>
+      <div style={{ marginBottom: state.description ? 5 : 0 }}>
+        <span style={{ ...badgeBase, background: phase.badgeBg, color: phase.badgeText }}>{state.phase}</span>
       </div>
 
       {/* Description */}
       {state.description && (
-        <p className="text-xs text-gray-500 mt-1 leading-tight line-clamp-2">{state.description}</p>
+        <p
+          style={{
+            fontSize: 11,
+            color: "#94a3b8",
+            margin: "4px 0 0",
+            lineHeight: 1.45,
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
+          {state.description}
+        </p>
       )}
 
       {/* Source handle (right) */}
       <Handle
         type="source"
         position={Position.Right}
-        className="w-3 h-3 bg-blue-500 border-2 border-white opacity-0 hover:opacity-100 transition-opacity"
+        style={{ width: 10, height: 10, background: "#3b82f6", border: "2px solid #1e293b", opacity: 0.7 }}
       />
     </div>
   );

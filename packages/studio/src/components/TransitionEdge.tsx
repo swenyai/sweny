@@ -1,4 +1,5 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps } from "@xyflow/react";
+import type { CSSProperties } from "react";
 
 export type TransitionEdgeData = {
   label: string;
@@ -8,16 +9,20 @@ export type TransitionEdgeData = {
 // In @xyflow/react v12, custom edge types use: type MyEdge = Edge<Data, "typeName">
 export type TransitionEdgeType = Edge<TransitionEdgeData, "transitionEdge">;
 
-function getLabelColor(label: string): string {
-  if (label === "failed") return "text-red-600 bg-red-50 border-red-200";
-  if (label === "→") return "text-gray-400 bg-gray-50 border-gray-200";
-  return "text-gray-700 bg-white border-gray-300";
+function getLabelStyle(label: string, isError: boolean): CSSProperties {
+  if (isError || label === "failed") {
+    return { color: "#fca5a5", background: "rgba(239,68,68,0.18)", border: "1px solid rgba(239,68,68,0.45)" };
+  }
+  if (label === "→") {
+    return { color: "#64748b", background: "rgba(100,116,139,0.12)", border: "1px solid rgba(100,116,139,0.3)" };
+  }
+  return { color: "#94a3b8", background: "rgba(148,163,184,0.12)", border: "1px solid rgba(148,163,184,0.3)" };
 }
 
 function getEdgeColor(label: string): string {
-  if (label === "failed") return "#dc2626"; // red-600
-  if (label === "→") return "#9ca3af"; // gray-400
-  return "#6b7280"; // gray-500
+  if (label === "failed") return "#ef4444";
+  if (label === "→") return "#475569"; // slate-600
+  return "#64748b"; // slate-500
 }
 
 export function TransitionEdge({
@@ -44,7 +49,7 @@ export function TransitionEdge({
   });
 
   const strokeColor = isError ? "#ef4444" : getEdgeColor(label);
-  const labelClasses = isError ? "text-red-700 bg-red-100 border-red-300" : getLabelColor(label);
+  const labelStyle = getLabelStyle(label, isError);
   const displayLabel = isError ? `⚠ ${label}` : label;
 
   return (
@@ -69,7 +74,17 @@ export function TransitionEdge({
             }}
             className="nodrag nopan"
           >
-            <span className={`text-xs font-medium px-1.5 py-0.5 rounded border ${labelClasses}`}>{displayLabel}</span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 500,
+                padding: "1px 6px",
+                borderRadius: 4,
+                ...labelStyle,
+              }}
+            >
+              {displayLabel}
+            </span>
           </div>
         </EdgeLabelRenderer>
       )}
