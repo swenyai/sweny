@@ -1,5 +1,14 @@
 # @sweny-ai/studio
 
+## 1.0.1
+
+### Patch Changes
+
+- 9940c68: Library build: add sideEffects declaration and source maps.
+  - `"sideEffects": ["dist-lib/style.css"]` prevents bundlers from incorrectly
+    tree-shaking the CSS import
+  - `sourcemap: true` in vite.lib.config.ts makes the bundled output debuggable
+
 ## 1.0.0
 
 ### Minor Changes
