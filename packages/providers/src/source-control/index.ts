@@ -1,4 +1,6 @@
 export type {
+  GitProvider,
+  RepoProvider,
   SourceControlProvider,
   PullRequest,
   PrCreateOptions,

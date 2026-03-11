@@ -48,14 +48,19 @@ export interface PrListOptions {
   limit?: number;
 }
 
-/** Provider interface for source control operations (branches, PRs, workflows). */
-export interface SourceControlProvider {
-  /**
-   * Verify that the provider credentials and connection are valid.
-   * @returns Resolves if access is valid; rejects otherwise.
-   */
-  verifyAccess(): Promise<void>;
+// ---------------------------------------------------------------------------
+// Split interfaces
+// ---------------------------------------------------------------------------
 
+/**
+ * Local git operations — requires a working directory with git initialized.
+ *
+ * These methods run shell commands (`git checkout`, `git commit`, `git push`, etc.)
+ * in the current working directory. They cannot be satisfied by a remote process
+ * or MCP server. Any recipe step that needs these must run in a context with a
+ * local git checkout.
+ */
+export interface GitProvider {
   /** Configure the git bot identity (name and email) for automated commits. */
   configureBotIdentity(): Promise<void>;
 
@@ -66,7 +71,7 @@ export interface SourceControlProvider {
   createBranch(name: string): Promise<void>;
 
   /**
-   * Push a branch to the remote repository.
+   * Push a local branch to the remote repository.
    * @param name - Branch name to push.
    */
   pushBranch(name: string): Promise<void>;
@@ -84,7 +89,7 @@ export interface SourceControlProvider {
   hasNewCommits(): Promise<boolean>;
 
   /**
-   * Get the list of files that have been changed.
+   * Get the list of files changed relative to the base branch.
    * @returns Array of changed file paths.
    */
   getChangedFiles(): Promise<string[]>;
@@ -100,6 +105,20 @@ export interface SourceControlProvider {
    * @param message - Commit message.
    */
   stageAndCommit(message: string): Promise<void>;
+}
+
+/**
+ * Remote repository API operations — no local filesystem required.
+ *
+ * These methods call the hosting provider's HTTP API (GitHub, GitLab, etc.)
+ * and can be satisfied by a remote process, cloud worker, or MCP server.
+ */
+export interface RepoProvider {
+  /**
+   * Verify that the provider credentials and connection are valid.
+   * @returns Resolves if access is valid; rejects otherwise.
+   */
+  verifyAccess(): Promise<void>;
 
   /**
    * Create a new pull request.
@@ -117,7 +136,7 @@ export interface SourceControlProvider {
 
   /**
    * Find an existing pull request by a search term.
-   * @param searchTerm - Term to search for (e.g., branch name or title).
+   * @param searchTerm - Term to search for (e.g., branch name or title substring).
    * @returns The matching pull request, or null if not found.
    */
   findExistingPr(searchTerm: string): Promise<PullRequest | null>;
@@ -135,3 +154,15 @@ export interface SourceControlProvider {
    */
   enableAutoMerge?(prNumber: number): Promise<void>;
 }
+
+/**
+ * Combined interface for providers that handle both local git operations and
+ * remote API calls (GitHub, GitLab, file-based implementations).
+ *
+ * This is the standard registry key `"sourceControl"` — existing recipe steps
+ * that need both halves continue to use this type unchanged.
+ *
+ * Steps that only need remote API operations should type-hint to `RepoProvider`.
+ * Steps that only need local git operations should type-hint to `GitProvider`.
+ */
+export type SourceControlProvider = GitProvider & RepoProvider;
