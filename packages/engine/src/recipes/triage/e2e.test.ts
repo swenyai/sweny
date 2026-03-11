@@ -300,9 +300,9 @@ describe("triageRecipe E2E (file providers + mock agent)", () => {
     const result = await runRecipe(triageRecipe, config, providers, { logger: silentLogger });
 
     expect(result.status).toBe("failed");
-    expect(result.steps).toHaveLength(1);
-    expect(result.steps[0].name).toBe("verify-access");
-    expect(result.steps[0].result.status).toBe("failed");
+    expect(result.steps).toHaveLength(2);
+    expect(result.steps[1].name).toBe("verify-access");
+    expect(result.steps[1].result.status).toBe("failed");
   });
 });
 

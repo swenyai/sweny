@@ -341,8 +341,8 @@ describe("triage recipe integration", () => {
     expect(stepResult(result, "verify-access")?.result.status).toBe("failed");
     expect(stepResult(result, "verify-access")?.result.reason).toBe("Datadog API key invalid");
 
-    // No other steps should have run — critical failure aborts immediately
-    expect(result.steps).toHaveLength(1);
+    // Only dedup-check (succeeds) + verify-access (fails) should have run
+    expect(result.steps).toHaveLength(2);
 
     // Verify no other providers were called
     const issueTracker = getProvider<{ verifyAccess: ReturnType<typeof vi.fn> }>(providers, "issueTracker");
@@ -391,11 +391,12 @@ describe("triage recipe integration", () => {
     expect(result.status).toBe("completed");
 
     // All 9 steps should be present
-    expect(result.steps).toHaveLength(9);
+    expect(result.steps).toHaveLength(10);
 
     // Verify step order matches the recipe definition
     const stepNames = result.steps.map((s) => s.name);
     expect(stepNames).toEqual([
+      "dedup-check",
       "verify-access",
       "build-context",
       "investigate",

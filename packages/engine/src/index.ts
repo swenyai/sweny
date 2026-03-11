@@ -43,3 +43,8 @@ export type {
   TriageStepDataMap,
 } from "./recipes/triage/index.js";
 export { getStepData } from "./recipes/triage/index.js";
+
+// Idempotency utilities
+export type { DedupStore } from "./lib/dedup-store.js";
+export { inMemoryDedupStore } from "./lib/dedup-store.js";
+export { fingerprintEvent } from "./lib/fingerprint.js";

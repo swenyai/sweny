@@ -9,8 +9,11 @@ export const triageDefinition: RecipeDefinition = {
   version: "1.0.0",
   name: "triage",
   description: "Investigate production issues, implement fixes, and report results",
-  initial: "verify-access",
+  initial: "dedup-check",
   states: {
+    // Pre-flight — deterministic dedup before any provider/LLM calls
+    "dedup-check": { phase: "learn", next: "verify-access", on: { notify: "notify" } },
+
     // Learn phase — gather data
     "verify-access": { phase: "learn", critical: true, next: "build-context" },
     "build-context": { phase: "learn", critical: true, next: "investigate" },
