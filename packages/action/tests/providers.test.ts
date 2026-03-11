@@ -104,7 +104,7 @@ describe("createProviders", () => {
     expect(typeof issueTracker.addComment).toBe("function");
     // Capabilities
     expect(typeof (issueTracker as any).linkPr).toBe("function");
-    expect(typeof (issueTracker as any).listTriageHistory).toBe("function");
+    expect(typeof (issueTracker as any).searchIssuesByLabel).toBe("function");
   });
 
   it("creates providers with sentry observability", () => {
