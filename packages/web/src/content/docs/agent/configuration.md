@@ -3,7 +3,11 @@ title: Agent Configuration
 description: Configure the SWEny agent with sweny.config.ts and environment variables.
 ---
 
-The agent is configured through a `sweny.config.ts` file in your project root and environment variables. The config file defines plugins, storage, auth, and model settings. Environment variables provide secrets and runtime overrides.
+:::note[Self-hosted agent]
+This page is for teams running the **`@sweny-ai/agent`** package — a self-hosted Slack bot powered by SWEny. If you're using the **GitHub Action** (`swenyai/sweny@v1`) or the **CLI** (`@sweny-ai/cli`), you can skip this section.
+:::
+
+The agent is configured through a `sweny.config.ts` file in your project root and environment variables.
 
 ## sweny.config.ts
 
@@ -49,22 +53,9 @@ export default defineConfig({
 | `slack.signingSecret` | `string` | from env | Slack signing secret |
 | `rateLimit.maxPerMinute` | `number` | (unlimited) | Per-user rate limit per minute |
 | `rateLimit.maxPerHour` | `number` | (unlimited) | Per-user rate limit per hour |
-| `audit` | `AuditLogger` | console logger | Audit log backend |
 | `healthPort` | `number` | `3000` | Health check HTTP port |
 | `logLevel` | `"debug" \| "info" \| "warn" \| "error"` | `"info"` | Log verbosity |
 | `allowedUsers` | `string[]` | `[]` (all allowed) | Slack user IDs allowed to interact |
-
-### defineConfig()
-
-A type-only helper that returns its argument unchanged. It provides TypeScript autocomplete in your config file:
-
-```typescript
-import { defineConfig } from "@sweny-ai/agent";
-
-export default defineConfig({
-  // IDE autocomplete works here
-});
-```
 
 ## Environment variables
 
@@ -77,8 +68,6 @@ export default defineConfig({
 | `SLACK_SIGNING_SECRET` | Slack signing secret | Yes (Slack mode) |
 | `LOG_LEVEL` | Log verbosity (`debug`, `info`, `warn`, `error`) | No (defaults to `info`) |
 
-Environment variables are validated with Zod on startup. At least one of `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` must be set, or the agent will fail to start. Slack tokens are validated for their expected prefixes (`xapp-`, `xoxb-`).
-
 Create a `.env` file in your project root:
 
 ```bash
@@ -87,32 +76,3 @@ SLACK_APP_TOKEN=xapp-...
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_SIGNING_SECRET=...
 ```
-
-## Config resolution
-
-The config loader merges file and environment settings:
-
-1. `loadConfig()` looks for `sweny.config.ts` in the current directory (or a custom path)
-2. If the file is missing or fails to import, a default config is used
-3. Environment variables fill in Slack tokens and log level **only when not set** in the config file (config file takes priority)
-4. Zod schema validation runs and fails fast with clear error messages if required values are missing
-
-## CLI mode
-
-The CLI uses the same config file. Slack tokens are not required when running in CLI mode:
-
-```bash
-npx tsx --env-file=.env src/cli.ts
-```
-
-Available commands in the REPL:
-
-| Command | Description |
-|---------|-------------|
-| `/quit`, `/exit` | Exit the CLI |
-| `/reset` | Clear the current session |
-| `/memory` | Show saved memories |
-| `/memory clear` | Clear all memories |
-| `/workspace` | Show workspace files |
-| `/workspace reset` | Clear the workspace |
-| `/help` | List commands |
