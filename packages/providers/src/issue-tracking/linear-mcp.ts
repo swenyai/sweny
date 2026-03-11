@@ -19,7 +19,7 @@
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
-import { MCPClient } from "./client.js";
+import { MCPClient } from "../mcp/client.js";
 import type {
   IssueTrackingProvider,
   Issue,
@@ -138,7 +138,7 @@ export function linearMCP(config: LinearMCPConfig): IssueTrackingProvider & PrLi
         labels: opts.labels,
         states: opts.states,
       });
-      return (raw ?? []).map((r) => toIssue(r as Record<string, unknown>));
+      return ((raw ?? []) as Record<string, unknown>[]).map((r) => toIssue(r));
     },
 
     async addComment(issueId: string, body: string): Promise<void> {
@@ -169,8 +169,8 @@ export function linearMCP(config: LinearMCPConfig): IssueTrackingProvider & PrLi
         limit: 100,
       });
 
-      return (raw ?? [])
-        .map((r) => r as Record<string, unknown>)
+      const records = (raw ?? []) as Record<string, unknown>[];
+      return records
         .filter((r) => {
           const createdAt = String(r.createdAt ?? "");
           return createdAt >= cutoff;

@@ -31,7 +31,8 @@
     "./storage": "./dist/storage/index.js",
     "./coding-agent": "./dist/coding-agent/index.js",
     "./agent-tool": "./dist/agent-tool/index.js",
-    "./credential-vault": "./dist/credential-vault/index.js"
+    "./credential-vault": "./dist/credential-vault/index.js",
+    "./mcp": "./dist/mcp/index.js"
   },
   "typesVersions": {
     "*": {
@@ -70,6 +71,9 @@
       ],
       "credential-vault": [
         "dist/credential-vault/index.d.ts"
+      ],
+      "mcp": [
+        "dist/mcp/index.d.ts"
       ]
     }
   },
@@ -85,12 +89,12 @@
     "@aws-sdk/credential-provider-node": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
     "@modelcontextprotocol/sdk": "^1.0",
-    "@modelcontextprotocol/sdk": {
-      "optional": true
-    },
     "@slack/web-api": "^7"
   },
   "peerDependenciesMeta": {
+    "@modelcontextprotocol/sdk": {
+      "optional": true
+    },
     "@actions/core": {
       "optional": true
     },

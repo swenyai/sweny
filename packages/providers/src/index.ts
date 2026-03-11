@@ -19,15 +19,25 @@ export type {
   PrLinkCapable,
   LabelHistoryCapable,
 } from "./issue-tracking/index.js";
-export { canLinkPr, canSearchIssuesByLabel, linear, githubIssues, jira } from "./issue-tracking/index.js";
+export { canLinkPr, canSearchIssuesByLabel, linear, githubIssues, jira, linearMCP } from "./issue-tracking/index.js";
 
 // Notification
 export type { NotificationProvider, NotificationPayload } from "./notification/index.js";
-export { githubSummary, slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "./notification/index.js";
+export {
+  githubSummary,
+  slackWebhook,
+  teamsWebhook,
+  discordWebhook,
+  email,
+  webhook,
+  slackMCP,
+} from "./notification/index.js";
 
 // Source Control
 export type {
   SourceControlProvider,
+  GitProvider,
+  RepoProvider,
   PullRequest,
   PrCreateOptions,
   PrListOptions,
@@ -35,7 +45,11 @@ export type {
   GitHubSourceControlConfig,
   GitLabSourceControlConfig,
 } from "./source-control/index.js";
-export { github, gitlab } from "./source-control/index.js";
+export { github, gitlab, githubMCP } from "./source-control/index.js";
+
+// MCP
+export type { MCPServerConfig } from "./mcp/index.js";
+export { MCPClient } from "./mcp/index.js";
 
 // Incident Management
 export type { IncidentProvider, Incident, IncidentCreateOptions, OnCallEntry } from "./incident/index.js";
