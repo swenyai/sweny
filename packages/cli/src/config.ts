@@ -67,6 +67,9 @@ export interface CliConfig {
   emailFrom: string;
   emailTo: string;
   webhookSigningSecret: string;
+  slackBotToken: string;
+  slackTeamId: string;
+  slackChannel: string;
 
   // Runtime context
   repository: string;
@@ -137,7 +140,8 @@ export function registerTriageCommand(program: Command): Command {
     .option("--cache-dir <path>", "Step cache directory (default: .sweny/cache)")
     .option("--cache-ttl <seconds>", "Cache TTL in seconds, 0 = infinite (default: 86400)")
     .option("--no-cache", "Disable step cache")
-    .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)");
+    .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
+    .option("--slack-channel <channel>", "Slack channel for slack-mcp notification provider (e.g. #sweny-alerts)");
 }
 
 export function parseCliInputs(options: Record<string, unknown>, fileConfig: Record<string, string> = {}): CliConfig {
@@ -214,6 +218,9 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
     emailFrom: env.EMAIL_FROM || "",
     emailTo: env.EMAIL_TO || "",
     webhookSigningSecret: env.WEBHOOK_SIGNING_SECRET || "",
+    slackBotToken: env.SLACK_BOT_TOKEN || "",
+    slackTeamId: env.SLACK_TEAM_ID || "",
+    slackChannel: (options.slackChannel as string) || env.SLACK_CHANNEL || f("slack-channel") || "",
 
     repository: (options.repository as string) || env.GITHUB_REPOSITORY || detectRepository(),
     repositoryOwner: env.GITHUB_REPOSITORY_OWNER || "",
@@ -349,6 +356,12 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.sendgridApiKey) errors.push("Missing: SENDGRID_API_KEY is required for email notifications");
       if (!config.emailFrom) errors.push("Missing: EMAIL_FROM is required for email notifications");
       if (!config.emailTo) errors.push("Missing: EMAIL_TO is required for email notifications");
+      break;
+    case "slack-mcp":
+      if (!config.slackBotToken) errors.push("Missing: SLACK_BOT_TOKEN is required for slack-mcp notifications");
+      if (!config.slackTeamId) errors.push("Missing: SLACK_TEAM_ID is required for slack-mcp notifications");
+      if (!config.slackChannel)
+        errors.push("Missing: SLACK_CHANNEL or --slack-channel is required for slack-mcp notifications");
       break;
     case "file":
       // No external credentials needed

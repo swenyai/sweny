@@ -1,8 +1,7 @@
 import { createProviderRegistry } from "@sweny-ai/engine";
 import type { ProviderRegistry } from "@sweny-ai/engine";
 import type { CliConfig } from "../config.js";
-import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "@sweny-ai/providers/observability";
-import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
+import { createObservabilityProvider, createCodingAgentProvider } from "@sweny-ai/providers";
 import { linear, jira, githubIssues, fileIssueTracking, linearMCP } from "@sweny-ai/providers/issue-tracking";
 import { github, gitlab, fileSourceControl } from "@sweny-ai/providers/source-control";
 import {
@@ -12,8 +11,8 @@ import {
   email,
   webhook,
   fileNotification,
+  slackMCP,
 } from "@sweny-ai/providers/notification";
-import { claudeCode, openaiCodex, googleGemini } from "@sweny-ai/providers/coding-agent";
 
 export interface CliLogger {
   info: (...args: unknown[]) => void;
@@ -26,75 +25,10 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
   const registry = createProviderRegistry();
 
   // Observability
-  let observability: ObservabilityProvider;
-  const obsCreds = config.observabilityCredentials;
-  switch (config.observabilityProvider) {
-    case "datadog":
-      observability = datadog({
-        apiKey: obsCreds.apiKey,
-        appKey: obsCreds.appKey,
-        site: obsCreds.site,
-        logger,
-      });
-      break;
-    case "sentry":
-      observability = sentry({
-        authToken: obsCreds.authToken,
-        organization: obsCreds.organization,
-        project: obsCreds.project,
-        baseUrl: obsCreds.baseUrl,
-        logger,
-      });
-      break;
-    case "cloudwatch":
-      observability = cloudwatch({
-        region: obsCreds.region,
-        logGroupPrefix: obsCreds.logGroupPrefix,
-        logger,
-      });
-      break;
-    case "splunk":
-      observability = splunk({
-        baseUrl: obsCreds.baseUrl,
-        token: obsCreds.token,
-        index: obsCreds.index,
-        logger,
-      });
-      break;
-    case "elastic":
-      observability = elastic({
-        baseUrl: obsCreds.baseUrl,
-        apiKey: obsCreds.apiKey,
-        index: obsCreds.index,
-        logger,
-      });
-      break;
-    case "newrelic":
-      observability = newrelic({
-        apiKey: obsCreds.apiKey,
-        accountId: obsCreds.accountId,
-        region: obsCreds.region as "us" | "eu",
-        logger,
-      });
-      break;
-    case "loki":
-      observability = loki({
-        baseUrl: obsCreds.baseUrl,
-        apiKey: obsCreds.apiKey,
-        orgId: obsCreds.orgId,
-        logger,
-      });
-      break;
-    case "file":
-      observability = file({
-        path: obsCreds.path,
-        logger,
-      });
-      break;
-    default:
-      throw new Error(`Unsupported observability provider: ${config.observabilityProvider}`);
-  }
-  registry.set("observability", observability);
+  registry.set(
+    "observability",
+    createObservabilityProvider(config.observabilityProvider, config.observabilityCredentials, logger),
+  );
 
   // Source control
   const scToken = config.botToken || config.githubToken;
@@ -205,6 +139,17 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
         }),
       );
       break;
+    case "slack-mcp":
+      registry.set(
+        "notification",
+        slackMCP({
+          botToken: config.slackBotToken,
+          teamId: config.slackTeamId,
+          channel: config.slackChannel,
+          logger,
+        }),
+      );
+      break;
     case "file":
       registry.set(
         "notification",
@@ -227,18 +172,7 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
   }
 
   // Coding agent — quiet mode suppresses agent stdout in CLI
-  switch (config.codingAgentProvider) {
-    case "codex":
-      registry.set("codingAgent", openaiCodex({ logger, quiet: true }));
-      break;
-    case "gemini":
-      registry.set("codingAgent", googleGemini({ logger, quiet: true }));
-      break;
-    case "claude":
-    default:
-      registry.set("codingAgent", claudeCode({ logger, quiet: true }));
-      break;
-  }
+  registry.set("codingAgent", createCodingAgentProvider(config.codingAgentProvider, logger, { quiet: true }));
 
   return registry;
 }
@@ -307,18 +241,7 @@ export function createImplementProviders(config: CliConfig, logger: CliLogger): 
   }
 
   // Coding agent
-  switch (config.codingAgentProvider) {
-    case "codex":
-      registry.set("codingAgent", openaiCodex({ logger, quiet: true }));
-      break;
-    case "gemini":
-      registry.set("codingAgent", googleGemini({ logger, quiet: true }));
-      break;
-    case "claude":
-    default:
-      registry.set("codingAgent", claudeCode({ logger, quiet: true }));
-      break;
-  }
+  registry.set("codingAgent", createCodingAgentProvider(config.codingAgentProvider, logger, { quiet: true }));
 
   return registry;
 }
