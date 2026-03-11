@@ -4,13 +4,12 @@ export type {
   IssueCreateOptions,
   IssueUpdateOptions,
   IssueSearchOptions,
-  TriageHistoryEntry,
+  IssueHistoryEntry,
   PrLinkCapable,
-  FingerprintCapable,
-  TriageHistoryCapable,
+  LabelHistoryCapable,
 } from "./types.js";
 
-export { canLinkPr, canSearchByFingerprint, canListTriageHistory } from "./types.js";
+export { canLinkPr, canSearchIssuesByLabel } from "./types.js";
 
 export { linear, linearConfigSchema, type LinearConfig } from "./linear.js";
 export { githubIssues, githubIssuesConfigSchema, type GitHubIssuesConfig } from "./github-issues.js";

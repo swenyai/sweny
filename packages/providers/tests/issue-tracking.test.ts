@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { linear, linearConfigSchema } from "../src/issue-tracking/linear.js";
 import { githubIssues, githubIssuesConfigSchema } from "../src/issue-tracking/github-issues.js";
-import { canLinkPr, canSearchByFingerprint, canListTriageHistory } from "../src/issue-tracking/types.js";
+import { canLinkPr, canSearchIssuesByLabel } from "../src/issue-tracking/types.js";
 import type { IssueTrackingProvider } from "../src/issue-tracking/types.js";
 
 const silentLogger = { info: () => {}, debug: () => {}, warn: () => {} };
@@ -50,14 +50,9 @@ describe("capability type guards", () => {
     expect(canLinkPr(provider)).toBe(true);
   });
 
-  it("canSearchByFingerprint detects FingerprintCapable", () => {
+  it("canSearchIssuesByLabel detects LabelHistoryCapable", () => {
     const provider = linear({ apiKey: "test", logger: silentLogger });
-    expect(canSearchByFingerprint(provider)).toBe(true);
-  });
-
-  it("canListTriageHistory detects TriageHistoryCapable", () => {
-    const provider = linear({ apiKey: "test", logger: silentLogger });
-    expect(canListTriageHistory(provider)).toBe(true);
+    expect(canSearchIssuesByLabel(provider)).toBe(true);
   });
 
   it("canLinkPr returns true for githubIssues", () => {
@@ -70,28 +65,27 @@ describe("capability type guards", () => {
     expect(canLinkPr(provider)).toBe(true);
   });
 
-  it("canSearchByFingerprint returns false for githubIssues", () => {
+  it("canSearchIssuesByLabel returns false for githubIssues", () => {
     const provider = githubIssues({
       token: "t",
       owner: "o",
       repo: "r",
       logger: silentLogger,
     });
-    expect(canSearchByFingerprint(provider)).toBe(false);
+    expect(canSearchIssuesByLabel(provider)).toBe(false);
   });
 
   it("type guards return false for a minimal provider", () => {
     const minimal: IssueTrackingProvider = {
       verifyAccess: async () => {},
-      createIssue: async () => ({ id: "", identifier: "", title: "", url: "", branchName: "" }),
-      getIssue: async () => ({ id: "", identifier: "", title: "", url: "", branchName: "" }),
+      createIssue: async () => ({ id: "", identifier: "", title: "", url: "" }),
+      getIssue: async () => ({ id: "", identifier: "", title: "", url: "" }),
       updateIssue: async () => {},
       searchIssues: async () => [],
       addComment: async () => {},
     };
     expect(canLinkPr(minimal)).toBe(false);
-    expect(canSearchByFingerprint(minimal)).toBe(false);
-    expect(canListTriageHistory(minimal)).toBe(false);
+    expect(canSearchIssuesByLabel(minimal)).toBe(false);
   });
 });
 
@@ -275,56 +269,7 @@ describe("LinearProvider", () => {
     expect(commentBody.variables.input.body).toContain("PR #7");
   });
 
-  it("searchByFingerprint filters issues by description fingerprint", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: {
-          team: {
-            issues: {
-              nodes: [
-                {
-                  id: "match-1",
-                  identifier: "ENG-10",
-                  title: "NullPointer crash",
-                  url: "https://linear.app/issue/ENG-10",
-                  branchName: "eng-10-nullpointer",
-                  description: "Error details\n<!-- TRIAGE_FINGERPRINT\nnullpointer in auth-service\n-->",
-                  state: { name: "Todo", type: "unstarted" },
-                },
-                {
-                  id: "no-match",
-                  identifier: "ENG-11",
-                  title: "Other issue",
-                  url: "https://linear.app/issue/ENG-11",
-                  branchName: "eng-11-other",
-                  description: "Unrelated description",
-                  state: { name: "Todo", type: "unstarted" },
-                },
-              ],
-            },
-          },
-        },
-      }),
-    });
-    globalThis.fetch = mockFetch;
-
-    const provider = linear({ apiKey: "lin_test", logger: silentLogger });
-    const matches = await provider.searchByFingerprint("team-uuid", "nullpointer", {
-      labelId: "label-1",
-      service: "auth-service",
-    });
-
-    expect(matches).toHaveLength(1);
-    expect(matches[0].identifier).toBe("ENG-10");
-    expect(matches[0].state).toBe("Todo");
-
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.variables.teamId).toBe("team-uuid");
-    expect(body.variables.filter.labels).toEqual({ id: { eq: "label-1" } });
-  });
-
-  it("listTriageHistory returns entries with fingerprint extraction", async () => {
+  it("searchIssuesByLabel returns entries for the given label", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -337,7 +282,7 @@ describe("LinearProvider", () => {
                   identifier: "ENG-20",
                   title: "Triage issue",
                   url: "https://linear.app/issue/ENG-20",
-                  description: "Some desc\n<!-- TRIAGE_FINGERPRINT\nerror_hash_abc\n-->\nMore text",
+                  description: "Some desc\nMore text",
                   state: { name: "Triage", type: "triage" },
                   createdAt: "2026-02-01T00:00:00Z",
                   labels: { nodes: [{ name: "bug" }, { name: "triage" }] },
@@ -345,7 +290,7 @@ describe("LinearProvider", () => {
                 {
                   id: "t-2",
                   identifier: "ENG-21",
-                  title: "No fingerprint",
+                  title: "Another issue",
                   url: "https://linear.app/issue/ENG-21",
                   description: null,
                   state: { name: "Backlog", type: "backlog" },
@@ -361,19 +306,15 @@ describe("LinearProvider", () => {
     globalThis.fetch = mockFetch;
 
     const provider = linear({ apiKey: "lin_test", logger: silentLogger });
-    const entries = await provider.listTriageHistory("team-uuid", "label-triage", 30);
+    const entries = await provider.searchIssuesByLabel("team-uuid", "label-triage", { days: 30 });
 
     expect(entries).toHaveLength(2);
-
     expect(entries[0].identifier).toBe("ENG-20");
     expect(entries[0].state).toBe("Triage");
     expect(entries[0].stateType).toBe("triage");
-    expect(entries[0].fingerprint).toBe("error_hash_abc");
     expect(entries[0].labels).toEqual(["bug", "triage"]);
     expect(entries[0].descriptionSnippet).toContain("Some desc");
-
     expect(entries[1].identifier).toBe("ENG-21");
-    expect(entries[1].fingerprint).toBeNull();
     expect(entries[1].descriptionSnippet).toBeNull();
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);

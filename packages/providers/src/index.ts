@@ -15,19 +15,11 @@ export type {
   IssueCreateOptions,
   IssueUpdateOptions,
   IssueSearchOptions,
-  TriageHistoryEntry,
+  IssueHistoryEntry,
   PrLinkCapable,
-  FingerprintCapable,
-  TriageHistoryCapable,
+  LabelHistoryCapable,
 } from "./issue-tracking/index.js";
-export {
-  canLinkPr,
-  canSearchByFingerprint,
-  canListTriageHistory,
-  linear,
-  githubIssues,
-  jira,
-} from "./issue-tracking/index.js";
+export { canLinkPr, canSearchIssuesByLabel, linear, githubIssues, jira } from "./issue-tracking/index.js";
 
 // Notification
 export type { NotificationProvider, NotificationPayload } from "./notification/index.js";

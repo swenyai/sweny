@@ -9,9 +9,8 @@ import type {
   IssueUpdateOptions,
   IssueSearchOptions,
   PrLinkCapable,
-  FingerprintCapable,
-  TriageHistoryCapable,
-  TriageHistoryEntry,
+  LabelHistoryCapable,
+  IssueHistoryEntry,
 } from "./types.js";
 
 export const jiraConfigSchema = z.object({
@@ -26,14 +25,12 @@ export const jiraConfigSchema = z.object({
 
 export type JiraConfig = z.infer<typeof jiraConfigSchema>;
 
-export function jira(
-  config: JiraConfig,
-): IssueTrackingProvider & PrLinkCapable & FingerprintCapable & TriageHistoryCapable {
+export function jira(config: JiraConfig): IssueTrackingProvider & PrLinkCapable & LabelHistoryCapable {
   const parsed = jiraConfigSchema.parse(config);
   return new JiraProvider(parsed);
 }
 
-class JiraProvider implements IssueTrackingProvider, PrLinkCapable, FingerprintCapable, TriageHistoryCapable {
+class JiraProvider implements IssueTrackingProvider, PrLinkCapable, LabelHistoryCapable {
   private readonly baseUrl: string;
   private readonly authHeader: string;
   private readonly log: Logger;
@@ -282,54 +279,16 @@ class JiraProvider implements IssueTrackingProvider, PrLinkCapable, FingerprintC
   }
 
   // ------------------------------------------------------------------
-  // FingerprintCapable
+  // LabelHistoryCapable
   // ------------------------------------------------------------------
 
-  async searchByFingerprint(
+  async searchIssuesByLabel(
     projectId: string,
-    errorPattern: string,
-    opts?: { labelId?: string; service?: string },
-  ): Promise<Issue[]> {
-    this.log.info(`Searching Jira by fingerprint: "${errorPattern}" in project ${projectId}`);
-
-    const jqlParts: string[] = [`project = "${projectId}"`, `summary ~ "${errorPattern}"`];
-
-    if (opts?.labelId) {
-      jqlParts.push(`labels = "${opts.labelId}"`);
-    }
-
-    const jql = jqlParts.join(" AND ");
-
-    const result = await this.request<{
-      issues: Array<{
-        id: string;
-        key: string;
-        fields: {
-          summary: string;
-          status: { name: string };
-        };
-      }>;
-    }>(`/search?jql=${encodeURIComponent(jql)}&maxResults=10&fields=summary,status`);
-
-    const issues = result.issues ?? [];
-    this.log.info(`Found ${issues.length} issues matching fingerprint`);
-
-    return issues.map((i) => ({
-      id: i.id,
-      identifier: i.key,
-      title: i.fields.summary,
-      url: `${this.baseUrl}/browse/${i.key}`,
-      branchName: `fix/${i.key}`,
-      state: i.fields.status.name,
-    }));
-  }
-
-  // ------------------------------------------------------------------
-  // TriageHistoryCapable
-  // ------------------------------------------------------------------
-
-  async listTriageHistory(projectId: string, labelId: string, days: number = 30): Promise<TriageHistoryEntry[]> {
-    this.log.info(`Listing Jira triage history for project ${projectId} (last ${days} days)`);
+    labelId: string,
+    opts?: { days?: number },
+  ): Promise<IssueHistoryEntry[]> {
+    const days = opts?.days ?? 30;
+    this.log.info(`Searching Jira issues by label ${labelId} in project ${projectId} (last ${days} days)`);
 
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split("T")[0]; // YYYY-MM-DD format for Jira JQL
 
@@ -350,7 +309,7 @@ class JiraProvider implements IssueTrackingProvider, PrLinkCapable, FingerprintC
     }>(`/search?jql=${encodeURIComponent(jql)}&maxResults=50&fields=summary,status,description,labels,created`);
 
     const issues = result.issues ?? [];
-    this.log.info(`Found ${issues.length} triage history entries`);
+    this.log.info(`Found ${issues.length} issues with label ${labelId}`);
 
     return issues.map((i) => {
       // Extract plain text from Atlassian Document Format description
@@ -372,7 +331,6 @@ class JiraProvider implements IssueTrackingProvider, PrLinkCapable, FingerprintC
         stateType: i.fields.status.statusCategory.key,
         url: `${this.baseUrl}/browse/${i.key}`,
         descriptionSnippet,
-        fingerprint: null, // Jira has no native fingerprint field
         createdAt: i.fields.created,
         labels: i.fields.labels,
       };

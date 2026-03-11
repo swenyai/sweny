@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { jira, jiraConfigSchema } from "../src/issue-tracking/jira.js";
-import { canLinkPr, canSearchByFingerprint, canListTriageHistory } from "../src/issue-tracking/types.js";
+import { canLinkPr, canSearchIssuesByLabel } from "../src/issue-tracking/types.js";
 
 const silentLogger = { info: () => {}, debug: () => {}, warn: () => {} };
 const originalFetch = globalThis.fetch;
@@ -349,10 +349,10 @@ describe("JiraProvider", () => {
 });
 
 // ---------------------------------------------------------------------------
-// FingerprintCapable
+// LabelHistoryCapable
 // ---------------------------------------------------------------------------
 
-describe("jira FingerprintCapable", () => {
+describe("jira LabelHistoryCapable", () => {
   const BASE_URL = "https://myco.atlassian.net";
 
   function makeJira() {
@@ -364,85 +364,11 @@ describe("jira FingerprintCapable", () => {
     });
   }
 
-  it("canSearchByFingerprint() returns true for jira provider", () => {
-    expect(canSearchByFingerprint(makeJira())).toBe(true);
+  it("canSearchIssuesByLabel() returns true for jira provider", () => {
+    expect(canSearchIssuesByLabel(makeJira())).toBe(true);
   });
 
-  it("searchByFingerprint calls /search with fingerprint JQL", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        issues: [
-          {
-            id: "10001",
-            key: "PROJ-1",
-            fields: { summary: "NullPointerException in WebhookHandler", status: { name: "Open" } },
-          },
-        ],
-      }),
-    });
-    globalThis.fetch = mockFetch;
-
-    const results = await makeJira().searchByFingerprint("PROJ", "NullPointerException");
-
-    expect(results).toHaveLength(1);
-    expect(results[0].identifier).toBe("PROJ-1");
-    expect(results[0].title).toBe("NullPointerException in WebhookHandler");
-    expect(results[0].url).toBe(`${BASE_URL}/browse/PROJ-1`);
-    expect(results[0].branchName).toBe("fix/PROJ-1");
-    expect(results[0].state).toBe("Open");
-
-    const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain(`${BASE_URL}/rest/api/3/search`);
-    expect(decodeURIComponent(url)).toContain('project = "PROJ"');
-    expect(decodeURIComponent(url)).toContain('summary ~ "NullPointerException"');
-  });
-
-  it("searchByFingerprint includes label filter when labelId provided", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ issues: [] }),
-    });
-    globalThis.fetch = mockFetch;
-
-    await makeJira().searchByFingerprint("PROJ", "crash", { labelId: "bug" });
-
-    const url = mockFetch.mock.calls[0][0] as string;
-    expect(decodeURIComponent(url)).toContain('labels = "bug"');
-  });
-
-  it("searchByFingerprint returns empty array when no issues found", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ issues: [] }),
-    });
-
-    const results = await makeJira().searchByFingerprint("PROJ", "crash");
-    expect(results).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TriageHistoryCapable
-// ---------------------------------------------------------------------------
-
-describe("jira TriageHistoryCapable", () => {
-  const BASE_URL = "https://myco.atlassian.net";
-
-  function makeJira() {
-    return jira({
-      baseUrl: BASE_URL,
-      email: "bot@myco.com",
-      apiToken: "tok_abc",
-      logger: { info: () => {}, debug: () => {}, warn: () => {} },
-    });
-  }
-
-  it("canListTriageHistory() returns true for jira provider", () => {
-    expect(canListTriageHistory(makeJira())).toBe(true);
-  });
-
-  it("listTriageHistory calls /search with label and date JQL", async () => {
+  it("searchIssuesByLabel calls /search with label and date JQL", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -472,7 +398,7 @@ describe("jira TriageHistoryCapable", () => {
     });
     globalThis.fetch = mockFetch;
 
-    const results = await makeJira().listTriageHistory("PROJ", "triage", 30);
+    const results = await makeJira().searchIssuesByLabel("PROJ", "triage", { days: 30 });
 
     expect(results).toHaveLength(1);
     const entry = results[0];
@@ -482,7 +408,6 @@ describe("jira TriageHistoryCapable", () => {
     expect(entry.stateType).toBe("done");
     expect(entry.url).toBe(`${BASE_URL}/browse/PROJ-42`);
     expect(entry.descriptionSnippet).toContain("Root cause was a null pointer.");
-    expect(entry.fingerprint).toBeNull();
     expect(entry.createdAt).toBe("2024-01-15T10:00:00.000Z");
     expect(entry.labels).toEqual(["triage"]);
 
@@ -493,21 +418,20 @@ describe("jira TriageHistoryCapable", () => {
     expect(decodeURIComponent(url)).toContain("created >=");
   });
 
-  it("listTriageHistory uses default 30 days when not specified", async () => {
+  it("searchIssuesByLabel uses default 30 days when not specified", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ issues: [] }),
     });
     globalThis.fetch = mockFetch;
 
-    await makeJira().listTriageHistory("PROJ", "triage");
+    await makeJira().searchIssuesByLabel("PROJ", "triage");
 
     const url = mockFetch.mock.calls[0][0] as string;
-    // Should contain a date string in the JQL (YYYY-MM-DD)
     expect(decodeURIComponent(url)).toMatch(/created >= "\d{4}-\d{2}-\d{2}"/);
   });
 
-  it("listTriageHistory returns null descriptionSnippet when description is null", async () => {
+  it("searchIssuesByLabel returns null descriptionSnippet when description is null", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -528,32 +452,7 @@ describe("jira TriageHistoryCapable", () => {
     });
     globalThis.fetch = mockFetch;
 
-    const results = await makeJira().listTriageHistory("PROJ", "triage");
+    const results = await makeJira().searchIssuesByLabel("PROJ", "triage");
     expect(results[0].descriptionSnippet).toBeNull();
-  });
-
-  it("listTriageHistory returns fingerprint as null", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        issues: [
-          {
-            id: "10003",
-            key: "PROJ-7",
-            fields: {
-              summary: "Some issue",
-              status: { name: "In Progress", statusCategory: { key: "indeterminate" } },
-              description: null,
-              labels: ["triage"],
-              created: "2024-01-20T12:00:00.000Z",
-            },
-          },
-        ],
-      }),
-    });
-    globalThis.fetch = mockFetch;
-
-    const results = await makeJira().listTriageHistory("PROJ", "triage");
-    expect(results.every((e) => e.fingerprint === null)).toBe(true);
   });
 });

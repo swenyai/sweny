@@ -9,9 +9,8 @@ import type {
   IssueUpdateOptions,
   IssueSearchOptions,
   PrLinkCapable,
-  FingerprintCapable,
-  TriageHistoryCapable,
-  TriageHistoryEntry,
+  LabelHistoryCapable,
+  IssueHistoryEntry,
 } from "./types.js";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
@@ -25,14 +24,12 @@ export const linearConfigSchema = z.object({
 
 export type LinearConfig = z.infer<typeof linearConfigSchema>;
 
-export function linear(
-  config: LinearConfig,
-): IssueTrackingProvider & PrLinkCapable & FingerprintCapable & TriageHistoryCapable {
+export function linear(config: LinearConfig): IssueTrackingProvider & PrLinkCapable & LabelHistoryCapable {
   const parsed = linearConfigSchema.parse(config);
   return new LinearProvider(parsed);
 }
 
-class LinearProvider implements IssueTrackingProvider, PrLinkCapable, FingerprintCapable, TriageHistoryCapable {
+class LinearProvider implements IssueTrackingProvider, PrLinkCapable, LabelHistoryCapable {
   private readonly apiKey: string;
   private readonly log: Logger;
 
@@ -305,10 +302,15 @@ class LinearProvider implements IssueTrackingProvider, PrLinkCapable, Fingerprin
     this.log.info(`PR #${prNumber} linked to issue ${issueId}`);
   }
 
-  async listTriageHistory(projectId: string, labelId: string, days: number = 30): Promise<TriageHistoryEntry[]> {
+  async searchIssuesByLabel(
+    projectId: string,
+    labelId: string,
+    opts?: { days?: number },
+  ): Promise<IssueHistoryEntry[]> {
+    const days = opts?.days ?? 30;
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-    this.log.info(`Listing triage history for project ${projectId} (last ${days} days)`);
+    this.log.info(`Searching issues by label ${labelId} in project ${projectId} (last ${days} days)`);
 
     const query = `
       query TriageHistory($teamId: String!, $filter: IssueFilter) {
@@ -354,110 +356,19 @@ class LinearProvider implements IssueTrackingProvider, PrLinkCapable, Fingerprin
 
     const issues = result.team?.issues?.nodes ?? [];
 
-    const entries: TriageHistoryEntry[] = issues.map((issue) => {
-      let fingerprint: string | null = null;
-      if (issue.description) {
-        const match = issue.description.match(/<!-- TRIAGE_FINGERPRINT\n([\s\S]*?)-->/);
-        if (match) {
-          fingerprint = match[1].trim();
-        }
-      }
+    const entries: IssueHistoryEntry[] = issues.map((issue) => ({
+      identifier: issue.identifier,
+      title: issue.title,
+      state: issue.state.name,
+      stateType: issue.state.type,
+      url: issue.url,
+      descriptionSnippet: issue.description ? issue.description.slice(0, 200) : null,
+      createdAt: issue.createdAt,
+      labels: issue.labels.nodes.map((l) => l.name),
+    }));
 
-      return {
-        identifier: issue.identifier,
-        title: issue.title,
-        state: issue.state.name,
-        stateType: issue.state.type,
-        url: issue.url,
-        descriptionSnippet: issue.description ? issue.description.slice(0, 200) : null,
-        fingerprint,
-        createdAt: issue.createdAt,
-        labels: issue.labels.nodes.map((l) => l.name),
-      };
-    });
-
-    this.log.info(`Found ${entries.length} triage history entries`);
+    this.log.info(`Found ${entries.length} issues with label ${labelId}`);
 
     return entries;
-  }
-
-  async searchByFingerprint(
-    projectId: string,
-    errorPattern: string,
-    opts?: { labelId?: string; service?: string },
-  ): Promise<Issue[]> {
-    this.log.info(`Searching by fingerprint: "${errorPattern}" in project ${projectId}`);
-
-    const query = `
-      query FingerprintSearch($teamId: String!, $filter: IssueFilter) {
-        team(id: $teamId) {
-          issues(filter: $filter, first: 50, orderBy: updatedAt) {
-            nodes {
-              id
-              identifier
-              title
-              url
-              branchName
-              description
-              state { name type }
-            }
-          }
-        }
-      }
-    `;
-
-    const filter: Record<string, unknown> = {};
-    if (opts?.labelId) {
-      filter.labels = { id: { eq: opts.labelId } };
-    }
-    filter.createdAt = {
-      gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
-    };
-
-    const result = await this.request<{
-      team: {
-        issues: {
-          nodes: Array<{
-            id: string;
-            identifier: string;
-            title: string;
-            url: string;
-            branchName: string;
-            description: string | null;
-            state: { name: string; type: string };
-          }>;
-        };
-      };
-    }>(query, { teamId: projectId, filter });
-
-    const issues = result.team?.issues?.nodes ?? [];
-    const pattern = errorPattern.toLowerCase();
-    const service = opts?.service?.toLowerCase();
-
-    const matches = issues.filter((issue) => {
-      if (!issue.description) return false;
-      const desc = issue.description.toLowerCase();
-
-      const fpMatch = desc.match(/<!-- triage_fingerprint\n([\s\S]*?)-->/);
-      if (fpMatch) {
-        const fp = fpMatch[1];
-        const hasErrorMatch = fp.includes(pattern);
-        const hasServiceMatch = !service || fp.includes(service);
-        if (hasErrorMatch && hasServiceMatch) return true;
-      }
-
-      return desc.includes(pattern);
-    });
-
-    this.log.info(`Found ${matches.length} issues matching fingerprint`);
-
-    return matches.map((m) => ({
-      id: m.id,
-      identifier: m.identifier,
-      title: m.title,
-      url: m.url,
-      branchName: m.branchName,
-      state: m.state.name,
-    }));
   }
 }

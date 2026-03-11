@@ -9,8 +9,8 @@ import type {
   IssueCreateOptions,
   IssueUpdateOptions,
   IssueSearchOptions,
-  TriageHistoryCapable,
-  TriageHistoryEntry,
+  LabelHistoryCapable,
+  IssueHistoryEntry,
 } from "./types.js";
 
 export const fileIssueTrackingConfigSchema = z.object({
@@ -20,7 +20,7 @@ export const fileIssueTrackingConfigSchema = z.object({
 
 export type FileIssueTrackingConfig = z.infer<typeof fileIssueTrackingConfigSchema>;
 
-export function fileIssueTracking(config: FileIssueTrackingConfig): IssueTrackingProvider & TriageHistoryCapable {
+export function fileIssueTracking(config: FileIssueTrackingConfig): IssueTrackingProvider & LabelHistoryCapable {
   const parsed = fileIssueTrackingConfigSchema.parse(config);
   return new FileIssueTrackingProvider(parsed);
 }
@@ -55,7 +55,7 @@ interface State {
 // Provider
 // ---------------------------------------------------------------------------
 
-class FileIssueTrackingProvider implements IssueTrackingProvider, TriageHistoryCapable {
+class FileIssueTrackingProvider implements IssueTrackingProvider, LabelHistoryCapable {
   private readonly outputDir: string;
   private readonly issuesDir: string;
   private readonly statePath: string;
@@ -212,9 +212,14 @@ class FileIssueTrackingProvider implements IssueTrackingProvider, TriageHistoryC
     this.log.info(`Added comment to ${rec.identifier}`);
   }
 
-  // ── TriageHistoryCapable ─────────────────────────────────────────────
+  // ── LabelHistoryCapable ──────────────────────────────────────────────
 
-  async listTriageHistory(projectId: string, labelId: string, days = 30): Promise<TriageHistoryEntry[]> {
+  async searchIssuesByLabel(
+    _projectId: string,
+    labelId: string,
+    opts?: { days?: number },
+  ): Promise<IssueHistoryEntry[]> {
+    const days = opts?.days ?? 30;
     const state = this.readState();
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
@@ -224,10 +229,9 @@ class FileIssueTrackingProvider implements IssueTrackingProvider, TriageHistoryC
         identifier: i.identifier,
         title: i.title,
         state: i.state,
-        stateType: i.state === "open" ? "triage" : "completed",
+        stateType: i.state === "open" ? "started" : "completed",
         url: `file://${path.join(this.issuesDir, `${i.identifier}.md`)}`,
         descriptionSnippet: i.description.slice(0, 200) || null,
-        fingerprint: null,
         createdAt: i.createdAt,
         labels: i.labels,
       }));

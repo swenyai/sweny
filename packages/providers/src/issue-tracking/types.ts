@@ -8,8 +8,13 @@ export interface Issue {
   title: string;
   /** Web URL to view the issue. */
   url: string;
-  /** Suggested git branch name derived from the issue. */
-  branchName: string;
+  /**
+   * Suggested git branch name derived from the issue.
+   * Optional — not all trackers compute this (e.g. Jira, GitHub Issues derive a
+   * fallback from the issue key/number). Recipe steps that create branches should
+   * fall back to `identifier.toLowerCase().replace(/[^a-z0-9]+/g, "-")` if absent.
+   */
+  branchName?: string;
   /** Current workflow state (e.g., "open", "in progress", "done"). */
   state?: string;
   /** Full markdown description body. */
@@ -28,13 +33,22 @@ export interface IssueCreateOptions {
   labels?: string[];
   /** Priority level (provider-specific numeric scale). */
   priority?: number;
-  /** Initial workflow state ID. */
+  /**
+   * Initial workflow state ID.
+   * Note: semantics differ per provider —
+   *   Linear: UUID string
+   *   Jira: status name (looked up via transitions API)
+   *   GitHub Issues: "open" or "closed"
+   */
   stateId?: string;
 }
 
 /** Options for updating an existing issue. */
 export interface IssueUpdateOptions {
-  /** New workflow state ID. */
+  /**
+   * New workflow state ID.
+   * Note: semantics differ per provider — see IssueCreateOptions.stateId.
+   */
   stateId?: string;
   /** Updated markdown description. */
   description?: string;
@@ -54,22 +68,23 @@ export interface IssueSearchOptions {
   states?: string[];
 }
 
-/** A historical triage entry used for duplicate/pattern detection. */
-export interface TriageHistoryEntry {
+/**
+ * A summary of an issue used for recent history context.
+ * Returned by LabelHistoryCapable.searchIssuesByLabel().
+ */
+export interface IssueHistoryEntry {
   /** Human-readable issue identifier. */
   identifier: string;
   /** Issue title / summary. */
   title: string;
   /** Current workflow state name. */
   state: string;
-  /** State category (e.g., "triage", "started", "completed", "cancelled"). */
+  /** State category (e.g., "started", "completed", "cancelled"). */
   stateType: string;
   /** Web URL to view the issue. */
   url: string;
   /** Truncated description for quick comparison. */
   descriptionSnippet: string | null;
-  /** Error fingerprint hash for deduplication. */
-  fingerprint: string | null;
   /** ISO 8601 creation timestamp. */
   createdAt: string;
   /** Labels attached to the issue. */
@@ -139,32 +154,19 @@ export interface PrLinkCapable {
   linkPr(issueId: string, prUrl: string, prNumber: number): Promise<void>;
 }
 
-/** Capability for searching issues by error fingerprint. */
-export interface FingerprintCapable {
+/**
+ * Capability for retrieving recent issues filtered by label and date.
+ * Used to provide historical context to recipe steps (e.g., dedup detection).
+ */
+export interface LabelHistoryCapable {
   /**
-   * Search for existing issues matching an error fingerprint pattern.
-   * @param projectId - Project or team identifier.
-   * @param errorPattern - Error pattern string to fingerprint-match against.
-   * @param opts - Optional filters (label, service).
-   * @returns Issues matching the fingerprint.
-   */
-  searchByFingerprint(
-    projectId: string,
-    errorPattern: string,
-    opts?: { labelId?: string; service?: string },
-  ): Promise<Issue[]>;
-}
-
-/** Capability for listing historical triage entries. */
-export interface TriageHistoryCapable {
-  /**
-   * List triage history entries for a project and label.
+   * Search for issues with a specific label created within a recent time window.
    * @param projectId - Project or team identifier.
    * @param labelId - Label ID to filter by.
-   * @param days - Number of days of history to retrieve (default: provider-specific).
-   * @returns Historical triage entries.
+   * @param opts.days - Number of days of history to retrieve (default: 30).
+   * @returns Recent issues matching the label filter.
    */
-  listTriageHistory(projectId: string, labelId: string, days?: number): Promise<TriageHistoryEntry[]>;
+  searchIssuesByLabel(projectId: string, labelId: string, opts?: { days?: number }): Promise<IssueHistoryEntry[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,19 +183,10 @@ export function canLinkPr(p: IssueTrackingProvider): p is IssueTrackingProvider 
 }
 
 /**
- * Type guard: checks whether the provider supports fingerprint search.
+ * Type guard: checks whether the provider supports label-filtered issue history.
  * @param p - Issue tracking provider to check.
- * @returns True if the provider implements FingerprintCapable.
+ * @returns True if the provider implements LabelHistoryCapable.
  */
-export function canSearchByFingerprint(p: IssueTrackingProvider): p is IssueTrackingProvider & FingerprintCapable {
-  return "searchByFingerprint" in p && typeof (p as Record<string, unknown>).searchByFingerprint === "function";
-}
-
-/**
- * Type guard: checks whether the provider supports triage history listing.
- * @param p - Issue tracking provider to check.
- * @returns True if the provider implements TriageHistoryCapable.
- */
-export function canListTriageHistory(p: IssueTrackingProvider): p is IssueTrackingProvider & TriageHistoryCapable {
-  return "listTriageHistory" in p && typeof (p as Record<string, unknown>).listTriageHistory === "function";
+export function canSearchIssuesByLabel(p: IssueTrackingProvider): p is IssueTrackingProvider & LabelHistoryCapable {
+  return "searchIssuesByLabel" in p && typeof (p as Record<string, unknown>).searchIssuesByLabel === "function";
 }
