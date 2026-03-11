@@ -5,11 +5,18 @@ description: How to build custom SWEny recipes — define states, wire transitio
 
 A **recipe** is a named, typed DAG of states. The engine walks the graph, executing each state in turn, routing to the next state based on the outcome — or stopping if no route is defined.
 
-Built-in recipes (`triage`, `implement`) live in `packages/engine/src/recipes/`. The full specification is in [`packages/engine/SPEC.md`](https://github.com/swenyai/sweny/blob/main/packages/engine/SPEC.md).
+Built-in recipes (`triage`, `implement`) are ready to use out of the box. To build your own, install `@sweny-ai/engine` and define a `RecipeDefinition` + state implementations. The full DAG spec is in the [engine README](https://github.com/swenyai/sweny/blob/main/packages/engine/SPEC.md).
 
 ## Core types
 
 ```ts
+import type {
+  RecipeDefinition,
+  StateDefinition,
+  Recipe,
+  StateImplementations,
+} from "@sweny-ai/engine";
+
 // Pure-data definition — JSON-serializable, renderable, versionable
 interface RecipeDefinition {
   id: string;
@@ -26,12 +33,6 @@ interface StateDefinition {
   critical?: boolean;     // failure aborts the whole recipe
   next?: string;          // default successor (success/skipped only)
   on?: Record<string, string>; // outcome/status → next state id; "end" terminates
-}
-
-// Complete wired recipe = definition + implementations
-interface Recipe<TConfig> {
-  definition: RecipeDefinition;
-  implementations: StateImplementations<TConfig>;
 }
 ```
 
@@ -50,9 +51,10 @@ Phase controls swimlane grouping in Studio and appears in execution logs. Failur
 A state is a plain async function that receives `ctx` and returns a `StepResult`:
 
 ```ts
-// packages/engine/src/nodes/my-node.ts
-import type { WorkflowContext, StepResult } from "../types.js";
-import type { MyRecipeConfig } from "../recipes/my-recipe/types.js";
+// src/recipes/my-recipe/steps/my-node.ts
+import type { WorkflowContext, StepResult } from "@sweny-ai/engine";
+import type { IssueTrackingProvider } from "@sweny-ai/providers/issue-tracking";
+import type { MyRecipeConfig } from "../types.js";
 
 export async function myNode(ctx: WorkflowContext<MyRecipeConfig>): Promise<StepResult> {
   const { config, logger, results, providers } = ctx;
@@ -93,8 +95,8 @@ The reserved target `"end"` stops the recipe successfully from any `on:` entry.
 ## Writing a definition
 
 ```ts
-// packages/engine/src/recipes/my-recipe/definition.ts
-import type { RecipeDefinition } from "../../types.js";
+// src/recipes/my-recipe/definition.ts
+import type { RecipeDefinition } from "@sweny-ai/engine";
 
 export const myRecipeDefinition: RecipeDefinition = {
   id: "my-recipe",
@@ -122,12 +124,12 @@ export const myRecipeDefinition: RecipeDefinition = {
 ## Wiring the recipe
 
 ```ts
-// packages/engine/src/recipes/my-recipe/index.ts
+// src/recipes/my-recipe/index.ts
 import { createRecipe } from "@sweny-ai/engine";
 import { myRecipeDefinition } from "./definition.js";
 import { verifySetup } from "./steps/verify-setup.js";
-import { doWork } from "../../nodes/do-work.js";
-import { sendNotification } from "../../nodes/notify.js";
+import { doWork } from "./steps/do-work.js";
+import { sendNotification } from "./steps/notify.js";
 import type { MyRecipeConfig } from "./types.js";
 
 export const myRecipe = createRecipe<MyRecipeConfig>(myRecipeDefinition, {
@@ -143,10 +145,12 @@ export const myRecipe = createRecipe<MyRecipeConfig>(myRecipeDefinition, {
 
 ```ts
 import { runRecipe, createProviderRegistry } from "@sweny-ai/engine";
+import { linear } from "@sweny-ai/providers/issue-tracking";
+import { github } from "@sweny-ai/providers/source-control";
 
 const registry = createProviderRegistry();
 registry.set("issueTracker", linear({ apiKey: process.env.LINEAR_KEY }));
-registry.set("sourceControl", github({ token: process.env.GH_TOKEN }));
+registry.set("sourceControl", github({ token: process.env.GH_TOKEN, owner: "my-org", repo: "my-repo" }));
 
 const result = await runRecipe(myRecipe, config, registry, {
   observer: myObserver,
@@ -197,39 +201,34 @@ const errors = validateDefinition(myDefinition);
 
 ## Testing
 
+File providers write outputs to disk and don't require real credentials — perfect for unit testing recipes without connecting to external services.
+
 ```ts
+import { describe, it, expect } from "vitest";
 import { runRecipe, createProviderRegistry } from "@sweny-ai/engine";
 import { fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
+import { myRecipe } from "./index.js";
 
-vi.mock("node:child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:child_process")>();
-  return {
-    ...actual,
-    execSync: (cmd: string, opts?: unknown) => {
-      if (typeof cmd === "string" && cmd.startsWith("git"))
-        throw new Error("mocked: no git");
-      return actual.execSync(cmd as string, opts as never);
-    },
-  };
-});
+describe("myRecipe", () => {
+  it("runs to completion with file providers", async () => {
+    const tmpDir = "/tmp/sweny-test";
+    const tracker = fileIssueTracking({ outputDir: tmpDir });
+    await tracker.verifyAccess(); // initialises output directories
 
-it("runs to completion with file providers", async () => {
-  const tracker = fileIssueTracking({ outputDir: tmpDir, logger: silentLogger });
-  await tracker.verifyAccess();
-  const issue = await tracker.createIssue({ title: "Test", projectId: "LOCAL" });
+    const issue = await tracker.createIssue({ title: "Test issue", projectId: "LOCAL" });
 
-  const registry = createProviderRegistry();
-  registry.set("issueTracker", tracker);
+    const registry = createProviderRegistry();
+    registry.set("issueTracker", tracker);
 
-  const result = await runRecipe(myRecipe, { issueIdentifier: issue.identifier }, registry, {
-    logger: silentLogger,
+    const result = await runRecipe(
+      myRecipe,
+      { issueIdentifier: issue.identifier, repository: "my-org/my-repo" },
+      registry,
+    );
+
+    expect(result.status).toBe("completed");
   });
-
-  expect(["completed", "partial"]).toContain(result.status);
 });
 ```
 
-Key points:
-- Call `tracker.verifyAccess()` before `createIssue()` — it initialises output directories
-- File providers return `LOCAL-N` identifiers — capture and pass them in config
-- Mock `node:child_process` so the file source control doesn't detect the monorepo's git repo
+File providers return `LOCAL-N` identifiers — capture the returned issue and pass it in config. Call `verifyAccess()` before `createIssue()` to ensure the output directory is initialised.
