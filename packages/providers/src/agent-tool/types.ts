@@ -1,6 +1,7 @@
 import type { ZodRawShape } from "zod";
 
 export interface ToolResult {
+  [x: string]: unknown;
   content: { type: "text"; text: string }[];
   isError?: boolean;
 }
