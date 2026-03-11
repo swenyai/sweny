@@ -7,8 +7,8 @@ import { definitionToFlow, extractTransitions } from "../lib/definition-to-flow.
 
 const elk = new ELK();
 
-const NODE_WIDTH = 200;
-const NODE_HEIGHT = 80;
+const NODE_WIDTH = 230;
+const NODE_HEIGHT = 110;
 
 export async function layoutDefinition(def: RecipeDefinition): Promise<{
   nodes: StateNodeType[];
@@ -21,9 +21,10 @@ export async function layoutDefinition(def: RecipeDefinition): Promise<{
     id: "root",
     layoutOptions: {
       "elk.algorithm": "layered",
-      "elk.direction": "RIGHT",
-      "elk.spacing.nodeNode": "60",
-      "elk.layered.spacing.edgeNodeBetweenLayers": "40",
+      "elk.direction": "DOWN",
+      "elk.spacing.nodeNode": "48",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "52",
+      "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
     },
     children: rfNodes.map(
       (node): ElkNode => ({

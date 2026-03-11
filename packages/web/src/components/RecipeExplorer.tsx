@@ -1,10 +1,269 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { RecipeViewer } from "@sweny-ai/studio/viewer";
 import { triageDefinition, implementDefinition } from "@sweny-ai/engine/browser";
 import "@sweny-ai/studio/style.css";
 import type { RecipeDefinition, StateDefinition } from "@sweny-ai/engine/browser";
 
-// ── Data ─────────────────────────────────────────────────────────────────────
+// ── Inline provider catalog (browser-safe subset) ────────────────────────────
+
+interface EnvVarSpec {
+  key: string;
+  description: string;
+  required: boolean;
+  secret: boolean;
+  example?: string;
+}
+interface ProviderOption {
+  id: string;
+  name: string;
+  category: string;
+  color: string;
+  envVars: EnvVarSpec[];
+  importPath: string;
+  factoryFn: string;
+}
+
+const CATALOG: ProviderOption[] = [
+  // observability
+  {
+    id: "datadog",
+    name: "Datadog",
+    category: "observability",
+    color: "#8b5cf6",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "datadog",
+    envVars: [
+      { key: "DATADOG_API_KEY", description: "API key", required: true, secret: true },
+      { key: "DATADOG_APP_KEY", description: "Application key", required: true, secret: true },
+      {
+        key: "DATADOG_SITE",
+        description: "Site (default: datadoghq.com)",
+        required: false,
+        secret: false,
+        example: "datadoghq.eu",
+      },
+    ],
+  },
+  {
+    id: "sentry",
+    name: "Sentry",
+    category: "observability",
+    color: "#362D59",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "sentry",
+    envVars: [
+      { key: "SENTRY_AUTH_TOKEN", description: "Auth token", required: true, secret: true },
+      { key: "SENTRY_ORG", description: "Organization slug", required: true, secret: false, example: "my-company" },
+      { key: "SENTRY_PROJECT", description: "Project slug (blank = all)", required: false, secret: false },
+    ],
+  },
+  {
+    id: "cloudwatch",
+    name: "CloudWatch",
+    category: "observability",
+    color: "#FF9900",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "cloudwatch",
+    envVars: [
+      { key: "AWS_ACCESS_KEY_ID", description: "AWS access key ID", required: true, secret: true },
+      { key: "AWS_SECRET_ACCESS_KEY", description: "AWS secret access key", required: true, secret: true },
+      { key: "AWS_REGION", description: "Region", required: true, secret: false, example: "us-east-1" },
+      { key: "CLOUDWATCH_LOG_GROUP", description: "Default log group", required: false, secret: false },
+    ],
+  },
+  {
+    id: "elastic",
+    name: "Elasticsearch",
+    category: "observability",
+    color: "#005571",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "elastic",
+    envVars: [
+      { key: "ELASTICSEARCH_URL", description: "Endpoint URL", required: true, secret: false },
+      { key: "ELASTICSEARCH_API_KEY", description: "API key", required: true, secret: true },
+      { key: "ELASTICSEARCH_INDEX", description: "Index pattern", required: false, secret: false, example: "logs-*" },
+    ],
+  },
+  {
+    id: "newrelic",
+    name: "New Relic",
+    category: "observability",
+    color: "#008C99",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "newrelic",
+    envVars: [
+      { key: "NEW_RELIC_API_KEY", description: "User API key", required: true, secret: true },
+      { key: "NEW_RELIC_ACCOUNT_ID", description: "Account ID", required: true, secret: false },
+    ],
+  },
+  {
+    id: "loki",
+    name: "Grafana Loki",
+    category: "observability",
+    color: "#F05A28",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "loki",
+    envVars: [
+      { key: "LOKI_URL", description: "Loki endpoint", required: true, secret: false, example: "http://loki:3100" },
+      { key: "LOKI_USERNAME", description: "Grafana Cloud username", required: false, secret: false },
+      { key: "LOKI_PASSWORD", description: "Grafana Cloud API key", required: false, secret: true },
+    ],
+  },
+  // issueTracking
+  {
+    id: "linear",
+    name: "Linear",
+    category: "issueTracking",
+    color: "#5E6AD2",
+    importPath: "@sweny-ai/providers/issue-tracking",
+    factoryFn: "linear",
+    envVars: [
+      { key: "LINEAR_API_KEY", description: "Personal API key", required: true, secret: true },
+      { key: "LINEAR_TEAM_ID", description: "Default team ID", required: true, secret: false },
+      { key: "LINEAR_PROJECT_ID", description: "Default project ID", required: false, secret: false },
+    ],
+  },
+  {
+    id: "github-issues",
+    name: "GitHub Issues",
+    category: "issueTracking",
+    color: "#24292F",
+    importPath: "@sweny-ai/providers/issue-tracking",
+    factoryFn: "githubIssues",
+    envVars: [
+      { key: "GITHUB_TOKEN", description: "Personal access token", required: true, secret: true },
+      { key: "GITHUB_OWNER", description: "Owner (org or user)", required: true, secret: false },
+      { key: "GITHUB_REPO", description: "Repository name", required: true, secret: false },
+    ],
+  },
+  {
+    id: "jira",
+    name: "Jira",
+    category: "issueTracking",
+    color: "#0052CC",
+    importPath: "@sweny-ai/providers/issue-tracking",
+    factoryFn: "jira",
+    envVars: [
+      { key: "JIRA_URL", description: "Instance URL", required: true, secret: false },
+      { key: "JIRA_EMAIL", description: "Account email", required: true, secret: false },
+      { key: "JIRA_API_TOKEN", description: "API token", required: true, secret: true },
+      { key: "JIRA_PROJECT_KEY", description: "Project key", required: true, secret: false, example: "ENG" },
+    ],
+  },
+  // sourceControl
+  {
+    id: "github",
+    name: "GitHub",
+    category: "sourceControl",
+    color: "#24292F",
+    importPath: "@sweny-ai/providers/source-control",
+    factoryFn: "github",
+    envVars: [
+      { key: "GITHUB_TOKEN", description: "Token (repo + workflow scopes)", required: true, secret: true },
+      { key: "GITHUB_OWNER", description: "Owner (org or user)", required: true, secret: false },
+      { key: "GITHUB_REPO", description: "Repository name", required: true, secret: false },
+    ],
+  },
+  {
+    id: "gitlab",
+    name: "GitLab",
+    category: "sourceControl",
+    color: "#FC6D26",
+    importPath: "@sweny-ai/providers/source-control",
+    factoryFn: "gitlab",
+    envVars: [
+      { key: "GITLAB_TOKEN", description: "Personal access token", required: true, secret: true },
+      { key: "GITLAB_URL", description: "Instance URL", required: false, secret: false },
+      { key: "GITLAB_PROJECT_ID", description: "Project ID or path", required: true, secret: false },
+    ],
+  },
+  // codingAgent
+  {
+    id: "claude-code",
+    name: "Claude Code",
+    category: "codingAgent",
+    color: "#D97706",
+    importPath: "@sweny-ai/providers/coding-agent",
+    factoryFn: "claudeCode",
+    envVars: [
+      {
+        key: "ANTHROPIC_API_KEY",
+        description: "Anthropic API key",
+        required: true,
+        secret: true,
+        example: "sk-ant-...",
+      },
+    ],
+  },
+  {
+    id: "openai-codex",
+    name: "OpenAI Codex",
+    category: "codingAgent",
+    color: "#10A37F",
+    importPath: "@sweny-ai/providers/coding-agent",
+    factoryFn: "openaiCodex",
+    envVars: [{ key: "OPENAI_API_KEY", description: "OpenAI API key", required: true, secret: true }],
+  },
+  // notification
+  {
+    id: "slack-webhook",
+    name: "Slack Webhook",
+    category: "notification",
+    color: "#4A154B",
+    importPath: "@sweny-ai/providers/notification",
+    factoryFn: "slackWebhook",
+    envVars: [{ key: "SLACK_WEBHOOK_URL", description: "Incoming webhook URL", required: true, secret: true }],
+  },
+  {
+    id: "discord-webhook",
+    name: "Discord Webhook",
+    category: "notification",
+    color: "#5865F2",
+    importPath: "@sweny-ai/providers/notification",
+    factoryFn: "discordWebhook",
+    envVars: [{ key: "DISCORD_WEBHOOK_URL", description: "Webhook URL", required: true, secret: true }],
+  },
+  {
+    id: "teams-webhook",
+    name: "Microsoft Teams",
+    category: "notification",
+    color: "#6264A7",
+    importPath: "@sweny-ai/providers/notification",
+    factoryFn: "teamsWebhook",
+    envVars: [{ key: "TEAMS_WEBHOOK_URL", description: "Incoming webhook URL", required: true, secret: true }],
+  },
+  {
+    id: "email",
+    name: "Email (SMTP)",
+    category: "notification",
+    color: "#EA4335",
+    importPath: "@sweny-ai/providers/notification",
+    factoryFn: "email",
+    envVars: [
+      { key: "SMTP_HOST", description: "SMTP server hostname", required: true, secret: false },
+      { key: "SMTP_PORT", description: "Port (default: 587)", required: false, secret: false, example: "587" },
+      { key: "SMTP_USER", description: "SMTP username", required: true, secret: false },
+      { key: "SMTP_PASS", description: "SMTP password or API key", required: true, secret: true },
+      { key: "SMTP_FROM", description: "Sender address", required: true, secret: false },
+      { key: "SMTP_TO", description: "Recipient address(es)", required: true, secret: false },
+    ],
+  },
+  {
+    id: "github-summary",
+    name: "GitHub Step Summary",
+    category: "notification",
+    color: "#24292F",
+    importPath: "@sweny-ai/providers/notification",
+    factoryFn: "githubSummary",
+    envVars: [],
+  },
+];
+
+function getCatalogForCategory(category: string): ProviderOption[] {
+  return CATALOG.filter((p) => p.category === category);
+}
+
+// ── Recipe data ───────────────────────────────────────────────────────────────
 
 const RECIPES: { id: string; label: string; description: string; definition: RecipeDefinition }[] = [
   {
@@ -27,11 +286,22 @@ const PHASE_META = {
   report: { label: "Report", color: "#22c55e", bg: "rgba(34,197,94,0.12)" },
 } as const;
 
+const CATEGORY_LABELS: Record<string, string> = {
+  observability: "Observability",
+  issueTracking: "Issue Tracking",
+  sourceControl: "Source Control",
+  codingAgent: "Coding Agent",
+  notification: "Notification",
+};
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ViewMode = "visual" | "split" | "source";
+type ViewMode = "visual" | "split" | "source" | "configure";
+type ProviderConfig = Record<string, string>; // stateId → providerId
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+type StateDefWithProvider = StateDefinition & { provider?: string };
 
 function recipeStats(definition: RecipeDefinition) {
   const states = Object.values(definition.states);
@@ -54,6 +324,113 @@ function outboundTransitions(state: StateDefinition) {
     transitions.push({ label: "→", target: state.next });
   }
   return transitions;
+}
+
+/** Collect all env vars needed given a providerConfig selection, deduped by key. */
+function collectEnvVars(
+  definition: RecipeDefinition,
+  providerConfig: ProviderConfig,
+): Array<{
+  key: string;
+  description: string;
+  required: boolean;
+  secret: boolean;
+  example?: string;
+  category: string;
+  providerName: string;
+}> {
+  const seen = new Set<string>();
+  const result: ReturnType<typeof collectEnvVars> = [];
+  for (const [stateId, providerId] of Object.entries(providerConfig)) {
+    const state = definition.states[stateId] as StateDefWithProvider;
+    if (!state) continue;
+    const provider = CATALOG.find((p) => p.id === providerId);
+    if (!provider) continue;
+    for (const ev of provider.envVars) {
+      if (!seen.has(ev.key)) {
+        seen.add(ev.key);
+        result.push({ ...ev, category: provider.category, providerName: provider.name });
+      }
+    }
+  }
+  return result;
+}
+
+/** Generate .env template string. */
+function generateEnvTemplate(definition: RecipeDefinition, providerConfig: ProviderConfig): string {
+  const vars = collectEnvVars(definition, providerConfig);
+  if (vars.length === 0) return "# No providers configured yet.";
+
+  const byCategory: Record<string, typeof vars> = {};
+  for (const v of vars) {
+    byCategory[v.category] = byCategory[v.category] ?? [];
+    byCategory[v.category].push(v);
+  }
+
+  const lines: string[] = [];
+  for (const [cat, entries] of Object.entries(byCategory)) {
+    const providerName = entries[0].providerName;
+    lines.push(`# ${CATEGORY_LABELS[cat] ?? cat} (${providerName})`);
+    for (const e of entries) {
+      if (e.example) lines.push(`${e.key}=${e.example}`);
+      else lines.push(`${e.key}=`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd();
+}
+
+/** Generate runRecipe TypeScript snippet. */
+function generateCodeSnippet(definition: RecipeDefinition, providerConfig: ProviderConfig): string {
+  const statesWithProviders = Object.entries(definition.states)
+    .map(([id, s]) => ({
+      id,
+      state: s as StateDefWithProvider,
+      provider: CATALOG.find((p) => p.id === providerConfig[id]),
+    }))
+    .filter((x) => x.provider);
+
+  if (statesWithProviders.length === 0) return "// Select providers above to generate setup code.";
+
+  // Deduplicate imports by factoryFn+importPath
+  const imports = new Map<string, { importPath: string; factoryFn: string }>();
+  const registrations: string[] = [];
+  const seenRoles = new Set<string>();
+
+  for (const { state, provider } of statesWithProviders) {
+    if (!provider) continue;
+    const role = state.provider!;
+    if (!imports.has(provider.factoryFn)) {
+      imports.set(provider.factoryFn, { importPath: provider.importPath, factoryFn: provider.factoryFn });
+    }
+    if (!seenRoles.has(role)) {
+      seenRoles.add(role);
+      const vars = provider.envVars
+        .filter((v) => v.required)
+        .map((v) => `process.env.${v.key}!`)
+        .join(", ");
+      registrations.push(`registry.set("${role}", ${provider.factoryFn}(${vars ? `{ /* ${vars} */ }` : "{}"}));`);
+    }
+  }
+
+  const importLines = Array.from(imports.values())
+    .map(({ importPath, factoryFn }) => `import { ${factoryFn} } from "${importPath}";`)
+    .join("\n");
+
+  const recipeId = definition.id === "triage" ? "triageRecipe" : "implementRecipe";
+  const recipeImport = `import { ${recipeId} } from "@sweny-ai/engine/recipes/${definition.id}";`;
+
+  return [
+    `import { runRecipe, createProviderRegistry } from "@sweny-ai/engine";`,
+    recipeImport,
+    importLines,
+    "",
+    `const registry = createProviderRegistry();`,
+    ...registrations,
+    "",
+    `const result = await runRecipe(${recipeId}, config, registry);`,
+    `console.log(result.status); // "completed" | "failed" | "partial"`,
+  ].join("\n");
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -83,16 +460,18 @@ function PhasePill({ phase }: { phase: keyof typeof PHASE_META }) {
   );
 }
 
-interface NodeDetailProps {
+function NodeDetail({
+  stateId,
+  state,
+  isInitial,
+  onClose,
+}: {
   stateId: string;
-  state: StateDefinition;
+  state: StateDefWithProvider;
   isInitial: boolean;
   onClose: () => void;
-}
-
-function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
+}) {
   const transitions = outboundTransitions(state);
-
   return (
     <div
       style={{
@@ -169,13 +548,11 @@ function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
           ✕
         </button>
       </div>
-
       {state.description ? (
         <p style={{ margin: 0, fontSize: "0.8rem", color: "#cbd5e1", lineHeight: 1.5 }}>{state.description}</p>
       ) : (
         <p style={{ margin: 0, fontSize: "0.8rem", color: "#475569", fontStyle: "italic" }}>No description.</p>
       )}
-
       {transitions.length > 0 && (
         <div>
           <div
@@ -224,7 +601,6 @@ function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
           </div>
         </div>
       )}
-
       {transitions.length === 0 && (
         <div style={{ fontSize: "0.75rem", color: "#94a3b8", fontStyle: "italic" }}>
           Terminal state — recipe ends here.
@@ -254,7 +630,6 @@ function RecipeOverview({ recipe, definition }: { recipe: (typeof RECIPES)[numbe
         <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "#f1f5f9", marginBottom: 6 }}>{recipe.label}</div>
         <p style={{ margin: 0, fontSize: "0.78rem", color: "#cbd5e1", lineHeight: 1.55 }}>{recipe.description}</p>
       </div>
-
       <div>
         <div
           style={{
@@ -289,10 +664,275 @@ function RecipeOverview({ recipe, definition }: { recipe: (typeof RECIPES)[numbe
           })}
         </div>
       </div>
-
-      <div style={{ marginTop: 4, fontSize: "0.72rem", color: "#94a3b8", lineHeight: 1.5 }}>
+      <div style={{ fontSize: "0.72rem", color: "#94a3b8", lineHeight: 1.5 }}>
         <span style={{ color: "#f1f5f9", fontWeight: 600 }}>{stats.total} states</span> total. Click any node to inspect
         its phase, routing, and transitions.
+      </div>
+    </div>
+  );
+}
+
+// ── Configure panel ───────────────────────────────────────────────────────────
+
+function ConfigurePanel({
+  recipe,
+  definition,
+  providerConfig,
+  onProviderChange,
+  focusedStateId,
+}: {
+  recipe: (typeof RECIPES)[number];
+  definition: RecipeDefinition;
+  providerConfig: ProviderConfig;
+  onProviderChange: (stateId: string, providerId: string) => void;
+  focusedStateId: string | null;
+}) {
+  const [outputTab, setOutputTab] = useState<"env" | "code">("env");
+  const [copied, setCopied] = useState(false);
+  const focusRef = useRef<HTMLDivElement | null>(null);
+
+  // Scroll focused state into view
+  useEffect(() => {
+    if (focusedStateId && focusRef.current) {
+      focusRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [focusedStateId]);
+
+  const statesWithProvider = Object.entries(definition.states).filter(
+    ([, s]) => (s as StateDefWithProvider).provider,
+  ) as [string, StateDefWithProvider][];
+
+  const configuredCount = statesWithProvider.filter(([id]) => providerConfig[id]).length;
+  const allConfigured = configuredCount === statesWithProvider.length;
+
+  const envText = generateEnvTemplate(definition, providerConfig);
+  const codeText = generateCodeSnippet(definition, providerConfig);
+  const outputText = outputTab === "env" ? envText : codeText;
+
+  async function copyOutput() {
+    await navigator.clipboard.writeText(outputText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  const labelStyle = {
+    fontSize: 10,
+    fontWeight: 700 as const,
+    letterSpacing: "0.07em",
+    textTransform: "uppercase" as const,
+    color: "#475569",
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflowY: "auto" }}>
+      {/* Header */}
+      <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={labelStyle}>Provider Configuration</span>
+          <span style={{ fontSize: 11, color: allConfigured ? "#22c55e" : "#f59e0b", fontWeight: 600 }}>
+            {allConfigured ? "✓ Ready" : `${configuredCount} / ${statesWithProvider.length} configured`}
+          </span>
+        </div>
+        <p style={{ margin: "4px 0 0", fontSize: 11, color: "#475569", lineHeight: 1.4 }}>
+          Select a provider for each step. Steps without a provider slot run without external services.
+        </p>
+      </div>
+
+      {/* Step list */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+        {Object.entries(definition.states).map(([stateId, stateDef]) => {
+          const state = stateDef as StateDefWithProvider;
+          const isFocused = stateId === focusedStateId;
+          const options = state.provider ? getCatalogForCategory(state.provider) : [];
+          const selectedId = providerConfig[stateId];
+          const selected = CATALOG.find((p) => p.id === selectedId);
+
+          return (
+            <div
+              key={stateId}
+              ref={isFocused ? focusRef : null}
+              style={{
+                margin: "4px 10px",
+                borderRadius: 8,
+                border: `1px solid ${isFocused ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.06)"}`,
+                background: isFocused ? "rgba(99,102,241,0.07)" : "rgba(255,255,255,0.02)",
+                overflow: "hidden",
+              }}
+            >
+              {/* State header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px 6px" }}>
+                <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#e2e8f0", flex: 1 }}>
+                  {stateId}
+                </span>
+                <PhasePill phase={state.phase} />
+              </div>
+
+              {state.description && (
+                <p style={{ margin: "0 10px 6px", fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>
+                  {state.description}
+                </p>
+              )}
+
+              {/* Provider selector */}
+              {state.provider ? (
+                <div style={{ padding: "0 10px 10px" }}>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "#475569",
+                      marginBottom: 5,
+                    }}
+                  >
+                    {CATEGORY_LABELS[state.provider] ?? state.provider}
+                  </div>
+                  <select
+                    value={selectedId ?? ""}
+                    onChange={(e) => onProviderChange(stateId, e.target.value)}
+                    style={{
+                      width: "100%",
+                      background: "#0f172a",
+                      color: selectedId ? "#e2e8f0" : "#64748b",
+                      border: `1px solid ${selectedId ? (selected?.color ?? "rgba(255,255,255,0.15)") + "66" : "rgba(255,255,255,0.1)"}`,
+                      borderRadius: 6,
+                      padding: "5px 8px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                      outline: "none",
+                      appearance: "none",
+                      backgroundImage:
+                        "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E\")",
+                      backgroundRepeat: "no-repeat",
+                      backgroundPosition: "right 8px center",
+                      paddingRight: 28,
+                    }}
+                  >
+                    <option value="">— select provider —</option>
+                    {options.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Env vars for selected provider */}
+                  {selected && selected.envVars.length > 0 && (
+                    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3 }}>
+                      {selected.envVars.map((ev) => (
+                        <div key={ev.key} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 11 }}>
+                          <code
+                            style={{
+                              color: ev.required ? "#93c5fd" : "#475569",
+                              fontFamily: "monospace",
+                              fontSize: 11,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {ev.key}
+                          </code>
+                          <span
+                            style={{
+                              color: "#334155",
+                              flex: 1,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {ev.description}
+                            {ev.example ? ` (e.g. ${ev.example})` : ""}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              padding: "1px 4px",
+                              borderRadius: 3,
+                              letterSpacing: "0.04em",
+                              background: ev.required ? "rgba(239,68,68,0.15)" : "rgba(100,116,139,0.15)",
+                              color: ev.required ? "#fca5a5" : "#64748b",
+                            }}
+                          >
+                            {ev.required ? "required" : "optional"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {selected && selected.envVars.length === 0 && (
+                    <p style={{ margin: "6px 0 0", fontSize: 11, color: "#334155", fontStyle: "italic" }}>
+                      No env vars required.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p style={{ margin: "0 10px 8px", fontSize: 11, color: "#334155", fontStyle: "italic" }}>
+                  No external provider needed.
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Output section */}
+      <div style={{ borderTop: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
+        {/* Tab bar */}
+        <div style={{ display: "flex", alignItems: "center", padding: "6px 10px 0", gap: 2 }}>
+          {(["env", "code"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setOutputTab(tab)}
+              style={{
+                padding: "3px 10px",
+                border: "none",
+                borderBottom: `2px solid ${outputTab === tab ? "#6366f1" : "transparent"}`,
+                background: "transparent",
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 600,
+                color: outputTab === tab ? "#a5b4fc" : "#475569",
+              }}
+            >
+              {tab === "env" ? ".env template" : "TypeScript setup"}
+            </button>
+          ))}
+          <button
+            onClick={copyOutput}
+            style={{
+              marginLeft: "auto",
+              padding: "2px 8px",
+              borderRadius: 4,
+              border: "1px solid rgba(255,255,255,0.1)",
+              background: "transparent",
+              cursor: "pointer",
+              fontSize: 10,
+              color: copied ? "#22c55e" : "#475569",
+            }}
+          >
+            {copied ? "✓ Copied" : "Copy"}
+          </button>
+        </div>
+        <pre
+          style={{
+            margin: 0,
+            padding: "10px 12px",
+            fontSize: 11,
+            fontFamily: "monospace",
+            color: "#64748b",
+            lineHeight: 1.6,
+            overflowX: "auto",
+            maxHeight: 200,
+            overflowY: "auto",
+            background: "#020617",
+            borderTop: "1px solid rgba(255,255,255,0.05)",
+          }}
+        >
+          {outputText}
+        </pre>
       </div>
     </div>
   );
@@ -307,7 +947,6 @@ function ExpandIcon() {
     </svg>
   );
 }
-
 function CompressIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -315,7 +954,6 @@ function CompressIcon() {
     </svg>
   );
 }
-
 function CopyIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -325,14 +963,15 @@ function CopyIcon() {
   );
 }
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── Layout constants ──────────────────────────────────────────────────────────
 
 const TOOLBAR_H = 48;
 const FOOTER_H = 30;
-const PANEL_WIDTH_DETAIL = 240;
-const PANEL_WIDTH_OVERVIEW = 200;
+const PANEL_W_DETAIL = 240;
+const PANEL_W_OVERVIEW = 200;
 const JSON_PANEL_W = 380;
-const EMBEDDED_HEIGHT = "min(72vh, 760px)";
+const CONFIG_PANEL_W = 380;
+const EMBEDDED_HEIGHT = "min(80vh, 800px)";
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -344,11 +983,12 @@ export function RecipeExplorer() {
   const [jsonText, setJsonText] = useState(() => JSON.stringify(RECIPES[0].definition, null, 2));
   const [parseError, setParseError] = useState<string | null>(null);
   const [liveDefinition, setLiveDefinition] = useState<RecipeDefinition>(RECIPES[0].definition);
+  const [providerConfig, setProviderConfig] = useState<ProviderConfig>({});
   const [copied, setCopied] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const recipe = RECIPES[activeIdx];
-  const selectedState = selectedStateId ? liveDefinition.states[selectedStateId] : null;
+  const selectedState = selectedStateId ? (liveDefinition.states[selectedStateId] as StateDefWithProvider) : null;
 
   function switchRecipe(idx: number) {
     setActiveIdx(idx);
@@ -356,6 +996,7 @@ export function RecipeExplorer() {
     setLiveDefinition(RECIPES[idx].definition);
     setJsonText(JSON.stringify(RECIPES[idx].definition, null, 2));
     setParseError(null);
+    setProviderConfig({});
   }
 
   const handleJsonChange = useCallback((text: string) => {
@@ -364,7 +1005,7 @@ export function RecipeExplorer() {
     debounceRef.current = setTimeout(() => {
       try {
         const parsed = JSON.parse(text) as RecipeDefinition;
-        if (parsed && typeof parsed === "object" && typeof parsed.initial === "string" && parsed.states) {
+        if (parsed && typeof parsed.initial === "string" && parsed.states) {
           setLiveDefinition(parsed);
           setParseError(null);
           setSelectedStateId(null);
@@ -389,7 +1030,6 @@ export function RecipeExplorer() {
     document.body.style.overflow = next ? "hidden" : "";
   }
 
-  // Escape key exits fullscreen
   useEffect(() => {
     if (!isFullscreen) return;
     function onKey(e: KeyboardEvent) {
@@ -402,14 +1042,14 @@ export function RecipeExplorer() {
     return () => window.removeEventListener("keydown", onKey);
   }, [isFullscreen]);
 
-  // Restore scroll on unmount
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       document.body.style.overflow = "";
-    };
-  }, []);
+    },
+    [],
+  );
 
-  // ── Panes ──────────────────────────────────────────────────────────────────
+  // ── Body layout ────────────────────────────────────────────────────────────
 
   const bodyHeight = isFullscreen
     ? `calc(100vh - ${TOOLBAR_H + FOOTER_H}px)`
@@ -437,7 +1077,6 @@ export function RecipeExplorer() {
         background: "#020617",
       }}
     >
-      {/* JSON pane header */}
       <div
         style={{
           display: "flex",
@@ -468,7 +1107,6 @@ export function RecipeExplorer() {
           )}
           <button
             onClick={copyJson}
-            title="Copy JSON"
             style={{
               background: "none",
               border: "1px solid rgba(255,255,255,0.1)",
@@ -487,8 +1125,6 @@ export function RecipeExplorer() {
           </button>
         </div>
       </div>
-
-      {/* Textarea */}
       <textarea
         value={jsonText}
         onChange={(e) => handleJsonChange(e.target.value)}
@@ -500,7 +1136,7 @@ export function RecipeExplorer() {
           width: "100%",
           background: "transparent",
           color: parseError ? "#fca5a5" : "#94a3b8",
-          fontFamily: "'ui-monospace', 'Cascadia Code', 'Fira Code', 'Consolas', monospace",
+          fontFamily: "ui-monospace, monospace",
           fontSize: 12,
           lineHeight: 1.65,
           padding: "12px 14px",
@@ -508,17 +1144,16 @@ export function RecipeExplorer() {
           outline: "none",
           resize: "none",
           boxSizing: "border-box",
-          tabSize: 2,
           height: bodyHeight,
         }}
       />
     </div>
   );
 
-  const sidePanel = viewMode === "visual" && (
+  const visualSidePanel = viewMode === "visual" && (
     <div
       style={{
-        width: selectedState ? PANEL_WIDTH_DETAIL : PANEL_WIDTH_OVERVIEW,
+        width: selectedState ? PANEL_W_DETAIL : PANEL_W_OVERVIEW,
         flexShrink: 0,
         borderLeft: "1px solid rgba(255,255,255,0.08)",
         overflowY: "auto",
@@ -538,7 +1173,35 @@ export function RecipeExplorer() {
     </div>
   );
 
+  const configurePanel = viewMode === "configure" && (
+    <div
+      style={{
+        width: CONFIG_PANEL_W,
+        flexShrink: 0,
+        borderLeft: "1px solid rgba(255,255,255,0.08)",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <ConfigurePanel
+        recipe={recipe}
+        definition={liveDefinition}
+        providerConfig={providerConfig}
+        onProviderChange={(stateId, providerId) => setProviderConfig((prev) => ({ ...prev, [stateId]: providerId }))}
+        focusedStateId={selectedStateId}
+      />
+    </div>
+  );
+
   // ── Toolbar ────────────────────────────────────────────────────────────────
+
+  const MODES: [ViewMode, string][] = [
+    ["visual", "Visual"],
+    ["configure", "Configure"],
+    ["split", "Split"],
+    ["source", "Source"],
+  ];
 
   const toolbar = (
     <div
@@ -553,7 +1216,6 @@ export function RecipeExplorer() {
         flexShrink: 0,
       }}
     >
-      {/* Recipe tabs */}
       {RECIPES.map((r, i) => (
         <button
           key={r.id}
@@ -573,26 +1235,9 @@ export function RecipeExplorer() {
           {r.label}
         </button>
       ))}
-
-      {/* Divider */}
       <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.1)", margin: "0 4px", flexShrink: 0 }} />
-
-      {/* View mode segmented control */}
-      <div
-        style={{
-          display: "flex",
-          border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: 6,
-          overflow: "hidden",
-        }}
-      >
-        {(
-          [
-            ["visual", "Visual"],
-            ["split", "Split"],
-            ["source", "Source"],
-          ] as [ViewMode, string][]
-        ).map(([mode, label], i) => (
+      <div style={{ display: "flex", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, overflow: "hidden" }}>
+        {MODES.map(([mode, label], i) => (
           <button
             key={mode}
             onClick={() => setViewMode(mode)}
@@ -611,8 +1256,6 @@ export function RecipeExplorer() {
           </button>
         ))}
       </div>
-
-      {/* Phase legend */}
       <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
         {(["learn", "act", "report"] as const).map((phase) => {
           const { label, color } = PHASE_META[phase];
@@ -624,8 +1267,6 @@ export function RecipeExplorer() {
           );
         })}
       </div>
-
-      {/* Fullscreen toggle */}
       <button
         onClick={toggleFullscreen}
         title={isFullscreen ? "Exit fullscreen (Esc)" : "Enter fullscreen"}
@@ -653,9 +1294,11 @@ export function RecipeExplorer() {
   const footerHint =
     viewMode === "visual"
       ? "Scroll to zoom · drag to pan · click a node to inspect"
-      : viewMode === "split"
-        ? "Edit JSON to live-update the graph"
-        : "Paste or type a RecipeDefinition JSON object";
+      : viewMode === "configure"
+        ? "Click a node to jump to its config · select a provider to see env vars"
+        : viewMode === "split"
+          ? "Edit JSON to live-update the graph"
+          : "Paste or type a RecipeDefinition JSON object";
 
   const footer = (
     <div
@@ -673,7 +1316,7 @@ export function RecipeExplorer() {
       }}
     >
       <span>{footerHint}</span>
-      {parseError && viewMode !== "visual" && (
+      {parseError && viewMode !== "visual" && viewMode !== "configure" && (
         <span
           style={{
             color: "#f87171",
@@ -727,14 +1370,13 @@ export function RecipeExplorer() {
       }
     >
       {toolbar}
-
-      {/* Body */}
       <div style={{ flex: 1, display: "flex", minHeight: 0, overflow: "hidden" }}>
         {viewMode !== "source" && graphPane}
-        {viewMode !== "visual" && jsonPane}
-        {viewMode === "visual" && sidePanel}
+        {viewMode === "split" && jsonPane}
+        {viewMode === "source" && jsonPane}
+        {viewMode === "visual" && visualSidePanel}
+        {viewMode === "configure" && configurePanel}
       </div>
-
       {footer}
     </div>
   );

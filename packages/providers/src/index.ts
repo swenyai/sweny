@@ -103,3 +103,7 @@ export { envVault, awsSecretsManager } from "./credential-vault/index.js";
 
 // Shared factories
 export { createObservabilityProvider, createCodingAgentProvider } from "./factories.js";
+
+// Provider catalog (browser-safe metadata for Studio)
+export type { ProviderOption, EnvVarSpec } from "./catalog.js";
+export { PROVIDER_CATALOG, getProvidersForCategory, getProviderById } from "./catalog.js";
