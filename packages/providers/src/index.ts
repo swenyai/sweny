@@ -100,3 +100,6 @@ export { agentTool } from "./agent-tool/index.js";
 // Credential Vault
 export type { CredentialVaultProvider, EnvVaultConfig, AwsSecretsManagerConfig } from "./credential-vault/index.js";
 export { envVault, awsSecretsManager } from "./credential-vault/index.js";
+
+// Shared factories
+export { createObservabilityProvider, createCodingAgentProvider } from "./factories.js";
