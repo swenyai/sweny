@@ -24,7 +24,7 @@ This monorepo contains the SWEny platform:
 | **[SWEny Triage](#sweny-triage)** | GitHub Action — autonomous SRE triage |
 | **[@sweny-ai/providers](packages/providers)** | 30+ provider implementations |
 | **[@sweny-ai/agent](packages/agent)** | AI assistant — Slack bot + CLI |
-| **[Studio](#studio)** | Visual recipe editor and execution monitor |
+| **[@sweny-ai/studio](packages/studio)** | Visual recipe editor and execution monitor |
 | **[@sweny-ai/web](packages/web)** | sweny.ai website |
 
 ---
@@ -177,7 +177,7 @@ SWEny creates GitHub Issues by default — zero additional config. Want Linear o
                                  └──────────────────────┘
 ```
 
-**Novelty gate** — SWEny won't create duplicate tickets. It checks Linear and GitHub for existing issues before acting, and adds "+1 occurrence" comments to known issues instead.
+**Novelty gate** — SWEny won't create duplicate tickets. It checks your issue tracker for existing issues before acting, and adds "+1 occurrence" comments to known issues instead.
 
 **Cross-repo dispatch** — If the bug belongs to a different repository (determined via your service map), SWEny automatically dispatches the fix to the correct repo.
 
@@ -319,8 +319,8 @@ SWEny creates GitHub Issues by default — zero additional config. Want Linear o
 |--------|-------------|
 | `issues-found` | Whether issues were found (`true`/`false`) |
 | `recommendation` | What SWEny decided (`implement`, `+1 existing ENG-123`, `skip`) |
-| `issue-identifier` | Linear issue created/found (e.g., `ENG-456`) |
-| `issue-url` | Linear issue URL |
+| `issue-identifier` | Issue created or found (e.g., `ENG-456`, `#42`) |
+| `issue-url` | Issue URL |
 | `pr-url` | Pull request URL (if created) |
 | `pr-number` | Pull request number (if created) |
 
@@ -424,8 +424,9 @@ The engine is provider-agnostic. Every integration is a pluggable provider that 
 
 | Role | Providers |
 |------|-----------|
-| **Learn** | Datadog, Sentry, CloudWatch, Splunk, Elasticsearch, New Relic, Grafana Loki |
-| **Act** | Linear, GitHub Issues, Jira (issue tracking) -- GitHub, GitLab (source control) -- PagerDuty, OpsGenie (incident) |
+| **Learn** | Datadog, Sentry, CloudWatch, Splunk, Elasticsearch, New Relic, Grafana Loki, Prometheus, PagerDuty |
+| **Act** | Linear, GitHub Issues, Jira (issue tracking) -- GitHub, GitLab (source control) |
+| **Incident** | PagerDuty, OpsGenie |
 | **Report** | GitHub Summary, Slack, Teams, Discord, Email (SendGrid), Generic Webhook |
 | **Infrastructure** | Filesystem / S3 / K8s CSI (storage) -- Env Vars / AWS Secrets Manager (credentials) -- API Key / No-Auth (auth) |
 | **AI** | Claude Code, OpenAI Codex, Google Gemini CLI (coding agent) |
@@ -436,7 +437,7 @@ Implementing a custom provider means implementing a TypeScript interface -- see 
 
 ## @sweny-ai/cli
 
-Run SWEny triage from your terminal — no CI pipeline required.
+Run SWEny triage and implement from your terminal — no CI pipeline required.
 
 ### Install
 
@@ -522,6 +523,28 @@ Cache flags:
 | `--cache-dir` | Cache directory | `.sweny/cache` |
 | `--cache-ttl` | TTL in seconds (0 = infinite) | `86400` (24h) |
 | `--no-cache` | Disable caching | — |
+
+### Implement command
+
+Implement a fix for a specific issue and open a PR — no triage needed:
+
+```bash
+sweny implement ENG-123
+sweny implement ENG-123 --dry-run
+sweny implement '#42' --issue-tracker-provider github-issues
+```
+
+`issueId` is passed as a positional argument. The implement command uses its own set of flags:
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--issue-tracker-provider` | `linear`, `jira`, `github-issues`, `file` | `linear` |
+| `--source-control-provider` | `github`, `gitlab`, `file` | `github` |
+| `--coding-agent-provider` | `claude`, `codex`, `gemini` | `claude` |
+| `--dry-run` | Skip creating PR | `false` |
+| `--max-implement-turns` | Max coding agent turns | `40` |
+| `--base-branch` | Base branch for PRs | `main` |
+| `--review-mode` | `auto` or `review` | `review` |
 
 See the [CLI documentation](https://sweny.ai/cli/) for the full inputs reference.
 
