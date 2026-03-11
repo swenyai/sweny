@@ -1,0 +1,27 @@
+/*
+ * Scoped overrides for the Live Recipe Explorer page.
+ * Uses :has(.recipe-explorer-root) so it only applies when the
+ * RecipeExplorer component is present — no other pages are affected.
+ */
+
+/* Remove the content column width constraint and padding so the explorer
+   can extend edge-to-edge in the Starlight splash template. */
+:has(.recipe-explorer-root) .sl-markdown-content {
+  max-width: none !important;
+  padding-inline: 0 !important;
+  padding-block: 0 !important;
+}
+
+:has(.recipe-explorer-root) .main-pane {
+  padding: 0 !important;
+}
+
+:has(.recipe-explorer-root) .content-panel {
+  padding: 0 !important;
+}
+
+/* Remove the "On this page" right rail (splash template already removes it
+   on supported Starlight versions; belt-and-suspenders). */
+:has(.recipe-explorer-root) .right-sidebar-container {
+  display: none !important;
+}

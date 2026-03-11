@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { RecipeViewer } from "@sweny-ai/studio/viewer";
 import { triageDefinition, implementDefinition } from "@sweny-ai/engine/browser";
 import "@sweny-ai/studio/style.css";
@@ -26,6 +26,10 @@ const PHASE_META = {
   act: { label: "Act", color: "#f59e0b", bg: "rgba(245,158,11,0.12)" },
   report: { label: "Report", color: "#22c55e", bg: "rgba(34,197,94,0.12)" },
 } as const;
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type ViewMode = "visual" | "split" | "source";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -101,7 +105,6 @@ function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
         overflowY: "auto",
       }}
     >
-      {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
@@ -142,7 +145,7 @@ function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
               fontFamily: "var(--sl-font-mono, monospace)",
               fontSize: "0.9rem",
               fontWeight: 700,
-              color: "var(--sl-color-text, #f1f5f9)",
+              color: "#f1f5f9",
               wordBreak: "break-all",
             }}
           >
@@ -157,7 +160,7 @@ function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
             background: "none",
             border: "none",
             cursor: "pointer",
-            color: "var(--sl-color-gray-3, #94a3b8)",
+            color: "#94a3b8",
             padding: 2,
             lineHeight: 1,
             fontSize: "1.1rem",
@@ -167,18 +170,12 @@ function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
         </button>
       </div>
 
-      {/* Description */}
       {state.description ? (
-        <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--sl-color-gray-2, #cbd5e1)", lineHeight: 1.5 }}>
-          {state.description}
-        </p>
+        <p style={{ margin: 0, fontSize: "0.8rem", color: "#cbd5e1", lineHeight: 1.5 }}>{state.description}</p>
       ) : (
-        <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--sl-color-gray-4, #475569)", fontStyle: "italic" }}>
-          No description.
-        </p>
+        <p style={{ margin: 0, fontSize: "0.8rem", color: "#475569", fontStyle: "italic" }}>No description.</p>
       )}
 
-      {/* Transitions */}
       {transitions.length > 0 && (
         <div>
           <div
@@ -187,7 +184,7 @@ function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
               fontWeight: 700,
               letterSpacing: "0.08em",
               textTransform: "uppercase",
-              color: "var(--sl-color-gray-3, #94a3b8)",
+              color: "#94a3b8",
               marginBottom: 8,
             }}
           >
@@ -211,17 +208,16 @@ function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
                 <span
                   style={{
                     fontFamily: "var(--sl-font-mono, monospace)",
-                    color:
-                      label === "failed" ? "#f87171" : label === "→" ? "var(--sl-color-gray-3, #94a3b8)" : "#a78bfa",
+                    color: label === "failed" ? "#f87171" : label === "→" ? "#94a3b8" : "#a78bfa",
                     fontWeight: 600,
                     minWidth: 60,
                   }}
                 >
                   {label}
                 </span>
-                <span style={{ color: "var(--sl-color-gray-3, #94a3b8)" }}>→</span>
-                <span style={{ fontFamily: "var(--sl-font-mono, monospace)", color: "var(--sl-color-text, #f1f5f9)" }}>
-                  {target === "end" ? <em style={{ color: "var(--sl-color-gray-3, #94a3b8)" }}>end</em> : target}
+                <span style={{ color: "#94a3b8" }}>→</span>
+                <span style={{ fontFamily: "var(--sl-font-mono, monospace)", color: "#f1f5f9" }}>
+                  {target === "end" ? <em style={{ color: "#94a3b8" }}>end</em> : target}
                 </span>
               </div>
             ))}
@@ -230,7 +226,7 @@ function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
       )}
 
       {transitions.length === 0 && (
-        <div style={{ fontSize: "0.75rem", color: "var(--sl-color-gray-3, #94a3b8)", fontStyle: "italic" }}>
+        <div style={{ fontSize: "0.75rem", color: "#94a3b8", fontStyle: "italic" }}>
           Terminal state — recipe ends here.
         </div>
       )}
@@ -238,8 +234,8 @@ function NodeDetail({ stateId, state, isInitial, onClose }: NodeDetailProps) {
   );
 }
 
-function RecipeOverview({ recipe }: { recipe: (typeof RECIPES)[number] }) {
-  const stats = recipeStats(recipe.definition);
+function RecipeOverview({ recipe, definition }: { recipe: (typeof RECIPES)[number]; definition: RecipeDefinition }) {
+  const stats = recipeStats(definition);
   return (
     <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 14 }}>
       <div>
@@ -249,18 +245,14 @@ function RecipeOverview({ recipe }: { recipe: (typeof RECIPES)[number] }) {
             fontWeight: 700,
             letterSpacing: "0.08em",
             textTransform: "uppercase",
-            color: "var(--sl-color-gray-3, #94a3b8)",
+            color: "#94a3b8",
             marginBottom: 6,
           }}
         >
           Recipe
         </div>
-        <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--sl-color-text, #f1f5f9)", marginBottom: 6 }}>
-          {recipe.label}
-        </div>
-        <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--sl-color-gray-2, #cbd5e1)", lineHeight: 1.55 }}>
-          {recipe.description}
-        </p>
+        <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "#f1f5f9", marginBottom: 6 }}>{recipe.label}</div>
+        <p style={{ margin: 0, fontSize: "0.78rem", color: "#cbd5e1", lineHeight: 1.55 }}>{recipe.description}</p>
       </div>
 
       <div>
@@ -270,7 +262,7 @@ function RecipeOverview({ recipe }: { recipe: (typeof RECIPES)[number] }) {
             fontWeight: 700,
             letterSpacing: "0.08em",
             textTransform: "uppercase",
-            color: "var(--sl-color-gray-3, #94a3b8)",
+            color: "#94a3b8",
             marginBottom: 8,
           }}
         >
@@ -278,7 +270,7 @@ function RecipeOverview({ recipe }: { recipe: (typeof RECIPES)[number] }) {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {(["learn", "act", "report"] as const).map((phase) => {
-            const { label, color, bg } = PHASE_META[phase];
+            const { label, color } = PHASE_META[phase];
             const count = stats[phase];
             const pct = Math.round((count / stats.total) * 100);
             return (
@@ -287,7 +279,7 @@ function RecipeOverview({ recipe }: { recipe: (typeof RECIPES)[number] }) {
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}
                 >
                   <span style={{ fontSize: "0.72rem", fontWeight: 600, color }}>{label}</span>
-                  <span style={{ fontSize: "0.72rem", color: "var(--sl-color-gray-3, #94a3b8)" }}>{count}</span>
+                  <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>{count}</span>
                 </div>
                 <div style={{ height: 4, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
                   <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2, opacity: 0.7 }} />
@@ -298,148 +290,452 @@ function RecipeOverview({ recipe }: { recipe: (typeof RECIPES)[number] }) {
         </div>
       </div>
 
-      <div style={{ marginTop: 4, fontSize: "0.72rem", color: "var(--sl-color-gray-3, #94a3b8)", lineHeight: 1.5 }}>
-        <span style={{ color: "var(--sl-color-text, #f1f5f9)", fontWeight: 600 }}>{stats.total} states</span> total.
-        Click any node to inspect its phase, routing, and transitions.
+      <div style={{ marginTop: 4, fontSize: "0.72rem", color: "#94a3b8", lineHeight: 1.5 }}>
+        <span style={{ color: "#f1f5f9", fontWeight: 600 }}>{stats.total} states</span> total. Click any node to inspect
+        its phase, routing, and transitions.
       </div>
     </div>
   );
 }
 
-// ── Layout constants ──────────────────────────────────────────────────────────
+// ── Icons ─────────────────────────────────────────────────────────────────────
 
-const GRAPH_HEIGHT = 520;
+function ExpandIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <path d="M1 5V1h4M13 5V1H9M1 9v4h4M13 9v4H9" />
+    </svg>
+  );
+}
+
+function CompressIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <path d="M5 1v4H1M9 1v4h4M5 13V9H1M9 13V9h4" />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <rect x="5" y="5" width="8" height="8" rx="1" />
+      <path d="M9 5V2a1 1 0 0 0-1-1H2a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h3" />
+    </svg>
+  );
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const TOOLBAR_H = 48;
+const FOOTER_H = 30;
 const PANEL_WIDTH_DETAIL = 240;
 const PANEL_WIDTH_OVERVIEW = 200;
+const JSON_PANEL_W = 380;
+const EMBEDDED_HEIGHT = "min(72vh, 760px)";
 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function RecipeExplorer() {
   const [activeIdx, setActiveIdx] = useState(0);
   const [selectedStateId, setSelectedStateId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("visual");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [jsonText, setJsonText] = useState(() => JSON.stringify(RECIPES[0].definition, null, 2));
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [liveDefinition, setLiveDefinition] = useState<RecipeDefinition>(RECIPES[0].definition);
+  const [copied, setCopied] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const recipe = RECIPES[activeIdx];
-  const selectedState = selectedStateId ? recipe.definition.states[selectedStateId] : null;
+  const selectedState = selectedStateId ? liveDefinition.states[selectedStateId] : null;
 
   function switchRecipe(idx: number) {
     setActiveIdx(idx);
     setSelectedStateId(null);
+    setLiveDefinition(RECIPES[idx].definition);
+    setJsonText(JSON.stringify(RECIPES[idx].definition, null, 2));
+    setParseError(null);
   }
 
-  return (
+  const handleJsonChange = useCallback((text: string) => {
+    setJsonText(text);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      try {
+        const parsed = JSON.parse(text) as RecipeDefinition;
+        if (parsed && typeof parsed === "object" && typeof parsed.initial === "string" && parsed.states) {
+          setLiveDefinition(parsed);
+          setParseError(null);
+          setSelectedStateId(null);
+        } else {
+          setParseError("Missing required fields: id, initial, states");
+        }
+      } catch (e) {
+        setParseError(e instanceof Error ? e.message : "Invalid JSON");
+      }
+    }, 350);
+  }, []);
+
+  async function copyJson() {
+    await navigator.clipboard.writeText(jsonText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  function toggleFullscreen() {
+    const next = !isFullscreen;
+    setIsFullscreen(next);
+    document.body.style.overflow = next ? "hidden" : "";
+  }
+
+  // Escape key exits fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setIsFullscreen(false);
+        document.body.style.overflow = "";
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isFullscreen]);
+
+  // Restore scroll on unmount
+  useEffect(() => {
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, []);
+
+  // ── Panes ──────────────────────────────────────────────────────────────────
+
+  const bodyHeight = isFullscreen
+    ? `calc(100vh - ${TOOLBAR_H + FOOTER_H}px)`
+    : `calc(${EMBEDDED_HEIGHT} - ${TOOLBAR_H + FOOTER_H}px)`;
+
+  const graphPane = (
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+      <RecipeViewer
+        key={activeIdx}
+        definition={liveDefinition}
+        height={bodyHeight}
+        onNodeClick={(id) => setSelectedStateId((prev) => (prev === id ? null : id))}
+      />
+    </div>
+  );
+
+  const jsonPane = (
     <div
       style={{
-        borderRadius: 12,
-        border: "1px solid rgba(255,255,255,0.1)",
-        overflow: "hidden",
-        background: "var(--sl-color-bg-sidebar, #0f172a)",
-        boxShadow: "0 4px 24px rgba(0,0,0,0.3)",
+        width: viewMode === "source" ? "100%" : JSON_PANEL_W,
+        flexShrink: 0,
+        display: "flex",
+        flexDirection: "column",
+        borderLeft: viewMode === "split" ? "1px solid rgba(255,255,255,0.08)" : "none",
+        background: "#020617",
       }}
     >
-      {/* Tab bar */}
+      {/* JSON pane header */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 4,
-          padding: "10px 14px",
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
+          justifyContent: "space-between",
+          padding: "5px 12px",
+          borderBottom: "1px solid rgba(255,255,255,0.07)",
           background: "rgba(255,255,255,0.03)",
+          flexShrink: 0,
         }}
       >
-        {RECIPES.map((r, i) => (
-          <button
-            key={r.id}
-            onClick={() => switchRecipe(i)}
-            style={{
-              padding: "5px 14px",
-              borderRadius: 6,
-              border: "1px solid",
-              cursor: "pointer",
-              fontSize: "0.8rem",
-              fontWeight: 600,
-              transition: "all 0.15s",
-              background: activeIdx === i ? "#6366f1" : "transparent",
-              color: activeIdx === i ? "#fff" : "var(--sl-color-gray-2, #94a3b8)",
-              borderColor: activeIdx === i ? "#6366f1" : "rgba(255,255,255,0.12)",
-            }}
-          >
-            {r.label}
-          </button>
-        ))}
-
-        {/* Phase legend — right-aligned */}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
-          {(["learn", "act", "report"] as const).map((phase) => {
-            const { label, color } = PHASE_META[phase];
-            return (
-              <div key={phase} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <span
-                  style={{ width: 8, height: 8, borderRadius: 2, background: color, opacity: 0.8, flexShrink: 0 }}
-                />
-                <span style={{ fontSize: "0.7rem", color: "var(--sl-color-gray-3, #94a3b8)" }}>{label}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Body: graph + side panel */}
-      <div style={{ display: "flex", height: GRAPH_HEIGHT }}>
-        {/* Graph */}
-        <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-          <RecipeViewer
-            key={recipe.id}
-            definition={recipe.definition}
-            height={GRAPH_HEIGHT}
-            onNodeClick={(id) => setSelectedStateId((prev) => (prev === id ? null : id))}
-          />
-        </div>
-
-        {/* Side panel */}
-        <div
+        <span
           style={{
-            width: selectedState ? PANEL_WIDTH_DETAIL : PANEL_WIDTH_OVERVIEW,
-            flexShrink: 0,
-            borderLeft: "1px solid rgba(255,255,255,0.08)",
-            overflowY: "auto",
-            transition: "width 0.2s ease",
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.07em",
+            textTransform: "uppercase",
+            color: "#475569",
           }}
         >
-          {selectedState ? (
-            <NodeDetail
-              stateId={selectedStateId!}
-              state={selectedState}
-              isInitial={selectedStateId === recipe.definition.initial}
-              onClose={() => setSelectedStateId(null)}
-            />
+          RecipeDefinition · JSON
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {parseError ? (
+            <span style={{ fontSize: 10, color: "#f87171" }}>⚠ invalid</span>
           ) : (
-            <RecipeOverview recipe={recipe} />
+            <span style={{ fontSize: 10, color: "#22c55e" }}>✓ valid</span>
           )}
+          <button
+            onClick={copyJson}
+            title="Copy JSON"
+            style={{
+              background: "none",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 4,
+              cursor: "pointer",
+              color: copied ? "#22c55e" : "#475569",
+              padding: "2px 6px",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: 10,
+            }}
+          >
+            <CopyIcon />
+            {copied ? "Copied!" : "Copy"}
+          </button>
         </div>
       </div>
 
-      {/* Footer */}
+      {/* Textarea */}
+      <textarea
+        value={jsonText}
+        onChange={(e) => handleJsonChange(e.target.value)}
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
+        style={{
+          flex: 1,
+          width: "100%",
+          background: "transparent",
+          color: parseError ? "#fca5a5" : "#94a3b8",
+          fontFamily: "'ui-monospace', 'Cascadia Code', 'Fira Code', 'Consolas', monospace",
+          fontSize: 12,
+          lineHeight: 1.65,
+          padding: "12px 14px",
+          border: "none",
+          outline: "none",
+          resize: "none",
+          boxSizing: "border-box",
+          tabSize: 2,
+          height: bodyHeight,
+        }}
+      />
+    </div>
+  );
+
+  const sidePanel = viewMode === "visual" && (
+    <div
+      style={{
+        width: selectedState ? PANEL_WIDTH_DETAIL : PANEL_WIDTH_OVERVIEW,
+        flexShrink: 0,
+        borderLeft: "1px solid rgba(255,255,255,0.08)",
+        overflowY: "auto",
+        transition: "width 0.2s ease",
+      }}
+    >
+      {selectedState ? (
+        <NodeDetail
+          stateId={selectedStateId!}
+          state={selectedState}
+          isInitial={selectedStateId === liveDefinition.initial}
+          onClose={() => setSelectedStateId(null)}
+        />
+      ) : (
+        <RecipeOverview recipe={recipe} definition={liveDefinition} />
+      )}
+    </div>
+  );
+
+  // ── Toolbar ────────────────────────────────────────────────────────────────
+
+  const toolbar = (
+    <div
+      style={{
+        height: TOOLBAR_H,
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "0 14px",
+        borderBottom: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.02)",
+        flexShrink: 0,
+      }}
+    >
+      {/* Recipe tabs */}
+      {RECIPES.map((r, i) => (
+        <button
+          key={r.id}
+          onClick={() => switchRecipe(i)}
+          style={{
+            padding: "4px 14px",
+            borderRadius: 6,
+            border: "1px solid",
+            cursor: "pointer",
+            fontSize: "0.78rem",
+            fontWeight: 600,
+            background: activeIdx === i ? "#6366f1" : "transparent",
+            color: activeIdx === i ? "#fff" : "#64748b",
+            borderColor: activeIdx === i ? "#6366f1" : "rgba(255,255,255,0.1)",
+          }}
+        >
+          {r.label}
+        </button>
+      ))}
+
+      {/* Divider */}
+      <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.1)", margin: "0 4px", flexShrink: 0 }} />
+
+      {/* View mode segmented control */}
       <div
         style={{
-          padding: "6px 14px",
-          borderTop: "1px solid rgba(255,255,255,0.06)",
-          fontSize: "0.68rem",
-          color: "var(--sl-color-gray-4, #475569)",
           display: "flex",
-          justifyContent: "space-between",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 6,
+          overflow: "hidden",
         }}
       >
-        <span>Scroll to zoom · drag to pan · click a node to inspect</span>
-        <a
-          href="https://github.com/swenyai/sweny"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: "inherit", textDecoration: "none" }}
-        >
-          @sweny-ai/engine
-        </a>
+        {(
+          [
+            ["visual", "Visual"],
+            ["split", "Split"],
+            ["source", "Source"],
+          ] as [ViewMode, string][]
+        ).map(([mode, label], i) => (
+          <button
+            key={mode}
+            onClick={() => setViewMode(mode)}
+            style={{
+              padding: "3px 11px",
+              border: "none",
+              borderLeft: i > 0 ? "1px solid rgba(255,255,255,0.1)" : "none",
+              cursor: "pointer",
+              fontSize: "0.72rem",
+              fontWeight: 500,
+              background: viewMode === mode ? "rgba(99,102,241,0.2)" : "transparent",
+              color: viewMode === mode ? "#a5b4fc" : "#475569",
+            }}
+          >
+            {label}
+          </button>
+        ))}
       </div>
+
+      {/* Phase legend */}
+      <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
+        {(["learn", "act", "report"] as const).map((phase) => {
+          const { label, color } = PHASE_META[phase];
+          return (
+            <div key={phase} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 7, height: 7, borderRadius: 2, background: color, opacity: 0.85, flexShrink: 0 }} />
+              <span style={{ fontSize: "0.68rem", color: "#475569" }}>{label}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Fullscreen toggle */}
+      <button
+        onClick={toggleFullscreen}
+        title={isFullscreen ? "Exit fullscreen (Esc)" : "Enter fullscreen"}
+        aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+        style={{
+          marginLeft: 8,
+          padding: "5px 7px",
+          borderRadius: 5,
+          border: "1px solid rgba(255,255,255,0.1)",
+          cursor: "pointer",
+          background: "transparent",
+          color: "#475569",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {isFullscreen ? <CompressIcon /> : <ExpandIcon />}
+      </button>
+    </div>
+  );
+
+  // ── Footer ─────────────────────────────────────────────────────────────────
+
+  const footerHint =
+    viewMode === "visual"
+      ? "Scroll to zoom · drag to pan · click a node to inspect"
+      : viewMode === "split"
+        ? "Edit JSON to live-update the graph"
+        : "Paste or type a RecipeDefinition JSON object";
+
+  const footer = (
+    <div
+      style={{
+        height: FOOTER_H,
+        padding: "0 14px",
+        borderTop: "1px solid rgba(255,255,255,0.06)",
+        fontSize: "0.67rem",
+        color: "#334155",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        flexShrink: 0,
+        gap: 8,
+      }}
+    >
+      <span>{footerHint}</span>
+      {parseError && viewMode !== "visual" && (
+        <span
+          style={{
+            color: "#f87171",
+            fontSize: "0.67rem",
+            fontFamily: "monospace",
+            maxWidth: 420,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flexShrink: 1,
+          }}
+        >
+          ⚠ {parseError}
+        </span>
+      )}
+      <a
+        href="https://github.com/swenyai/sweny"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ color: "inherit", textDecoration: "none", flexShrink: 0 }}
+      >
+        @sweny-ai/engine
+      </a>
+    </div>
+  );
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  return (
+    <div
+      className="recipe-explorer-root"
+      style={
+        isFullscreen
+          ? {
+              position: "fixed",
+              inset: 0,
+              zIndex: 9999,
+              display: "flex",
+              flexDirection: "column",
+              background: "#080d16",
+              borderRadius: 0,
+            }
+          : {
+              display: "flex",
+              flexDirection: "column",
+              height: EMBEDDED_HEIGHT,
+              background: "#080d16",
+              borderRadius: 0,
+              overflow: "hidden",
+            }
+      }
+    >
+      {toolbar}
+
+      {/* Body */}
+      <div style={{ flex: 1, display: "flex", minHeight: 0, overflow: "hidden" }}>
+        {viewMode !== "source" && graphPane}
+        {viewMode !== "visual" && jsonPane}
+        {viewMode === "visual" && sidePanel}
+      </div>
+
+      {footer}
     </div>
   );
 }

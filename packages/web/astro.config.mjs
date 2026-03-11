@@ -8,6 +8,7 @@ export default defineConfig({
   integrations: [
     react(),
     starlight({
+      customCss: ["./src/styles/explorer-overrides.css"],
       title: "SWEny",
       description: "Autonomous engineering tools powered by Claude AI",
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/swenyai/sweny" }],
