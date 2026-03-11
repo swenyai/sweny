@@ -1,19 +1,21 @@
 import type { TriageConfig } from "./types.js";
 import { triageDefinition } from "./definition.js";
+import { dedupCheck } from "./steps/dedup-check.js";
 import { verifyAccess } from "./steps/verify-access.js";
 import { buildContext } from "./steps/build-context.js";
 import { investigate } from "./steps/investigate.js";
 import { noveltyGate } from "./steps/novelty-gate.js";
 import { createIssue } from "./steps/create-issue.js";
 import { crossRepoCheck } from "./steps/cross-repo-check.js";
-import { implementFix } from "./steps/implement-fix.js";
-import { createPr } from "./steps/create-pr.js";
-import { sendNotification } from "./steps/notify.js";
+import { implementFix } from "../../nodes/implement-fix.js";
+import { createPr } from "../../nodes/create-pr.js";
+import { sendNotification } from "../../nodes/notify.js";
 import { createRecipe } from "../../runner-recipe.js";
 
 export { triageDefinition };
 
 export const triageRecipe = createRecipe<TriageConfig>(triageDefinition, {
+  "dedup-check": dedupCheck,
   "verify-access": verifyAccess,
   "build-context": buildContext,
   investigate: investigate,
