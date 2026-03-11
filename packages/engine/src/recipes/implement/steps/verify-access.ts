@@ -1,5 +1,5 @@
 import type { IssueTrackingProvider } from "@sweny-ai/providers/issue-tracking";
-import type { SourceControlProvider } from "@sweny-ai/providers/source-control";
+import type { RepoProvider } from "@sweny-ai/providers/source-control";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { ImplementConfig } from "../types.js";
 
@@ -9,7 +9,7 @@ export async function verifyAccess(ctx: WorkflowContext<ImplementConfig>): Promi
   await issueTracker.verifyAccess();
   ctx.logger.info("Issue tracker access verified");
 
-  const sourceControl = ctx.providers.get<SourceControlProvider>("sourceControl");
+  const sourceControl = ctx.providers.get<RepoProvider>("sourceControl");
   await sourceControl.verifyAccess();
   ctx.logger.info("Source control access verified");
 

@@ -1,5 +1,5 @@
 import type { IssueTrackingProvider } from "@sweny-ai/providers/issue-tracking";
-import type { SourceControlProvider } from "@sweny-ai/providers/source-control";
+import type { RepoProvider } from "@sweny-ai/providers/source-control";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig } from "../types.js";
 import { getStepData } from "../results.js";
@@ -7,7 +7,7 @@ import { getStepData } from "../results.js";
 /** If the bug belongs to a different repo, dispatch the workflow there and skip remaining act steps. */
 export async function crossRepoCheck(ctx: WorkflowContext<TriageConfig>): Promise<StepResult> {
   const config = ctx.config;
-  const sourceControl = ctx.providers.get<SourceControlProvider>("sourceControl");
+  const sourceControl = ctx.providers.get<RepoProvider>("sourceControl");
   const issueTracker = ctx.providers.get<IssueTrackingProvider>("issueTracker");
   const investigation = getStepData(ctx, "investigate");
   const issueData = getStepData(ctx, "create-issue");
