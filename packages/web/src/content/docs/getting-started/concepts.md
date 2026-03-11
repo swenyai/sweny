@@ -29,36 +29,21 @@ A **Recipe** is a pre-built workflow with sensible defaults for a specific use c
 
 **[SWEny Triage](/recipes/triage/)** is the first recipe — it automates the on-call triage loop by monitoring production logs, investigating the highest-impact issue, and opening a fix PR.
 
-## ProviderRegistry
+## Providers
 
-The **ProviderRegistry** is how the engine connects to external services. You register providers by role — observability, issue tracking, source control, notification — and the engine injects them into steps that need them.
+**Providers** connect SWEny to your existing tools — your observability platform, issue tracker, source control, and notification channels. You choose one provider per category and configure it through Action inputs or `.sweny.yml`. No code required.
 
 This means you can swap Datadog for CloudWatch, or Linear for Jira, without changing your workflow logic.
 
-```typescript
-import { createProviderRegistry } from "@sweny-ai/engine";
-import { datadog } from "@sweny-ai/providers/observability";
-import { linear } from "@sweny-ai/providers/issue-tracking";
-import { github } from "@sweny-ai/providers/source-control";
+## Supported providers
 
-const providers = createProviderRegistry();
-providers.set("observability", datadog({ apiKey, appKey }));
-providers.set("issueTracker", linear({ apiKey }));
-providers.set("sourceControl", github({ token, owner, repo }));
-```
-
-## Provider roles
-
-Providers map to workflow phases:
-
-| Phase | Provider Role | Implementations |
-|-------|--------------|-----------------|
+| Phase | Category | Supported services |
+|-------|----------|--------------------|
 | **Learn** | Observability | Datadog, Sentry, CloudWatch, Splunk, Elasticsearch, New Relic, Grafana Loki |
 | **Act** | Issue Tracking | Linear, GitHub Issues, Jira |
 | **Act** | Source Control | GitHub, GitLab |
 | **Act** | Incident Management | PagerDuty, OpsGenie |
 | **Act** | Coding Agent | Claude Code, OpenAI Codex, Google Gemini |
 | **Report** | Notification | GitHub Summary, Slack, Teams, Discord, Email, Webhook |
-| **Report** | Messaging | Slack, Microsoft Teams |
 
-See [Provider Architecture](/getting-started/providers/) for details on the plugin system, and [Engine & Recipes](/getting-started/engine/) for programmatic usage.
+See [Provider Reference](/providers/observability/) to configure your observability, issue tracking, and notification providers.
