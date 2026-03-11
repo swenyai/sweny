@@ -218,6 +218,12 @@ export function validateInputs(config: ActionConfig): string[] {
       if (!config.linearTeamId)
         errors.push("Missing required input: `linear-team-id` is required when `issue-tracker-provider` is `linear`");
       break;
+    case "linear-mcp":
+      if (!config.linearApiKey)
+        errors.push(
+          "Missing required input: `linear-api-key` is required when `issue-tracker-provider` is `linear-mcp`",
+        );
+      break;
     case "jira":
       if (!config.jiraBaseUrl)
         errors.push("Missing required input: `jira-base-url` is required when `issue-tracker-provider` is `jira`");

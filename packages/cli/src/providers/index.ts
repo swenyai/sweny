@@ -3,7 +3,7 @@ import type { ProviderRegistry } from "@sweny-ai/engine";
 import type { CliConfig } from "../config.js";
 import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "@sweny-ai/providers/observability";
 import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
-import { linear, jira, githubIssues, fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
+import { linear, jira, githubIssues, fileIssueTracking, linearMCP } from "@sweny-ai/providers/issue-tracking";
 import { github, gitlab, fileSourceControl } from "@sweny-ai/providers/source-control";
 import {
   slackWebhook,
@@ -135,6 +135,9 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
     case "linear":
       registry.set("issueTracker", linear({ apiKey: config.linearApiKey, logger }));
       break;
+    case "linear-mcp":
+      registry.set("issueTracker", linearMCP({ apiKey: config.linearApiKey, logger }));
+      break;
     case "jira":
       registry.set(
         "issueTracker",
@@ -252,6 +255,9 @@ export function createImplementProviders(config: CliConfig, logger: CliLogger): 
   switch (config.issueTrackerProvider) {
     case "linear":
       registry.set("issueTracker", linear({ apiKey: config.linearApiKey, logger }));
+      break;
+    case "linear-mcp":
+      registry.set("issueTracker", linearMCP({ apiKey: config.linearApiKey, logger }));
       break;
     case "jira":
       registry.set(

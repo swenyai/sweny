@@ -4,7 +4,7 @@ import type { ProviderRegistry } from "@sweny-ai/engine";
 import { ActionConfig } from "../config.js";
 import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "@sweny-ai/providers/observability";
 import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
-import { linear, jira, githubIssues } from "@sweny-ai/providers/issue-tracking";
+import { linear, jira, githubIssues, linearMCP } from "@sweny-ai/providers/issue-tracking";
 import { github, gitlab } from "@sweny-ai/providers/source-control";
 import {
   githubSummary,
@@ -120,6 +120,9 @@ export function createProviders(config: ActionConfig): ProviderRegistry {
   switch (config.issueTrackerProvider) {
     case "linear":
       registry.set("issueTracker", linear({ apiKey: config.linearApiKey, logger: actionsLogger }));
+      break;
+    case "linear-mcp":
+      registry.set("issueTracker", linearMCP({ apiKey: config.linearApiKey, logger: actionsLogger }));
       break;
     case "jira":
       registry.set(
