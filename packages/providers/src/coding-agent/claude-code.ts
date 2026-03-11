@@ -20,52 +20,76 @@ export interface ClaudeCodeConfig {
 }
 
 /**
- * Maps a raw Claude stream-json event object to an AgentEvent.
- * Returns null for event types we do not expose (e.g. system, result).
+ * Stateful parser for Claude stream-json NDJSON events.
+ *
+ * Maintains a tool_use_id → tool_name map so that tool_result events
+ * (type === "user") can be emitted with the human-readable tool name
+ * rather than the opaque tool_use_id.
+ *
+ * Verified against Claude Code CLI 2.x stream-json output format:
+ *   - assistant events carry content blocks: text | tool_use | thinking
+ *   - user events carry tool_result content blocks (one per tool call)
+ *   - system / result / rate_limit_event are silently skipped
+ *
+ * Note: --output-format stream-json requires --verbose (Claude Code CLI
+ * returns an error without it). See claudeCode() run() below.
  */
-function mapClaudeEvent(raw: unknown): AgentEvent | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const r = raw as Record<string, unknown>;
+function makeClaudeEventParser() {
+  // tool_use_id (e.g. "toolu_01xxx") → tool name (e.g. "Bash")
+  const toolNames = new Map<string, string>();
 
-  if (r["type"] === "assistant") {
-    const message = r["message"] as Record<string, unknown> | undefined;
-    const content = message?.["content"];
-    if (!Array.isArray(content)) return null;
-    for (const block of content) {
-      if (typeof block !== "object" || block === null) continue;
-      const b = block as Record<string, unknown>;
-      if (b["type"] === "text" && typeof b["text"] === "string") {
-        return { type: "text", text: b["text"] };
-      }
-      if (b["type"] === "tool_use" && typeof b["name"] === "string") {
-        return { type: "tool_call", tool: b["name"], input: b["input"] };
-      }
-      if (b["type"] === "thinking" && typeof b["thinking"] === "string") {
-        return { type: "thinking", text: b["thinking"] };
-      }
-    }
-    return null;
-  }
+  return function parse(raw: unknown): AgentEvent | null {
+    if (typeof raw !== "object" || raw === null) return null;
+    const r = raw as Record<string, unknown>;
 
-  if (r["type"] === "tool") {
-    const toolUseId = typeof r["tool_use_id"] === "string" ? r["tool_use_id"] : "unknown";
-    const content = r["content"];
-    let output = "";
-    if (Array.isArray(content)) {
+    if (r["type"] === "assistant") {
+      const message = r["message"] as Record<string, unknown> | undefined;
+      const content = message?.["content"];
+      if (!Array.isArray(content)) return null;
+
       for (const block of content) {
-        if (typeof block === "object" && block !== null) {
-          const b = block as Record<string, unknown>;
-          if (b["type"] === "text" && typeof b["text"] === "string") {
-            output = b["text"];
-            break;
-          }
+        if (typeof block !== "object" || block === null) continue;
+        const b = block as Record<string, unknown>;
+
+        if (b["type"] === "thinking" && typeof b["thinking"] === "string") {
+          return { type: "thinking", text: b["thinking"] };
+        }
+        if (b["type"] === "text" && typeof b["text"] === "string") {
+          return { type: "text", text: b["text"] };
+        }
+        if (b["type"] === "tool_use" && typeof b["name"] === "string") {
+          // Register the id→name mapping so tool_result events can look it up
+          if (typeof b["id"] === "string") toolNames.set(b["id"], b["name"]);
+          return { type: "tool_call", tool: b["name"], input: b["input"] };
         }
       }
+      return null;
     }
-    return { type: "tool_result", tool: toolUseId, success: true, output };
-  }
 
-  return null;
+    // Tool results arrive as "user" messages with tool_result content blocks.
+    // Format confirmed from Claude Code CLI 2.x stream-json output.
+    if (r["type"] === "user") {
+      const message = r["message"] as Record<string, unknown> | undefined;
+      const content = message?.["content"];
+      if (!Array.isArray(content)) return null;
+
+      for (const block of content) {
+        if (typeof block !== "object" || block === null) continue;
+        const b = block as Record<string, unknown>;
+        if (b["type"] !== "tool_result") continue;
+
+        const toolUseId = typeof b["tool_use_id"] === "string" ? b["tool_use_id"] : "";
+        const toolName = toolNames.get(toolUseId) ?? toolUseId;
+        const isError = b["is_error"] === true;
+        const output = typeof b["content"] === "string" ? b["content"] : "";
+        return { type: "tool_result", tool: toolName, success: !isError, output };
+      }
+      return null;
+    }
+
+    // system, result, rate_limit_event — silently ignored
+    return null;
+  };
 }
 
 export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
@@ -100,7 +124,10 @@ export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
       ];
 
       if (onEvent) {
-        args.push("--output-format", "stream-json");
+        // --output-format stream-json requires --verbose; omitting it causes
+        // the CLI to exit with "stream-json requires --verbose" error.
+        args.push("--output-format", "stream-json", "--verbose");
+        const parse = makeClaudeEventParser();
         return spawnLines("claude", args, {
           env: opts.env,
           timeoutMs: opts.timeoutMs,
@@ -108,7 +135,7 @@ export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
           onLine(line) {
             try {
               const evt = JSON.parse(line);
-              const mapped = mapClaudeEvent(evt);
+              const mapped = parse(evt);
               if (mapped) return onEvent(mapped);
             } catch {
               /* skip malformed JSON lines */
