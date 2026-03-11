@@ -25,7 +25,7 @@ export async function dedupCheck(ctx: WorkflowContext<TriageConfig>): Promise<St
 
   if (await config.dedupStore.has(fp)) {
     logger.info(`Dedup: skipping duplicate event (fingerprint ${fp})`);
-    return { status: "success", data: { outcome: "notify", duplicate: true, fingerprint: fp } };
+    return { status: "success", data: { outcome: "duplicate", duplicate: true, fingerprint: fp } };
   }
 
   await config.dedupStore.add(fp);

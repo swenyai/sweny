@@ -36,7 +36,8 @@ import type { RepoProvider, PullRequest, PrCreateOptions, PrListOptions, Dispatc
 export const githubMCPConfigSchema = z.object({
   personalAccessToken: z.string().min(1, "GitHub personal access token is required"),
   /** "owner/repo" — used as default for PR operations. */
-  repo: z.string().min(1, "GitHub repo (owner/repo) is required"),
+  /** "owner/repo" format required. */
+  repo: z.string().regex(/^[^/]+\/[^/]+$/, 'GitHub repo must be in "owner/repo" format (e.g., "org/my-repo")'),
   /**
    * Override MCP tool names if your server version differs from defaults.
    * Defaults match `@modelcontextprotocol/server-github` v1.x.
@@ -79,12 +80,14 @@ export function githubMCP(config: GitHubMCPConfig): RepoProvider {
   });
 
   function toPullRequest(raw: Record<string, unknown>): PullRequest {
+    const number = Number(raw.number);
+    if (!number) throw new Error(`GitHub MCP returned PR without a valid number: ${JSON.stringify(raw)}`);
     const mergedAt = raw.merged_at ? String(raw.merged_at) : null;
     const closedAt = raw.closed_at ? String(raw.closed_at) : null;
     const rawState = String(raw.state ?? "open");
     const state: PullRequest["state"] = mergedAt ? "merged" : rawState === "closed" ? "closed" : "open";
     return {
-      number: Number(raw.number ?? 0),
+      number,
       url: String(raw.html_url ?? raw.url ?? ""),
       state,
       title: String(raw.title ?? ""),
@@ -130,7 +133,11 @@ export function githubMCP(config: GitHubMCPConfig): RepoProvider {
     },
 
     async dispatchWorkflow(opts: DispatchWorkflowOptions): Promise<void> {
-      const [wfOwner, wfRepo] = opts.targetRepo.split("/");
+      const parts = opts.targetRepo.split("/");
+      if (parts.length !== 2 || !parts[0] || !parts[1]) {
+        throw new Error(`dispatchWorkflow: targetRepo must be "owner/repo", got "${opts.targetRepo}"`);
+      }
+      const [wfOwner, wfRepo] = parts;
       await client.call(tools.createWorkflowDispatch, {
         owner: wfOwner,
         repo: wfRepo,

@@ -44,7 +44,7 @@ describe("dedupCheck", () => {
     const result = await dedupCheck(ctx);
 
     expect(result.status).toBe("success");
-    expect(result.data?.outcome).toBe("notify");
+    expect(result.data?.outcome).toBe("duplicate");
     expect(result.data?.duplicate).toBe(true);
     expect(typeof result.data?.fingerprint).toBe("string");
     // Should NOT add to store for duplicates
@@ -60,6 +60,6 @@ describe("dedupCheck", () => {
     });
 
     const result = await dedupCheck(ctx);
-    expect(result.data?.outcome).toBe("notify");
+    expect(result.data?.outcome).toBe("duplicate");
   });
 });

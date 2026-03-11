@@ -44,12 +44,16 @@ export class MCPClient {
   ) {}
 
   async connect(): Promise<void> {
-    // Ensure concurrent callers wait on the same connection attempt.
+    // Return in-flight connection so concurrent callers wait on the same attempt.
     if (this.connectPromise) return this.connectPromise;
     if (this.client) return;
 
-    this.connectPromise = this._connect();
-    await this.connectPromise;
+    // Clear connectPromise on failure so callers can retry after a transient error.
+    this.connectPromise = this._connect().catch((err) => {
+      this.connectPromise = null;
+      throw err;
+    });
+    return this.connectPromise;
   }
 
   private async _connect(): Promise<void> {
@@ -80,20 +84,24 @@ export class MCPClient {
   /**
    * Call a tool and return the parsed result.
    *
-   * PROBLEM: MCP tool results are `ContentBlock[]` — text content is returned
-   * as raw strings that may or may not be valid JSON depending on the server.
-   * We attempt JSON.parse; if that fails we return the raw string. Callers
-   * must validate the shape themselves (use Zod in production code).
+   * NOTE: MCP tool results are `ContentBlock[]` — text content is returned as
+   * raw strings that may or may not be valid JSON depending on the server.
+   * We attempt JSON.parse; if that fails we return the raw string as-is.
+   * Callers must validate the shape themselves (Zod recommended for production).
    */
   async call<T = unknown>(toolName: string, args: Record<string, unknown>): Promise<T> {
     if (!this.client) await this.connect();
+
+    // Guard against concurrent disconnect racing with an in-flight call.
+    const client = this.client;
+    if (!client) throw new ProviderError(`MCPClient "${this.name}" was disconnected`, this.name);
 
     // callTool returns { [x: string]: unknown; content: ContentBlock[]; isError?: boolean }
     // The index signature causes TypeScript to widen content to unknown, so we
     // cast through the concrete SDK type to recover the typed content array.
     type ContentBlock = { type: string; text?: string };
     type CallResult = { content: ContentBlock[]; isError?: boolean };
-    const result = (await this.client!.callTool({
+    const result = (await client.callTool({
       name: toolName,
       arguments: args,
     })) as CallResult;

@@ -166,7 +166,11 @@ export interface LabelHistoryCapable {
    * @param opts.days - Number of days of history to retrieve (default: 30).
    * @returns Recent issues matching the label filter.
    */
-  searchIssuesByLabel(projectId: string, labelId: string, opts?: { days?: number }): Promise<IssueHistoryEntry[]>;
+  searchIssuesByLabel(
+    projectId: string,
+    labelId: string,
+    opts?: { days?: number; limit?: number },
+  ): Promise<IssueHistoryEntry[]>;
 }
 
 // ---------------------------------------------------------------------------

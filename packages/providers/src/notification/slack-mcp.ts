@@ -32,14 +32,18 @@ import type { NotificationProvider, NotificationPayload } from "./types.js";
 export const slackMCPConfigSchema = z.object({
   botToken: z.string().min(1, "Slack bot token is required"),
   teamId: z.string().min(1, "Slack team ID is required"),
-  /** Default channel to post to (e.g. "#sweny-alerts"). */
-  channel: z.string().min(1, "Slack channel is required"),
+  /**
+   * Slack channel ID to post to (e.g. "C123456789").
+   * Must be the channel's ID, not its name — the MCP server uses `channel_id`.
+   * Find it in Slack: right-click the channel → "Copy link" or check channel details.
+   */
+  channel: z.string().min(1, "Slack channel ID is required"),
   /** Override MCP tool name if the server version uses a different name. */
   postMessageTool: z.string().default("slack_post_message"),
   logger: z.custom<Logger>().optional(),
 });
 
-export type SlackMCPConfig = z.infer<typeof slackMCPConfigSchema>;
+export type SlackMCPConfig = z.input<typeof slackMCPConfigSchema>;
 
 // ---------------------------------------------------------------------------
 // Factory

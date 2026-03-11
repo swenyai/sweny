@@ -12,7 +12,7 @@ export const triageDefinition: RecipeDefinition = {
   initial: "dedup-check",
   states: {
     // Pre-flight — deterministic dedup before any provider/LLM calls
-    "dedup-check": { phase: "learn", next: "verify-access", on: { notify: "notify" } },
+    "dedup-check": { phase: "learn", next: "verify-access", on: { duplicate: "notify" } },
 
     // Learn phase — gather data
     "verify-access": { phase: "learn", critical: true, next: "build-context" },

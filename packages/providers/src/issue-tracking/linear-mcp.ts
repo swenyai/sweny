@@ -82,6 +82,9 @@ export function linearMCP(config: LinearMCPConfig): IssueTrackingProvider & PrLi
   function toIssue(raw: Record<string, unknown>): Issue {
     const id = String(raw.id ?? raw.identifier ?? "");
     const identifier = String(raw.identifier ?? raw.id ?? "");
+    if (!id || !identifier) {
+      throw new Error(`Linear MCP returned issue without id or identifier: ${JSON.stringify(raw)}`);
+    }
     return {
       id,
       identifier,
@@ -156,17 +159,18 @@ export function linearMCP(config: LinearMCPConfig): IssueTrackingProvider & PrLi
     async searchIssuesByLabel(
       projectId: string,
       labelId: string,
-      opts?: { days?: number },
+      opts?: { days?: number; limit?: number },
     ): Promise<IssueHistoryEntry[]> {
       const days = opts?.days ?? 30;
+      const limit = opts?.limit ?? 100;
       const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
       // NOTE: Linear MCP search_issues does not support createdAfter — fetch broadly
-      // and filter client-side. Increase limit if you have high volume.
+      // and filter client-side. Tune `limit` if you have high volume (default 100).
       const raw = await client.call<unknown[]>(tools.searchIssues, {
         teamId: projectId,
         labels: [labelId],
-        limit: 100,
+        limit,
       });
 
       const records = (raw ?? []) as Record<string, unknown>[];
