@@ -64,7 +64,7 @@ function createMockProviders(): ProviderRegistry {
     searchIssues: vi.fn().mockResolvedValue([]),
     addComment: vi.fn().mockResolvedValue(undefined),
     linkPr: vi.fn().mockResolvedValue(undefined),
-    listTriageHistory: vi.fn().mockResolvedValue([]),
+    searchIssuesByLabel: vi.fn().mockResolvedValue([]),
   });
 
   registry.set("sourceControl", {

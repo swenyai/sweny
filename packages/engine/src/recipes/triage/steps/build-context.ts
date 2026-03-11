@@ -1,5 +1,5 @@
-import type { IssueTrackingProvider, TriageHistoryCapable } from "@sweny-ai/providers/issue-tracking";
-import { canListTriageHistory } from "@sweny-ai/providers/issue-tracking";
+import type { IssueTrackingProvider, LabelHistoryCapable } from "@sweny-ai/providers/issue-tracking";
+import { canSearchIssuesByLabel } from "@sweny-ai/providers/issue-tracking";
 import type { SourceControlProvider } from "@sweny-ai/providers/source-control";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import type { TriageConfig } from "../types.js";
@@ -20,11 +20,11 @@ export async function buildContext(ctx: WorkflowContext<TriageConfig>): Promise<
   // 1. Fetch recent triage issues (last 30 days)
   lines.push("## Tracked Issues");
   try {
-    if (canListTriageHistory(issueTracker)) {
-      const triageHistory = await (issueTracker as IssueTrackingProvider & TriageHistoryCapable).listTriageHistory(
+    if (canSearchIssuesByLabel(issueTracker)) {
+      const triageHistory = await (issueTracker as IssueTrackingProvider & LabelHistoryCapable).searchIssuesByLabel(
         config.projectId,
         config.triageLabelId,
-        30,
+        { days: 30 },
       );
 
       if (triageHistory.length > 0) {
@@ -35,7 +35,7 @@ export async function buildContext(ctx: WorkflowContext<TriageConfig>): Promise<
         lines.push("_No triage-labeled issues found in last 30 days_");
       }
     } else {
-      lines.push("_Issue tracker does not support triage history_");
+      lines.push("_Issue tracker does not support label history search_");
     }
   } catch (err) {
     ctx.logger.warn(`Failed to fetch triage history: ${err}`);

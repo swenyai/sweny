@@ -10,7 +10,7 @@ describe("buildContext", () => {
 
   it("includes triage history when tracker supports it", async () => {
     const issueTracker = {
-      listTriageHistory: vi.fn().mockResolvedValue([
+      searchIssuesByLabel: vi.fn().mockResolvedValue([
         { identifier: "ENG-1", state: "Done", title: "Fix auth", url: "https://linear.app/ENG-1" },
         { identifier: "ENG-2", state: "In Progress", title: "Fix logging", url: "https://linear.app/ENG-2" },
       ]),
@@ -30,12 +30,12 @@ describe("buildContext", () => {
     expect(content).toContain("ENG-1");
     expect(content).toContain("ENG-2");
     expect(content).toContain("Fix auth");
-    expect(issueTracker.listTriageHistory).toHaveBeenCalledWith("proj-1", "label-triage", 30);
+    expect(issueTracker.searchIssuesByLabel).toHaveBeenCalledWith("proj-1", "label-triage", { days: 30 });
   });
 
-  it("shows fallback when tracker lacks triage history capability", async () => {
+  it("shows fallback when tracker lacks label history capability", async () => {
     const issueTracker = {
-      // No listTriageHistory method — canListTriageHistory returns false
+      // No searchIssuesByLabel method — canSearchIssuesByLabel returns false
     };
     const sourceControl = {
       listPullRequests: vi.fn().mockResolvedValue([]),
@@ -48,7 +48,7 @@ describe("buildContext", () => {
     const result = await buildContext(ctx);
 
     const content = result.data?.knownIssuesContent as string;
-    expect(content).toContain("Issue tracker does not support triage history");
+    expect(content).toContain("Issue tracker does not support label history search");
   });
 
   it("categorizes PRs by state", async () => {
@@ -78,7 +78,7 @@ describe("buildContext", () => {
 
   it("handles triage history fetch error gracefully", async () => {
     const issueTracker = {
-      listTriageHistory: vi.fn().mockRejectedValue(new Error("API timeout")),
+      searchIssuesByLabel: vi.fn().mockRejectedValue(new Error("API timeout")),
     };
     const sourceControl = {
       listPullRequests: vi.fn().mockResolvedValue([]),
@@ -115,7 +115,7 @@ describe("buildContext", () => {
 
   it("shows empty state when no issues or PRs found", async () => {
     const issueTracker = {
-      listTriageHistory: vi.fn().mockResolvedValue([]),
+      searchIssuesByLabel: vi.fn().mockResolvedValue([]),
     };
     const sourceControl = {
       listPullRequests: vi.fn().mockResolvedValue([]),
