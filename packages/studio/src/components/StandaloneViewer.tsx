@@ -12,6 +12,8 @@ import type { TransitionEdgeData } from "./TransitionEdge.js";
 const nodeTypes = { stateNode: StateNode };
 const edgeTypes = { transitionEdge: TransitionEdge };
 
+const EMPTY_EXECUTION_STATE: Record<string, "current" | "success" | "failed" | "skipped"> = {};
+
 export interface RecipeViewerProps {
   /** The RecipeDefinition to visualize. */
   definition: RecipeDefinition;
@@ -51,7 +53,12 @@ function AutoFitView({ nodeCount }: { nodeCount: number }) {
   return null;
 }
 
-export function RecipeViewer({ definition, executionState = {}, height = "100%", onNodeClick }: RecipeViewerProps) {
+export function RecipeViewer({
+  definition,
+  executionState = EMPTY_EXECUTION_STATE,
+  height = "100%",
+  onNodeClick,
+}: RecipeViewerProps) {
   const [nodes, setNodes] = useState<StateNodeType[]>([]);
   const [edges, setEdges] = useState<Edge<TransitionEdgeData>[]>([]);
   const [loading, setLoading] = useState(true);
