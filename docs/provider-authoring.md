@@ -1,133 +1,60 @@
 # Provider Authoring Guide
 
-Providers are the integration layer — they wrap third-party APIs and expose a
-typed interface the engine and recipes use. All providers live in
-`packages/providers/src/<category>/`.
-
-Two categories are extensible by contributors:
-
-- **Observability** — log query backends (Datadog, CloudWatch, Loki, …)
-- **Issue tracking** — project management systems (Linear, Jira, GitHub Issues, …)
-
-> Before adding a provider, check `CONTRIBUTING.md` for the build/test workflow.
+> **Read `docs/architecture.md` before writing a new provider.**
+> Most new integrations should be MCP server configs, not custom providers.
+> Only write a provider when the recipe needs a typed return value from the operation.
 
 ---
 
-## Observability provider
+## Should This Be a Provider or an MCP Server?
 
-### Interface (`packages/providers/src/observability/types.ts`)
+**Write a provider when:**
+- A recipe step calls the operation and needs the response (e.g., `createIssue` returns an issue ID the next step uses)
+- The operation is deterministic and must succeed before the recipe continues
+- You need to validate the result, not just hope the agent did it
 
-```ts
-export interface ObservabilityProvider {
-  verifyAccess(): Promise<void>;
-  queryLogs(opts: LogQueryOptions): Promise<LogEntry[]>;
-  aggregate(opts: Omit<LogQueryOptions, "severity">): Promise<AggregateResult[]>;
-  getAgentEnv(): Record<string, string>;       // env vars injected into the coding agent
-  getPromptInstructions(): string;             // API docs appended to the triage prompt
-}
+**Configure an MCP server when:**
+- The *agent* needs access to the service during reasoning (log querying, issue searching, code lookup)
+- The service ships an official MCP server (Datadog, Linear, GitHub, Slack, etc.)
+- The operation is "gather information" rather than "create something with a structured return"
 
-export interface LogQueryOptions {
-  timeRange: string;      // e.g. "1h", "24h"
-  serviceFilter: string;  // service name or "*"
-  severity: string;       // "error" | "warning" | "info"
-}
-
-export interface LogEntry {
-  timestamp: string;
-  service: string;
-  level: string;
-  message: string;
-  attributes: Record<string, unknown>;
-}
-
-export interface AggregateResult {
-  service: string;
-  count: number;
-}
+```
+Datadog logs for investigation  → MCP server config (agent queries during investigate step)
+Create a Linear issue            → Provider (recipe needs the issue identifier back)
+Search Linear for similar issues → MCP server config (agent can do this itself)
+Open a GitHub PR                 → Provider (recipe needs the PR URL for notify step)
 ```
 
-### Skeleton implementation
-
-```ts
-// packages/providers/src/observability/acme.ts
-import { z } from "zod";
-import type { Logger } from "../logger.js";
-import { consoleLogger } from "../logger.js";
-import { ProviderApiError } from "../errors.js";
-import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
-
-export const acmeConfigSchema = z.object({
-  apiKey: z.string().min(1, "ACME API key is required"),
-  region: z.string().default("us-east-1"),
-  logger: z.custom<Logger>().optional(),
-});
-
-export type AcmeConfig = z.infer<typeof acmeConfigSchema>;
-
-export function acme(config: AcmeConfig): ObservabilityProvider {
-  const parsed = acmeConfigSchema.parse(config);
-  return new AcmeProvider(parsed);
-}
-
-class AcmeProvider implements ObservabilityProvider {
-  private readonly apiKey: string;
-  private readonly region: string;
-  private readonly log: Logger;
-
-  constructor(config: AcmeConfig) {
-    this.apiKey = config.apiKey;
-    this.region = config.region;
-    this.log = config.logger ?? consoleLogger;
-  }
-
-  async verifyAccess(): Promise<void> {
-    const res = await fetch(`https://api.acme.example/v1/ping`, {
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new ProviderApiError("Acme", res.status, res.statusText, body);
-    }
-    this.log.info("Acme access verified");
-  }
-
-  async queryLogs(opts: LogQueryOptions): Promise<LogEntry[]> {
-    // fetch and map to LogEntry[]
-    return [];
-  }
-
-  async aggregate(opts: Omit<LogQueryOptions, "severity">): Promise<AggregateResult[]> {
-    // fetch and map to AggregateResult[]
-    return [];
-  }
-
-  getAgentEnv(): Record<string, string> {
-    return { ACME_API_KEY: this.apiKey, ACME_REGION: this.region };
-  }
-
-  getPromptInstructions(): string {
-    return `### Acme Logs API\nUse ACME_API_KEY in Authorization: Bearer header.\n`;
-  }
-}
-```
-
-`getAgentEnv()` is merged into the coding agent's environment so it can make
-direct API calls with `curl`. `getPromptInstructions()` is prepended to the
-investigation prompt — include working `curl` examples the agent can copy.
-
-### Registration
-
-Add exports to `packages/providers/src/observability/index.ts`:
-
-```ts
-export { acme, acmeConfigSchema, type AcmeConfig } from "./acme.js";
-```
+If the service has an MCP server — **use it**. Don't write a custom provider for data-gathering operations the agent can handle itself.
 
 ---
 
-## Issue-tracking provider
+## The Two Provider Categories
 
-### Interface (`packages/providers/src/issue-tracking/types.ts`)
+### Category 1: Thin Orchestration Providers (what to write)
+
+These implement **exactly the operations recipe steps need** and nothing more. They return typed data the recipe passes to subsequent steps.
+
+Required interfaces:
+- `IssueTrackingProvider` — `createIssue`, `updateIssue`, `getIssue` (recipe needs these)
+- `SourceControlProvider` — `createPullRequest`, `createBranch`, `pushBranch` (recipe needs these)
+- `NotificationProvider` — `send` (final report step)
+
+Target size: **20–50 lines per method**. No feature-complete API coverage needed.
+
+### Category 2: Observability / Search Providers (do not write new ones)
+
+Observability providers (`queryLogs`, `aggregate`) exist for the `build-context` step. **Before adding a new observability provider**, check whether the service has an MCP server. If it does, the agent should query it via MCP during `investigate` rather than us pre-querying it in `build-context`.
+
+Existing observability providers are maintained for backward compatibility and for cases where the service has no MCP server.
+
+---
+
+## Writing a Thin Orchestration Provider
+
+### Issue-Tracking Provider
+
+The interface (`packages/providers/src/issue-tracking/types.ts`):
 
 ```ts
 export interface IssueTrackingProvider {
@@ -138,20 +65,26 @@ export interface IssueTrackingProvider {
   searchIssues(opts: IssueSearchOptions): Promise<Issue[]>;
   addComment(issueId: string, body: string): Promise<void>;
 }
+
+export interface Issue {
+  id: string;
+  identifier: string;   // human-readable key e.g. "ENG-123"
+  title: string;
+  url: string;
+  branchName?: string;  // optional — derive from identifier if absent
+  state?: string;
+  description?: string;
+}
 ```
 
-Three optional capability interfaces extend the core:
+Optional capability interfaces (implement if the provider supports them):
 
-| Interface | Method | Purpose |
+| Interface | Method | When to implement |
 |---|---|---|
-| `PrLinkCapable` | `linkPr(issueId, prUrl, prNumber)` | Attach a PR to the issue |
-| `FingerprintCapable` | `searchByFingerprint(projectId, pattern, opts?)` | Dedup by error hash |
-| `TriageHistoryCapable` | `listTriageHistory(projectId, labelId, days?)` | Pattern detection |
+| `PrLinkCapable` | `linkPr(issueId, prUrl, prNumber)` | Provider can attach PRs to issues |
+| `LabelHistoryCapable` | `searchIssuesByLabel(projectId, labelId, opts?)` | Provider supports label-filtered search |
 
-Use the exported type guards (`canLinkPr`, `canSearchByFingerprint`,
-`canListTriageHistory`) to check capability at runtime.
-
-### Skeleton implementation
+Skeleton:
 
 ```ts
 // packages/providers/src/issue-tracking/acme.ts
@@ -159,13 +92,10 @@ import { z } from "zod";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { ProviderApiError } from "../errors.js";
-import type {
-  IssueTrackingProvider, Issue,
-  IssueCreateOptions, IssueUpdateOptions, IssueSearchOptions,
-} from "./types.js";
+import type { IssueTrackingProvider, Issue, IssueCreateOptions, IssueUpdateOptions, IssueSearchOptions } from "./types.js";
 
 export const acmeIssuesConfigSchema = z.object({
-  apiKey: z.string().min(1),
+  apiKey: z.string().min(1, "ACME API key is required"),
   logger: z.custom<Logger>().optional(),
 });
 
@@ -173,109 +103,186 @@ export type AcmeIssuesConfig = z.infer<typeof acmeIssuesConfigSchema>;
 
 export function acmeIssues(config: AcmeIssuesConfig): IssueTrackingProvider {
   const parsed = acmeIssuesConfigSchema.parse(config);
-  return new AcmeIssuesProvider(parsed);
-}
+  const log = parsed.logger ?? consoleLogger;
 
-class AcmeIssuesProvider implements IssueTrackingProvider {
-  private readonly apiKey: string;
-  private readonly log: Logger;
-
-  constructor(config: AcmeIssuesConfig) {
-    this.apiKey = config.apiKey;
-    this.log = config.logger ?? consoleLogger;
+  async function request(path: string, init?: RequestInit): Promise<Response> {
+    const res = await fetch(`https://api.acme.example/v1${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${parsed.apiKey}`, "Content-Type": "application/json", ...init?.headers },
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new ProviderApiError("Acme", res.status, res.statusText, body);
+    }
+    return res;
   }
 
-  async verifyAccess(): Promise<void> { /* call a cheap read endpoint */ }
-
-  async createIssue(opts: IssueCreateOptions): Promise<Issue> {
-    // POST to provider, return Issue shape
-    throw new Error("not implemented");
+  function toIssue(raw: Record<string, unknown>): Issue {
+    const identifier = String(raw.key ?? raw.id ?? "");
+    return {
+      id: String(raw.id ?? ""),
+      identifier,
+      title: String(raw.title ?? raw.summary ?? ""),
+      url: String(raw.url ?? raw.htmlUrl ?? ""),
+      branchName: raw.branchName
+        ? String(raw.branchName)
+        : `fix/${identifier.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      state: raw.state ? String(raw.state) : undefined,
+      description: raw.description ? String(raw.description) : undefined,
+    };
   }
 
-  async getIssue(identifier: string): Promise<Issue> {
-    throw new Error("not implemented");
-  }
+  return {
+    async verifyAccess(): Promise<void> {
+      await request("/ping");
+      log.info("Acme access verified");
+    },
 
-  async updateIssue(issueId: string, opts: IssueUpdateOptions): Promise<void> {
-    // PATCH state / description; call addComment if opts.comment is set
-  }
+    async createIssue(opts: IssueCreateOptions): Promise<Issue> {
+      const res = await request("/issues", {
+        method: "POST",
+        body: JSON.stringify({ title: opts.title, description: opts.description, projectId: opts.projectId }),
+      });
+      const raw = await res.json() as Record<string, unknown>;
+      log.info(`Acme: created issue ${raw.key}`);
+      return toIssue(raw);
+    },
 
-  async searchIssues(opts: IssueSearchOptions): Promise<Issue[]> {
-    return [];
-  }
+    async getIssue(identifier: string): Promise<Issue> {
+      const res = await request(`/issues/${identifier}`);
+      return toIssue(await res.json() as Record<string, unknown>);
+    },
 
-  async addComment(issueId: string, body: string): Promise<void> { /* POST comment */ }
+    async updateIssue(issueId: string, opts: IssueUpdateOptions): Promise<void> {
+      await request(`/issues/${issueId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ stateId: opts.stateId, description: opts.description }),
+      });
+      if (opts.comment) {
+        await request(`/issues/${issueId}/comments`, {
+          method: "POST",
+          body: JSON.stringify({ body: opts.comment }),
+        });
+      }
+    },
+
+    async searchIssues(opts: IssueSearchOptions): Promise<Issue[]> {
+      const params = new URLSearchParams({ q: opts.query ?? "" });
+      const res = await request(`/issues/search?${params}`);
+      const raw = await res.json() as unknown[];
+      return (raw as Record<string, unknown>[]).map(toIssue);
+    },
+
+    async addComment(issueId: string, body: string): Promise<void> {
+      await request(`/issues/${issueId}/comments`, { method: "POST", body: JSON.stringify({ body }) });
+    },
+  };
 }
 ```
 
-The returned `Issue` shape must include: `id`, `identifier`, `title`, `url`,
-`branchName`. `state` and `description` are optional.
+### Source Control Provider
 
-### Registration
+Required for `createBranch`, `pushBranch`, `stageAndCommit` (git operations) and `createPullRequest` (API operation). The interfaces are split:
+
+- `GitProvider` — local git shell operations (branch, commit, push)
+- `RepoProvider` — remote API operations (create PR, list PRs, dispatch workflow)
+- `SourceControlProvider = GitProvider & RepoProvider` — combined for providers that do both
+
+See `packages/providers/src/source-control/types.ts` for the full interface.
+
+### Notification Provider
 
 ```ts
-// packages/providers/src/issue-tracking/index.ts
-export { acmeIssues, acmeIssuesConfigSchema, type AcmeIssuesConfig } from "./acme.js";
+export interface NotificationProvider {
+  send(payload: NotificationPayload): Promise<void>;
+}
 ```
+
+Simple — implement `send()` and return. See `packages/providers/src/notification/types.ts` for `NotificationPayload` shape.
 
 ---
 
-## Config schema pattern
+## Config Schema Pattern
 
 Every provider follows the same three exports:
 
 ```ts
-export const fooConfigSchema = z.object({ ... });  // validated at construction
+export const fooConfigSchema = z.object({
+  apiKey: z.string().min(1, "API key is required"),
+  logger: z.custom<Logger>().optional(),
+});
+
 export type FooConfig = z.infer<typeof fooConfigSchema>;
-export function foo(config: FooConfig): ProviderInterface { ... }
+
+export function foo(config: FooConfig): ProviderInterface {
+  const parsed = fooConfigSchema.parse(config);  // fail-fast on bad input
+  // ...
+}
 ```
 
-Always call `fooConfigSchema.parse(config)` at the top of the factory to fail
-fast on bad input.
+- Validate at construction with `schema.parse(config)`, never at call time
+- Accept `logger` as optional — fall back to `consoleLogger`
+- Keep secrets (API keys, tokens) in config, never hardcoded or inferred from env directly
 
 ---
 
 ## Testing
 
-Use `vi.spyOn` to mock `fetch` — not `vi.fn()` on `globalThis.fetch`:
-
 ```ts
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { acme } from "../src/observability/acme.js";
+import { acmeIssues } from "../src/issue-tracking/acme.js";
 
-describe("AcmeProvider", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
+describe("acmeIssues", () => {
+  beforeEach(() => vi.restoreAllMocks());
 
-  it("verifyAccess succeeds on 200", async () => {
+  it("createIssue returns mapped Issue", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
-      new Response("{}", { status: 200 }),
+      new Response(JSON.stringify({ id: "1", key: "ACME-1", title: "Test", url: "https://acme.example/1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
     );
 
-    const provider = acme({ apiKey: "test-key" });
-    await expect(provider.verifyAccess()).resolves.toBeUndefined();
-  });
+    const provider = acmeIssues({ apiKey: "test" });
+    const issue = await provider.createIssue({ title: "Test", projectId: "proj-1" });
 
-  it("verifyAccess throws ProviderApiError on 401", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
-      new Response("Unauthorized", { status: 401, statusText: "Unauthorized" }),
-    );
-
-    const provider = acme({ apiKey: "bad-key" });
-    await expect(provider.verifyAccess()).rejects.toThrow("401");
+    expect(issue.identifier).toBe("ACME-1");
+    expect(issue.title).toBe("Test");
+    expect(issue.branchName).toBe("fix/acme-1");
   });
 });
 ```
 
-Test each method (`queryLogs`, `aggregate`, `createIssue`, etc.) by providing
-a mock response payload and asserting the mapped output shape.
+Use `vi.spyOn(globalThis, "fetch").mockImplementation(...)` — not `vi.fn()` and not `mockResolvedValue`.
 
 ---
 
-## Wiring into the action
+## Registration
 
-Providers are instantiated in `packages/action/src/main.ts` and passed to
-`createProviderRegistry()` before `runRecipe()` is called. Add a new branch
-there (or in a config-loading helper) to instantiate your provider when the
-user sets the appropriate config keys.
+1. Export from the category index:
+```ts
+// packages/providers/src/issue-tracking/index.ts
+export { acmeIssues, acmeIssuesConfigSchema, type AcmeIssuesConfig } from "./acme.js";
+```
+
+2. Add to the CLI provider switch (`packages/cli/src/providers/index.ts`):
+```ts
+case "acme":
+  registry.set("issueTracker", acmeIssues({ apiKey: config.acmeApiKey, logger }));
+  break;
+```
+
+3. Add to the Action provider switch (`packages/action/src/providers/index.ts`) with the same pattern.
+
+4. Add validation in `packages/cli/src/config.ts` and `packages/action/src/config.ts`.
+
+5. Create a changeset — this is a `minor` bump for `@sweny-ai/providers`.
+
+---
+
+## What Not to Build
+
+- **Observability providers** for services that have MCP servers (Datadog, Splunk, New Relic, etc.) — configure their MCP server instead
+- **MCP adapter providers** (`linearMCP`, `githubMCP`) — the wrong layer; the agent should use MCP tools directly
+- **Feature-complete API clients** — implement exactly what the recipe step needs, nothing more
+- **`npx -y <package>` subprocess launchers** — runtime npm downloads are not production-safe
