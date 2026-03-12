@@ -283,7 +283,12 @@ inputs:
 
   # MCP servers
   mcp-servers:
-    description: 'MCP servers as a JSON object — e.g. ''{"github":{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github@latest"],"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"${{ secrets.GH_PAT }}"}}}'''
+    description: >-
+      MCP servers as a JSON object passed to the coding agent. Each key is a server name;
+      each value is an MCPServerConfig (fields: type, command, args, env, url, headers).
+      Example — GitHub MCP server:
+        {"github":{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github@latest"],"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"${{ secrets.GH_PAT }}"}}}
+      See docs/mcp-servers.md for a full catalog including Sentry, filesystem, and HTTP servers.
     required: false
 
 outputs:

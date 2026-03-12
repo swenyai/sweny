@@ -126,6 +126,14 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # cache-dir: .sweny/cache
 # cache-ttl: 86400
 
+# ── MCP servers ───────────────────────────────────────────────────────
+# Extend the coding agent with additional tools via MCP.
+# Value is a JSON object — each key is a server name you choose.
+# See docs/mcp-servers.md for a full catalog with copy-paste configs.
+#
+# Example: GitHub MCP server (query PRs, issues, CI run logs)
+# mcp-servers-json: '{"github":{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github@latest"],"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"ghp_..."}}}'
+
 # ── Local-only quick start ───────────────────────────────────────────
 # Uncomment to run without any external services (just an LLM API key):
 # observability-provider: file
