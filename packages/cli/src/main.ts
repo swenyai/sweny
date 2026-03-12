@@ -10,6 +10,7 @@ import { loadDotenv, loadConfigFile, STARTER_CONFIG } from "./config-file.js";
 import { registerTriageCommand, registerImplementCommand, parseCliInputs, validateInputs } from "./config.js";
 import type { CliConfig } from "./config.js";
 import { createProviders, createImplementProviders } from "./providers/index.js";
+import type { MCPServerConfig } from "@sweny-ai/providers";
 import {
   c,
   phaseColor,
@@ -314,6 +315,41 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   }
 });
 
+/**
+ * Auto-inject well-known MCP servers for providers the user already configured.
+ * User-supplied mcpServers win on key conflict (explicit > auto).
+ */
+function buildAutoMcpServers(
+  sourceControlProvider: string,
+  issueTrackerProvider: string,
+  githubToken: string,
+  linearApiKey: string,
+  userMcpServers: Record<string, MCPServerConfig>,
+): Record<string, MCPServerConfig> | undefined {
+  const auto: Record<string, MCPServerConfig> = {};
+
+  if (sourceControlProvider === "github" && githubToken) {
+    auto["github"] = {
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-github@latest"],
+      env: { GITHUB_TOKEN: githubToken },
+    };
+  }
+
+  if (issueTrackerProvider === "linear" && linearApiKey) {
+    auto["linear"] = {
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@linear/mcp"],
+      env: { LINEAR_API_KEY: linearApiKey },
+    };
+  }
+
+  const merged = { ...auto, ...userMcpServers };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 function mapToImplementConfig(issueId: string, config: CliConfig): ImplementConfig {
   const agentEnv: Record<string, string> = {};
   if (config.anthropicApiKey) agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
@@ -341,7 +377,13 @@ function mapToImplementConfig(issueId: string, config: CliConfig): ImplementConf
     issueTrackerName: config.issueTrackerProvider,
     reviewMode: config.reviewMode,
     agentEnv,
-    mcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
+    mcpServers: buildAutoMcpServers(
+      config.sourceControlProvider,
+      config.issueTrackerProvider,
+      config.githubToken || config.botToken,
+      config.linearApiKey,
+      config.mcpServers,
+    ),
   };
 }
 
@@ -423,7 +465,13 @@ function mapToTriageConfig(config: CliConfig): TriageConfig {
     issueTrackerName: config.issueTrackerProvider,
 
     agentEnv,
-    mcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
+    mcpServers: buildAutoMcpServers(
+      config.sourceControlProvider,
+      config.issueTrackerProvider,
+      config.githubToken || config.botToken,
+      config.linearApiKey,
+      config.mcpServers,
+    ),
   };
 }
 
