@@ -5,7 +5,6 @@ node_modules/
 .sweny.yml
 .sweny-data/
 .github/triage-analysis/
-tasks/
 .DS_Store
 .claude/worktrees/
 
