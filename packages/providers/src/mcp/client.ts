@@ -7,9 +7,8 @@
  * Providers that use this are NOT drop-in replacements for the native
  * implementations — see the individual *-mcp.ts files for what is lost.
  */
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 import { ProviderError } from "../errors.js";
 
@@ -65,9 +64,10 @@ export class MCPClient {
     if (this.connectPromise) return this.connectPromise;
     if (this.client) return;
 
-    // Clear connectPromise on failure so callers can retry after a transient error.
+    // Clear connectPromise and client on failure so callers can retry after a transient error.
     this.connectPromise = this._connect().catch((err) => {
       this.connectPromise = null;
+      this.client = null;
       throw err;
     });
     return this.connectPromise;
@@ -87,6 +87,11 @@ export class MCPClient {
     if (!this.config.command) {
       throw new ProviderError(`MCPClient "${this.name}": stdio transport requires a command.`, this.name);
     }
+
+    const [{ Client }, { StdioClientTransport }] = await Promise.all([
+      import("@modelcontextprotocol/sdk/client/index.js"),
+      import("@modelcontextprotocol/sdk/client/stdio.js"),
+    ]);
 
     const transport = new StdioClientTransport({
       command: this.config.command,

@@ -1,5 +1,4 @@
-import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import type { S3Client } from "@aws-sdk/client-s3";
 import { randomUUID } from "node:crypto";
 import type { WorkspaceFile, WorkspaceManifest, WorkspaceStore } from "../types.js";
 import { WORKSPACE_LIMITS } from "../types.js";
@@ -34,17 +33,26 @@ function guessMimeType(path: string): string {
 }
 
 export class S3WorkspaceStore implements WorkspaceStore {
-  private s3: S3Client;
-  private bucket: string;
-  private prefix: string;
-  private cache = new Map<string, WorkspaceManifest>();
-  private logger: Logger;
+  private _client: S3Client | null = null;
+  private readonly region: string;
+  private readonly bucket: string;
+  private readonly prefix: string;
+  private readonly cache = new Map<string, WorkspaceManifest>();
+  private readonly logger: Logger;
 
   constructor(bucket: string, prefix = "", region = "us-west-2", logger?: Logger) {
-    this.s3 = new S3Client({ region });
     this.bucket = bucket;
     this.prefix = prefix;
+    this.region = region;
     this.logger = logger ?? consoleLogger;
+  }
+
+  private async client(): Promise<S3Client> {
+    if (!this._client) {
+      const { S3Client } = await import("@aws-sdk/client-s3");
+      this._client = new S3Client({ region: this.region });
+    }
+    return this._client;
   }
 
   private manifestKey(userId: string): string {
@@ -61,8 +69,9 @@ export class S3WorkspaceStore implements WorkspaceStore {
     const cached = this.cache.get(userId);
     if (cached) return cached;
 
+    const [s3, { GetObjectCommand }] = await Promise.all([this.client(), import("@aws-sdk/client-s3")]);
     try {
-      const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.manifestKey(userId) }));
+      const result = await s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.manifestKey(userId) }));
       const body = await result.Body?.transformToString("utf-8");
       if (body) {
         const manifest = JSON.parse(body) as WorkspaceManifest;
@@ -82,9 +91,10 @@ export class S3WorkspaceStore implements WorkspaceStore {
   }
 
   private async saveManifest(userId: string, manifest: WorkspaceManifest): Promise<void> {
+    const [s3, { PutObjectCommand }] = await Promise.all([this.client(), import("@aws-sdk/client-s3")]);
     manifest.updatedAt = new Date().toISOString();
     this.cache.set(userId, manifest);
-    await this.s3.send(
+    await s3.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: this.manifestKey(userId),
@@ -100,9 +110,8 @@ export class S3WorkspaceStore implements WorkspaceStore {
     const file = manifest.files.find((f) => f.path === path);
     if (!file) throw new Error(`File not found in workspace: ${path}`);
 
-    const result = await this.s3.send(
-      new GetObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, file.blobId) }),
-    );
+    const [s3, { GetObjectCommand }] = await Promise.all([this.client(), import("@aws-sdk/client-s3")]);
+    const result = await s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, file.blobId) }));
     return (await result.Body?.transformToString("utf-8")) ?? "";
   }
 
@@ -114,7 +123,6 @@ export class S3WorkspaceStore implements WorkspaceStore {
 
     const manifest = await this.getManifest(userId);
 
-    // Check if replacing existing file
     const existingIdx = manifest.files.findIndex((f) => f.path === path);
     const existing = existingIdx >= 0 ? manifest.files[existingIdx] : undefined;
     const existingSize = existing?.size ?? 0;
@@ -132,15 +140,19 @@ export class S3WorkspaceStore implements WorkspaceStore {
       );
     }
 
-    // Delete old blob if replacing
+    const [s3, { PutObjectCommand, DeleteObjectCommand }] = await Promise.all([
+      this.client(),
+      import("@aws-sdk/client-s3"),
+    ]);
+
     if (existing) {
-      await this.s3
+      await s3
         .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, existing.blobId) }))
         .catch(() => {});
     }
 
     const blobId = randomUUID();
-    await this.s3.send(
+    await s3.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: this.blobKey(userId, blobId),
@@ -177,7 +189,9 @@ export class S3WorkspaceStore implements WorkspaceStore {
 
     const file = manifest.files[idx];
     if (!file) return false;
-    await this.s3
+
+    const [s3, { DeleteObjectCommand }] = await Promise.all([this.client(), import("@aws-sdk/client-s3")]);
+    await s3
       .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, file.blobId) }))
       .catch(() => {});
 
@@ -189,19 +203,15 @@ export class S3WorkspaceStore implements WorkspaceStore {
 
   async reset(userId: string): Promise<void> {
     const manifest = await this.getManifest(userId);
+    const [s3, { DeleteObjectCommand }] = await Promise.all([this.client(), import("@aws-sdk/client-s3")]);
 
-    // Delete all blobs
     await Promise.all(
       manifest.files.map((f) =>
-        this.s3
-          .send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, f.blobId) }))
-          .catch(() => {}),
+        s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, f.blobId) })).catch(() => {}),
       ),
     );
 
-    // Reset manifest
-    const empty = emptyManifest(userId);
-    await this.saveManifest(userId, empty);
+    await this.saveManifest(userId, emptyManifest(userId));
   }
 
   async getDownloadUrl(userId: string, path: string): Promise<string> {
@@ -209,10 +219,12 @@ export class S3WorkspaceStore implements WorkspaceStore {
     const file = manifest.files.find((f) => f.path === path);
     if (!file) throw new Error(`File not found in workspace: ${path}`);
 
-    const command = new GetObjectCommand({
-      Bucket: this.bucket,
-      Key: this.blobKey(userId, file.blobId),
-    });
-    return getSignedUrl(this.s3, command, { expiresIn: 3600 });
+    const [s3, { GetObjectCommand }, { getSignedUrl }] = await Promise.all([
+      this.client(),
+      import("@aws-sdk/client-s3"),
+      import("@aws-sdk/s3-request-presigner"),
+    ]);
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: this.blobKey(userId, file.blobId) });
+    return getSignedUrl(s3, command, { expiresIn: 3600 });
   }
 }

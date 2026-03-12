@@ -75,3 +75,35 @@ jobs:
         run: npm run build --workspace=packages/providers
 
       - run: npm run test
+
+  smoke-test:
+    name: Smoke — providers load without peer deps
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build providers
+        run: npm run build --workspace=packages/providers
+
+      - name: Remove optional peer deps from node_modules
+        run: |
+          rm -rf node_modules/@aws-sdk
+          rm -rf node_modules/@modelcontextprotocol
+          rm -rf node_modules/@slack
+          rm -rf node_modules/@actions
+
+      - name: Verify package loads without peer deps
+        run: |
+          node --input-type=module <<'EOF'
+          import('./packages/providers/dist/index.js')
+            .then(() => { console.log('✓ @sweny-ai/providers loads without peer deps'); })
+            .catch((err) => { console.error('✗', err.message); process.exit(1); });
+          EOF

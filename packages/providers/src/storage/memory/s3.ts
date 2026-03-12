@@ -1,21 +1,30 @@
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import type { S3Client } from "@aws-sdk/client-s3";
 import { randomBytes } from "node:crypto";
 import type { MemoryEntry, UserMemory, MemoryStore } from "../types.js";
 import type { Logger } from "../../logger.js";
 import { consoleLogger } from "../../logger.js";
 
 export class S3MemoryStore implements MemoryStore {
-  private s3: S3Client;
-  private bucket: string;
-  private prefix: string;
-  private cache = new Map<string, UserMemory>();
-  private logger: Logger;
+  private _client: S3Client | null = null;
+  private readonly region: string;
+  private readonly bucket: string;
+  private readonly prefix: string;
+  private readonly cache = new Map<string, UserMemory>();
+  private readonly logger: Logger;
 
   constructor(bucket: string, prefix = "", region = "us-west-2", logger?: Logger) {
-    this.s3 = new S3Client({ region });
     this.bucket = bucket;
     this.prefix = prefix;
+    this.region = region;
     this.logger = logger ?? consoleLogger;
+  }
+
+  private async client(): Promise<S3Client> {
+    if (!this._client) {
+      const { S3Client } = await import("@aws-sdk/client-s3");
+      this._client = new S3Client({ region: this.region });
+    }
+    return this._client;
   }
 
   private s3Key(userId: string): string {
@@ -27,8 +36,9 @@ export class S3MemoryStore implements MemoryStore {
     const cached = this.cache.get(userId);
     if (cached) return cached;
 
+    const [s3, { GetObjectCommand }] = await Promise.all([this.client(), import("@aws-sdk/client-s3")]);
     try {
-      const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.s3Key(userId) }));
+      const result = await s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.s3Key(userId) }));
       const body = await result.Body?.transformToString("utf-8");
       if (body) {
         const memory = JSON.parse(body) as UserMemory;
@@ -48,8 +58,9 @@ export class S3MemoryStore implements MemoryStore {
   }
 
   private async save(userId: string, memory: UserMemory): Promise<void> {
+    const [s3, { PutObjectCommand }] = await Promise.all([this.client(), import("@aws-sdk/client-s3")]);
     this.cache.set(userId, memory);
-    await this.s3.send(
+    await s3.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: this.s3Key(userId),

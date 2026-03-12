@@ -1,19 +1,28 @@
-import { S3Client, GetObjectCommand, PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import type { S3Client } from "@aws-sdk/client-s3";
 import type { PersistedSession, TranscriptEntry, SessionStore } from "../types.js";
 import type { Logger } from "../../logger.js";
 import { consoleLogger } from "../../logger.js";
 
 export class S3SessionStore implements SessionStore {
-  private s3: S3Client;
-  private bucket: string;
-  private prefix: string;
-  private logger: Logger;
+  private _client: S3Client | null = null;
+  private readonly region: string;
+  private readonly bucket: string;
+  private readonly prefix: string;
+  private readonly logger: Logger;
 
   constructor(bucket: string, prefix = "", region = "us-west-2", logger?: Logger) {
-    this.s3 = new S3Client({ region });
     this.bucket = bucket;
     this.prefix = prefix;
+    this.region = region;
     this.logger = logger ?? consoleLogger;
+  }
+
+  private async client(): Promise<S3Client> {
+    if (!this._client) {
+      const { S3Client } = await import("@aws-sdk/client-s3");
+      this._client = new S3Client({ region: this.region });
+    }
+    return this._client;
   }
 
   private baseKey(userId: string, threadKey: string): string {
@@ -30,8 +39,9 @@ export class S3SessionStore implements SessionStore {
   }
 
   async load(userId: string, threadKey: string): Promise<PersistedSession | null> {
+    const [s3, { GetObjectCommand }] = await Promise.all([this.client(), import("@aws-sdk/client-s3")]);
     try {
-      const result = await this.s3.send(
+      const result = await s3.send(
         new GetObjectCommand({ Bucket: this.bucket, Key: this.metadataKey(userId, threadKey) }),
       );
       const body = await result.Body?.transformToString("utf-8");
@@ -46,7 +56,8 @@ export class S3SessionStore implements SessionStore {
   }
 
   async save(userId: string, threadKey: string, session: PersistedSession): Promise<void> {
-    await this.s3.send(
+    const [s3, { PutObjectCommand }] = await Promise.all([this.client(), import("@aws-sdk/client-s3")]);
+    await s3.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: this.metadataKey(userId, threadKey),
@@ -58,13 +69,16 @@ export class S3SessionStore implements SessionStore {
   }
 
   async appendTranscript(userId: string, threadKey: string, entry: TranscriptEntry): Promise<void> {
+    const [s3, { GetObjectCommand, PutObjectCommand }] = await Promise.all([
+      this.client(),
+      import("@aws-sdk/client-s3"),
+    ]);
     const key = this.transcriptKey(userId, threadKey);
     const line = JSON.stringify(entry) + "\n";
 
-    // Read existing transcript and append
     let existing = "";
     try {
-      const result = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+      const result = await s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
       existing = (await result.Body?.transformToString("utf-8")) ?? "";
     } catch (err: unknown) {
       const code = (err as { name?: string }).name;
@@ -73,7 +87,7 @@ export class S3SessionStore implements SessionStore {
       }
     }
 
-    await this.s3.send(
+    await s3.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
@@ -85,8 +99,9 @@ export class S3SessionStore implements SessionStore {
   }
 
   async getTranscript(userId: string, threadKey: string): Promise<TranscriptEntry[]> {
+    const [s3, { GetObjectCommand }] = await Promise.all([this.client(), import("@aws-sdk/client-s3")]);
     try {
-      const result = await this.s3.send(
+      const result = await s3.send(
         new GetObjectCommand({ Bucket: this.bucket, Key: this.transcriptKey(userId, threadKey) }),
       );
       const body = await result.Body?.transformToString("utf-8");
@@ -106,13 +121,14 @@ export class S3SessionStore implements SessionStore {
   }
 
   async listSessions(userId: string): Promise<PersistedSession[]> {
+    const [s3, { ListObjectsV2Command }] = await Promise.all([this.client(), import("@aws-sdk/client-s3")]);
     const prefix = this.prefix ? `${this.prefix}/users/${userId}/sessions/` : `users/${userId}/sessions/`;
 
     const sessions: PersistedSession[] = [];
     let continuationToken: string | undefined;
 
     do {
-      const result = await this.s3.send(
+      const result = await s3.send(
         new ListObjectsV2Command({
           Bucket: this.bucket,
           Prefix: prefix,
@@ -124,7 +140,6 @@ export class S3SessionStore implements SessionStore {
       if (result.CommonPrefixes) {
         for (const cp of result.CommonPrefixes) {
           if (!cp.Prefix) continue;
-          // Extract threadKey from prefix: .../sessions/{threadKey}/
           const parts = cp.Prefix.replace(/\/$/, "").split("/");
           const threadKey = parts[parts.length - 1];
           if (!threadKey) continue;
