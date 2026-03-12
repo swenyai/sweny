@@ -41,69 +41,44 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Collect CI failure logs
+      - name: Collect CI failure summary
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 - <<'EOF'
-          import subprocess, json, sys
-
-          repo = "swenyai/sweny"
-
-          result = subprocess.run(
-            ["gh", "run", "list", "--repo", repo,
-             "--status", "failure", "--limit", "30",
-             "--json", "databaseId,name,createdAt,headBranch,workflowName"],
-            capture_output=True, text=True,
-          )
-          runs = json.loads(result.stdout) if result.stdout.strip() else []
-          print(f"Found {len(runs)} failed runs", flush=True)
-
-          entries = []
-          for run in runs:
-            run_id   = str(run["databaseId"])
-            job_name = run.get("name") or run.get("workflowName", "unknown")
-            wf_name  = run.get("workflowName", job_name)
-            created  = run["createdAt"]
-            branch   = run.get("headBranch", "unknown")
-
-            logs = subprocess.run(
-              ["gh", "run", "view", run_id, "--repo", repo, "--log-failed"],
-              capture_output=True, text=True,
-            )
-            lines = [l.strip() for l in logs.stdout.splitlines() if l.strip()]
-            print(f"  run {run_id} ({wf_name}): {len(lines)} log lines", flush=True)
-
-            for line in lines:
-              if any(line.startswith(p) for p in ("##[debug]", "##[group]", "##[endgroup]")):
-                continue
-              entries.append({
-                "timestamp": created,
-                "service":   "sweny-ci",
-                "level":     "error",
-                "message":   f"[{wf_name} / {branch}] {line}",
-                "attributes": {
-                  "run_id":   run_id,
-                  "workflow": wf_name,
-                  "job":      job_name,
-                  "branch":   branch,
-                },
-              })
-
-          with open("/tmp/ci-logs.json", "w") as f:
-            json.dump(entries, f, indent=2)
-
-          print(f"Wrote {len(entries)} log entries from {len(runs)} failed runs", flush=True)
-          EOF
+          gh run list --repo swenyai/sweny --status failure --limit 20 \
+            --json databaseId,name,createdAt,headBranch,workflowName \
+          | jq '[.[] | {
+              timestamp: .createdAt,
+              service: "sweny-ci",
+              level: "error",
+              message: ("CI failure: " + .workflowName + " on " + .headBranch),
+              attributes: {
+                run_id: (.databaseId | tostring),
+                workflow: .workflowName,
+                branch: .headBranch
+              }
+            }]' > /tmp/ci-failures.json
+          echo "Collected $(jq length /tmp/ci-failures.json) failed runs"
 
       - name: Run SWEny
         uses: swenyai/sweny@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-          # Observability: our own CI failure logs
+          # Observability: CI failure summary (agent uses GitHub MCP for deeper queries)
           observability-provider: file
-          log-file-path: /tmp/ci-logs.json
+          log-file-path: /tmp/ci-failures.json
+
+          # MCP: GitHub server so the agent can query run logs, PRs, and issues directly
+          mcp-servers: >-
+            {
+              "github": {
+                "type": "stdio",
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-github@latest"],
+                "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ secrets.GH_PAT || github.token }}" }
+              }
+            }
 
           # Issue tracking: GitHub Issues on this repo
           issue-tracker-provider: github-issues

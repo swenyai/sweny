@@ -54,6 +54,7 @@ export async function implementFix(ctx) {
         prompt: implementPrompt,
         maxTurns: config.maxImplementTurns,
         env: { ...config.agentEnv },
+        mcpServers: config.mcpServers,
     });
     // -------------------------------------------------------------------------
     // 4. Check for code changes

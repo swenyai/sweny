@@ -281,6 +281,11 @@ inputs:
     description: "Optional bot token with elevated permissions (for cross-repo dispatch, push to protected branches)"
     required: false
 
+  # MCP servers
+  mcp-servers:
+    description: 'MCP servers as a JSON object — e.g. ''{"github":{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github@latest"],"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"${{ secrets.GH_PAT }}"}}}'''
+    required: false
+
 outputs:
   issues-found:
     description: "Whether any issues were found during investigation (true/false)"

@@ -1,4 +1,5 @@
 import type { DedupStore } from "../../lib/dedup-store.js";
+import type { MCPServerConfig } from "@sweny-ai/providers";
 
 /** Configuration for the triage recipe. Provider-agnostic — no Linear/GitHub specifics. */
 export interface TriageConfig {
@@ -53,6 +54,12 @@ export interface TriageConfig {
 
   // Coding agent auth (passed through as env vars)
   agentEnv: Record<string, string>;
+
+  /**
+   * MCP servers injected into the coding agent for investigate and implement-fix steps.
+   * The agent receives all configured tools during its reasoning session.
+   */
+  mcpServers?: Record<string, MCPServerConfig>;
 
   /**
    * Optional dedup store for deterministic idempotency.

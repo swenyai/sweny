@@ -341,6 +341,7 @@ function mapToImplementConfig(issueId: string, config: CliConfig): ImplementConf
     issueTrackerName: config.issueTrackerProvider,
     reviewMode: config.reviewMode,
     agentEnv,
+    mcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
   };
 }
 
@@ -422,6 +423,7 @@ function mapToTriageConfig(config: CliConfig): TriageConfig {
     issueTrackerName: config.issueTrackerProvider,
 
     agentEnv,
+    mcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
   };
 }
 

@@ -1,3 +1,4 @@
+import type { MCPServerConfig } from "@sweny-ai/providers";
 /**
  * Minimal config interface required by shared nodes (implement-fix, create-pr, notify).
  * Both TriageConfig and ImplementConfig satisfy this interface.
@@ -24,5 +25,10 @@ export interface SharedNodeConfig {
     issueTrackerName?: string;
     /** Controls PR merge behavior. "auto" enables GitHub auto-merge after CI. */
     reviewMode?: "auto" | "review";
+    /**
+     * MCP servers injected into the coding agent during implement-fix and investigate steps.
+     * Written to a temp config file and passed as --mcp-config to the agent CLI.
+     */
+    mcpServers?: Record<string, MCPServerConfig>;
 }
 //# sourceMappingURL=types.d.ts.map

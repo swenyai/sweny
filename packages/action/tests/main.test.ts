@@ -99,6 +99,7 @@ const DEFAULT_CONFIG = {
   openaiApiKey: "",
   geminiApiKey: "",
   logFilePath: "",
+  mcpServers: {},
 };
 
 const DEFAULT_PROVIDERS = new Map();

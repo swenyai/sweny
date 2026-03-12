@@ -72,6 +72,7 @@ vi.mock("../src/config.js", () => ({
     openaiApiKey: "",
     geminiApiKey: "",
     logFilePath: "",
+    mcpServers: {},
   }),
   validateInputs: vi.fn().mockReturnValue([]),
 }));
@@ -138,6 +139,7 @@ const BASE: ActionConfig = {
   openaiApiKey: "",
   geminiApiKey: "",
   logFilePath: "",
+  mcpServers: {},
 };
 
 // ---------------------------------------------------------------------------

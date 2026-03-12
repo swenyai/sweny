@@ -66,6 +66,7 @@ export async function implementFix(ctx: WorkflowContext<SharedNodeConfig>): Prom
     prompt: implementPrompt,
     maxTurns: config.maxImplementTurns,
     env: { ...config.agentEnv },
+    mcpServers: config.mcpServers,
   });
 
   // -------------------------------------------------------------------------

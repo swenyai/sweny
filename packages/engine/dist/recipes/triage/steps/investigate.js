@@ -23,6 +23,7 @@ export async function investigate(ctx) {
         prompt,
         maxTurns: config.maxInvestigateTurns,
         env: { ...config.agentEnv },
+        mcpServers: config.mcpServers,
     });
     // Parse results
     const result = parseInvestigationResults(analysisDir);

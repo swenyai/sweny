@@ -1,3 +1,5 @@
+import type { MCPServerConfig } from "@sweny-ai/providers";
+
 /**
  * Configuration for the implement recipe.
  *
@@ -34,4 +36,7 @@ export interface ImplementConfig {
 
   // Issue tracker provider key (e.g. "linear", "github-issues") — used for prompt/template labels
   issueTrackerName?: string;
+
+  /** MCP servers injected into the coding agent during implement-fix. */
+  mcpServers?: Record<string, MCPServerConfig>;
 }

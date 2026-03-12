@@ -79,6 +79,7 @@ const BASE_CONFIG = {
   claudeOauthToken: "",
   openaiApiKey: "",
   geminiApiKey: "",
+  mcpServers: {},
 };
 
 // ── Helper: set up all doMocks and import main.ts ─────────────────────────────

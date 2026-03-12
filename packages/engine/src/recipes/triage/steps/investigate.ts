@@ -34,6 +34,7 @@ export async function investigate(ctx: WorkflowContext<TriageConfig>): Promise<S
     prompt,
     maxTurns: config.maxInvestigateTurns,
     env: { ...config.agentEnv },
+    mcpServers: config.mcpServers,
   });
 
   // Parse results

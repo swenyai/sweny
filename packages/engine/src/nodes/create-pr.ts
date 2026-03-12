@@ -43,6 +43,7 @@ export async function createPr(ctx: WorkflowContext<SharedNodeConfig>): Promise<
     prompt: prDescPrompt,
     maxTurns: config.prDescriptionMaxTurns ?? 10,
     env: { ...config.agentEnv },
+    mcpServers: config.mcpServers,
   });
 
   // -------------------------------------------------------------------------

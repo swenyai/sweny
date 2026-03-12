@@ -1,3 +1,4 @@
+import type { MCPServerConfig } from "@sweny-ai/providers";
 /**
  * Configuration for the implement recipe.
  *
@@ -19,5 +20,7 @@ export interface ImplementConfig {
     stateInProgress: string;
     statePeerReview: string;
     issueTrackerName?: string;
+    /** MCP servers injected into the coding agent during implement-fix. */
+    mcpServers?: Record<string, MCPServerConfig>;
 }
 //# sourceMappingURL=types.d.ts.map

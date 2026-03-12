@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import type { Command } from "commander";
+import type { MCPServerConfig } from "@sweny-ai/providers";
 
 export interface CliConfig {
   // Coding agent
@@ -82,6 +83,9 @@ export interface CliConfig {
 
   // Output (file providers)
   outputDir: string;
+
+  // MCP servers for agent tool access
+  mcpServers: Record<string, MCPServerConfig>;
 }
 
 export function registerTriageCommand(program: Command): Command {
@@ -226,6 +230,8 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
     noCache: options.cache === false,
 
     outputDir: (options.outputDir as string) || env.SWENY_OUTPUT_DIR || f("output-dir") || ".sweny/output",
+
+    mcpServers: parseMcpServers(env.SWENY_MCP_SERVERS || f("mcp-servers-json") || ""),
   };
 }
 
@@ -455,6 +461,30 @@ export function registerImplementCommand(program: Command): Command {
       "PR merge behavior: auto (GitHub auto-merge when CI passes) | review (human approval, default)",
       "review",
     );
+}
+
+/**
+ * Parse a JSON string into MCP server configs.
+ * Returns empty object on blank input; throws on malformed JSON.
+ *
+ * Expected format (JSON):
+ *   {"datadog":{"type":"http","url":"https://...","headers":{"DD_API_KEY":"..."}}}
+ *
+ * In .sweny.yml, set as a single-line JSON value:
+ *   mcp-servers-json: '{"datadog":{"type":"http","url":"..."}}'
+ *
+ * Or via env var:
+ *   SWENY_MCP_SERVERS='{"datadog":{"type":"http","url":"..."}}'
+ */
+function parseMcpServers(json: string): Record<string, MCPServerConfig> {
+  if (!json.trim()) return {};
+  try {
+    return JSON.parse(json) as Record<string, MCPServerConfig>;
+  } catch {
+    throw new Error(
+      `Invalid mcp-servers-json: expected a JSON object mapping server names to MCPServerConfig.\n  Got: ${json.slice(0, 120)}`,
+    );
+  }
 }
 
 function detectRepository(): string {

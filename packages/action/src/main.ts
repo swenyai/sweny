@@ -69,6 +69,7 @@ export function mapToImplementConfig(config: ActionConfig): ImplementConfig {
     statePeerReview: config.linearStatePeerReview,
     issueTrackerName: config.issueTrackerProvider,
     agentEnv,
+    mcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
   };
 }
 
@@ -150,6 +151,7 @@ export function mapToTriageConfig(config: ActionConfig): TriageConfig {
     issueTrackerName: config.issueTrackerProvider,
 
     agentEnv,
+    mcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
   };
 }
 

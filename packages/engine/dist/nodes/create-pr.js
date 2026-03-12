@@ -33,6 +33,7 @@ export async function createPr(ctx) {
         prompt: prDescPrompt,
         maxTurns: config.prDescriptionMaxTurns ?? 10,
         env: { ...config.agentEnv },
+        mcpServers: config.mcpServers,
     });
     // -------------------------------------------------------------------------
     // 2. Create Pull Request

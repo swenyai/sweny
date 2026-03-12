@@ -1,4 +1,5 @@
 import * as core from "@actions/core";
+import type { MCPServerConfig } from "@sweny-ai/providers";
 
 export interface ActionConfig {
   // Recipe selection
@@ -72,6 +73,9 @@ export interface ActionConfig {
   // Output (file providers)
   outputDir: string;
 
+  // MCP servers for agent tool access
+  mcpServers: Record<string, MCPServerConfig>;
+
   // Runtime context
   repository: string;
   repositoryOwner: string;
@@ -139,10 +143,30 @@ export function parseInputs(): ActionConfig {
 
     outputDir: core.getInput("output-dir") || ".github/sweny-output",
 
+    mcpServers: parseMcpServers(core.getInput("mcp-servers")),
+
     repository: process.env.GITHUB_REPOSITORY || "",
     repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",
     logFilePath: core.getInput("log-file-path"),
   };
+}
+
+/**
+ * Parse a JSON string into MCP server configs.
+ * Returns empty object on blank input; throws on malformed JSON.
+ *
+ * Example action.yml usage:
+ *   mcp-servers: '{"datadog":{"type":"http","url":"https://...","headers":{"DD_API_KEY":"${{ secrets.DD_API_KEY }}"}}}'
+ */
+function parseMcpServers(json: string): Record<string, MCPServerConfig> {
+  if (!json.trim()) return {};
+  try {
+    return JSON.parse(json) as Record<string, MCPServerConfig>;
+  } catch {
+    throw new Error(
+      `Invalid mcp-servers input: expected a JSON object mapping server names to MCPServerConfig.\n  Got: ${json.slice(0, 120)}`,
+    );
+  }
 }
 
 export function validateInputs(config: ActionConfig): string[] {
