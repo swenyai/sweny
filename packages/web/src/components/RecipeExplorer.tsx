@@ -294,10 +294,36 @@ const CATEGORY_LABELS: Record<string, string> = {
   notification: "Notification",
 };
 
+const CATEGORY_META: Record<string, { icon: string; color: string }> = {
+  observability: { icon: "◉", color: "#818cf8" },
+  issueTracking: { icon: "◈", color: "#f472b6" },
+  sourceControl: { icon: "⎇", color: "#34d399" },
+  codingAgent: { icon: "⬡", color: "#fb923c" },
+  notification: { icon: "◎", color: "#a78bfa" },
+};
+
+// Hardcoded category→stateIds fallback for built-in recipes (used when
+// engine dist doesn't carry provider fields e.g. cached older build).
+const RECIPE_CATEGORIES: Record<string, Array<{ category: string; stateIds: string[] }>> = {
+  triage: [
+    { category: "observability", stateIds: ["dedup-check", "build-context"] },
+    { category: "codingAgent", stateIds: ["investigate", "implement-fix"] },
+    { category: "issueTracking", stateIds: ["novelty-gate", "create-issue"] },
+    { category: "sourceControl", stateIds: ["cross-repo-check", "create-pr"] },
+    { category: "notification", stateIds: ["notify"] },
+  ],
+  implement: [
+    { category: "issueTracking", stateIds: ["fetch-issue"] },
+    { category: "codingAgent", stateIds: ["implement"] },
+    { category: "sourceControl", stateIds: ["create-pr"] },
+    { category: "notification", stateIds: ["notify"] },
+  ],
+};
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type ViewMode = "visual" | "split" | "source" | "configure";
-type ProviderConfig = Record<string, string>; // stateId → providerId
+type ProviderConfig = Record<string, string>; // category → providerId
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -326,11 +352,27 @@ function outboundTransitions(state: StateDefinition) {
   return transitions;
 }
 
-/** Collect all env vars needed given a providerConfig selection, deduped by key. */
-function collectEnvVars(
+/** Derive used provider categories from the definition.
+ *  First tries state.provider fields; falls back to RECIPE_CATEGORIES. */
+function getUsedCategories(
   definition: RecipeDefinition,
-  providerConfig: ProviderConfig,
-): Array<{
+  recipeId: string,
+): Array<{ category: string; stateIds: string[] }> {
+  const catMap: Record<string, string[]> = {};
+  for (const [id, state] of Object.entries(definition.states)) {
+    const prov = (state as StateDefWithProvider).provider;
+    if (prov) {
+      catMap[prov] = [...(catMap[prov] ?? []), id];
+    }
+  }
+  if (Object.keys(catMap).length > 0) {
+    return Object.entries(catMap).map(([category, stateIds]) => ({ category, stateIds }));
+  }
+  return RECIPE_CATEGORIES[recipeId] ?? [];
+}
+
+/** Collect all env vars needed given a category→providerId config, deduped by key. */
+function collectEnvVars(categoryConfig: ProviderConfig): Array<{
   key: string;
   description: string;
   required: boolean;
@@ -341,15 +383,13 @@ function collectEnvVars(
 }> {
   const seen = new Set<string>();
   const result: ReturnType<typeof collectEnvVars> = [];
-  for (const [stateId, providerId] of Object.entries(providerConfig)) {
-    const state = definition.states[stateId] as StateDefWithProvider;
-    if (!state) continue;
+  for (const [category, providerId] of Object.entries(categoryConfig)) {
     const provider = CATALOG.find((p) => p.id === providerId);
     if (!provider) continue;
     for (const ev of provider.envVars) {
       if (!seen.has(ev.key)) {
         seen.add(ev.key);
-        result.push({ ...ev, category: provider.category, providerName: provider.name });
+        result.push({ ...ev, category, providerName: provider.name });
       }
     }
   }
@@ -357,9 +397,9 @@ function collectEnvVars(
 }
 
 /** Generate .env template string. */
-function generateEnvTemplate(definition: RecipeDefinition, providerConfig: ProviderConfig): string {
-  const vars = collectEnvVars(definition, providerConfig);
-  if (vars.length === 0) return "# No providers configured yet.";
+function generateEnvTemplate(categoryConfig: ProviderConfig): string {
+  const vars = collectEnvVars(categoryConfig);
+  if (vars.length === 0) return "# No providers configured yet.\n# Select a provider for each category above.";
 
   const byCategory: Record<string, typeof vars> = {};
   for (const v of vars) {
@@ -370,7 +410,7 @@ function generateEnvTemplate(definition: RecipeDefinition, providerConfig: Provi
   const lines: string[] = [];
   for (const [cat, entries] of Object.entries(byCategory)) {
     const providerName = entries[0].providerName;
-    lines.push(`# ${CATEGORY_LABELS[cat] ?? cat} (${providerName})`);
+    lines.push(`# ${CATEGORY_LABELS[cat] ?? cat} — ${providerName}`);
     for (const e of entries) {
       if (e.example) lines.push(`${e.key}=${e.example}`);
       else lines.push(`${e.key}=`);
@@ -381,41 +421,24 @@ function generateEnvTemplate(definition: RecipeDefinition, providerConfig: Provi
 }
 
 /** Generate runRecipe TypeScript snippet. */
-function generateCodeSnippet(definition: RecipeDefinition, providerConfig: ProviderConfig): string {
-  const statesWithProviders = Object.entries(definition.states)
-    .map(([id, s]) => ({
-      id,
-      state: s as StateDefWithProvider,
-      provider: CATALOG.find((p) => p.id === providerConfig[id]),
-    }))
-    .filter((x) => x.provider);
+function generateCodeSnippet(definition: RecipeDefinition, categoryConfig: ProviderConfig): string {
+  const entries = Object.entries(categoryConfig)
+    .map(([category, providerId]) => ({ category, provider: CATALOG.find((p) => p.id === providerId) }))
+    .filter((x): x is { category: string; provider: ProviderOption } => !!x.provider);
 
-  if (statesWithProviders.length === 0) return "// Select providers above to generate setup code.";
+  if (entries.length === 0) return "// Select providers above to generate setup code.";
 
-  // Deduplicate imports by factoryFn+importPath
-  const imports = new Map<string, { importPath: string; factoryFn: string }>();
-  const registrations: string[] = [];
-  const seenRoles = new Set<string>();
-
-  for (const { state, provider } of statesWithProviders) {
-    if (!provider) continue;
-    const role = state.provider!;
-    if (!imports.has(provider.factoryFn)) {
-      imports.set(provider.factoryFn, { importPath: provider.importPath, factoryFn: provider.factoryFn });
-    }
-    if (!seenRoles.has(role)) {
-      seenRoles.add(role);
-      const vars = provider.envVars
-        .filter((v) => v.required)
-        .map((v) => `process.env.${v.key}!`)
-        .join(", ");
-      registrations.push(`registry.set("${role}", ${provider.factoryFn}(${vars ? `{ /* ${vars} */ }` : "{}"}));`);
-    }
-  }
-
-  const importLines = Array.from(imports.values())
-    .map(({ importPath, factoryFn }) => `import { ${factoryFn} } from "${importPath}";`)
+  const importLines = entries
+    .map(({ provider }) => `import { ${provider.factoryFn} } from "${provider.importPath}";`)
     .join("\n");
+
+  const registrations = entries.map(({ category, provider }) => {
+    const vars = provider.envVars
+      .filter((v) => v.required)
+      .map((v) => `process.env.${v.key}!`)
+      .join(", ");
+    return `registry.set("${category}", ${provider.factoryFn}(${vars ? `{ /* ${vars} */ }` : "{}"}));`;
+  });
 
   const recipeId = definition.id === "triage" ? "triageRecipe" : "implementRecipe";
   const recipeImport = `import { ${recipeId} } from "@sweny-ai/engine/recipes/${definition.id}";`;
@@ -675,37 +698,24 @@ function RecipeOverview({ recipe, definition }: { recipe: (typeof RECIPES)[numbe
 // ── Configure panel ───────────────────────────────────────────────────────────
 
 function ConfigurePanel({
-  recipe,
   definition,
+  usedCategories,
   providerConfig,
   onProviderChange,
-  focusedStateId,
 }: {
-  recipe: (typeof RECIPES)[number];
   definition: RecipeDefinition;
+  usedCategories: Array<{ category: string; stateIds: string[] }>;
   providerConfig: ProviderConfig;
-  onProviderChange: (stateId: string, providerId: string) => void;
-  focusedStateId: string | null;
+  onProviderChange: (category: string, providerId: string) => void;
 }) {
   const [outputTab, setOutputTab] = useState<"env" | "code">("env");
   const [copied, setCopied] = useState(false);
-  const focusRef = useRef<HTMLDivElement | null>(null);
 
-  // Scroll focused state into view
-  useEffect(() => {
-    if (focusedStateId && focusRef.current) {
-      focusRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }, [focusedStateId]);
+  const configuredCount = usedCategories.filter(({ category }) => !!providerConfig[category]).length;
+  const total = usedCategories.length;
+  const allConfigured = total > 0 && configuredCount === total;
 
-  const statesWithProvider = Object.entries(definition.states).filter(
-    ([, s]) => (s as StateDefWithProvider).provider,
-  ) as [string, StateDefWithProvider][];
-
-  const configuredCount = statesWithProvider.filter(([id]) => providerConfig[id]).length;
-  const allConfigured = configuredCount === statesWithProvider.length;
-
-  const envText = generateEnvTemplate(definition, providerConfig);
+  const envText = generateEnvTemplate(providerConfig);
   const codeText = generateCodeSnippet(definition, providerConfig);
   const outputText = outputTab === "env" ? envText : codeText;
 
@@ -715,173 +725,221 @@ function ConfigurePanel({
     setTimeout(() => setCopied(false), 1500);
   }
 
-  const labelStyle = {
-    fontSize: 10,
-    fontWeight: 700 as const,
-    letterSpacing: "0.07em",
-    textTransform: "uppercase" as const,
-    color: "#475569",
-  };
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflowY: "auto" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {/* Header */}
-      <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={labelStyle}>Provider Configuration</span>
-          <span style={{ fontSize: 11, color: allConfigured ? "#22c55e" : "#f59e0b", fontWeight: 600 }}>
-            {allConfigured ? "✓ Ready" : `${configuredCount} / ${statesWithProvider.length} configured`}
+      <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.07em",
+              textTransform: "uppercase",
+              color: "#3d4f6a",
+            }}
+          >
+            Provider Setup
+          </span>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: allConfigured ? "#22c55e" : configuredCount > 0 ? "#f59e0b" : "#3d4f6a",
+            }}
+          >
+            {allConfigured ? "✓ Ready to run" : `${configuredCount} / ${total} configured`}
           </span>
         </div>
-        <p style={{ margin: "4px 0 0", fontSize: 11, color: "#475569", lineHeight: 1.4 }}>
-          Select a provider for each step. Steps without a provider slot run without external services.
+        {/* Progress bar */}
+        <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+          <div
+            style={{
+              width: total > 0 ? `${(configuredCount / total) * 100}%` : "0%",
+              height: "100%",
+              background: allConfigured ? "#22c55e" : "#6366f1",
+              borderRadius: 2,
+              transition: "width 0.3s ease",
+            }}
+          />
+        </div>
+        <p style={{ margin: "6px 0 0", fontSize: 10.5, color: "#2d3f58", lineHeight: 1.5 }}>
+          Pick one provider per category. Env vars and setup code update automatically.
         </p>
       </div>
 
-      {/* Step list */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
-        {Object.entries(definition.states).map(([stateId, stateDef]) => {
-          const state = stateDef as StateDefWithProvider;
-          const isFocused = stateId === focusedStateId;
-          const options = state.provider ? getCatalogForCategory(state.provider) : [];
-          const selectedId = providerConfig[stateId];
+      {/* Category cards */}
+      <div
+        style={{ flex: 1, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}
+      >
+        {usedCategories.map(({ category, stateIds }) => {
+          const meta = CATEGORY_META[category];
+          const options = getCatalogForCategory(category);
+          const selectedId = providerConfig[category];
           const selected = CATALOG.find((p) => p.id === selectedId);
+          const isConfigured = !!selectedId;
 
           return (
             <div
-              key={stateId}
-              ref={isFocused ? focusRef : null}
+              key={category}
               style={{
-                margin: "4px 10px",
-                borderRadius: 8,
-                border: `1px solid ${isFocused ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.06)"}`,
-                background: isFocused ? "rgba(99,102,241,0.07)" : "rgba(255,255,255,0.02)",
+                borderRadius: 9,
+                border: `1px solid ${isConfigured ? (meta?.color ?? "#6366f1") + "44" : "rgba(255,255,255,0.07)"}`,
+                background: isConfigured ? (meta?.color ?? "#6366f1") + "0a" : "rgba(255,255,255,0.02)",
                 overflow: "hidden",
+                transition: "border-color 0.2s, background 0.2s",
               }}
             >
-              {/* State header */}
-              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px 6px" }}>
-                <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#e2e8f0", flex: 1 }}>
-                  {stateId}
-                </span>
-                <PhasePill phase={state.phase} />
+              {/* Card header */}
+              <div style={{ padding: "9px 12px 7px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                <div
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 14, color: meta?.color ?? "#818cf8", lineHeight: 1 }}>
+                      {meta?.icon ?? "◆"}
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#c8d8e8" }}>
+                      {CATEGORY_LABELS[category] ?? category}
+                    </span>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 600,
+                      padding: "1px 6px",
+                      borderRadius: 4,
+                      background: "rgba(255,255,255,0.05)",
+                      color: "#3d4f6a",
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    {stateIds.length} step{stateIds.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                {/* Step name chips */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                  {stateIds.map((id) => (
+                    <span
+                      key={id}
+                      style={{
+                        fontSize: 9.5,
+                        fontFamily: "monospace",
+                        color: "#3d4f6a",
+                        background: "rgba(255,255,255,0.04)",
+                        border: "1px solid rgba(255,255,255,0.07)",
+                        borderRadius: 4,
+                        padding: "1px 5px",
+                      }}
+                    >
+                      {id}
+                    </span>
+                  ))}
+                </div>
               </div>
 
-              {state.description && (
-                <p style={{ margin: "0 10px 6px", fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>
-                  {state.description}
-                </p>
-              )}
+              {/* Provider dropdown + env vars */}
+              <div style={{ padding: "8px 12px 10px" }}>
+                <select
+                  value={selectedId ?? ""}
+                  onChange={(e) => onProviderChange(category, e.target.value)}
+                  style={{
+                    width: "100%",
+                    background: "#060c18",
+                    color: selectedId ? "#e2e8f0" : "#3d4f6a",
+                    border: `1px solid ${isConfigured ? (meta?.color ?? "#6366f1") + "55" : "rgba(255,255,255,0.1)"}`,
+                    borderRadius: 7,
+                    padding: "6px 28px 6px 10px",
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                    outline: "none",
+                    appearance: "none",
+                    backgroundImage:
+                      "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E\")",
+                    backgroundRepeat: "no-repeat",
+                    backgroundPosition: "right 9px center",
+                  }}
+                >
+                  <option value="">— choose {CATEGORY_LABELS[category] ?? category} provider —</option>
+                  {options.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.name}
+                    </option>
+                  ))}
+                </select>
 
-              {/* Provider selector */}
-              {state.provider ? (
-                <div style={{ padding: "0 10px 10px" }}>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      letterSpacing: "0.06em",
-                      textTransform: "uppercase",
-                      color: "#475569",
-                      marginBottom: 5,
-                    }}
-                  >
-                    {CATEGORY_LABELS[state.provider] ?? state.provider}
-                  </div>
-                  <select
-                    value={selectedId ?? ""}
-                    onChange={(e) => onProviderChange(stateId, e.target.value)}
-                    style={{
-                      width: "100%",
-                      background: "#0f172a",
-                      color: selectedId ? "#e2e8f0" : "#64748b",
-                      border: `1px solid ${selectedId ? (selected?.color ?? "rgba(255,255,255,0.15)") + "66" : "rgba(255,255,255,0.1)"}`,
-                      borderRadius: 6,
-                      padding: "5px 8px",
-                      fontSize: 12,
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      outline: "none",
-                      appearance: "none",
-                      backgroundImage:
-                        "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E\")",
-                      backgroundRepeat: "no-repeat",
-                      backgroundPosition: "right 8px center",
-                      paddingRight: 28,
-                    }}
-                  >
-                    <option value="">— select provider —</option>
-                    {options.map((opt) => (
-                      <option key={opt.id} value={opt.id}>
-                        {opt.name}
-                      </option>
+                {/* Env vars for selected provider */}
+                {selected && selected.envVars.length > 0 && (
+                  <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3 }}>
+                    {selected.envVars.map((ev) => (
+                      <div
+                        key={ev.key}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "3px 6px",
+                          borderRadius: 5,
+                          background: "rgba(255,255,255,0.03)",
+                          fontSize: 10.5,
+                        }}
+                      >
+                        <code
+                          style={{ color: ev.required ? "#93c5fd" : "#3d4f6a", fontFamily: "monospace", flexShrink: 0 }}
+                        >
+                          {ev.key}
+                        </code>
+                        <span
+                          style={{
+                            color: "#2d3f58",
+                            flex: 1,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {ev.description}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 8.5,
+                            fontWeight: 700,
+                            padding: "1px 4px",
+                            borderRadius: 3,
+                            background: ev.required ? "rgba(239,68,68,0.15)" : "rgba(100,116,139,0.1)",
+                            color: ev.required ? "#fca5a5" : "#3d4f6a",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {ev.required ? "req" : "opt"}
+                        </span>
+                      </div>
                     ))}
-                  </select>
-
-                  {/* Env vars for selected provider */}
-                  {selected && selected.envVars.length > 0 && (
-                    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3 }}>
-                      {selected.envVars.map((ev) => (
-                        <div key={ev.key} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 11 }}>
-                          <code
-                            style={{
-                              color: ev.required ? "#93c5fd" : "#475569",
-                              fontFamily: "monospace",
-                              fontSize: 11,
-                              flexShrink: 0,
-                            }}
-                          >
-                            {ev.key}
-                          </code>
-                          <span
-                            style={{
-                              color: "#334155",
-                              flex: 1,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {ev.description}
-                            {ev.example ? ` (e.g. ${ev.example})` : ""}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 9,
-                              fontWeight: 700,
-                              padding: "1px 4px",
-                              borderRadius: 3,
-                              letterSpacing: "0.04em",
-                              background: ev.required ? "rgba(239,68,68,0.15)" : "rgba(100,116,139,0.15)",
-                              color: ev.required ? "#fca5a5" : "#64748b",
-                            }}
-                          >
-                            {ev.required ? "required" : "optional"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {selected && selected.envVars.length === 0 && (
-                    <p style={{ margin: "6px 0 0", fontSize: 11, color: "#334155", fontStyle: "italic" }}>
-                      No env vars required.
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <p style={{ margin: "0 10px 8px", fontSize: 11, color: "#334155", fontStyle: "italic" }}>
-                  No external provider needed.
-                </p>
-              )}
+                  </div>
+                )}
+                {selected && selected.envVars.length === 0 && (
+                  <p style={{ margin: "6px 0 0", fontSize: 10.5, color: "#2d3f58", fontStyle: "italic" }}>
+                    No environment variables required.
+                  </p>
+                )}
+              </div>
             </div>
           );
         })}
+
+        {usedCategories.length === 0 && (
+          <div style={{ textAlign: "center", padding: "40px 16px", color: "#2d3f58", fontSize: 12, lineHeight: 1.6 }}>
+            No provider categories detected.
+            <br />
+            <span style={{ fontSize: 11, opacity: 0.6 }}>Try switching to the Triage or Implement recipe.</span>
+          </div>
+        )}
       </div>
 
       {/* Output section */}
-      <div style={{ borderTop: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
-        {/* Tab bar */}
-        <div style={{ display: "flex", alignItems: "center", padding: "6px 10px 0", gap: 2 }}>
+      <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", padding: "5px 10px 0", gap: 2 }}>
           {(["env", "code"] as const).map((tab) => (
             <button
               key={tab}
@@ -892,9 +950,9 @@ function ConfigurePanel({
                 borderBottom: `2px solid ${outputTab === tab ? "#6366f1" : "transparent"}`,
                 background: "transparent",
                 cursor: "pointer",
-                fontSize: 11,
+                fontSize: 10.5,
                 fontWeight: 600,
-                color: outputTab === tab ? "#a5b4fc" : "#475569",
+                color: outputTab === tab ? "#a5b4fc" : "#3d4f6a",
               }}
             >
               {tab === "env" ? ".env template" : "TypeScript setup"}
@@ -906,11 +964,11 @@ function ConfigurePanel({
               marginLeft: "auto",
               padding: "2px 8px",
               borderRadius: 4,
-              border: "1px solid rgba(255,255,255,0.1)",
+              border: "1px solid rgba(255,255,255,0.08)",
               background: "transparent",
               cursor: "pointer",
-              fontSize: 10,
-              color: copied ? "#22c55e" : "#475569",
+              fontSize: 9.5,
+              color: copied ? "#22c55e" : "#3d4f6a",
             }}
           >
             {copied ? "✓ Copied" : "Copy"}
@@ -920,15 +978,15 @@ function ConfigurePanel({
           style={{
             margin: 0,
             padding: "10px 12px",
-            fontSize: 11,
+            fontSize: 10.5,
             fontFamily: "monospace",
-            color: "#64748b",
-            lineHeight: 1.6,
+            color: "#4a6180",
+            lineHeight: 1.7,
             overflowX: "auto",
-            maxHeight: 200,
+            maxHeight: 175,
             overflowY: "auto",
-            background: "#020617",
-            borderTop: "1px solid rgba(255,255,255,0.05)",
+            background: "#020814",
+            borderTop: "1px solid rgba(255,255,255,0.04)",
           }}
         >
           {outputText}
@@ -989,6 +1047,7 @@ export function RecipeExplorer() {
 
   const recipe = RECIPES[activeIdx];
   const selectedState = selectedStateId ? (liveDefinition.states[selectedStateId] as StateDefWithProvider) : null;
+  const usedCategories = getUsedCategories(liveDefinition, recipe.id);
 
   function switchRecipe(idx: number) {
     setActiveIdx(idx);
@@ -1088,17 +1147,24 @@ export function RecipeExplorer() {
           flexShrink: 0,
         }}
       >
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: "0.07em",
-            textTransform: "uppercase",
-            color: "#475569",
-          }}
-        >
-          RecipeDefinition · JSON
-        </span>
+        <div>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.07em",
+              textTransform: "uppercase",
+              color: "#3d4f6a",
+            }}
+          >
+            RecipeDefinition
+          </span>
+          {viewMode === "source" && (
+            <span style={{ fontSize: 10, color: "#2d3f58", marginLeft: 8 }}>
+              Edit the JSON below — the graph updates live
+            </span>
+          )}
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {parseError ? (
             <span style={{ fontSize: 10, color: "#f87171" }}>⚠ invalid</span>
@@ -1187,11 +1253,10 @@ export function RecipeExplorer() {
       }}
     >
       <ConfigurePanel
-        recipe={recipe}
         definition={liveDefinition}
+        usedCategories={usedCategories}
         providerConfig={providerConfig}
-        onProviderChange={(stateId, providerId) => setProviderConfig((prev) => ({ ...prev, [stateId]: providerId }))}
-        focusedStateId={selectedStateId}
+        onProviderChange={(category, providerId) => setProviderConfig((prev) => ({ ...prev, [category]: providerId }))}
       />
     </div>
   );
@@ -1201,8 +1266,8 @@ export function RecipeExplorer() {
   const MODES: [ViewMode, string][] = [
     ["visual", "Visual"],
     ["configure", "Configure"],
-    ["split", "Split"],
-    ["source", "Source"],
+    ["split", "Split  ↔  JSON"],
+    ["source", "JSON"],
   ];
 
   const toolbar = (
