@@ -3,6 +3,7 @@ import { runRecipe, triageRecipe, implementRecipe } from "@sweny-ai/engine";
 import type { TriageConfig, ImplementConfig, WorkflowResult } from "@sweny-ai/engine";
 import { parseInputs, validateInputs, ActionConfig } from "./config.js";
 import { createProviders } from "./providers/index.js";
+import type { MCPServerConfig } from "@sweny-ai/providers";
 
 const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
 
@@ -69,7 +70,13 @@ export function mapToImplementConfig(config: ActionConfig): ImplementConfig {
     statePeerReview: config.linearStatePeerReview,
     issueTrackerName: config.issueTrackerProvider,
     agentEnv,
-    mcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
+    mcpServers: buildAutoMcpServers(
+      config.sourceControlProvider,
+      config.issueTrackerProvider,
+      config.githubToken || config.botToken,
+      config.linearApiKey,
+      config.mcpServers,
+    ),
   };
 }
 
@@ -151,8 +158,49 @@ export function mapToTriageConfig(config: ActionConfig): TriageConfig {
     issueTrackerName: config.issueTrackerProvider,
 
     agentEnv,
-    mcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
+    mcpServers: buildAutoMcpServers(
+      config.sourceControlProvider,
+      config.issueTrackerProvider,
+      config.githubToken || config.botToken,
+      config.linearApiKey,
+      config.mcpServers,
+    ),
   };
+}
+
+/**
+ * Auto-inject well-known MCP servers for providers the user already configured.
+ * User-supplied mcpServers win on key conflict (explicit > auto).
+ */
+function buildAutoMcpServers(
+  sourceControlProvider: string,
+  issueTrackerProvider: string,
+  githubToken: string,
+  linearApiKey: string,
+  userMcpServers: Record<string, MCPServerConfig>,
+): Record<string, MCPServerConfig> | undefined {
+  const auto: Record<string, MCPServerConfig> = {};
+
+  if (sourceControlProvider === "github" && githubToken) {
+    auto["github"] = {
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-github@latest"],
+      env: { GITHUB_TOKEN: githubToken },
+    };
+  }
+
+  if (issueTrackerProvider === "linear" && linearApiKey) {
+    auto["linear"] = {
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@linear/mcp"],
+      env: { LINEAR_API_KEY: linearApiKey },
+    };
+  }
+
+  const merged = { ...auto, ...userMcpServers };
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 function setGitHubOutputs(result: WorkflowResult): void {
