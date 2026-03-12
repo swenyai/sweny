@@ -1,5 +1,19 @@
 # @sweny-ai/cli
 
+## 1.1.0
+
+### Minor Changes
+
+- ad1a352: Auto-inject MCP servers for configured providers — no user-facing MCP configuration required.
+
+  When you configure `source-control-provider: github`, `issue-tracker-provider: linear`, or `observability-provider: datadog`, SWEny now automatically injects the corresponding MCP server into the coding agent's tool set. Linear and Datadog use HTTP transport (no local installation). GitHub uses the official `@modelcontextprotocol/server-github` package. User-supplied `mcp-servers` override auto-injected entries.
+
+  Also extends GitHub MCP injection to `issue-tracker-provider: github-issues`.
+
+### Patch Changes
+
+- 4bc0500: CLI banner now reads version dynamically from package.json instead of a hardcoded string.
+
 ## 1.0.0
 
 ### Major Changes
