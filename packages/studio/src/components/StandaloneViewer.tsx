@@ -44,7 +44,7 @@ function AutoFitView({ nodeCount }: { nodeCount: number }) {
       // second lets ReactFlow measure them before fitting.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          fitView({ padding: 0.12, duration: 450, minZoom: 0.65 });
+          fitView({ padding: 0.1, duration: 450, minZoom: 0.4 });
         });
       });
     }

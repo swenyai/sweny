@@ -576,6 +576,42 @@ function NodeDetail({
       ) : (
         <p style={{ margin: 0, fontSize: "0.8rem", color: "#475569", fontStyle: "italic" }}>No description.</p>
       )}
+      {state.provider && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span
+            style={{
+              fontSize: "0.65rem",
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "#475569",
+            }}
+          >
+            Provider
+          </span>
+          <span
+            style={{
+              fontSize: "0.7rem",
+              fontWeight: 600,
+              padding: "2px 8px",
+              borderRadius: 5,
+              background: "rgba(255,255,255,0.05)",
+              color: "#94a3b8",
+              border: "1px solid rgba(255,255,255,0.1)",
+            }}
+          >
+            {(
+              {
+                observability: "◉ Observability",
+                issueTracking: "◈ Issue Tracking",
+                sourceControl: "⎇ Source Control",
+                codingAgent: "⬡ Coding Agent",
+                notification: "◎ Notification",
+              } as Record<string, string>
+            )[state.provider] ?? state.provider}
+          </span>
+        </div>
+      )}
       {transitions.length > 0 && (
         <div>
           <div
@@ -687,9 +723,34 @@ function RecipeOverview({ recipe, definition }: { recipe: (typeof RECIPES)[numbe
           })}
         </div>
       </div>
-      <div style={{ fontSize: "0.72rem", color: "#94a3b8", lineHeight: 1.5 }}>
-        <span style={{ color: "#f1f5f9", fontWeight: 600 }}>{stats.total} states</span> total. Click any node to inspect
-        its phase, routing, and transitions.
+      <div
+        style={{
+          fontSize: "0.72rem",
+          color: "#64748b",
+          lineHeight: 1.6,
+          padding: "10px 12px",
+          borderRadius: 7,
+          background: "rgba(99,102,241,0.07)",
+          border: "1px solid rgba(99,102,241,0.15)",
+          marginTop: 4,
+        }}
+      >
+        <div
+          style={{
+            fontWeight: 700,
+            color: "#a5b4fc",
+            marginBottom: 3,
+            fontSize: "0.7rem",
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+          }}
+        >
+          How to use
+        </div>
+        <span style={{ color: "#94a3b8" }}>{stats.total} states</span> · scroll to zoom · drag to pan
+        <br />
+        <span style={{ color: "#6366f1", fontWeight: 600 }}>Click any node</span> to inspect its phase, provider,
+        routing, and transitions.
       </div>
     </div>
   );
