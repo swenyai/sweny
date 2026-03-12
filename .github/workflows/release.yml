@@ -14,13 +14,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
       id-token: write
 
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          # Use a PAT so the version-bump commit triggers CI on re-push.
+          # Falls back to GITHUB_TOKEN (version-bump won't re-trigger CI, but publish still works).
+          token: ${{ secrets.GH_PAT || github.token }}
 
       - uses: actions/setup-node@v6
         with:
@@ -39,14 +41,30 @@ jobs:
       - name: Test
         run: npm run test
 
-      - name: Create Release PR or Publish
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          publish: npm run release
-          title: "chore: release packages"
-          commit: "chore: release packages"
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Consume changesets — bump versions
+        id: version
+        run: |
+          if ls .changeset/*.md 2>/dev/null | grep -qv README; then
+            npx changeset version
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push version bumps
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          git add -A
+          git commit -m "chore: release packages [skip ci]"
+          git push
+
+      - name: Publish to npm
+        run: npx changeset publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
