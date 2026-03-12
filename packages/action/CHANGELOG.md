@@ -1,16 +1,6 @@
-# @sweny-ai/cli
+# @sweny-ai/action
 
-## 1.0.0
-
-### Major Changes
-
-- ebbb5a7: Remove wrong-pattern MCP adapter providers (breaking change).
-
-  `linearMCP`, `githubMCP`, and `slackMCP` have been removed. These adapters called MCP servers from recipe steps — the wrong architectural layer. MCP servers are agent tools accessed during reasoning, not recipe-step backends.
-
-  **Migration:** Configure these MCP servers via `mcpServers` in `CodingAgentRunOptions` (now supported in all three coding agents). The agent gets access to Linear, GitHub, and Slack MCP tools during its reasoning session with zero custom provider code.
-
-  Also removed: `slack-mcp` notification provider option from CLI and GitHub Action (previously required `SLACK_BOT_TOKEN`, `SLACK_TEAM_ID`, `SLACK_CHANNEL`). Use the `slack` webhook notification provider or configure the Slack MCP server for the agent directly.
+## 0.1.1
 
 ### Patch Changes
 
@@ -47,20 +37,3 @@
 - Updated dependencies [4b4b29f]
   - @sweny-ai/providers@1.0.0
   - @sweny-ai/engine@2.0.0
-
-## 0.3.0
-
-### Minor Changes
-
-- 474589e: Add `--review-mode` flag to `sweny implement`.
-  - `--review-mode auto` enables GitHub auto-merge when CI passes (suppressed automatically for high-risk changes: migrations, auth files, lockfiles, or >20 changed files)
-  - `--review-mode review` (default) opens a PR and waits for human approval
-
-### Patch Changes
-
-- Updated dependencies [5053263]
-- Updated dependencies [474589e]
-- Updated dependencies [6a71f2a]
-- Updated dependencies [474589e]
-  - @sweny-ai/providers@0.3.0
-  - @sweny-ai/engine@1.0.0

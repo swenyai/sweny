@@ -1,5 +1,73 @@
 # @sweny-ai/providers
 
+## 1.0.0
+
+### Major Changes
+
+- 2f1a424: Rename triage-specific issue tracking interfaces to generic equivalents:
+  - `TriageHistoryCapable` → `LabelHistoryCapable`
+  - `TriageHistoryEntry` → `IssueHistoryEntry`
+  - `listTriageHistory()` → `searchIssuesByLabel()` (signature: `(projectId, labelId, opts?: { days? })`)
+  - `canListTriageHistory()` → `canSearchIssuesByLabel()`
+  - Remove `FingerprintCapable` interface and `canSearchByFingerprint()` (dead code — never called from engine)
+  - Make `Issue.branchName` optional (Linear returns real names; Jira/GitHub Issues synthesize them)
+- ebbb5a7: Remove wrong-pattern MCP adapter providers (breaking change).
+
+  `linearMCP`, `githubMCP`, and `slackMCP` have been removed. These adapters called MCP servers from recipe steps — the wrong architectural layer. MCP servers are agent tools accessed during reasoning, not recipe-step backends.
+
+  **Migration:** Configure these MCP servers via `mcpServers` in `CodingAgentRunOptions` (now supported in all three coding agents). The agent gets access to Linear, GitHub, and Slack MCP tools during its reasoning session with zero custom provider code.
+
+  Also removed: `slack-mcp` notification provider option from CLI and GitHub Action (previously required `SLACK_BOT_TOKEN`, `SLACK_TEAM_ID`, `SLACK_CHANNEL`). Use the `slack` webhook notification provider or configure the Slack MCP server for the agent directly.
+
+### Minor Changes
+
+- 9313ff9: Add `mcpServers` injection to coding agent providers.
+
+  `CodingAgentRunOptions` now accepts `mcpServers?: Record<string, MCPServerConfig>`. When provided, all three coding agents (Claude Code, OpenAI Codex, Gemini) serialize the config to a temp JSON file and pass `--mcp-config <path>` to the agent CLI. The agent receives all configured MCP tools during its reasoning session. Temp file is cleaned up after the agent exits.
+
+  `MCPServerConfig` extended to support both transports:
+  - `type: "stdio"` — local pre-installed binary (`command`, `args`, `env`)
+  - `type: "http"` — remote Streamable HTTP server (`url`, `headers`)
+
+  Type defaults to `"http"` when `url` is set, `"stdio"` when `command` is set.
+
+- 556a53d: Add browser-safe `PROVIDER_CATALOG` — a structured list of all available provider implementations with display names, categories, env var specs (key, description, required, secret, example), and import paths. Exported as `PROVIDER_CATALOG`, `getProvidersForCategory()`, and `getProviderById()` from the main package entry.
+- f33c74d: Add `GitProvider` (local git operations) and `RepoProvider` (remote API operations) interfaces.
+  `SourceControlProvider` is now a type alias for `GitProvider & RepoProvider` — fully backward compatible.
+  Enables partial implementations for contexts without a local checkout (cloud workers, MCP servers).
+- 1df08e0: Task 03/04/05: wire slackMCP, add file providers to Action, shared factories.
+
+  **providers (minor — new exports):**
+  - `createObservabilityProvider(name, credentials, logger)` — shared factory for all 8 observability providers
+  - `createCodingAgentProvider(name, logger, opts)` — shared factory for all 3 coding agents
+
+  **cli (patch):**
+  - `notification-provider: slack-mcp` now supported via `slackMCP()`
+  - CLI and Action provider switches for observability and coding agent replaced with shared factory calls
+
+  **action (patch):**
+  - `issue-tracker-provider: file`, `source-control-provider: file`, `notification-provider: file` now supported
+  - `slack-mcp` notification provider added
+  - New `output-dir` input (default `.github/sweny-output`) for file-based providers
+  - `slack-bot-token`, `slack-team-id`, `slack-channel` inputs added to `action.yml`
+
+### Patch Changes
+
+- 68780d5: Fix `ERR_MODULE_NOT_FOUND` crash on import when optional peer deps are not installed. S3 storage classes (`S3SessionStore`, `S3MemoryStore`, `S3WorkspaceStore`) and `MCPClient` now lazy-load their peer dependencies (`@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`, `@modelcontextprotocol/sdk`) on first use rather than at module load time. Also fixes a retry bug in `MCPClient` where a failed `connect()` would leave a stale client reference that blocked subsequent reconnect attempts.
+- 207a317: Add index signature to `ToolResult` to satisfy updated `@anthropic-ai/claude-agent-sdk` tool callback type constraints.
+- 010b6d7: Code review fixes for MCP adapters and triage dedup step.
+
+  **providers:**
+  - `MCPClient`: clear `connectPromise` on error to prevent stuck reconnections; use local variable before `callTool` to guard against concurrent disconnect
+  - `linearMCP`: throw on empty `id`/`identifier` in `toIssue()`; expose `limit` option in `searchIssuesByLabel()` (default 100)
+  - `githubMCP`: validate `repo` config as `owner/repo` format; guard against PR `number=0`; validate `targetRepo` in `dispatchWorkflow`
+  - `slackMCP`: clarify `channel` config must be a Slack channel ID (e.g. `C123456`), not a name
+  - `LabelHistoryCapable`: add `limit?: number` to `searchIssuesByLabel` opts
+
+  **engine:**
+  - `dedup-check` step: rename outcome from `"notify"` → `"duplicate"` so routing key is distinct from target node name
+  - `triage definition`: update `on: { duplicate: "notify" }` to match
+
 ## 0.3.1
 
 ### Patch Changes
