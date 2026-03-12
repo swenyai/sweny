@@ -1,0 +1,61 @@
+# .github/service-map.yml — SWEny service ownership map
+#
+# Copy this file to .github/service-map.yml in your repo (remove the .example suffix).
+# SWEny uses this map to:
+#   - Scope code investigation to the right source paths for each service
+#   - Route Linear issues to the correct team
+#   - Identify the on-call contact to mention in issue descriptions
+#
+# The `name` field is a human-readable label.
+# The observability field (e.g. `datadog_service`, `sentry_project`) must match
+# exactly what your monitoring platform uses as the service identifier.
+
+version: 1
+
+services:
+  - name: api-gateway
+    description: "Public REST API — authentication, rate limiting, request routing"
+    datadog_service: api-gateway # matches the `service` tag in Datadog logs/traces
+    paths:
+      - services/api-gateway/src/**
+      - packages/shared/src/auth/**
+      - packages/shared/src/middleware/**
+    linear_team_id: "" # Linear team UUID — overrides global linear-team-id
+    oncall: "@platform-team"
+
+  - name: payments
+    description: "Stripe integration, billing, subscription lifecycle"
+    datadog_service: payments-service
+    sentry_project: payments # optional: if using Sentry instead of Datadog
+    paths:
+      - services/payments/src/**
+      - packages/billing/src/**
+    linear_team_id: ""
+    oncall: "@payments-team"
+
+  - name: worker
+    description: "Background job processor — email delivery, PDF generation, webhooks"
+    datadog_service: worker
+    paths:
+      - services/worker/src/**
+      - packages/queue/src/**
+      - packages/jobs/src/**
+    linear_team_id: ""
+    oncall: "@platform-team"
+
+  - name: frontend
+    description: "Next.js customer-facing web app"
+    datadog_service: frontend
+    paths:
+      - apps/web/src/**
+      - packages/ui/src/**
+    linear_team_id: ""
+    oncall: "@frontend-team"
+
+  - name: data-pipeline
+    description: "ETL pipeline — ingests events and writes to the analytics warehouse"
+    datadog_service: data-pipeline
+    paths:
+      - services/data-pipeline/src/**
+    linear_team_id: ""
+    oncall: "@data-team"
