@@ -184,7 +184,7 @@ export function RecipeViewer({
         colorMode="dark"
         defaultEdgeOptions={{
           type: "transitionEdge",
-          markerEnd: { type: "arrowclosed" as const, color: "#475569", width: 14, height: 14 },
+          markerEnd: { type: "arrowclosed" as const, color: "#4d7aaa", width: 20, height: 20 },
         }}
       >
         <AutoFitView nodeCount={nodes.length} />

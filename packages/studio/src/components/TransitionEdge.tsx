@@ -9,8 +9,8 @@ export type TransitionEdgeType = Edge<TransitionEdgeData, "transitionEdge">;
 
 function getEdgeColor(label: string): string {
   if (label === "failed") return "#ef4444";
-  if (label === "→") return "#3b5070";
-  if (label === "skip" || label === "skipped") return "#4b5563";
+  if (label === "→") return "#4d7aaa";
+  if (label === "skip" || label === "skipped") return "#64748b";
   if (label === "implement") return "#8b5cf6";
   if (label === "local") return "#06b6d4";
   if (label === "dispatched") return "#22d3ee";
@@ -68,8 +68,8 @@ export function TransitionEdge({
         markerEnd={markerEnd}
         style={{
           stroke: strokeColor,
-          strokeWidth: isDefault ? 1.5 : 2,
-          opacity: isDefault ? 0.5 : 0.9,
+          strokeWidth: 3,
+          opacity: isDefault ? 0.75 : 1,
           ...(label === "failed" || isError ? { strokeDasharray: "6 3" } : {}),
         }}
       />

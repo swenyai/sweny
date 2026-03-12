@@ -847,7 +847,6 @@ function ConfigurePanel({
                 borderRadius: 9,
                 border: `1px solid ${isConfigured ? (meta?.color ?? "#6366f1") + "44" : "rgba(255,255,255,0.07)"}`,
                 background: isConfigured ? (meta?.color ?? "#6366f1") + "0a" : "rgba(255,255,255,0.02)",
-                overflow: "hidden",
                 transition: "border-color 0.2s, background 0.2s",
               }}
             >
