@@ -69,18 +69,8 @@ jobs:
           observability-provider: file
           log-file-path: /tmp/ci-failures.json
 
-          # MCP: GitHub server so the agent can query run logs, PRs, and issues directly
-          mcp-servers: >-
-            {
-              "github": {
-                "type": "stdio",
-                "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-github@latest"],
-                "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ secrets.GH_PAT || github.token }}" }
-              }
-            }
-
           # Issue tracking: GitHub Issues on this repo
+          # Note: GitHub MCP server is auto-injected because issue-tracker-provider is github-issues
           issue-tracker-provider: github-issues
           # GH_PAT preferred — PRs authored by a real user trigger CI.
           # Falls back to github.token (PRs won't trigger CI, but workflow won't crash).
