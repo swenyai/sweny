@@ -75,6 +75,27 @@ mcp-servers:
 
 When the `investigate` or `implement-fix` step runs the agent, it serializes this config to a temp JSON file and passes `--mcp-config <path>` to the agent CLI. The agent now has every tool from every configured MCP server available during its reasoning.
 
+### Auto-Injection (The Better Pattern for Users)
+
+Users should **never** need to configure MCP servers manually for the providers they've already wired up. `buildAutoMcpServers()` in `packages/cli/src/main.ts` and `packages/action/src/main.ts` reads the user's provider config and auto-injects the corresponding MCP servers before passing to the agent.
+
+**Current auto-injections:**
+
+| Provider | Trigger | MCP Server | Transport |
+|---|---|---|---|
+| GitHub source control | `source-control-provider: github` | `@modelcontextprotocol/server-github` | stdio (npx) |
+| GitHub Issues tracker | `issue-tracker-provider: github-issues` | `@modelcontextprotocol/server-github` | stdio (npx) |
+| Linear | `issue-tracker-provider: linear` | `https://mcp.linear.app/mcp` | HTTP |
+| Datadog | `observability-provider: datadog` | `https://mcp.datadoghq.com/api/unstable/mcp-server/mcp` | HTTP |
+
+**Rules:**
+- HTTP transport is preferred for remote services — no local install, vendor-managed, scales
+- GitHub uses stdio because no stable remote HTTP endpoint exists yet; the agent spawns the MCP server
+- User-supplied `mcp-servers` config **always wins** on key conflict (explicit overrides auto)
+- New provider added to CLI/Action? Add a corresponding auto-injection in `buildAutoMcpServers()`
+
+**Note on `npx` for agent MCP configs:** The `npx -y` prohibition in the ADL below applies to `MCPClient` (when SWEny itself calls MCP tools from recipe steps). For the coding agent's own MCP config, the agent process handles spawning — `npx` is acceptable as a fallback when no HTTP endpoint exists, but prefer HTTP.
+
 ### Why This Architecture
 
 1. **Zero maintenance burden** — Datadog ships a new MCP tool? Users get it automatically. We write zero code.

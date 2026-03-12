@@ -70,13 +70,7 @@ export function mapToImplementConfig(config: ActionConfig): ImplementConfig {
     statePeerReview: config.linearStatePeerReview,
     issueTrackerName: config.issueTrackerProvider,
     agentEnv,
-    mcpServers: buildAutoMcpServers(
-      config.sourceControlProvider,
-      config.issueTrackerProvider,
-      config.githubToken || config.botToken,
-      config.linearApiKey,
-      config.mcpServers,
-    ),
+    mcpServers: buildAutoMcpServers(config),
   };
 }
 
@@ -158,30 +152,22 @@ export function mapToTriageConfig(config: ActionConfig): TriageConfig {
     issueTrackerName: config.issueTrackerProvider,
 
     agentEnv,
-    mcpServers: buildAutoMcpServers(
-      config.sourceControlProvider,
-      config.issueTrackerProvider,
-      config.githubToken || config.botToken,
-      config.linearApiKey,
-      config.mcpServers,
-    ),
+    mcpServers: buildAutoMcpServers(config),
   };
 }
 
 /**
  * Auto-inject well-known MCP servers for providers the user already configured.
+ * Uses HTTP transport for remote services (no local installation required).
+ * GitHub falls back to stdio since it has no stable remote HTTP endpoint yet.
  * User-supplied mcpServers win on key conflict (explicit > auto).
  */
-function buildAutoMcpServers(
-  sourceControlProvider: string,
-  issueTrackerProvider: string,
-  githubToken: string,
-  linearApiKey: string,
-  userMcpServers: Record<string, MCPServerConfig>,
-): Record<string, MCPServerConfig> | undefined {
+function buildAutoMcpServers(config: ActionConfig): Record<string, MCPServerConfig> | undefined {
   const auto: Record<string, MCPServerConfig> = {};
+  const githubToken = config.githubToken || config.botToken;
 
-  if (sourceControlProvider === "github" && githubToken) {
+  // GitHub MCP — inject when using GitHub source control OR GitHub Issues tracker
+  if ((config.sourceControlProvider === "github" || config.issueTrackerProvider === "github-issues") && githubToken) {
     auto["github"] = {
       type: "stdio",
       command: "npx",
@@ -190,16 +176,27 @@ function buildAutoMcpServers(
     };
   }
 
-  if (issueTrackerProvider === "linear" && linearApiKey) {
+  // Linear MCP — HTTP transport (no local installation required)
+  if (config.issueTrackerProvider === "linear" && config.linearApiKey) {
     auto["linear"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@linear/mcp"],
-      env: { LINEAR_API_KEY: linearApiKey },
+      type: "http",
+      url: "https://mcp.linear.app/mcp",
+      headers: { Authorization: `Bearer ${config.linearApiKey}` },
     };
   }
 
-  const merged = { ...auto, ...userMcpServers };
+  // Datadog MCP — HTTP transport (no local installation required)
+  const ddKey = config.observabilityCredentials.apiKey;
+  const ddAppKey = config.observabilityCredentials.appKey;
+  if (config.observabilityProvider === "datadog" && ddKey && ddAppKey) {
+    auto["datadog"] = {
+      type: "http",
+      url: "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
+      headers: { DD_API_KEY: ddKey, DD_APPLICATION_KEY: ddAppKey },
+    };
+  }
+
+  const merged = { ...auto, ...config.mcpServers };
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
