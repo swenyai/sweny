@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createRequire } from "node:module";
 import { Command } from "commander";
+
+const _require = createRequire(import.meta.url);
+const { version } = _require("../package.json") as { version: string };
 import chalk from "chalk";
 import { runRecipe, triageRecipe, implementRecipe, createProviderRegistry } from "@sweny-ai/engine";
 import type { StepCache, TriageConfig, WorkflowPhase, ImplementConfig } from "@sweny-ai/engine";
@@ -30,7 +34,7 @@ loadDotenv();
 const program = new Command()
   .name("sweny")
   .description("SWEny CLI \u2014 autonomous engineering workflows")
-  .version("0.2.0");
+  .version(version);
 
 // ── sweny init ────────────────────────────────────────────────────────
 program
@@ -86,7 +90,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 
   // Banner
   if (!config.json) {
-    console.log(formatBanner(config, program.version() ?? "0.2.0"));
+    console.log(formatBanner(config, version));
   }
 
   // ── Spinner state ──────────────────────────────────────────
