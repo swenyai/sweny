@@ -44,7 +44,7 @@ function AutoFitView({ nodeCount }: { nodeCount: number }) {
       // second lets ReactFlow measure them before fitting.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          fitView({ padding: 0.15, duration: 400 });
+          fitView({ padding: 0.12, duration: 450, minZoom: 0.65 });
         });
       });
     }
@@ -131,7 +131,7 @@ export function RecipeViewer({
         width: "100%",
         height,
         position: "relative",
-        background: "#0f172a",
+        background: "#060d1a",
         borderRadius: 8,
         overflow: "hidden",
       }}
@@ -161,7 +161,16 @@ export function RecipeViewer({
           />
         </div>
       )}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes node-pulse {
+          0%, 100% { box-shadow: 0 0 0 2.5px #3b82f6, 0 0 20px rgba(59,130,246,0.4); }
+          50%       { box-shadow: 0 0 0 2.5px #3b82f6, 0 0 30px rgba(59,130,246,0.65); }
+        }
+        .react-flow__node[data-exec-status="current"] > div {
+          animation: node-pulse 2s ease-in-out infinite;
+        }
+      `}</style>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -173,19 +182,26 @@ export function RecipeViewer({
         onNodeClick={onNodeClick ? handleNodeClick : undefined}
         fitView={false}
         colorMode="dark"
+        defaultEdgeOptions={{
+          type: "transitionEdge",
+          markerEnd: { type: "arrowclosed" as const, color: "#475569", width: 14, height: 14 },
+        }}
       >
         <AutoFitView nodeCount={nodes.length} />
-        <Background color="#1e293b" gap={20} />
-        <Controls showInteractive={false} style={{ background: "#1e293b", border: "1px solid #334155" }} />
+        <Background color="#1e2840" gap={22} size={1.5} />
+        <Controls
+          showInteractive={false}
+          style={{ background: "#0d1827", border: "1px solid #1e3050", borderRadius: 8 }}
+        />
         <MiniMap
-          style={{ background: "#0f172a", border: "1px solid #334155" }}
-          maskColor="rgba(15,23,42,0.75)"
+          style={{ background: "#080f1e", border: "1px solid #1e293b", borderRadius: 8 }}
+          maskColor="rgba(8,14,30,0.8)"
           nodeColor={(node) => {
             const d = node.data as StateNodeData;
             if (d?.state?.phase === "learn") return "#3b82f6";
             if (d?.state?.phase === "act") return "#f59e0b";
             if (d?.state?.phase === "report") return "#10b981";
-            return "#475569";
+            return "#334155";
           }}
         />
       </ReactFlow>

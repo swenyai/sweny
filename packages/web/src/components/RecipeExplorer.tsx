@@ -965,7 +965,7 @@ function CopyIcon() {
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 
-const TOOLBAR_H = 48;
+const TOOLBAR_H = 52;
 const FOOTER_H = 30;
 const PANEL_W_DETAIL = 240;
 const PANEL_W_OVERVIEW = 200;
@@ -1155,7 +1155,8 @@ export function RecipeExplorer() {
       style={{
         width: selectedState ? PANEL_W_DETAIL : PANEL_W_OVERVIEW,
         flexShrink: 0,
-        borderLeft: "1px solid rgba(255,255,255,0.08)",
+        borderLeft: "1px solid rgba(255,255,255,0.07)",
+        background: "rgba(4,8,18,0.5)",
         overflowY: "auto",
         transition: "width 0.2s ease",
       }}
@@ -1178,7 +1179,8 @@ export function RecipeExplorer() {
       style={{
         width: CONFIG_PANEL_W,
         flexShrink: 0,
-        borderLeft: "1px solid rgba(255,255,255,0.08)",
+        borderLeft: "1px solid rgba(255,255,255,0.07)",
+        background: "rgba(4,8,18,0.5)",
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
@@ -1209,79 +1211,151 @@ export function RecipeExplorer() {
         height: TOOLBAR_H,
         display: "flex",
         alignItems: "center",
-        gap: 6,
-        padding: "0 14px",
-        borderBottom: "1px solid rgba(255,255,255,0.08)",
-        background: "rgba(255,255,255,0.02)",
+        gap: 8,
+        padding: "0 12px 0 14px",
+        borderBottom: "1px solid rgba(255,255,255,0.07)",
+        background: "linear-gradient(180deg, rgba(12,20,40,0.98) 0%, rgba(8,13,22,0.98) 100%)",
         flexShrink: 0,
+        userSelect: "none",
       }}
     >
-      {RECIPES.map((r, i) => (
-        <button
-          key={r.id}
-          onClick={() => switchRecipe(i)}
+      {/* Brand mark */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          marginRight: 4,
+          flexShrink: 0,
+        }}
+      >
+        <span
           style={{
-            padding: "4px 14px",
-            borderRadius: 6,
-            border: "1px solid",
-            cursor: "pointer",
-            fontSize: "0.78rem",
-            fontWeight: 600,
-            background: activeIdx === i ? "#6366f1" : "transparent",
-            color: activeIdx === i ? "#fff" : "#64748b",
-            borderColor: activeIdx === i ? "#6366f1" : "rgba(255,255,255,0.1)",
+            fontSize: 15,
+            color: "#6366f1",
+            lineHeight: 1,
           }}
         >
-          {r.label}
-        </button>
-      ))}
-      <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.1)", margin: "0 4px", flexShrink: 0 }} />
-      <div style={{ display: "flex", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, overflow: "hidden" }}>
+          ⬡
+        </span>
+        <span
+          style={{
+            fontSize: "0.72rem",
+            fontWeight: 700,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            color: "#4f5f80",
+          }}
+        >
+          sweny
+        </span>
+      </div>
+
+      {/* Separator */}
+      <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.08)", flexShrink: 0 }} />
+
+      {/* Recipe selector */}
+      <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+        {RECIPES.map((r, i) => (
+          <button
+            key={r.id}
+            onClick={() => switchRecipe(i)}
+            style={{
+              padding: "4px 14px",
+              borderRadius: 6,
+              border: "1px solid",
+              cursor: "pointer",
+              fontSize: "0.77rem",
+              fontWeight: 600,
+              letterSpacing: "0.01em",
+              background: activeIdx === i ? "rgba(99,102,241,0.22)" : "transparent",
+              color: activeIdx === i ? "#c7d2fe" : "#4f5f80",
+              borderColor: activeIdx === i ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.07)",
+              transition: "all 0.12s ease",
+            }}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Separator */}
+      <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.08)", flexShrink: 0 }} />
+
+      {/* View mode tabs */}
+      <div
+        style={{
+          display: "flex",
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 7,
+          overflow: "hidden",
+          flexShrink: 0,
+        }}
+      >
         {MODES.map(([mode, label], i) => (
           <button
             key={mode}
             onClick={() => setViewMode(mode)}
             style={{
-              padding: "3px 11px",
+              padding: "3px 13px",
               border: "none",
-              borderLeft: i > 0 ? "1px solid rgba(255,255,255,0.1)" : "none",
+              borderLeft: i > 0 ? "1px solid rgba(255,255,255,0.07)" : "none",
               cursor: "pointer",
-              fontSize: "0.72rem",
-              fontWeight: 500,
-              background: viewMode === mode ? "rgba(99,102,241,0.2)" : "transparent",
-              color: viewMode === mode ? "#a5b4fc" : "#475569",
+              fontSize: "0.71rem",
+              fontWeight: 600,
+              letterSpacing: "0.02em",
+              background: viewMode === mode ? "rgba(99,102,241,0.25)" : "transparent",
+              color: viewMode === mode ? "#a5b4fc" : "#3d4f6a",
+              transition: "all 0.12s ease",
             }}
           >
             {label}
           </button>
         ))}
       </div>
-      <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
+
+      {/* Phase legend — pushed right */}
+      <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", flexShrink: 0 }}>
         {(["learn", "act", "report"] as const).map((phase) => {
           const { label, color } = PHASE_META[phase];
           return (
             <div key={phase} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 7, height: 7, borderRadius: 2, background: color, opacity: 0.85, flexShrink: 0 }} />
-              <span style={{ fontSize: "0.68rem", color: "#475569" }}>{label}</span>
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 2,
+                  background: color,
+                  opacity: 0.75,
+                  flexShrink: 0,
+                }}
+              />
+              <span style={{ fontSize: "0.67rem", fontWeight: 500, color: "#3d4f6a", letterSpacing: "0.02em" }}>
+                {label}
+              </span>
             </div>
           );
         })}
       </div>
+
+      {/* Fullscreen toggle */}
       <button
         onClick={toggleFullscreen}
-        title={isFullscreen ? "Exit fullscreen (Esc)" : "Enter fullscreen"}
+        title={isFullscreen ? "Exit fullscreen (Esc)" : "Fullscreen"}
         aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
         style={{
-          marginLeft: 8,
+          marginLeft: 6,
           padding: "5px 7px",
-          borderRadius: 5,
-          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 6,
+          border: "1px solid rgba(255,255,255,0.08)",
           cursor: "pointer",
           background: "transparent",
-          color: "#475569",
+          color: "#3d4f6a",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          flexShrink: 0,
         }}
       >
         {isFullscreen ? <CompressIcon /> : <ExpandIcon />}
@@ -1293,26 +1367,28 @@ export function RecipeExplorer() {
 
   const footerHint =
     viewMode === "visual"
-      ? "Scroll to zoom · drag to pan · click a node to inspect"
+      ? "Scroll to zoom  ·  drag to pan  ·  click a node to inspect"
       : viewMode === "configure"
-        ? "Click a node to jump to its config · select a provider to see env vars"
+        ? "Click a node to jump to its config  ·  select a provider to reveal env vars"
         : viewMode === "split"
-          ? "Edit JSON to live-update the graph"
-          : "Paste or type a RecipeDefinition JSON object";
+          ? "Edit JSON on the right to live-update the graph"
+          : "Paste or type a RecipeDefinition JSON to visualize it";
 
   const footer = (
     <div
       style={{
         height: FOOTER_H,
         padding: "0 14px",
-        borderTop: "1px solid rgba(255,255,255,0.06)",
-        fontSize: "0.67rem",
-        color: "#334155",
+        borderTop: "1px solid rgba(255,255,255,0.05)",
+        background: "rgba(4,8,18,0.6)",
+        fontSize: "0.65rem",
+        color: "#2d3f58",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
         flexShrink: 0,
         gap: 8,
+        letterSpacing: "0.01em",
       }}
     >
       <span>{footerHint}</span>
@@ -1320,9 +1396,9 @@ export function RecipeExplorer() {
         <span
           style={{
             color: "#f87171",
-            fontSize: "0.67rem",
+            fontSize: "0.65rem",
             fontFamily: "monospace",
-            maxWidth: 420,
+            maxWidth: 400,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -1332,14 +1408,7 @@ export function RecipeExplorer() {
           ⚠ {parseError}
         </span>
       )}
-      <a
-        href="https://github.com/swenyai/sweny"
-        target="_blank"
-        rel="noopener noreferrer"
-        style={{ color: "inherit", textDecoration: "none", flexShrink: 0 }}
-      >
-        @sweny-ai/engine
-      </a>
+      <span style={{ flexShrink: 0, opacity: 0.6 }}>@sweny-ai/engine</span>
     </div>
   );
 
@@ -1356,14 +1425,14 @@ export function RecipeExplorer() {
               zIndex: 9999,
               display: "flex",
               flexDirection: "column",
-              background: "#080d16",
+              background: "#060c18",
               borderRadius: 0,
             }
           : {
               display: "flex",
               flexDirection: "column",
               height: EMBEDDED_HEIGHT,
-              background: "#080d16",
+              background: "#060c18",
               borderRadius: 0,
               overflow: "hidden",
             }
