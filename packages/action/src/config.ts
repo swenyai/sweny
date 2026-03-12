@@ -69,10 +69,6 @@ export interface ActionConfig {
   emailFrom: string;
   emailTo: string;
   webhookSigningSecret: string;
-  slackBotToken: string;
-  slackTeamId: string;
-  slackChannel: string;
-
   // Output (file providers)
   outputDir: string;
 
@@ -140,9 +136,6 @@ export function parseInputs(): ActionConfig {
     emailFrom: core.getInput("email-from"),
     emailTo: core.getInput("email-to"),
     webhookSigningSecret: core.getInput("webhook-signing-secret"),
-    slackBotToken: core.getInput("slack-bot-token"),
-    slackTeamId: core.getInput("slack-team-id"),
-    slackChannel: core.getInput("slack-channel"),
 
     outputDir: core.getInput("output-dir") || ".github/sweny-output",
 
@@ -275,16 +268,6 @@ export function validateInputs(config: ActionConfig): string[] {
         errors.push("Missing required input: `email-from` is required when `notification-provider` is `email`");
       if (!config.emailTo)
         errors.push("Missing required input: `email-to` is required when `notification-provider` is `email`");
-      break;
-    case "slack-mcp":
-      if (!config.slackBotToken)
-        errors.push(
-          "Missing required input: `slack-bot-token` is required when `notification-provider` is `slack-mcp`",
-        );
-      if (!config.slackTeamId)
-        errors.push("Missing required input: `slack-team-id` is required when `notification-provider` is `slack-mcp`");
-      if (!config.slackChannel)
-        errors.push("Missing required input: `slack-channel` is required when `notification-provider` is `slack-mcp`");
       break;
   }
 

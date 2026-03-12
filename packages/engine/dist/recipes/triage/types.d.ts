@@ -1,3 +1,4 @@
+import type { DedupStore } from "../../lib/dedup-store.js";
 /** Configuration for the triage recipe. Provider-agnostic — no Linear/GitHub specifics. */
 export interface TriageConfig {
     timeRange: string;
@@ -36,6 +37,15 @@ export interface TriageConfig {
     issuePriority?: number;
     issueTrackerName?: string;
     agentEnv: Record<string, string>;
+    /**
+     * Optional dedup store for deterministic idempotency.
+     *
+     * When provided, triage short-circuits before any LLM invocation if the
+     * incoming event fingerprint was already processed within the TTL window.
+     * Use `inMemoryDedupStore()` for single-process deployments, or provide a
+     * Redis-backed implementation for multi-process cloud workers.
+     */
+    dedupStore?: DedupStore;
 }
 /** Result of the investigation (learn) phase. */
 export interface InvestigationResult {

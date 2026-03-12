@@ -15,4 +15,3 @@ export { linear, linearConfigSchema, type LinearConfig } from "./linear.js";
 export { githubIssues, githubIssuesConfigSchema, type GitHubIssuesConfig } from "./github-issues.js";
 export { jira, jiraConfigSchema, type JiraConfig } from "./jira.js";
 export { fileIssueTracking, fileIssueTrackingConfigSchema, type FileIssueTrackingConfig } from "./file.js";
-export { linearMCP, linearMCPConfigSchema, type LinearMCPConfig } from "./linear-mcp.js";

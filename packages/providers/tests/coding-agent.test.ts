@@ -1,12 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { claudeCode } from "../src/coding-agent/claude-code.js";
 import type { CodingAgent } from "../src/coding-agent/types.js";
-import { execCommand, isCliInstalled } from "../src/coding-agent/shared.js";
+import { execCommand, isCliInstalled, writeMcpConfig } from "../src/coding-agent/shared.js";
 
-// Mock the shared module that contains execCommand and isCliInstalled
+// vi.hoisted ensures this runs before vi.mock factories (which are hoisted to top of file)
+const mockMcpCleanup = vi.hoisted(() => vi.fn());
+
+// Mock the shared module that contains execCommand, isCliInstalled, and writeMcpConfig
 vi.mock("../src/coding-agent/shared.js", () => ({
   execCommand: vi.fn().mockResolvedValue(0),
+  spawnLines: vi.fn().mockResolvedValue(0),
   isCliInstalled: vi.fn().mockReturnValue(false),
+  writeMcpConfig: vi.fn().mockReturnValue({ path: "/tmp/sweny-mcp-test.json", cleanup: mockMcpCleanup }),
 }));
 
 describe("claudeCode coding agent", () => {
@@ -16,6 +21,7 @@ describe("claudeCode coding agent", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockMcpCleanup.mockReset();
     // Get the mocked functions from the module
     mockExecCommand = vi.mocked(execCommand);
     mockIsCliInstalled = vi.mocked(isCliInstalled);
@@ -92,6 +98,61 @@ describe("claudeCode coding agent", () => {
 
       const exitCode = await agent.run({ prompt: "Fail", maxTurns: 1 });
       expect(exitCode).toBe(1);
+    });
+
+    it("passes --mcp-config when mcpServers provided", async () => {
+      await agent.run({
+        prompt: "Test",
+        maxTurns: 5,
+        mcpServers: {
+          datadog: { type: "http", url: "https://mcp.datadoghq.com/mcp", headers: { DD_API_KEY: "key" } },
+        },
+      });
+
+      expect(vi.mocked(writeMcpConfig)).toHaveBeenCalledOnce();
+      const args = mockExecCommand.mock.calls[0][1] as string[];
+      expect(args).toContain("--mcp-config");
+      expect(args[args.indexOf("--mcp-config") + 1]).toBe("/tmp/sweny-mcp-test.json");
+    });
+
+    it("calls cleanup after run completes", async () => {
+      await agent.run({
+        prompt: "Test",
+        maxTurns: 5,
+        mcpServers: { linear: { type: "http", url: "https://mcp.linear.app/mcp" } },
+      });
+
+      expect(mockMcpCleanup).toHaveBeenCalledOnce();
+    });
+
+    it("calls cleanup even when exec throws", async () => {
+      mockExecCommand.mockRejectedValueOnce(new Error("agent crashed"));
+
+      await expect(
+        agent.run({
+          prompt: "Test",
+          maxTurns: 5,
+          mcpServers: { linear: { type: "http", url: "https://mcp.linear.app/mcp" } },
+        }),
+      ).rejects.toThrow("agent crashed");
+
+      expect(mockMcpCleanup).toHaveBeenCalledOnce();
+    });
+
+    it("skips --mcp-config when mcpServers is empty", async () => {
+      await agent.run({ prompt: "Test", maxTurns: 5, mcpServers: {} });
+
+      expect(vi.mocked(writeMcpConfig)).not.toHaveBeenCalled();
+      const args = mockExecCommand.mock.calls[0][1] as string[];
+      expect(args).not.toContain("--mcp-config");
+    });
+
+    it("skips --mcp-config when mcpServers is omitted", async () => {
+      await agent.run({ prompt: "Test", maxTurns: 5 });
+
+      expect(vi.mocked(writeMcpConfig)).not.toHaveBeenCalled();
+      const args = mockExecCommand.mock.calls[0][1] as string[];
+      expect(args).not.toContain("--mcp-config");
     });
   });
 });

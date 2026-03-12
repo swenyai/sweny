@@ -1,4 +1,4 @@
-import { canListTriageHistory } from "@sweny-ai/providers/issue-tracking";
+import { canSearchIssuesByLabel } from "@sweny-ai/providers/issue-tracking";
 /** Build known-issues context from issue tracker + source control to prevent duplicates. */
 export async function buildContext(ctx) {
     const issueTracker = ctx.providers.get("issueTracker");
@@ -13,8 +13,8 @@ export async function buildContext(ctx) {
     // 1. Fetch recent triage issues (last 30 days)
     lines.push("## Tracked Issues");
     try {
-        if (canListTriageHistory(issueTracker)) {
-            const triageHistory = await issueTracker.listTriageHistory(config.projectId, config.triageLabelId, 30);
+        if (canSearchIssuesByLabel(issueTracker)) {
+            const triageHistory = await issueTracker.searchIssuesByLabel(config.projectId, config.triageLabelId, { days: 30 });
             if (triageHistory.length > 0) {
                 for (const entry of triageHistory) {
                     lines.push(`- **${entry.identifier}** [${entry.state}] ${entry.title} — ${entry.url}`);
@@ -25,7 +25,7 @@ export async function buildContext(ctx) {
             }
         }
         else {
-            lines.push("_Issue tracker does not support triage history_");
+            lines.push("_Issue tracker does not support label history search_");
         }
     }
     catch (err) {

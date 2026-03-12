@@ -168,6 +168,14 @@ export interface StateDefinition {
      * Reserved target value: "end" — stops the recipe successfully.
      */
     on?: Record<string, string>;
+    /**
+     * The provider category this state primarily relies on (e.g. "observability",
+     * "issueTracking", "sourceControl", "codingAgent", "notification").
+     *
+     * Pure metadata — no runtime effect. Used by Studio to surface configuration
+     * options and required env vars for each step.
+     */
+    provider?: string;
 }
 /**
  * Implementation functions keyed by state id.

@@ -162,8 +162,10 @@ export function writeMcpConfig(servers: Record<string, MCPServerConfig>): {
   for (const [name, cfg] of Object.entries(servers)) {
     const resolvedType = cfg.type ?? (cfg.url ? "http" : "stdio");
     if (resolvedType === "http") {
+      if (!cfg.url) throw new Error(`MCP server "${name}": HTTP transport requires a url.`);
       mcpServers[name] = { type: "http", url: cfg.url, headers: cfg.headers ?? {} };
     } else {
+      if (!cfg.command) throw new Error(`MCP server "${name}": stdio transport requires a command.`);
       mcpServers[name] = { type: "stdio", command: cfg.command, args: cfg.args ?? [], env: cfg.env ?? {} };
     }
   }

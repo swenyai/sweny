@@ -38,14 +38,12 @@ export function googleGemini(config?: GoogleGeminiConfig): CodingAgent {
       // Gemini CLI uses --mcp-config <path> with the same JSON format as Claude Code.
       const args = ["-y", "-p", opts.prompt, ...extraFlags];
 
-      const mcpConfig =
-        opts.mcpServers && Object.keys(opts.mcpServers).length > 0 ? writeMcpConfig(opts.mcpServers) : null;
+      const mcpServers = opts.mcpServers;
+      const mcpConfig = mcpServers && Object.keys(mcpServers).length > 0 ? writeMcpConfig(mcpServers) : null;
 
-      if (mcpConfig) {
+      if (mcpConfig && mcpServers) {
         args.push("--mcp-config", mcpConfig.path);
-        log.info(
-          `Injecting ${Object.keys(opts.mcpServers!).length} MCP server(s): ${Object.keys(opts.mcpServers!).join(", ")}`,
-        );
+        log.info(`Injecting ${Object.keys(mcpServers).length} MCP server(s): ${Object.keys(mcpServers).join(", ")}`);
       }
 
       try {

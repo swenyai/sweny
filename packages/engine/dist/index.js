@@ -6,4 +6,6 @@ export { CollectingObserver, CallbackObserver, composeObservers } from "./observ
 export { triageRecipe, triageDefinition } from "./recipes/triage/index.js";
 export { implementRecipe, implementDefinition } from "./recipes/implement/index.js";
 export { getStepData } from "./recipes/triage/index.js";
+export { inMemoryDedupStore } from "./lib/dedup-store.js";
+export { fingerprintEvent } from "./lib/fingerprint.js";
 //# sourceMappingURL=index.js.map

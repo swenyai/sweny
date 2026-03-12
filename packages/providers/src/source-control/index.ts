@@ -15,4 +15,3 @@ export { gitlab, gitlabConfigSchema } from "./gitlab.js";
 export type { GitLabSourceControlConfig } from "./gitlab.js";
 
 export { fileSourceControl, fileSourceControlConfigSchema, type FileSourceControlConfig } from "./file.js";
-export { githubMCP, githubMCPConfigSchema, type GitHubMCPConfig } from "./github-mcp.js";

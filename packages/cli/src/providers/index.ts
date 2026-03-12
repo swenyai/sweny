@@ -2,7 +2,7 @@ import { createProviderRegistry } from "@sweny-ai/engine";
 import type { ProviderRegistry } from "@sweny-ai/engine";
 import type { CliConfig } from "../config.js";
 import { createObservabilityProvider, createCodingAgentProvider } from "@sweny-ai/providers";
-import { linear, jira, githubIssues, fileIssueTracking, linearMCP } from "@sweny-ai/providers/issue-tracking";
+import { linear, jira, githubIssues, fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
 import { github, gitlab, fileSourceControl } from "@sweny-ai/providers/source-control";
 import {
   slackWebhook,
@@ -11,7 +11,6 @@ import {
   email,
   webhook,
   fileNotification,
-  slackMCP,
 } from "@sweny-ai/providers/notification";
 
 export interface CliLogger {
@@ -68,9 +67,6 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
   switch (config.issueTrackerProvider) {
     case "linear":
       registry.set("issueTracker", linear({ apiKey: config.linearApiKey, logger }));
-      break;
-    case "linear-mcp":
-      registry.set("issueTracker", linearMCP({ apiKey: config.linearApiKey, logger }));
       break;
     case "jira":
       registry.set(
@@ -139,17 +135,6 @@ export function createProviders(config: CliConfig, logger: CliLogger): ProviderR
         }),
       );
       break;
-    case "slack-mcp":
-      registry.set(
-        "notification",
-        slackMCP({
-          botToken: config.slackBotToken,
-          teamId: config.slackTeamId,
-          channel: config.slackChannel,
-          logger,
-        }),
-      );
-      break;
     case "file":
       registry.set(
         "notification",
@@ -189,9 +174,6 @@ export function createImplementProviders(config: CliConfig, logger: CliLogger): 
   switch (config.issueTrackerProvider) {
     case "linear":
       registry.set("issueTracker", linear({ apiKey: config.linearApiKey, logger }));
-      break;
-    case "linear-mcp":
-      registry.set("issueTracker", linearMCP({ apiKey: config.linearApiKey, logger }));
       break;
     case "jira":
       registry.set(

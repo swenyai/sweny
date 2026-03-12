@@ -14,4 +14,3 @@ export { discordWebhook, discordWebhookConfigSchema, type DiscordWebhookConfig }
 export { email, emailConfigSchema, type EmailConfig } from "./email.js";
 export { webhook, webhookConfigSchema, type WebhookConfig } from "./webhook.js";
 export { fileNotification, fileNotificationConfigSchema, type FileNotificationConfig } from "./file.js";
-export { slackMCP, slackMCPConfigSchema, type SlackMCPConfig } from "./slack-mcp.js";

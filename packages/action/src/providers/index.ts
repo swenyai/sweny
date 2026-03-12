@@ -3,7 +3,7 @@ import { createProviderRegistry } from "@sweny-ai/engine";
 import type { ProviderRegistry } from "@sweny-ai/engine";
 import { ActionConfig } from "../config.js";
 import { createObservabilityProvider, createCodingAgentProvider } from "@sweny-ai/providers";
-import { linear, jira, githubIssues, linearMCP, fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
+import { linear, jira, githubIssues, fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
 import { github, gitlab, fileSourceControl } from "@sweny-ai/providers/source-control";
 import {
   githubSummary,
@@ -13,7 +13,6 @@ import {
   email,
   webhook,
   fileNotification,
-  slackMCP,
 } from "@sweny-ai/providers/notification";
 
 const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
@@ -61,9 +60,6 @@ export function createProviders(config: ActionConfig): ProviderRegistry {
   switch (config.issueTrackerProvider) {
     case "linear":
       registry.set("issueTracker", linear({ apiKey: config.linearApiKey, logger: actionsLogger }));
-      break;
-    case "linear-mcp":
-      registry.set("issueTracker", linearMCP({ apiKey: config.linearApiKey, logger: actionsLogger }));
       break;
     case "jira":
       registry.set(
@@ -125,17 +121,6 @@ export function createProviders(config: ActionConfig): ProviderRegistry {
         webhook({
           url: config.notificationWebhookUrl,
           signingSecret: config.webhookSigningSecret || undefined,
-          logger: actionsLogger,
-        }),
-      );
-      break;
-    case "slack-mcp":
-      registry.set(
-        "notification",
-        slackMCP({
-          botToken: config.slackBotToken,
-          teamId: config.slackTeamId,
-          channel: config.slackChannel,
           logger: actionsLogger,
         }),
       );

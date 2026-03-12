@@ -205,15 +205,6 @@ inputs:
   webhook-signing-secret:
     description: "HMAC-SHA256 signing secret for generic webhook notifications"
     required: false
-  slack-bot-token:
-    description: "Slack OAuth bot token (xoxb-...) — required when notification-provider is slack-mcp"
-    required: false
-  slack-team-id:
-    description: "Slack workspace/team ID — required when notification-provider is slack-mcp"
-    required: false
-  slack-channel:
-    description: "Slack channel to post to (e.g. #sweny-alerts) — required when notification-provider is slack-mcp"
-    required: false
   output-dir:
     description: "Directory for file-based provider output (dry-run / file providers)"
     required: false
