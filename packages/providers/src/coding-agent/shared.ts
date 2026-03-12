@@ -1,4 +1,9 @@
 import { spawn, execSync } from "node:child_process";
+import { writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import type { MCPServerConfig } from "../mcp/index.js";
 import type { Logger } from "../logger.js";
 
 export interface ExecOptions {
@@ -138,6 +143,43 @@ export function spawnLines(cmd: string, args: string[], opts: SpawnLinesOptions)
       }
     });
   });
+}
+
+/**
+ * Writes MCP server configs to a temp JSON file in Claude Code's --mcp-config format.
+ * Returns the file path and a cleanup function to delete it after the agent exits.
+ *
+ * File format: `{ "mcpServers": { "<name>": { "type": "...", ... } } }`
+ */
+export function writeMcpConfig(servers: Record<string, MCPServerConfig>): {
+  path: string;
+  cleanup: () => void;
+} {
+  const id = randomBytes(8).toString("hex");
+  const filePath = join(tmpdir(), `sweny-mcp-config-${id}.json`);
+
+  const mcpServers: Record<string, unknown> = {};
+  for (const [name, cfg] of Object.entries(servers)) {
+    const resolvedType = cfg.type ?? (cfg.url ? "http" : "stdio");
+    if (resolvedType === "http") {
+      mcpServers[name] = { type: "http", url: cfg.url, headers: cfg.headers ?? {} };
+    } else {
+      mcpServers[name] = { type: "stdio", command: cfg.command, args: cfg.args ?? [], env: cfg.env ?? {} };
+    }
+  }
+
+  writeFileSync(filePath, JSON.stringify({ mcpServers }, null, 2), "utf8");
+
+  return {
+    path: filePath,
+    cleanup: () => {
+      try {
+        unlinkSync(filePath);
+      } catch {
+        // Best-effort cleanup — ignore if already deleted
+      }
+    },
+  };
 }
 
 export function isCliInstalled(cmd: string): boolean {

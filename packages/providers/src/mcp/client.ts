@@ -14,15 +14,32 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { ProviderError } from "../errors.js";
 
 export interface MCPServerConfig {
-  /** Command to spawn the MCP server process. Usually "npx" or "node". */
-  command: string;
-  /** Args passed to the command. e.g. ["-y", "@linear/mcp"] */
-  args: string[];
+  /**
+   * Transport type. Defaults to "stdio" if `command` is set, "http" if `url` is set.
+   * Use "http" for remote/cloud-hosted MCP servers (Streamable HTTP transport).
+   * Use "stdio" for local pre-installed binaries. Never use "npx -y" at runtime.
+   */
+  type?: "stdio" | "http";
+
+  // ── stdio fields ──
+  /** Command to spawn the MCP server process. e.g. "/usr/local/bin/github-mcp" */
+  command?: string;
+  /** Args passed to the command. */
+  args?: string[];
   /**
    * Additional env vars merged into the server process environment.
    * Use this for API keys the server reads from env (most MCP servers do this).
    */
   env?: Record<string, string>;
+
+  // ── http fields ──
+  /** URL of the remote MCP server (Streamable HTTP transport). */
+  url?: string;
+  /**
+   * HTTP headers sent with every request.
+   * Use for API key auth: e.g. `{ Authorization: "Bearer <token>" }`.
+   */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -57,9 +74,23 @@ export class MCPClient {
   }
 
   private async _connect(): Promise<void> {
+    const resolvedType = this.config.type ?? (this.config.url ? "http" : "stdio");
+
+    if (resolvedType === "http") {
+      throw new ProviderError(
+        `MCPClient "${this.name}": HTTP transport is not supported in MCPClient — ` +
+          "configure HTTP servers in mcpServers and let the coding agent connect to them.",
+        this.name,
+      );
+    }
+
+    if (!this.config.command) {
+      throw new ProviderError(`MCPClient "${this.name}": stdio transport requires a command.`, this.name);
+    }
+
     const transport = new StdioClientTransport({
       command: this.config.command,
-      args: this.config.args,
+      args: this.config.args ?? [],
       // MCP servers read credentials from env — merge caller-supplied keys
       // with the current process env so PATH etc. is still available.
       env: { ...process.env, ...this.config.env } as Record<string, string>,

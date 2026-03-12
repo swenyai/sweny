@@ -1,7 +1,7 @@
 import type { CodingAgent, CodingAgentRunOptions, AgentEvent, AgentEventHandler } from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
-import { execCommand, spawnLines, isCliInstalled } from "./shared.js";
+import { execCommand, spawnLines, isCliInstalled, writeMcpConfig } from "./shared.js";
 
 export interface ClaudeCodeConfig {
   cliFlags?: string[];
@@ -123,34 +123,48 @@ export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
         ...extraFlags,
       ];
 
-      if (onEvent) {
-        // --output-format stream-json requires --verbose; omitting it causes
-        // the CLI to exit with "stream-json requires --verbose" error.
-        args.push("--output-format", "stream-json", "--verbose");
-        const parse = makeClaudeEventParser();
-        return spawnLines("claude", args, {
-          env: opts.env,
-          timeoutMs: opts.timeoutMs,
-          logger: log,
-          onLine(line) {
-            try {
-              const evt = JSON.parse(line);
-              const mapped = parse(evt);
-              if (mapped) return onEvent(mapped);
-            } catch {
-              /* skip malformed JSON lines */
-            }
-          },
-        });
+      const mcpConfig =
+        opts.mcpServers && Object.keys(opts.mcpServers).length > 0 ? writeMcpConfig(opts.mcpServers) : null;
+
+      if (mcpConfig) {
+        args.push("--mcp-config", mcpConfig.path);
+        log.info(
+          `Injecting ${Object.keys(opts.mcpServers!).length} MCP server(s): ${Object.keys(opts.mcpServers!).join(", ")}`,
+        );
       }
 
-      return execCommand("claude", args, {
-        env: { ...process.env, ...opts.env } as Record<string, string>,
-        ignoreReturnCode: true,
-        quiet,
-        timeoutMs: opts.timeoutMs,
-        onStderr: quiet ? (line) => log.debug(line) : undefined,
-      });
+      try {
+        if (onEvent) {
+          // --output-format stream-json requires --verbose; omitting it causes
+          // the CLI to exit with "stream-json requires --verbose" error.
+          args.push("--output-format", "stream-json", "--verbose");
+          const parse = makeClaudeEventParser();
+          return await spawnLines("claude", args, {
+            env: opts.env,
+            timeoutMs: opts.timeoutMs,
+            logger: log,
+            onLine(line) {
+              try {
+                const evt = JSON.parse(line);
+                const mapped = parse(evt);
+                if (mapped) return onEvent(mapped);
+              } catch {
+                /* skip malformed JSON lines */
+              }
+            },
+          });
+        }
+
+        return await execCommand("claude", args, {
+          env: { ...process.env, ...opts.env } as Record<string, string>,
+          ignoreReturnCode: true,
+          quiet,
+          timeoutMs: opts.timeoutMs,
+          onStderr: quiet ? (line) => log.debug(line) : undefined,
+        });
+      } finally {
+        mcpConfig?.cleanup();
+      }
     },
   };
 }

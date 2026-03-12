@@ -1,7 +1,7 @@
 import type { CodingAgent, CodingAgentRunOptions, AgentEventHandler } from "./types.js";
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
-import { execCommand, spawnLines, isCliInstalled } from "./shared.js";
+import { execCommand, spawnLines, isCliInstalled, writeMcpConfig } from "./shared.js";
 
 export interface GoogleGeminiConfig {
   cliFlags?: string[];
@@ -35,24 +35,39 @@ export function googleGemini(config?: GoogleGeminiConfig): CodingAgent {
     async run(opts: CodingAgentRunOptions): Promise<number> {
       log.info("Running Google Gemini agent...");
 
+      // Gemini CLI uses --mcp-config <path> with the same JSON format as Claude Code.
       const args = ["-y", "-p", opts.prompt, ...extraFlags];
 
-      if (onEvent) {
-        return spawnLines("gemini", args, {
-          env: opts.env,
-          timeoutMs: opts.timeoutMs,
-          logger: log,
-          onLine: (line) => onEvent({ type: "text", text: line }),
-        });
+      const mcpConfig =
+        opts.mcpServers && Object.keys(opts.mcpServers).length > 0 ? writeMcpConfig(opts.mcpServers) : null;
+
+      if (mcpConfig) {
+        args.push("--mcp-config", mcpConfig.path);
+        log.info(
+          `Injecting ${Object.keys(opts.mcpServers!).length} MCP server(s): ${Object.keys(opts.mcpServers!).join(", ")}`,
+        );
       }
 
-      return execCommand("gemini", args, {
-        env: { ...process.env, ...opts.env } as Record<string, string>,
-        ignoreReturnCode: true,
-        quiet,
-        timeoutMs: opts.timeoutMs,
-        onStderr: quiet ? (line) => log.debug(line) : undefined,
-      });
+      try {
+        if (onEvent) {
+          return await spawnLines("gemini", args, {
+            env: opts.env,
+            timeoutMs: opts.timeoutMs,
+            logger: log,
+            onLine: (line) => onEvent({ type: "text", text: line }),
+          });
+        }
+
+        return await execCommand("gemini", args, {
+          env: { ...process.env, ...opts.env } as Record<string, string>,
+          ignoreReturnCode: true,
+          quiet,
+          timeoutMs: opts.timeoutMs,
+          onStderr: quiet ? (line) => log.debug(line) : undefined,
+        });
+      } finally {
+        mcpConfig?.cleanup();
+      }
     },
   };
 }

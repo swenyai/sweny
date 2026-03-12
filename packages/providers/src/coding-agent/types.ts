@@ -1,9 +1,25 @@
+import type { MCPServerConfig } from "../mcp/index.js";
+
 export interface CodingAgentRunOptions {
   prompt: string;
   maxTurns: number;
   env?: Record<string, string>;
   /** Kill the agent process after this many milliseconds. No limit if omitted. */
   timeoutMs?: number;
+  /**
+   * MCP servers to inject into the agent during this run.
+   * Written to a temp config file and passed as --mcp-config (or equivalent)
+   * to the agent CLI. Supports stdio and Streamable HTTP transports.
+   *
+   * Example:
+   * ```ts
+   * mcpServers: {
+   *   datadog: { type: "http", url: "https://mcp.datadoghq.com/...", headers: { DD_API_KEY: "..." } },
+   *   github:  { type: "stdio", command: "/usr/local/bin/github-mcp", env: { GITHUB_TOKEN: "..." } },
+   * }
+   * ```
+   */
+  mcpServers?: Record<string, MCPServerConfig>;
 }
 
 export interface CodingAgent {
