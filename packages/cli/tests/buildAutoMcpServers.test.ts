@@ -213,11 +213,39 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
     expect((result.mcpServers?.["github"] as Record<string, unknown>)["env"]).toBeUndefined();
   });
 
+  it("injects Datadog MCP server when observability provider is datadog with both keys", () => {
+    const config: CliConfig = {
+      ...BASE,
+      observabilityProvider: "datadog",
+      observabilityCredentials: { apiKey: "dd_api", appKey: "dd_app" },
+      githubToken: "",
+    };
+    const result = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(result.mcpServers?.["datadog"]).toMatchObject({
+      type: "http",
+      url: "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
+      headers: { DD_API_KEY: "dd_api", DD_APPLICATION_KEY: "dd_app" },
+    });
+  });
+
+  it("does not inject Datadog MCP server when either key is absent", () => {
+    const config: CliConfig = {
+      ...BASE,
+      observabilityProvider: "datadog",
+      observabilityCredentials: { apiKey: "dd_api" }, // no appKey
+      githubToken: "",
+    };
+    const result = mapToTriageConfig(config) as { mcpServers: unknown };
+    expect((result.mcpServers as Record<string, unknown> | undefined)?.["datadog"]).toBeUndefined();
+  });
+
   it("returns undefined when no providers trigger injection and no user mcpServers", () => {
     const config: CliConfig = {
       ...BASE,
       sourceControlProvider: "file",
       issueTrackerProvider: "linear",
+      observabilityProvider: "datadog",
+      observabilityCredentials: {},
       linearApiKey: "",
       githubToken: "",
       botToken: "",

@@ -186,6 +186,17 @@ function buildAutoMcpServers(config: ActionConfig): Record<string, MCPServerConf
     };
   }
 
+  // Datadog MCP — HTTP transport (/unstable is the current versioned path for this endpoint)
+  const ddKey = config.observabilityCredentials.apiKey;
+  const ddAppKey = config.observabilityCredentials.appKey;
+  if (config.observabilityProvider === "datadog" && ddKey && ddAppKey) {
+    auto["datadog"] = {
+      type: "http",
+      url: "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
+      headers: { DD_API_KEY: ddKey, DD_APPLICATION_KEY: ddAppKey },
+    };
+  }
+
   const merged = { ...auto, ...config.mcpServers };
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
