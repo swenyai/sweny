@@ -314,6 +314,10 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.linearTeamId)
         errors.push("Missing: LINEAR_TEAM_ID or --linear-team-id is required for linear issue tracker");
       break;
+    case "github-issues":
+      if (!config.githubToken && !config.botToken)
+        errors.push("Missing: GITHUB_TOKEN is required for github-issues issue tracker");
+      break;
     case "jira":
       if (!config.jiraBaseUrl) errors.push("Missing: JIRA_BASE_URL is required for jira issue tracker");
       if (!config.jiraEmail) errors.push("Missing: JIRA_EMAIL is required for jira issue tracker");

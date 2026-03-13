@@ -187,7 +187,7 @@ inputs:
 
   # Notification provider
   notification-provider:
-    description: "Notification provider (github-summary, slack, teams, discord, email, webhook, slack-mcp)"
+    description: "Notification provider (github-summary, slack, teams, discord, email, webhook, file)"
     required: false
     default: "github-summary"
   notification-webhook-url:

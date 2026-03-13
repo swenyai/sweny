@@ -158,22 +158,44 @@ export function mapToTriageConfig(config: ActionConfig): TriageConfig {
 
 /**
  * Auto-inject well-known MCP servers for providers the user already configured.
- * Uses HTTP transport for remote services (no local installation required).
- * GitHub falls back to stdio since it has no stable remote HTTP endpoint yet.
- * User-supplied mcpServers win on key conflict (explicit > auto).
+ *
+ * Design rules:
+ * - HTTP transport preferred for cloud-hosted services (no local install, vendor-managed).
+ * - stdio (npx) used when no stable HTTP endpoint exists; the agent handles process spawning.
+ * - Category A: injected from structured provider config (sourceControlProvider, etc.)
+ * - Category B: injected when specific env vars are present — zero new action inputs required.
+ *   Users set these as workflow env vars: `env: { SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }} }`
+ * - User-supplied mcpServers always win on key conflict (explicit > auto).
  */
 function buildAutoMcpServers(config: ActionConfig): Record<string, MCPServerConfig> | undefined {
   const auto: Record<string, MCPServerConfig> = {};
-  const githubToken = config.githubToken || config.botToken;
+  const obsCreds = config.observabilityCredentials;
+
+  // ── Category A: Provider-config triggered ─────────────────────────────────
 
   // GitHub MCP — inject when using GitHub source control OR GitHub Issues tracker.
   // @modelcontextprotocol/server-github requires GITHUB_PERSONAL_ACCESS_TOKEN (not GITHUB_TOKEN).
+  const githubToken = config.githubToken || config.botToken;
   if ((config.sourceControlProvider === "github" || config.issueTrackerProvider === "github-issues") && githubToken) {
     auto["github"] = {
       type: "stdio",
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-github@latest"],
       env: { GITHUB_PERSONAL_ACCESS_TOKEN: githubToken },
+    };
+  }
+
+  // GitLab MCP — inject when source control provider is gitlab.
+  if (config.sourceControlProvider === "gitlab" && config.gitlabToken) {
+    const gitlabEnv: Record<string, string> = { GITLAB_PERSONAL_ACCESS_TOKEN: config.gitlabToken };
+    // For self-hosted GitLab, point to the instance API
+    const baseUrl = config.gitlabBaseUrl || "https://gitlab.com";
+    if (baseUrl !== "https://gitlab.com") gitlabEnv.GITLAB_API_URL = `${baseUrl}/api/v4`;
+    auto["gitlab"] = {
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-gitlab@latest"],
+      env: gitlabEnv,
     };
   }
 
@@ -187,13 +209,61 @@ function buildAutoMcpServers(config: ActionConfig): Record<string, MCPServerConf
   }
 
   // Datadog MCP — HTTP transport (/unstable is the current versioned path for this endpoint)
-  const ddKey = config.observabilityCredentials.apiKey;
-  const ddAppKey = config.observabilityCredentials.appKey;
+  const ddKey = obsCreds.apiKey;
+  const ddAppKey = obsCreds.appKey;
   if (config.observabilityProvider === "datadog" && ddKey && ddAppKey) {
     auto["datadog"] = {
       type: "http",
       url: "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
       headers: { DD_API_KEY: ddKey, DD_APPLICATION_KEY: ddAppKey },
+    };
+  }
+
+  // Sentry MCP — inject when observability provider is sentry with auth token present.
+  if (config.observabilityProvider === "sentry" && obsCreds.authToken) {
+    const sentryEnv: Record<string, string> = { SENTRY_AUTH_TOKEN: obsCreds.authToken };
+    // For self-hosted Sentry, override the host (hostname only, no protocol)
+    if (obsCreds.baseUrl && obsCreds.baseUrl !== "https://sentry.io") {
+      try {
+        sentryEnv.SENTRY_HOST = new URL(obsCreds.baseUrl).hostname;
+      } catch {
+        // malformed URL — leave SENTRY_HOST unset, server defaults to sentry.io
+      }
+    }
+    auto["sentry"] = {
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@sentry/mcp-server@latest"],
+      env: sentryEnv,
+    };
+  }
+
+  // ── Category B: Environment-variable triggered (zero new action inputs required) ─
+
+  // Slack MCP — inject when SLACK_BOT_TOKEN is present in the environment.
+  // Bot token provides full bidirectional API access for agent queries/posts.
+  // This is separate from the one-way NOTIFICATION_WEBHOOK_URL used for triage summaries.
+  const slackBotToken = process.env.SLACK_BOT_TOKEN;
+  if (slackBotToken) {
+    const slackEnv: Record<string, string> = { SLACK_BOT_TOKEN: slackBotToken };
+    if (process.env.SLACK_TEAM_ID) slackEnv.SLACK_TEAM_ID = process.env.SLACK_TEAM_ID;
+    auto["slack"] = {
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-slack@latest"],
+      env: slackEnv,
+    };
+  }
+
+  // Notion MCP — inject when NOTION_API_KEY is present in the environment.
+  // Gives the agent read access to Notion pages/databases (runbooks, on-call docs, etc.)
+  const notionApiKey = process.env.NOTION_API_KEY;
+  if (notionApiKey) {
+    auto["notion"] = {
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@notionhq/notion-mcp-server@latest"],
+      env: { NOTION_API_KEY: notionApiKey },
     };
   }
 

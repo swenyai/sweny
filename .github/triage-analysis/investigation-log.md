@@ -1,63 +1,87 @@
-# Investigation Log — 2026-03-09
+# Investigation Log — 2026-03-12
 
 ## Approach
-Following Additional Instructions: autonomous improvement agent for the SWEny codebase.
-Primary input: CI failure logs at `/tmp/ci-logs.json`.
 
-## Step 1: Analyze CI Logs
+Default mode (no Issue Tracker issue, no additional instructions). Read local log file at
+`packages/cli/fixtures/sample-errors.json` and investigate top errors by frequency and severity.
 
-Parsed CI logs and extracted unique error patterns:
+## Step 1 — Read log file
 
-### Error 1: TypeScript type error (critical, blocking CI + Release)
+```bash
+cat "packages/cli/fixtures/sample-errors.json"
 ```
-src/main.ts(103,35): error TS2339: Property 'nodes' does not exist on type 'Recipe<TriageConfig>'
+
+**Result**: JSON array with 8 entries (7 error/warning level) covering 3 services:
+`api-gateway`, `payment-service`, `worker`.
+
+## Step 2 — Read service map
+
+```bash
+cat ".github/service-map.yml"
 ```
-- Affects: packages/cli
-- Observed on: main, all dependabot branches
-- CI jobs failed: typecheck, Release/Build packages
 
-### Error 2: Format check failure
+**Result**: File not found. Service-to-repo ownership mapping is unavailable.
+TARGET_REPO defaults to current repo (`swenyai/sweny`).
+
+## Step 3 — Check known issues
+
+Known issue LOCAL-1: _CLI Typecheck and Format Failures After DAG Spec v2 Migration_ (open).
+None of the production errors in the sample log match LOCAL-1 — these are distinct runtime errors
+from different services.
+
+## Step 4 — Error triage by frequency and severity
+
+| Rank | Service | Error | Count | Status |
+|------|---------|-------|-------|--------|
+| 1 | `api-gateway` | `TypeError: Cannot read properties of undefined (reading 'userId')` at `auth.ts:42` | 3 | 500 |
+| 2 | `worker` | `ECONNREFUSED 127.0.0.1:5432` — PostgreSQL connection refused | 2 | — |
+| 3 | `payment-service` | Stripe webhook signature verification failed | 1 | 400 |
+
+One additional warning (payment retry 3/5) not classified as an error.
+
+## Step 5 — Root cause analysis: api-gateway auth TypeError
+
+Stack trace (present in 2 of 3 occurrences):
 ```
-Code style issues found in 7 files. Run Prettier with --write to fix.
+TypeError: Cannot read properties of undefined (reading 'userId')
+    at AuthMiddleware.verify (/src/middleware/auth.ts:42:28)
+    at processRequest (/src/server.ts:118:5)
 ```
-Files:
-- `packages/engine/src/runner-recipe.ts`
-- `packages/engine/src/types.ts`
-- `packages/providers/src/observability/pagerduty.ts`
-- `packages/providers/src/observability/prometheus.ts`
-- `packages/providers/tests/observability/pagerduty.test.ts`
-- `packages/providers/tests/observability/prometheus.test.ts`
-- `packages/studio/index.html`
 
-## Step 2: Root Cause Analysis
+Affected endpoints:
+- `GET /api/v1/users/profile` (req_abc123)
+- `GET /api/v1/users/settings` (req_def456)
+- `POST /api/v1/orders` (req_ghi789)
 
-### Issue 1: `triageRecipe.nodes` does not exist
+All three are authenticated routes. The middleware accesses `.userId` on a value that is
+`undefined` — the decoded JWT/session object. The guard is missing before the property
+access on line 42 of `auth.ts`.
 
-Examined `packages/engine/src/types.ts`:
-- `Recipe<TConfig>` interface has two fields: `definition: RecipeDefinition` and `implementations: StateImplementations<TConfig>`
-- `RecipeDefinition` has `states: Record<string, StateDefinition>` — NOT a `nodes` array
-
-Examined `packages/cli/src/main.ts:103`:
+Canonical fix pattern:
 ```typescript
-const totalSteps = triageRecipe.nodes.length;
+// Before (line 42 — crashes when decodedToken/session is undefined):
+const userId = decodedToken.userId;
+
+// After:
+if (!decodedToken) throw new UnauthorizedError('Missing or invalid token');
+const userId = decodedToken.userId;
 ```
 
-Root cause: The DAG spec v2 migration (commit `b0958d3 feat(engine): DAG spec v2 — states{} map, createRecipe factory, explicit routing`) changed the `Recipe` shape from a `nodes[]` array to `definition.states` record, but line 103 in `main.ts` was not updated.
+## Step 6 — Root cause analysis: worker PostgreSQL ECONNREFUSED
 
-Fix: `Object.keys(triageRecipe.definition.states).length`
+Two jobs (`job_abc` / `send_notification`, `job_def` / `process_payment`) failed immediately
+(retry_count: 0) with `ECONNREFUSED 127.0.0.1:5432`. This points to a PostgreSQL instance
+that is either down or not reachable at localhost. Likely infrastructure issue rather than
+a code bug — though the worker should be retrying rather than failing immediately.
 
-### Issue 2: Prettier formatting not applied to newly added files
+## Step 7 — Root cause analysis: payment-service Stripe webhook failure
 
-The 7 flagged files were added/modified recently (pagerduty/prometheus providers, studio HTML, engine types/runner) but were not run through prettier before commit.
-
-Fix: Run `npx prettier --write` on the affected files.
-
-## Step 3: Verify Fix Scope
-
-- The `nodes` reference is only on line 103 of `main.ts` — verified via code read
-- `triageRecipe.definition.states` has 9 states (verify-access, build-context, investigate, novelty-gate, create-issue, cross-repo-check, implement-fix, create-pr, notify)
-- The fix preserves the spinner counter logic correctly
+Single occurrence — Stripe signature mismatch on `/webhooks/stripe`. Most commonly caused
+by a rotated webhook secret that was not updated in the service's environment config.
+Low frequency (1 hit), lower priority.
 
 ## Conclusion
 
-Both issues are on the same repo (swenyai/sweny). TypeScript error is the primary blocking issue; formatting is secondary but also blocks CI. Both can be fixed in a single PR.
+Best candidate for fixing: `api-gateway` auth middleware null guard at `auth.ts:42`.
+Highest frequency (3 of 8 log entries = 37%), direct user-facing 500 errors on core endpoints,
+clear and minimal code fix with high confidence.

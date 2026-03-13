@@ -85,7 +85,7 @@ vi.mock("../src/providers/index.js", () => ({
 // Import after mocks are in place
 // ---------------------------------------------------------------------------
 
-import { mapToTriageConfig } from "../src/main.js";
+import { mapToTriageConfig, mapToImplementConfig } from "../src/main.js";
 
 // ---------------------------------------------------------------------------
 // Base ActionConfig for parameterised tests
@@ -209,6 +209,8 @@ describe("mapToTriageConfig — observability agentEnv", () => {
 });
 
 describe("mapToTriageConfig — buildAutoMcpServers", () => {
+  // ── Category A: provider-config triggered ──────────────────────────────────
+
   it("injects GitHub MCP server when source control is github", () => {
     const config: ActionConfig = { ...BASE, sourceControlProvider: "github", githubToken: "ghp_abc" };
     const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
@@ -296,6 +298,150 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
     expect((mcpServers as Record<string, unknown> | undefined)?.["datadog"]).toBeUndefined();
   });
 
+  it("injects GitLab MCP server when source control is gitlab", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      sourceControlProvider: "gitlab",
+      gitlabToken: "glpat_abc",
+      gitlabBaseUrl: "https://gitlab.com",
+      githubToken: "",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(mcpServers?.["gitlab"]).toMatchObject({
+      type: "stdio",
+      command: "npx",
+      env: { GITLAB_PERSONAL_ACCESS_TOKEN: "glpat_abc" },
+    });
+  });
+
+  it("includes GITLAB_API_URL for self-hosted GitLab", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      sourceControlProvider: "gitlab",
+      gitlabToken: "glpat_abc",
+      gitlabBaseUrl: "https://gitlab.internal.example.com",
+      githubToken: "",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect((mcpServers?.["gitlab"] as Record<string, unknown>)?.["env"]).toMatchObject({
+      GITLAB_API_URL: "https://gitlab.internal.example.com/api/v4",
+    });
+  });
+
+  it("does not inject GitLab MCP server when gitlabToken is absent", () => {
+    const config: ActionConfig = { ...BASE, sourceControlProvider: "gitlab", gitlabToken: "", githubToken: "" };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> | undefined };
+    expect(mcpServers?.["gitlab"]).toBeUndefined();
+  });
+
+  it("injects Sentry MCP server when observability provider is sentry with auth token", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      observabilityProvider: "sentry",
+      observabilityCredentials: { authToken: "sntryu_secret", organization: "acme", project: "api" },
+      githubToken: "",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(mcpServers?.["sentry"]).toMatchObject({
+      type: "stdio",
+      command: "npx",
+      env: { SENTRY_AUTH_TOKEN: "sntryu_secret" },
+    });
+  });
+
+  it("sets SENTRY_HOST for self-hosted Sentry", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      observabilityProvider: "sentry",
+      observabilityCredentials: {
+        authToken: "sntryu_secret",
+        baseUrl: "https://sentry.internal.example.com",
+      },
+      githubToken: "",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect((mcpServers?.["sentry"] as Record<string, unknown>)?.["env"]).toMatchObject({
+      SENTRY_HOST: "sentry.internal.example.com",
+    });
+  });
+
+  it("does not inject Sentry MCP when authToken is absent", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      observabilityProvider: "sentry",
+      observabilityCredentials: { organization: "acme", project: "api" },
+      githubToken: "",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> | undefined };
+    expect(mcpServers?.["sentry"]).toBeUndefined();
+  });
+
+  // ── Category B: env-var triggered ──────────────────────────────────────────
+
+  it("injects Slack MCP server when SLACK_BOT_TOKEN is present in env", () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
+    try {
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "" }) as {
+        mcpServers: Record<string, unknown>;
+      };
+      expect(mcpServers?.["slack"]).toMatchObject({
+        type: "stdio",
+        command: "npx",
+        env: { SLACK_BOT_TOKEN: "xoxb-test-token" },
+      });
+    } finally {
+      delete process.env.SLACK_BOT_TOKEN;
+    }
+  });
+
+  it("includes SLACK_TEAM_ID in Slack MCP env when set", () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
+    process.env.SLACK_TEAM_ID = "T012AB3CD";
+    try {
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "" }) as {
+        mcpServers: Record<string, unknown>;
+      };
+      expect((mcpServers?.["slack"] as Record<string, unknown>)?.["env"]).toMatchObject({
+        SLACK_TEAM_ID: "T012AB3CD",
+      });
+    } finally {
+      delete process.env.SLACK_BOT_TOKEN;
+      delete process.env.SLACK_TEAM_ID;
+    }
+  });
+
+  it("does not inject Slack MCP when SLACK_BOT_TOKEN is absent", () => {
+    delete process.env.SLACK_BOT_TOKEN;
+    const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {} }) as {
+      mcpServers: Record<string, unknown> | undefined;
+    };
+    expect(mcpServers?.["slack"]).toBeUndefined();
+  });
+
+  it("injects Notion MCP server when NOTION_API_KEY is present in env", () => {
+    process.env.NOTION_API_KEY = "secret_notion_key";
+    try {
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "" }) as {
+        mcpServers: Record<string, unknown>;
+      };
+      expect(mcpServers?.["notion"]).toMatchObject({
+        type: "stdio",
+        command: "npx",
+        env: { NOTION_API_KEY: "secret_notion_key" },
+      });
+    } finally {
+      delete process.env.NOTION_API_KEY;
+    }
+  });
+
+  it("does not inject Notion MCP when NOTION_API_KEY is absent", () => {
+    delete process.env.NOTION_API_KEY;
+    const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {} }) as {
+      mcpServers: Record<string, unknown> | undefined;
+    };
+    expect(mcpServers?.["notion"]).toBeUndefined();
+  });
+
   it("returns undefined when no providers and no user mcpServers", () => {
     const config: ActionConfig = {
       ...BASE,
@@ -310,5 +456,44 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
     };
     const { mcpServers } = mapToTriageConfig(config) as { mcpServers: unknown };
     expect(mcpServers).toBeUndefined();
+  });
+});
+
+describe("mapToImplementConfig — MCP auto-injection", () => {
+  it("injects GitHub MCP server when source control is github", () => {
+    const config: ActionConfig = { ...BASE, sourceControlProvider: "github", githubToken: "ghp_impl" };
+    const { mcpServers } = mapToImplementConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(mcpServers?.["github"]).toMatchObject({
+      type: "stdio",
+      command: "npx",
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_impl" },
+    });
+  });
+
+  it("injects Linear MCP server when issue tracker is linear", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      issueTrackerProvider: "linear",
+      linearApiKey: "lin_impl_key",
+      githubToken: "",
+    };
+    const { mcpServers } = mapToImplementConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(mcpServers?.["linear"]).toMatchObject({
+      type: "http",
+      url: "https://mcp.linear.app/mcp",
+      headers: { Authorization: "Bearer lin_impl_key" },
+    });
+  });
+
+  it("user-supplied mcpServers override auto-injected ones in implementConfig", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      sourceControlProvider: "github",
+      githubToken: "ghp_auto",
+      mcpServers: { github: { type: "http", url: "https://custom-github.example.com/mcp" } },
+    };
+    const { mcpServers } = mapToImplementConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(mcpServers?.["github"]).toMatchObject({ url: "https://custom-github.example.com/mcp" });
+    expect((mcpServers?.["github"] as Record<string, unknown>)["env"]).toBeUndefined();
   });
 });

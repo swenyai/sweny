@@ -68,7 +68,8 @@ mcp-servers:
       Authorization: "Bearer ${LINEAR_API_KEY}"
   github:
     type: stdio
-    command: /usr/local/bin/github-mcp   # pre-installed binary, NOT npx
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github@latest"]
     env:
       GITHUB_TOKEN: "${GITHUB_TOKEN}"
 ```
@@ -81,16 +82,28 @@ Users should **never** need to configure MCP servers manually for the providers 
 
 **Current auto-injections:**
 
+Category A — triggered by provider config (structured credentials already collected):
+
 | Provider | Trigger | MCP Server | Transport |
 |---|---|---|---|
 | GitHub source control | `source-control-provider: github` | `@modelcontextprotocol/server-github` | stdio (npx) |
 | GitHub Issues tracker | `issue-tracker-provider: github-issues` | `@modelcontextprotocol/server-github` | stdio (npx) |
+| GitLab | `source-control-provider: gitlab` | `@modelcontextprotocol/server-gitlab` | stdio (npx) |
 | Linear | `issue-tracker-provider: linear` | `https://mcp.linear.app/mcp` | HTTP |
 | Datadog | `observability-provider: datadog` | `https://mcp.datadoghq.com/api/unstable/mcp-server/mcp` | HTTP |
+| Sentry | `observability-provider: sentry` | `@sentry/mcp-server` | stdio (npx) |
+
+Category B — triggered by env var presence (zero new config required; set as workflow/shell secrets):
+
+| Env Var | MCP Server | Notes |
+|---|---|---|
+| `SLACK_BOT_TOKEN` | `@modelcontextprotocol/server-slack` | Full API access; separate from notification webhook |
+| `NOTION_API_KEY` | `@notionhq/notion-mcp-server` | Runbooks, on-call docs, incident templates |
 
 **Rules:**
 - HTTP transport is preferred for remote services — no local install, vendor-managed, scales
-- GitHub uses stdio because no stable remote HTTP endpoint exists yet; the agent spawns the MCP server
+- stdio (npx) used when no stable HTTP endpoint exists; the agent process handles spawning
+- Category B env vars let users add MCP tools without changing any provider config
 - User-supplied `mcp-servers` config **always wins** on key conflict (explicit overrides auto)
 - New provider added to CLI/Action? Add a corresponding auto-injection in `buildAutoMcpServers()`
 
@@ -110,9 +123,10 @@ Users should **never** need to configure MCP servers manually for the providers 
 const raw = await mcpClient.call("search_issues", { query: "TypeError" });
 const issues = parseResponse(raw);
 
-// ❌ WRONG — npx at runtime
+// ❌ WRONG — npx in MCPClient (when SWEny itself acts as MCP client from recipe steps)
 new StdioClientTransport({ command: "npx", args: ["-y", "@linear/mcp"] })
-// npx -y downloads packages at runtime: no lockfile, no security audit, slow
+// npx -y has no lockfile, no security audit, slow cold start
+// For the coding agent's mcpServers config, npx is acceptable since the agent handles spawning
 
 // ❌ WRONG — custom observability providers for data the agent can get via MCP
 registry.set("observability", datadog({ apiKey, appKey }));
