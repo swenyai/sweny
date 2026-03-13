@@ -207,3 +207,80 @@ describe("mapToTriageConfig — observability agentEnv", () => {
     expect(agentEnv.LOKI_ORG_ID).toBe("tenant-1");
   });
 });
+
+describe("mapToTriageConfig — buildAutoMcpServers", () => {
+  it("injects GitHub MCP server when source control is github", () => {
+    const config: ActionConfig = { ...BASE, sourceControlProvider: "github", githubToken: "ghp_abc" };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(mcpServers?.["github"]).toMatchObject({
+      type: "stdio",
+      command: "npx",
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_abc" },
+    });
+  });
+
+  it("injects GitHub MCP server when issue tracker is github-issues (botToken fallback)", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      sourceControlProvider: "file",
+      issueTrackerProvider: "github-issues",
+      githubToken: "",
+      botToken: "ghp_bot",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(mcpServers?.["github"]).toMatchObject({ env: { GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_bot" } });
+  });
+
+  it("does not inject GitHub MCP server when no token is present", () => {
+    const config: ActionConfig = { ...BASE, githubToken: "", botToken: "" };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> | undefined };
+    expect(mcpServers?.["github"]).toBeUndefined();
+  });
+
+  it("injects Linear MCP server when issue tracker is linear", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      issueTrackerProvider: "linear",
+      linearApiKey: "lin_api_key",
+      githubToken: "",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(mcpServers?.["linear"]).toMatchObject({
+      type: "http",
+      url: "https://mcp.linear.app/mcp",
+      headers: { Authorization: "Bearer lin_api_key" },
+    });
+  });
+
+  it("does not inject Linear MCP server when linearApiKey is absent", () => {
+    const config: ActionConfig = { ...BASE, issueTrackerProvider: "linear", linearApiKey: "", githubToken: "" };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> | undefined };
+    expect(mcpServers?.["linear"]).toBeUndefined();
+  });
+
+  it("user-supplied mcpServers override auto-injected ones on key conflict", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      sourceControlProvider: "github",
+      githubToken: "ghp_auto",
+      mcpServers: { github: { type: "http", url: "https://my-github-proxy.example.com/mcp" } },
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(mcpServers?.["github"]).toMatchObject({ url: "https://my-github-proxy.example.com/mcp" });
+    expect((mcpServers?.["github"] as Record<string, unknown>)["env"]).toBeUndefined();
+  });
+
+  it("returns undefined when no providers and no user mcpServers", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      sourceControlProvider: "file",
+      issueTrackerProvider: "linear",
+      linearApiKey: "",
+      githubToken: "",
+      botToken: "",
+      mcpServers: {},
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: unknown };
+    expect(mcpServers).toBeUndefined();
+  });
+});

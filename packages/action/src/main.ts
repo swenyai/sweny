@@ -166,33 +166,23 @@ function buildAutoMcpServers(config: ActionConfig): Record<string, MCPServerConf
   const auto: Record<string, MCPServerConfig> = {};
   const githubToken = config.githubToken || config.botToken;
 
-  // GitHub MCP — inject when using GitHub source control OR GitHub Issues tracker
+  // GitHub MCP — inject when using GitHub source control OR GitHub Issues tracker.
+  // @modelcontextprotocol/server-github requires GITHUB_PERSONAL_ACCESS_TOKEN (not GITHUB_TOKEN).
   if ((config.sourceControlProvider === "github" || config.issueTrackerProvider === "github-issues") && githubToken) {
     auto["github"] = {
       type: "stdio",
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-github@latest"],
-      env: { GITHUB_TOKEN: githubToken },
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: githubToken },
     };
   }
 
-  // Linear MCP — HTTP transport (no local installation required)
+  // Linear MCP — official HTTP remote MCP endpoint (https://linear.app/changelog/2025-04-09-mcp)
   if (config.issueTrackerProvider === "linear" && config.linearApiKey) {
     auto["linear"] = {
       type: "http",
       url: "https://mcp.linear.app/mcp",
       headers: { Authorization: `Bearer ${config.linearApiKey}` },
-    };
-  }
-
-  // Datadog MCP — HTTP transport (no local installation required)
-  const ddKey = config.observabilityCredentials.apiKey;
-  const ddAppKey = config.observabilityCredentials.appKey;
-  if (config.observabilityProvider === "datadog" && ddKey && ddAppKey) {
-    auto["datadog"] = {
-      type: "http",
-      url: "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
-      headers: { DD_API_KEY: ddKey, DD_APPLICATION_KEY: ddAppKey },
     };
   }
 

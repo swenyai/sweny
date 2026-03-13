@@ -4,7 +4,7 @@ import type { Logger } from "../../logger.js";
 import { consoleLogger } from "../../logger.js";
 
 export class S3SessionStore implements SessionStore {
-  private _client: S3Client | null = null;
+  private _clientPromise: Promise<S3Client> | null = null;
   private readonly region: string;
   private readonly bucket: string;
   private readonly prefix: string;
@@ -17,12 +17,11 @@ export class S3SessionStore implements SessionStore {
     this.logger = logger ?? consoleLogger;
   }
 
-  private async client(): Promise<S3Client> {
-    if (!this._client) {
-      const { S3Client } = await import("@aws-sdk/client-s3");
-      this._client = new S3Client({ region: this.region });
+  private client(): Promise<S3Client> {
+    if (!this._clientPromise) {
+      this._clientPromise = import("@aws-sdk/client-s3").then(({ S3Client }) => new S3Client({ region: this.region }));
     }
-    return this._client;
+    return this._clientPromise;
   }
 
   private baseKey(userId: string, threadKey: string): string {

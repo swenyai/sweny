@@ -75,3 +75,36 @@ describe("peer dep imports are lazy (no load-time side effects)", () => {
     expect(client.hasTool("some_tool")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Verify that method calls DO trigger the dynamic import (lazy, not absent).
+// The mock above throws on import — if the import were skipped, these would
+// succeed silently. Instead they must reject, proving the import is lazy.
+// ---------------------------------------------------------------------------
+
+describe("peer dep imports are triggered on first method call (lazy, not missing)", () => {
+  // The mock factories above throw on import. Vitest wraps factory errors in its
+  // own message, so we match on that. The important invariant: these methods must
+  // throw (meaning the import was triggered), while the constructor tests above
+  // must NOT throw (meaning the import was NOT triggered at construction time).
+
+  it("S3SessionStore.load() triggers @aws-sdk/client-s3 on first call", async () => {
+    const store = new S3SessionStore("my-bucket");
+    await expect(store.load("user", "thread")).rejects.toThrow(/mocking a module|must not be imported/);
+  });
+
+  it("S3MemoryStore.getMemories() triggers @aws-sdk/client-s3 on first call", async () => {
+    const store = new S3MemoryStore("my-bucket");
+    await expect(store.getMemories("user")).rejects.toThrow(/mocking a module|must not be imported/);
+  });
+
+  it("S3WorkspaceStore.getManifest() triggers @aws-sdk/client-s3 on first call", async () => {
+    const store = new S3WorkspaceStore("my-bucket");
+    await expect(store.getManifest("user")).rejects.toThrow(/mocking a module|must not be imported/);
+  });
+
+  it("MCPClient.connect() triggers @modelcontextprotocol/sdk on first call", async () => {
+    const client = new MCPClient("test", { command: "my-server" });
+    await expect(client.connect()).rejects.toThrow(/mocking a module|must not be imported/);
+  });
+});

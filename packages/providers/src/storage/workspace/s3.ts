@@ -33,7 +33,7 @@ function guessMimeType(path: string): string {
 }
 
 export class S3WorkspaceStore implements WorkspaceStore {
-  private _client: S3Client | null = null;
+  private _clientPromise: Promise<S3Client> | null = null;
   private readonly region: string;
   private readonly bucket: string;
   private readonly prefix: string;
@@ -47,12 +47,11 @@ export class S3WorkspaceStore implements WorkspaceStore {
     this.logger = logger ?? consoleLogger;
   }
 
-  private async client(): Promise<S3Client> {
-    if (!this._client) {
-      const { S3Client } = await import("@aws-sdk/client-s3");
-      this._client = new S3Client({ region: this.region });
+  private client(): Promise<S3Client> {
+    if (!this._clientPromise) {
+      this._clientPromise = import("@aws-sdk/client-s3").then(({ S3Client }) => new S3Client({ region: this.region }));
     }
-    return this._client;
+    return this._clientPromise;
   }
 
   private manifestKey(userId: string): string {
