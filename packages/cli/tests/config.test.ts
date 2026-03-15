@@ -67,6 +67,16 @@ describe("parseCliInputs", () => {
     expect(config.cacheDir).toBe(".sweny/cache");
   });
 
+  it("--agent flag sets codingAgentProvider", () => {
+    const config = parseCliInputs({ agent: "codex" });
+    expect(config.codingAgentProvider).toBe("codex");
+  });
+
+  it("--agent takes priority over --coding-agent-provider when both passed", () => {
+    const config = parseCliInputs({ agent: "gemini", codingAgentProvider: "codex" });
+    expect(config.codingAgentProvider).toBe("gemini");
+  });
+
   it("overrides defaults with provided CLI options", () => {
     const config = parseCliInputs({
       codingAgentProvider: "codex",

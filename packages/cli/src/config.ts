@@ -99,7 +99,8 @@ export function registerTriageCommand(program: Command): Command {
   return program
     .command("triage")
     .description("Run the SWEny triage workflow")
-    .option("--coding-agent-provider <provider>", "Coding agent (default: claude)")
+    .option("--agent <provider>", "Coding agent: claude (default), codex, gemini")
+    .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
     .option("--observability-provider <provider>", "Observability provider (default: datadog)")
     .option("--issue-tracker-provider <provider>", "Issue tracker provider (default: github-issues)")
     .option("--source-control-provider <provider>", "Source control provider (default: github)")
@@ -160,7 +161,8 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
   const obsProvider = (options.observabilityProvider as string) || f("observability-provider") || "datadog";
 
   return {
-    codingAgentProvider: (options.codingAgentProvider as string) || f("coding-agent-provider") || "claude",
+    codingAgentProvider:
+      (options.agent as string) || (options.codingAgentProvider as string) || f("coding-agent-provider") || "claude",
 
     // Secrets: env only — never from config file
     anthropicApiKey: env.ANTHROPIC_API_KEY || "",
@@ -472,7 +474,8 @@ export function registerImplementCommand(program: Command): Command {
   return program
     .command("implement <issueId>")
     .description("Implement a fix for a specific issue and open a PR")
-    .option("--coding-agent-provider <provider>", "Coding agent (default: claude)")
+    .option("--agent <provider>", "Coding agent: claude (default), codex, gemini")
+    .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
     .option("--issue-tracker-provider <provider>", "Issue tracker (linear|jira|github-issues|file)")
     .option("--source-control-provider <provider>", "Source control (github|gitlab|file)")
     .option("--dry-run", "Skip creating PR — report only", false)
