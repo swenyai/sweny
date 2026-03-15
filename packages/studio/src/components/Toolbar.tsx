@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import type { WorkflowPhase, WorkflowDefinition } from "@sweny-ai/engine";
 import { useEditorStore, useTemporalStore } from "../store/editor-store.js";
@@ -44,6 +44,18 @@ export function Toolbar({
   const [newStepType, setNewStepType] = useState<string>("sweny/verify-access");
   const [showTypePicker, setShowTypePicker] = useState(false);
   const [copied, setCopied] = useState(false);
+  const typePickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showTypePicker) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (typePickerRef.current && !typePickerRef.current.contains(e.target as Node)) {
+        setShowTypePicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showTypePicker]);
 
   function switchMode(newMode: StudioMode) {
     if (newMode !== mode) {
@@ -195,7 +207,7 @@ export function Toolbar({
       <div className="flex-1" />
 
       {/* Add step — type picker */}
-      <div className="relative">
+      <div className="relative" ref={typePickerRef}>
         <form onSubmit={handleAddStep} className="flex gap-1">
           <input
             value={newStepId}

@@ -8,7 +8,10 @@ import { definitionToFlow, extractTransitions } from "../lib/definition-to-flow.
 const elk = new ELK();
 
 const NODE_WIDTH = 200;
-const NODE_HEIGHT = 40;
+// Matches the taller StateNode height (52px when a type subtitle is shown).
+// Using the maximum height keeps spacing consistent regardless of whether
+// individual nodes have a subtitle or not.
+const NODE_HEIGHT = 52;
 
 export async function layoutDefinition(def: WorkflowDefinition): Promise<{
   nodes: StateNodeType[];

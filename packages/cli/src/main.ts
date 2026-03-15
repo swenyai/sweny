@@ -11,7 +11,6 @@ import {
   runWorkflow,
   triageWorkflow,
   implementWorkflow,
-  createProviderRegistry,
   validateWorkflow,
   resolveWorkflow,
   triageDefinition,
