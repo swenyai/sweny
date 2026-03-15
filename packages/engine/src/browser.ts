@@ -7,13 +7,13 @@
 
 // Pure types
 export type {
-  RecipeDefinition,
-  StateDefinition,
+  WorkflowDefinition,
+  StepDefinition,
   WorkflowPhase,
   StepResult,
   WorkflowResult,
-  Recipe,
-  StateImplementations,
+  Workflow,
+  StepImplementations,
   RunOptions,
   ProviderRegistry,
 } from "./types.js";
@@ -25,10 +25,10 @@ export type { ExecutionEvent, RunObserver } from "./types.js";
 export { CollectingObserver, CallbackObserver, composeObservers } from "./observer.js";
 
 // Pure validation — no Node.js deps, safe for browser use
-export { validateDefinition } from "./validate.js";
+export { validateWorkflow } from "./validate.js";
 
 // Runner — browser-safe (no @sweny-ai/providers import, uses console directly)
-export { createRecipe, runRecipe, createProviderRegistry } from "./browser-runner.js";
+export { createWorkflow, runWorkflow, createProviderRegistry } from "./browser-runner.js";
 
 // Pure definition objects (no implementation functions)
 export { triageDefinition } from "./recipes/triage/definition.js";

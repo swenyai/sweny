@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
-import { runRecipe } from "../../runner-recipe.js";
+import { runWorkflow } from "../../runner-recipe.js";
 import { createProviderRegistry } from "../../runner-recipe.js";
-import { implementRecipe } from "./index.js";
+import { implementWorkflow } from "./index.js";
 import { fetchIssue } from "./steps/fetch-issue.js";
 import { verifyAccess } from "./steps/verify-access.js";
 import type { ImplementConfig } from "./types.js";
@@ -97,7 +97,7 @@ describe("implement workflow", () => {
     const providers = createMockProviders();
     const issueTracker = providers.get<{ getIssue: ReturnType<typeof vi.fn> }>("issueTracker");
 
-    const result = await runRecipe(implementRecipe, defaultConfig, providers, { logger: silentLogger });
+    const result = await runWorkflow(implementWorkflow, defaultConfig, providers, { logger: silentLogger });
 
     expect(issueTracker.getIssue).toHaveBeenCalledWith("ENG-123");
     // All learn steps passed, so at least learn phase is done
@@ -111,7 +111,7 @@ describe("implement workflow", () => {
     const sourceControl = providers.get<{ findExistingPr: ReturnType<typeof vi.fn> }>("sourceControl");
     sourceControl.findExistingPr.mockResolvedValue({ ...mockPr, state: "open" });
 
-    const result = await runRecipe(implementRecipe, defaultConfig, providers, { logger: silentLogger });
+    const result = await runWorkflow(implementWorkflow, defaultConfig, providers, { logger: silentLogger });
 
     const implementStep = result.steps.find((s) => s.name === "implement-fix");
     const prStep = result.steps.find((s) => s.name === "create-pr");
@@ -124,7 +124,7 @@ describe("implement workflow", () => {
     const issueTracker = providers.get<{ getIssue: ReturnType<typeof vi.fn> }>("issueTracker");
     issueTracker.getIssue.mockRejectedValue(new Error("Issue not found"));
 
-    const result = await runRecipe(implementRecipe, defaultConfig, providers, { logger: silentLogger });
+    const result = await runWorkflow(implementWorkflow, defaultConfig, providers, { logger: silentLogger });
 
     // create-issue is in the learn phase → failure aborts the workflow
     expect(result.status).toBe("failed");

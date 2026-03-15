@@ -4,7 +4,7 @@
  *
  * @example
  * const obs = new CollectingObserver();
- * await runRecipe(recipe, config, providers, { observer: obs });
+ * await runWorkflow(workflow, config, providers, { observer: obs });
  * console.log(obs.events);
  */
 export class CollectingObserver {
@@ -12,9 +12,9 @@ export class CollectingObserver {
     onEvent(event) {
         this.events.push(event);
     }
-    /** All state:exit events, in execution order. */
-    get stateResults() {
-        return this.events.filter((e) => e.type === "state:exit");
+    /** All step:exit events, in execution order. */
+    get stepResults() {
+        return this.events.filter((e) => e.type === "step:exit");
     }
 }
 /**

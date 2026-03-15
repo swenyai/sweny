@@ -1,36 +1,36 @@
 /**
- * Validate a RecipeDefinition for structural correctness.
+ * Validate a WorkflowDefinition for structural correctness.
  * Returns an array of errors (empty array = valid).
- * Does NOT check implementations (use createRecipe for that).
+ * Does NOT check implementations (use createWorkflow for that).
  *
  * Pure function — no Node.js dependencies, safe for browser use.
  */
-export function validateDefinition(def) {
+export function validateWorkflow(def) {
     const errors = [];
-    const stateIds = new Set(Object.keys(def.states));
+    const stepIds = new Set(Object.keys(def.steps));
     // initial must exist
-    if (!stateIds.has(def.initial)) {
+    if (!stepIds.has(def.initial)) {
         errors.push({
             code: "MISSING_INITIAL",
-            message: `initial state "${def.initial}" does not exist in states`,
+            message: `initial step "${def.initial}" does not exist in steps`,
         });
     }
-    // all on/next targets must be valid state ids or "end"
-    for (const [stateId, state] of Object.entries(def.states)) {
-        if (state.next && state.next !== "end" && !stateIds.has(state.next)) {
+    // all on/next targets must be valid step ids or "end"
+    for (const [stepId, step] of Object.entries(def.steps)) {
+        if (step.next && step.next !== "end" && !stepIds.has(step.next)) {
             errors.push({
                 code: "UNKNOWN_TARGET",
-                message: `state "${stateId}" next target "${state.next}" does not exist`,
-                stateId,
-                targetId: state.next,
+                message: `step "${stepId}" next target "${step.next}" does not exist`,
+                stateId: stepId,
+                targetId: step.next,
             });
         }
-        for (const [outcome, target] of Object.entries(state.on ?? {})) {
-            if (target !== "end" && !stateIds.has(target)) {
+        for (const [outcome, target] of Object.entries(step.on ?? {})) {
+            if (target !== "end" && !stepIds.has(target)) {
                 errors.push({
                     code: "UNKNOWN_TARGET",
-                    message: `state "${stateId}" on["${outcome}"] target "${target}" does not exist`,
-                    stateId,
+                    message: `step "${stepId}" on["${outcome}"] target "${target}" does not exist`,
+                    stateId: stepId,
                     targetId: target,
                 });
             }

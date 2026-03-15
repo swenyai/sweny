@@ -7,17 +7,17 @@
  * This module is only used by the browser entry point (browser.ts).
  */
 
-import { validateDefinition } from "./validate.js";
+import { validateWorkflow } from "./validate.js";
 import { createProviderRegistry } from "./registry.js";
 import type {
-  DefinitionError,
+  WorkflowDefinitionError,
   ExecutionEvent,
-  Recipe,
-  RecipeDefinition,
+  Workflow,
+  WorkflowDefinition,
   RunObserver,
   RunOptions,
-  StateDefinition,
-  StateImplementations,
+  StepDefinition,
+  StepImplementations,
   StepMeta,
   StepResult,
   WorkflowContext,
@@ -48,34 +48,35 @@ async function emit(observer: RunObserver | undefined, event: ExecutionEvent): P
 }
 
 /**
- * Create a Recipe by combining a definition with implementations.
- * Validates the definition and that all state ids have implementations.
+ * Create a Workflow by combining a definition with implementations.
+ * Validates the definition and that all step ids have implementations.
  * Throws a descriptive Error if validation fails.
  */
-export function createRecipe<TConfig>(
-  definition: RecipeDefinition,
-  implementations: StateImplementations<TConfig>,
-): Recipe<TConfig> {
-  const defErrors = validateDefinition(definition);
+export function createWorkflow<TConfig>(
+  definition: WorkflowDefinition,
+  implementations: StepImplementations<TConfig>,
+): Workflow<TConfig> {
+  const defErrors = validateWorkflow(definition);
   if (defErrors.length > 0) {
     throw new Error(
-      `Invalid recipe definition "${definition.id}":\n` + defErrors.map((e) => `  [${e.code}] ${e.message}`).join("\n"),
+      `Invalid workflow definition "${definition.id}":\n` +
+        defErrors.map((e) => `  [${e.code}] ${e.message}`).join("\n"),
     );
   }
 
-  const implErrors: DefinitionError[] = [];
-  for (const stateId of Object.keys(definition.states)) {
-    if (!implementations[stateId]) {
+  const implErrors: WorkflowDefinitionError[] = [];
+  for (const stepId of Object.keys(definition.steps)) {
+    if (!implementations[stepId]) {
       implErrors.push({
         code: "MISSING_IMPLEMENTATION",
-        message: `state "${stateId}" has no implementation`,
-        stateId,
+        message: `step "${stepId}" has no implementation`,
+        stateId: stepId,
       });
     }
   }
   if (implErrors.length > 0) {
     throw new Error(
-      `Missing implementations for recipe "${definition.id}":\n` +
+      `Missing implementations for workflow "${definition.id}":\n` +
         implErrors.map((e) => `  [${e.code}] ${e.message}`).join("\n"),
     );
   }
@@ -84,11 +85,11 @@ export function createRecipe<TConfig>(
 }
 
 /**
- * Execute a Recipe as a state machine (browser-safe version).
+ * Execute a Workflow as a state machine (browser-safe version).
  *
- * Starts at recipe.definition.initial, executes each state, then follows
- * on: transitions to determine the next state. Stops when a transition
- * resolves to "end", there is no next state, or a critical state fails.
+ * Starts at workflow.definition.initial, executes each step, then follows
+ * on: transitions to determine the next step. Stops when a transition
+ * resolves to "end", there is no next step, or a critical step fails.
  *
  * Outcome resolution order (for on: routing):
  *   1. result.data?.outcome (string) — explicit outcome set by the implementation
@@ -96,15 +97,15 @@ export function createRecipe<TConfig>(
  *   3. "*"                  — wildcard default
  *   4. next                 — fallback for success/skipped
  */
-export async function runRecipe<TConfig>(
-  recipe: Recipe<TConfig>,
+export async function runWorkflow<TConfig>(
+  workflow: Workflow<TConfig>,
   config: TConfig,
   providers: ReturnType<typeof createProviderRegistry>,
   options?: RunOptions,
 ): Promise<WorkflowResult> {
   const logger = options?.logger ?? browserLogger;
   const start = Date.now();
-  const { definition, implementations } = recipe;
+  const { definition, implementations } = workflow;
 
   const results = new Map<string, StepResult>();
   const completedSteps: WorkflowResult["steps"] = [];
@@ -112,9 +113,9 @@ export async function runRecipe<TConfig>(
   const ctx: WorkflowContext<TConfig> = { config, logger, results, providers };
 
   await emit(options?.observer, {
-    type: "recipe:start",
-    recipeId: definition.id,
-    recipeName: definition.name,
+    type: "workflow:start",
+    workflowId: definition.id,
+    workflowName: definition.name,
     timestamp: Date.now(),
   });
 
@@ -124,9 +125,9 @@ export async function runRecipe<TConfig>(
   const visited = new Set<string>();
 
   while (currentId && currentId !== "end") {
-    const state = definition.states[currentId];
-    if (!state) {
-      logger.error(`[${definition.name}] Unknown state id: "${currentId}" — aborting`);
+    const step = definition.steps[currentId];
+    if (!step) {
+      logger.error(`[${definition.name}] Unknown step id: "${currentId}" — aborting`);
       aborted = true;
       break;
     }
@@ -138,77 +139,77 @@ export async function runRecipe<TConfig>(
     }
     visited.add(currentId);
 
-    const stateId = currentId;
-    const meta: StepMeta = { id: stateId, phase: state.phase };
+    const stepId = currentId;
+    const meta: StepMeta = { id: stepId, phase: step.phase };
 
     await emit(options?.observer, {
-      type: "state:enter",
-      stateId,
-      phase: state.phase,
+      type: "step:enter",
+      stepId,
+      phase: step.phase,
       timestamp: Date.now(),
     });
 
-    // beforeStep hook — return false to skip this state
+    // beforeStep hook — return false to skip this step
     if (options?.beforeStep) {
       const proceed = await options.beforeStep(meta, ctx);
       if (proceed === false) {
         const result: StepResult = { status: "skipped", reason: "Skipped by beforeStep hook" };
-        results.set(stateId, result);
-        completedSteps.push({ name: stateId, phase: state.phase, result });
+        results.set(stepId, result);
+        completedSteps.push({ name: stepId, phase: step.phase, result });
         await emit(options?.observer, {
-          type: "state:exit",
-          stateId,
-          phase: state.phase,
+          type: "step:exit",
+          stepId,
+          phase: step.phase,
           result,
           cached: false,
           timestamp: Date.now(),
         });
         if (options.afterStep) await options.afterStep(meta, result, ctx);
-        currentId = resolveNext(stateId, state, result);
+        currentId = resolveNext(stepId, step, result);
         continue;
       }
     }
 
     // Cache check — replay a previously cached result if available
     if (options?.cache) {
-      const entry = await options.cache.get(stateId);
+      const entry = await options.cache.get(stepId);
       if (entry) {
         const result: StepResult = { ...entry.result, cached: true };
-        results.set(stateId, result);
-        completedSteps.push({ name: stateId, phase: state.phase, result });
+        results.set(stepId, result);
+        completedSteps.push({ name: stepId, phase: step.phase, result });
         await emit(options?.observer, {
-          type: "state:exit",
-          stateId,
-          phase: state.phase,
+          type: "step:exit",
+          stepId,
+          phase: step.phase,
           result,
           cached: true,
           timestamp: Date.now(),
         });
         if (options.afterStep) await options.afterStep(meta, result, ctx);
-        currentId = resolveNext(stateId, state, result);
+        currentId = resolveNext(stepId, step, result);
         continue;
       }
     }
 
-    // Execute the state — result is always assigned (either from run or catch)
+    // Execute the step — result is always assigned (either from run or catch)
     let result: StepResult;
     try {
-      logger.info(`[${definition.name}] ${state.phase}/${stateId}: starting`);
-      result = await implementations[stateId](ctx);
-      logger.info(`[${definition.name}] ${state.phase}/${stateId}: ${result.status}`);
+      logger.info(`[${definition.name}] ${step.phase}/${stepId}: starting`);
+      result = await implementations[stepId](ctx);
+      logger.info(`[${definition.name}] ${step.phase}/${stepId}: ${result.status}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error(`[${definition.name}] ${state.phase}/${stateId}: failed — ${message}`);
+      logger.error(`[${definition.name}] ${step.phase}/${stepId}: failed — ${message}`);
       result = { status: "failed", reason: message };
     }
 
-    results.set(stateId, result);
-    completedSteps.push({ name: stateId, phase: state.phase, result });
+    results.set(stepId, result);
+    completedSteps.push({ name: stepId, phase: step.phase, result });
 
     await emit(options?.observer, {
-      type: "state:exit",
-      stateId,
-      phase: state.phase,
+      type: "step:exit",
+      stepId,
+      phase: step.phase,
       result,
       cached: result.cached ?? false,
       timestamp: Date.now(),
@@ -216,7 +217,7 @@ export async function runRecipe<TConfig>(
 
     if (result.status === "failed") {
       hasFailed = true;
-      if (state.critical) {
+      if (step.critical) {
         aborted = true;
         break;
       }
@@ -224,18 +225,18 @@ export async function runRecipe<TConfig>(
 
     // Persist successful results to cache
     if (result.status === "success" && options?.cache) {
-      await options.cache.set(stateId, { result, createdAt: Date.now() }).catch(() => {}); // cache failures are non-fatal
+      await options.cache.set(stepId, { result, createdAt: Date.now() }).catch(() => {}); // cache failures are non-fatal
     }
 
     if (options?.afterStep) await options.afterStep(meta, result, ctx);
 
-    currentId = resolveNext(stateId, state, result);
+    currentId = resolveNext(stepId, step, result);
   }
 
   const status = aborted ? "failed" : hasFailed ? "partial" : "completed";
 
   await emit(options?.observer, {
-    type: "recipe:end",
+    type: "workflow:end",
     status,
     duration: Date.now() - start,
     timestamp: Date.now(),
@@ -245,31 +246,31 @@ export async function runRecipe<TConfig>(
 }
 
 /**
- * Resolve the id of the next state to execute.
+ * Resolve the id of the next step to execute.
  *
  * Priority:
  *   1. Explicit on: match for result.data?.outcome
  *   2. Explicit on: match for result.status
  *   3. Wildcard on["*"]
  *   4. next (success/skipped only)
- *   5. undefined — stop the recipe
+ *   5. undefined — stop the workflow
  */
-function resolveNext(stateId: string, state: StateDefinition, result: StepResult): string | undefined {
+function resolveNext(stepId: string, step: StepDefinition, result: StepResult): string | undefined {
   const outcome = typeof result.data?.outcome === "string" ? result.data.outcome : undefined;
 
-  if (state.on) {
+  if (step.on) {
     // 1. explicit outcome
-    if (outcome && outcome in state.on) return state.on[outcome];
+    if (outcome && outcome in step.on) return step.on[outcome];
     // 2. status
-    if (result.status in state.on) return state.on[result.status];
+    if (result.status in step.on) return step.on[result.status];
     // 3. wildcard
-    if ("*" in state.on) return state.on["*"];
+    if ("*" in step.on) return step.on["*"];
   }
 
   // 4. next (only for non-failure)
-  if (result.status !== "failed" && state.next) return state.next;
+  if (result.status !== "failed" && step.next) return step.next;
 
   // 5. stop
-  void stateId; // used by callers for logging context
+  void stepId; // used by callers for logging context
   return undefined;
 }

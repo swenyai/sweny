@@ -1,5 +1,6 @@
 import type { Logger } from "@sweny-ai/providers";
-/** The three phases of every recipe. */
+import type { ProviderConfigSchema } from "@sweny-ai/providers";
+/** The three phases of every workflow. */
 export type WorkflowPhase = "learn" | "act" | "report";
 /** Result returned by a node after execution. */
 export interface StepResult {
@@ -15,9 +16,9 @@ export interface StepResult {
     /** True when this result was replayed from cache rather than freshly executed. */
     cached?: boolean;
 }
-/** Mutable context threaded through every node in a recipe run. */
+/** Mutable context threaded through every node in a workflow run. */
 export interface WorkflowContext<TConfig = unknown> {
-    /** Recipe-specific configuration. */
+    /** Workflow-specific configuration. */
     config: TConfig;
     /** Logger for structured output. */
     logger: Logger;
@@ -35,7 +36,7 @@ export interface ProviderRegistry {
     /** Register a provider under a role key. */
     set(key: string, provider: unknown): void;
 }
-/** Overall result of running a recipe. */
+/** Overall result of running a workflow. */
 export interface WorkflowResult {
     /** completed = all nodes finished, failed = critical node failed, partial = non-critical failure. */
     status: "completed" | "failed" | "partial";
@@ -50,12 +51,12 @@ export interface WorkflowResult {
 }
 /** Minimal node identity passed to beforeStep / afterStep hooks. */
 export interface StepMeta {
-    /** The node's unique id within the recipe. */
+    /** The node's unique id within the workflow. */
     id: string;
     /** The phase this node belongs to. */
     phase: WorkflowPhase;
 }
-/** Options for runRecipe. */
+/** Options for runWorkflow. */
 export interface RunOptions {
     /** Logger instance. Falls back to console. */
     logger?: Logger;
@@ -72,37 +73,37 @@ export interface RunOptions {
     observer?: RunObserver;
 }
 /**
- * A discrete, serializable event emitted at each lifecycle point of a recipe run.
+ * A discrete, serializable event emitted at each lifecycle point of a workflow run.
  *
  * Events are JSON-serializable so they can be forwarded over WebSocket, SSE,
  * or any other transport without transformation.
  */
 export type ExecutionEvent = {
-    type: "recipe:start";
-    recipeId: string;
-    recipeName: string;
+    type: "workflow:start";
+    workflowId: string;
+    workflowName: string;
     timestamp: number;
 } | {
-    type: "state:enter";
-    stateId: string;
+    type: "step:enter";
+    stepId: string;
     phase: WorkflowPhase;
     timestamp: number;
 } | {
-    type: "state:exit";
-    stateId: string;
+    type: "step:exit";
+    stepId: string;
     phase: WorkflowPhase;
     result: StepResult;
     /** True when replayed from cache, not freshly executed. */
     cached: boolean;
     timestamp: number;
 } | {
-    type: "recipe:end";
+    type: "workflow:end";
     status: WorkflowResult["status"];
     duration: number;
     timestamp: number;
 };
 /**
- * Observer that receives ExecutionEvents in real-time during a recipe run.
+ * Observer that receives ExecutionEvents in real-time during a workflow run.
  *
  * Implementations:
  *  - In-memory (for local simulation and testing)
@@ -112,45 +113,45 @@ export type ExecutionEvent = {
  * The runner awaits each onEvent call. Keep implementations fast; defer heavy
  * work (e.g. DB writes) asynchronously so they don't block the runner.
  *
- * Errors thrown by onEvent are caught and logged — they do NOT abort the recipe.
+ * Errors thrown by onEvent are caught and logged — they do NOT abort the workflow.
  */
 export interface RunObserver {
     onEvent(event: ExecutionEvent): void | Promise<void>;
 }
 /**
- * A pure-data recipe definition. Fully serializable — no functions.
+ * A pure-data workflow definition. Fully serializable — no functions.
  * Can be stored in JSON, versioned, and rendered as a visual graph.
- * Implementations are injected separately via createRecipe().
+ * Implementations are injected separately via createWorkflow().
  */
-export interface RecipeDefinition {
+export interface WorkflowDefinition {
     /** Unique machine-readable identifier (for persistence and import/export). */
     id: string;
     /** Semver string, e.g. "1.0.0". Increment when the shape changes. */
     version: string;
     /** Human-readable name used in logs. */
     name: string;
-    /** Optional description of what this recipe does. */
+    /** Optional description of what this workflow does. */
     description?: string;
-    /** Id of the first state to execute. Must be a key in `states`. */
+    /** Id of the first step to execute. Must be a key in `steps`. */
     initial: string;
     /**
-     * All states keyed by their unique id.
+     * All steps keyed by their unique id.
      * Order is irrelevant — all routing is explicit via `on` and `next`.
      */
-    states: Record<string, StateDefinition>;
+    steps: Record<string, StepDefinition>;
 }
-export interface StateDefinition {
+export interface StepDefinition {
     /** Phase for swimlane grouping and failure semantics. */
     phase: WorkflowPhase;
     /** Human-readable description (shown in visual editor, not executed). */
     description?: string;
     /**
-     * If true, any failure immediately aborts the entire recipe (status: "failed").
-     * Use for states whose output is required by everything downstream.
+     * If true, any failure immediately aborts the entire workflow (status: "failed").
+     * Use for steps whose output is required by everything downstream.
      */
     critical?: boolean;
     /**
-     * Explicit default successor state (for linear chains).
+     * Explicit default successor step (for linear chains).
      * Used when no `on` key matches the resolved outcome.
      * Shorthand for `on: { success: "...", skipped: "..." }`.
      */
@@ -165,36 +166,49 @@ export interface StateDefinition {
      *
      * After `on` is exhausted, falls back to `next` (success/skipped only).
      *
-     * Reserved target value: "end" — stops the recipe successfully.
+     * Reserved target value: "end" — stops the workflow successfully.
      */
     on?: Record<string, string>;
     /**
-     * The provider category this state primarily relies on (e.g. "observability",
-     * "issueTracking", "sourceControl", "codingAgent", "notification").
+     * Provider roles this step depends on (e.g. ["observability", "sourceControl"]).
+     * Used by the engine for pre-flight config validation.
+     * Each role is looked up in the ProviderRegistry; if the provider has a configSchema,
+     * all required fields are validated before the workflow starts.
      *
-     * Pure metadata — no runtime effect. Used by Studio to surface configuration
-     * options and required env vars for each step.
+     * Pure metadata — no runtime routing effect.
      */
-    provider?: string;
+    uses?: string[];
 }
 /**
- * Implementation functions keyed by state id.
- * Every state id in RecipeDefinition.states must have an entry here.
+ * Implementation functions keyed by step id.
+ * Every step id in WorkflowDefinition.steps must have an entry here.
  */
-export type StateImplementations<TConfig> = Record<string, (ctx: WorkflowContext<TConfig>) => Promise<StepResult>>;
+export type StepImplementations<TConfig> = Record<string, (ctx: WorkflowContext<TConfig>) => Promise<StepResult>>;
 /**
- * A complete wired recipe ready to run.
+ * A complete wired workflow ready to run.
  * Definition is pure data; implementations are the actual async functions.
  */
-export interface Recipe<TConfig = unknown> {
-    definition: RecipeDefinition;
-    implementations: StateImplementations<TConfig>;
+export interface Workflow<TConfig = unknown> {
+    definition: WorkflowDefinition;
+    implementations: StepImplementations<TConfig>;
 }
-/** Validation error describing a structural problem with a RecipeDefinition. */
-export interface DefinitionError {
+/** Validation error describing a structural problem with a WorkflowDefinition. */
+export interface WorkflowDefinitionError {
     code: "MISSING_INITIAL" | "UNKNOWN_TARGET" | "MISSING_IMPLEMENTATION";
     message: string;
     stateId?: string;
     targetId?: string;
 }
+/**
+ * Thrown by runWorkflow() when required provider environment variables are missing.
+ * Reports all missing vars at once — never fails on first missing var.
+ */
+export declare class WorkflowConfigError extends Error {
+    constructor(workflowName: string, issues: Array<{
+        stepId: string;
+        providerName: string;
+        missingEnvVars: string[];
+    }>);
+}
+export type { ProviderConfigSchema };
 //# sourceMappingURL=types.d.ts.map

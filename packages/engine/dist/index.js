@@ -1,10 +1,12 @@
+// WorkflowConfigError is a class, not just a type
+export { WorkflowConfigError } from "./types.js";
 // Runner
-export { runRecipe, createProviderRegistry, validateDefinition, createRecipe } from "./runner-recipe.js";
+export { runWorkflow, createProviderRegistry, validateWorkflow, createWorkflow } from "./runner-recipe.js";
 // Observer utilities
 export { CollectingObserver, CallbackObserver, composeObservers } from "./observer.js";
-// Built-in recipes
-export { triageRecipe, triageDefinition } from "./recipes/triage/index.js";
-export { implementRecipe, implementDefinition } from "./recipes/implement/index.js";
+// Built-in workflows
+export { triageWorkflow, triageDefinition } from "./recipes/triage/index.js";
+export { implementWorkflow, implementDefinition } from "./recipes/implement/index.js";
 export { getStepData } from "./recipes/triage/index.js";
 export { inMemoryDedupStore } from "./lib/dedup-store.js";
 export { fingerprintEvent } from "./lib/fingerprint.js";

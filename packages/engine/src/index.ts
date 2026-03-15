@@ -7,29 +7,33 @@ export type {
   ProviderRegistry,
   WorkflowResult,
   RunOptions,
-  Recipe,
-  RecipeDefinition,
-  StateDefinition,
-  StateImplementations,
-  DefinitionError,
+  Workflow,
+  WorkflowDefinition,
+  StepDefinition,
+  StepImplementations,
+  WorkflowDefinitionError,
   ExecutionEvent,
   RunObserver,
+  ProviderConfigSchema,
 } from "./types.js";
+
+// WorkflowConfigError is a class, not just a type
+export { WorkflowConfigError } from "./types.js";
 
 // Cache
 export type { CacheEntry, StepCache } from "./cache.js";
 
 // Runner
-export { runRecipe, createProviderRegistry, validateDefinition, createRecipe } from "./runner-recipe.js";
+export { runWorkflow, createProviderRegistry, validateWorkflow, createWorkflow } from "./runner-recipe.js";
 
 // Observer utilities
 export { CollectingObserver, CallbackObserver, composeObservers } from "./observer.js";
 
-// Built-in recipes
-export { triageRecipe, triageDefinition } from "./recipes/triage/index.js";
-export { implementRecipe, implementDefinition } from "./recipes/implement/index.js";
+// Built-in workflows
+export { triageWorkflow, triageDefinition } from "./recipes/triage/index.js";
+export { implementWorkflow, implementDefinition } from "./recipes/implement/index.js";
 
-// Recipe configs and types
+// Workflow configs and types
 export type { ImplementConfig } from "./recipes/implement/index.js";
 export type {
   TriageConfig,

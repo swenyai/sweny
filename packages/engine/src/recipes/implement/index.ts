@@ -5,11 +5,11 @@ import { fetchIssue } from "./steps/fetch-issue.js";
 import { implementFix } from "../../nodes/implement-fix.js";
 import { createPr } from "../../nodes/create-pr.js";
 import { sendNotification } from "../../nodes/notify.js";
-import { createRecipe } from "../../runner-recipe.js";
+import { createWorkflow } from "../../runner-recipe.js";
 
 export { implementDefinition };
 
-export const implementRecipe = createRecipe<ImplementConfig>(implementDefinition, {
+export const implementWorkflow = createWorkflow<ImplementConfig>(implementDefinition, {
   "verify-access": verifyAccess,
   "create-issue": fetchIssue,
   "implement-fix": implementFix,

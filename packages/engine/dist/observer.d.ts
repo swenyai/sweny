@@ -5,15 +5,15 @@ import type { ExecutionEvent, RunObserver } from "./types.js";
  *
  * @example
  * const obs = new CollectingObserver();
- * await runRecipe(recipe, config, providers, { observer: obs });
+ * await runWorkflow(workflow, config, providers, { observer: obs });
  * console.log(obs.events);
  */
 export declare class CollectingObserver implements RunObserver {
     readonly events: ExecutionEvent[];
     onEvent(event: ExecutionEvent): void;
-    /** All state:exit events, in execution order. */
-    get stateResults(): Array<Extract<ExecutionEvent, {
-        type: "state:exit";
+    /** All step:exit events, in execution order. */
+    get stepResults(): Array<Extract<ExecutionEvent, {
+        type: "step:exit";
     }>>;
 }
 /**

@@ -9,9 +9,9 @@ import { crossRepoCheck } from "./steps/cross-repo-check.js";
 import { implementFix } from "../../nodes/implement-fix.js";
 import { createPr } from "../../nodes/create-pr.js";
 import { sendNotification } from "../../nodes/notify.js";
-import { createRecipe } from "../../runner-recipe.js";
+import { createWorkflow } from "../../runner-recipe.js";
 export { triageDefinition };
-export const triageRecipe = createRecipe(triageDefinition, {
+export const triageWorkflow = createWorkflow(triageDefinition, {
     "dedup-check": dedupCheck,
     "verify-access": verifyAccess,
     "build-context": buildContext,

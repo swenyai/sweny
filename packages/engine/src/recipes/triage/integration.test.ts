@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
-import { runRecipe, createProviderRegistry } from "../../runner-recipe.js";
-import { triageRecipe } from "./index.js";
+import { runWorkflow, createProviderRegistry } from "../../runner-recipe.js";
+import { triageWorkflow } from "./index.js";
 import { defaultConfig, silentLogger } from "./test-helpers.js";
 import type { TriageConfig } from "./types.js";
 import type { ProviderRegistry, WorkflowResult } from "../../types.js";
@@ -181,7 +181,7 @@ describe("triage recipe integration", () => {
     config.dryRun = true;
     mockFsForInvestigation("implement");
 
-    const result = await runRecipe(triageRecipe, config, providers, {
+    const result = await runWorkflow(triageWorkflow, config, providers, {
       logger: silentLogger,
     });
 
@@ -227,7 +227,7 @@ describe("triage recipe integration", () => {
   it("handles skip recommendation: novelty-gate routes to notify", async () => {
     mockFsForInvestigation("skip");
 
-    const result = await runRecipe(triageRecipe, config, providers, {
+    const result = await runWorkflow(triageWorkflow, config, providers, {
       logger: silentLogger,
     });
 
@@ -281,7 +281,7 @@ describe("triage recipe integration", () => {
       branchName: "eng-123-fix",
     });
 
-    const result = await runRecipe(triageRecipe, config, providers, {
+    const result = await runWorkflow(triageWorkflow, config, providers, {
       logger: silentLogger,
     });
 
@@ -330,7 +330,7 @@ describe("triage recipe integration", () => {
     const observability = getProvider<{ verifyAccess: ReturnType<typeof vi.fn> }>(providers, "observability");
     observability.verifyAccess.mockRejectedValue(new Error("Datadog API key invalid"));
 
-    const result = await runRecipe(triageRecipe, config, providers, {
+    const result = await runWorkflow(triageWorkflow, config, providers, {
       logger: silentLogger,
     });
 
@@ -383,7 +383,7 @@ describe("triage recipe integration", () => {
     sourceControl.getChangedFiles.mockResolvedValue(["src/fix.ts"]);
     sourceControl.createPullRequest.mockResolvedValue(mockPr);
 
-    const result = await runRecipe(triageRecipe, config, providers, {
+    const result = await runWorkflow(triageWorkflow, config, providers, {
       logger: silentLogger,
     });
 

@@ -1,10 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://sweny.ai/schemas/recipe-definition.schema.json",
-  "title": "RecipeDefinition",
-  "description": "A pure-data, serializable workflow recipe definition for the Sweny engine.",
+  "$id": "https://sweny.ai/schemas/workflow-definition.schema.json",
+  "title": "WorkflowDefinition",
+  "description": "A pure-data, serializable workflow definition for the Sweny engine.",
   "type": "object",
-  "required": ["id", "version", "name", "initial", "states"],
+  "required": ["id", "version", "name", "initial", "steps"],
   "additionalProperties": false,
   "properties": {
     "id": {
@@ -24,24 +24,24 @@
     },
     "description": {
       "type": "string",
-      "description": "Optional description of what this recipe does."
+      "description": "Optional description of what this workflow does."
     },
     "initial": {
       "type": "string",
       "minLength": 1,
-      "description": "Id of the first state to execute. Must be a key in 'states'."
+      "description": "Id of the first step to execute. Must be a key in 'steps'."
     },
-    "states": {
+    "steps": {
       "type": "object",
-      "description": "All states keyed by their unique id. All routing must be explicit.",
+      "description": "All steps keyed by their unique id. All routing must be explicit.",
       "minProperties": 1,
       "additionalProperties": {
-        "$ref": "#/$defs/StateDefinition"
+        "$ref": "#/$defs/StepDefinition"
       }
     }
   },
   "$defs": {
-    "StateDefinition": {
+    "StepDefinition": {
       "type": "object",
       "required": ["phase"],
       "additionalProperties": false,
@@ -57,24 +57,28 @@
         },
         "critical": {
           "type": "boolean",
-          "description": "If true, any failure immediately aborts the entire recipe."
+          "description": "If true, any failure immediately aborts the entire workflow."
         },
         "next": {
           "type": "string",
           "minLength": 1,
-          "description": "Explicit default successor state id for linear chains. Use 'end' to stop successfully."
+          "description": "Explicit default successor step id for linear chains. Use 'end' to stop successfully."
         },
         "on": {
           "type": "object",
-          "description": "Outcome-based transitions. Keys: outcome string, status ('success'|'skipped'|'failed'), or '*' wildcard. Values: state id or 'end'.",
+          "description": "Outcome-based transitions. Keys: outcome string, status ('success'|'skipped'|'failed'), or '*' wildcard. Values: step id or 'end'.",
           "additionalProperties": {
             "type": "string",
             "minLength": 1
           }
         },
-        "provider": {
-          "type": "string",
-          "description": "Primary provider role used by this state (e.g. 'codingAgent', 'issueTracking'). Metadata only — for visual editor and documentation."
+        "uses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Provider roles this step depends on (e.g. ['observability', 'sourceControl']). Metadata only — for pre-flight validation and documentation."
         }
       }
     }

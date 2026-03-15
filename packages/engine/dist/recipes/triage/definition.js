@@ -4,12 +4,12 @@ export const triageDefinition = {
     name: "triage",
     description: "Investigate production issues, implement fixes, and report results",
     initial: "dedup-check",
-    states: {
+    steps: {
         // Pre-flight — deterministic dedup before any provider/LLM calls
         "dedup-check": {
             phase: "learn",
             description: "Check recent issue labels to skip duplicates before calling any external service.",
-            provider: "observability",
+            uses: ["observability"],
             next: "verify-access",
             on: { duplicate: "notify" },
         },
@@ -23,14 +23,14 @@ export const triageDefinition = {
         "build-context": {
             phase: "learn",
             description: "Query logs, aggregate error patterns, and build a structured context object for the AI investigator.",
-            provider: "observability",
+            uses: ["observability"],
             critical: true,
             next: "investigate",
         },
         investigate: {
             phase: "learn",
             description: "Run Claude Code against the codebase with the error context. Produces root-cause analysis and an implementation plan.",
-            provider: "codingAgent",
+            uses: ["codingAgent"],
             critical: true,
             next: "novelty-gate",
         },
@@ -38,7 +38,7 @@ export const triageDefinition = {
         "novelty-gate": {
             phase: "act",
             description: "Decide whether this error is novel (implement), already known (skip), or unactionable (failed).",
-            provider: "issueTracking",
+            uses: ["issueTracker"],
             on: {
                 skip: "notify",
                 implement: "create-issue",
@@ -48,7 +48,7 @@ export const triageDefinition = {
         "create-issue": {
             phase: "act",
             description: "Open a ticket in the issue tracker with the root-cause analysis and AI-generated description.",
-            provider: "issueTracking",
+            uses: ["issueTracker"],
             next: "cross-repo-check",
             on: { failed: "notify" },
         },
@@ -56,7 +56,7 @@ export const triageDefinition = {
         "cross-repo-check": {
             phase: "act",
             description: "Determine whether the fix belongs in this repo or a dependency. Dispatches a cross-repo workflow if needed.",
-            provider: "sourceControl",
+            uses: ["sourceControl"],
             on: {
                 local: "implement-fix",
                 dispatched: "notify",
@@ -66,14 +66,14 @@ export const triageDefinition = {
         "implement-fix": {
             phase: "act",
             description: "Write and commit the fix using Claude Code, guided by the investigation output.",
-            provider: "codingAgent",
+            uses: ["codingAgent"],
             next: "create-pr",
             on: { failed: "notify" },
         },
         "create-pr": {
             phase: "act",
             description: "Push the branch and open a pull request. Links the PR to the issue. Optionally enables auto-merge.",
-            provider: "sourceControl",
+            uses: ["sourceControl"],
             next: "notify",
             on: { failed: "notify" },
         },
@@ -81,7 +81,7 @@ export const triageDefinition = {
         notify: {
             phase: "report",
             description: "Send a structured summary to the configured notification channel (Slack, Teams, Discord, email, etc.).",
-            provider: "notification",
+            uses: ["notification"],
         },
     },
 };

@@ -16,8 +16,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { runRecipe, createProviderRegistry } from "../../runner-recipe.js";
-import { triageRecipe } from "./index.js";
+import { runWorkflow, createProviderRegistry } from "../../runner-recipe.js";
+import { triageWorkflow } from "./index.js";
 import type { TriageConfig } from "./types.js";
 
 // ── Prevent real git commands ────────────────────────────────────────────────
@@ -192,7 +192,7 @@ function buildConfig(fx: Fixture, overrides: Partial<TriageConfig> = {}): Triage
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("triageRecipe E2E (file providers + mock agent)", () => {
+describe("triageWorkflow E2E (file providers + mock agent)", () => {
   let fixture: Fixture;
 
   afterEach(() => fixture?.cleanup());
@@ -202,7 +202,7 @@ describe("triageRecipe E2E (file providers + mock agent)", () => {
     const providers = buildProviders(fixture);
     const config = buildConfig(fixture);
 
-    const result = await runRecipe(triageRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(triageWorkflow, config, providers, { logger: silentLogger });
 
     const accessStep = result.steps.find((s) => s.name === "verify-access");
     expect(accessStep?.result.status).toBe("success");
@@ -213,7 +213,7 @@ describe("triageRecipe E2E (file providers + mock agent)", () => {
     const providers = buildProviders(fixture);
     const config = buildConfig(fixture);
 
-    const result = await runRecipe(triageRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(triageWorkflow, config, providers, { logger: silentLogger });
 
     const ctxStep = result.steps.find((s) => s.name === "build-context");
     expect(ctxStep?.result.status).toBe("success");
@@ -226,7 +226,7 @@ describe("triageRecipe E2E (file providers + mock agent)", () => {
     const providers = buildProviders(fixture);
     const config = buildConfig(fixture);
 
-    const result = await runRecipe(triageRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(triageWorkflow, config, providers, { logger: silentLogger });
 
     const investigateStep = result.steps.find((s) => s.name === "investigate");
     expect(investigateStep?.result.status).toBe("success");
@@ -245,7 +245,7 @@ describe("triageRecipe E2E (file providers + mock agent)", () => {
     const providers = buildProviders(fixture);
     const config = buildConfig(fixture, { dryRun: true });
 
-    const result = await runRecipe(triageRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(triageWorkflow, config, providers, { logger: silentLogger });
 
     expect(result.status).toBe("completed");
 
@@ -269,7 +269,7 @@ describe("triageRecipe E2E (file providers + mock agent)", () => {
 
     const config = buildConfig(fixture, { dryRun: false });
 
-    const result = await runRecipe(triageRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(triageWorkflow, config, providers, { logger: silentLogger });
 
     expect(result.status).toBe("completed");
 
@@ -297,7 +297,7 @@ describe("triageRecipe E2E (file providers + mock agent)", () => {
 
     const config = buildConfig(fixture);
 
-    const result = await runRecipe(triageRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(triageWorkflow, config, providers, { logger: silentLogger });
 
     expect(result.status).toBe("failed");
     expect(result.steps).toHaveLength(2);
@@ -373,7 +373,7 @@ function buildProvidersWithCommits(fx: Fixture) {
   return registry;
 }
 
-describe("triageRecipe E2E — implement-fix → create-pr path", () => {
+describe("triageWorkflow E2E — implement-fix → create-pr path", () => {
   let fixture: Fixture;
 
   afterEach(() => fixture?.cleanup());
@@ -388,7 +388,7 @@ describe("triageRecipe E2E — implement-fix → create-pr path", () => {
 
     const config = buildConfig(fixture, { dryRun: false });
 
-    const result = await runRecipe(triageRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(triageWorkflow, config, providers, { logger: silentLogger });
 
     const createPrStep = result.steps.find((s) => s.name === "create-pr");
     expect(createPrStep).toBeDefined();
@@ -408,7 +408,7 @@ describe("triageRecipe E2E — implement-fix → create-pr path", () => {
 
     const config = buildConfig(fixture, { dryRun: false });
 
-    const result = await runRecipe(triageRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(triageWorkflow, config, providers, { logger: silentLogger });
 
     const createPrStep = result.steps.find((s) => s.name === "create-pr");
     expect(createPrStep?.result.status).toBe("success");
@@ -428,7 +428,7 @@ describe("triageRecipe E2E — implement-fix → create-pr path", () => {
 
     const config = buildConfig(fixture, { dryRun: false });
 
-    await runRecipe(triageRecipe, config, providers, { logger: silentLogger });
+    await runWorkflow(triageWorkflow, config, providers, { logger: silentLogger });
 
     // The file source control provider writes a .md file per PR
     const prsDir = path.join(fixture.outputDir, "prs");

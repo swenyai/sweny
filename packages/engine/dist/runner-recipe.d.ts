@@ -1,19 +1,24 @@
 import { createProviderRegistry } from "./registry.js";
-import { validateDefinition } from "./validate.js";
-import type { ProviderRegistry, Recipe, RecipeDefinition, RunOptions, StateImplementations, WorkflowResult } from "./types.js";
-export { validateDefinition };
+import { validateWorkflow } from "./validate.js";
+import type { ProviderRegistry, Workflow, WorkflowDefinition, RunOptions, StepImplementations, WorkflowResult } from "./types.js";
+import { WorkflowConfigError } from "./types.js";
+export { WorkflowConfigError };
+export { validateWorkflow };
 /**
- * Create a Recipe by combining a definition with implementations.
- * Validates the definition and that all state ids have implementations.
+ * Create a Workflow by combining a definition with implementations.
+ * Validates the definition and that all step ids have implementations.
  * Throws a descriptive Error if validation fails.
  */
-export declare function createRecipe<TConfig>(definition: RecipeDefinition, implementations: StateImplementations<TConfig>): Recipe<TConfig>;
+export declare function createWorkflow<TConfig>(definition: WorkflowDefinition, implementations: StepImplementations<TConfig>): Workflow<TConfig>;
 /**
- * Execute a Recipe as a state machine.
+ * Execute a Workflow as a state machine.
  *
- * Starts at recipe.definition.initial, executes each state, then follows
- * on: transitions to determine the next state. Stops when a transition
- * resolves to "end", there is no next state, or a critical state fails.
+ * Starts at workflow.definition.initial, executes each step, then follows
+ * on: transitions to determine the next step. Stops when a transition
+ * resolves to "end", there is no next step, or a critical step fails.
+ *
+ * Runs pre-flight config validation before any steps execute.
+ * Throws WorkflowConfigError if any required provider env vars are missing.
  *
  * Outcome resolution order (for on: routing):
  *   1. result.data?.outcome (string) — explicit outcome set by the implementation
@@ -21,6 +26,6 @@ export declare function createRecipe<TConfig>(definition: RecipeDefinition, impl
  *   3. "*"                  — wildcard default
  *   4. next                 — fallback for success/skipped
  */
-export declare function runRecipe<TConfig>(recipe: Recipe<TConfig>, config: TConfig, providers: ProviderRegistry, options?: RunOptions): Promise<WorkflowResult>;
+export declare function runWorkflow<TConfig>(workflow: Workflow<TConfig>, config: TConfig, providers: ProviderRegistry, options?: RunOptions): Promise<WorkflowResult>;
 export { createProviderRegistry };
 //# sourceMappingURL=runner-recipe.d.ts.map

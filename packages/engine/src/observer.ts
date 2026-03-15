@@ -6,7 +6,7 @@ import type { ExecutionEvent, RunObserver } from "./types.js";
  *
  * @example
  * const obs = new CollectingObserver();
- * await runRecipe(recipe, config, providers, { observer: obs });
+ * await runWorkflow(workflow, config, providers, { observer: obs });
  * console.log(obs.events);
  */
 export class CollectingObserver implements RunObserver {
@@ -16,9 +16,9 @@ export class CollectingObserver implements RunObserver {
     this.events.push(event);
   }
 
-  /** All state:exit events, in execution order. */
-  get stateResults(): Array<Extract<ExecutionEvent, { type: "state:exit" }>> {
-    return this.events.filter((e): e is Extract<ExecutionEvent, { type: "state:exit" }> => e.type === "state:exit");
+  /** All step:exit events, in execution order. */
+  get stepResults(): Array<Extract<ExecutionEvent, { type: "step:exit" }>> {
+    return this.events.filter((e): e is Extract<ExecutionEvent, { type: "step:exit" }> => e.type === "step:exit");
   }
 }
 

@@ -1,10 +1,10 @@
-import type { DefinitionError, RecipeDefinition } from "./types.js";
+import type { WorkflowDefinitionError, WorkflowDefinition } from "./types.js";
 /**
- * Validate a RecipeDefinition for structural correctness.
+ * Validate a WorkflowDefinition for structural correctness.
  * Returns an array of errors (empty array = valid).
- * Does NOT check implementations (use createRecipe for that).
+ * Does NOT check implementations (use createWorkflow for that).
  *
  * Pure function — no Node.js dependencies, safe for browser use.
  */
-export declare function validateDefinition(def: RecipeDefinition): DefinitionError[];
+export declare function validateWorkflow(def: WorkflowDefinition): WorkflowDefinitionError[];
 //# sourceMappingURL=validate.d.ts.map

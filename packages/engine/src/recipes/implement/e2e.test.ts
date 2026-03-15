@@ -9,9 +9,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { runRecipe } from "../../runner-recipe.js";
+import { runWorkflow } from "../../runner-recipe.js";
 import { createProviderRegistry } from "../../runner-recipe.js";
-import { implementRecipe } from "./index.js";
+import { implementWorkflow } from "./index.js";
 import { fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
 import { fileSourceControl } from "@sweny-ai/providers/source-control";
 import type { SourceControlProvider } from "@sweny-ai/providers/source-control";
@@ -115,7 +115,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir);
     const config = buildConfig(issueId, tmpDir);
 
-    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
 
     const verifyStep = result.steps.find((s) => s.name === "verify-access");
     expect(verifyStep?.result.status).toBe("success");
@@ -126,7 +126,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir);
     const config = buildConfig(issueId, tmpDir);
 
-    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
 
     const fetchStep = result.steps.find((s) => s.name === "create-issue");
     expect(fetchStep?.result.status).toBe("success");
@@ -138,7 +138,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir);
     const config = buildConfig(issueId, tmpDir);
 
-    await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+    await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
 
     const analysisDir = path.join(tmpDir, "analysis");
     const bestCandidatePath = path.join(analysisDir, "best-candidate.md");
@@ -153,7 +153,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir, onRun);
     const config = buildConfig(issueId, tmpDir);
 
-    await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+    await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
 
     expect(onRun).toHaveBeenCalled();
     const [callOpts] = onRun.mock.calls[0];
@@ -167,7 +167,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const config = buildConfig(issueId, tmpDir);
 
     // Should not throw
-    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
 
     // All learn steps should succeed; act steps may be skipped (no git changes)
     const verifyStep = result.steps.find((s) => s.name === "verify-access");
@@ -182,7 +182,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir);
     const config = buildConfig("LOCAL-999", tmpDir);
 
-    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
 
     // create-issue is in learn phase — failure aborts the workflow
     expect(result.status).toBe("failed");
@@ -203,7 +203,7 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     const providers = buildProviders(tmpDir, agentOnRun);
     const config = buildConfig(issueId, tmpDir);
 
-    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
 
     const implementStep = result.steps.find((s) => s.name === "implement-fix");
     expect(implementStep?.result.status).toBe("skipped");
@@ -292,7 +292,7 @@ describe("implement workflow e2e — create-pr path", () => {
     // Ensure prs dir is created (verifyAccess on sourceControl does this)
     await providers.get<SourceControlProvider>("sourceControl").verifyAccess();
 
-    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
 
     const implementStep = result.steps.find((s) => s.name === "implement-fix");
     expect(implementStep?.result.status).toBe("success");
@@ -308,7 +308,7 @@ describe("implement workflow e2e — create-pr path", () => {
 
     await providers.get<SourceControlProvider>("sourceControl").verifyAccess();
 
-    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
 
     const createPrStep = result.steps.find((s) => s.name === "create-pr");
     expect(createPrStep?.result.status).toBe("success");
@@ -328,7 +328,7 @@ describe("implement workflow e2e — create-pr path", () => {
 
     await providers.get<SourceControlProvider>("sourceControl").verifyAccess();
 
-    await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+    await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
 
     const prsDir = path.join(tmpDir, "prs");
     const prFiles = fs.readdirSync(prsDir).filter((f) => f.endsWith(".md"));
@@ -346,7 +346,7 @@ describe("implement workflow e2e — create-pr path", () => {
 
     await providers.get<SourceControlProvider>("sourceControl").verifyAccess();
 
-    const result = await runRecipe(implementRecipe, config, providers, { logger: silentLogger });
+    const result = await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
 
     const notifyStep = result.steps.find((s) => s.name === "notify");
     expect(notifyStep).toBeDefined();

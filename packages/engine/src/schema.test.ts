@@ -31,7 +31,7 @@ describe("recipe-definition.schema.json", () => {
       version: "1.0.0",
       name: "bad",
       initial: "a",
-      states: { a: { phase: "deploy" } }, // invalid phase
+      steps: { a: { phase: "deploy" } }, // invalid phase
     });
     expect(valid).toBe(false);
   });
@@ -42,7 +42,7 @@ describe("recipe-definition.schema.json", () => {
       version: "1.0.0",
       name: "bad",
       initial: "a",
-      states: {},
+      steps: {},
     });
     expect(valid).toBe(false);
   });
@@ -53,7 +53,7 @@ describe("recipe-definition.schema.json", () => {
       version: "not-semver",
       name: "bad",
       initial: "a",
-      states: { a: { phase: "learn" } },
+      steps: { a: { phase: "learn" } },
     });
     expect(valid).toBe(false);
   });

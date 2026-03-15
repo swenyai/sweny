@@ -1,16 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { triageDefinition } from "./definition.js";
-import { triageRecipe } from "./index.js";
+import { triageWorkflow } from "./index.js";
 import { implementDefinition } from "../implement/definition.js";
-import { implementRecipe } from "../implement/index.js";
+import { implementWorkflow } from "../implement/index.js";
 
-describe("recipe definition — single source of truth", () => {
-  it("triageRecipe.definition is the same object reference as triageDefinition", () => {
-    expect(triageRecipe.definition).toBe(triageDefinition);
+describe("workflow definition — single source of truth", () => {
+  it("triageWorkflow.definition is the same object reference as triageDefinition", () => {
+    expect(triageWorkflow.definition).toBe(triageDefinition);
   });
 
-  it("implementRecipe.definition is the same object reference as implementDefinition", () => {
-    expect(implementRecipe.definition).toBe(implementDefinition);
+  it("implementWorkflow.definition is the same object reference as implementDefinition", () => {
+    expect(implementWorkflow.definition).toBe(implementDefinition);
   });
 
   it("triageDefinition is JSON-serializable", () => {
