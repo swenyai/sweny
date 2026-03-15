@@ -1,7 +1,7 @@
 # SWEny Architecture & Design Philosophy
 
 > **This document is the source of truth for architectural decisions.**
-> Before changing how providers, recipes, or MCP integration work — read this first.
+> Before changing how providers, workflows, or MCP integration work — read this first.
 > It exists because the wrong patterns are easy to accidentally rebuild.
 
 ---
@@ -14,14 +14,14 @@ The value proposition:
 - **MCP handles what the agent CAN do** — tool access, data retrieval, service integration
 - **SWEny handles WHEN and IN WHAT ORDER the agent does it** — workflow, reliability, structure, cost control
 
-Neither replaces the other. A fully agentic system with MCP tools is powerful but unreliable. The recipe DAG makes it production-grade.
+Neither replaces the other. A fully agentic system with MCP tools is powerful but unreliable. The workflow DAG makes it production-grade.
 
 ---
 
 ## The Two Layers (Never Conflate These)
 
 ```
-┌─ ORCHESTRATION LAYER (sweny recipe DAG) ────────────────────────────┐
+┌─ ORCHESTRATION LAYER (sweny workflow DAG) ──────────────────────────┐
 │  Deterministic execution, structured data handoffs, step validation  │
 │                                                                       │
 │  dedup-check → verify-access → build-context → investigate           │
@@ -84,21 +84,29 @@ Users should **never** need to configure MCP servers manually for the providers 
 
 Category A — triggered by provider config (structured credentials already collected):
 
-| Provider | Trigger | MCP Server | Transport |
-|---|---|---|---|
-| GitHub source control | `source-control-provider: github` | `@modelcontextprotocol/server-github` | stdio (npx) |
-| GitHub Issues tracker | `issue-tracker-provider: github-issues` | `@modelcontextprotocol/server-github` | stdio (npx) |
-| GitLab | `source-control-provider: gitlab` | `@modelcontextprotocol/server-gitlab` | stdio (npx) |
-| Linear | `issue-tracker-provider: linear` | `https://mcp.linear.app/mcp` | HTTP |
-| Datadog | `observability-provider: datadog` | `https://mcp.datadoghq.com/api/unstable/mcp-server/mcp` | HTTP |
-| Sentry | `observability-provider: sentry` | `@sentry/mcp-server` | stdio (npx) |
+| Provider | Trigger | MCP Server | Transport | Auth |
+|---|---|---|---|---|
+| GitHub source control | `source-control-provider: github` | `@modelcontextprotocol/server-github` | stdio (npx) | `GITHUB_PERSONAL_ACCESS_TOKEN` |
+| GitHub Issues tracker | `issue-tracker-provider: github-issues` | `@modelcontextprotocol/server-github` | stdio (npx) | `GITHUB_PERSONAL_ACCESS_TOKEN` |
+| GitLab | `source-control-provider: gitlab` | `@modelcontextprotocol/server-gitlab` | stdio (npx) | `GITLAB_PERSONAL_ACCESS_TOKEN` |
+| Linear | `issue-tracker-provider: linear` | `https://mcp.linear.app/mcp` | HTTP | `Authorization: Bearer <token>` |
+| Datadog | `observability-provider: datadog` | `https://mcp.datadoghq.com/api/unstable/mcp-server/mcp` | HTTP | `DD_API_KEY` + `DD_APPLICATION_KEY` headers |
+| Sentry | `observability-provider: sentry` | `@sentry/mcp-server` | stdio (npx) | `SENTRY_ACCESS_TOKEN` env |
+| New Relic | `observability-provider: newrelic` | `https://mcp.newrelic.com/mcp/` (US) or `https://mcp.eu.newrelic.com/mcp/` (EU) | HTTP | `Api-Key: <key>` header |
 
-Category B — triggered by env var presence (zero new config required; set as workflow/shell secrets):
+Category B — requires **both** an explicit declaration in `workspace-tools` config **and** the credential env var to be set. Neither alone is sufficient.
 
-| Env Var | MCP Server | Notes |
-|---|---|---|
-| `SLACK_BOT_TOKEN` | `@modelcontextprotocol/server-slack` | Full API access; separate from notification webhook |
-| `NOTION_API_KEY` | `@notionhq/notion-mcp-server` | Runbooks, on-call docs, incident templates |
+```yaml
+# .sweny.yml or action input
+workspace-tools: slack,notion,pagerduty
+```
+
+| Tool name | Credential env var | MCP Server | Transport | Notes |
+|---|---|---|---|---|
+| `slack` | `SLACK_BOT_TOKEN` | `@modelcontextprotocol/server-slack` | stdio (npx) | Full bidirectional API; separate from notification webhook. Package deprecated upstream — override via `mcp-servers` when Slack ships a stable replacement. |
+| `notion` | `NOTION_TOKEN` (or `NOTION_API_KEY`) | `@notionhq/notion-mcp-server` | stdio (npx) | Runbooks, on-call docs, incident templates |
+| `pagerduty` | `PAGERDUTY_API_TOKEN` | `https://mcp.pagerduty.com/mcp` | HTTP | Auth: `Token token=<key>` (not Bearer) |
+| `monday` | `MONDAY_TOKEN` | `@mondaydotcomorg/monday-api-mcp` | stdio (npx) | Monday.com project/issue context |
 
 **Rules:**
 - HTTP transport is preferred for remote services — no local install, vendor-managed, scales
@@ -141,7 +149,7 @@ Not all providers are equal. Two fundamentally different kinds:
 
 ### Type A: Thin Orchestration Providers (Keep These)
 
-These are called by **recipe steps**, return **structured data** that subsequent steps depend on, and cannot be replaced by agent reasoning because the recipe needs typed return values.
+These are called by **workflow steps**, return **structured data** that subsequent steps depend on, and cannot be replaced by agent reasoning because the workflow needs typed return values.
 
 | Provider | Operation | Why It Must Be Deterministic |
 |---|---|---|
@@ -150,11 +158,13 @@ These are called by **recipe steps**, return **structured data** that subsequent
 | `sourceControl` | `createPullRequest()` | Returns `{ prUrl, prNumber }` used by notify |
 | `notification` | `send()` | Final output step, must succeed reliably |
 
-These providers are **thin** — 20–50 lines. They are not feature-complete API clients. They implement exactly what the recipe needs and nothing more.
+These providers are **thin** — 20–50 lines. They are not feature-complete API clients. They implement exactly what the workflow needs and nothing more.
+
+All Type A providers expose a `configSchema: ProviderConfigSchema` field declaring their required env vars. The engine validates this before step 1 fires (see Pre-flight Validation below).
 
 ### Type B: Agent Tool Access (Use MCP, Not Providers)
 
-These are accessed by **the agent during reasoning** to gather information, not by recipe steps that need structured returns. The agent calls them as MCP tools.
+These are accessed by **the agent during reasoning** to gather information, not by workflow steps that need structured returns. The agent calls them as MCP tools.
 
 | Category | Examples | Correct Approach |
 |---|---|---|
@@ -164,6 +174,41 @@ These are accessed by **the agent during reasoning** to gather information, not 
 | Docs/context | Confluence, Notion, web search | MCP server config |
 
 **Do not write custom providers for Type B.** Every custom observability provider we maintain is technical debt that becomes obsolete when the vendor ships an MCP server.
+
+---
+
+## Provider Config Schema + Pre-flight Validation
+
+Every Type A provider exposes a `configSchema` object alongside its implementation:
+
+```typescript
+interface ProviderConfigField {
+  key: string;         // logical name ("apiKey")
+  envVar: string;      // env var ("DD_API_KEY")
+  required?: boolean;  // default true
+  description: string;
+}
+interface ProviderConfigSchema {
+  role: string;        // provider role ("observability")
+  name: string;        // display name ("Datadog")
+  fields: ProviderConfigField[];
+}
+```
+
+`runWorkflow()` reads `uses: string[]` from each `StepDefinition`, looks up the registered provider, and collects all required fields. Before step 1 executes it throws `WorkflowConfigError` listing **all** missing env vars grouped by step — never one at a time.
+
+```
+WorkflowConfigError: Missing required configuration for workflow "triage":
+  step "build-context" (Datadog):  DD_API_KEY, DD_APPLICATION_KEY
+  step "create-issue" (Linear):    LINEAR_API_KEY
+  step "create-pr" (GitHub):       GITHUB_TOKEN
+```
+
+**Rules:**
+- Validate ALL steps upfront (even conditionally-reached ones) — you want to know about missing config before the 45-minute investigation step, not after
+- Steps without `uses` are skipped in pre-flight
+- Providers without `configSchema` are skipped (validation is additive/opt-in)
+- `required: false` fields are never validated (they have defaults)
 
 ---
 
@@ -182,29 +227,29 @@ Examples:
   "Did the tests pass?"                 → deterministic (CI exit code)
 ```
 
-**LLM judges are valid** for verification of reasoning-based outputs. They are wasteful for verification of retrievable facts. The recipe naturally separates these — deterministic steps validate facts, agent steps reason.
+**LLM judges are valid** for verification of reasoning-based outputs. They are wasteful for verification of retrievable facts. The workflow naturally separates these — deterministic steps validate facts, agent steps reason.
 
 ---
 
-## Why the Recipe DAG Still Matters in an Agentic World
+## Why the Workflow DAG Still Matters in an Agentic World
 
 You might ask: "Why not give the agent all MCP tools and a prompt saying do A→B→C?"
 
 Because:
 
-1. **Reliability** — LLMs claim to have done things they haven't. Recipe steps validate that each step actually succeeded before proceeding. "Create issue" returns the issue ID or throws — there's no ambiguity.
+1. **Reliability** — LLMs claim to have done things they haven't. Workflow steps validate that each step actually succeeded before proceeding. "Create issue" returns the issue ID or throws — there's no ambiguity.
 
 2. **Structured data handoffs** — The `create-issue` step returns `{ issueIdentifier: "ENG-123" }`. The `implement-fix` step uses that ID. Parsing "what issue did the agent create?" from natural language transcript is fragile and breaks when phrasing changes.
 
 3. **Cost control** — Investigation (50k+ tokens) and implementation (100k+ tokens) are bounded to their steps. They don't bleed into "create a Slack message." Without step boundaries, a single agent run for the full pipeline would cost 10-50x more.
 
-4. **Resumability** — If `create-pr` fails, the recipe retries just that step with full context from prior steps. A monolithic agent run restarts from scratch.
+4. **Resumability** — If `create-pr` fails, the workflow retries just that step with full context from prior steps. A monolithic agent run restarts from scratch.
 
 5. **Human gates** — The `novelty-gate` step can pause for human review before spending money on implementation. A monolithic agent has already done everything by the time you review.
 
-6. **Multi-model orchestration** — Investigation might use Claude Opus for deep reasoning; implementation uses Claude Sonnet for cost; PR description uses a template. The recipe can use different models/agents per step. One prompt = one model.
+6. **Multi-model orchestration** — Investigation might use Claude Opus for deep reasoning; implementation uses Claude Sonnet for cost; PR description uses a template. The workflow can use different models/agents per step. One prompt = one model.
 
-7. **Auditability** — "What did each step do and why?" is trivially answered by the recipe runner's step results. A monolithic agent transcript requires full parsing.
+7. **Auditability** — "What did each step do and why?" is trivially answered by the workflow runner's step results. A monolithic agent transcript requires full parsing.
 
 ---
 
@@ -257,10 +302,13 @@ To prevent scope creep and accidental rebuilding of the wrong patterns:
 
 | Decision | Rationale |
 |---|---|
-| Recipe DAG over monolithic agent prompt | Reliability, structured handoffs, cost control, human gates |
+| Workflow DAG over monolithic agent prompt | Reliability, structured handoffs, cost control, human gates |
 | MCP injection over custom observability providers | Zero maintenance, cross-agent, vendor-owned |
-| Thin native providers for create/update/notify | Structured returns required by recipe; 20–50 lines each |
+| Thin native providers for create/update/notify | Structured returns required by workflow; 20–50 lines each |
 | `npx -y` prohibited for stdio MCP | Runtime npm download: no lockfile, security risk, slow |
 | Streamable HTTP preferred over stdio for remote MCP | Current spec standard, supports auth, scales |
 | LLM for reasoning steps; deterministic for fact retrieval | Optimal cost/reliability tradeoff |
 | Cross-agent by default (no Claude lock-in) | Provider replaceability; business continuity |
+| `WorkflowDefinition` / `StepDefinition` over `RecipeDefinition` / `StateDefinition` | Accurate terminology; "recipe" implies linear/sequential, not a conditional state machine |
+| Provider `configSchema` + pre-flight validation | Fail fast with full error report before any LLM spend; self-documenting config requirements |
+| `StepDefinition.uses[]` over `provider: string` | Steps can depend on multiple provider roles; array is more expressive and future-proof |
