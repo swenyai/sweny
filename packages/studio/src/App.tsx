@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { triageDefinition, implementDefinition, validateDefinition } from "@sweny-ai/engine";
+import { triageDefinition, implementDefinition, validateWorkflow } from "@sweny-ai/engine";
 import { useEditorStore, useTemporalStore } from "./store/editor-store.js";
 import { RecipeViewer } from "./RecipeViewer.js";
 import { PropertiesPanel } from "./components/PropertiesPanel.js";
@@ -7,10 +7,10 @@ import { Toolbar } from "./components/Toolbar.js";
 import { DropOverlay } from "./components/DropOverlay.js";
 import { SimulationPanel } from "./components/SimulationPanel.js";
 import { LiveConnectPanel } from "./components/LiveConnectPanel.js";
-import type { RecipeDefinition } from "@sweny-ai/engine";
-import { readPermalinkFromHash, encodeRecipe } from "./lib/permalink.js";
+import type { WorkflowDefinition } from "@sweny-ai/engine";
+import { readPermalinkFromHash, encodeWorkflow } from "./lib/permalink.js";
 
-const PRESET_RECIPES: Array<{ id: string; name: string; definition: RecipeDefinition }> = [
+const PRESET_WORKFLOWS: Array<{ id: string; name: string; definition: WorkflowDefinition }> = [
   { id: "triage", name: "triage", definition: triageDefinition },
   { id: "implement", name: "implement", definition: implementDefinition },
 ];
@@ -21,41 +21,41 @@ export function App() {
   const mode = useEditorStore((s) => s.mode);
   const [activeId, setActiveId] = useState("triage");
   const [showImport, setShowImport] = useState(false);
-  const validationErrors = useMemo(() => validateDefinition(definition), [definition]);
+  const validationErrors = useMemo(() => validateWorkflow(definition), [definition]);
 
-  // On mount, load recipe from URL hash if present
+  // On mount, load workflow from URL hash if present
   useEffect(() => {
     const fromLink = readPermalinkFromHash();
     if (fromLink) {
       setDefinition(fromLink);
-      // Clear undo history so the user doesn't undo back to the default recipe
+      // Clear undo history so the user doesn't undo back to the default workflow
       useEditorStore.temporal.getState().clear();
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep URL hash in sync as user edits (use replaceState to avoid polluting history)
   useEffect(() => {
-    const encoded = encodeRecipe(definition);
+    const encoded = encodeWorkflow(definition);
     const newHash = `#def=${encoded}`;
     if (window.location.hash !== newHash) {
       window.history.replaceState(null, "", newHash);
     }
   }, [definition]);
 
-  const handleRecipeChange = useCallback(
+  const handleWorkflowChange = useCallback(
     (id: string) => {
-      const recipe = PRESET_RECIPES.find((r) => r.id === id);
-      if (!recipe) return;
+      const workflow = PRESET_WORKFLOWS.find((w) => w.id === id);
+      if (!workflow) return;
       const { clear } = useEditorStore.temporal.getState();
       clear(); // reset undo history
-      setDefinition(recipe.definition);
+      setDefinition(workflow.definition);
       setActiveId(id);
     },
     [setDefinition],
   );
 
   const handleDropImport = useCallback(
-    (def: RecipeDefinition) => {
+    (def: WorkflowDefinition) => {
       useEditorStore.temporal.getState().clear();
       setDefinition(def);
     },
@@ -67,7 +67,7 @@ export function App() {
     function onKeyDown(e: KeyboardEvent) {
       const meta = e.metaKey || e.ctrlKey;
       const { undo, redo } = useEditorStore.temporal.getState();
-      const { selection, deleteState, setSelection } = useEditorStore.getState();
+      const { selection, deleteStep, setSelection } = useEditorStore.getState();
 
       if (meta && e.key === "o") {
         e.preventDefault();
@@ -88,9 +88,9 @@ export function App() {
         setSelection(null);
         return;
       }
-      if ((e.key === "Backspace" || e.key === "Delete") && selection?.kind === "state") {
-        if (window.confirm(`Delete state "${selection.id}"?`)) {
-          deleteState(selection.id);
+      if ((e.key === "Backspace" || e.key === "Delete") && selection?.kind === "step") {
+        if (window.confirm(`Delete step "${selection.id}"?`)) {
+          deleteStep(selection.id);
         }
       }
     }
@@ -101,9 +101,9 @@ export function App() {
   return (
     <div style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column" }}>
       <Toolbar
-        availableRecipes={PRESET_RECIPES}
-        activeRecipeId={activeId}
-        onRecipeChange={handleRecipeChange}
+        availableWorkflows={PRESET_WORKFLOWS}
+        activeWorkflowId={activeId}
+        onWorkflowChange={handleWorkflowChange}
         showImport={showImport}
         onShowImportChange={setShowImport}
       />

@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { validateDefinition } from "@sweny-ai/engine";
-import type { RecipeDefinition } from "@sweny-ai/engine";
+import { validateWorkflow } from "@sweny-ai/engine";
+import type { WorkflowDefinition } from "@sweny-ai/engine";
 
 interface DropOverlayProps {
-  onImport(def: RecipeDefinition): void;
+  onImport(def: WorkflowDefinition): void;
 }
 
 export function DropOverlay({ onImport }: DropOverlayProps) {
@@ -37,12 +37,12 @@ export function DropOverlay({ onImport }: DropOverlayProps) {
       reader.onload = (ev) => {
         try {
           const parsed = JSON.parse(ev.target?.result as string);
-          const errors = validateDefinition(parsed);
+          const errors = validateWorkflow(parsed);
           if (errors.length > 0) {
             setError(errors.map((e) => `[${e.code}] ${e.message}`).join("\n"));
             return;
           }
-          onImport(parsed as RecipeDefinition);
+          onImport(parsed as WorkflowDefinition);
         } catch (e) {
           setError(`Parse error: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -77,7 +77,7 @@ export function DropOverlay({ onImport }: DropOverlayProps) {
         <div className="fixed inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 z-40 flex items-center justify-center pointer-events-none">
           <div className="bg-white rounded-lg px-8 py-6 shadow-xl text-center">
             <p className="text-2xl mb-1">📂</p>
-            <p className="font-semibold text-gray-800">Drop .recipe.json to import</p>
+            <p className="font-semibold text-gray-800">Drop .workflow.json to import</p>
           </div>
         </div>
       )}

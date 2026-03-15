@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { WorkflowPhase } from "@sweny-ai/engine";
+import type { WorkflowPhase, StepDefinition } from "@sweny-ai/engine";
 import { useEditorStore } from "../store/editor-store.js";
 
 export function PropertiesPanel() {
@@ -7,9 +7,9 @@ export function PropertiesPanel() {
     definition,
     selection,
     setSelection,
-    updateState,
-    updateRecipeMeta,
-    deleteState,
+    updateStep,
+    updateWorkflowMeta,
+    deleteStep,
     setInitial,
     addTransition,
     updateTransitionOutcome,
@@ -17,24 +17,24 @@ export function PropertiesPanel() {
     deleteTransition,
   } = useEditorStore();
 
-  const stateIds = Object.keys(definition.states);
+  const stepIds = Object.keys(definition.steps);
 
-  if (selection?.kind === "state") {
+  if (selection?.kind === "step") {
     const { id } = selection;
-    const state = definition.states[id];
-    if (!state) return <EmptyPanel />;
+    const step = definition.steps[id];
+    if (!step) return <EmptyPanel />;
     return (
-      <StatePanel
+      <StepPanel
         key={id}
         id={id}
-        state={state}
-        stateIds={stateIds}
+        step={step}
+        stepIds={stepIds}
         isInitial={definition.initial === id}
-        updateState={updateState}
+        updateStep={updateStep}
         setInitial={setInitial}
-        deleteState={(sid) => {
-          if (window.confirm(`Delete state "${sid}"?`)) {
-            deleteState(sid);
+        deleteStep={(sid) => {
+          if (window.confirm(`Delete step "${sid}"?`)) {
+            deleteStep(sid);
           }
         }}
         addTransition={addTransition}
@@ -47,12 +47,12 @@ export function PropertiesPanel() {
 
   if (selection?.kind === "edge") {
     const { source, outcome } = selection;
-    const sourceState = definition.states[source];
+    const sourceStep = definition.steps[source];
     let currentTarget = "";
     if (outcome === "→") {
-      currentTarget = sourceState?.next ?? "";
+      currentTarget = sourceStep?.next ?? "";
     } else {
-      currentTarget = sourceState?.on?.[outcome] ?? "";
+      currentTarget = sourceStep?.on?.[outcome] ?? "";
     }
     return (
       <EdgePanel
@@ -60,7 +60,7 @@ export function PropertiesPanel() {
         source={source}
         outcome={outcome}
         currentTarget={currentTarget}
-        stateIds={stateIds}
+        stepIds={stepIds}
         updateTransitionOutcome={updateTransitionOutcome}
         updateTransitionTarget={updateTransitionTarget}
         deleteTransition={(src, out) => {
@@ -71,27 +71,27 @@ export function PropertiesPanel() {
     );
   }
 
-  // Nothing selected — recipe meta
-  return <RecipeMetaPanel definition={definition} updateRecipeMeta={updateRecipeMeta} />;
+  // Nothing selected — workflow meta
+  return <WorkflowMetaPanel definition={definition} updateWorkflowMeta={updateWorkflowMeta} />;
 }
 
 // ─────────────────────────────────────────────
-// Recipe meta panel
+// Workflow meta panel
 // ─────────────────────────────────────────────
 
-interface RecipeMetaPanelProps {
+interface WorkflowMetaPanelProps {
   definition: ReturnType<typeof useEditorStore.getState>["definition"];
-  updateRecipeMeta: ReturnType<typeof useEditorStore.getState>["updateRecipeMeta"];
+  updateWorkflowMeta: ReturnType<typeof useEditorStore.getState>["updateWorkflowMeta"];
 }
 
-function RecipeMetaPanel({ definition, updateRecipeMeta }: RecipeMetaPanelProps) {
+function WorkflowMetaPanel({ definition, updateWorkflowMeta }: WorkflowMetaPanelProps) {
   const [name, setName] = useState(definition.name ?? "");
   const [description, setDescription] = useState(definition.description ?? "");
   const [version, setVersion] = useState(definition.version ?? "");
 
   return (
     <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
-      <h2 className="font-semibold text-gray-800 mb-3 text-sm">Recipe</h2>
+      <h2 className="font-semibold text-gray-800 mb-3 text-sm">Workflow</h2>
 
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">ID</label>
@@ -104,7 +104,7 @@ function RecipeMetaPanel({ definition, updateRecipeMeta }: RecipeMetaPanelProps)
           className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onBlur={() => updateRecipeMeta({ name })}
+          onBlur={() => updateWorkflowMeta({ name })}
         />
       </div>
 
@@ -115,7 +115,7 @@ function RecipeMetaPanel({ definition, updateRecipeMeta }: RecipeMetaPanelProps)
           rows={3}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          onBlur={() => updateRecipeMeta({ description })}
+          onBlur={() => updateWorkflowMeta({ description })}
         />
       </div>
 
@@ -125,12 +125,12 @@ function RecipeMetaPanel({ definition, updateRecipeMeta }: RecipeMetaPanelProps)
           className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
           value={version}
           onChange={(e) => setVersion(e.target.value)}
-          onBlur={() => updateRecipeMeta({ version })}
+          onBlur={() => updateWorkflowMeta({ version })}
         />
       </div>
 
       <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Initial state</label>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Initial step</label>
         <code className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded block">{definition.initial}</code>
       </div>
 
@@ -140,44 +140,42 @@ function RecipeMetaPanel({ definition, updateRecipeMeta }: RecipeMetaPanelProps)
 }
 
 // ─────────────────────────────────────────────
-// State panel
+// Step panel
 // ─────────────────────────────────────────────
 
-import type { StateDefinition } from "@sweny-ai/engine";
-
-interface StatePanelProps {
+interface StepPanelProps {
   id: string;
-  state: StateDefinition;
-  stateIds: string[];
+  step: StepDefinition;
+  stepIds: string[];
   isInitial: boolean;
-  updateState: (id: string, patch: Partial<StateDefinition>) => void;
+  updateStep: (id: string, patch: Partial<StepDefinition>) => void;
   setInitial: (id: string) => void;
-  deleteState: (id: string) => void;
+  deleteStep: (id: string) => void;
   addTransition: (sourceId: string, outcome: string, targetId: string) => void;
   updateTransitionOutcome: (sourceId: string, oldOutcome: string, newOutcome: string) => void;
   updateTransitionTarget: (sourceId: string, outcome: string, newTarget: string) => void;
   deleteTransition: (sourceId: string, outcome: string) => void;
 }
 
-function StatePanel({
+function StepPanel({
   id,
-  state,
-  stateIds,
+  step,
+  stepIds,
   isInitial,
-  updateState,
+  updateStep,
   setInitial,
-  deleteState,
+  deleteStep,
   addTransition,
   updateTransitionOutcome,
   updateTransitionTarget,
   deleteTransition,
-}: StatePanelProps) {
+}: StepPanelProps) {
   const [newOutcome, setNewOutcome] = useState("");
-  const [newTarget, setNewTarget] = useState(stateIds[0] ?? "");
-  const [description, setDescription] = useState(state.description ?? "");
+  const [newTarget, setNewTarget] = useState(stepIds[0] ?? "");
+  const [description, setDescription] = useState(step.description ?? "");
 
-  const targetOptions = [...stateIds, "end"];
-  const onEntries = Object.entries(state.on ?? {});
+  const targetOptions = [...stepIds, "end"];
+  const onEntries = Object.entries(step.on ?? {});
 
   function handleAddTransition(e: React.FormEvent) {
     e.preventDefault();
@@ -188,7 +186,7 @@ function StatePanel({
 
   return (
     <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
-      <h2 className="font-semibold text-gray-800 mb-3 text-sm">State</h2>
+      <h2 className="font-semibold text-gray-800 mb-3 text-sm">Step</h2>
 
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">ID</label>
@@ -199,8 +197,8 @@ function StatePanel({
         <label className="block text-xs font-medium text-gray-600 mb-1">Phase</label>
         <select
           className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
-          value={state.phase}
-          onChange={(e) => updateState(id, { phase: e.target.value as WorkflowPhase })}
+          value={step.phase}
+          onChange={(e) => updateStep(id, { phase: e.target.value as WorkflowPhase })}
         >
           <option value="learn">learn</option>
           <option value="act">act</option>
@@ -212,8 +210,8 @@ function StatePanel({
         <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
           <input
             type="checkbox"
-            checked={state.critical ?? false}
-            onChange={(e) => updateState(id, { critical: e.target.checked })}
+            checked={step.critical ?? false}
+            onChange={(e) => updateStep(id, { critical: e.target.checked })}
           />
           Critical
         </label>
@@ -225,7 +223,7 @@ function StatePanel({
           className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          onBlur={() => updateState(id, { description })}
+          onBlur={() => updateStep(id, { description })}
         />
       </div>
 
@@ -233,10 +231,10 @@ function StatePanel({
         <label className="block text-xs font-medium text-gray-600 mb-1">Next (default)</label>
         <select
           className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
-          value={state.next ?? ""}
+          value={step.next ?? ""}
           onChange={(e) => {
             const val = e.target.value;
-            updateState(id, { next: val === "" ? undefined : val });
+            updateStep(id, { next: val === "" ? undefined : val });
           }}
         >
           <option value="">(none)</option>
@@ -296,13 +294,13 @@ function StatePanel({
           disabled={isInitial}
           className="px-3 py-1 rounded text-xs bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {isInitial ? "Initial state" : "Set as initial"}
+          {isInitial ? "Initial step" : "Set as initial"}
         </button>
         <button
-          onClick={() => deleteState(id)}
+          onClick={() => deleteStep(id)}
           className="px-3 py-1 rounded text-xs bg-red-600 text-white hover:bg-red-500"
         >
-          Delete state
+          Delete step
         </button>
       </div>
     </div>
@@ -374,7 +372,7 @@ interface EdgePanelProps {
   source: string;
   outcome: string;
   currentTarget: string;
-  stateIds: string[];
+  stepIds: string[];
   updateTransitionOutcome: (sourceId: string, oldOutcome: string, newOutcome: string) => void;
   updateTransitionTarget: (sourceId: string, outcome: string, newTarget: string) => void;
   deleteTransition: (sourceId: string, outcome: string) => void;
@@ -384,13 +382,13 @@ function EdgePanel({
   source,
   outcome,
   currentTarget,
-  stateIds,
+  stepIds,
   updateTransitionOutcome,
   updateTransitionTarget,
   deleteTransition,
 }: EdgePanelProps) {
   const [editOutcome, setEditOutcome] = useState(outcome);
-  const targetOptions = [...stateIds, "end"];
+  const targetOptions = [...stepIds, "end"];
 
   return (
     <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
@@ -450,7 +448,7 @@ function EdgePanel({
 function EmptyPanel() {
   return (
     <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
-      <p className="text-xs text-gray-400">State not found.</p>
+      <p className="text-xs text-gray-400">Step not found.</p>
     </div>
   );
 }

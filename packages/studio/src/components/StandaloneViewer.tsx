@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { ReactFlow, Background, Controls, MiniMap, useReactFlow, type NodeMouseHandler } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { RecipeDefinition } from "@sweny-ai/engine";
+import type { WorkflowDefinition } from "@sweny-ai/engine";
 import { StateNode } from "./StateNode.js";
 import { TransitionEdge } from "./TransitionEdge.js";
 import { layoutDefinition } from "../layout/elk.js";
@@ -14,9 +14,9 @@ const edgeTypes = { transitionEdge: TransitionEdge };
 
 const EMPTY_EXECUTION_STATE: Record<string, "current" | "success" | "failed" | "skipped"> = {};
 
-export interface RecipeViewerProps {
-  /** The RecipeDefinition to visualize. */
-  definition: RecipeDefinition;
+export interface WorkflowViewerProps {
+  /** The WorkflowDefinition to visualize. */
+  definition: WorkflowDefinition;
   /**
    * Highlight these state ids (e.g. from a live execution).
    * Keys are state ids, values are the execution status.
@@ -53,12 +53,12 @@ function AutoFitView({ nodeCount }: { nodeCount: number }) {
   return null;
 }
 
-export function RecipeViewer({
+export function WorkflowViewer({
   definition,
   executionState = EMPTY_EXECUTION_STATE,
   height = "100%",
   onNodeClick,
-}: RecipeViewerProps) {
+}: WorkflowViewerProps) {
   const [nodes, setNodes] = useState<StateNodeType[]>([]);
   const [edges, setEdges] = useState<Edge<TransitionEdgeData>[]>([]);
   const [loading, setLoading] = useState(true);

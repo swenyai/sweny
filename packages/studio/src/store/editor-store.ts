@@ -1,18 +1,18 @@
 import { create } from "zustand";
 import { temporal } from "zundo";
 import { produce } from "immer";
-import type { RecipeDefinition, StateDefinition, WorkflowPhase, ExecutionEvent, StepResult } from "@sweny-ai/engine";
+import type { WorkflowDefinition, StepDefinition, WorkflowPhase, ExecutionEvent, StepResult } from "@sweny-ai/engine";
 import { triageDefinition } from "@sweny-ai/engine";
 
 export type StudioMode = "design" | "simulate" | "live";
 
 export interface ExecutionSlice {
   mode: StudioMode;
-  // Which state is currently executing (entered but not yet exited)
-  currentStateId: string | null;
-  // Results of states that have completed
-  completedStates: Record<string, StepResult>;
-  // Overall recipe status
+  // Which step is currently executing (entered but not yet exited)
+  currentStepId: string | null;
+  // Results of steps that have completed
+  completedSteps: Record<string, StepResult>;
+  // Overall workflow status
   executionStatus: "idle" | "running" | "completed" | "failed" | "partial";
   // For live mode: connection info
   liveConnection: {
@@ -30,22 +30,22 @@ export interface ExecutionSlice {
 }
 
 // What the user has selected on the canvas
-export type Selection = { kind: "state"; id: string } | { kind: "edge"; source: string; outcome: string } | null;
+export type Selection = { kind: "step"; id: string } | { kind: "edge"; source: string; outcome: string } | null;
 
 export interface EditorState extends ExecutionSlice {
-  definition: RecipeDefinition;
+  definition: WorkflowDefinition;
   selection: Selection;
   isLayoutStale: boolean; // true when structure changed and ELK needs to re-run
 
   // Setters
-  setDefinition(def: RecipeDefinition): void;
+  setDefinition(def: WorkflowDefinition): void;
   setSelection(sel: Selection): void;
 
-  // State mutations (all affect `definition`)
-  updateRecipeMeta(patch: Partial<Pick<RecipeDefinition, "name" | "description" | "version">>): void;
-  addState(id: string, phase: WorkflowPhase): void;
-  deleteState(id: string): void;
-  updateState(id: string, patch: Partial<StateDefinition>): void;
+  // Step mutations (all affect `definition`)
+  updateWorkflowMeta(patch: Partial<Pick<WorkflowDefinition, "name" | "description" | "version">>): void;
+  addStep(id: string, phase: WorkflowPhase): void;
+  deleteStep(id: string): void;
+  updateStep(id: string, patch: Partial<StepDefinition>): void;
   setInitial(id: string): void;
 
   // Transition mutations
@@ -60,14 +60,14 @@ export interface EditorState extends ExecutionSlice {
 export const useEditorStore = create<EditorState>()(
   temporal(
     (set, _get) => ({
-      definition: triageDefinition as RecipeDefinition,
+      definition: triageDefinition as WorkflowDefinition,
       selection: null,
       isLayoutStale: false,
 
       // ExecutionSlice initial state
       mode: "design" as StudioMode,
-      currentStateId: null,
-      completedStates: {},
+      currentStepId: null,
+      completedSteps: {},
       executionStatus: "idle" as const,
       liveConnection: null,
 
@@ -81,20 +81,20 @@ export const useEditorStore = create<EditorState>()(
       applyEvent: (event: ExecutionEvent) =>
         set(
           produce((s: EditorState) => {
-            if (event.type === "recipe:start") {
-              s.currentStateId = null;
-              s.completedStates = {};
+            if (event.type === "workflow:start") {
+              s.currentStepId = null;
+              s.completedSteps = {};
               s.executionStatus = "running";
             }
-            if (event.type === "state:enter") {
-              s.currentStateId = event.stateId;
+            if (event.type === "step:enter") {
+              s.currentStepId = event.stepId;
             }
-            if (event.type === "state:exit") {
-              s.currentStateId = null;
-              s.completedStates[event.stateId] = event.result;
+            if (event.type === "step:exit") {
+              s.currentStepId = null;
+              s.completedSteps[event.stepId] = event.result;
             }
-            if (event.type === "recipe:end") {
-              s.currentStateId = null;
+            if (event.type === "workflow:end") {
+              s.currentStepId = null;
               s.executionStatus = event.status;
             }
           }),
@@ -103,8 +103,8 @@ export const useEditorStore = create<EditorState>()(
       resetExecution: () =>
         set(
           produce((s: EditorState) => {
-            s.currentStateId = null;
-            s.completedStates = {};
+            s.currentStepId = null;
+            s.completedSteps = {};
             s.executionStatus = "idle";
             s.liveConnection = null;
           }),
@@ -117,7 +117,7 @@ export const useEditorStore = create<EditorState>()(
           }),
         ),
 
-      setDefinition: (def: RecipeDefinition) =>
+      setDefinition: (def: WorkflowDefinition) =>
         set(
           produce((s: EditorState) => {
             s.definition = def;
@@ -139,7 +139,7 @@ export const useEditorStore = create<EditorState>()(
           }),
         ),
 
-      updateRecipeMeta: (patch: Partial<Pick<RecipeDefinition, "name" | "description" | "version">>) =>
+      updateWorkflowMeta: (patch: Partial<Pick<WorkflowDefinition, "name" | "description" | "version">>) =>
         set(
           produce((s: EditorState) => {
             if (patch.name !== undefined) s.definition.name = patch.name;
@@ -148,59 +148,59 @@ export const useEditorStore = create<EditorState>()(
           }),
         ),
 
-      addState: (id: string, phase: WorkflowPhase) =>
+      addStep: (id: string, phase: WorkflowPhase) =>
         set(
           produce((s: EditorState) => {
-            if (!id || s.definition.states[id]) return;
-            s.definition.states[id] = { phase };
+            if (!id || s.definition.steps[id]) return;
+            s.definition.steps[id] = { phase };
             s.isLayoutStale = true;
           }),
         ),
 
-      deleteState: (id: string) =>
+      deleteStep: (id: string) =>
         set(
           produce((s: EditorState) => {
-            delete s.definition.states[id];
-            // Remove references in other states
-            for (const state of Object.values(s.definition.states)) {
-              if (state.next === id) {
-                delete state.next;
+            delete s.definition.steps[id];
+            // Remove references in other steps
+            for (const step of Object.values(s.definition.steps)) {
+              if (step.next === id) {
+                delete step.next;
               }
-              if (state.on) {
-                for (const outcome of Object.keys(state.on)) {
-                  if (state.on[outcome] === id) {
-                    delete state.on[outcome];
+              if (step.on) {
+                for (const outcome of Object.keys(step.on)) {
+                  if (step.on[outcome] === id) {
+                    delete step.on[outcome];
                   }
                 }
-                if (Object.keys(state.on).length === 0) {
-                  delete state.on;
+                if (Object.keys(step.on).length === 0) {
+                  delete step.on;
                 }
               }
             }
             // Fix initial if needed
             if (s.definition.initial === id) {
-              const remaining = Object.keys(s.definition.states);
+              const remaining = Object.keys(s.definition.steps);
               s.definition.initial = remaining[0] ?? "";
             }
-            // Clear selection if this state was selected
-            if (s.selection?.kind === "state" && s.selection.id === id) {
+            // Clear selection if this step was selected
+            if (s.selection?.kind === "step" && s.selection.id === id) {
               s.selection = null;
             }
             s.isLayoutStale = true;
           }),
         ),
 
-      updateState: (id: string, patch: Partial<StateDefinition>) =>
+      updateStep: (id: string, patch: Partial<StepDefinition>) =>
         set(
           produce((s: EditorState) => {
-            const state = s.definition.states[id];
-            if (!state) return;
+            const step = s.definition.steps[id];
+            if (!step) return;
             const structural = patch.next !== undefined || patch.on !== undefined;
-            if (patch.phase !== undefined) state.phase = patch.phase;
-            if (patch.description !== undefined) state.description = patch.description;
-            if (patch.critical !== undefined) state.critical = patch.critical;
-            if (patch.next !== undefined) state.next = patch.next;
-            if (patch.on !== undefined) state.on = patch.on;
+            if (patch.phase !== undefined) step.phase = patch.phase;
+            if (patch.description !== undefined) step.description = patch.description;
+            if (patch.critical !== undefined) step.critical = patch.critical;
+            if (patch.next !== undefined) step.next = patch.next;
+            if (patch.on !== undefined) step.on = patch.on;
             if (structural) {
               s.isLayoutStale = true;
             }
@@ -217,13 +217,13 @@ export const useEditorStore = create<EditorState>()(
       addTransition: (sourceId: string, outcome: string, targetId: string) =>
         set(
           produce((s: EditorState) => {
-            const state = s.definition.states[sourceId];
-            if (!state) return;
+            const step = s.definition.steps[sourceId];
+            if (!step) return;
             if (outcome === "→") {
-              state.next = targetId;
+              step.next = targetId;
             } else {
-              if (!state.on) state.on = {};
-              state.on[outcome] = targetId;
+              if (!step.on) step.on = {};
+              step.on[outcome] = targetId;
             }
             s.isLayoutStale = true;
           }),
@@ -232,29 +232,29 @@ export const useEditorStore = create<EditorState>()(
       updateTransitionOutcome: (sourceId: string, oldOutcome: string, newOutcome: string) =>
         set(
           produce((s: EditorState) => {
-            const state = s.definition.states[sourceId];
-            if (!state) return;
+            const step = s.definition.steps[sourceId];
+            if (!step) return;
 
             let target: string | undefined;
 
             if (oldOutcome === "→") {
-              target = state.next;
-              delete state.next;
+              target = step.next;
+              delete step.next;
             } else {
-              target = state.on?.[oldOutcome];
-              if (state.on) delete state.on[oldOutcome];
+              target = step.on?.[oldOutcome];
+              if (step.on) delete step.on[oldOutcome];
             }
 
             if (target === undefined) return;
 
             if (newOutcome === "→") {
-              state.next = target;
-              if (state.on && Object.keys(state.on).length === 0) {
-                delete state.on;
+              step.next = target;
+              if (step.on && Object.keys(step.on).length === 0) {
+                delete step.on;
               }
             } else {
-              if (!state.on) state.on = {};
-              state.on[newOutcome] = target;
+              if (!step.on) step.on = {};
+              step.on[newOutcome] = target;
             }
           }),
         ),
@@ -262,12 +262,12 @@ export const useEditorStore = create<EditorState>()(
       updateTransitionTarget: (sourceId: string, outcome: string, newTarget: string) =>
         set(
           produce((s: EditorState) => {
-            const state = s.definition.states[sourceId];
-            if (!state) return;
+            const step = s.definition.steps[sourceId];
+            if (!step) return;
             if (outcome === "→") {
-              state.next = newTarget;
-            } else if (state.on) {
-              state.on[outcome] = newTarget;
+              step.next = newTarget;
+            } else if (step.on) {
+              step.on[outcome] = newTarget;
             }
           }),
         ),
@@ -275,15 +275,15 @@ export const useEditorStore = create<EditorState>()(
       deleteTransition: (sourceId: string, outcome: string) =>
         set(
           produce((s: EditorState) => {
-            const state = s.definition.states[sourceId];
-            if (!state) return;
+            const step = s.definition.steps[sourceId];
+            if (!step) return;
             if (outcome === "→") {
-              delete state.next;
+              delete step.next;
             } else {
-              if (state.on) {
-                delete state.on[outcome];
-                if (Object.keys(state.on).length === 0) {
-                  delete state.on;
+              if (step.on) {
+                delete step.on[outcome];
+                if (Object.keys(step.on).length === 0) {
+                  delete step.on;
                 }
               }
             }

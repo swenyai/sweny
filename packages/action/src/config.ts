@@ -2,8 +2,8 @@ import * as core from "@actions/core";
 import type { MCPServerConfig } from "@sweny-ai/providers";
 
 export interface ActionConfig {
-  // Recipe selection
-  recipe: "triage" | "implement";
+  // Workflow selection
+  workflow: "triage" | "implement";
 
   // Claude authentication
   anthropicApiKey: string;
@@ -76,6 +76,10 @@ export interface ActionConfig {
   // MCP servers for agent tool access
   mcpServers: Record<string, MCPServerConfig>;
 
+  // Workspace tool integrations — explicit opt-in for Category B MCP servers.
+  // Supported: slack, notion, pagerduty, monday
+  workspaceTools: string[];
+
   // Runtime context
   repository: string;
   repositoryOwner: string;
@@ -83,9 +87,9 @@ export interface ActionConfig {
 }
 
 export function parseInputs(): ActionConfig {
-  const recipeRaw = core.getInput("recipe") || "triage";
+  const workflowRaw = core.getInput("workflow") || "triage";
   return {
-    recipe: (recipeRaw === "implement" ? "implement" : "triage") as "triage" | "implement",
+    workflow: (workflowRaw === "implement" ? "implement" : "triage") as "triage" | "implement",
     anthropicApiKey: core.getInput("anthropic-api-key"),
     claudeOauthToken: core.getInput("claude-oauth-token"),
 
@@ -145,6 +149,11 @@ export function parseInputs(): ActionConfig {
 
     mcpServers: parseMcpServers(core.getInput("mcp-servers")),
 
+    workspaceTools: (core.getInput("workspace-tools") || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+
     repository: process.env.GITHUB_REPOSITORY || "",
     repositoryOwner: process.env.GITHUB_REPOSITORY_OWNER || "",
     logFilePath: core.getInput("log-file-path"),
@@ -169,12 +178,15 @@ function parseMcpServers(json: string): Record<string, MCPServerConfig> {
   }
 }
 
+/** All recognized workspace tool names. Update here when adding a new Category B MCP server. */
+export const SUPPORTED_WORKSPACE_TOOLS = new Set(["slack", "notion", "pagerduty", "monday"] as const);
+
 export function validateInputs(config: ActionConfig): string[] {
   const errors: string[] = [];
 
-  // Implement recipe requires an issue identifier
-  if (config.recipe === "implement" && !config.linearIssue) {
-    errors.push("Missing required input: `linear-issue` is required when `recipe` is `implement`");
+  // Implement workflow requires an issue identifier
+  if (config.workflow === "implement" && !config.linearIssue) {
+    errors.push("Missing required input: `linear-issue` is required when `workflow` is `implement`");
   }
 
   // Auth: at least one required
@@ -305,6 +317,15 @@ export function validateInputs(config: ActionConfig): string[] {
       if (!config.geminiApiKey)
         errors.push("Missing required input: `gemini-api-key` is required when `coding-agent-provider` is `gemini`");
       break;
+  }
+
+  // Workspace tools: reject unknown names early
+  for (const tool of config.workspaceTools) {
+    if (!SUPPORTED_WORKSPACE_TOOLS.has(tool)) {
+      errors.push(
+        `Unknown workspace tool: "${tool}". Supported values: ${[...SUPPORTED_WORKSPACE_TOOLS].join(", ")}`,
+      );
+    }
   }
 
   // Enum validation

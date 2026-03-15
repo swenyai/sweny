@@ -13,8 +13,8 @@ import { StateNode, type StateNodeType, type StateNodeData, type NodeExecStatus 
 import { TransitionEdge, type TransitionEdgeData } from "./components/TransitionEdge.js";
 import { layoutDefinition } from "./layout/elk.js";
 import { useEditorStore } from "./store/editor-store.js";
-import { validateDefinition } from "@sweny-ai/engine";
-import type { RecipeDefinition, StepResult } from "@sweny-ai/engine";
+import { validateWorkflow } from "@sweny-ai/engine";
+import type { WorkflowDefinition, StepResult } from "@sweny-ai/engine";
 import type { StudioMode } from "./store/editor-store.js";
 
 const nodeTypes = { stateNode: StateNode };
@@ -22,17 +22,17 @@ const edgeTypes = { transitionEdge: TransitionEdge };
 
 function annotateEdgesWithErrors(
   edges: Edge<TransitionEdgeData>[],
-  definition: RecipeDefinition,
+  definition: WorkflowDefinition,
 ): Edge<TransitionEdgeData>[] {
-  const errors = validateDefinition(definition);
+  const errors = validateWorkflow(definition);
   const unknownTargets = new Set(
     errors
       .filter((e) => e.code === "UNKNOWN_TARGET" && e.stateId && e.targetId)
       .map((e) => `${e.stateId}::${e.targetId}`),
   );
   return edges.map((edge) => {
-    const sourceState = definition.states[edge.source];
-    const target = edge.data?.label === "→" ? sourceState?.next : sourceState?.on?.[edge.data?.label ?? ""];
+    const sourceStep = definition.steps[edge.source];
+    const target = edge.data?.label === "→" ? sourceStep?.next : sourceStep?.on?.[edge.data?.label ?? ""];
     const isError = !!target && unknownTargets.has(`${edge.source}::${target}`);
     return { ...edge, data: { ...(edge.data ?? { label: "" }), isError } };
   });
@@ -53,13 +53,13 @@ function nodeColor(node: RFNode): string {
 
 function getNodeExecStatus(
   nodeId: string,
-  currentStateId: string | null,
-  completedStates: Record<string, StepResult>,
+  currentStepId: string | null,
+  completedSteps: Record<string, StepResult>,
   mode: StudioMode,
 ): NodeExecStatus {
   if (mode === "design") return "pending";
-  if (nodeId === currentStateId) return "current";
-  const result = completedStates[nodeId];
+  if (nodeId === currentStepId) return "current";
+  const result = completedSteps[nodeId];
   if (!result) return "pending";
   return result.status; // "success" | "failed" | "skipped"
 }
@@ -72,8 +72,8 @@ export function RecipeViewer() {
     addTransition,
     isLayoutStale,
     markLayoutFresh,
-    currentStateId,
-    completedStates,
+    currentStepId,
+    completedSteps,
     mode,
   } = useEditorStore();
   const [nodes, setNodes] = useState<StateNodeType[]>([]);
@@ -90,10 +90,10 @@ export function RecipeViewer() {
         setNodes(
           n.map((node) => ({
             ...node,
-            selected: selection?.kind === "state" && selection.id === node.id,
+            selected: selection?.kind === "step" && selection.id === node.id,
             data: {
               ...node.data,
-              execStatus: getNodeExecStatus(node.id, currentStateId, completedStates, mode),
+              execStatus: getNodeExecStatus(node.id, currentStepId, completedSteps, mode),
             },
           })),
         );
@@ -118,17 +118,17 @@ export function RecipeViewer() {
     setNodes((prev) =>
       prev.map((node) => ({
         ...node,
-        selected: selection?.kind === "state" && selection.id === node.id,
+        selected: selection?.kind === "step" && selection.id === node.id,
         data: {
           ...node.data,
-          execStatus: getNodeExecStatus(node.id, currentStateId, completedStates, mode),
+          execStatus: getNodeExecStatus(node.id, currentStepId, completedSteps, mode),
         },
       })),
     );
-  }, [currentStateId, completedStates, mode, selection]);
+  }, [currentStepId, completedSteps, mode, selection]);
 
   function onNodeClick(_: React.MouseEvent, node: RFNode) {
-    setSelection({ kind: "state", id: node.id });
+    setSelection({ kind: "step", id: node.id });
   }
 
   function onEdgeClick(_: React.MouseEvent, edge: Edge) {

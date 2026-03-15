@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useStore } from "zustand";
-import type { WorkflowPhase } from "@sweny-ai/engine";
-import type { RecipeDefinition } from "@sweny-ai/engine";
+import type { WorkflowPhase, WorkflowDefinition } from "@sweny-ai/engine";
 import { useEditorStore, useTemporalStore } from "../store/editor-store.js";
 import type { StudioMode } from "../store/editor-store.js";
 import { ImportModal } from "./ImportModal.js";
@@ -9,17 +8,17 @@ import { exportAsTypescript } from "../lib/export-typescript.js";
 import { buildPermalinkUrl } from "../lib/permalink.js";
 
 interface ToolbarProps {
-  onRecipeChange(id: string): void;
-  activeRecipeId: string;
-  availableRecipes: Array<{ id: string; name: string }>;
+  onWorkflowChange(id: string): void;
+  activeWorkflowId: string;
+  availableWorkflows: Array<{ id: string; name: string }>;
   showImport: boolean;
   onShowImportChange(open: boolean): void;
 }
 
 export function Toolbar({
-  onRecipeChange,
-  activeRecipeId,
-  availableRecipes,
+  onWorkflowChange,
+  activeWorkflowId,
+  availableWorkflows,
   showImport,
   onShowImportChange,
 }: ToolbarProps) {
@@ -31,12 +30,12 @@ export function Toolbar({
 
   const definition = useEditorStore((s) => s.definition);
   const setDefinition = useEditorStore((s) => s.setDefinition);
-  const addState = useEditorStore((s) => s.addState);
+  const addStep = useEditorStore((s) => s.addStep);
   const mode = useEditorStore((s) => s.mode);
   const setMode = useEditorStore((s) => s.setMode);
   const resetExecution = useEditorStore((s) => s.resetExecution);
-  const [newStateId, setNewStateId] = useState("");
-  const [newStatePhase, setNewStatePhase] = useState<WorkflowPhase>("act");
+  const [newStepId, setNewStepId] = useState("");
+  const [newStepPhase, setNewStepPhase] = useState<WorkflowPhase>("act");
   const [copied, setCopied] = useState(false);
 
   function switchMode(newMode: StudioMode) {
@@ -46,7 +45,7 @@ export function Toolbar({
     }
   }
 
-  function handleImport(def: RecipeDefinition) {
+  function handleImport(def: WorkflowDefinition) {
     temporalStore.getState().clear();
     setDefinition(def);
   }
@@ -57,7 +56,7 @@ export function Toolbar({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${definition.id}.recipe.json`;
+    a.download = `${definition.id}.workflow.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -84,17 +83,17 @@ export function Toolbar({
       },
       () => {
         // Clipboard write failed (non-HTTPS or browser security policy).
-        // The URL bar already reflects the current recipe via the hash sync in App.tsx,
-        // so the user can still copy it manually. No additional action needed.
+        // The URL bar already reflects the current workflow via the hash sync in App.tsx,
+        // so the user can still copy it manually.
       },
     );
   }
 
-  function handleAddState(e: React.FormEvent) {
+  function handleAddStep(e: React.FormEvent) {
     e.preventDefault();
-    if (!newStateId.trim()) return;
-    addState(newStateId.trim(), newStatePhase);
-    setNewStateId("");
+    if (!newStepId.trim()) return;
+    addStep(newStepId.trim(), newStepPhase);
+    setNewStepId("");
   }
 
   return (
@@ -102,17 +101,17 @@ export function Toolbar({
       {/* Brand */}
       <span className="font-bold text-white mr-2">sweny studio</span>
 
-      {/* Recipe switcher */}
+      {/* Workflow switcher */}
       <div className="flex gap-1 mr-4">
-        {availableRecipes.map((r) => (
+        {availableWorkflows.map((w) => (
           <button
-            key={r.id}
-            onClick={() => onRecipeChange(r.id)}
+            key={w.id}
+            onClick={() => onWorkflowChange(w.id)}
             className={`px-3 py-1 rounded text-xs ${
-              activeRecipeId === r.id ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              activeWorkflowId === w.id ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"
             }`}
           >
-            {r.name}
+            {w.name}
           </button>
         ))}
       </div>
@@ -150,17 +149,17 @@ export function Toolbar({
 
       <div className="flex-1" />
 
-      {/* Add state */}
-      <form onSubmit={handleAddState} className="flex gap-1">
+      {/* Add step */}
+      <form onSubmit={handleAddStep} className="flex gap-1">
         <input
-          value={newStateId}
-          onChange={(e) => setNewStateId(e.target.value)}
-          placeholder="state-id"
+          value={newStepId}
+          onChange={(e) => setNewStepId(e.target.value)}
+          placeholder="step-id"
           className="px-2 py-1 rounded bg-gray-700 text-white text-xs w-28 placeholder-gray-400"
         />
         <select
-          value={newStatePhase}
-          onChange={(e) => setNewStatePhase(e.target.value as WorkflowPhase)}
+          value={newStepPhase}
+          onChange={(e) => setNewStepPhase(e.target.value as WorkflowPhase)}
           className="px-1 py-1 rounded bg-gray-700 text-white text-xs"
         >
           <option value="learn">learn</option>
@@ -168,7 +167,7 @@ export function Toolbar({
           <option value="report">report</option>
         </select>
         <button type="submit" className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-xs">
-          + State
+          + Step
         </button>
       </form>
 

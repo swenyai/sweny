@@ -1,6 +1,6 @@
 import ELK, { type ElkNode, type ElkExtendedEdge } from "elkjs";
 import type { Edge } from "@xyflow/react";
-import type { RecipeDefinition } from "@sweny-ai/engine";
+import type { WorkflowDefinition } from "@sweny-ai/engine";
 import type { StateNodeType } from "../components/StateNode.js";
 import type { TransitionEdgeData } from "../components/TransitionEdge.js";
 import { definitionToFlow, extractTransitions } from "../lib/definition-to-flow.js";
@@ -10,7 +10,7 @@ const elk = new ELK();
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 40;
 
-export async function layoutDefinition(def: RecipeDefinition): Promise<{
+export async function layoutDefinition(def: WorkflowDefinition): Promise<{
   nodes: StateNodeType[];
   edges: Edge<TransitionEdgeData>[];
 }> {

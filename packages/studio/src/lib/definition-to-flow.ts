@@ -1,4 +1,4 @@
-import type { RecipeDefinition } from "@sweny-ai/engine";
+import type { WorkflowDefinition } from "@sweny-ai/engine";
 import type { Edge } from "@xyflow/react";
 import type { NodeExecStatus, StateNodeData, StateNodeType } from "../components/StateNode.js";
 import type { TransitionEdgeData } from "../components/TransitionEdge.js";
@@ -10,22 +10,22 @@ export type FlowTransition = {
 };
 
 /**
- * Extract all transitions from a RecipeDefinition.
- * Skips edges where target is "end" — those mark terminal states.
+ * Extract all transitions from a WorkflowDefinition.
+ * Skips edges where target is "end" — those mark terminal steps.
  */
-export function extractTransitions(def: RecipeDefinition): FlowTransition[] {
+export function extractTransitions(def: WorkflowDefinition): FlowTransition[] {
   const transitions: FlowTransition[] = [];
 
-  for (const [stateId, state] of Object.entries(def.states)) {
+  for (const [stepId, step] of Object.entries(def.steps)) {
     // next field → default path edge
-    if (state.next && state.next !== "end") {
-      transitions.push({ source: stateId, target: state.next, label: "→" });
+    if (step.next && step.next !== "end") {
+      transitions.push({ source: stepId, target: step.next, label: "→" });
     }
     // on entries
-    if (state.on) {
-      for (const [outcome, target] of Object.entries(state.on)) {
+    if (step.on) {
+      for (const [outcome, target] of Object.entries(step.on)) {
         if (target !== "end") {
-          transitions.push({ source: stateId, target, label: outcome });
+          transitions.push({ source: stepId, target, label: outcome });
         }
       }
     }
@@ -35,18 +35,18 @@ export function extractTransitions(def: RecipeDefinition): FlowTransition[] {
 }
 
 /**
- * Determine if a state is terminal:
+ * Determine if a step is terminal:
  * - Has no `next` (or next is "end")
  * - Has no `on` entries (or all `on` targets are "end")
  */
-function isTerminal(stateId: string, def: RecipeDefinition): boolean {
-  const state = def.states[stateId];
-  if (!state) return false;
+function isTerminal(stepId: string, def: WorkflowDefinition): boolean {
+  const step = def.steps[stepId];
+  if (!step) return false;
 
-  const hasNext = state.next && state.next !== "end";
+  const hasNext = step.next && step.next !== "end";
   if (hasNext) return false;
 
-  const onEntries = Object.entries(state.on ?? {});
+  const onEntries = Object.entries(step.on ?? {});
   if (onEntries.length === 0) return true;
 
   // Terminal if ALL on targets are "end"
@@ -54,10 +54,10 @@ function isTerminal(stateId: string, def: RecipeDefinition): boolean {
 }
 
 /**
- * Convert a RecipeDefinition to un-positioned React Flow nodes and edges.
+ * Convert a WorkflowDefinition to un-positioned React Flow nodes and edges.
  * Positions are set to 0,0 — ELK will compute real positions.
  */
-export function definitionToFlow(def: RecipeDefinition): {
+export function definitionToFlow(def: WorkflowDefinition): {
   nodes: StateNodeType[];
   edges: Edge<TransitionEdgeData>[];
 } {
@@ -65,16 +65,16 @@ export function definitionToFlow(def: RecipeDefinition): {
 
   const defaultExecStatus: NodeExecStatus = "pending";
 
-  const nodes: StateNodeType[] = Object.entries(def.states).map(([stateId, state]) => {
+  const nodes: StateNodeType[] = Object.entries(def.steps).map(([stepId, step]) => {
     const data: StateNodeData = {
-      stateId,
-      state,
-      isInitial: stateId === def.initial,
-      isTerminal: isTerminal(stateId, def),
+      stateId: stepId,
+      state: step,
+      isInitial: stepId === def.initial,
+      isTerminal: isTerminal(stepId, def),
       execStatus: defaultExecStatus,
     };
     return {
-      id: stateId,
+      id: stepId,
       type: "stateNode" as const,
       position: { x: 0, y: 0 },
       data,

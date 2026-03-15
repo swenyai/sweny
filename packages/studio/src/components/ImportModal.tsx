@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { validateDefinition } from "@sweny-ai/engine";
-import type { RecipeDefinition } from "@sweny-ai/engine";
+import { validateWorkflow } from "@sweny-ai/engine";
+import type { WorkflowDefinition } from "@sweny-ai/engine";
 
 interface ImportModalProps {
-  onImport(def: RecipeDefinition): void;
+  onImport(def: WorkflowDefinition): void;
   onClose(): void;
 }
 
@@ -29,20 +29,19 @@ export function ImportModal({ onImport, onClose }: ImportModalProps) {
       typeof (parsed as Record<string, unknown>).version !== "string" ||
       typeof (parsed as Record<string, unknown>).name !== "string" ||
       typeof (parsed as Record<string, unknown>).initial !== "string" ||
-      typeof (parsed as Record<string, unknown>).states !== "object"
+      typeof (parsed as Record<string, unknown>).steps !== "object"
     ) {
       setError(
-        "JSON does not match RecipeDefinition shape: missing required fields (id, version, name, initial, states)",
+        "JSON does not match WorkflowDefinition shape: missing required fields (id, version, name, initial, steps)",
       );
       return;
     }
 
-    const def = parsed as RecipeDefinition;
+    const def = parsed as WorkflowDefinition;
 
-    // Use the engine's validateDefinition for graph integrity
-    const errors = validateDefinition(def);
+    const errors = validateWorkflow(def);
     if (errors.length > 0) {
-      setError("Recipe definition has errors:\n" + errors.map((e) => `  [${e.code}] ${e.message}`).join("\n"));
+      setError("Workflow definition has errors:\n" + errors.map((e) => `  [${e.code}] ${e.message}`).join("\n"));
       return;
     }
 
@@ -62,7 +61,7 @@ export function ImportModal({ onImport, onClose }: ImportModalProps) {
       <div className="bg-white rounded-lg shadow-xl w-[560px] max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-          <h2 className="font-semibold text-gray-800 text-sm">Import Recipe JSON</h2>
+          <h2 className="font-semibold text-gray-800 text-sm">Import Workflow JSON</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">
             ×
           </button>
@@ -71,8 +70,8 @@ export function ImportModal({ onImport, onClose }: ImportModalProps) {
         {/* Body */}
         <div className="flex-1 p-4 overflow-auto">
           <p className="text-xs text-gray-500 mb-2">
-            Paste a <code>RecipeDefinition</code> JSON object. Must have <code>id</code>, <code>version</code>,{" "}
-            <code>name</code>, <code>initial</code>, and <code>states</code>.
+            Paste a <code>WorkflowDefinition</code> JSON object. Must have <code>id</code>, <code>version</code>,{" "}
+            <code>name</code>, <code>initial</code>, and <code>steps</code>.
           </p>
           <textarea
             className="w-full h-64 font-mono text-xs border border-gray-300 rounded p-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -81,7 +80,7 @@ export function ImportModal({ onImport, onClose }: ImportModalProps) {
               setText(e.target.value);
               setError(null);
             }}
-            placeholder='{ "id": "my-recipe", "version": "1.0.0", ... }'
+            placeholder='{ "id": "my-workflow", "version": "1.0.0", ... }'
             spellCheck={false}
           />
           {error && (

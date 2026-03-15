@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import { runRecipe, triageRecipe, implementRecipe } from "@sweny-ai/engine";
+import { runWorkflow, triageWorkflow, implementWorkflow } from "@sweny-ai/engine";
 import type { TriageConfig, ImplementConfig, WorkflowResult } from "@sweny-ai/engine";
 import { parseInputs, validateInputs, ActionConfig } from "./config.js";
 import { createProviders } from "./providers/index.js";
@@ -29,12 +29,12 @@ async function run(): Promise<void> {
     };
 
     let result: WorkflowResult;
-    if (config.recipe === "implement") {
+    if (config.workflow === "implement") {
       const implementConfig = mapToImplementConfig(config);
-      result = await runRecipe(implementRecipe, implementConfig, providers, runOptions);
+      result = await runWorkflow(implementWorkflow, implementConfig, providers, runOptions);
     } else {
       const triageConfig = mapToTriageConfig(config);
-      result = await runRecipe(triageRecipe, triageConfig, providers, runOptions);
+      result = await runWorkflow(triageWorkflow, triageConfig, providers, runOptions);
     }
 
     setGitHubOutputs(result);
@@ -220,8 +220,9 @@ function buildAutoMcpServers(config: ActionConfig): Record<string, MCPServerConf
   }
 
   // Sentry MCP — inject when observability provider is sentry with auth token present.
+  // Note: @sentry/mcp-server reads SENTRY_ACCESS_TOKEN (not SENTRY_AUTH_TOKEN).
   if (config.observabilityProvider === "sentry" && obsCreds.authToken) {
-    const sentryEnv: Record<string, string> = { SENTRY_AUTH_TOKEN: obsCreds.authToken };
+    const sentryEnv: Record<string, string> = { SENTRY_ACCESS_TOKEN: obsCreds.authToken };
     // For self-hosted Sentry, override the host (hostname only, no protocol)
     if (obsCreds.baseUrl && obsCreds.baseUrl !== "https://sentry.io") {
       try {
@@ -238,33 +239,82 @@ function buildAutoMcpServers(config: ActionConfig): Record<string, MCPServerConf
     };
   }
 
-  // ── Category B: Environment-variable triggered (zero new action inputs required) ─
-
-  // Slack MCP — inject when SLACK_BOT_TOKEN is present in the environment.
-  // Bot token provides full bidirectional API access for agent queries/posts.
-  // This is separate from the one-way NOTIFICATION_WEBHOOK_URL used for triage summaries.
-  const slackBotToken = process.env.SLACK_BOT_TOKEN;
-  if (slackBotToken) {
-    const slackEnv: Record<string, string> = { SLACK_BOT_TOKEN: slackBotToken };
-    if (process.env.SLACK_TEAM_ID) slackEnv.SLACK_TEAM_ID = process.env.SLACK_TEAM_ID;
-    auto["slack"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-slack@latest"],
-      env: slackEnv,
+  // New Relic MCP — HTTP transport; region-aware endpoint.
+  // Header key is `Api-Key` (not `Authorization`), unique to New Relic's MCP.
+  // Trailing slash is intentional — New Relic's MCP spec requires it.
+  const nrApiKey = obsCreds.apiKey;
+  if (config.observabilityProvider === "newrelic" && nrApiKey) {
+    const nrEndpoint =
+      obsCreds.region === "eu" ? "https://mcp.eu.newrelic.com/mcp/" : "https://mcp.newrelic.com/mcp/";
+    auto["newrelic"] = {
+      type: "http",
+      url: nrEndpoint,
+      headers: { "Api-Key": nrApiKey },
     };
   }
 
-  // Notion MCP — inject when NOTION_API_KEY is present in the environment.
-  // Gives the agent read access to Notion pages/databases (runbooks, on-call docs, etc.)
-  const notionApiKey = process.env.NOTION_API_KEY;
-  if (notionApiKey) {
-    auto["notion"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@notionhq/notion-mcp-server@latest"],
-      env: { NOTION_API_KEY: notionApiKey },
-    };
+  // ── Category B: Workspace tools (explicit opt-in via workspace-tools input) ─
+  // Both the tool name must appear in workspaceTools AND the credential env var must be set.
+  // Users set credentials as workflow env vars: `env: { SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }} }`
+
+  const tools = new Set(config.workspaceTools);
+
+  // Slack MCP — requires workspace-tools includes "slack" AND SLACK_BOT_TOKEN is set.
+  // Note: @modelcontextprotocol/server-slack is deprecated upstream; users can override
+  // with their own `mcp-servers` entry once Slack publishes a stable replacement package.
+  // Bot token provides full bidirectional API access; separate from notification webhook.
+  if (tools.has("slack")) {
+    const slackBotToken = process.env.SLACK_BOT_TOKEN;
+    if (slackBotToken) {
+      const slackEnv: Record<string, string> = { SLACK_BOT_TOKEN: slackBotToken };
+      if (process.env.SLACK_TEAM_ID) slackEnv.SLACK_TEAM_ID = process.env.SLACK_TEAM_ID;
+      auto["slack"] = {
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-slack@latest"],
+        env: slackEnv,
+      };
+    }
+  }
+
+  // Notion MCP — requires workspace-tools includes "notion" AND NOTION_TOKEN is set.
+  // @notionhq/notion-mcp-server reads NOTION_TOKEN; NOTION_API_KEY accepted as fallback.
+  if (tools.has("notion")) {
+    const notionToken = process.env.NOTION_TOKEN || process.env.NOTION_API_KEY;
+    if (notionToken) {
+      auto["notion"] = {
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@notionhq/notion-mcp-server@latest"],
+        env: { NOTION_TOKEN: notionToken },
+      };
+    }
+  }
+
+  // PagerDuty MCP — requires workspace-tools includes "pagerduty" AND PAGERDUTY_API_TOKEN is set.
+  // HTTP remote endpoint; auth uses "Token token=<key>" (not "Bearer").
+  if (tools.has("pagerduty")) {
+    const pagerdutyToken = process.env.PAGERDUTY_API_TOKEN;
+    if (pagerdutyToken) {
+      auto["pagerduty"] = {
+        type: "http",
+        url: "https://mcp.pagerduty.com/mcp",
+        headers: { Authorization: `Token token=${pagerdutyToken}` },
+      };
+    }
+  }
+
+  // Monday.com MCP — requires workspace-tools includes "monday" AND MONDAY_TOKEN is set.
+  if (tools.has("monday")) {
+    const mondayToken = process.env.MONDAY_TOKEN;
+    if (mondayToken) {
+      auto["monday"] = {
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@mondaydotcomorg/monday-api-mcp@latest"],
+        env: { MONDAY_TOKEN: mondayToken },
+      };
+    }
   }
 
   const merged = { ...auto, ...config.mcpServers };

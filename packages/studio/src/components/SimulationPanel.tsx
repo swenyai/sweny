@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useEditorStore } from "../store/editor-store.js";
-import { createRecipe, runRecipe, createProviderRegistry } from "@sweny-ai/engine";
+import { createWorkflow, runWorkflow, createProviderRegistry } from "@sweny-ai/engine";
 import type { StepResult, RunObserver } from "@sweny-ai/engine";
 
 // A deferred promise that the UI resolves
@@ -15,11 +15,11 @@ class StepLatch {
 }
 
 function createMockImplementations(
-  stateIds: string[],
+  stepIds: string[],
   latchRef: React.MutableRefObject<StepLatch | null>,
 ): Record<string, () => Promise<StepResult>> {
   return Object.fromEntries(
-    stateIds.map((id) => [
+    stepIds.map((id) => [
       id,
       async (): Promise<StepResult> => {
         const latch = new StepLatch();
@@ -31,15 +31,15 @@ function createMockImplementations(
 }
 
 export function SimulationPanel() {
-  const { currentStateId, completedStates, executionStatus, definition, resetExecution } = useEditorStore();
+  const { currentStepId, completedSteps, executionStatus, definition, resetExecution } = useEditorStore();
   const [outcome, setOutcome] = useState<StepResult["status"]>("success");
   const [customOutcome, setCustomOutcome] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [simError, setSimError] = useState<string | null>(null);
   const activeLatchRef = useRef<StepLatch | null>(null);
 
-  const currentState = currentStateId ? definition.states[currentStateId] : null;
-  const completedList = Object.entries(completedStates);
+  const currentStep = currentStepId ? definition.steps[currentStepId] : null;
+  const completedList = Object.entries(completedSteps);
 
   function handleStart() {
     setSimError(null);
@@ -49,10 +49,10 @@ export function SimulationPanel() {
     const { definition: def, applyEvent } = useEditorStore.getState();
     resetExecution();
 
-    let recipe;
+    let workflow;
     try {
-      const mockImpls = createMockImplementations(Object.keys(def.states), activeLatchRef);
-      recipe = createRecipe(def, mockImpls);
+      const mockImpls = createMockImplementations(Object.keys(def.steps), activeLatchRef);
+      workflow = createWorkflow(def, mockImpls);
     } catch (err) {
       setSimError(err instanceof Error ? err.message : String(err));
       setIsRunning(false);
@@ -62,7 +62,7 @@ export function SimulationPanel() {
     const providers = createProviderRegistry();
     const observer: RunObserver = { onEvent: applyEvent };
 
-    runRecipe(recipe, {}, providers, { observer })
+    runWorkflow(workflow, {}, providers, { observer })
       .catch((err: unknown) => {
         setSimError(err instanceof Error ? err.message : String(err));
       })
@@ -80,102 +80,88 @@ export function SimulationPanel() {
     setCustomOutcome("");
   }
 
-  function handleReset() {
-    // Resolve any waiting latch so the async loop can exit cleanly
-    activeLatchRef.current?.complete({ status: "failed", reason: "Simulation reset" });
-    activeLatchRef.current = null;
-    resetExecution();
-    setIsRunning(false);
-    setSimError(null);
-  }
+  const statusColor = {
+    idle: "text-gray-400",
+    running: "text-blue-400",
+    completed: "text-green-400",
+    failed: "text-red-400",
+    partial: "text-yellow-400",
+  }[executionStatus];
 
   return (
-    <div className="border-t border-gray-200 bg-gray-50 px-4 py-3 flex-shrink-0">
-      {/* Header row */}
-      <div className="flex items-center gap-3 mb-2">
-        <span className="text-xs font-semibold text-gray-700">
-          {executionStatus === "idle" ? "Simulation" : `Simulating: ${definition.name}`}
-        </span>
-        {executionStatus !== "idle" && (
-          <span
-            className={`text-xs px-2 py-0.5 rounded ${
-              executionStatus === "running"
-                ? "bg-blue-100 text-blue-700"
-                : executionStatus === "completed"
-                  ? "bg-green-100 text-green-700"
-                  : "bg-red-100 text-red-700"
-            }`}
-          >
-            {executionStatus}
-          </span>
-        )}
-        <div className="flex-1" />
-        {executionStatus === "idle" ? (
+    <div className="border-t border-gray-200 bg-gray-50 p-3 flex gap-4 items-start text-sm flex-shrink-0">
+      {/* Controls */}
+      <div className="flex flex-col gap-2 min-w-40">
+        <div className="flex gap-2">
           <button
             onClick={handleStart}
             disabled={isRunning}
-            className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500 disabled:opacity-40"
+            className="px-3 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-500 disabled:opacity-50"
           >
-            ▶ Start
+            {isRunning ? "Running…" : "▶ Start"}
           </button>
-        ) : (
-          <button onClick={handleReset} className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500">
-            ↺ Reset
-          </button>
+        </div>
+
+        {currentStepId && (
+          <div className="flex flex-col gap-1">
+            <select
+              value={outcome}
+              onChange={(e) => setOutcome(e.target.value as StepResult["status"])}
+              className="border border-gray-300 rounded px-2 py-1 text-xs"
+            >
+              <option value="success">success</option>
+              <option value="skipped">skipped</option>
+              <option value="failed">failed</option>
+            </select>
+            <input
+              value={customOutcome}
+              onChange={(e) => setCustomOutcome(e.target.value)}
+              placeholder="custom outcome (optional)"
+              className="border border-gray-300 rounded px-2 py-1 text-xs"
+            />
+            <button
+              onClick={handleStep}
+              className="px-3 py-1 rounded bg-green-600 text-white text-xs hover:bg-green-500"
+            >
+              → Step
+            </button>
+          </div>
         )}
       </div>
 
-      {/* Error display */}
-      {simError && <p className="text-xs text-red-600 mb-2">{simError}</p>}
+      {/* Current step */}
+      <div className="flex-1 min-w-0">
+        <div className={`text-xs font-medium mb-1 ${statusColor}`}>Status: {executionStatus}</div>
 
-      {/* Current state + step controls */}
-      {currentState && currentStateId && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-600">
-            Current: <code className="bg-gray-100 px-1 rounded">{currentStateId}</code>
-            <span className="ml-1 text-gray-400">({currentState.phase})</span>
-          </span>
-          <div className="flex-1" />
-          <input
-            value={customOutcome}
-            onChange={(e) => setCustomOutcome(e.target.value)}
-            placeholder="outcome (optional)"
-            className="px-2 py-1 text-xs border border-gray-300 rounded w-36"
-          />
-          <select
-            value={outcome}
-            onChange={(e) => setOutcome(e.target.value as StepResult["status"])}
-            className="px-2 py-1 text-xs border border-gray-300 rounded"
-          >
-            <option value="success">success</option>
-            <option value="skipped">skipped</option>
-            <option value="failed">failed</option>
-          </select>
-          <button onClick={handleStep} className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-500">
-            → Step
-          </button>
-        </div>
-      )}
+        {currentStepId && (
+          <div className="text-xs text-blue-600 font-medium mb-1 animate-pulse">
+            ● Waiting at: <code>{currentStepId}</code>
+            {currentStep && <span className="text-gray-400 ml-1">({currentStep.phase})</span>}
+          </div>
+        )}
 
-      {/* Completed list */}
-      {completedList.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-2">
-          {completedList.map(([id, result]) => (
-            <span
-              key={id}
-              className={`text-xs px-1.5 py-0.5 rounded ${
-                result.status === "success"
-                  ? "bg-green-100 text-green-700"
-                  : result.status === "failed"
-                    ? "bg-red-100 text-red-700"
-                    : "bg-gray-100 text-gray-600"
-              }`}
-            >
-              {id} {result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "−"}
-            </span>
-          ))}
-        </div>
-      )}
+        {simError && <div className="text-xs text-red-600 bg-red-50 rounded p-2 mb-1">{simError}</div>}
+
+        {/* Completed steps */}
+        {completedList.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {completedList.map(([id, result]) => (
+              <span
+                key={id}
+                className={`px-2 py-0.5 rounded text-xs ${
+                  result.status === "success"
+                    ? "bg-green-100 text-green-700"
+                    : result.status === "failed"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-gray-100 text-gray-600"
+                }`}
+              >
+                {id}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { RecipeDefinition, StateDefinition } from "@sweny-ai/engine";
+import type { WorkflowDefinition, StepDefinition } from "@sweny-ai/engine";
 
 /**
  * Convert a kebab-case, snake_case, or space-separated string to camelCase.
@@ -30,30 +30,30 @@ function formatKey(key: string): string {
 }
 
 /**
- * Serialize a StateDefinition as indented TypeScript object literal lines.
- * Produces multi-line format for `on` maps, single-line for simple states.
+ * Serialize a StepDefinition as indented TypeScript object literal lines.
+ * Produces multi-line format for `on` maps, single-line for simple steps.
  */
-function serializeState(state: StateDefinition, indent: string): string {
+function serializeStep(step: StepDefinition, indent: string): string {
   const inner = `${indent}  `;
   const lines: string[] = ["{"];
 
   // JSON.stringify produces a correctly escaped TS string literal (handles \n, \t, \, ", etc.)
-  lines.push(`${inner}phase: ${JSON.stringify(state.phase)},`);
+  lines.push(`${inner}phase: ${JSON.stringify(step.phase)},`);
 
-  if (state.description !== undefined) {
-    lines.push(`${inner}description: ${JSON.stringify(state.description)},`);
+  if (step.description !== undefined) {
+    lines.push(`${inner}description: ${JSON.stringify(step.description)},`);
   }
 
-  if (state.critical === true) {
+  if (step.critical === true) {
     lines.push(`${inner}critical: true,`);
   }
 
-  if (state.next !== undefined) {
-    lines.push(`${inner}next: ${JSON.stringify(state.next)},`);
+  if (step.next !== undefined) {
+    lines.push(`${inner}next: ${JSON.stringify(step.next)},`);
   }
 
-  if (state.on !== undefined) {
-    const onEntries = Object.entries(state.on);
+  if (step.on !== undefined) {
+    const onEntries = Object.entries(step.on);
     if (onEntries.length === 0) {
       lines.push(`${inner}on: {},`);
     } else if (onEntries.length === 1) {
@@ -73,11 +73,11 @@ function serializeState(state: StateDefinition, indent: string): string {
 }
 
 /**
- * Serialize the full RecipeDefinition as a TypeScript const expression.
+ * Serialize the full WorkflowDefinition as a TypeScript const expression.
  */
-function serializeDefinition(def: RecipeDefinition, constName: string): string {
+function serializeDefinition(def: WorkflowDefinition, constName: string): string {
   const lines: string[] = [];
-  lines.push(`export const ${constName}Definition: RecipeDefinition = {`);
+  lines.push(`export const ${constName}Definition: WorkflowDefinition = {`);
   lines.push(`  id: ${JSON.stringify(def.id)},`);
   lines.push(`  version: ${JSON.stringify(def.version)},`);
   lines.push(`  name: ${JSON.stringify(def.name)},`);
@@ -87,11 +87,11 @@ function serializeDefinition(def: RecipeDefinition, constName: string): string {
   }
 
   lines.push(`  initial: ${JSON.stringify(def.initial)},`);
-  lines.push(`  states: {`);
+  lines.push(`  steps: {`);
 
-  for (const [stateId, stateDef] of Object.entries(def.states)) {
-    const key = formatKey(stateId);
-    const serialized = serializeState(stateDef, "    ");
+  for (const [stepId, stepDef] of Object.entries(def.steps)) {
+    const key = formatKey(stepId);
+    const serialized = serializeStep(stepDef, "    ");
     lines.push(`    ${key}: ${serialized},`);
   }
 
@@ -102,14 +102,14 @@ function serializeDefinition(def: RecipeDefinition, constName: string): string {
 }
 
 /**
- * Build the outcome comment for a state: lists all on: transitions and next,
+ * Build the outcome comment for a step: lists all on: transitions and next,
  * skipping "end" targets since it's a built-in terminal state.
  */
-function buildOutcomeComment(state: StateDefinition): string {
+function buildOutcomeComment(step: StepDefinition): string {
   const parts: string[] = [];
 
-  if (state.on !== undefined) {
-    for (const [outcome, target] of Object.entries(state.on)) {
+  if (step.on !== undefined) {
+    for (const [outcome, target] of Object.entries(step.on)) {
       if (target !== "end") {
         parts.push(`${outcome} → ${target}`);
       } else {
@@ -118,8 +118,8 @@ function buildOutcomeComment(state: StateDefinition): string {
     }
   }
 
-  if (state.next !== undefined) {
-    const label = state.next === "end" ? "(default) → end" : `(default) → ${state.next}`;
+  if (step.next !== undefined) {
+    const label = step.next === "end" ? "(default) → end" : `(default) → ${step.next}`;
     parts.push(label);
   }
 
@@ -131,28 +131,27 @@ function buildOutcomeComment(state: StateDefinition): string {
 }
 
 /**
- * Generate a TypeScript recipe file from a RecipeDefinition.
+ * Generate a TypeScript workflow file from a WorkflowDefinition.
  * Output is ready to drop into a Node.js project that has @sweny-ai/engine installed.
  */
-export function exportAsTypescript(definition: RecipeDefinition): string {
+export function exportAsTypescript(definition: WorkflowDefinition): string {
   const camelName = toCamelCase(definition.id);
-  // Capitalize first letter for the variable name prefix (e.g. myFlow → MyFlow not needed, keep lower)
-  const varName = camelName.length > 0 ? camelName : "recipe";
+  const varName = camelName.length > 0 ? camelName : "workflow";
 
-  const stateEntries = Object.entries(definition.states);
+  const stepEntries = Object.entries(definition.steps);
 
   // Build header comment
   const header = [
     `/**`,
     ` * ${definition.name} — generated by sweny studio`,
-    ` * Recipe ID: ${definition.id} | Version: ${definition.version}`,
+    ` * Workflow ID: ${definition.id} | Version: ${definition.version}`,
     ` */`,
   ].join("\n");
 
   // Imports
   const imports = [
-    `import { createRecipe } from "@sweny-ai/engine";`,
-    `import type { RecipeDefinition, WorkflowContext, StepResult } from "@sweny-ai/engine";`,
+    `import { createWorkflow } from "@sweny-ai/engine";`,
+    `import type { WorkflowDefinition, WorkflowContext, StepResult } from "@sweny-ai/engine";`,
   ].join("\n");
 
   // Definition const
@@ -165,10 +164,10 @@ export function exportAsTypescript(definition: RecipeDefinition): string {
     `// Use data.outcome to drive named on: transitions.`,
   ].join("\n");
 
-  // Generate one async function per state
-  const stubs = stateEntries.map(([stateId, stateDef]) => {
-    const fnName = toCamelCase(stateId);
-    const outcomeComment = buildOutcomeComment(stateDef);
+  // Generate one async function per step
+  const stubs = stepEntries.map(([stepId, stepDef]) => {
+    const fnName = toCamelCase(stepId);
+    const outcomeComment = buildOutcomeComment(stepDef);
     return [
       `async function ${fnName}(ctx: WorkflowContext<unknown>): Promise<StepResult> {`,
       `  ${outcomeComment}`,
@@ -178,20 +177,22 @@ export function exportAsTypescript(definition: RecipeDefinition): string {
     ].join("\n");
   });
 
-  // Recipe call separator + createRecipe call
-  const recipeHeader = `// ${"─".repeat(3)} Recipe ${"─".repeat(75 - "Recipe".length)}`;
+  // Workflow call separator + createWorkflow call
+  const workflowHeader = `// ${"─".repeat(3)} Workflow ${"─".repeat(75 - "Workflow".length)}`;
 
-  const implMap = stateEntries
-    .map(([stateId]) => {
-      const fnName = toCamelCase(stateId);
-      const key = formatKey(stateId);
+  const implMap = stepEntries
+    .map(([stepId]) => {
+      const fnName = toCamelCase(stepId);
+      const key = formatKey(stepId);
       return `  ${key}: ${fnName},`;
     })
     .join("\n");
 
-  const recipeCall = [`export const ${varName}Recipe = createRecipe(${varName}Definition, {`, implMap, `});`].join(
-    "\n",
-  );
+  const workflowCall = [
+    `export const ${varName}Workflow = createWorkflow(${varName}Definition, {`,
+    implMap,
+    `});`,
+  ].join("\n");
 
-  return [header, imports, defBlock, implHeader, ...stubs, recipeHeader, recipeCall].join("\n\n");
+  return [header, imports, defBlock, implHeader, ...stubs, workflowHeader, workflowCall].join("\n\n");
 }

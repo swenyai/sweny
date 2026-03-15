@@ -98,9 +98,9 @@ async function loadMapToTriageConfig(): Promise<(config: CliConfig) => unknown> 
     validateInputs: vi.fn(),
   }));
   vi.doMock("@sweny-ai/engine", () => ({
-    runRecipe: vi.fn(),
-    triageRecipe: { definition: { states: {} }, implementations: {} },
-    implementRecipe: { definition: { states: {} }, implementations: {} },
+    runWorkflow: vi.fn(),
+    triageWorkflow: { definition: { steps: {} } },
+    implementWorkflow: { definition: { steps: {} } },
     createProviderRegistry: vi.fn(() => ({ set: vi.fn(), get: vi.fn(), has: vi.fn() })),
   }));
   vi.doMock("../src/providers/index.js", () => ({

@@ -33,9 +33,9 @@ async function loadMain() {
     error: vi.fn(),
   }));
   vi.doMock("@sweny-ai/engine", () => ({
-    runRecipe: mockRunRecipe,
-    triageRecipe: { name: "triage", start: "verify-access", definition: { states: {} }, implementations: {} },
-    implementRecipe: { name: "implement", start: "verify-access", definition: { states: {} }, implementations: {} },
+    runWorkflow: mockRunRecipe,
+    triageWorkflow: { name: "triage", start: "verify-access", definition: { steps: {} } },
+    implementWorkflow: { name: "implement", start: "verify-access", definition: { steps: {} } },
   }));
   vi.doMock("../src/config.js", () => ({
     parseInputs: mockParseInputs,
@@ -52,7 +52,7 @@ async function loadMain() {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_CONFIG = {
-  recipe: "triage" as const,
+  workflow: "triage" as const,
   anthropicApiKey: "sk-ant-test",
   claudeOauthToken: "",
   observabilityProvider: "datadog",
@@ -121,7 +121,7 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("run() orchestration", () => {
-  it("calls parseInputs, validateInputs, createProviders, and runRecipe in sequence", async () => {
+  it("calls parseInputs, validateInputs, createProviders, and runWorkflow in sequence", async () => {
     const callOrder: string[] = [];
     mockParseInputs.mockImplementation(() => {
       callOrder.push("parseInputs");
@@ -136,16 +136,16 @@ describe("run() orchestration", () => {
       return DEFAULT_PROVIDERS;
     });
     mockRunRecipe.mockImplementation(async () => {
-      callOrder.push("runRecipe");
+      callOrder.push("runWorkflow");
       return { steps: [] };
     });
 
     await loadMain();
 
-    expect(callOrder).toEqual(["parseInputs", "validateInputs", "createProviders", "runRecipe"]);
+    expect(callOrder).toEqual(["parseInputs", "validateInputs", "createProviders", "runWorkflow"]);
   });
 
-  it("calls core.setFailed with joined validation errors and skips runRecipe", async () => {
+  it("calls core.setFailed with joined validation errors and skips runWorkflow", async () => {
     mockValidateInputs.mockReturnValue(["Error 1", "Error 2"]);
 
     await loadMain();
@@ -154,7 +154,7 @@ describe("run() orchestration", () => {
     expect(mockRunRecipe).not.toHaveBeenCalled();
   });
 
-  it("passes triageRecipe as first arg and providers as third arg to runRecipe", async () => {
+  it("passes triageWorkflow as first arg and providers as third arg to runWorkflow", async () => {
     const fakeProviders = new Map([["obs", {}]]);
     mockCreateProviders.mockReturnValue(fakeProviders);
 
@@ -165,8 +165,8 @@ describe("run() orchestration", () => {
     expect(thirdArg).toBe(fakeProviders);
   });
 
-  it("routes to implementRecipe when config.recipe is 'implement'", async () => {
-    mockParseInputs.mockReturnValue({ ...DEFAULT_CONFIG, recipe: "implement" as const });
+  it("routes to implementWorkflow when config.workflow is 'implement'", async () => {
+    mockParseInputs.mockReturnValue({ ...DEFAULT_CONFIG, workflow: "implement" as const });
 
     await loadMain();
 
@@ -174,7 +174,7 @@ describe("run() orchestration", () => {
     expect(firstArg).toMatchObject({ name: "implement" });
   });
 
-  it("calls core.setFailed with error.message when runRecipe throws Error", async () => {
+  it("calls core.setFailed with error.message when runWorkflow throws Error", async () => {
     mockRunRecipe.mockRejectedValue(new Error("workflow exploded"));
 
     await loadMain();
@@ -182,7 +182,7 @@ describe("run() orchestration", () => {
     expect(mockSetFailed).toHaveBeenCalledWith("workflow exploded");
   });
 
-  it("calls core.setFailed with generic message when runRecipe throws non-Error", async () => {
+  it("calls core.setFailed with generic message when runWorkflow throws non-Error", async () => {
     mockRunRecipe.mockRejectedValue("plain string error");
 
     await loadMain();

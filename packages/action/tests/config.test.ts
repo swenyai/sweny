@@ -29,7 +29,7 @@ describe("parseInputs", () => {
 
     const config = parseInputs();
 
-    expect(config.recipe).toBe("triage");
+    expect(config.workflow).toBe("triage");
     expect(config.observabilityProvider).toBe("datadog");
     expect(config.observabilityCredentials.site).toBe("datadoghq.com");
     expect(config.issueTrackerProvider).toBe("github-issues"); // default changed from linear
@@ -76,18 +76,18 @@ describe("parseInputs", () => {
     expect(config.linearApiKey).toBe("lin_test");
   });
 
-  it("parses recipe=implement correctly", () => {
-    mockGetInput.mockImplementation((name: string) => (name === "recipe" ? "implement" : ""));
+  it("parses workflow=implement correctly", () => {
+    mockGetInput.mockImplementation((name: string) => (name === "workflow" ? "implement" : ""));
     mockGetBooleanInput.mockReturnValue(false);
     const config = parseInputs();
-    expect(config.recipe).toBe("implement");
+    expect(config.workflow).toBe("implement");
   });
 
-  it("defaults recipe to triage for unknown values", () => {
-    mockGetInput.mockImplementation((name: string) => (name === "recipe" ? "unknown-recipe" : ""));
+  it("defaults workflow to triage for unknown values", () => {
+    mockGetInput.mockImplementation((name: string) => (name === "workflow" ? "unknown-workflow" : ""));
     mockGetBooleanInput.mockReturnValue(false);
     const config = parseInputs();
-    expect(config.recipe).toBe("triage");
+    expect(config.workflow).toBe("triage");
   });
 
   it("parses maxInvestigateTurns and maxImplementTurns as integers", () => {
@@ -331,7 +331,7 @@ describe("parseInputs", () => {
 describe("validateInputs", () => {
   function baseConfig(overrides?: Partial<ActionConfig>): ActionConfig {
     return {
-      recipe: "triage",
+      workflow: "triage",
       anthropicApiKey: "sk-ant-test",
       claudeOauthToken: "",
       observabilityProvider: "datadog",
@@ -379,6 +379,8 @@ describe("validateInputs", () => {
       openaiApiKey: "",
       geminiApiKey: "",
       logFilePath: "",
+      mcpServers: {},
+      workspaceTools: [],
       ...overrides,
     };
   }
@@ -390,6 +392,22 @@ describe("validateInputs", () => {
   it("rejects invalid review-mode values", () => {
     const errors = validateInputs(baseConfig({ reviewMode: "invalid" as "auto" }));
     expect(errors).toContainEqual(expect.stringContaining("review-mode"));
+  });
+
+  it("rejects unknown workspace tool names", () => {
+    const errors = validateInputs(baseConfig({ workspaceTools: ["slack", "unknowntool"] }));
+    expect(errors).toContainEqual(expect.stringContaining("unknowntool"));
+    expect(errors).toContainEqual(expect.stringContaining("slack, notion, pagerduty, monday"));
+  });
+
+  it("accepts all supported workspace tool names", () => {
+    const errors = validateInputs(baseConfig({ workspaceTools: ["slack", "notion", "pagerduty", "monday"] }));
+    expect(errors).toEqual([]);
+  });
+
+  it("accepts empty workspace tools list", () => {
+    const errors = validateInputs(baseConfig({ workspaceTools: [] }));
+    expect(errors).toEqual([]);
   });
 
   it("requires auth: either anthropic-api-key or claude-oauth-token", () => {
@@ -547,19 +565,19 @@ describe("validateInputs", () => {
     expect(errors.filter((e) => e.includes("openai") || e.includes("gemini"))).toHaveLength(0);
   });
 
-  // recipe validation
-  it("requires linear-issue when recipe is implement", () => {
-    const errors = validateInputs(baseConfig({ recipe: "implement", linearIssue: "" }));
+  // workflow validation
+  it("requires linear-issue when workflow is implement", () => {
+    const errors = validateInputs(baseConfig({ workflow: "implement", linearIssue: "" }));
     expect(errors).toContainEqual(expect.stringContaining("linear-issue"));
   });
 
-  it("passes implement recipe when linear-issue is provided", () => {
-    const errors = validateInputs(baseConfig({ recipe: "implement", linearIssue: "ENG-123" }));
+  it("passes implement workflow when linear-issue is provided", () => {
+    const errors = validateInputs(baseConfig({ workflow: "implement", linearIssue: "ENG-123" }));
     expect(errors.filter((e) => e.includes("linear-issue"))).toHaveLength(0);
   });
 
-  it("does not require linear-issue for triage recipe", () => {
-    const errors = validateInputs(baseConfig({ recipe: "triage", linearIssue: "" }));
+  it("does not require linear-issue for triage workflow", () => {
+    const errors = validateInputs(baseConfig({ workflow: "triage", linearIssue: "" }));
     expect(errors.filter((e) => e.includes("linear-issue"))).toHaveLength(0);
   });
 });

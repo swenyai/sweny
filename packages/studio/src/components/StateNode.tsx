@@ -1,11 +1,11 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import type { StateDefinition, WorkflowPhase } from "@sweny-ai/engine";
+import type { StepDefinition, WorkflowPhase } from "@sweny-ai/engine";
 
 export type NodeExecStatus = "current" | "success" | "failed" | "skipped" | "pending";
 
 export type StateNodeData = {
   stateId: string;
-  state: StateDefinition;
+  state: StepDefinition;
   isInitial: boolean;
   isTerminal: boolean;
   execStatus: NodeExecStatus;
@@ -43,7 +43,7 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
   const { stateId, state, isInitial, isTerminal, execStatus } = data;
   const accent = phaseAccent[state.phase];
   const exec = execStyle[execStatus];
-  const provider = (state as StateDefinition & { provider?: string }).provider;
+  const provider = (state as StepDefinition & { provider?: string }).provider;
   const pMeta = provider ? (providerMeta[provider] ?? null) : null;
 
   const borderColor = exec.borderColor || (isInitial ? accent.bar + "cc" : accent.bar + "40");

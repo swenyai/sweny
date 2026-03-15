@@ -80,6 +80,7 @@ const BASE_CONFIG = {
   openaiApiKey: "",
   geminiApiKey: "",
   mcpServers: {},
+  workspaceTools: [],
 };
 
 // ── Helper: set up all doMocks and import main.ts ─────────────────────────────
@@ -131,11 +132,9 @@ async function loadMain(argv: string[]) {
     validateInputs: mockValidateInputs,
   }));
   vi.doMock("@sweny-ai/engine", () => ({
-    runRecipe: mockRunWorkflow,
-    triageRecipe: { definition: { states: {} }, implementations: {} },
-    implementRecipe: { definition: { states: {} }, implementations: {} },
-    triageWorkflow: { name: "triage", steps: [] },
-    implementWorkflow: { name: "implement", steps: [] },
+    runWorkflow: mockRunWorkflow,
+    triageWorkflow: { name: "triage", definition: { steps: {} } },
+    implementWorkflow: { name: "implement", definition: { steps: {} } },
     createProviderRegistry: vi.fn(() => ({ set: vi.fn(), get: vi.fn(), has: vi.fn() })),
   }));
   vi.doMock("../src/providers/index.js", () => ({
@@ -558,13 +557,40 @@ describe("mapToTriageConfig", () => {
       githubToken: "",
     });
     const mcp = triageConfig.mcpServers as Record<string, unknown>;
-    expect(mcp?.["sentry"]).toMatchObject({ type: "stdio", env: { SENTRY_AUTH_TOKEN: "sntryu_secret" } });
+    // @sentry/mcp-server uses SENTRY_ACCESS_TOKEN (not SENTRY_AUTH_TOKEN)
+    expect(mcp?.["sentry"]).toMatchObject({ type: "stdio", env: { SENTRY_ACCESS_TOKEN: "sntryu_secret" } });
   });
 
-  it("injects Slack MCP server when SLACK_BOT_TOKEN is in env", async () => {
+  it("injects New Relic MCP server when observability provider is newrelic", async () => {
+    const triageConfig = await runWithConfig({
+      ...BASE_CONFIG,
+      observabilityProvider: "newrelic",
+      observabilityCredentials: { apiKey: "NRAK-test", accountId: "123456", region: "us" },
+      githubToken: "",
+    });
+    const mcp = triageConfig.mcpServers as Record<string, unknown>;
+    expect(mcp?.["newrelic"]).toMatchObject({
+      type: "http",
+      url: "https://mcp.newrelic.com/mcp/",
+      headers: { "Api-Key": "NRAK-test" },
+    });
+  });
+
+  it("uses EU endpoint for New Relic when region is eu", async () => {
+    const triageConfig = await runWithConfig({
+      ...BASE_CONFIG,
+      observabilityProvider: "newrelic",
+      observabilityCredentials: { apiKey: "NRAK-test", accountId: "123456", region: "eu" },
+      githubToken: "",
+    });
+    const mcp = triageConfig.mcpServers as Record<string, unknown>;
+    expect((mcp?.["newrelic"] as Record<string, unknown>)?.["url"]).toBe("https://mcp.eu.newrelic.com/mcp/");
+  });
+
+  it("injects Slack MCP when declared in workspaceTools and SLACK_BOT_TOKEN is set", async () => {
     process.env.SLACK_BOT_TOKEN = "xoxb-test";
     try {
-      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {} });
+      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["slack"] });
       const mcp = triageConfig.mcpServers as Record<string, unknown>;
       expect(mcp?.["slack"]).toMatchObject({ type: "stdio", env: { SLACK_BOT_TOKEN: "xoxb-test" } });
     } finally {
@@ -572,14 +598,51 @@ describe("mapToTriageConfig", () => {
     }
   });
 
-  it("injects Notion MCP server when NOTION_API_KEY is in env", async () => {
-    process.env.NOTION_API_KEY = "secret_notion";
+  it("does not inject Slack MCP when token is set but tool is not declared", async () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-test";
     try {
-      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {} });
-      const mcp = triageConfig.mcpServers as Record<string, unknown>;
-      expect(mcp?.["notion"]).toMatchObject({ type: "stdio", env: { NOTION_API_KEY: "secret_notion" } });
+      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: [] });
+      const mcp = triageConfig.mcpServers as Record<string, unknown> | undefined;
+      expect(mcp?.["slack"]).toBeUndefined();
     } finally {
-      delete process.env.NOTION_API_KEY;
+      delete process.env.SLACK_BOT_TOKEN;
+    }
+  });
+
+  it("injects Notion MCP when declared in workspaceTools and NOTION_TOKEN is set", async () => {
+    process.env.NOTION_TOKEN = "secret_notion";
+    try {
+      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["notion"] });
+      const mcp = triageConfig.mcpServers as Record<string, unknown>;
+      expect(mcp?.["notion"]).toMatchObject({ type: "stdio", env: { NOTION_TOKEN: "secret_notion" } });
+    } finally {
+      delete process.env.NOTION_TOKEN;
+    }
+  });
+
+  it("injects PagerDuty MCP when declared in workspaceTools and PAGERDUTY_API_TOKEN is set", async () => {
+    process.env.PAGERDUTY_API_TOKEN = "pd_token_abc";
+    try {
+      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["pagerduty"] });
+      const mcp = triageConfig.mcpServers as Record<string, unknown>;
+      expect(mcp?.["pagerduty"]).toMatchObject({
+        type: "http",
+        url: "https://mcp.pagerduty.com/mcp",
+        headers: { Authorization: "Token token=pd_token_abc" },
+      });
+    } finally {
+      delete process.env.PAGERDUTY_API_TOKEN;
+    }
+  });
+
+  it("injects Monday.com MCP when declared in workspaceTools and MONDAY_TOKEN is set", async () => {
+    process.env.MONDAY_TOKEN = "monday_key_abc";
+    try {
+      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["monday"] });
+      const mcp = triageConfig.mcpServers as Record<string, unknown>;
+      expect(mcp?.["monday"]).toMatchObject({ type: "stdio", env: { MONDAY_TOKEN: "monday_key_abc" } });
+    } finally {
+      delete process.env.MONDAY_TOKEN;
     }
   });
 
@@ -663,5 +726,27 @@ describe("mapToImplementConfig", () => {
     });
     const mcp = implementConfig.mcpServers as Record<string, unknown>;
     expect(mcp?.["linear"]).toMatchObject({ type: "http", url: "https://mcp.linear.app/mcp" });
+  });
+
+  it("injects Slack MCP when workspace-tools includes 'slack' and SLACK_BOT_TOKEN is set", async () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-impl-test";
+    try {
+      const implementConfig = await runImplementWithConfig({ ...BASE_CONFIG, workspaceTools: ["slack"] });
+      const mcp = implementConfig.mcpServers as Record<string, unknown>;
+      expect(mcp?.["slack"]).toMatchObject({ type: "stdio", env: { SLACK_BOT_TOKEN: "xoxb-impl-test" } });
+    } finally {
+      delete process.env.SLACK_BOT_TOKEN;
+    }
+  });
+
+  it("does not inject Slack MCP when SLACK_BOT_TOKEN is set but workspace-tools is empty", async () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-impl-test";
+    try {
+      const implementConfig = await runImplementWithConfig({ ...BASE_CONFIG, workspaceTools: [] });
+      const mcp = implementConfig.mcpServers as Record<string, unknown>;
+      expect(mcp?.["slack"]).toBeUndefined();
+    } finally {
+      delete process.env.SLACK_BOT_TOKEN;
+    }
   });
 });
