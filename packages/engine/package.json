@@ -21,6 +21,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./browser": "./dist/browser.js",
+    "./builtin-steps": "./dist/builtin-steps.js",
     "./schema": "./schema/recipe-definition.schema.json"
   },
   "dependencies": {

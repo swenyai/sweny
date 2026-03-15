@@ -7,8 +7,19 @@ import { Command } from "commander";
 const _require = createRequire(import.meta.url);
 const { version } = _require("../package.json") as { version: string };
 import chalk from "chalk";
-import { runWorkflow, triageWorkflow, implementWorkflow, createProviderRegistry } from "@sweny-ai/engine";
-import type { StepCache, TriageConfig, WorkflowPhase, ImplementConfig } from "@sweny-ai/engine";
+import {
+  runWorkflow,
+  triageWorkflow,
+  implementWorkflow,
+  createProviderRegistry,
+  validateWorkflow,
+  resolveWorkflow,
+  triageDefinition,
+  implementDefinition,
+} from "@sweny-ai/engine";
+// Register built-in step types so resolveWorkflow() can look them up
+import "@sweny-ai/engine/builtin-steps";
+import type { StepCache, TriageConfig, WorkflowPhase, ImplementConfig, WorkflowDefinition } from "@sweny-ai/engine";
 import { createFsCache, hashConfig } from "./cache.js";
 import { loadDotenv, loadConfigFile, STARTER_CONFIG } from "./config-file.js";
 import { registerTriageCommand, registerImplementCommand, parseCliInputs, validateInputs } from "./config.js";
@@ -27,6 +38,8 @@ import {
   formatValidationErrors,
   formatCrashError,
 } from "./output.js";
+
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 // Auto-load .env before Commander parses (so env vars are available for defaults)
 loadDotenv();
@@ -406,8 +419,7 @@ function buildAutoMcpServers(config: CliConfig): Record<string, MCPServerConfig>
   // Trailing slash is intentional — New Relic's MCP spec requires it.
   const nrApiKey = obsCreds.apiKey;
   if (config.observabilityProvider === "newrelic" && nrApiKey) {
-    const nrEndpoint =
-      obsCreds.region === "eu" ? "https://mcp.eu.newrelic.com/mcp/" : "https://mcp.newrelic.com/mcp/";
+    const nrEndpoint = obsCreds.region === "eu" ? "https://mcp.eu.newrelic.com/mcp/" : "https://mcp.newrelic.com/mcp/";
     auto["newrelic"] = {
       type: "http",
       url: nrEndpoint,
@@ -594,5 +606,103 @@ export function mapToTriageConfig(config: CliConfig): TriageConfig {
     mcpServers: buildAutoMcpServers(config),
   };
 }
+
+// ── sweny workflow ─────────────────────────────────────────────────────
+const workflowCmd = program.command("workflow").description("Manage and run workflow files");
+
+export function loadWorkflowFile(filePath: string): WorkflowDefinition {
+  const content = fs.readFileSync(filePath, "utf-8");
+  const ext = path.extname(filePath).toLowerCase();
+  const raw = ext === ".yaml" || ext === ".yml" ? parseYaml(content) : JSON.parse(content);
+  const errors = validateWorkflow(raw as WorkflowDefinition);
+  if (errors.length > 0) {
+    throw new Error(`Invalid workflow file:\n${errors.map((e) => `  ${e.message}`).join("\n")}`);
+  }
+  return raw as WorkflowDefinition;
+}
+
+export async function workflowRunAction(file: string, options: Record<string, unknown>): Promise<void> {
+  let definition: WorkflowDefinition;
+  try {
+    definition = loadWorkflowFile(file);
+  } catch (err) {
+    console.error(chalk.red(`  Error loading workflow file: ${err instanceof Error ? err.message : String(err)}`));
+    process.exit(1);
+    return;
+  }
+
+  if (options.dryRun) {
+    console.log(
+      chalk.green(`  Workflow "${definition.name}" is valid (${Object.keys(definition.steps).length} steps)`),
+    );
+    for (const [id, step] of Object.entries(definition.steps)) {
+      console.log(chalk.dim(`    ${id}: phase=${step.phase}${step.type ? ` type=${step.type}` : ""}`));
+    }
+    process.exit(0);
+    return;
+  }
+
+  let workflow;
+  try {
+    workflow = resolveWorkflow(definition);
+  } catch (err) {
+    console.error(chalk.red(`  Error resolving workflow: ${err instanceof Error ? err.message : String(err)}`));
+    process.exit(1);
+    return;
+  }
+
+  const fileConfig = loadConfigFile();
+  const config = parseCliInputs(options, fileConfig);
+
+  const logger = {
+    info: (...args: unknown[]) => console.log(...args),
+    debug: () => {},
+    warn: (...args: unknown[]) => console.warn(...args),
+    error: (...args: unknown[]) => console.error(...args),
+  };
+
+  const providers = createProviders(config, logger);
+
+  console.log(chalk.cyan(`\n  sweny workflow run ${file}\n`));
+
+  try {
+    const result = await runWorkflow(workflow, mapToTriageConfig(config), providers, { logger });
+    if (result.status === "failed") {
+      console.error(chalk.red(`\n  Workflow failed\n`));
+      process.exit(1);
+      return;
+    }
+    console.log(chalk.green(`\n  Workflow completed (${result.status})\n`));
+    process.exit(0);
+  } catch (err) {
+    console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+    process.exit(1);
+  }
+}
+
+export function workflowExportAction(name: string): void {
+  let definition: WorkflowDefinition;
+  if (name === "triage") {
+    definition = triageDefinition;
+  } else if (name === "implement") {
+    definition = implementDefinition;
+  } else {
+    console.error(chalk.red(`  Unknown workflow "${name}". Available: triage, implement`));
+    process.exit(1);
+    return;
+  }
+  process.stdout.write(stringifyYaml(definition));
+}
+
+workflowCmd
+  .command("run <file>")
+  .description("Run a workflow from a YAML or JSON file")
+  .option("--dry-run", "Validate workflow without running")
+  .action(workflowRunAction);
+
+workflowCmd
+  .command("export <name>")
+  .description("Print a built-in workflow as YAML (triage or implement)")
+  .action(workflowExportAction);
 
 program.parse();

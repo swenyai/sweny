@@ -63,6 +63,7 @@ const BASE: CliConfig = {
   jiraEmail: "",
   jiraApiToken: "",
   mcpServers: {},
+  workspaceTools: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -101,8 +102,14 @@ async function loadMapToTriageConfig(): Promise<(config: CliConfig) => unknown> 
     runWorkflow: vi.fn(),
     triageWorkflow: { definition: { steps: {} } },
     implementWorkflow: { definition: { steps: {} } },
+    triageDefinition: { id: "triage", name: "triage", version: "1.0.0", initial: "verify-access", steps: {} },
+    implementDefinition: { id: "implement", name: "implement", version: "1.0.0", initial: "verify-access", steps: {} },
     createProviderRegistry: vi.fn(() => ({ set: vi.fn(), get: vi.fn(), has: vi.fn() })),
+    validateWorkflow: vi.fn().mockReturnValue([]),
+    resolveWorkflow: vi.fn().mockReturnValue({ definition: { steps: {} }, implementations: {} }),
   }));
+  vi.doMock("@sweny-ai/engine/builtin-steps", () => ({}));
+  vi.doMock("yaml", () => ({ parse: vi.fn().mockReturnValue({}), stringify: vi.fn().mockReturnValue("") }));
   vi.doMock("../src/providers/index.js", () => ({
     createProviders: vi.fn().mockReturnValue(new Map()),
     createImplementProviders: vi.fn().mockReturnValue(new Map()),

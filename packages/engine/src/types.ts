@@ -197,6 +197,12 @@ export interface StepDefinition {
    * Pure metadata — no runtime routing effect.
    */
   uses?: string[];
+  /**
+   * Built-in step type identifier (e.g. "sweny/fetch-issue").
+   * When set, resolveWorkflow() looks this up in the built-in step registry.
+   * Not needed when using createWorkflow() with explicit implementations.
+   */
+  type?: string;
 }
 
 /**
@@ -230,10 +236,7 @@ export interface WorkflowDefinitionError {
  * Reports all missing vars at once — never fails on first missing var.
  */
 export class WorkflowConfigError extends Error {
-  constructor(
-    workflowName: string,
-    issues: Array<{ stepId: string; providerName: string; missingEnvVars: string[] }>,
-  ) {
+  constructor(workflowName: string, issues: Array<{ stepId: string; providerName: string; missingEnvVars: string[] }>) {
     const lines = issues.map(
       ({ stepId, providerName, missingEnvVars }) =>
         `  step "${stepId}" (${providerName}): ${missingEnvVars.join(", ")}`,

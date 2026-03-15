@@ -135,7 +135,16 @@ async function loadMain(argv: string[]) {
     runWorkflow: mockRunWorkflow,
     triageWorkflow: { name: "triage", definition: { steps: {} } },
     implementWorkflow: { name: "implement", definition: { steps: {} } },
+    triageDefinition: { id: "triage", name: "triage", version: "1.0.0", initial: "verify-access", steps: {} },
+    implementDefinition: { id: "implement", name: "implement", version: "1.0.0", initial: "verify-access", steps: {} },
     createProviderRegistry: vi.fn(() => ({ set: vi.fn(), get: vi.fn(), has: vi.fn() })),
+    validateWorkflow: vi.fn().mockReturnValue([]),
+    resolveWorkflow: vi.fn().mockReturnValue({ definition: { steps: {} }, implementations: {} }),
+  }));
+  vi.doMock("@sweny-ai/engine/builtin-steps", () => ({}));
+  vi.doMock("yaml", () => ({
+    parse: vi.fn().mockReturnValue({}),
+    stringify: vi.fn().mockReturnValue(""),
   }));
   vi.doMock("../src/providers/index.js", () => ({
     createProviders: mockCreateProviders,
@@ -590,7 +599,13 @@ describe("mapToTriageConfig", () => {
   it("injects Slack MCP when declared in workspaceTools and SLACK_BOT_TOKEN is set", async () => {
     process.env.SLACK_BOT_TOKEN = "xoxb-test";
     try {
-      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["slack"] });
+      const triageConfig = await runWithConfig({
+        ...BASE_CONFIG,
+        githubToken: "",
+        botToken: "",
+        mcpServers: {},
+        workspaceTools: ["slack"],
+      });
       const mcp = triageConfig.mcpServers as Record<string, unknown>;
       expect(mcp?.["slack"]).toMatchObject({ type: "stdio", env: { SLACK_BOT_TOKEN: "xoxb-test" } });
     } finally {
@@ -601,7 +616,13 @@ describe("mapToTriageConfig", () => {
   it("does not inject Slack MCP when token is set but tool is not declared", async () => {
     process.env.SLACK_BOT_TOKEN = "xoxb-test";
     try {
-      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: [] });
+      const triageConfig = await runWithConfig({
+        ...BASE_CONFIG,
+        githubToken: "",
+        botToken: "",
+        mcpServers: {},
+        workspaceTools: [],
+      });
       const mcp = triageConfig.mcpServers as Record<string, unknown> | undefined;
       expect(mcp?.["slack"]).toBeUndefined();
     } finally {
@@ -612,7 +633,13 @@ describe("mapToTriageConfig", () => {
   it("injects Notion MCP when declared in workspaceTools and NOTION_TOKEN is set", async () => {
     process.env.NOTION_TOKEN = "secret_notion";
     try {
-      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["notion"] });
+      const triageConfig = await runWithConfig({
+        ...BASE_CONFIG,
+        githubToken: "",
+        botToken: "",
+        mcpServers: {},
+        workspaceTools: ["notion"],
+      });
       const mcp = triageConfig.mcpServers as Record<string, unknown>;
       expect(mcp?.["notion"]).toMatchObject({ type: "stdio", env: { NOTION_TOKEN: "secret_notion" } });
     } finally {
@@ -623,7 +650,13 @@ describe("mapToTriageConfig", () => {
   it("injects PagerDuty MCP when declared in workspaceTools and PAGERDUTY_API_TOKEN is set", async () => {
     process.env.PAGERDUTY_API_TOKEN = "pd_token_abc";
     try {
-      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["pagerduty"] });
+      const triageConfig = await runWithConfig({
+        ...BASE_CONFIG,
+        githubToken: "",
+        botToken: "",
+        mcpServers: {},
+        workspaceTools: ["pagerduty"],
+      });
       const mcp = triageConfig.mcpServers as Record<string, unknown>;
       expect(mcp?.["pagerduty"]).toMatchObject({
         type: "http",
@@ -638,7 +671,13 @@ describe("mapToTriageConfig", () => {
   it("injects Monday.com MCP when declared in workspaceTools and MONDAY_TOKEN is set", async () => {
     process.env.MONDAY_TOKEN = "monday_key_abc";
     try {
-      const triageConfig = await runWithConfig({ ...BASE_CONFIG, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["monday"] });
+      const triageConfig = await runWithConfig({
+        ...BASE_CONFIG,
+        githubToken: "",
+        botToken: "",
+        mcpServers: {},
+        workspaceTools: ["monday"],
+      });
       const mcp = triageConfig.mcpServers as Record<string, unknown>;
       expect(mcp?.["monday"]).toMatchObject({ type: "stdio", env: { MONDAY_TOKEN: "monday_key_abc" } });
     } finally {
