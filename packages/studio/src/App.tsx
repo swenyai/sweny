@@ -21,7 +21,11 @@ export function App() {
   const mode = useEditorStore((s) => s.mode);
   const [activeId, setActiveId] = useState("triage");
   const [showImport, setShowImport] = useState(false);
+  const [forkToast, setForkToast] = useState<string | null>(null);
   const validationErrors = useMemo(() => validateWorkflow(definition), [definition]);
+
+  // Whether the currently displayed workflow is an unmodified preset
+  const isBuiltinWorkflow = PRESET_WORKFLOWS.some((p) => p.id === activeId);
 
   // On mount, load workflow from URL hash if present
   useEffect(() => {
@@ -53,6 +57,20 @@ export function App() {
     },
     [setDefinition],
   );
+
+  const handleFork = useCallback(() => {
+    const { clear } = useEditorStore.temporal.getState();
+    clear();
+    const forked = {
+      ...definition,
+      id: `${definition.id}-fork`,
+      name: `${definition.name} (Fork)`,
+    };
+    setDefinition(forked);
+    setActiveId("custom");
+    setForkToast(`Forked! Customize your workflow then export as YAML.`);
+    setTimeout(() => setForkToast(null), 4000);
+  }, [definition, setDefinition]);
 
   const handleDropImport = useCallback(
     (def: WorkflowDefinition) => {
@@ -106,7 +124,14 @@ export function App() {
         onWorkflowChange={handleWorkflowChange}
         showImport={showImport}
         onShowImportChange={setShowImport}
+        isBuiltinWorkflow={isBuiltinWorkflow}
+        onFork={handleFork}
       />
+      {forkToast && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-amber-700 text-white text-xs px-4 py-2 rounded shadow-xl z-50">
+          {forkToast}
+        </div>
+      )}
       {mode === "design" && validationErrors.length > 0 && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-1.5 flex items-center gap-2 flex-shrink-0">
           <span className="text-amber-600 text-xs font-medium">

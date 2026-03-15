@@ -10,4 +10,5 @@ export { implementWorkflow, implementDefinition } from "./recipes/implement/inde
 export { getStepData } from "./recipes/triage/index.js";
 export { inMemoryDedupStore } from "./lib/dedup-store.js";
 export { fingerprintEvent } from "./lib/fingerprint.js";
+export { builtinStepRegistry, registerStepType, resolveWorkflow } from "./step-registry.js";
 //# sourceMappingURL=index.js.map

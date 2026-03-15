@@ -178,6 +178,12 @@ export interface StepDefinition {
      * Pure metadata — no runtime routing effect.
      */
     uses?: string[];
+    /**
+     * Built-in step type identifier (e.g. "sweny/fetch-issue").
+     * When set, resolveWorkflow() looks this up in the built-in step registry.
+     * Not needed when using createWorkflow() with explicit implementations.
+     */
+    type?: string;
 }
 /**
  * Implementation functions keyed by step id.

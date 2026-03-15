@@ -1,5 +1,6 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import type { StepDefinition, WorkflowPhase } from "@sweny-ai/engine";
+import { findStepType } from "../lib/step-types.js";
 
 export type NodeExecStatus = "current" | "success" | "failed" | "skipped" | "pending";
 
@@ -45,6 +46,8 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
   const exec = execStyle[execStatus];
   const provider = (state as StepDefinition & { provider?: string }).provider;
   const pMeta = provider ? (providerMeta[provider] ?? null) : null;
+  const typeEntry = state.type ? findStepType(state.type) : undefined;
+  const typeLabel = typeEntry ? typeEntry.label : state.type ? state.type.replace(/^sweny\//, "") : null;
 
   const borderColor = exec.borderColor || (isInitial ? accent.bar + "cc" : accent.bar + "40");
   const borderStyle = isTerminal ? "dashed" : "solid";
@@ -58,7 +61,7 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
         borderRadius: 7,
         overflow: "hidden",
         width: 200,
-        height: 40,
+        height: typeLabel ? 52 : 40,
         background: exec.bg,
         boxShadow: exec.shadow,
         border: `1px ${borderStyle} ${borderColor}`,
@@ -72,49 +75,77 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
         style={{ width: 4, flexShrink: 0, background: accent.bar, opacity: execStatus === "skipped" ? 0.3 : 0.95 }}
       />
 
-      {/* Content row */}
-      <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 9px 0 8px", gap: 5, minWidth: 0 }}>
-        {/* State ID */}
-        <span
-          style={{
-            fontFamily: "ui-monospace, 'Cascadia Code', monospace",
-            fontSize: 11,
-            fontWeight: 700,
-            color: "#dde5f0",
-            flex: 1,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            opacity: textOpacity,
-          }}
-        >
-          {stateId}
-        </span>
-
-        {/* Provider icon */}
-        {pMeta && (
-          <span style={{ fontSize: 10, color: pMeta.color, flexShrink: 0, opacity: textOpacity, lineHeight: 1 }}>
-            {pMeta.icon}
+      {/* Content */}
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          padding: "0 9px 0 8px",
+          minWidth: 0,
+        }}
+      >
+        {/* Top row: ID + icons + phase badge */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span
+            style={{
+              fontFamily: "ui-monospace, 'Cascadia Code', monospace",
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#dde5f0",
+              flex: 1,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              opacity: textOpacity,
+            }}
+          >
+            {stateId}
           </span>
-        )}
 
-        {/* Phase badge */}
-        <span
-          style={{
-            fontSize: 7.5,
-            fontWeight: 800,
-            letterSpacing: "0.07em",
-            textTransform: "uppercase",
-            padding: "2px 5px",
-            borderRadius: 3,
-            background: accent.badgeBg,
-            color: accent.badgeText,
-            flexShrink: 0,
-            opacity: textOpacity,
-          }}
-        >
-          {state.phase}
-        </span>
+          {/* Provider icon */}
+          {pMeta && (
+            <span style={{ fontSize: 10, color: pMeta.color, flexShrink: 0, opacity: textOpacity, lineHeight: 1 }}>
+              {pMeta.icon}
+            </span>
+          )}
+
+          {/* Phase badge */}
+          <span
+            style={{
+              fontSize: 7.5,
+              fontWeight: 800,
+              letterSpacing: "0.07em",
+              textTransform: "uppercase",
+              padding: "2px 5px",
+              borderRadius: 3,
+              background: accent.badgeBg,
+              color: accent.badgeText,
+              flexShrink: 0,
+              opacity: textOpacity,
+            }}
+          >
+            {state.phase}
+          </span>
+        </div>
+
+        {/* Step type subtitle */}
+        {typeLabel && (
+          <div
+            style={{
+              fontSize: 9,
+              color: "#64748b",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              marginTop: 2,
+              opacity: textOpacity,
+            }}
+          >
+            {typeLabel}
+          </div>
+        )}
       </div>
 
       {/* Handles */}

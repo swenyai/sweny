@@ -11,4 +11,6 @@ export { getStepData } from "./recipes/triage/index.js";
 export type { DedupStore } from "./lib/dedup-store.js";
 export { inMemoryDedupStore } from "./lib/dedup-store.js";
 export { fingerprintEvent } from "./lib/fingerprint.js";
+export type { StepType } from "./step-registry.js";
+export { builtinStepRegistry, registerStepType, resolveWorkflow } from "./step-registry.js";
 //# sourceMappingURL=index.d.ts.map
