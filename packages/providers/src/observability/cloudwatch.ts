@@ -3,6 +3,7 @@ import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export const cloudwatchConfigSchema = z.object({
   region: z.string().default("us-east-1"),
@@ -12,9 +13,16 @@ export const cloudwatchConfigSchema = z.object({
 
 export type CloudWatchConfig = z.infer<typeof cloudwatchConfigSchema>;
 
-export function cloudwatch(config: CloudWatchConfig): ObservabilityProvider {
+export const cloudwatchProviderConfigSchema: ProviderConfigSchema = {
+  role: "observability",
+  name: "CloudWatch",
+  fields: [{ key: "region", envVar: "AWS_REGION", description: "AWS region for CloudWatch" }],
+};
+
+export function cloudwatch(config: CloudWatchConfig): ObservabilityProvider & { configSchema: ProviderConfigSchema } {
   const parsed = cloudwatchConfigSchema.parse(config);
-  return new CloudWatchProvider(parsed);
+  const provider = new CloudWatchProvider(parsed);
+  return Object.assign(provider, { configSchema: cloudwatchProviderConfigSchema });
 }
 
 function parseTimeRange(timeRange: string): number {

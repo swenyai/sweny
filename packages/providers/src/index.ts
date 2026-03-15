@@ -1,6 +1,9 @@
 // Errors
 export { ProviderError, ProviderAuthError, ProviderApiError, ProviderConfigError } from "./errors.js";
 
+// Provider config schema types
+export type { ProviderConfigField, ProviderConfigSchema } from "./config-schema.js";
+
 export type { Logger } from "./logger.js";
 export { consoleLogger } from "./logger.js";
 

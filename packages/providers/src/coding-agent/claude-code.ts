@@ -2,6 +2,7 @@ import type { CodingAgent, CodingAgentRunOptions, AgentEvent, AgentEventHandler 
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { execCommand, spawnLines, isCliInstalled, writeMcpConfig } from "./shared.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export interface ClaudeCodeConfig {
   cliFlags?: string[];
@@ -92,13 +93,32 @@ function makeClaudeEventParser() {
   };
 }
 
-export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
+export const claudeCodeProviderConfigSchema: ProviderConfigSchema = {
+  role: "codingAgent",
+  name: "Claude Code",
+  fields: [
+    {
+      key: "anthropicApiKey",
+      envVar: "ANTHROPIC_API_KEY",
+      required: false,
+      description: "Anthropic API key (one of ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is required)",
+    },
+    {
+      key: "claudeCodeOauthToken",
+      envVar: "CLAUDE_CODE_OAUTH_TOKEN",
+      required: false,
+      description: "Claude Code OAuth token (one of ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is required)",
+    },
+  ],
+};
+
+export function claudeCode(config?: ClaudeCodeConfig): CodingAgent & { configSchema: ProviderConfigSchema } {
   const log = config?.logger ?? consoleLogger;
   const extraFlags = config?.cliFlags ?? [];
   const quiet = config?.quiet ?? false;
   const onEvent = config?.onEvent;
 
-  return {
+  return Object.assign({
     async install(): Promise<void> {
       if (isCliInstalled("claude")) {
         log.info("Claude Code CLI already installed, skipping");
@@ -164,5 +184,5 @@ export function claudeCode(config?: ClaudeCodeConfig): CodingAgent {
         mcpConfig?.cleanup();
       }
     },
-  };
+  }, { configSchema: claudeCodeProviderConfigSchema });
 }

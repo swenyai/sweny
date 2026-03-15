@@ -10,6 +10,7 @@ import type {
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { ProviderApiError } from "../errors.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -49,11 +50,17 @@ async function ghApi(method: string, path: string, token: string, body?: Record<
   return resp.json();
 }
 
-export function github(config: GitHubSourceControlConfig): SourceControlProvider {
+export const githubProviderConfigSchema: ProviderConfigSchema = {
+  role: "sourceControl",
+  name: "GitHub",
+  fields: [{ key: "token", envVar: "GITHUB_TOKEN", description: "GitHub personal access token" }],
+};
+
+export function github(config: GitHubSourceControlConfig): SourceControlProvider & { configSchema: ProviderConfigSchema } {
   const { token, owner, repo, baseBranch = "main" } = config;
   const log = config.logger ?? consoleLogger;
 
-  return {
+  return Object.assign({
     async verifyAccess(): Promise<void> {
       await ghApi("GET", `/repos/${owner}/${repo}`, token);
       log.info(`Verified access to ${owner}/${repo}`);
@@ -244,5 +251,5 @@ export function github(config: GitHubSourceControlConfig): SourceControlProvider
       });
       log.info(`Auto-merge enabled on PR #${prNumber}`);
     },
-  };
+  }, { configSchema: githubProviderConfigSchema });
 }

@@ -3,6 +3,7 @@ import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export const newrelicConfigSchema = z.object({
   apiKey: z.string().min(1, "New Relic User API key is required"),
@@ -13,13 +14,20 @@ export const newrelicConfigSchema = z.object({
 
 export type NewRelicConfig = z.infer<typeof newrelicConfigSchema>;
 
+export const newrelicProviderConfigSchema: ProviderConfigSchema = {
+  role: "observability",
+  name: "New Relic",
+  fields: [{ key: "apiKey", envVar: "NR_API_KEY", description: "New Relic User API key" }],
+};
+
 function escapeNrql(value: string): string {
   return value.replace(/'/g, "''").replace(/\\/g, "\\\\");
 }
 
-export function newrelic(config: NewRelicConfig): ObservabilityProvider {
+export function newrelic(config: NewRelicConfig): ObservabilityProvider & { configSchema: ProviderConfigSchema } {
   const parsed = newrelicConfigSchema.parse(config);
-  return new NewRelicProvider(parsed);
+  const provider = new NewRelicProvider(parsed);
+  return Object.assign(provider, { configSchema: newrelicProviderConfigSchema });
 }
 
 class NewRelicProvider implements ObservabilityProvider {

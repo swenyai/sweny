@@ -12,6 +12,7 @@ import type {
   LabelHistoryCapable,
   IssueHistoryEntry,
 } from "./types.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export const jiraConfigSchema = z.object({
   baseUrl: z
@@ -25,9 +26,22 @@ export const jiraConfigSchema = z.object({
 
 export type JiraConfig = z.infer<typeof jiraConfigSchema>;
 
-export function jira(config: JiraConfig): IssueTrackingProvider & PrLinkCapable & LabelHistoryCapable {
+export const jiraProviderConfigSchema: ProviderConfigSchema = {
+  role: "issueTracker",
+  name: "Jira",
+  fields: [
+    { key: "baseUrl", envVar: "JIRA_BASE_URL", description: "Jira base URL (e.g. https://yourorg.atlassian.net)" },
+    { key: "email", envVar: "JIRA_EMAIL", description: "Jira account email" },
+    { key: "apiToken", envVar: "JIRA_API_TOKEN", description: "Jira API token" },
+  ],
+};
+
+export function jira(
+  config: JiraConfig,
+): IssueTrackingProvider & PrLinkCapable & LabelHistoryCapable & { configSchema: ProviderConfigSchema } {
   const parsed = jiraConfigSchema.parse(config);
-  return new JiraProvider(parsed);
+  const provider = new JiraProvider(parsed);
+  return Object.assign(provider, { configSchema: jiraProviderConfigSchema });
 }
 
 class JiraProvider implements IssueTrackingProvider, PrLinkCapable, LabelHistoryCapable {

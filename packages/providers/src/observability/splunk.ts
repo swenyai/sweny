@@ -3,6 +3,7 @@ import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export const splunkConfigSchema = z.object({
   baseUrl: z.string().min(1, "Splunk instance URL is required"),
@@ -13,13 +14,23 @@ export const splunkConfigSchema = z.object({
 
 export type SplunkConfig = z.infer<typeof splunkConfigSchema>;
 
+export const splunkProviderConfigSchema: ProviderConfigSchema = {
+  role: "observability",
+  name: "Splunk",
+  fields: [
+    { key: "baseUrl", envVar: "SPLUNK_URL", description: "Splunk instance URL" },
+    { key: "token", envVar: "SPLUNK_TOKEN", description: "Splunk Bearer token" },
+  ],
+};
+
 function escapeSpl(value: string): string {
   return value.replace(/["\\]/g, "\\$&");
 }
 
-export function splunk(config: SplunkConfig): ObservabilityProvider {
+export function splunk(config: SplunkConfig): ObservabilityProvider & { configSchema: ProviderConfigSchema } {
   const parsed = splunkConfigSchema.parse(config);
-  return new SplunkProvider(parsed);
+  const provider = new SplunkProvider(parsed);
+  return Object.assign(provider, { configSchema: splunkProviderConfigSchema });
 }
 
 class SplunkProvider implements ObservabilityProvider {

@@ -3,6 +3,7 @@ import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export const elasticConfigSchema = z
   .object({
@@ -19,9 +20,19 @@ export const elasticConfigSchema = z
 
 export type ElasticConfig = z.infer<typeof elasticConfigSchema>;
 
-export function elastic(config: ElasticConfig): ObservabilityProvider {
+export const elasticProviderConfigSchema: ProviderConfigSchema = {
+  role: "observability",
+  name: "Elastic",
+  fields: [
+    { key: "baseUrl", envVar: "ELASTIC_URL", description: "Elasticsearch URL" },
+    { key: "apiKey", envVar: "ELASTIC_API_KEY", description: "Elasticsearch API key" },
+  ],
+};
+
+export function elastic(config: ElasticConfig): ObservabilityProvider & { configSchema: ProviderConfigSchema } {
   const parsed = elasticConfigSchema.parse(config);
-  return new ElasticProvider(parsed);
+  const provider = new ElasticProvider(parsed);
+  return Object.assign(provider, { configSchema: elasticProviderConfigSchema });
 }
 
 /** Safely extract a string from an unknown value, returning undefined for non-strings. */

@@ -12,6 +12,7 @@ import type {
   LabelHistoryCapable,
   IssueHistoryEntry,
 } from "./types.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 
@@ -24,9 +25,18 @@ export const linearConfigSchema = z.object({
 
 export type LinearConfig = z.infer<typeof linearConfigSchema>;
 
-export function linear(config: LinearConfig): IssueTrackingProvider & PrLinkCapable & LabelHistoryCapable {
+export const linearProviderConfigSchema: ProviderConfigSchema = {
+  role: "issueTracker",
+  name: "Linear",
+  fields: [{ key: "apiKey", envVar: "LINEAR_API_KEY", description: "Linear API key" }],
+};
+
+export function linear(
+  config: LinearConfig,
+): IssueTrackingProvider & PrLinkCapable & LabelHistoryCapable & { configSchema: ProviderConfigSchema } {
   const parsed = linearConfigSchema.parse(config);
-  return new LinearProvider(parsed);
+  const provider = new LinearProvider(parsed);
+  return Object.assign(provider, { configSchema: linearProviderConfigSchema });
 }
 
 class LinearProvider implements IssueTrackingProvider, PrLinkCapable, LabelHistoryCapable {

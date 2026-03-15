@@ -2,6 +2,7 @@ import type { CodingAgent, CodingAgentRunOptions, AgentEventHandler } from "./ty
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { execCommand, spawnLines, isCliInstalled, writeMcpConfig } from "./shared.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export interface GoogleGeminiConfig {
   cliFlags?: string[];
@@ -15,13 +16,19 @@ export interface GoogleGeminiConfig {
   onEvent?: AgentEventHandler;
 }
 
-export function googleGemini(config?: GoogleGeminiConfig): CodingAgent {
+export const googleGeminiProviderConfigSchema: ProviderConfigSchema = {
+  role: "codingAgent",
+  name: "Google Gemini",
+  fields: [{ key: "apiKey", envVar: "GEMINI_API_KEY", description: "Google Gemini API key" }],
+};
+
+export function googleGemini(config?: GoogleGeminiConfig): CodingAgent & { configSchema: ProviderConfigSchema } {
   const log = config?.logger ?? consoleLogger;
   const extraFlags = config?.cliFlags ?? [];
   const quiet = config?.quiet ?? false;
   const onEvent = config?.onEvent;
 
-  return {
+  return Object.assign({
     async install(): Promise<void> {
       if (isCliInstalled("gemini")) {
         log.info("Google Gemini CLI already installed, skipping");
@@ -67,5 +74,5 @@ export function googleGemini(config?: GoogleGeminiConfig): CodingAgent {
         mcpConfig?.cleanup();
       }
     },
-  };
+  }, { configSchema: googleGeminiProviderConfigSchema });
 }

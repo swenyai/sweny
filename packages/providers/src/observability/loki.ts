@@ -3,6 +3,7 @@ import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export const lokiConfigSchema = z.object({
   baseUrl: z.string().min(1, "Loki base URL is required"),
@@ -13,13 +14,20 @@ export const lokiConfigSchema = z.object({
 
 export type LokiConfig = z.infer<typeof lokiConfigSchema>;
 
+export const lokiProviderConfigSchema: ProviderConfigSchema = {
+  role: "observability",
+  name: "Loki",
+  fields: [{ key: "baseUrl", envVar: "LOKI_URL", description: "Loki base URL" }],
+};
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function loki(config: LokiConfig): ObservabilityProvider {
+export function loki(config: LokiConfig): ObservabilityProvider & { configSchema: ProviderConfigSchema } {
   const parsed = lokiConfigSchema.parse(config);
-  return new LokiProvider(parsed);
+  const provider = new LokiProvider(parsed);
+  return Object.assign(provider, { configSchema: lokiProviderConfigSchema });
 }
 
 class LokiProvider implements ObservabilityProvider {

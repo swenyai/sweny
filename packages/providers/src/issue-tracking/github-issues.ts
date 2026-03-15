@@ -10,6 +10,7 @@ import type {
   IssueSearchOptions,
   PrLinkCapable,
 } from "./types.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export const githubIssuesConfigSchema = z.object({
   token: z.string().min(1, "GitHub token is required"),
@@ -20,9 +21,18 @@ export const githubIssuesConfigSchema = z.object({
 
 export type GitHubIssuesConfig = z.infer<typeof githubIssuesConfigSchema>;
 
-export function githubIssues(config: GitHubIssuesConfig): IssueTrackingProvider & PrLinkCapable {
+export const githubIssuesProviderConfigSchema: ProviderConfigSchema = {
+  role: "issueTracker",
+  name: "GitHub Issues",
+  fields: [{ key: "token", envVar: "GITHUB_TOKEN", description: "GitHub personal access token" }],
+};
+
+export function githubIssues(
+  config: GitHubIssuesConfig,
+): IssueTrackingProvider & PrLinkCapable & { configSchema: ProviderConfigSchema } {
   const parsed = githubIssuesConfigSchema.parse(config);
-  return new GitHubIssuesProvider(parsed);
+  const provider = new GitHubIssuesProvider(parsed);
+  return Object.assign(provider, { configSchema: githubIssuesProviderConfigSchema });
 }
 
 class GitHubIssuesProvider implements IssueTrackingProvider, PrLinkCapable {

@@ -3,6 +3,7 @@ import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export const datadogConfigSchema = z.object({
   apiKey: z.string().min(1, "Datadog API key is required"),
@@ -13,9 +14,19 @@ export const datadogConfigSchema = z.object({
 
 export type DatadogConfig = z.infer<typeof datadogConfigSchema>;
 
-export function datadog(config: DatadogConfig): ObservabilityProvider {
+export const datadogProviderConfigSchema: ProviderConfigSchema = {
+  role: "observability",
+  name: "Datadog",
+  fields: [
+    { key: "apiKey", envVar: "DD_API_KEY", description: "Datadog API key" },
+    { key: "appKey", envVar: "DD_APPLICATION_KEY", description: "Datadog Application key" },
+  ],
+};
+
+export function datadog(config: DatadogConfig): ObservabilityProvider & { configSchema: ProviderConfigSchema } {
   const parsed = datadogConfigSchema.parse(config);
-  return new DatadogProvider(parsed);
+  const provider = new DatadogProvider(parsed);
+  return Object.assign(provider, { configSchema: datadogProviderConfigSchema });
 }
 
 class DatadogProvider implements ObservabilityProvider {

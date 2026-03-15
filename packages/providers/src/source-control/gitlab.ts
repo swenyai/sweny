@@ -11,6 +11,7 @@ import type {
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { ProviderApiError } from "../errors.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -78,7 +79,13 @@ function toGitLabState(state: string): string {
   }
 }
 
-export function gitlab(config: GitLabSourceControlConfig): SourceControlProvider {
+export const gitlabProviderConfigSchema: ProviderConfigSchema = {
+  role: "sourceControl",
+  name: "GitLab",
+  fields: [{ key: "token", envVar: "GITLAB_TOKEN", description: "GitLab personal access token" }],
+};
+
+export function gitlab(config: GitLabSourceControlConfig): SourceControlProvider & { configSchema: ProviderConfigSchema } {
   const parsed = gitlabConfigSchema.parse(config);
   const { token, baseBranch } = parsed;
   const baseUrl = parsed.baseUrl.replace(/\/+$/, "");
@@ -86,7 +93,7 @@ export function gitlab(config: GitLabSourceControlConfig): SourceControlProvider
     typeof parsed.projectId === "number" ? String(parsed.projectId) : encodeURIComponent(parsed.projectId);
   const log = parsed.logger ?? consoleLogger;
 
-  return {
+  return Object.assign({
     async verifyAccess(): Promise<void> {
       const project = (await glApi("GET", `/projects/${projectId}`, baseUrl, token)) as {
         path_with_namespace: string;
@@ -307,5 +314,5 @@ export function gitlab(config: GitLabSourceControlConfig): SourceControlProvider
       });
       log.info(`Triggered pipeline on ref "${opts.workflow}" for project ${opts.targetRepo || projectId}`);
     },
-  };
+  }, { configSchema: gitlabProviderConfigSchema });
 }

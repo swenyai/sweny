@@ -3,6 +3,7 @@ import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { ProviderApiError } from "../errors.js";
 import type { ObservabilityProvider, LogQueryOptions, LogEntry, AggregateResult } from "./types.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export const sentryConfigSchema = z.object({
   authToken: z.string().min(1, "Sentry auth token is required"),
@@ -14,9 +15,16 @@ export const sentryConfigSchema = z.object({
 
 export type SentryConfig = z.infer<typeof sentryConfigSchema>;
 
-export function sentry(config: SentryConfig): ObservabilityProvider {
+export const sentryProviderConfigSchema: ProviderConfigSchema = {
+  role: "observability",
+  name: "Sentry",
+  fields: [{ key: "authToken", envVar: "SENTRY_AUTH_TOKEN", description: "Sentry authentication token" }],
+};
+
+export function sentry(config: SentryConfig): ObservabilityProvider & { configSchema: ProviderConfigSchema } {
   const parsed = sentryConfigSchema.parse(config);
-  return new SentryProvider(parsed);
+  const provider = new SentryProvider(parsed);
+  return Object.assign(provider, { configSchema: sentryProviderConfigSchema });
 }
 
 class SentryProvider implements ObservabilityProvider {

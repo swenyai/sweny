@@ -2,6 +2,7 @@ import type { CodingAgent, CodingAgentRunOptions, AgentEventHandler } from "./ty
 import type { Logger } from "../logger.js";
 import { consoleLogger } from "../logger.js";
 import { execCommand, spawnLines, isCliInstalled, writeMcpConfig } from "./shared.js";
+import type { ProviderConfigSchema } from "../config-schema.js";
 
 export interface OpenAICodexConfig {
   cliFlags?: string[];
@@ -15,13 +16,19 @@ export interface OpenAICodexConfig {
   onEvent?: AgentEventHandler;
 }
 
-export function openaiCodex(config?: OpenAICodexConfig): CodingAgent {
+export const openaiCodexProviderConfigSchema: ProviderConfigSchema = {
+  role: "codingAgent",
+  name: "OpenAI Codex",
+  fields: [{ key: "apiKey", envVar: "OPENAI_API_KEY", description: "OpenAI API key" }],
+};
+
+export function openaiCodex(config?: OpenAICodexConfig): CodingAgent & { configSchema: ProviderConfigSchema } {
   const log = config?.logger ?? consoleLogger;
   const extraFlags = config?.cliFlags ?? [];
   const quiet = config?.quiet ?? false;
   const onEvent = config?.onEvent;
 
-  return {
+  return Object.assign({
     async install(): Promise<void> {
       if (isCliInstalled("codex")) {
         log.info("OpenAI Codex CLI already installed, skipping");
@@ -67,5 +74,5 @@ export function openaiCodex(config?: OpenAICodexConfig): CodingAgent {
         mcpConfig?.cleanup();
       }
     },
-  };
+  }, { configSchema: openaiCodexProviderConfigSchema });
 }
