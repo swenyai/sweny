@@ -172,6 +172,11 @@ describe("parseCliInputs", () => {
     const config = parseCliInputs({ prLabels: " agent , triage , fix " });
     expect(config.prLabels).toEqual(["agent", "triage", "fix"]);
   });
+
+  it("trims whitespace from workspaceTools entries and filters empty strings", () => {
+    const config = parseCliInputs({ workspaceTools: "slack,  , notion" });
+    expect(config.workspaceTools).toEqual(["slack", "notion"]);
+  });
 });
 
 // ── validateInputs ──────────────────────────────────────────────────────────
@@ -206,6 +211,8 @@ describe("validateInputs", () => {
       maxInvestigateTurns: 50,
       maxImplementTurns: 30,
       reviewMode: "review",
+      mcpServers: {},
+      workspaceTools: [],
       ...overrides,
     } as Parameters<typeof validateInputs>[0];
   }
@@ -435,6 +442,22 @@ describe("validateInputs", () => {
     it("accepts boundary values of 500 and 1", () => {
       const errors = validateInputs(base({ maxInvestigateTurns: 500, maxImplementTurns: 1 }));
       expect(errors.filter((e) => e.includes("turns"))).toHaveLength(0);
+    });
+  });
+
+  describe("workspace tools", () => {
+    it("accepts an empty workspaceTools list", () => {
+      expect(validateInputs(base({ workspaceTools: [] }))).toEqual([]);
+    });
+
+    it("accepts all supported tool names", () => {
+      expect(validateInputs(base({ workspaceTools: ["slack", "notion", "pagerduty", "monday"] }))).toEqual([]);
+    });
+
+    it("rejects unknown tool names and lists supported values", () => {
+      const errors = validateInputs(base({ workspaceTools: ["slack", "zapier"] }));
+      expect(errors.some((e) => e.includes("zapier"))).toBe(true);
+      expect(errors.some((e) => e.includes("slack, notion, pagerduty, monday"))).toBe(true);
     });
   });
 });

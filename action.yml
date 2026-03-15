@@ -281,6 +281,16 @@ inputs:
     description: "Optional bot token with elevated permissions (for cross-repo dispatch, push to protected branches)"
     required: false
 
+  # Workspace tool integrations (Category B MCP servers — explicit opt-in)
+  workspace-tools:
+    description: >-
+      Comma-separated list of workspace tool integrations to enable.
+      Each tool injects its MCP server into the coding agent when the corresponding
+      credential env var is also present. Supported values: slack, notion, pagerduty, monday.
+      Example: "slack,notion"
+    required: false
+    default: ""
+
   # MCP servers
   mcp-servers:
     description: >-

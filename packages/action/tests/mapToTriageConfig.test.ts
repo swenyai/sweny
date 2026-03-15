@@ -73,6 +73,7 @@ vi.mock("../src/config.js", () => ({
     geminiApiKey: "",
     logFilePath: "",
     mcpServers: {},
+    workspaceTools: [],
   }),
   validateInputs: vi.fn().mockReturnValue([]),
 }));
@@ -140,6 +141,7 @@ const BASE: ActionConfig = {
   geminiApiKey: "",
   logFilePath: "",
   mcpServers: {},
+  workspaceTools: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -345,7 +347,8 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
     expect(mcpServers?.["sentry"]).toMatchObject({
       type: "stdio",
       command: "npx",
-      env: { SENTRY_AUTH_TOKEN: "sntryu_secret" },
+      // @sentry/mcp-server uses SENTRY_ACCESS_TOKEN (not SENTRY_AUTH_TOKEN)
+      env: { SENTRY_ACCESS_TOKEN: "sntryu_secret" },
     });
   });
 
@@ -365,6 +368,34 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
     });
   });
 
+  it("injects New Relic MCP server when observability provider is newrelic", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      observabilityProvider: "newrelic",
+      observabilityCredentials: { apiKey: "NRAK-test", accountId: "123456", region: "us" },
+      githubToken: "",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(mcpServers?.["newrelic"]).toMatchObject({
+      type: "http",
+      url: "https://mcp.newrelic.com/mcp/",
+      headers: { "Api-Key": "NRAK-test" },
+    });
+  });
+
+  it("uses EU endpoint for New Relic when region is eu", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      observabilityProvider: "newrelic",
+      observabilityCredentials: { apiKey: "NRAK-test", accountId: "123456", region: "eu" },
+      githubToken: "",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect((mcpServers?.["newrelic"] as Record<string, unknown>)?.["url"]).toBe(
+      "https://mcp.eu.newrelic.com/mcp/",
+    );
+  });
+
   it("does not inject Sentry MCP when authToken is absent", () => {
     const config: ActionConfig = {
       ...BASE,
@@ -378,10 +409,10 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
 
   // ── Category B: env-var triggered ──────────────────────────────────────────
 
-  it("injects Slack MCP server when SLACK_BOT_TOKEN is present in env", () => {
+  it("injects Slack MCP server when workspace-tools includes 'slack' and SLACK_BOT_TOKEN is set", () => {
     process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
     try {
-      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "" }) as {
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", workspaceTools: ["slack"] }) as {
         mcpServers: Record<string, unknown>;
       };
       expect(mcpServers?.["slack"]).toMatchObject({
@@ -398,7 +429,7 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
     process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
     process.env.SLACK_TEAM_ID = "T012AB3CD";
     try {
-      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "" }) as {
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", workspaceTools: ["slack"] }) as {
         mcpServers: Record<string, unknown>;
       };
       expect((mcpServers?.["slack"] as Record<string, unknown>)?.["env"]).toMatchObject({
@@ -410,36 +441,110 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
     }
   });
 
-  it("does not inject Slack MCP when SLACK_BOT_TOKEN is absent", () => {
+  it("does not inject Slack MCP when tool is declared but token is absent", () => {
     delete process.env.SLACK_BOT_TOKEN;
-    const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {} }) as {
+    const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["slack"] }) as {
       mcpServers: Record<string, unknown> | undefined;
     };
     expect(mcpServers?.["slack"]).toBeUndefined();
   });
 
-  it("injects Notion MCP server when NOTION_API_KEY is present in env", () => {
-    process.env.NOTION_API_KEY = "secret_notion_key";
+  it("does not inject Slack MCP when token is present but tool is not declared", () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
     try {
-      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "" }) as {
+      // workspaceTools is empty — no slack declared
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: [] }) as {
+        mcpServers: Record<string, unknown> | undefined;
+      };
+      expect(mcpServers?.["slack"]).toBeUndefined();
+    } finally {
+      delete process.env.SLACK_BOT_TOKEN;
+    }
+  });
+
+  it("injects Notion MCP server when NOTION_TOKEN is present in env", () => {
+    process.env.NOTION_TOKEN = "secret_notion_key";
+    try {
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", workspaceTools: ["notion"] }) as {
         mcpServers: Record<string, unknown>;
       };
       expect(mcpServers?.["notion"]).toMatchObject({
         type: "stdio",
         command: "npx",
-        env: { NOTION_API_KEY: "secret_notion_key" },
+        // @notionhq/notion-mcp-server reads NOTION_TOKEN (not NOTION_API_KEY)
+        env: { NOTION_TOKEN: "secret_notion_key" },
+      });
+    } finally {
+      delete process.env.NOTION_TOKEN;
+    }
+  });
+
+  it("injects Notion MCP server from legacy NOTION_API_KEY env var", () => {
+    delete process.env.NOTION_TOKEN;
+    process.env.NOTION_API_KEY = "legacy_notion_key";
+    try {
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", workspaceTools: ["notion"] }) as {
+        mcpServers: Record<string, unknown>;
+      };
+      expect((mcpServers?.["notion"] as Record<string, unknown>)?.["env"]).toMatchObject({
+        NOTION_TOKEN: "legacy_notion_key",
       });
     } finally {
       delete process.env.NOTION_API_KEY;
     }
   });
 
-  it("does not inject Notion MCP when NOTION_API_KEY is absent", () => {
+  it("does not inject Notion MCP when tool not declared (even if token present)", () => {
+    process.env.NOTION_TOKEN = "secret_notion_key";
+    try {
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: [] }) as {
+        mcpServers: Record<string, unknown> | undefined;
+      };
+      expect(mcpServers?.["notion"]).toBeUndefined();
+    } finally {
+      delete process.env.NOTION_TOKEN;
+    }
+  });
+
+  it("does not inject Notion MCP when tool is declared but neither token is set", () => {
+    delete process.env.NOTION_TOKEN;
     delete process.env.NOTION_API_KEY;
-    const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {} }) as {
+    const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["notion"] }) as {
       mcpServers: Record<string, unknown> | undefined;
     };
     expect(mcpServers?.["notion"]).toBeUndefined();
+  });
+
+  it("injects PagerDuty MCP server when declared and PAGERDUTY_API_TOKEN is set", () => {
+    process.env.PAGERDUTY_API_TOKEN = "pd_token_abc";
+    try {
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", workspaceTools: ["pagerduty"] }) as {
+        mcpServers: Record<string, unknown>;
+      };
+      expect(mcpServers?.["pagerduty"]).toMatchObject({
+        type: "http",
+        url: "https://mcp.pagerduty.com/mcp",
+        headers: { Authorization: "Token token=pd_token_abc" },
+      });
+    } finally {
+      delete process.env.PAGERDUTY_API_TOKEN;
+    }
+  });
+
+  it("injects Monday.com MCP server when declared and MONDAY_TOKEN is set", () => {
+    process.env.MONDAY_TOKEN = "monday_key_abc";
+    try {
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", workspaceTools: ["monday"] }) as {
+        mcpServers: Record<string, unknown>;
+      };
+      expect(mcpServers?.["monday"]).toMatchObject({
+        type: "stdio",
+        command: "npx",
+        env: { MONDAY_TOKEN: "monday_key_abc" },
+      });
+    } finally {
+      delete process.env.MONDAY_TOKEN;
+    }
   });
 
   it("returns undefined when no providers and no user mcpServers", () => {

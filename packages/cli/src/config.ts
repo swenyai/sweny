@@ -86,6 +86,11 @@ export interface CliConfig {
 
   // MCP servers for agent tool access
   mcpServers: Record<string, MCPServerConfig>;
+
+  // Workspace tool integrations — explicit opt-in for Category B MCP servers.
+  // Credential env vars must also be present for injection to occur.
+  // Supported: slack, notion, pagerduty, monday
+  workspaceTools: string[];
 }
 
 export function registerTriageCommand(program: Command): Command {
@@ -140,7 +145,11 @@ export function registerTriageCommand(program: Command): Command {
     .option("--cache-dir <path>", "Step cache directory (default: .sweny/cache)")
     .option("--cache-ttl <seconds>", "Cache TTL in seconds, 0 = infinite (default: 86400)")
     .option("--no-cache", "Disable step cache")
-    .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)");
+    .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
+    .option(
+      "--workspace-tools <tools>",
+      "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday)",
+    );
 }
 
 export function parseCliInputs(options: Record<string, unknown>, fileConfig: Record<string, string> = {}): CliConfig {
@@ -232,8 +241,16 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
     outputDir: (options.outputDir as string) || env.SWENY_OUTPUT_DIR || f("output-dir") || ".sweny/output",
 
     mcpServers: parseMcpServers(env.SWENY_MCP_SERVERS || f("mcp-servers-json") || ""),
+
+    workspaceTools: ((options.workspaceTools as string) || env.SWENY_WORKSPACE_TOOLS || f("workspace-tools") || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }
+
+/** All recognized workspace tool names. Update here when adding a new Category B MCP server. */
+export const SUPPORTED_WORKSPACE_TOOLS = new Set(["slack", "notion", "pagerduty", "monday"] as const);
 
 export function validateInputs(config: CliConfig): string[] {
   const errors: string[] = [];
@@ -361,6 +378,15 @@ export function validateInputs(config: CliConfig): string[] {
       break;
   }
 
+  // Workspace tools: reject unknown names early
+  for (const tool of config.workspaceTools) {
+    if (!SUPPORTED_WORKSPACE_TOOLS.has(tool)) {
+      errors.push(
+        `Unknown workspace tool: "${tool}". Supported values: ${[...SUPPORTED_WORKSPACE_TOOLS].join(", ")}`,
+      );
+    }
+  }
+
   // Enum validation
   if (!["auto", "review"].includes(config.reviewMode)) {
     errors.push("--review-mode must be one of: auto, review");
@@ -457,6 +483,10 @@ export function registerImplementCommand(program: Command): Command {
     .option("--linear-state-in-progress <name>", "Linear in-progress state name")
     .option("--linear-state-peer-review <name>", "Linear peer-review state name")
     .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
+    .option(
+      "--workspace-tools <tools>",
+      "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday)",
+    )
     .option(
       "--review-mode <mode>",
       "PR merge behavior: auto (GitHub auto-merge when CI passes) | review (human approval, default)",
