@@ -2,7 +2,8 @@ import * as core from "@actions/core";
 import { createProviderRegistry } from "@sweny-ai/engine";
 import type { ProviderRegistry } from "@sweny-ai/engine";
 import { ActionConfig } from "../config.js";
-import { createObservabilityProvider, createCodingAgentProvider } from "@sweny-ai/providers";
+import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "@sweny-ai/providers/observability";
+import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
 import { linear, jira, githubIssues, fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
 import { github, gitlab, fileSourceControl } from "@sweny-ai/providers/source-control";
 import {
@@ -14,6 +15,7 @@ import {
   webhook,
   fileNotification,
 } from "@sweny-ai/providers/notification";
+import { claudeCode, openaiCodex, googleGemini } from "@sweny-ai/providers/coding-agent";
 
 const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
 
@@ -21,10 +23,75 @@ export function createProviders(config: ActionConfig): ProviderRegistry {
   const registry = createProviderRegistry();
 
   // Observability
-  registry.set(
-    "observability",
-    createObservabilityProvider(config.observabilityProvider, config.observabilityCredentials, actionsLogger),
-  );
+  let observability: ObservabilityProvider;
+  const obsCreds = config.observabilityCredentials;
+  switch (config.observabilityProvider) {
+    case "datadog":
+      observability = datadog({
+        apiKey: obsCreds.apiKey,
+        appKey: obsCreds.appKey,
+        site: obsCreds.site,
+        logger: actionsLogger,
+      });
+      break;
+    case "sentry":
+      observability = sentry({
+        authToken: obsCreds.authToken,
+        organization: obsCreds.organization,
+        project: obsCreds.project,
+        baseUrl: obsCreds.baseUrl,
+        logger: actionsLogger,
+      });
+      break;
+    case "cloudwatch":
+      observability = cloudwatch({
+        region: obsCreds.region,
+        logGroupPrefix: obsCreds.logGroupPrefix,
+        logger: actionsLogger,
+      });
+      break;
+    case "splunk":
+      observability = splunk({
+        baseUrl: obsCreds.baseUrl,
+        token: obsCreds.token,
+        index: obsCreds.index,
+        logger: actionsLogger,
+      });
+      break;
+    case "elastic":
+      observability = elastic({
+        baseUrl: obsCreds.baseUrl,
+        apiKey: obsCreds.apiKey,
+        index: obsCreds.index,
+        logger: actionsLogger,
+      });
+      break;
+    case "newrelic":
+      observability = newrelic({
+        apiKey: obsCreds.apiKey,
+        accountId: obsCreds.accountId,
+        region: obsCreds.region as "us" | "eu",
+        logger: actionsLogger,
+      });
+      break;
+    case "loki":
+      observability = loki({
+        baseUrl: obsCreds.baseUrl,
+        apiKey: obsCreds.apiKey,
+        orgId: obsCreds.orgId,
+        logger: actionsLogger,
+      });
+      break;
+    case "file":
+      observability = file({
+        path: obsCreds.path,
+        logger: actionsLogger,
+      });
+      break;
+    default:
+      throw new Error(`Unsupported observability provider: ${config.observabilityProvider}`);
+  }
+  registry.set("observability", observability);
 
   // Source control
   const scToken = config.botToken || config.githubToken;
@@ -134,7 +201,18 @@ export function createProviders(config: ActionConfig): ProviderRegistry {
   }
 
   // Coding agent
-  registry.set("codingAgent", createCodingAgentProvider(config.codingAgentProvider, actionsLogger));
+  switch (config.codingAgentProvider) {
+    case "codex":
+      registry.set("codingAgent", openaiCodex({ logger: actionsLogger }));
+      break;
+    case "gemini":
+      registry.set("codingAgent", googleGemini({ logger: actionsLogger }));
+      break;
+    case "claude":
+    default:
+      registry.set("codingAgent", claudeCode({ logger: actionsLogger }));
+      break;
+  }
 
   return registry;
 }

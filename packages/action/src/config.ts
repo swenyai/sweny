@@ -333,6 +333,7 @@ export function validateInputs(config: ActionConfig): string[] {
     errors.push("`review-mode` must be one of: auto, review");
   }
 
+
   // Integer bounds
   if (config.maxInvestigateTurns < 1 || config.maxInvestigateTurns > 500) {
     errors.push("`max-investigate-turns` must be between 1 and 500");
