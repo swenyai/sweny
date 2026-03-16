@@ -208,6 +208,13 @@ export const useEditorStore = create<EditorState>()(
                 step.type = patch.type;
               }
             }
+            if ("uses" in patch) {
+              if (patch.uses === undefined) {
+                delete step.uses;
+              } else {
+                step.uses = patch.uses;
+              }
+            }
             if (patch.next !== undefined) step.next = patch.next;
             if (patch.on !== undefined) step.on = patch.on;
             if (structural) {
