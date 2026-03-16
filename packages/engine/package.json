@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/engine",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Recipe engine for SWEny — composable DAG-based workflows",
   "type": "module",
   "engines": {
@@ -25,10 +25,10 @@
     "./schema": "./schema/recipe-definition.schema.json"
   },
   "dependencies": {
-    "@sweny-ai/providers": ">=1.0.0"
+    "@sweny-ai/providers": ">=1.1.0"
   },
   "peerDependencies": {
-    "@sweny-ai/providers": ">=1.0.0"
+    "@sweny-ai/providers": ">=1.1.0"
   },
   "devDependencies": {
     "@types/node": "^25",
