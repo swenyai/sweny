@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { WorkflowPhase, StepDefinition } from "@sweny-ai/engine";
+import type { WorkflowPhase, StepDefinition, StepResult } from "@sweny-ai/engine";
 import { useEditorStore } from "../store/editor-store.js";
 
 export function PropertiesPanel() {
@@ -15,7 +15,12 @@ export function PropertiesPanel() {
     updateTransitionOutcome,
     updateTransitionTarget,
     deleteTransition,
+    mode,
+    completedSteps,
+    currentStepId,
   } = useEditorStore();
+
+  const readOnly = mode !== "design";
 
   const stepIds = Object.keys(definition.steps);
 
@@ -23,6 +28,8 @@ export function PropertiesPanel() {
     const { id } = selection;
     const step = definition.steps[id];
     if (!step) return <EmptyPanel />;
+    const execResult = completedSteps[id] as StepResult | undefined;
+    const isRunning = id === currentStepId;
     return (
       <StepPanel
         key={id}
@@ -30,6 +37,9 @@ export function PropertiesPanel() {
         step={step}
         stepIds={stepIds}
         isInitial={definition.initial === id}
+        readOnly={readOnly}
+        execResult={execResult}
+        isRunning={isRunning}
         updateStep={updateStep}
         setInitial={setInitial}
         deleteStep={(sid) => {
@@ -148,6 +158,9 @@ interface StepPanelProps {
   step: StepDefinition;
   stepIds: string[];
   isInitial: boolean;
+  readOnly: boolean;
+  execResult?: StepResult;
+  isRunning: boolean;
   updateStep: (id: string, patch: Partial<StepDefinition>) => void;
   setInitial: (id: string) => void;
   deleteStep: (id: string) => void;
@@ -162,6 +175,9 @@ function StepPanel({
   step,
   stepIds,
   isInitial,
+  readOnly,
+  execResult,
+  isRunning,
   updateStep,
   setInitial,
   deleteStep,
@@ -188,6 +204,9 @@ function StepPanel({
     <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
       <h2 className="font-semibold text-gray-800 mb-3 text-sm">Step</h2>
 
+      {/* Execution result card — shown in simulate/live mode */}
+      {readOnly && <ExecutionResultCard result={execResult} isRunning={isRunning} />}
+
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">ID</label>
         <code className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded block">{id}</code>
@@ -196,8 +215,9 @@ function StepPanel({
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">Phase</label>
         <select
-          className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
           value={step.phase}
+          disabled={readOnly}
           onChange={(e) => updateStep(id, { phase: e.target.value as WorkflowPhase })}
         >
           <option value="learn">learn</option>
@@ -207,10 +227,11 @@ function StepPanel({
       </div>
 
       <div className="mb-3">
-        <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
+        <label className={`flex items-center gap-2 text-xs font-medium text-gray-600 ${readOnly ? "opacity-60" : ""}`}>
           <input
             type="checkbox"
             checked={step.critical ?? false}
+            disabled={readOnly}
             onChange={(e) => updateStep(id, { critical: e.target.checked })}
           />
           Critical
@@ -220,8 +241,9 @@ function StepPanel({
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
         <input
-          className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
           value={description}
+          disabled={readOnly}
           onChange={(e) => setDescription(e.target.value)}
           onBlur={() => updateStep(id, { description })}
         />
@@ -230,8 +252,9 @@ function StepPanel({
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">Next (default)</label>
         <select
-          className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
           value={step.next ?? ""}
+          disabled={readOnly}
           onChange={(e) => {
             const val = e.target.value;
             updateStep(id, { next: val === "" ? undefined : val });
@@ -256,53 +279,58 @@ function StepPanel({
             outcome={outcome}
             target={target}
             targetOptions={targetOptions}
+            readOnly={readOnly}
             updateTransitionOutcome={updateTransitionOutcome}
             updateTransitionTarget={updateTransitionTarget}
             deleteTransition={deleteTransition}
           />
         ))}
 
-        {/* Add transition row */}
-        <form onSubmit={handleAddTransition} className="flex gap-1 mt-2">
-          <input
-            value={newOutcome}
-            onChange={(e) => setNewOutcome(e.target.value)}
-            placeholder="outcome"
-            className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs min-w-0"
-          />
-          <select
-            value={newTarget}
-            onChange={(e) => setNewTarget(e.target.value)}
-            className="border border-gray-300 rounded px-1 py-1 text-xs"
-          >
-            {targetOptions.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <button type="submit" className="px-2 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-500">
-            Add
-          </button>
-        </form>
+        {/* Add transition row — hidden in read-only mode */}
+        {!readOnly && (
+          <form onSubmit={handleAddTransition} className="flex gap-1 mt-2">
+            <input
+              value={newOutcome}
+              onChange={(e) => setNewOutcome(e.target.value)}
+              placeholder="outcome"
+              className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs min-w-0"
+            />
+            <select
+              value={newTarget}
+              onChange={(e) => setNewTarget(e.target.value)}
+              className="border border-gray-300 rounded px-1 py-1 text-xs"
+            >
+              {targetOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <button type="submit" className="px-2 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-500">
+              Add
+            </button>
+          </form>
+        )}
       </div>
 
-      {/* Danger zone */}
-      <div className="mt-4 pt-4 border-t border-gray-200 flex flex-col gap-2">
-        <button
-          onClick={() => setInitial(id)}
-          disabled={isInitial}
-          className="px-3 py-1 rounded text-xs bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {isInitial ? "Initial step" : "Set as initial"}
-        </button>
-        <button
-          onClick={() => deleteStep(id)}
-          className="px-3 py-1 rounded text-xs bg-red-600 text-white hover:bg-red-500"
-        >
-          Delete step
-        </button>
-      </div>
+      {/* Danger zone — hidden in read-only mode */}
+      {!readOnly && (
+        <div className="mt-4 pt-4 border-t border-gray-200 flex flex-col gap-2">
+          <button
+            onClick={() => setInitial(id)}
+            disabled={isInitial}
+            className="px-3 py-1 rounded text-xs bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isInitial ? "Initial step" : "Set as initial"}
+          </button>
+          <button
+            onClick={() => deleteStep(id)}
+            className="px-3 py-1 rounded text-xs bg-red-600 text-white hover:bg-red-500"
+          >
+            Delete step
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -312,6 +340,7 @@ interface TransitionRowProps {
   outcome: string;
   target: string;
   targetOptions: string[];
+  readOnly: boolean;
   updateTransitionOutcome: (sourceId: string, oldOutcome: string, newOutcome: string) => void;
   updateTransitionTarget: (sourceId: string, outcome: string, newTarget: string) => void;
   deleteTransition: (sourceId: string, outcome: string) => void;
@@ -322,6 +351,7 @@ function TransitionRow({
   outcome,
   target,
   targetOptions,
+  readOnly,
   updateTransitionOutcome,
   updateTransitionTarget,
   deleteTransition,
@@ -331,8 +361,9 @@ function TransitionRow({
   return (
     <div className="flex items-center gap-1 mb-1">
       <input
-        className="flex-1 border border-gray-300 rounded px-1 py-0.5 text-xs min-w-0"
+        className={`flex-1 border border-gray-300 rounded px-1 py-0.5 text-xs min-w-0 ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
         value={editOutcome}
+        disabled={readOnly}
         onChange={(e) => setEditOutcome(e.target.value)}
         onBlur={() => {
           const trimmed = editOutcome.trim();
@@ -343,8 +374,9 @@ function TransitionRow({
       />
       <span className="text-gray-400 text-xs">→</span>
       <select
-        className="border border-gray-300 rounded px-1 py-0.5 text-xs"
+        className={`border border-gray-300 rounded px-1 py-0.5 text-xs ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
         value={target}
+        disabled={readOnly}
         onChange={(e) => updateTransitionTarget(sourceId, outcome, e.target.value)}
       >
         {targetOptions.map((s) => (
@@ -353,13 +385,79 @@ function TransitionRow({
           </option>
         ))}
       </select>
-      <button
-        onClick={() => deleteTransition(sourceId, outcome)}
-        className="text-red-500 hover:text-red-700 text-xs px-1"
-        title="Delete transition"
-      >
-        ×
-      </button>
+      {!readOnly && (
+        <button
+          onClick={() => deleteTransition(sourceId, outcome)}
+          className="text-red-500 hover:text-red-700 text-xs px-1"
+          title="Delete transition"
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Execution result card
+// ─────────────────────────────────────────────
+
+interface ExecutionResultCardProps {
+  result?: StepResult;
+  isRunning: boolean;
+}
+
+function ExecutionResultCard({ result, isRunning }: ExecutionResultCardProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (isRunning) {
+    return (
+      <div className="mb-3 p-2 rounded bg-blue-50 border border-blue-200 text-xs animate-pulse">
+        <span className="text-blue-600 font-medium">● running…</span>
+      </div>
+    );
+  }
+
+  if (!result) {
+    return <div className="mb-3 p-2 rounded bg-gray-50 border border-gray-200 text-xs text-gray-400">pending</div>;
+  }
+
+  const statusColor =
+    result.status === "success"
+      ? "text-green-700 bg-green-50 border-green-200"
+      : result.status === "failed"
+        ? "text-red-700 bg-red-50 border-red-200"
+        : "text-gray-600 bg-gray-50 border-gray-200";
+
+  const icon = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "⊘";
+  const dataOutcome = result.data?.outcome != null ? String(result.data.outcome) : null;
+  const extraKeys = Object.keys(result.data ?? {}).filter((k) => k !== "outcome");
+  const hasExtraData = extraKeys.length > 0;
+  const extraJson = hasExtraData ? JSON.stringify(result.data, null, 2) : null;
+
+  return (
+    <div className={`mb-3 p-2 rounded border text-xs ${statusColor}`}>
+      <div className="flex items-center gap-1.5 font-medium">
+        <span>{icon}</span>
+        <span>{result.status}</span>
+        {result.cached && <span className="px-1 rounded bg-yellow-100 text-yellow-700 text-[10px]">cached</span>}
+        {dataOutcome && (
+          <span className="px-1 rounded bg-white/60 text-[10px] border border-current/20">{dataOutcome}</span>
+        )}
+      </div>
+      {result.reason && <p className="mt-1 text-[11px] opacity-80">{result.reason}</p>}
+      {hasExtraData && (
+        <div className="mt-1">
+          <button onClick={() => setExpanded((v) => !v)} className="text-[10px] underline opacity-70 hover:opacity-100">
+            {expanded ? "▾ Hide data" : "▸ Show data"}
+          </button>
+          {expanded && (
+            <pre className="mt-1 text-[10px] bg-white/60 rounded p-1 overflow-auto max-h-32 whitespace-pre-wrap">
+              {extraJson!.length > 800 ? extraJson!.slice(0, 800) + "…" : extraJson}
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }

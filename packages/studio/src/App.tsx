@@ -149,8 +149,8 @@ export function App() {
           {mode === "simulate" && <SimulationPanel />}
           {mode === "live" && <LiveConnectPanel />}
         </div>
-        {/* Right sidebar — design mode only */}
-        {mode === "design" && <PropertiesPanel />}
+        {/* Right sidebar — always visible; shows execution results in simulate/live */}
+        <PropertiesPanel />
       </div>
       <DropOverlay onImport={handleDropImport} />
     </div>
