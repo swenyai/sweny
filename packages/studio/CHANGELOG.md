@@ -1,5 +1,32 @@
 # @sweny-ai/studio
 
+## 3.0.0
+
+### Major Changes
+
+- 815d361: **Breaking**: Studio public exports renamed to workflow terminology.
+  - `RecipeViewer` → `WorkflowViewer`
+  - `RecipeViewerProps` → `WorkflowViewerProps`
+  - Studio now listens for `workflow:start`, `step:enter`, `step:exit`, `workflow:end` events (matching engine v2)
+  - Internal store fields: `currentStepId`, `completedSteps`, `updateWorkflowMeta`
+
+  CLI: updated to use `runWorkflow`, `triageWorkflow`, `implementWorkflow` from engine (no user-facing change).
+
+### Minor Changes
+
+- e36f470: Studio is now the GUI for declarative YAML workflows.
+  - **Step type picker**: select built-in step types (sweny/investigate, sweny/create-pr, etc.) when adding nodes — pre-populates phase, uses, and type fields
+  - **YAML export**: primary export is now workflow YAML (compatible with `sweny workflow run`); JSON export kept as secondary
+  - **YAML import**: Import modal accepts YAML or JSON paste
+  - **Fork UX**: one-click fork of built-in workflows (triage, implement) into editable custom workflow
+  - **Step type display**: nodes show their type label as subtitle
+
+### Patch Changes
+
+- Updated dependencies [1204f4f]
+- Updated dependencies [93e7710]
+  - @sweny-ai/engine@3.0.0
+
 ## 2.0.0
 
 ### Minor Changes

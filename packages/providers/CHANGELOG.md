@@ -1,5 +1,19 @@
 # @sweny-ai/providers
 
+## 1.1.0
+
+### Minor Changes
+
+- c0119dc: Migrate `@sweny-ai/agent` to `@anthropic-ai/claude-agent-sdk` (Anthropic split the programmatic SDK from the CLI binary).
+
+  **Breaking in `@sweny-ai/agent`**: `customSystemPrompt` option renamed to `systemPrompt`.
+
+  **New in `@sweny-ai/providers`**: File observability provider — use a local JSON log file as the observability source. Useful for CI exports and offline triage.
+
+- 1204f4f: Providers now expose `configSchema` — a declarative list of required env vars.
+  `runWorkflow()` runs pre-flight validation before step 1 and throws `WorkflowConfigError`
+  listing all missing env vars grouped by step. Built-in workflows now declare `uses` on each step.
+
 ## 1.0.1
 
 ### Patch Changes

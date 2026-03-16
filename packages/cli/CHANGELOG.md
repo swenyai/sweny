@@ -1,5 +1,39 @@
 # @sweny-ai/cli
 
+## 1.3.0
+
+### Minor Changes
+
+- 054d1f4: Add `--agent <provider>` flag to `sweny triage` and `sweny implement`.
+
+  Supported values: `claude` (default), `codex`, `gemini`.
+  `--agent` takes priority over the longer `--coding-agent-provider` flag.
+  Also supported via `.sweny.yml`: `coding-agent-provider: codex`.
+
+- 93e7710: Add declarative YAML workflow support.
+  - New `StepDefinition.type` field for referencing built-in step implementations
+  - New `resolveWorkflow(definition)` — resolves a WorkflowDefinition to a runnable Workflow using the built-in step registry
+  - New `builtinStepRegistry` and `registerStepType` exports for extending the registry
+  - New `@sweny-ai/engine/builtin-steps` subpath — import to register all built-in step types
+  - New CLI command: `sweny workflow run <file.yaml>` — run any workflow from a YAML or JSON file
+  - New CLI command: `sweny workflow export triage|implement` — print built-in workflow as YAML for forking
+
+### Patch Changes
+
+- 815d361: **Breaking**: Studio public exports renamed to workflow terminology.
+  - `RecipeViewer` → `WorkflowViewer`
+  - `RecipeViewerProps` → `WorkflowViewerProps`
+  - Studio now listens for `workflow:start`, `step:enter`, `step:exit`, `workflow:end` events (matching engine v2)
+  - Internal store fields: `currentStepId`, `completedSteps`, `updateWorkflowMeta`
+
+  CLI: updated to use `runWorkflow`, `triageWorkflow`, `implementWorkflow` from engine (no user-facing change).
+
+- Updated dependencies [c0119dc]
+- Updated dependencies [1204f4f]
+- Updated dependencies [93e7710]
+  - @sweny-ai/providers@1.1.0
+  - @sweny-ai/engine@3.0.0
+
 ## 1.2.0
 
 ### Minor Changes

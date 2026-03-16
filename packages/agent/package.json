@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AI assistant framework powered by Claude Code SDK — Slack bot + CLI with plugin architecture",
   "type": "module",
   "engines": {
