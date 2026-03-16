@@ -5,6 +5,7 @@ import { useEditorStore, useTemporalStore } from "../store/editor-store.js";
 import type { StudioMode } from "../store/editor-store.js";
 import { ImportModal } from "./ImportModal.js";
 import { exportWorkflowYaml } from "../lib/export-yaml.js";
+import { exportAsTypescript } from "../lib/export-typescript.js";
 import { buildPermalinkUrl } from "../lib/permalink.js";
 import { BUILTIN_STEP_TYPES, findStepType } from "../lib/step-types.js";
 
@@ -89,6 +90,18 @@ export function Toolbar({
     const a = document.createElement("a");
     a.href = url;
     a.download = `${def.id}.workflow.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleExportTypescript() {
+    const { definition: def } = useEditorStore.getState();
+    const content = exportAsTypescript(def);
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${def.id}.workflow.ts`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -283,6 +296,11 @@ export function Toolbar({
       {/* Export JSON (secondary) */}
       <button onClick={handleExportJson} className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs">
         ↓ JSON
+      </button>
+
+      {/* Export TypeScript */}
+      <button onClick={handleExportTypescript} className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs">
+        ↓ TypeScript
       </button>
 
       {/* Share link */}
