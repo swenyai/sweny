@@ -18,7 +18,11 @@ export type SentryConfig = z.infer<typeof sentryConfigSchema>;
 export const sentryProviderConfigSchema: ProviderConfigSchema = {
   role: "observability",
   name: "Sentry",
-  fields: [{ key: "authToken", envVar: "SENTRY_AUTH_TOKEN", description: "Sentry authentication token" }],
+  fields: [
+    { key: "authToken", envVar: "SENTRY_AUTH_TOKEN", description: "Sentry authentication token" },
+    { key: "organization", envVar: "SENTRY_ORG", description: "Sentry organization slug" },
+    { key: "project", envVar: "SENTRY_PROJECT", description: "Sentry project slug" },
+  ],
 };
 
 export function sentry(config: SentryConfig): ObservabilityProvider & { configSchema: ProviderConfigSchema } {
