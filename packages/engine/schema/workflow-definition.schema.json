@@ -72,6 +72,23 @@
             "minLength": 1
           }
         },
+        "type": {
+          "type": "string",
+          "description": "Built-in step type identifier (e.g. \"sweny/fetch-issue\"). When set, resolveWorkflow() wires the implementation automatically.",
+          "examples": [
+            "sweny/verify-access",
+            "sweny/build-context",
+            "sweny/investigate",
+            "sweny/novelty-gate",
+            "sweny/create-issue",
+            "sweny/cross-repo-check",
+            "sweny/dedup-check",
+            "sweny/fetch-issue",
+            "sweny/implement-fix",
+            "sweny/create-pr",
+            "sweny/notify"
+          ]
+        },
         "uses": {
           "type": "array",
           "items": {

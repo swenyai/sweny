@@ -679,6 +679,9 @@ export async function workflowRunAction(file: string, options: Record<string, un
   }
 }
 
+const YAML_SCHEMA_COMMENT =
+  "# yaml-language-server: $schema=https://sweny.ai/schemas/workflow-definition.schema.json\n";
+
 export function workflowExportAction(name: string): void {
   let definition: WorkflowDefinition;
   if (name === "triage") {
@@ -690,7 +693,7 @@ export function workflowExportAction(name: string): void {
     process.exit(1);
     return;
   }
-  process.stdout.write(stringifyYaml(definition));
+  process.stdout.write(YAML_SCHEMA_COMMENT + stringifyYaml(definition, { indent: 2, lineWidth: 120 }));
 }
 
 workflowCmd

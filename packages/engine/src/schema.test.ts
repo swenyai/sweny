@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import Ajv from "ajv";
 import { triageDefinition, implementDefinition } from "./index.js";
-import schema from "../schema/recipe-definition.schema.json" with { type: "json" };
+import schema from "../schema/workflow-definition.schema.json" with { type: "json" };
 
 const ajv = new Ajv({ allErrors: true });
 const validate = ajv.compile(schema);
 
-describe("recipe-definition.schema.json", () => {
+describe("workflow-definition.schema.json", () => {
   it("triageDefinition passes schema validation", () => {
     const valid = validate(triageDefinition);
     expect(validate.errors).toBeNull();

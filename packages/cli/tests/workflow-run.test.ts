@@ -329,23 +329,27 @@ describe("workflowExportAction", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("writes triage YAML to stdout", async () => {
+  it("writes triage YAML to stdout with schema comment header", async () => {
     const { workflowExportAction } = await loadModule();
     mockStringifyYaml.mockReturnValue("id: triage\n");
 
     workflowExportAction("triage");
 
     expect(mockStringifyYaml).toHaveBeenCalled();
-    expect(stdoutSpy).toHaveBeenCalledWith("id: triage\n");
+    const written = stdoutSpy.mock.calls[0][0] as string;
+    expect(written).toContain("yaml-language-server: $schema=");
+    expect(written).toContain("id: triage");
   });
 
-  it("writes implement YAML to stdout", async () => {
+  it("writes implement YAML to stdout with schema comment header", async () => {
     const { workflowExportAction } = await loadModule();
     mockStringifyYaml.mockReturnValue("id: implement\n");
 
     workflowExportAction("implement");
 
-    expect(stdoutSpy).toHaveBeenCalledWith("id: implement\n");
+    const written = stdoutSpy.mock.calls[0][0] as string;
+    expect(written).toContain("yaml-language-server: $schema=");
+    expect(written).toContain("id: implement");
   });
 
   it("exits 1 for unknown workflow name", async () => {

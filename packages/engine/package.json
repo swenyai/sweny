@@ -22,7 +22,7 @@
     ".": "./dist/index.js",
     "./browser": "./dist/browser.js",
     "./builtin-steps": "./dist/builtin-steps.js",
-    "./schema": "./schema/recipe-definition.schema.json"
+    "./schema": "./schema/workflow-definition.schema.json"
   },
   "dependencies": {
     "@sweny-ai/providers": ">=1.1.0"
