@@ -41,5 +41,32 @@ export function validateWorkflow(def: WorkflowDefinition): WorkflowDefinitionErr
     }
   }
 
+  // Reachability check — only run when there are no structural errors, because
+  // unknown targets would produce false-positive unreachable reports.
+  if (errors.length === 0) {
+    const visited = new Set<string>();
+    const queue: string[] = [def.initial];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      const step = def.steps[id];
+      if (!step) continue;
+      if (step.next && step.next !== "end") queue.push(step.next);
+      for (const target of Object.values(step.on ?? {})) {
+        if (target !== "end") queue.push(target);
+      }
+    }
+    for (const stepId of Object.keys(def.steps)) {
+      if (!visited.has(stepId)) {
+        errors.push({
+          code: "UNREACHABLE_STEP",
+          message: `step "${stepId}" is unreachable from initial step "${def.initial}"`,
+          stateId: stepId,
+        });
+      }
+    }
+  }
+
   return errors;
 }

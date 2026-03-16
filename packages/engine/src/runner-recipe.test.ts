@@ -198,16 +198,11 @@ describe("runWorkflow — on: transition routing", () => {
         initial: "gate",
         steps: {
           gate: { phase: "act", on: { success: "node-b" } },
-          "node-a": { phase: "act" },
           "node-b": { phase: "act" },
         },
       },
       {
         gate: async () => ({ status: "success", data: { outcome: "unknown-outcome" } }),
-        "node-a": async () => {
-          order.push("a");
-          return { status: "success" };
-        },
         "node-b": async () => {
           order.push("b");
           return { status: "success" };
@@ -880,7 +875,8 @@ describe("createWorkflow — comprehensive", () => {
           version: "1.0.0",
           name: "r",
           initial: "a",
-          steps: { a: { phase: "act" }, b: { phase: "act" } },
+          // b is reachable via next so validation passes; missing impl is caught next
+          steps: { a: { phase: "act", next: "b" }, b: { phase: "act" } },
         },
         { a: async () => ({ status: "success" }) },
       ),
@@ -1283,7 +1279,6 @@ describe("runWorkflow routing — next as fallback", () => {
 
 describe("runWorkflow routing — end keyword", () => {
   it("stops successfully when on target is 'end'", async () => {
-    const order: string[] = [];
     const r = createWorkflow<Cfg>(
       {
         id: "r",
@@ -1292,24 +1287,18 @@ describe("runWorkflow routing — end keyword", () => {
         initial: "a",
         steps: {
           a: { phase: "act", on: { success: "end" } },
-          b: { phase: "act" },
         },
       },
       {
         a: async () => ({ status: "success" }),
-        b: async () => {
-          order.push("b");
-          return { status: "success" };
-        },
       },
     );
     const result = await runWorkflow(r, {}, providers, opts);
-    expect(order).toEqual([]);
+    expect(result.steps).toHaveLength(1);
     expect(result.status).toBe("completed");
   });
 
   it("stops successfully when next is 'end'", async () => {
-    const order: string[] = [];
     const r = createWorkflow<Cfg>(
       {
         id: "r",
@@ -1318,19 +1307,14 @@ describe("runWorkflow routing — end keyword", () => {
         initial: "a",
         steps: {
           a: { phase: "act", next: "end" },
-          b: { phase: "act" },
         },
       },
       {
         a: async () => ({ status: "success" }),
-        b: async () => {
-          order.push("b");
-          return { status: "success" };
-        },
       },
     );
     const result = await runWorkflow(r, {}, providers, opts);
-    expect(order).toEqual([]);
+    expect(result.steps).toHaveLength(1);
     expect(result.status).toBe("completed");
   });
 });
