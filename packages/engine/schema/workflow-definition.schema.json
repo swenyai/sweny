@@ -14,7 +14,7 @@
     },
     "version": {
       "type": "string",
-      "pattern": "^\\d+\\.\\d+\\.\\d+",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[a-zA-Z0-9.-]+)?(?:\\+[a-zA-Z0-9.-]+)?$",
       "description": "Semver version string, e.g. \"1.0.0\"."
     },
     "name": {

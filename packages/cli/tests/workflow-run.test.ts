@@ -131,6 +131,8 @@ async function loadModule() {
     validateWorkflow: mockValidateWorkflow,
     resolveWorkflow: mockResolveWorkflow,
     listStepTypes: mockListStepTypes,
+    WORKFLOW_YAML_SCHEMA_HEADER:
+      "# yaml-language-server: $schema=https://sweny.ai/schemas/workflow-definition.schema.json\n",
   }));
   vi.doMock("@sweny-ai/engine/builtin-steps", () => ({}));
   vi.doMock("../src/providers/index.js", () => ({

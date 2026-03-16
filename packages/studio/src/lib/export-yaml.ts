@@ -1,8 +1,7 @@
 import { stringify } from "yaml";
+import { WORKFLOW_YAML_SCHEMA_HEADER } from "@sweny-ai/engine";
 import type { WorkflowDefinition } from "@sweny-ai/engine";
 
-const SCHEMA_COMMENT = "# yaml-language-server: $schema=https://sweny.ai/schemas/workflow-definition.schema.json\n";
-
 export function exportWorkflowYaml(definition: WorkflowDefinition): string {
-  return SCHEMA_COMMENT + stringify(definition, { indent: 2, lineWidth: 120 });
+  return WORKFLOW_YAML_SCHEMA_HEADER + stringify(definition, { indent: 2, lineWidth: 120 });
 }

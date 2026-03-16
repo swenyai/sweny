@@ -57,4 +57,59 @@ describe("workflow-definition.schema.json", () => {
     });
     expect(valid).toBe(false);
   });
+
+  it("rejects version with trailing garbage (regex end-anchor check)", () => {
+    const valid = validate({
+      id: "bad",
+      version: "1.0.0-extra-JUNK!!!",
+      name: "bad",
+      initial: "a",
+      steps: { a: { phase: "learn" } },
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("accepts valid semver with pre-release label", () => {
+    const valid = validate({
+      id: "t",
+      version: "1.0.0-alpha.1",
+      name: "test",
+      initial: "a",
+      steps: { a: { phase: "learn" } },
+    });
+    expect(valid).toBe(true);
+  });
+
+  it("accepts valid semver with build metadata", () => {
+    const valid = validate({
+      id: "t",
+      version: "1.0.0+build.42",
+      name: "test",
+      initial: "a",
+      steps: { a: { phase: "learn" } },
+    });
+    expect(valid).toBe(true);
+  });
+
+  it("accepts a step definition with type field", () => {
+    const valid = validate({
+      id: "t",
+      version: "1.0.0",
+      name: "test",
+      initial: "a",
+      steps: { a: { phase: "learn", type: "sweny/verify-access" } },
+    });
+    expect(valid).toBe(true);
+  });
+
+  it("rejects a step definition with unknown extra property", () => {
+    const valid = validate({
+      id: "t",
+      version: "1.0.0",
+      name: "test",
+      initial: "a",
+      steps: { a: { phase: "learn", unknownField: true } },
+    });
+    expect(valid).toBe(false);
+  });
 });
