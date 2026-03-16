@@ -708,6 +708,45 @@ export function workflowExportAction(name: string): void {
   process.stdout.write(WORKFLOW_YAML_SCHEMA_HEADER + stringifyYaml(definition, { indent: 2, lineWidth: 120 }));
 }
 
+export function workflowValidateAction(file: string, options: { json?: boolean }): void {
+  let raw: unknown;
+  try {
+    const content = fs.readFileSync(file, "utf-8");
+    const ext = path.extname(file).toLowerCase();
+    raw = ext === ".yaml" || ext === ".yml" ? parseYaml(content) : JSON.parse(content);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (options.json) {
+      process.stdout.write(JSON.stringify({ valid: false, errors: [{ message }] }, null, 2) + "\n");
+    } else {
+      console.error(chalk.red(`  Cannot read "${file}": ${message}`));
+    }
+    process.exit(1);
+    return;
+  }
+
+  const errors = validateWorkflow(raw as WorkflowDefinition);
+
+  if (options.json) {
+    process.stdout.write(JSON.stringify({ valid: errors.length === 0, errors }, null, 2) + "\n");
+  } else if (errors.length === 0) {
+    console.log(chalk.green(`  ✓ ${file} is valid`));
+  } else {
+    console.error(chalk.red(`  ✗ ${file} has ${errors.length} validation error${errors.length > 1 ? "s" : ""}:`));
+    for (const err of errors) {
+      console.error(chalk.dim(`    ${err.message}`));
+    }
+  }
+
+  process.exit(errors.length === 0 ? 0 : 1);
+}
+
+workflowCmd
+  .command("validate <file>")
+  .description("Validate a workflow YAML or JSON file")
+  .option("--json", "Output result as JSON")
+  .action(workflowValidateAction);
+
 workflowCmd
   .command("run <file>")
   .description("Run a workflow from a YAML or JSON file")

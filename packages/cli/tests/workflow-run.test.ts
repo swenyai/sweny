@@ -449,3 +449,109 @@ describe("workflowRunAction --steps flag", () => {
   // e2e tests; the unit test boundary stops at the error-path above because dynamic
   // import() interacts poorly with Vitest's module-mock registry.
 });
+
+describe("workflowValidateAction", () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+    stdoutSpy.mockRestore();
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("exits 0 and prints ✓ for a valid YAML file", async () => {
+    const { workflowValidateAction } = await loadModule();
+    const def = { id: "t", version: "1.0.0", name: "test", initial: "a", steps: { a: { phase: "learn" } } };
+    mockReadFileSync.mockReturnValue("yaml");
+    mockParseYaml.mockReturnValue(def);
+    mockValidateWorkflow.mockReturnValue([]);
+
+    workflowValidateAction("ok.yaml", {});
+
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("✓"));
+  });
+
+  it("exits 1 and prints errors for an invalid workflow", async () => {
+    const { workflowValidateAction } = await loadModule();
+    mockReadFileSync.mockReturnValue("yaml");
+    mockParseYaml.mockReturnValue({});
+    mockValidateWorkflow.mockReturnValue([{ message: 'initial step "start" does not exist', code: "MISSING_INITIAL" }]);
+
+    workflowValidateAction("bad.yaml", {});
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("✗"));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("initial step"));
+  });
+
+  it("exits 1 when file cannot be read", async () => {
+    const { workflowValidateAction } = await loadModule();
+    mockReadFileSync.mockImplementation(() => {
+      throw new Error("ENOENT: no such file");
+    });
+
+    workflowValidateAction("missing.yaml", {});
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Cannot read"));
+  });
+
+  it("--json outputs { valid: true, errors: [] } for a valid file", async () => {
+    const { workflowValidateAction } = await loadModule();
+    const def = { id: "t", version: "1.0.0", name: "test", initial: "a", steps: { a: { phase: "learn" } } };
+    mockReadFileSync.mockReturnValue("yaml");
+    mockParseYaml.mockReturnValue(def);
+    mockValidateWorkflow.mockReturnValue([]);
+
+    workflowValidateAction("ok.yaml", { json: true });
+
+    const written = (stdoutSpy.mock.calls[0][0] as string).trim();
+    const parsed = JSON.parse(written);
+    expect(parsed.valid).toBe(true);
+    expect(parsed.errors).toEqual([]);
+  });
+
+  it("--json outputs { valid: false, errors: [...] } for an invalid file", async () => {
+    const { workflowValidateAction } = await loadModule();
+    mockReadFileSync.mockReturnValue("yaml");
+    mockParseYaml.mockReturnValue({});
+    mockValidateWorkflow.mockReturnValue([{ message: "missing initial", code: "MISSING_INITIAL" }]);
+
+    workflowValidateAction("bad.yaml", { json: true });
+
+    const written = (stdoutSpy.mock.calls[0][0] as string).trim();
+    const parsed = JSON.parse(written);
+    expect(parsed.valid).toBe(false);
+    expect(parsed.errors).toHaveLength(1);
+    expect(parsed.errors[0]).toHaveProperty("message", "missing initial");
+  });
+
+  it("--json outputs error object when file cannot be read", async () => {
+    const { workflowValidateAction } = await loadModule();
+    mockReadFileSync.mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+
+    workflowValidateAction("missing.yaml", { json: true });
+
+    const written = (stdoutSpy.mock.calls[0][0] as string).trim();
+    const parsed = JSON.parse(written);
+    expect(parsed.valid).toBe(false);
+    expect(parsed.errors[0]).toHaveProperty("message", "ENOENT");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+});
