@@ -621,7 +621,21 @@ export function loadWorkflowFile(filePath: string): WorkflowDefinition {
   return raw as WorkflowDefinition;
 }
 
-export async function workflowRunAction(file: string, options: Record<string, unknown>): Promise<void> {
+export async function workflowRunAction(
+  file: string,
+  options: Record<string, unknown> & { steps?: string },
+): Promise<void> {
+  if (options.steps) {
+    const stepsPath = path.resolve(options.steps);
+    try {
+      await import(stepsPath);
+    } catch (err) {
+      console.error(chalk.red(`  Failed to load steps module: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+      return;
+    }
+  }
+
   let definition: WorkflowDefinition;
   try {
     definition = loadWorkflowFile(file);
@@ -700,6 +714,7 @@ workflowCmd
   .command("run <file>")
   .description("Run a workflow from a YAML or JSON file")
   .option("--dry-run", "Validate workflow without running")
+  .option("--steps <path>", "Path to a module that registers custom step types")
   .action(workflowRunAction);
 
 workflowCmd

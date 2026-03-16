@@ -29,6 +29,7 @@ async function loadModule() {
       const dot = p.lastIndexOf(".");
       return dot >= 0 ? p.slice(dot) : "";
     },
+    resolve: (...args: string[]) => args[args.length - 1],
   }));
   vi.doMock("chalk", () => ({
     default: Object.assign((s: string) => s, {
@@ -415,4 +416,34 @@ describe("workflowListAction", () => {
 
     expect(consoleLogSpy).not.toHaveBeenCalled();
   });
+});
+
+describe("workflowRunAction --steps flag", () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("exits 1 and prints error when --steps path does not exist", async () => {
+    const { workflowRunAction } = await loadModule();
+
+    await workflowRunAction("ok.yaml", { steps: "/tmp/definitely-nonexistent-steps-xyz123abc.js" });
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to load steps module"));
+  });
+
+  // Happy-path integration (--steps module loads and workflow runs) is exercised by
+  // e2e tests; the unit test boundary stops at the error-path above because dynamic
+  // import() interacts poorly with Vitest's module-mock registry.
 });
