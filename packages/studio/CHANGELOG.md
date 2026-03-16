@@ -1,5 +1,27 @@
 # @sweny-ai/studio
 
+## 3.3.0
+
+### Minor Changes
+
+- 65c467f: StepPanel now shows a "Step type" dropdown with all built-in step types.
+  Selecting a type auto-sets the step's phase to the type's canonical phase and
+  shows the type's description as a hint below the dropdown. Provider role badges
+  (e.g., `observability`, `sourceControl`) appear for types that declare them.
+  Selecting "— none (custom) —" clears the `type` field.
+
+### Patch Changes
+
+- caf64a7: `WORKFLOW_YAML_SCHEMA_HEADER` is now exported from `@sweny-ai/engine/browser`
+  (the browser-safe entry). Studio's `export-yaml` now imports from the browser
+  entry, ensuring the export YAML path pulls zero Node.js transitive dependencies.
+- f5ae307: EdgePanel and WorkflowMetaPanel are now read-only in simulate/live mode.
+  Previously, clicking an edge or de-selecting a node while a simulation was
+  running allowed editing transitions and workflow metadata. All inputs are now
+  disabled and the "Delete transition" button is hidden during execution.
+- Updated dependencies [caf64a7]
+  - @sweny-ai/engine@3.0.3
+
 ## 3.2.1
 
 ### Patch Changes
