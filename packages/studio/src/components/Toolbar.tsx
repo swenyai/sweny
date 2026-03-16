@@ -101,7 +101,9 @@ export function Toolbar({
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       },
-      () => {},
+      (err) => {
+        console.error("Failed to copy share link:", err);
+      },
     );
   }
 
@@ -114,9 +116,9 @@ export function Toolbar({
     const phase: WorkflowPhase = entry?.phase ?? "act";
 
     addStep(id, phase);
-    // Apply type and uses from catalog
+    // Apply type, uses, and description from catalog
     if (entry && entry.type !== "custom") {
-      updateStep(id, { type: entry.type, uses: entry.uses });
+      updateStep(id, { type: entry.type, uses: entry.uses, description: entry.description });
     }
 
     setNewStepId("");

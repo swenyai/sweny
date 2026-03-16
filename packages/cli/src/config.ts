@@ -252,7 +252,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
 }
 
 /** All recognized workspace tool names. Update here when adding a new Category B MCP server. */
-export const SUPPORTED_WORKSPACE_TOOLS = new Set(["slack", "notion", "pagerduty", "monday"] as const);
+export const SUPPORTED_WORKSPACE_TOOLS = new Set(["slack", "notion", "pagerduty", "monday"]);
 
 export function validateInputs(config: CliConfig): string[] {
   const errors: string[] = [];
@@ -383,9 +383,7 @@ export function validateInputs(config: CliConfig): string[] {
   // Workspace tools: reject unknown names early
   for (const tool of config.workspaceTools) {
     if (!SUPPORTED_WORKSPACE_TOOLS.has(tool)) {
-      errors.push(
-        `Unknown workspace tool: "${tool}". Supported values: ${[...SUPPORTED_WORKSPACE_TOOLS].join(", ")}`,
-      );
+      errors.push(`Unknown workspace tool: "${tool}". Supported values: ${[...SUPPORTED_WORKSPACE_TOOLS].join(", ")}`);
     }
   }
 

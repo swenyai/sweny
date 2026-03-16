@@ -44,8 +44,9 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
   const { stateId, state, isInitial, isTerminal, execStatus } = data;
   const accent = phaseAccent[state.phase];
   const exec = execStyle[execStatus];
-  const provider = (state as StepDefinition & { provider?: string }).provider;
-  const pMeta = provider ? (providerMeta[provider] ?? null) : null;
+  // Show provider icon for the first declared dependency (e.g. "observability", "issueTracker")
+  const primaryUse = state.uses?.[0] ?? null;
+  const pMeta = primaryUse ? (providerMeta[primaryUse] ?? null) : null;
   const typeEntry = state.type ? findStepType(state.type) : undefined;
   const typeLabel = typeEntry ? typeEntry.label : state.type ? state.type.replace(/^sweny\//, "") : null;
 

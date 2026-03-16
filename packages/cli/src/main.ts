@@ -638,7 +638,6 @@ export async function workflowRunAction(file: string, options: Record<string, un
       console.log(chalk.dim(`    ${id}: phase=${step.phase}${step.type ? ` type=${step.type}` : ""}`));
     }
     process.exit(0);
-    return;
   }
 
   let workflow;
