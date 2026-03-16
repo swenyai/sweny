@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { WorkflowPhase, StepDefinition, StepResult } from "@sweny-ai/engine";
 import { useEditorStore } from "../store/editor-store.js";
+import { BUILTIN_STEP_TYPES, findStepType } from "../lib/step-types.js";
 
 export function PropertiesPanel() {
   const {
@@ -217,6 +218,52 @@ function StepPanel({
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">ID</label>
         <code className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded block">{id}</code>
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-xs font-medium text-gray-600 mb-1">Step type</label>
+        <select
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
+          value={step.type ?? ""}
+          disabled={readOnly}
+          onChange={(e) => {
+            const selected = e.target.value;
+            if (!selected) {
+              updateStep(id, { type: undefined });
+            } else {
+              const entry = findStepType(selected);
+              updateStep(id, {
+                type: selected,
+                ...(entry && entry.type !== "custom" ? { phase: entry.phase } : {}),
+              });
+            }
+          }}
+        >
+          <option value="">— none (custom) —</option>
+          {BUILTIN_STEP_TYPES.filter((e) => e.type !== "custom").map((entry) => (
+            <option key={entry.type} value={entry.type}>
+              {entry.label}
+            </option>
+          ))}
+        </select>
+        {step.type &&
+          (() => {
+            const entry = findStepType(step.type);
+            return entry ? (
+              <>
+                <p className="text-xs text-gray-400 mt-1">{entry.description}</p>
+                {entry.uses && entry.uses.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {entry.uses.map((role) => (
+                      <span key={role} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                        {role}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : null;
+          })()}
       </div>
 
       <div className="mb-3">
