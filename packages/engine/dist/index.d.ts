@@ -11,7 +11,7 @@ export { getStepData } from "./recipes/triage/index.js";
 export type { DedupStore } from "./lib/dedup-store.js";
 export { inMemoryDedupStore } from "./lib/dedup-store.js";
 export { fingerprintEvent } from "./lib/fingerprint.js";
-export declare const WORKFLOW_YAML_SCHEMA_HEADER = "# yaml-language-server: $schema=https://sweny.ai/schemas/workflow-definition.schema.json\n";
+export { WORKFLOW_YAML_SCHEMA_HEADER } from "./browser.js";
 export type { StepType } from "./step-registry.js";
 export { registerStepType, resolveWorkflow, listStepTypes } from "./step-registry.js";
 //# sourceMappingURL=index.d.ts.map

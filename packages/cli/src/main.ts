@@ -611,10 +611,15 @@ export function mapToTriageConfig(config: CliConfig): TriageConfig {
 // ── sweny workflow ─────────────────────────────────────────────────────
 const workflowCmd = program.command("workflow").description("Manage and run workflow files");
 
-export function loadWorkflowFile(filePath: string): WorkflowDefinition {
+/** Reads and parses a workflow file (YAML or JSON). Throws on I/O or parse error. */
+function parseWorkflowFileContent(filePath: string): unknown {
   const content = fs.readFileSync(filePath, "utf-8");
   const ext = path.extname(filePath).toLowerCase();
-  const raw = ext === ".yaml" || ext === ".yml" ? parseYaml(content) : JSON.parse(content);
+  return ext === ".yaml" || ext === ".yml" ? parseYaml(content) : JSON.parse(content);
+}
+
+export function loadWorkflowFile(filePath: string): WorkflowDefinition {
+  const raw = parseWorkflowFileContent(filePath);
   const errors = validateWorkflow(raw as WorkflowDefinition);
   if (errors.length > 0) {
     throw new Error(`Invalid workflow file:\n${errors.map((e) => `  ${e.message}`).join("\n")}`);
@@ -711,15 +716,25 @@ export function workflowExportAction(name: string): void {
 export function workflowValidateAction(file: string, options: { json?: boolean }): void {
   let raw: unknown;
   try {
-    const content = fs.readFileSync(file, "utf-8");
-    const ext = path.extname(file).toLowerCase();
-    raw = ext === ".yaml" || ext === ".yml" ? parseYaml(content) : JSON.parse(content);
+    raw = parseWorkflowFileContent(file);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (options.json) {
-      process.stdout.write(JSON.stringify({ valid: false, errors: [{ message }] }, null, 2) + "\n");
+      process.stderr.write(JSON.stringify({ valid: false, errors: [{ message }] }, null, 2) + "\n");
     } else {
       console.error(chalk.red(`  Cannot read "${file}": ${message}`));
+    }
+    process.exit(1);
+    return;
+  }
+
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    const kind = raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw;
+    const message = `Expected a YAML/JSON object, got ${kind}`;
+    if (options.json) {
+      process.stderr.write(JSON.stringify({ valid: false, errors: [{ message }] }, null, 2) + "\n");
+    } else {
+      console.error(chalk.red(`  ✗ ${file}: ${message}`));
     }
     process.exit(1);
     return;

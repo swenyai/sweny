@@ -198,6 +198,8 @@ function StepPanel({
   const [newTarget, setNewTarget] = useState(stepIds[0] ?? "");
   const [description, setDescription] = useState(step.description ?? "");
 
+  const typeEntry = step.type ? findStepType(step.type) : undefined;
+
   const targetOptions = [...stepIds, "end"];
   const onEntries = Object.entries(step.on ?? {});
 
@@ -246,24 +248,20 @@ function StepPanel({
             </option>
           ))}
         </select>
-        {step.type &&
-          (() => {
-            const entry = findStepType(step.type);
-            return entry ? (
-              <>
-                <p className="text-xs text-gray-400 mt-1">{entry.description}</p>
-                {entry.uses && entry.uses.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {entry.uses.map((role) => (
-                      <span key={role} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
-                        {role}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </>
-            ) : null;
-          })()}
+        {typeEntry && (
+          <>
+            <p className="text-xs text-gray-400 mt-1">{typeEntry.description}</p>
+            {typeEntry.uses && typeEntry.uses.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {typeEntry.uses.map((role) => (
+                  <span key={role} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                    {role}
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <div className="mb-3">

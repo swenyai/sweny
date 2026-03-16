@@ -453,6 +453,7 @@ describe("workflowRunAction --steps flag", () => {
 describe("workflowValidateAction", () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
   let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -461,6 +462,7 @@ describe("workflowValidateAction", () => {
     vi.clearAllMocks();
     exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
     stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -468,6 +470,7 @@ describe("workflowValidateAction", () => {
   afterEach(() => {
     exitSpy.mockRestore();
     stdoutSpy.mockRestore();
+    stderrSpy.mockRestore();
     consoleLogSpy.mockRestore();
     consoleErrorSpy.mockRestore();
   });
@@ -481,6 +484,7 @@ describe("workflowValidateAction", () => {
 
     workflowValidateAction("ok.yaml", {});
 
+    expect(mockParseYaml).toHaveBeenCalledWith("yaml");
     expect(exitSpy).toHaveBeenCalledWith(0);
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("✓"));
   });
@@ -540,7 +544,7 @@ describe("workflowValidateAction", () => {
     expect(parsed.errors[0]).toHaveProperty("message", "missing initial");
   });
 
-  it("--json outputs error object when file cannot be read", async () => {
+  it("--json writes error object to stderr when file cannot be read", async () => {
     const { workflowValidateAction } = await loadModule();
     mockReadFileSync.mockImplementation(() => {
       throw new Error("ENOENT");
@@ -548,8 +552,12 @@ describe("workflowValidateAction", () => {
 
     workflowValidateAction("missing.yaml", { json: true });
 
-    const written = (stdoutSpy.mock.calls[0][0] as string).trim();
-    const parsed = JSON.parse(written);
+    // stdout must be empty — errors go to stderr in --json mode
+    expect(stdoutSpy).not.toHaveBeenCalled();
+    // Find the JSON call among stderr writes (Commander may also write to stderr)
+    const jsonCall = stderrSpy.mock.calls.find((args) => (args[0] as string).trim().startsWith("{"));
+    expect(jsonCall).toBeDefined();
+    const parsed = JSON.parse((jsonCall![0] as string).trim());
     expect(parsed.valid).toBe(false);
     expect(parsed.errors[0]).toHaveProperty("message", "ENOENT");
     expect(exitSpy).toHaveBeenCalledWith(1);
