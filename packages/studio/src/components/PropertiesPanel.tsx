@@ -71,6 +71,7 @@ export function PropertiesPanel() {
         outcome={outcome}
         currentTarget={currentTarget}
         stepIds={stepIds}
+        readOnly={readOnly}
         updateTransitionOutcome={updateTransitionOutcome}
         updateTransitionTarget={updateTransitionTarget}
         deleteTransition={(src, out) => {
@@ -82,7 +83,7 @@ export function PropertiesPanel() {
   }
 
   // Nothing selected — workflow meta
-  return <WorkflowMetaPanel definition={definition} updateWorkflowMeta={updateWorkflowMeta} />;
+  return <WorkflowMetaPanel definition={definition} updateWorkflowMeta={updateWorkflowMeta} readOnly={readOnly} />;
 }
 
 // ─────────────────────────────────────────────
@@ -92,9 +93,10 @@ export function PropertiesPanel() {
 interface WorkflowMetaPanelProps {
   definition: ReturnType<typeof useEditorStore.getState>["definition"];
   updateWorkflowMeta: ReturnType<typeof useEditorStore.getState>["updateWorkflowMeta"];
+  readOnly: boolean;
 }
 
-function WorkflowMetaPanel({ definition, updateWorkflowMeta }: WorkflowMetaPanelProps) {
+function WorkflowMetaPanel({ definition, updateWorkflowMeta, readOnly }: WorkflowMetaPanelProps) {
   const [name, setName] = useState(definition.name ?? "");
   const [description, setDescription] = useState(definition.description ?? "");
   const [version, setVersion] = useState(definition.version ?? "");
@@ -111,31 +113,34 @@ function WorkflowMetaPanel({ definition, updateWorkflowMeta }: WorkflowMetaPanel
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
         <input
-          className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
           value={name}
           onChange={(e) => setName(e.target.value)}
           onBlur={() => updateWorkflowMeta({ name })}
+          disabled={readOnly}
         />
       </div>
 
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
         <textarea
-          className="w-full border border-gray-300 rounded px-2 py-1 text-sm resize-none"
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm resize-none ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
           rows={3}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           onBlur={() => updateWorkflowMeta({ description })}
+          disabled={readOnly}
         />
       </div>
 
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">Version</label>
         <input
-          className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
           value={version}
           onChange={(e) => setVersion(e.target.value)}
           onBlur={() => updateWorkflowMeta({ version })}
+          disabled={readOnly}
         />
       </div>
 
@@ -144,7 +149,9 @@ function WorkflowMetaPanel({ definition, updateWorkflowMeta }: WorkflowMetaPanel
         <code className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded block">{definition.initial}</code>
       </div>
 
-      <p className="text-xs text-gray-400 mt-4">Click a node or edge to edit it.</p>
+      <p className="text-xs text-gray-400 mt-4">
+        {readOnly ? "Read-only during execution." : "Click a node or edge to edit it."}
+      </p>
     </div>
   );
 }
@@ -471,6 +478,7 @@ interface EdgePanelProps {
   outcome: string;
   currentTarget: string;
   stepIds: string[];
+  readOnly: boolean;
   updateTransitionOutcome: (sourceId: string, oldOutcome: string, newOutcome: string) => void;
   updateTransitionTarget: (sourceId: string, outcome: string, newTarget: string) => void;
   deleteTransition: (sourceId: string, outcome: string) => void;
@@ -481,6 +489,7 @@ function EdgePanel({
   outcome,
   currentTarget,
   stepIds,
+  readOnly,
   updateTransitionOutcome,
   updateTransitionTarget,
   deleteTransition,
@@ -500,7 +509,7 @@ function EdgePanel({
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">Outcome</label>
         <input
-          className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
           value={editOutcome}
           onChange={(e) => setEditOutcome(e.target.value)}
           onBlur={() => {
@@ -509,15 +518,17 @@ function EdgePanel({
               updateTransitionOutcome(source, outcome, trimmed);
             }
           }}
+          disabled={readOnly}
         />
       </div>
 
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">Target</label>
         <select
-          className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
           value={currentTarget}
           onChange={(e) => updateTransitionTarget(source, outcome, e.target.value)}
+          disabled={readOnly}
         >
           {targetOptions.map((s) => (
             <option key={s} value={s}>
@@ -527,14 +538,16 @@ function EdgePanel({
         </select>
       </div>
 
-      <div className="mt-4 pt-4 border-t border-gray-200">
-        <button
-          onClick={() => deleteTransition(source, outcome)}
-          className="w-full px-3 py-1 rounded text-xs bg-red-600 text-white hover:bg-red-500"
-        >
-          Delete transition
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="mt-4 pt-4 border-t border-gray-200">
+          <button
+            onClick={() => deleteTransition(source, outcome)}
+            className="w-full px-3 py-1 rounded text-xs bg-red-600 text-white hover:bg-red-500"
+          >
+            Delete transition
+          </button>
+        </div>
+      )}
     </div>
   );
 }
