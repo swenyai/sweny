@@ -13,4 +13,8 @@ export { createWorkflow, runWorkflow, createProviderRegistry } from "./browser-r
 // Pure definition objects (no implementation functions)
 export { triageDefinition } from "./recipes/triage/definition.js";
 export { implementDefinition } from "./recipes/implement/definition.js";
+// Schema metadata — pure string constant, safe for browser use.
+// Defined here directly (not re-exported from index.ts) to avoid pulling
+// in Node.js transitive deps from the main entry.
+export const WORKFLOW_YAML_SCHEMA_HEADER = "# yaml-language-server: $schema=https://sweny.ai/schemas/workflow-definition.schema.json\n";
 //# sourceMappingURL=browser.js.map
