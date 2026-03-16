@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useEditorStore } from "../store/editor-store.js";
-import type { ExecutionEvent } from "@sweny-ai/engine";
+import type { ExecutionEvent, StepResult } from "@sweny-ai/engine";
 
 export function LiveConnectPanel() {
-  const { liveConnection, setLiveConnection, applyEvent, resetExecution, setMode } = useEditorStore();
+  const { liveConnection, setLiveConnection, applyEvent, resetExecution, setMode, completedSteps, currentStepId } =
+    useEditorStore();
   const [url, setUrl] = useState("ws://localhost:4000/events");
   const [transport, setTransport] = useState<"websocket" | "sse">("websocket");
   const wsRef = useRef<WebSocket | null>(null);
@@ -130,6 +131,39 @@ export function LiveConnectPanel() {
         )}
       </div>
       {liveConnection?.error && <p className="text-xs text-red-600 mt-1">{liveConnection.error}</p>}
+
+      {/* Execution trace — shown once a workflow is running or has run */}
+      {(currentStepId || Object.keys(completedSteps).length > 0) && (
+        <div className="mt-2 max-h-36 overflow-y-auto flex flex-col gap-0.5">
+          {Object.entries(completedSteps as Record<string, StepResult>).map(([id, result]) => {
+            const icon = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "⊘";
+            const iconColor =
+              result.status === "success"
+                ? "text-green-600"
+                : result.status === "failed"
+                  ? "text-red-600"
+                  : "text-gray-400";
+            const dataOutcome = result.data?.outcome != null ? String(result.data.outcome) : null;
+            return (
+              <div key={id} className="flex items-baseline gap-1.5 text-xs leading-tight">
+                <span className={`font-bold flex-shrink-0 ${iconColor}`}>{icon}</span>
+                <span className="font-mono text-gray-700 flex-shrink-0">{id}</span>
+                {dataOutcome && (
+                  <span className="px-1 rounded bg-blue-50 text-blue-600 text-[10px] flex-shrink-0">{dataOutcome}</span>
+                )}
+                {result.reason && <span className="text-gray-400 truncate text-[10px]">— {result.reason}</span>}
+              </div>
+            );
+          })}
+          {currentStepId && (
+            <div className="flex items-baseline gap-1.5 text-xs leading-tight text-blue-500 animate-pulse">
+              <span className="font-bold flex-shrink-0">●</span>
+              <span className="font-mono flex-shrink-0">{currentStepId}</span>
+              <span className="text-[10px] text-blue-400">running…</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { triageDefinition, implementDefinition, validateWorkflow } from "@sweny-ai/engine";
 import { useEditorStore, useTemporalStore } from "./store/editor-store.js";
-import { RecipeViewer } from "./RecipeViewer.js";
+import { WorkflowViewer } from "./WorkflowViewer.js";
 import { PropertiesPanel } from "./components/PropertiesPanel.js";
 import { Toolbar } from "./components/Toolbar.js";
 import { DropOverlay } from "./components/DropOverlay.js";
@@ -143,7 +143,7 @@ export function App() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <div style={{ flex: 1 }}>
-            <RecipeViewer />
+            <WorkflowViewer />
           </div>
           {/* Bottom execution panel */}
           {mode === "simulate" && <SimulationPanel />}

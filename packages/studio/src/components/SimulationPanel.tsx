@@ -142,23 +142,31 @@ export function SimulationPanel() {
 
         {simError && <div className="text-xs text-red-600 bg-red-50 rounded p-2 mb-1">{simError}</div>}
 
-        {/* Completed steps */}
+        {/* Completed steps — trace log with result details */}
         {completedList.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1">
-            {completedList.map(([id, result]) => (
-              <span
-                key={id}
-                className={`px-2 py-0.5 rounded text-xs ${
-                  result.status === "success"
-                    ? "bg-green-100 text-green-700"
-                    : result.status === "failed"
-                      ? "bg-red-100 text-red-700"
-                      : "bg-gray-100 text-gray-600"
-                }`}
-              >
-                {id}
-              </span>
-            ))}
+          <div className="mt-1 max-h-36 overflow-y-auto flex flex-col gap-0.5">
+            {completedList.map(([id, result]) => {
+              const icon = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "⊘";
+              const iconColor =
+                result.status === "success"
+                  ? "text-green-600"
+                  : result.status === "failed"
+                    ? "text-red-600"
+                    : "text-gray-400";
+              const dataOutcome = result.data?.outcome != null ? String(result.data.outcome) : null;
+              return (
+                <div key={id} className="flex items-baseline gap-1.5 text-xs leading-tight">
+                  <span className={`font-bold flex-shrink-0 ${iconColor}`}>{icon}</span>
+                  <span className="font-mono text-gray-700 flex-shrink-0">{id}</span>
+                  {dataOutcome && (
+                    <span className="px-1 rounded bg-blue-50 text-blue-600 text-[10px] flex-shrink-0">
+                      {dataOutcome}
+                    </span>
+                  )}
+                  {result.reason && <span className="text-gray-400 truncate text-[10px]">— {result.reason}</span>}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
