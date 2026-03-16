@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const mockRunWorkflow = vi.fn();
 const mockResolveWorkflow = vi.fn();
 const mockValidateWorkflow = vi.fn();
+const mockListStepTypes = vi.fn();
 const mockParseYaml = vi.fn();
 const mockStringifyYaml = vi.fn();
 const mockReadFileSync = vi.fn();
@@ -36,12 +37,14 @@ async function loadModule() {
       yellow: (s: string) => s,
       dim: (s: string) => s,
       cyan: (s: string) => s,
+      bold: (s: string) => s,
     }),
     red: (s: string) => s,
     green: (s: string) => s,
     yellow: (s: string) => s,
     dim: (s: string) => s,
     cyan: (s: string) => s,
+    bold: (s: string) => s,
   }));
   vi.doMock("yaml", () => ({
     parse: mockParseYaml,
@@ -126,6 +129,7 @@ async function loadModule() {
     createProviderRegistry: vi.fn(() => ({ set: vi.fn(), get: vi.fn(), has: vi.fn() })),
     validateWorkflow: mockValidateWorkflow,
     resolveWorkflow: mockResolveWorkflow,
+    listStepTypes: mockListStepTypes,
   }));
   vi.doMock("@sweny-ai/engine/builtin-steps", () => ({}));
   vi.doMock("../src/providers/index.js", () => ({
@@ -351,5 +355,60 @@ describe("workflowExportAction", () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Unknown workflow"));
+  });
+});
+
+describe("workflowListAction", () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+
+  const sampleTypes = [
+    { type: "sweny/verify-access", description: "Verify credentials" },
+    { type: "sweny/investigate", description: "Run agent investigation" },
+  ];
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockListStepTypes.mockReturnValue(sampleTypes);
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+    stdoutSpy.mockRestore();
+    consoleLogSpy.mockRestore();
+  });
+
+  it("prints human-readable list with type and description", async () => {
+    const { workflowListAction } = await loadModule();
+    workflowListAction({});
+
+    const allOutput = consoleLogSpy.mock.calls.flat().join("\n");
+    expect(allOutput).toContain("sweny/verify-access");
+    expect(allOutput).toContain("Verify credentials");
+    expect(allOutput).toContain("sweny/investigate");
+  });
+
+  it("--json outputs valid JSON array with type and description fields", async () => {
+    const { workflowListAction } = await loadModule();
+    workflowListAction({ json: true });
+
+    const written = (stdoutSpy.mock.calls[0][0] as string).trim();
+    const parsed = JSON.parse(written);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0]).toHaveProperty("type", "sweny/verify-access");
+    expect(parsed[0]).toHaveProperty("description", "Verify credentials");
+    expect(parsed[1]).toHaveProperty("type", "sweny/investigate");
+  });
+
+  it("--json does not call console.log", async () => {
+    const { workflowListAction } = await loadModule();
+    workflowListAction({ json: true });
+
+    expect(consoleLogSpy).not.toHaveBeenCalled();
   });
 });

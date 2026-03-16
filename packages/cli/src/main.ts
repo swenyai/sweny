@@ -13,6 +13,7 @@ import {
   implementWorkflow,
   validateWorkflow,
   resolveWorkflow,
+  listStepTypes,
   triageDefinition,
   implementDefinition,
 } from "@sweny-ai/engine";
@@ -702,5 +703,27 @@ workflowCmd
   .command("export <name>")
   .description("Print a built-in workflow as YAML (triage or implement)")
   .action(workflowExportAction);
+
+export function workflowListAction(options: { json?: boolean }): void {
+  const types = listStepTypes();
+
+  if (options.json) {
+    process.stdout.write(JSON.stringify(types, null, 2) + "\n");
+    return;
+  }
+
+  console.log(chalk.bold("\nBuilt-in step types:\n"));
+  for (const { type, description } of types) {
+    console.log(`  ${chalk.cyan(type)}`);
+    console.log(chalk.dim(`    ${description}`));
+  }
+  console.log();
+}
+
+workflowCmd
+  .command("list")
+  .description("List all registered built-in step types")
+  .option("--json", "Output as JSON array")
+  .action(workflowListAction);
 
 program.parse();
