@@ -11,6 +11,7 @@ export function PropertiesPanel() {
     updateStep,
     updateWorkflowMeta,
     deleteStep,
+    renameStep,
     setInitial,
     addTransition,
     updateTransitionOutcome,
@@ -42,6 +43,7 @@ export function PropertiesPanel() {
         execResult={execResult}
         isRunning={isRunning}
         updateStep={updateStep}
+        renameStep={renameStep}
         setInitial={setInitial}
         deleteStep={(sid) => {
           if (window.confirm(`Delete step "${sid}"?`)) {
@@ -170,6 +172,7 @@ interface StepPanelProps {
   execResult?: StepResult;
   isRunning: boolean;
   updateStep: (id: string, patch: Partial<StepDefinition>) => void;
+  renameStep: (oldId: string, newId: string) => string | null;
   setInitial: (id: string) => void;
   deleteStep: (id: string) => void;
   addTransition: (sourceId: string, outcome: string, targetId: string) => void;
@@ -187,6 +190,7 @@ function StepPanel({
   execResult,
   isRunning,
   updateStep,
+  renameStep,
   setInitial,
   deleteStep,
   addTransition,
@@ -197,6 +201,8 @@ function StepPanel({
   const [newOutcome, setNewOutcome] = useState("");
   const [newTarget, setNewTarget] = useState(stepIds[0] ?? "");
   const [description, setDescription] = useState(step.description ?? "");
+  const [editId, setEditId] = useState(id);
+  const [idError, setIdError] = useState<string | null>(null);
 
   const typeEntry = step.type ? findStepType(step.type) : undefined;
 
@@ -219,7 +225,27 @@ function StepPanel({
 
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">ID</label>
-        <code className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded block">{id}</code>
+        <input
+          className={`w-full border rounded px-2 py-1 text-sm font-mono ${idError ? "border-red-400" : "border-gray-300"} ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
+          value={editId}
+          disabled={readOnly}
+          onChange={(e) => {
+            setEditId(e.target.value);
+            setIdError(null);
+          }}
+          onBlur={() => {
+            const trimmed = editId.trim();
+            if (trimmed === id) return;
+            const err = renameStep(id, trimmed);
+            if (err) {
+              setIdError(err);
+              setEditId(id);
+            } else {
+              setIdError(null);
+            }
+          }}
+        />
+        {idError && <p className="text-xs text-red-500 mt-0.5">{idError}</p>}
       </div>
 
       <div className="mb-3">

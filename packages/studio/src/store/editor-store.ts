@@ -46,6 +46,8 @@ export interface EditorState extends ExecutionSlice {
   addStep(id: string, phase: WorkflowPhase): void;
   deleteStep(id: string): void;
   updateStep(id: string, patch: Partial<StepDefinition>): void;
+  /** Rename a step ID and cascade all references. Returns an error string on failure, null on success. */
+  renameStep(oldId: string, newId: string): string | null;
   setInitial(id: string): void;
 
   // Transition mutations
@@ -59,7 +61,7 @@ export interface EditorState extends ExecutionSlice {
 
 export const useEditorStore = create<EditorState>()(
   temporal(
-    (set, _get) => ({
+    (set, get) => ({
       definition: triageDefinition as WorkflowDefinition,
       selection: null,
       isLayoutStale: false,
@@ -199,6 +201,13 @@ export const useEditorStore = create<EditorState>()(
             if (patch.phase !== undefined) step.phase = patch.phase;
             if (patch.description !== undefined) step.description = patch.description;
             if (patch.critical !== undefined) step.critical = patch.critical;
+            if ("type" in patch) {
+              if (patch.type === undefined) {
+                delete step.type;
+              } else {
+                step.type = patch.type;
+              }
+            }
             if (patch.next !== undefined) step.next = patch.next;
             if (patch.on !== undefined) step.on = patch.on;
             if (structural) {
@@ -206,6 +215,43 @@ export const useEditorStore = create<EditorState>()(
             }
           }),
         ),
+
+      renameStep: (oldId: string, newId: string): string | null => {
+        const trimmed = newId.trim();
+        if (!trimmed) return "Step ID cannot be empty";
+        if (!/^[a-zA-Z0-9_-]+$/.test(trimmed)) {
+          return "Step IDs may only contain letters, digits, hyphens, and underscores";
+        }
+        if (trimmed === oldId) return null;
+        const state = get();
+        if (state.definition.steps[trimmed]) {
+          return `A step with ID "${trimmed}" already exists`;
+        }
+        if (!state.definition.steps[oldId]) {
+          return `Step "${oldId}" does not exist`;
+        }
+        set(
+          produce((s: EditorState) => {
+            const step = s.definition.steps[oldId];
+            s.definition.steps[trimmed] = step;
+            delete s.definition.steps[oldId];
+            if (s.definition.initial === oldId) s.definition.initial = trimmed;
+            for (const st of Object.values(s.definition.steps)) {
+              if (st.next === oldId) st.next = trimmed;
+              if (st.on) {
+                for (const outcome of Object.keys(st.on)) {
+                  if (st.on[outcome] === oldId) st.on[outcome] = trimmed;
+                }
+              }
+            }
+            if (s.selection?.kind === "step" && s.selection.id === oldId) {
+              s.selection = { kind: "step", id: trimmed };
+            }
+            s.isLayoutStale = true;
+          }),
+        );
+        return null;
+      },
 
       setInitial: (id: string) =>
         set(

@@ -14,6 +14,7 @@ export const BUILTIN_STEP_TYPES: StepTypeEntry[] = [
     label: "Verify Access",
     description: "Verify all required provider credentials (triage: observability + issue tracker)",
     phase: "learn",
+    uses: ["observability", "issueTracker"],
   },
   {
     type: "sweny/verify-access-implement",
