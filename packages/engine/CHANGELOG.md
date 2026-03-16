@@ -1,5 +1,18 @@
 # @sweny-ai/engine
 
+## 3.0.1
+
+### Patch Changes
+
+- dc62460: Add `listStepTypes()` to engine for introspecting the built-in step registry.
+  Add `sweny workflow list` CLI command to print all registered step types
+  (human-readable by default, `--json` for machine-readable output).
+- 7f284ff: JSON Schema for workflow YAML updated and renamed to `workflow-definition.schema.json`.
+  Added the `type` field for built-in step types with known values as examples.
+  CLI `sweny workflow export` and Studio's Export YAML button now include a
+  `# yaml-language-server: $schema=...` header — VS Code auto-completes and
+  validates workflow YAML files with no extra setup.
+
 ## 3.0.0
 
 ### Minor Changes

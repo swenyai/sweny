@@ -1,5 +1,26 @@
 # @sweny-ai/studio
 
+## 3.2.0
+
+### Minor Changes
+
+- 3375a00: PropertiesPanel now shows an execution result card in simulate/live mode.
+  Clicking a completed step displays status icon, outcome badge, reason, and
+  optionally the full output data (expandable). Running steps show a pulsing
+  indicator; pending steps show "pending". All design controls become read-only
+  (disabled, not hidden) during execution so the workflow definition stays visible.
+
+### Patch Changes
+
+- 7f284ff: JSON Schema for workflow YAML updated and renamed to `workflow-definition.schema.json`.
+  Added the `type` field for built-in step types with known values as examples.
+  CLI `sweny workflow export` and Studio's Export YAML button now include a
+  `# yaml-language-server: $schema=...` header — VS Code auto-completes and
+  validates workflow YAML files with no extra setup.
+- Updated dependencies [dc62460]
+- Updated dependencies [7f284ff]
+  - @sweny-ai/engine@3.0.1
+
 ## 3.1.0
 
 ### Minor Changes

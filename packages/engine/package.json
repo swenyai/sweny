@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/engine",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Recipe engine for SWEny — composable DAG-based workflows",
   "type": "module",
   "engines": {

@@ -12,5 +12,5 @@ export type { DedupStore } from "./lib/dedup-store.js";
 export { inMemoryDedupStore } from "./lib/dedup-store.js";
 export { fingerprintEvent } from "./lib/fingerprint.js";
 export type { StepType } from "./step-registry.js";
-export { registerStepType, resolveWorkflow } from "./step-registry.js";
+export { registerStepType, resolveWorkflow, listStepTypes } from "./step-registry.js";
 //# sourceMappingURL=index.d.ts.map

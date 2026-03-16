@@ -5,6 +5,13 @@ export function registerStepType(entry) {
     builtinStepRegistry.set(entry.type, entry);
 }
 /**
+ * Return all registered step types as plain data (no impl function).
+ * Call this after importing '@sweny-ai/engine/builtin-steps' to include built-ins.
+ */
+export function listStepTypes() {
+    return [...builtinStepRegistry.values()].map(({ type, description }) => ({ type, description }));
+}
+/**
  * Resolve a WorkflowDefinition into a runnable Workflow by looking up
  * each step's `type` field in the built-in step registry.
  *

@@ -12,6 +12,14 @@ export interface StepType {
 export declare const builtinStepRegistry: Map<string, StepType>;
 export declare function registerStepType(entry: StepType): void;
 /**
+ * Return all registered step types as plain data (no impl function).
+ * Call this after importing '@sweny-ai/engine/builtin-steps' to include built-ins.
+ */
+export declare function listStepTypes(): Array<{
+    type: string;
+    description: string;
+}>;
+/**
  * Resolve a WorkflowDefinition into a runnable Workflow by looking up
  * each step's `type` field in the built-in step registry.
  *
