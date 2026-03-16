@@ -1,152 +1,113 @@
-# Issues Report — 2026-03-12
+# Issues Report — 2026-03-16
 
-## Issue 1: Auth Middleware Null Guard Missing — userId Access on Undefined
+## Issue 1: NewRelic and Sentry Provider Config Schemas Missing Required Env Var Fields
 
-- **Severity**: Critical
-- **Environment**: Production
-- **Frequency**: 3 occurrences in 24h window — all user-facing endpoints returning 500
+- **Severity**: High
+- **Environment**: All (production and local — any env using these providers)
+- **Frequency**: Affects all users of NewRelic or Sentry providers
 
 ### Description
 
-`AuthMiddleware.verify` at `/src/middleware/auth.ts:42` reads `.userId` from an object
-(decoded JWT or session) without first checking whether it is defined. When the object is
-`undefined` (e.g., malformed token, expired session, missing Authorization header edge case),
-the middleware throws an unhandled TypeError that propagates as a 500 to the client.
+The engine's pre-flight validation (`validateWorkflowConfig` in `runner-recipe.ts`) checks
+`provider.configSchema.fields` to verify required environment variables are set before the
+workflow starts. Two providers have incomplete `fields` arrays — they list fewer env vars than
+their Zod schemas require — causing the pre-flight check to silently pass when critical env vars
+are missing, producing confusing runtime failures mid-workflow instead of a clear upfront error.
+
+**NewRelic** (`packages/providers/src/observability/newrelic.ts`):
+- Zod schema requires: `apiKey`, `accountId`
+- `newrelicProviderConfigSchema.fields` lists: only `NR_API_KEY`
+- Missing: `NR_ACCOUNT_ID`
+
+**Sentry** (`packages/providers/src/observability/sentry.ts`):
+- Zod schema requires: `authToken`, `organization`, `project`
+- `sentryProviderConfigSchema.fields` lists: only `SENTRY_AUTH_TOKEN`
+- Missing: `SENTRY_ORG`, `SENTRY_PROJECT`
 
 ### Evidence
 
-```
-TypeError: Cannot read properties of undefined (reading 'userId')
-    at AuthMiddleware.verify (/src/middleware/auth.ts:42:28)
-    at processRequest (/src/server.ts:118:5)
+`newrelic.ts` line 17-21 — configSchema only lists one field:
+```typescript
+export const newrelicProviderConfigSchema: ProviderConfigSchema = {
+  role: "observability",
+  name: "New Relic",
+  fields: [{ key: "apiKey", envVar: "NR_API_KEY", description: "New Relic User API key" }],
+  //       ^^^^^ missing accountId / NR_ACCOUNT_ID
+};
 ```
 
-- `GET /api/v1/users/profile` → 500 (req_abc123)
-- `GET /api/v1/users/settings` → 500 (req_def456)
-- `POST /api/v1/orders` → 500 (req_ghi789)
+But `newrelic.ts` line 163-168 — `getAgentEnv()` shows the expected env vars:
+```typescript
+getAgentEnv(): Record<string, string> {
+  return {
+    NR_API_KEY: this.apiKey,
+    NR_ACCOUNT_ID: this.accountId,   // ← this IS required
+    NR_REGION: this.region,
+  };
+}
+```
+
+`sentry.ts` line 18-22 — configSchema only lists one field, but Zod requires three:
+```typescript
+export const sentryProviderConfigSchema: ProviderConfigSchema = {
+  role: "observability",
+  name: "Sentry",
+  fields: [{ key: "authToken", envVar: "SENTRY_AUTH_TOKEN", description: "Sentry authentication token" }],
+  //       ^^^^^ missing organization/SENTRY_ORG, project/SENTRY_PROJECT
+};
+```
+
+`runner-recipe.ts` line 56-58 — the validation that is missed:
+```typescript
+const missing = provider.configSchema.fields
+  .filter((f) => f.required !== false && !process.env[f.envVar])
+  .map((f) => f.envVar);
+```
 
 ### Root Cause Analysis
 
-Line 42 of `auth.ts` performs a direct property access (`decodedToken.userId` or similar)
-without guarding against a nullish `decodedToken`. When JWT verification returns `undefined`
-or `null` instead of throwing (e.g., `jwt.verify` with `complete: false` returning null on
-an invalid token in some library versions), the subsequent property access crashes.
+When new required fields were added to the Zod schemas (accountId for NewRelic,
+organization/project for Sentry), the corresponding `ProviderConfigSchema.fields` arrays
+were not updated. The two validation paths (Zod and configSchema) became out of sync.
 
 ### Impact
 
-- All authenticated routes are susceptible: 500s instead of 401/403 for invalid tokens
-- Users with edge-case token states (e.g., transitioning between sessions) get opaque errors
-- No differentiation between "invalid token" (should be 401) and server error (500)
+- Users running NewRelic or Sentry without `NR_ACCOUNT_ID` / `SENTRY_ORG` / `SENTRY_PROJECT`
+  pass pre-flight but get cryptic runtime failures when the provider actually executes API calls
+- Debug experience is poor: no clear error message pointing to the missing variable
+- All workflows using these providers are affected
 
 ### Suggested Fix
 
+Add the missing fields to each provider's `ProviderConfigSchema.fields`:
+
+**newrelic.ts**:
 ```typescript
-// auth.ts line 42 (approximate, before userId access):
-if (!decodedToken) {
-  throw new UnauthorizedError('Invalid or missing authentication token');
-}
-const userId = decodedToken.userId;
+fields: [
+  { key: "apiKey", envVar: "NR_API_KEY", description: "New Relic User API key" },
+  { key: "accountId", envVar: "NR_ACCOUNT_ID", description: "New Relic account ID" },
+],
 ```
 
-Or, if the function returns early instead of throwing:
+**sentry.ts**:
 ```typescript
-if (!decodedToken || !decodedToken.userId) {
-  return res.status(401).json({ error: 'Unauthorized' });
-}
+fields: [
+  { key: "authToken", envVar: "SENTRY_AUTH_TOKEN", description: "Sentry authentication token" },
+  { key: "organization", envVar: "SENTRY_ORG", description: "Sentry organization slug" },
+  { key: "project", envVar: "SENTRY_PROJECT", description: "Sentry project slug" },
+],
 ```
 
 ### Files to Modify
 
-- `/src/middleware/auth.ts` — line ~42, add null guard before `.userId` access
+- `packages/providers/src/observability/newrelic.ts` — line 20, add accountId field
+- `packages/providers/src/observability/sentry.ts` — line 21, add organization and project fields
 
 ### Confidence Level
 
-High — direct stack trace pinpoints the exact line; the fix pattern is standard defensive programming.
+Very High — direct code inspection confirms the mismatch; env var names confirmed via
+`getAgentEnv()` and `action/src/config.ts` validation logic.
 
-### Issue Tracker Status
+### GitHub Issues Status
 
-No existing Issue Tracker issue found — new issue will be created.
-
----
-
-## Issue 2: Worker — PostgreSQL ECONNREFUSED (Infrastructure)
-
-- **Severity**: High
-- **Environment**: Production
-- **Frequency**: 2 occurrences in 24h window
-
-### Description
-
-Two worker jobs failed immediately with `ECONNREFUSED 127.0.0.1:5432` (PostgreSQL).
-Both jobs had `retry_count: 0`, suggesting no retry policy is in place for connection errors.
-
-### Evidence
-
-```
-Job processing failed: ECONNREFUSED 127.0.0.1:5432 - Connection refused to PostgreSQL
-  job_id: job_abc, job_type: send_notification
-  job_id: job_def, job_type: process_payment
-```
-
-### Root Cause Analysis
-
-Primary cause is likely infrastructure (PostgreSQL instance unavailable at localhost).
-Secondary code issue: the worker makes no retry attempt on `ECONNREFUSED` — jobs fail
-immediately. A connection error is typically transient and should trigger retries.
-
-### Impact
-
-Notifications and payment processing jobs silently dropped.
-
-### Suggested Fix
-
-1. (Infrastructure) Ensure PostgreSQL is accessible and healthy.
-2. (Code) Add retry-with-backoff for `ECONNREFUSED` before marking the job failed.
-
-### Confidence Level
-
-Medium for infrastructure cause, high for the missing retry policy.
-
-### Issue Tracker Status
-
-No existing Issue Tracker issue found.
-
----
-
-## Issue 3: Payment Service — Stripe Webhook Signature Mismatch
-
-- **Severity**: Medium
-- **Environment**: Production
-- **Frequency**: 1 occurrence in 24h window
-
-### Description
-
-Stripe webhook signature verification failed for event `evt_1234567890` on `/webhooks/stripe`.
-
-### Evidence
-
-```
-Stripe webhook signature verification failed: No signatures found matching the expected signature
-  webhook_id: evt_1234567890, status_code: 400
-```
-
-### Root Cause Analysis
-
-Most likely cause: webhook signing secret was rotated in the Stripe dashboard but the
-environment variable `STRIPE_WEBHOOK_SECRET` in the payment service was not updated.
-
-### Impact
-
-Stripe events (payment confirmations, refunds, disputes) are not being processed.
-
-### Suggested Fix
-
-Rotate / resync `STRIPE_WEBHOOK_SECRET` env var to match the current secret in Stripe dashboard.
-
-### Confidence Level
-
-Medium — single occurrence, may be a one-time replay or key rotation event.
-
-### Issue Tracker Status
-
-No existing Issue Tracker issue found.
+No existing GitHub Issues issue found — New issue will be created.

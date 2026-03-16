@@ -17,7 +17,10 @@ export type NewRelicConfig = z.infer<typeof newrelicConfigSchema>;
 export const newrelicProviderConfigSchema: ProviderConfigSchema = {
   role: "observability",
   name: "New Relic",
-  fields: [{ key: "apiKey", envVar: "NR_API_KEY", description: "New Relic User API key" }],
+  fields: [
+    { key: "apiKey", envVar: "NR_API_KEY", description: "New Relic User API key" },
+    { key: "accountId", envVar: "NR_ACCOUNT_ID", description: "New Relic account ID" },
+  ],
 };
 
 function escapeNrql(value: string): string {

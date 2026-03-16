@@ -1,87 +1,54 @@
-# Investigation Log — 2026-03-12
+# Investigation Log — 2026-03-16
 
 ## Approach
 
-Default mode (no Issue Tracker issue, no additional instructions). Read local log file at
-`packages/cli/fixtures/sample-errors.json` and investigate top errors by frequency and severity.
+Additional instructions: autonomous improvement agent, broad mandate.
+CI failures from `/tmp/ci-failures.json` show recurring `CI on main` and `Deploy Docs` failures.
+GitHub Actions API returned 404 for expired run details, so pivoted to holistic codebase exploration.
 
-## Step 1 — Read log file
+## Step 1 — Read CI Failures
 
-```bash
-cat "packages/cli/fixtures/sample-errors.json"
-```
+The CI failures log contained ~20 entries:
+- `CI on main` (run_id: 23132498377, 23131264950)
+- `Deploy Docs on main` (run_id: 23132498397, 23131264956)
+- Multiple dependabot branch failures
 
-**Result**: JSON array with 8 entries (7 error/warning level) covering 3 services:
-`api-gateway`, `payment-service`, `worker`.
+GitHub Actions API returned 404 — run details not accessible (likely expired).
 
-## Step 2 — Read service map
+## Step 2 — Codebase Exploration
 
-```bash
-cat ".github/service-map.yml"
-```
+Ran broad exploration of:
+- `packages/providers/src/` — all 30+ provider implementations
+- `packages/engine/src/` — runner, validate, schema
+- `packages/cli/src/` — CLI main entry
+- `packages/action/src/` — GitHub Action entrypoint
 
-**Result**: File not found. Service-to-repo ownership mapping is unavailable.
-TARGET_REPO defaults to current repo (`swenyai/sweny`).
+## Step 3 — Identify Provider Config Schema Mismatch Bug
 
-## Step 3 — Check known issues
+Read `packages/engine/src/runner-recipe.ts` lines 44-66 — `validateWorkflowConfig()` checks
+env vars listed in `provider.configSchema.fields`. Found that several providers list FEWER
+fields than their Zod schemas require, causing silent pre-flight validation passes that lead
+to runtime crashes.
 
-Known issue LOCAL-1: _CLI Typecheck and Format Failures After DAG Spec v2 Migration_ (open).
-None of the production errors in the sample log match LOCAL-1 — these are distinct runtime errors
-from different services.
+**Verified providers:**
 
-## Step 4 — Error triage by frequency and severity
+| Provider | Zod required | configSchema.fields | Gap |
+|----------|-------------|---------------------|-----|
+| NewRelic | apiKey, accountId | NR_API_KEY only | NR_ACCOUNT_ID missing |
+| Sentry | authToken, organization, project | SENTRY_AUTH_TOKEN only | SENTRY_ORG, SENTRY_PROJECT missing |
+| Datadog | apiKey, appKey | DD_API_KEY, DD_APPLICATION_KEY | ✅ complete |
+| Splunk | baseUrl, token | SPLUNK_URL, SPLUNK_TOKEN | ✅ complete |
+| Elastic | baseUrl, apiKey | ELASTIC_URL, ELASTIC_API_KEY | ✅ complete |
+| Loki | baseUrl (apiKey/orgId optional) | LOKI_URL | ✅ complete |
+| Linear | apiKey | LINEAR_API_KEY | ✅ complete |
+| Jira | baseUrl, email, apiToken | all 3 listed | ✅ complete |
 
-| Rank | Service | Error | Count | Status |
-|------|---------|-------|-------|--------|
-| 1 | `api-gateway` | `TypeError: Cannot read properties of undefined (reading 'userId')` at `auth.ts:42` | 3 | 500 |
-| 2 | `worker` | `ECONNREFUSED 127.0.0.1:5432` — PostgreSQL connection refused | 2 | — |
-| 3 | `payment-service` | Stripe webhook signature verification failed | 1 | 400 |
-
-One additional warning (payment retry 3/5) not classified as an error.
-
-## Step 5 — Root cause analysis: api-gateway auth TypeError
-
-Stack trace (present in 2 of 3 occurrences):
-```
-TypeError: Cannot read properties of undefined (reading 'userId')
-    at AuthMiddleware.verify (/src/middleware/auth.ts:42:28)
-    at processRequest (/src/server.ts:118:5)
-```
-
-Affected endpoints:
-- `GET /api/v1/users/profile` (req_abc123)
-- `GET /api/v1/users/settings` (req_def456)
-- `POST /api/v1/orders` (req_ghi789)
-
-All three are authenticated routes. The middleware accesses `.userId` on a value that is
-`undefined` — the decoded JWT/session object. The guard is missing before the property
-access on line 42 of `auth.ts`.
-
-Canonical fix pattern:
-```typescript
-// Before (line 42 — crashes when decodedToken/session is undefined):
-const userId = decodedToken.userId;
-
-// After:
-if (!decodedToken) throw new UnauthorizedError('Missing or invalid token');
-const userId = decodedToken.userId;
-```
-
-## Step 6 — Root cause analysis: worker PostgreSQL ECONNREFUSED
-
-Two jobs (`job_abc` / `send_notification`, `job_def` / `process_payment`) failed immediately
-(retry_count: 0) with `ECONNREFUSED 127.0.0.1:5432`. This points to a PostgreSQL instance
-that is either down or not reachable at localhost. Likely infrastructure issue rather than
-a code bug — though the worker should be retrying rather than failing immediately.
-
-## Step 7 — Root cause analysis: payment-service Stripe webhook failure
-
-Single occurrence — Stripe signature mismatch on `/webhooks/stripe`. Most commonly caused
-by a rotated webhook secret that was not updated in the service's environment config.
-Low frequency (1 hit), lower priority.
+Confirmed correct env var names from:
+- `newrelic.ts getAgentEnv()` → exports `NR_ACCOUNT_ID`
+- `sentry.ts getAgentEnv()` → exports `SENTRY_ORG`, `SENTRY_PROJECT`
+- `action/src/config.ts validateInputs()` → checks `newrelic-account-id`, `sentry-org`, `sentry-project`
 
 ## Conclusion
 
-Best candidate for fixing: `api-gateway` auth middleware null guard at `auth.ts:42`.
-Highest frequency (3 of 8 log entries = 37%), direct user-facing 500 errors on core endpoints,
-clear and minimal code fix with high confidence.
+Best candidate: Fix `newrelicProviderConfigSchema` and `sentryProviderConfigSchema` to include
+all required env var fields. Small, targeted, high-impact fix affecting all users of these providers.
