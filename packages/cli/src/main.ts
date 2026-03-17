@@ -30,7 +30,13 @@ import type {
 } from "@sweny-ai/engine";
 import { createFsCache, hashConfig } from "./cache.js";
 import { loadDotenv, loadConfigFile, STARTER_CONFIG } from "./config-file.js";
-import { registerTriageCommand, registerImplementCommand, parseCliInputs, validateInputs } from "./config.js";
+import {
+  registerTriageCommand,
+  registerImplementCommand,
+  parseCliInputs,
+  validateInputs,
+  validateWarnings,
+} from "./config.js";
 import type { CliConfig } from "./config.js";
 import { createProviders, createImplementProviders } from "./providers/index.js";
 import type { MCPServerConfig } from "@sweny-ai/providers";
@@ -105,6 +111,11 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     console.error(formatValidationErrors(errors));
     console.error(c.subtle("\n  Run sweny triage --help for usage information.\n"));
     process.exit(1);
+  }
+
+  // Non-fatal warnings (e.g. missing service map file)
+  for (const warning of validateWarnings(config)) {
+    console.warn(chalk.yellow(`  ⚠  ${warning}`));
   }
 
   // ── Shared logger ─────────────────────────────────────────

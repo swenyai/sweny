@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as os from "node:os";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // Prevent real git calls in detectRepository()
 vi.mock("node:child_process", () => ({
   execSync: vi.fn().mockReturnValue("git@github.com:acme/api.git"),
 }));
 
-const { parseCliInputs, validateInputs } = await import("../src/config.js");
+const { parseCliInputs, validateInputs, validateWarnings } = await import("../src/config.js");
 
 // ── parseCliInputs ──────────────────────────────────────────────────────────
 
@@ -498,5 +501,40 @@ describe("validateInputs", () => {
       expect(errors.some((e) => e.includes("zapier"))).toBe(true);
       expect(errors.some((e) => e.includes("slack, notion, pagerduty, monday"))).toBe(true);
     });
+  });
+});
+
+// ── validateWarnings ──────────────────────────────────────────────────────────
+
+describe("validateWarnings", () => {
+  it("returns no warnings when serviceMapPath is undefined", () => {
+    expect(validateWarnings({ serviceMapPath: undefined as unknown as string })).toEqual([]);
+  });
+
+  it("returns no warnings for the default service map path (not explicitly set)", () => {
+    expect(validateWarnings({ serviceMapPath: ".github/service-map.yml" })).toEqual([]);
+  });
+
+  it("returns no warnings when an explicitly set serviceMapPath exists on disk", () => {
+    const tmp = path.join(os.tmpdir(), `sweny-test-service-map-${Date.now()}.yml`);
+    fs.writeFileSync(tmp, "services: {}");
+    try {
+      const warnings = validateWarnings({ serviceMapPath: tmp });
+      expect(warnings).toEqual([]);
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+  it("warns when an explicitly set serviceMapPath does not exist", () => {
+    const warnings = validateWarnings({ serviceMapPath: "/nonexistent/path/service-map.yml" });
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("Service map file not found");
+    expect(warnings[0]).toContain("/nonexistent/path/service-map.yml");
+    expect(warnings[0]).toContain("Cross-repo routing will be disabled");
+  });
+
+  it("returns no warnings when serviceMapPath is empty string", () => {
+    expect(validateWarnings({ serviceMapPath: "" })).toEqual([]);
   });
 });

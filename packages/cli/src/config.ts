@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import * as fs from "node:fs";
 import type { Command } from "commander";
 import type { MCPServerConfig } from "@sweny-ai/providers";
 
@@ -431,6 +432,26 @@ export function validateInputs(config: CliConfig): string[] {
   }
 
   return errors;
+}
+
+const DEFAULT_SERVICE_MAP_PATH = ".github/service-map.yml";
+
+/**
+ * Returns non-fatal warnings about the configuration.
+ * These are surfaced before the spinner starts but do not abort the run.
+ */
+export function validateWarnings(config: Pick<CliConfig, "serviceMapPath">): string[] {
+  const warnings: string[] = [];
+
+  // Warn when an explicitly configured serviceMapPath doesn't exist on disk.
+  // We skip the default path to avoid noise for users who never set it up.
+  if (config.serviceMapPath && config.serviceMapPath !== DEFAULT_SERVICE_MAP_PATH) {
+    if (!fs.existsSync(config.serviceMapPath)) {
+      warnings.push(`Service map file not found: "${config.serviceMapPath}". Cross-repo routing will be disabled.`);
+    }
+  }
+
+  return warnings;
 }
 
 function parseObservabilityCredentials(

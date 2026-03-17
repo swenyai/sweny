@@ -130,6 +130,7 @@ async function loadMain(argv: string[]) {
     })),
     parseCliInputs: mockParseCliInputs,
     validateInputs: mockValidateInputs,
+    validateWarnings: vi.fn().mockReturnValue([]),
   }));
   vi.doMock("@sweny-ai/engine", () => ({
     runWorkflow: mockRunWorkflow,
