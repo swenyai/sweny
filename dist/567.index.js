@@ -2,14 +2,14 @@ export const id = 567;
 export const ids = [567];
 export const modules = {
 
-/***/ 5816:
+/***/ 15816:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.resolveHttpAuthSchemeConfig = exports.defaultSSOOIDCHttpAuthSchemeProvider = exports.defaultSSOOIDCHttpAuthSchemeParametersProvider = void 0;
-const core_1 = __webpack_require__(9116);
-const util_middleware_1 = __webpack_require__(4160);
+const core_1 = __webpack_require__(39116);
+const util_middleware_1 = __webpack_require__(54160);
 const defaultSSOOIDCHttpAuthSchemeParametersProvider = async (config, context, input) => {
     return {
         operation: (0, util_middleware_1.getSmithyContext)(context).operation,
@@ -65,15 +65,15 @@ exports.resolveHttpAuthSchemeConfig = resolveHttpAuthSchemeConfig;
 
 /***/ }),
 
-/***/ 7086:
+/***/ 67086:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.defaultEndpointResolver = void 0;
-const util_endpoints_1 = __webpack_require__(4024);
-const util_endpoints_2 = __webpack_require__(9622);
-const ruleset_1 = __webpack_require__(3599);
+const util_endpoints_1 = __webpack_require__(94024);
+const util_endpoints_2 = __webpack_require__(49622);
+const ruleset_1 = __webpack_require__(83599);
 const cache = new util_endpoints_2.EndpointCache({
     size: 50,
     params: ["Endpoint", "Region", "UseDualStack", "UseFIPS"],
@@ -90,7 +90,7 @@ util_endpoints_2.customEndpointFunctions.aws = util_endpoints_1.awsEndpointFunct
 
 /***/ }),
 
-/***/ 3599:
+/***/ 83599:
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -203,29 +203,29 @@ exports.ruleSet = _data;
 
 /***/ }),
 
-/***/ 567:
+/***/ 30567:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 
-var middlewareHostHeader = __webpack_require__(4746);
-var middlewareLogger = __webpack_require__(438);
-var middlewareRecursionDetection = __webpack_require__(2588);
+var middlewareHostHeader = __webpack_require__(54746);
+var middlewareLogger = __webpack_require__(10438);
+var middlewareRecursionDetection = __webpack_require__(52588);
 var middlewareUserAgent = __webpack_require__(3979);
-var configResolver = __webpack_require__(3768);
-var core = __webpack_require__(5086);
-var schema = __webpack_require__(5982);
-var middlewareContentLength = __webpack_require__(2352);
-var middlewareEndpoint = __webpack_require__(775);
-var middlewareRetry = __webpack_require__(6318);
-var smithyClient = __webpack_require__(8015);
-var httpAuthSchemeProvider = __webpack_require__(5816);
-var runtimeConfig = __webpack_require__(2137);
-var regionConfigResolver = __webpack_require__(2627);
-var protocolHttp = __webpack_require__(9752);
+var configResolver = __webpack_require__(93768);
+var core = __webpack_require__(75086);
+var schema = __webpack_require__(15982);
+var middlewareContentLength = __webpack_require__(82352);
+var middlewareEndpoint = __webpack_require__(10775);
+var middlewareRetry = __webpack_require__(46318);
+var smithyClient = __webpack_require__(58015);
+var httpAuthSchemeProvider = __webpack_require__(15816);
+var runtimeConfig = __webpack_require__(92137);
+var regionConfigResolver = __webpack_require__(52627);
+var protocolHttp = __webpack_require__(29752);
 var schemas_0 = __webpack_require__(8867);
-var errors = __webpack_require__(1919);
-var SSOOIDCServiceException = __webpack_require__(8556);
+var errors = __webpack_require__(51919);
+var SSOOIDCServiceException = __webpack_require__(68556);
 
 const resolveClientEndpointParameters = (options) => {
     return Object.assign(options, {
@@ -382,13 +382,13 @@ Object.keys(errors).forEach(function (k) {
 
 /***/ }),
 
-/***/ 8556:
+/***/ 68556:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SSOOIDCServiceException = exports.__ServiceException = void 0;
-const smithy_client_1 = __webpack_require__(8015);
+const smithy_client_1 = __webpack_require__(58015);
 Object.defineProperty(exports, "__ServiceException", ({ enumerable: true, get: function () { return smithy_client_1.ServiceException; } }));
 class SSOOIDCServiceException extends smithy_client_1.ServiceException {
     constructor(options) {
@@ -401,13 +401,13 @@ exports.SSOOIDCServiceException = SSOOIDCServiceException;
 
 /***/ }),
 
-/***/ 1919:
+/***/ 51919:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.UnsupportedGrantTypeException = exports.UnauthorizedClientException = exports.SlowDownException = exports.InvalidScopeException = exports.InvalidRequestException = exports.InvalidGrantException = exports.InvalidClientException = exports.InternalServerException = exports.ExpiredTokenException = exports.AuthorizationPendingException = exports.AccessDeniedException = void 0;
-const SSOOIDCServiceException_1 = __webpack_require__(8556);
+const SSOOIDCServiceException_1 = __webpack_require__(68556);
 class AccessDeniedException extends SSOOIDCServiceException_1.SSOOIDCServiceException {
     name = "AccessDeniedException";
     $fault = "client";
@@ -603,26 +603,26 @@ exports.UnsupportedGrantTypeException = UnsupportedGrantTypeException;
 
 /***/ }),
 
-/***/ 2137:
+/***/ 92137:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getRuntimeConfig = void 0;
-const tslib_1 = __webpack_require__(4176);
-const package_json_1 = tslib_1.__importDefault(__webpack_require__(9474));
-const core_1 = __webpack_require__(9116);
-const util_user_agent_node_1 = __webpack_require__(6388);
-const config_resolver_1 = __webpack_require__(3768);
-const hash_node_1 = __webpack_require__(1296);
-const middleware_retry_1 = __webpack_require__(6318);
-const node_config_provider_1 = __webpack_require__(1172);
-const node_http_handler_1 = __webpack_require__(8771);
-const smithy_client_1 = __webpack_require__(8015);
-const util_body_length_node_1 = __webpack_require__(8194);
-const util_defaults_mode_node_1 = __webpack_require__(7215);
-const util_retry_1 = __webpack_require__(4506);
-const runtimeConfig_shared_1 = __webpack_require__(526);
+const tslib_1 = __webpack_require__(94176);
+const package_json_1 = tslib_1.__importDefault(__webpack_require__(89474));
+const core_1 = __webpack_require__(39116);
+const util_user_agent_node_1 = __webpack_require__(16388);
+const config_resolver_1 = __webpack_require__(93768);
+const hash_node_1 = __webpack_require__(51296);
+const middleware_retry_1 = __webpack_require__(46318);
+const node_config_provider_1 = __webpack_require__(71172);
+const node_http_handler_1 = __webpack_require__(18771);
+const smithy_client_1 = __webpack_require__(58015);
+const util_body_length_node_1 = __webpack_require__(68194);
+const util_defaults_mode_node_1 = __webpack_require__(17215);
+const util_retry_1 = __webpack_require__(54506);
+const runtimeConfig_shared_1 = __webpack_require__(80526);
 const getRuntimeConfig = (config) => {
     (0, smithy_client_1.emitWarningIfUnsupportedVersion)(process.version);
     const defaultsMode = (0, util_defaults_mode_node_1.resolveDefaultsModeConfig)(config);
@@ -663,21 +663,21 @@ exports.getRuntimeConfig = getRuntimeConfig;
 
 /***/ }),
 
-/***/ 526:
+/***/ 80526:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getRuntimeConfig = void 0;
-const core_1 = __webpack_require__(9116);
-const protocols_1 = __webpack_require__(3628);
-const core_2 = __webpack_require__(5086);
-const smithy_client_1 = __webpack_require__(8015);
+const core_1 = __webpack_require__(39116);
+const protocols_1 = __webpack_require__(23628);
+const core_2 = __webpack_require__(75086);
+const smithy_client_1 = __webpack_require__(58015);
 const url_parser_1 = __webpack_require__(7834);
-const util_base64_1 = __webpack_require__(7245);
-const util_utf8_1 = __webpack_require__(6005);
-const httpAuthSchemeProvider_1 = __webpack_require__(5816);
-const endpointResolver_1 = __webpack_require__(7086);
+const util_base64_1 = __webpack_require__(77245);
+const util_utf8_1 = __webpack_require__(76005);
+const httpAuthSchemeProvider_1 = __webpack_require__(15816);
+const endpointResolver_1 = __webpack_require__(67086);
 const schemas_0_1 = __webpack_require__(8867);
 const getRuntimeConfig = (config) => {
     return {
@@ -766,9 +766,9 @@ const _sc = "scope";
 const _se = "server";
 const _tT = "tokenType";
 const n0 = "com.amazonaws.ssooidc";
-const schema_1 = __webpack_require__(5982);
-const errors_1 = __webpack_require__(1919);
-const SSOOIDCServiceException_1 = __webpack_require__(8556);
+const schema_1 = __webpack_require__(15982);
+const errors_1 = __webpack_require__(51919);
+const SSOOIDCServiceException_1 = __webpack_require__(68556);
 const _s_registry = schema_1.TypeRegistry.for(_s);
 exports.SSOOIDCServiceException$ = [-3, _s, "SSOOIDCServiceException", 0, [], []];
 _s_registry.registerError(exports.SSOOIDCServiceException$, SSOOIDCServiceException_1.SSOOIDCServiceException);
