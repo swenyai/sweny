@@ -297,7 +297,7 @@ inputs:
       MCP servers as a JSON object passed to the coding agent. Each key is a server name;
       each value is an MCPServerConfig (fields: type, command, args, env, url, headers).
       Example — GitHub MCP server:
-        {"github":{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github@latest"],"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"${{ secrets.GH_PAT }}"}}}
+        {"github":{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github@latest"],"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"YOUR_TOKEN_HERE"}}}
       See docs/mcp-servers.md for a full catalog including Sentry, filesystem, and HTTP servers.
     required: false
 
