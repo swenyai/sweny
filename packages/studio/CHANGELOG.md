@@ -1,5 +1,23 @@
 # @sweny-ai/studio
 
+## 5.3.0
+
+### Minor Changes
+
+- eac9979: - feat(studio): execution trace panel + rename RecipeViewer → WorkflowViewer
+
+### Patch Changes
+
+- 2deee05: - fix: review fixes — stderr, shape guard, parse helper, PropertiesPanel IIFE
+- Updated dependencies [2deee05]
+  - @sweny-ai/engine@3.2.1
+
+## 5.2.0
+
+### Minor Changes
+
+- 87a7fa6: Unreachable steps are now visually highlighted in the workflow graph with a dashed orange border and warning badge. Clicking a validation error in the banner selects the affected step. The properties panel shows an actionable warning for unreachable steps.
+
 ## 5.1.0
 
 ### Minor Changes

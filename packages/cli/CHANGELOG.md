@@ -1,5 +1,27 @@
 # @sweny-ai/cli
 
+## 1.8.0
+
+### Minor Changes
+
+- 11589ec: - feat(action,cli): auto-inject GitHub and Linear MCP servers for configured providers
+
+### Patch Changes
+
+- 02cafdb: - fix: restore Datadog MCP auto-injection (/unstable is the live endpoint)
+- 22a468b: - fix: review fixes — stderr, shape guard, parse helper, PropertiesPanel IIFE
+- 49a56e8: - fix: review fixes — stderr, shape guard, parse helper, PropertiesPanel IIFE
+- 2deee05: - fix: review fixes — stderr, shape guard, parse helper, PropertiesPanel IIFE
+- abedfcb: - docs: add MCP server catalog with copy-paste configs for GitHub, Sentry, filesystem
+- Updated dependencies [2deee05]
+  - @sweny-ai/engine@3.2.1
+
+## 1.7.0
+
+### Minor Changes
+
+- 7c01036: `sweny workflow run` now streams live step-by-step output to stderr as each step enters and exits, matching the experience of `sweny triage`. A new `--json` flag outputs the full result as JSON on stdout while suppressing progress output.
+
 ## 1.6.0
 
 ### Minor Changes
