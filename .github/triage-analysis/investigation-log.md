@@ -1,65 +1,54 @@
-# Investigation Log — 2026-03-17
+# Investigation Log — 2026-03-16
 
 ## Approach
 
-Additional instructions direct improvement of the SWEny codebase itself.
-Primary inputs: CI failure logs at `/tmp/ci-failures.json` + holistic codebase review.
+Additional instructions: autonomous improvement agent, broad mandate.
+CI failures from `/tmp/ci-failures.json` show recurring `CI on main` and `Deploy Docs` failures.
+GitHub Actions API returned 404 for expired run details, so pivoted to holistic codebase exploration.
 
-## Step 1: Read CI Failure Log
+## Step 1 — Read CI Failures
 
-`/tmp/ci-failures.json` contains 20 entries, all from 2026-03-17.
+The CI failures log contained ~20 entries:
+- `CI on main` (run_id: 23132498377, 23131264950)
+- `Deploy Docs on main` (run_id: 23132498397, 23131264956)
+- Multiple dependabot branch failures
 
-Workflows failing:
-- **CI on main** (run IDs: 23199468449, 23195029818) — repeated failures
-- **Continuous Improvement on main** (run IDs: 23195412282, 23195001538)
-- **CI on dependabot branches** — multiple dependency update branches
+GitHub Actions API returned 404 — run details not accessible (likely expired).
 
-## Step 2: Inspect Most Recent Failure
+## Step 2 — Codebase Exploration
 
-Fetched logs for run `23199468449` (most recent CI failure on main).
+Ran broad exploration of:
+- `packages/providers/src/` — all 30+ provider implementations
+- `packages/engine/src/` — runner, validate, schema
+- `packages/cli/src/` — CLI main entry
+- `packages/action/src/` — GitHub Action entrypoint
 
-**Failure step**: `Format — Run npm run format:check`
+## Step 3 — Identify Provider Config Schema Mismatch Bug
 
-```
-[warn] packages/action/tests/mapToTriageConfig.test.ts
-[warn] packages/providers/src/coding-agent/claude-code.ts
-[warn] packages/providers/src/coding-agent/google-gemini.ts
-[warn] packages/providers/src/coding-agent/openai-codex.ts
-[warn] packages/providers/src/source-control/github.ts
-[warn] packages/providers/src/source-control/gitlab.ts
-[error] Code style issues found in 6 files. Run Prettier with --write to fix.
-Process completed with exit code 1.
-```
+Read `packages/engine/src/runner-recipe.ts` lines 44-66 — `validateWorkflowConfig()` checks
+env vars listed in `provider.configSchema.fields`. Found that several providers list FEWER
+fields than their Zod schemas require, causing silent pre-flight validation passes that lead
+to runtime crashes.
 
-## Step 3: Root Cause Analysis
+**Verified providers:**
 
-6 files were committed without running Prettier first. The `format:check` step in CI runs
-`prettier --check .` and fails the build when files don't conform to the project's formatting
-rules. These were likely new files added or modified in recent commits without running the
-formatter locally.
+| Provider | Zod required | configSchema.fields | Gap |
+|----------|-------------|---------------------|-----|
+| NewRelic | apiKey, accountId | NR_API_KEY only | NR_ACCOUNT_ID missing |
+| Sentry | authToken, organization, project | SENTRY_AUTH_TOKEN only | SENTRY_ORG, SENTRY_PROJECT missing |
+| Datadog | apiKey, appKey | DD_API_KEY, DD_APPLICATION_KEY | ✅ complete |
+| Splunk | baseUrl, token | SPLUNK_URL, SPLUNK_TOKEN | ✅ complete |
+| Elastic | baseUrl, apiKey | ELASTIC_URL, ELASTIC_API_KEY | ✅ complete |
+| Loki | baseUrl (apiKey/orgId optional) | LOKI_URL | ✅ complete |
+| Linear | apiKey | LINEAR_API_KEY | ✅ complete |
+| Jira | baseUrl, email, apiToken | all 3 listed | ✅ complete |
 
-## Step 4: Fix Applied
+Confirmed correct env var names from:
+- `newrelic.ts getAgentEnv()` → exports `NR_ACCOUNT_ID`
+- `sentry.ts getAgentEnv()` → exports `SENTRY_ORG`, `SENTRY_PROJECT`
+- `action/src/config.ts validateInputs()` → checks `newrelic-account-id`, `sentry-org`, `sentry-project`
 
-Ran `npx prettier --write` on all 6 offending files:
-- `packages/action/tests/mapToTriageConfig.test.ts`
-- `packages/providers/src/coding-agent/claude-code.ts`
-- `packages/providers/src/coding-agent/google-gemini.ts`
-- `packages/providers/src/coding-agent/openai-codex.ts`
-- `packages/providers/src/source-control/github.ts`
-- `packages/providers/src/source-control/gitlab.ts`
+## Conclusion
 
-Verified clean with `npx prettier --check` — all files now pass.
-
-## Step 5: Known Issues Cross-Check
-
-- PR #61 (open): newrelic/sentry config schemas — confirmed already committed (`7bd135a`); PR still open but fix is in main. Not related to this CI failure.
-- PR #44, #32, #34: closed, not re-introduced by this change.
-
-## Step 6: Changeset
-
-Files modified are in:
-- `packages/action` (private, not published) — no changeset needed
-- `packages/providers` (published as `@sweny-ai/providers`) — formatting-only = patch
-- `packages/providers/src/source-control/` and `packages/providers/src/coding-agent/` are published
-
-Created `.changeset/fix-prettier-format-violations.md` (patch).
+Best candidate: Fix `newrelicProviderConfigSchema` and `sentryProviderConfigSchema` to include
+all required env var fields. Small, targeted, high-impact fix affecting all users of these providers.
