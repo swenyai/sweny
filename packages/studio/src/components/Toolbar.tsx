@@ -4,6 +4,7 @@ import type { WorkflowPhase, WorkflowDefinition } from "@sweny-ai/engine";
 import { useEditorStore, useTemporalStore } from "../store/editor-store.js";
 import type { StudioMode } from "../store/editor-store.js";
 import { ImportModal } from "./ImportModal.js";
+import { HelpPanel } from "./HelpPanel.js";
 import { exportWorkflowYaml } from "../lib/export-yaml.js";
 import { exportAsTypescript } from "../lib/export-typescript.js";
 import { buildPermalinkUrl } from "../lib/permalink.js";
@@ -15,6 +16,8 @@ interface ToolbarProps {
   availableWorkflows: Array<{ id: string; name: string }>;
   showImport: boolean;
   onShowImportChange(open: boolean): void;
+  showHelp: boolean;
+  onShowHelpChange(open: boolean): void;
   onFork?(): void;
   isBuiltinWorkflow?: boolean;
 }
@@ -25,6 +28,8 @@ export function Toolbar({
   availableWorkflows,
   showImport,
   onShowImportChange,
+  showHelp,
+  onShowHelpChange,
   onFork,
   isBuiltinWorkflow,
 }: ToolbarProps) {
@@ -311,7 +316,17 @@ export function Toolbar({
         {copied ? "Copied!" : "Share link"}
       </button>
 
+      {/* Help */}
+      <button
+        onClick={() => onShowHelpChange(true)}
+        title="Keyboard shortcuts (?)"
+        className="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs text-gray-300"
+      >
+        ?
+      </button>
+
       {showImport && <ImportModal onImport={handleImport} onClose={() => onShowImportChange(false)} />}
+      {showHelp && <HelpPanel onClose={() => onShowHelpChange(false)} />}
     </div>
   );
 }

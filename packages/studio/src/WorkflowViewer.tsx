@@ -147,8 +147,16 @@ export function WorkflowViewer() {
     }
   }
 
+  const stepCount = Object.keys(definition.steps).length;
+
   return (
-    <div style={{ width: "100%", height: "100%" }}>
+    <div style={{ width: "100%", height: "100%", position: "relative" }}>
+      {stepCount === 0 && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-gray-400 pointer-events-none z-10">
+          <p className="text-sm">No steps yet.</p>
+          <p className="text-xs">Add your first step using the toolbar above ↑</p>
+        </div>
+      )}
       {error ? (
         <div className="flex items-center justify-center w-full h-full bg-red-50 text-red-700 p-4">
           <p className="font-mono text-sm">{error}</p>

@@ -548,6 +548,77 @@ sweny implement '#42' --issue-tracker-provider github-issues
 
 See the [CLI documentation](https://sweny.ai/cli/) for the full inputs reference.
 
+### Custom workflows
+
+Build and run your own workflows beyond triage and implement.
+
+**1. Start from a built-in as a base:**
+
+```bash
+sweny workflow export triage > my-workflow.yaml
+```
+
+Outputs a YAML file with the full `triage` definition and a YAML Language Server
+schema comment for editor autocomplete. Edit it in VS Code — fields validate
+against the schema automatically.
+
+**2. Discover available step types:**
+
+```bash
+sweny workflow list               # human-readable
+sweny workflow list --json        # machine-readable
+```
+
+**3. Validate your workflow file:**
+
+```bash
+sweny workflow validate my-workflow.yaml
+# ✓ my-workflow.yaml is valid
+
+sweny workflow validate my-workflow.yaml --json
+# { "valid": true, "errors": [] }
+```
+
+Exits 0 on success, 1 on failure. Reports unknown targets, missing initial step,
+and unreachable steps. Works in CI:
+
+```yaml
+- run: sweny workflow validate .sweny/my-workflow.yaml
+```
+
+**4. Run your workflow:**
+
+```bash
+sweny workflow run my-workflow.yaml
+sweny workflow run my-workflow.yaml --dry-run   # validate + list steps only
+```
+
+**5. Use custom step types with `--steps`:**
+
+Register your own step implementations before the workflow runs:
+
+```typescript
+// my-steps.ts
+import { registerStepType } from "@sweny-ai/engine/builtin-steps";
+
+registerStepType({
+  type: "my-org/deploy",
+  description: "Deploy to staging via Kubernetes",
+  impl: async (ctx) => {
+    // ctx.providers, ctx.config, ctx.logger available
+    await deploy(ctx.config.repository);
+    return { status: "success" };
+  },
+});
+```
+
+```bash
+sweny workflow run my-workflow.yaml --steps ./my-steps.ts
+```
+
+See [Recipe Authoring](docs/recipe-authoring.md) for the full guide on writing
+custom steps, providers, and wiring definitions.
+
 ---
 
 ## @sweny-ai/agent
@@ -560,7 +631,7 @@ See [`packages/agent/`](packages/agent/) for documentation.
 
 ## Studio
 
-Studio is the visual editor and execution monitor for SWEny recipes. It renders any `RecipeDefinition` as an interactive DAG — nodes are color-coded by phase (blue=learn, amber=act, green=report), edges show transition outcomes, and execution state is overlaid in real time.
+Studio is the visual editor and execution monitor for SWEny workflows. It renders any `WorkflowDefinition` as an interactive DAG — nodes are color-coded by phase (blue=learn, amber=act, green=report), edges show transition outcomes, and execution state is overlaid in real time.
 
 ```bash
 npm run dev --workspace=packages/studio
@@ -568,11 +639,11 @@ npm run dev --workspace=packages/studio
 
 **Three modes:**
 
-- **Design** — edit the graph, add/remove states, configure transitions and properties, undo/redo. Import and export recipe definitions as JSON.
-- **Simulate** — run the recipe locally in the browser using mock providers. Watch states execute with live status rings.
+- **Design** — add/remove steps, rename IDs, configure transitions and properties, select built-in step types, undo/redo. Import YAML/JSON or export as YAML, JSON, or TypeScript.
+- **Simulate** — run the workflow locally in the browser using mock providers. Watch steps execute with live status rings.
 - **Live** — connect to a running engine instance over WebSocket or SSE and stream execution events in real time.
 
-Studio uses the same `RecipeDefinition` type the engine executes, so what you see is what runs. The `RecipeViewer` component is embeddable in dashboards and documentation via `@sweny-ai/studio/viewer` — see [`docs/studio.md`](docs/studio.md#embedding-the-viewer).
+Studio uses the same `WorkflowDefinition` type the engine executes, so what you see is what runs. The `StandaloneViewer` component is embeddable in dashboards and documentation via `@sweny-ai/studio/viewer` — see [`docs/studio.md`](docs/studio.md#embedding-the-viewer).
 
 See [`docs/studio.md`](docs/studio.md) for the full guide.
 

@@ -21,6 +21,7 @@ export function App() {
   const mode = useEditorStore((s) => s.mode);
   const [activeId, setActiveId] = useState("triage");
   const [showImport, setShowImport] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [forkToast, setForkToast] = useState<string | null>(null);
   const validationErrors = useMemo(() => validateWorkflow(definition), [definition]);
 
@@ -87,6 +88,10 @@ export function App() {
       const { undo, redo } = useEditorStore.temporal.getState();
       const { selection, deleteStep, setSelection } = useEditorStore.getState();
 
+      if (e.key === "?") {
+        setShowHelp(true);
+        return;
+      }
       if (meta && e.key === "o") {
         e.preventDefault();
         setShowImport(true);
@@ -124,6 +129,8 @@ export function App() {
         onWorkflowChange={handleWorkflowChange}
         showImport={showImport}
         onShowImportChange={setShowImport}
+        showHelp={showHelp}
+        onShowHelpChange={setShowHelp}
         isBuiltinWorkflow={isBuiltinWorkflow}
         onFork={handleFork}
       />
