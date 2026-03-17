@@ -14,9 +14,13 @@ export async function sendNotification(ctx) {
     // -------------------------------------------------------------------------
     let status;
     let summary;
-    if (crossRepoData?.dispatched) {
+    if (crossRepoData?.outcome === "dispatch-failed") {
+        status = "warning";
+        summary = `Cross-repo dispatch failed: Could not dispatch to \`${crossRepoData.targetRepo ?? "target repo"}\` — implementing locally`;
+    }
+    else if (crossRepoData?.dispatched) {
         status = "info";
-        summary = `Cross-repo dispatch: Bug belongs to \`${crossRepoData.targetRepo}\` — dispatched for implementation`;
+        summary = `Cross-repo dispatch: Bug belongs to \`${crossRepoData.targetRepo ?? "target repo"}\` — dispatched for implementation`;
     }
     else if (investigation?.recommendation?.toLowerCase().includes("skip")) {
         status = "skipped";

@@ -13,12 +13,10 @@ export async function implementFix(ctx) {
     // -------------------------------------------------------------------------
     // 1. Check for existing PRs (duplicate check)
     // -------------------------------------------------------------------------
-    const skipMergedCheck = !!config.issueOverride;
-    let existingPr = await sourceControl.findExistingPr(issueIdentifier);
-    if (existingPr && skipMergedCheck && existingPr.state !== "open") {
-        existingPr = null;
-    }
+    const existingPr = await sourceControl.findExistingPr(issueIdentifier);
     if (existingPr) {
+        // With an issue override, a merged/closed PR means the original fix landed
+        // but we want a fresh implementation — continue past it.
         if (config.issueOverride && existingPr.state !== "open") {
             ctx.logger.info(`Found ${existingPr.state} PR: ${existingPr.url} — issue override provided, implementing anyway`);
         }

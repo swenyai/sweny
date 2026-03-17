@@ -1,5 +1,16 @@
 # @sweny-ai/cli
 
+## 1.8.2
+
+### Patch Changes
+
+- eb7901f: Unknown provider names now fail immediately at startup with a clear error listing valid values — catches typos like `datdog` before the spinner starts.
+- 26012db: Credential validation errors for Linear team ID, Jira credentials, and GitLab now include actionable hints pointing to where each value can be found.
+- Updated dependencies [b2eb6e7]
+- Updated dependencies [b3e16fd]
+  - @sweny-ai/engine@3.2.5
+  - @sweny-ai/providers@1.1.4
+
 ## 1.8.1
 
 ### Patch Changes

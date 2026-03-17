@@ -33,6 +33,11 @@ export async function crossRepoCheck(ctx) {
     }
     catch (err) {
         ctx.logger.warn(`Cross-repo dispatch failed: ${err}`);
+        // Don't abort the triage workflow over a dispatch failure, but record it accurately.
+        return {
+            status: "success",
+            data: { outcome: "dispatch-failed", dispatched: false, targetRepo },
+        };
     }
     return {
         status: "success",
