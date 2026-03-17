@@ -24,6 +24,7 @@ export default defineConfig({
           label: "Getting Started",
           items: [
             { label: "Introduction", slug: "getting-started" },
+            { label: "Why SWEny?", slug: "getting-started/why-sweny" },
             { label: "Concepts", slug: "getting-started/concepts" },
             { label: "Walkthrough", slug: "getting-started/walkthrough" },
             { label: "Troubleshooting", slug: "getting-started/troubleshooting" },
