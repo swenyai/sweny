@@ -17,7 +17,10 @@ import type {
 
 // Pure-data definition — JSON-serializable, renderable, versionable
 interface WorkflowDefinition {
+  id: string;                // unique machine-readable identifier
+  version: string;           // semver, e.g. "1.0.0"
   name: string;
+  description?: string;
   initial: string;           // id of the first step
   steps: Record<string, StepDefinition>;
 }
@@ -26,12 +29,11 @@ interface StepDefinition {
   phase: "learn" | "act" | "report";
   description?: string;
   critical?: boolean;        // failure aborts the whole workflow
+  next?: string;             // default successor step (success/skipped)
+  on?: Record<string, string>; // outcome → target step id (or "end")
+  uses?: string[];           // provider roles this step depends on
   type?: string;             // built-in step type (e.g. "sweny/investigate")
   timeout?: number;          // ms — step is aborted if it exceeds this
-  transitions?: Array<{
-    on: string;              // outcome string or "*" wildcard
-    target: string;          // step id, or "end" to terminate
-  }>;
 }
 ```
 
@@ -78,7 +80,7 @@ Set `data.outcome` to drive transition routing with custom keys:
 
 ```ts
 return { status: "success", data: { outcome: "needs-review" } };
-// Triggers: transitions: [{ on: "needs-review", target: "human-review-step" }]
+// Triggers: on: { "needs-review": "human-review-step" }
 ```
 
 ## Transition routing (priority order)
@@ -97,22 +99,19 @@ The reserved target `"end"` stops the workflow successfully from any transition.
 import type { WorkflowDefinition } from "@sweny-ai/engine";
 
 export const myWorkflowDefinition: WorkflowDefinition = {
+  id: "my-workflow",
+  version: "1.0.0",
   name: "my-workflow",
   initial: "verify-setup",
   steps: {
     "verify-setup": {
       phase: "learn",
       critical: true,
-      transitions: [
-        { on: "done", target: "do-work" },
-      ],
+      on: { done: "do-work" },
     },
     "do-work": {
       phase: "act",
-      transitions: [
-        { on: "done",   target: "notify" },
-        { on: "failed", target: "notify" },
-      ],
+      on: { done: "notify", failed: "notify" },
     },
     "notify": {
       phase: "report",
@@ -217,8 +216,8 @@ const combined  = composeObservers(collector, streamer);
 import { validateWorkflow } from "@sweny-ai/engine";
 
 const errors = validateWorkflow(myDefinition);
-// errors: WorkflowDefinitionError[] — each has { code, message, stateId? }
-// codes: MISSING_INITIAL, UNKNOWN_INITIAL, UNKNOWN_TRANSITION_TARGET, UNREACHABLE_STEP
+// errors: WorkflowDefinitionError[] — each has { code, message, stepId? }
+// codes: MISSING_INITIAL, UNKNOWN_TARGET, UNREACHABLE_STEP
 ```
 
 `validateWorkflow()` is browser-safe — Studio calls it continuously while you edit.

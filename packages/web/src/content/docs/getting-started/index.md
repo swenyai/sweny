@@ -3,7 +3,7 @@ title: Quick Start
 description: Get SWEny running in your repo in 5 minutes.
 ---
 
-SWEny is a platform for building AI-powered engineering workflows that follow a **Learn → Act → Report** pattern. **SWEny Triage** is the first recipe -- it monitors your observability logs, investigates issues, creates tickets, and opens fix PRs. This guide walks through setting it up.
+SWEny is a platform for building AI-powered engineering workflows that follow a **Learn → Act → Report** pattern. **SWEny Triage** is the first built-in workflow — it monitors your observability logs, investigates issues, creates tickets, and opens fix PRs. This guide walks through setting it up.
 
 ## Prerequisites
 
@@ -35,7 +35,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v1
+      - uses: swenyai/sweny@v3
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -86,7 +86,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v1
+      - uses: swenyai/sweny@v3
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -105,7 +105,7 @@ Set `issue-tracker-provider` and add the relevant credentials:
 
 ```yaml
 # Linear
-- uses: swenyai/sweny@v1
+- uses: swenyai/sweny@v3
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}

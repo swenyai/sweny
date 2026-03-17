@@ -26,7 +26,7 @@ export default defineConfig({
           ],
         },
         {
-          label: "Triage Recipe",
+          label: "Triage Workflow",
           items: [
             { label: "Overview", slug: "recipes/triage" },
             { label: "Action Inputs", slug: "action/inputs" },
@@ -50,8 +50,8 @@ export default defineConfig({
         {
           label: "Studio",
           items: [
-            { label: "Live Recipe Explorer", slug: "studio/explorer" },
-            { label: "Recipe Authoring", slug: "studio/recipe-authoring" },
+            { label: "Live Workflow Explorer", slug: "studio/explorer" },
+            { label: "Workflow Authoring", slug: "studio/recipe-authoring" },
             { label: "Overview", slug: "studio" },
           ],
         },
@@ -59,7 +59,7 @@ export default defineConfig({
           label: "Advanced",
           collapsed: true,
           items: [
-            { label: "Engine & Recipes", slug: "getting-started/engine" },
+            { label: "Engine & Workflows", slug: "getting-started/engine" },
             { label: "Provider Architecture", slug: "getting-started/providers" },
             { label: "Deploying the Agent", slug: "getting-started/agent" },
             { label: "Agent Plugins", slug: "agent/plugins" },

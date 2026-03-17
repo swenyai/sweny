@@ -4,7 +4,7 @@ description: Build custom tool plugins to extend the SWEny agent with new capabi
 ---
 
 :::note[Self-hosted agent]
-This page is for teams running the **`@sweny-ai/agent`** package — a self-hosted Slack bot powered by SWEny. If you're using the **GitHub Action** (`swenyai/sweny@v1`) or the **CLI** (`@sweny-ai/cli`), you can skip this section.
+This page is for teams running the **`@sweny-ai/agent`** package — a self-hosted Slack bot powered by SWEny. If you're using the **GitHub Action** (`swenyai/sweny@v3`) or the **CLI** (`@sweny-ai/cli`), you can skip this section.
 :::
 
 The agent's capabilities are defined by plugins. Each plugin provides tools that the model can call during a conversation, plus optional system prompt sections that guide how tools are used.

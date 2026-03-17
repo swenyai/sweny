@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { WorkflowViewer } from "@sweny-ai/studio/viewer";
 import { triageDefinition, implementDefinition } from "@sweny-ai/engine/browser";
 import "@sweny-ai/studio/style.css";
-import type { RecipeDefinition, StateDefinition } from "@sweny-ai/engine/browser";
+import type { WorkflowDefinition, StepDefinition } from "@sweny-ai/engine/browser";
 
 // ── Inline provider catalog (browser-safe subset) ────────────────────────────
 
@@ -263,20 +263,20 @@ function getCatalogForCategory(category: string): ProviderOption[] {
   return CATALOG.filter((p) => p.category === category);
 }
 
-// ── Recipe data ───────────────────────────────────────────────────────────────
+// ── Workflow data ─────────────────────────────────────────────────────────────
 
-const RECIPES: { id: string; label: string; description: string; definition: RecipeDefinition }[] = [
+const WORKFLOWS: { id: string; label: string; description: string; definition: WorkflowDefinition }[] = [
   {
     id: "triage",
     label: "Triage",
     description: "Monitors production logs, investigates novel errors, implements fixes, and opens PRs — autonomously.",
-    definition: triageDefinition as RecipeDefinition,
+    definition: triageDefinition as WorkflowDefinition,
   },
   {
     id: "implement",
     label: "Implement",
     description: "Takes an existing issue identifier and produces a reviewed PR with a working fix.",
-    definition: implementDefinition as RecipeDefinition,
+    definition: implementDefinition as WorkflowDefinition,
   },
 ];
 
@@ -302,9 +302,9 @@ const CATEGORY_META: Record<string, { icon: string; color: string }> = {
   notification: { icon: "◎", color: "#a78bfa" },
 };
 
-// Hardcoded category→stateIds fallback for built-in recipes (used when
+// Hardcoded category→stepIds fallback for built-in workflows (used when
 // engine dist doesn't carry provider fields e.g. cached older build).
-const RECIPE_CATEGORIES: Record<string, Array<{ category: string; stateIds: string[] }>> = {
+const WORKFLOW_CATEGORIES: Record<string, Array<{ category: string; stateIds: string[] }>> = {
   triage: [
     { category: "observability", stateIds: ["dedup-check", "build-context"] },
     { category: "codingAgent", stateIds: ["investigate", "implement-fix"] },
@@ -327,19 +327,19 @@ type ProviderConfig = Record<string, string>; // category → providerId
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-type StateDefWithProvider = StateDefinition & { provider?: string };
+type StepDefWithProvider = StepDefinition & { provider?: string };
 
-function recipeStats(definition: RecipeDefinition) {
-  const states = Object.values(definition.states);
+function workflowStats(definition: WorkflowDefinition) {
+  const steps = Object.values(definition.steps);
   return {
-    total: states.length,
-    learn: states.filter((s) => s.phase === "learn").length,
-    act: states.filter((s) => s.phase === "act").length,
-    report: states.filter((s) => s.phase === "report").length,
+    total: steps.length,
+    learn: steps.filter((s) => s.phase === "learn").length,
+    act: steps.filter((s) => s.phase === "act").length,
+    report: steps.filter((s) => s.phase === "report").length,
   };
 }
 
-function outboundTransitions(state: StateDefinition) {
+function outboundTransitions(state: StepDefinition) {
   const transitions: { label: string; target: string }[] = [];
   if (state.on) {
     for (const [outcome, target] of Object.entries(state.on)) {
@@ -353,14 +353,14 @@ function outboundTransitions(state: StateDefinition) {
 }
 
 /** Derive used provider categories from the definition.
- *  First tries state.provider fields; falls back to RECIPE_CATEGORIES. */
+ *  First tries step.provider fields; falls back to WORKFLOW_CATEGORIES. */
 function getUsedCategories(
-  definition: RecipeDefinition,
-  recipeId: string,
+  definition: WorkflowDefinition,
+  workflowId: string,
 ): Array<{ category: string; stateIds: string[] }> {
   const catMap: Record<string, string[]> = {};
-  for (const [id, state] of Object.entries(definition.states)) {
-    const prov = (state as StateDefWithProvider).provider;
+  for (const [id, state] of Object.entries(definition.steps)) {
+    const prov = (state as StepDefWithProvider).provider;
     if (prov) {
       catMap[prov] = [...(catMap[prov] ?? []), id];
     }
@@ -368,7 +368,7 @@ function getUsedCategories(
   if (Object.keys(catMap).length > 0) {
     return Object.entries(catMap).map(([category, stateIds]) => ({ category, stateIds }));
   }
-  return RECIPE_CATEGORIES[recipeId] ?? [];
+  return WORKFLOW_CATEGORIES[workflowId] ?? [];
 }
 
 /** Collect all env vars needed given a category→providerId config, deduped by key. */
@@ -420,8 +420,8 @@ function generateEnvTemplate(categoryConfig: ProviderConfig): string {
   return lines.join("\n").trimEnd();
 }
 
-/** Generate runRecipe TypeScript snippet. */
-function generateCodeSnippet(definition: RecipeDefinition, categoryConfig: ProviderConfig): string {
+/** Generate runWorkflow TypeScript snippet. */
+function generateCodeSnippet(definition: WorkflowDefinition, categoryConfig: ProviderConfig): string {
   const entries = Object.entries(categoryConfig)
     .map(([category, providerId]) => ({ category, provider: CATALOG.find((p) => p.id === providerId) }))
     .filter((x): x is { category: string; provider: ProviderOption } => !!x.provider);
@@ -440,18 +440,18 @@ function generateCodeSnippet(definition: RecipeDefinition, categoryConfig: Provi
     return `registry.set("${category}", ${provider.factoryFn}(${vars ? `{ /* ${vars} */ }` : "{}"}));`;
   });
 
-  const recipeId = definition.id === "triage" ? "triageRecipe" : "implementRecipe";
-  const recipeImport = `import { ${recipeId} } from "@sweny-ai/engine/recipes/${definition.id}";`;
+  const workflowId = definition.id === "triage" ? "triageWorkflow" : "implementWorkflow";
+  const workflowImport = `import { ${workflowId} } from "@sweny-ai/engine";`;
 
   return [
-    `import { runRecipe, createProviderRegistry } from "@sweny-ai/engine";`,
-    recipeImport,
+    `import { runWorkflow, createProviderRegistry } from "@sweny-ai/engine";`,
+    workflowImport,
     importLines,
     "",
     `const registry = createProviderRegistry();`,
     ...registrations,
     "",
-    `const result = await runRecipe(${recipeId}, config, registry);`,
+    `const result = await runWorkflow(${workflowId}, config, registry);`,
     `console.log(result.status); // "completed" | "failed" | "partial"`,
   ].join("\n");
 }
@@ -490,7 +490,7 @@ function NodeDetail({
   onClose,
 }: {
   stateId: string;
-  state: StateDefWithProvider;
+  state: StepDefWithProvider;
   isInitial: boolean;
   onClose: () => void;
 }) {
@@ -662,15 +662,21 @@ function NodeDetail({
       )}
       {transitions.length === 0 && (
         <div style={{ fontSize: "0.75rem", color: "#94a3b8", fontStyle: "italic" }}>
-          Terminal state — recipe ends here.
+          Terminal step — workflow ends here.
         </div>
       )}
     </div>
   );
 }
 
-function RecipeOverview({ recipe, definition }: { recipe: (typeof RECIPES)[number]; definition: RecipeDefinition }) {
-  const stats = recipeStats(definition);
+function WorkflowOverview({
+  workflow,
+  definition,
+}: {
+  workflow: (typeof WORKFLOWS)[number];
+  definition: WorkflowDefinition;
+}) {
+  const stats = workflowStats(definition);
   return (
     <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 14 }}>
       <div>
@@ -684,10 +690,10 @@ function RecipeOverview({ recipe, definition }: { recipe: (typeof RECIPES)[numbe
             marginBottom: 6,
           }}
         >
-          Recipe
+          Workflow
         </div>
-        <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "#f1f5f9", marginBottom: 6 }}>{recipe.label}</div>
-        <p style={{ margin: 0, fontSize: "0.78rem", color: "#cbd5e1", lineHeight: 1.55 }}>{recipe.description}</p>
+        <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "#f1f5f9", marginBottom: 6 }}>{workflow.label}</div>
+        <p style={{ margin: 0, fontSize: "0.78rem", color: "#cbd5e1", lineHeight: 1.55 }}>{workflow.description}</p>
       </div>
       <div>
         <div
@@ -747,7 +753,7 @@ function RecipeOverview({ recipe, definition }: { recipe: (typeof RECIPES)[numbe
         >
           How to use
         </div>
-        <span style={{ color: "#94a3b8" }}>{stats.total} states</span> · scroll to zoom · drag to pan
+        <span style={{ color: "#94a3b8" }}>{stats.total} steps</span> · scroll to zoom · drag to pan
         <br />
         <span style={{ color: "#6366f1", fontWeight: 600 }}>Click any node</span> to inspect its phase, provider,
         routing, and transitions.
@@ -764,7 +770,7 @@ function ConfigurePanel({
   providerConfig,
   onProviderChange,
 }: {
-  definition: RecipeDefinition;
+  definition: WorkflowDefinition;
   usedCategories: Array<{ category: string; stateIds: string[] }>;
   providerConfig: ProviderConfig;
   onProviderChange: (category: string, providerId: string) => void;
@@ -992,7 +998,7 @@ function ConfigurePanel({
           <div style={{ textAlign: "center", padding: "40px 16px", color: "#2d3f58", fontSize: 12, lineHeight: 1.6 }}>
             No provider categories detected.
             <br />
-            <span style={{ fontSize: 11, opacity: 0.6 }}>Try switching to the Triage or Implement recipe.</span>
+            <span style={{ fontSize: 11, opacity: 0.6 }}>Try switching to the Triage or Implement workflow.</span>
           </div>
         )}
       </div>
@@ -1093,27 +1099,27 @@ const EMBEDDED_HEIGHT = "min(80vh, 800px)";
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function RecipeExplorer() {
+export function WorkflowExplorer() {
   const [activeIdx, setActiveIdx] = useState(0);
   const [selectedStateId, setSelectedStateId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("visual");
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [jsonText, setJsonText] = useState(() => JSON.stringify(RECIPES[0].definition, null, 2));
+  const [jsonText, setJsonText] = useState(() => JSON.stringify(WORKFLOWS[0].definition, null, 2));
   const [parseError, setParseError] = useState<string | null>(null);
-  const [liveDefinition, setLiveDefinition] = useState<RecipeDefinition>(RECIPES[0].definition);
+  const [liveDefinition, setLiveDefinition] = useState<WorkflowDefinition>(WORKFLOWS[0].definition);
   const [providerConfig, setProviderConfig] = useState<ProviderConfig>({});
   const [copied, setCopied] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const recipe = RECIPES[activeIdx];
-  const selectedState = selectedStateId ? (liveDefinition.states[selectedStateId] as StateDefWithProvider) : null;
-  const usedCategories = getUsedCategories(liveDefinition, recipe.id);
+  const workflow = WORKFLOWS[activeIdx];
+  const selectedState = selectedStateId ? (liveDefinition.steps[selectedStateId] as StepDefWithProvider) : null;
+  const usedCategories = getUsedCategories(liveDefinition, workflow.id);
 
-  function switchRecipe(idx: number) {
+  function switchWorkflow(idx: number) {
     setActiveIdx(idx);
     setSelectedStateId(null);
-    setLiveDefinition(RECIPES[idx].definition);
-    setJsonText(JSON.stringify(RECIPES[idx].definition, null, 2));
+    setLiveDefinition(WORKFLOWS[idx].definition);
+    setJsonText(JSON.stringify(WORKFLOWS[idx].definition, null, 2));
     setParseError(null);
     setProviderConfig({});
   }
@@ -1123,13 +1129,13 @@ export function RecipeExplorer() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       try {
-        const parsed = JSON.parse(text) as RecipeDefinition;
-        if (parsed && typeof parsed.initial === "string" && parsed.states) {
+        const parsed = JSON.parse(text) as WorkflowDefinition;
+        if (parsed && typeof parsed.initial === "string" && parsed.steps) {
           setLiveDefinition(parsed);
           setParseError(null);
           setSelectedStateId(null);
         } else {
-          setParseError("Missing required fields: id, initial, states");
+          setParseError("Missing required fields: id, initial, steps");
         }
       } catch (e) {
         setParseError(e instanceof Error ? e.message : "Invalid JSON");
@@ -1217,7 +1223,7 @@ export function RecipeExplorer() {
               color: "#3d4f6a",
             }}
           >
-            RecipeDefinition
+            WorkflowDefinition
           </span>
           {viewMode === "source" && (
             <span style={{ fontSize: 10, color: "#2d3f58", marginLeft: 8 }}>
@@ -1295,7 +1301,7 @@ export function RecipeExplorer() {
           onClose={() => setSelectedStateId(null)}
         />
       ) : (
-        <RecipeOverview recipe={recipe} definition={liveDefinition} />
+        <WorkflowOverview workflow={workflow} definition={liveDefinition} />
       )}
     </div>
   );
@@ -1379,12 +1385,12 @@ export function RecipeExplorer() {
       {/* Separator */}
       <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.08)", flexShrink: 0 }} />
 
-      {/* Recipe selector */}
+      {/* Workflow selector */}
       <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-        {RECIPES.map((r, i) => (
+        {WORKFLOWS.map((r, i) => (
           <button
             key={r.id}
-            onClick={() => switchRecipe(i)}
+            onClick={() => switchWorkflow(i)}
             style={{
               padding: "4px 14px",
               borderRadius: 6,
@@ -1497,7 +1503,7 @@ export function RecipeExplorer() {
         ? "Click a node to jump to its config  ·  select a provider to reveal env vars"
         : viewMode === "split"
           ? "Edit JSON on the right to live-update the graph"
-          : "Paste or type a RecipeDefinition JSON to visualize it";
+          : "Paste or type a WorkflowDefinition JSON to visualize it";
 
   const footer = (
     <div
@@ -1541,7 +1547,7 @@ export function RecipeExplorer() {
 
   return (
     <div
-      className="recipe-explorer-root"
+      className="workflow-explorer-root"
       style={
         isFullscreen
           ? {

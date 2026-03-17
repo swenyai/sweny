@@ -3,7 +3,7 @@ title: SWEny Triage
 description: Autonomous SRE triage — monitors logs, investigates issues, and opens fix PRs.
 ---
 
-**SWEny Triage** is the first recipe built on the engine. It automates the on-call triage loop: monitor your observability logs, identify the highest-impact novel issue, create a ticket with root cause analysis, implement a fix, and open a PR — all without human intervention.
+**SWEny Triage** is the first built-in workflow. It automates the on-call triage loop: monitor your observability logs, identify the highest-impact novel issue, create a ticket with root cause analysis, implement a fix, and open a PR — all without human intervention.
 
 ## How it works
 

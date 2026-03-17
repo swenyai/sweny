@@ -4,7 +4,7 @@ description: Memory, workspace, and HTTP plugins included with the SWEny agent.
 ---
 
 :::note[Self-hosted agent]
-This page is for teams running the **`@sweny-ai/agent`** package — a self-hosted Slack bot powered by SWEny. If you're using the **GitHub Action** (`swenyai/sweny@v1`) or the **CLI** (`@sweny-ai/cli`), you can skip this section.
+This page is for teams running the **`@sweny-ai/agent`** package — a self-hosted Slack bot powered by SWEny. If you're using the **GitHub Action** (`swenyai/sweny@v3`) or the **CLI** (`@sweny-ai/cli`), you can skip this section.
 :::
 
 The agent ships with two built-in plugins and one example plugin. Add them to your config:

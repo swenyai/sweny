@@ -40,7 +40,7 @@ The default is **GitHub Actions Summary** — zero setup, results appear inline 
 You can send notifications to more than one channel by passing a comma-separated list:
 
 ```yaml
-- uses: swenyai/sweny@v1
+- uses: swenyai/sweny@v3
   with:
     notification-provider: 'github-summary,slack'
     slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
