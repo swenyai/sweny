@@ -2,27 +2,27 @@ export const id = 241;
 export const ids = [241];
 export const modules = {
 
-/***/ 1241:
+/***/ 31241:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 
-var sharedIniFileLoader = __webpack_require__(8123);
+var sharedIniFileLoader = __webpack_require__(10504);
 var propertyProvider = __webpack_require__(2074);
-var client = __webpack_require__(9300);
-var credentialProviderLogin = __webpack_require__(2844);
+var client = __webpack_require__(19300);
+var credentialProviderLogin = __webpack_require__(52844);
 
 const resolveCredentialSource = (credentialSource, profileName, logger) => {
     const sourceProvidersMap = {
         EcsContainer: async (options) => {
-            const { fromHttp } = await __webpack_require__.e(/* import() */ 641).then(__webpack_require__.bind(__webpack_require__, 9641));
-            const { fromContainerMetadata } = await __webpack_require__.e(/* import() */ 778).then(__webpack_require__.t.bind(__webpack_require__, 1778, 19));
+            const { fromHttp } = await __webpack_require__.e(/* import() */ 641).then(__webpack_require__.bind(__webpack_require__, 49641));
+            const { fromContainerMetadata } = await __webpack_require__.e(/* import() */ 778).then(__webpack_require__.t.bind(__webpack_require__, 21778, 19));
             logger?.debug("@aws-sdk/credential-provider-ini - credential_source is EcsContainer");
             return async () => propertyProvider.chain(fromHttp(options ?? {}), fromContainerMetadata(options))().then(setNamedProvider);
         },
         Ec2InstanceMetadata: async (options) => {
             logger?.debug("@aws-sdk/credential-provider-ini - credential_source is Ec2InstanceMetadata");
-            const { fromInstanceMetadata } = await __webpack_require__.e(/* import() */ 778).then(__webpack_require__.t.bind(__webpack_require__, 1778, 19));
+            const { fromInstanceMetadata } = await __webpack_require__.e(/* import() */ 778).then(__webpack_require__.t.bind(__webpack_require__, 21778, 19));
             return async () => fromInstanceMetadata(options)().then(setNamedProvider);
         },
         Environment: async (options) => {
@@ -69,7 +69,7 @@ const resolveAssumeRoleCredentials = async (profileName, profiles, options, call
     const profileData = profiles[profileName];
     const { source_profile, region } = profileData;
     if (!options.roleAssumer) {
-        const { getDefaultRoleAssumer } = await __webpack_require__.e(/* import() */ 100).then(__webpack_require__.t.bind(__webpack_require__, 2100, 23));
+        const { getDefaultRoleAssumer } = await __webpack_require__.e(/* import() */ 100).then(__webpack_require__.t.bind(__webpack_require__, 22100, 23));
         options.roleAssumer = getDefaultRoleAssumer({
             ...options.clientConfig,
             credentialProviderLogger: options.logger,
@@ -130,13 +130,13 @@ const resolveLoginCredentials = async (profileName, options, callerClientConfig)
 };
 
 const isProcessProfile = (arg) => Boolean(arg) && typeof arg === "object" && typeof arg.credential_process === "string";
-const resolveProcessCredentials = async (options, profile) => __webpack_require__.e(/* import() */ 884).then(__webpack_require__.t.bind(__webpack_require__, 2884, 19)).then(({ fromProcess }) => fromProcess({
+const resolveProcessCredentials = async (options, profile) => __webpack_require__.e(/* import() */ 884).then(__webpack_require__.t.bind(__webpack_require__, 92884, 19)).then(({ fromProcess }) => fromProcess({
     ...options,
     profile,
 })().then((creds) => client.setCredentialFeature(creds, "CREDENTIALS_PROFILE_PROCESS", "v")));
 
 const resolveSsoCredentials = async (profile, profileData, options = {}, callerClientConfig) => {
-    const { fromSSO } = await __webpack_require__.e(/* import() */ 874).then(__webpack_require__.t.bind(__webpack_require__, 9874, 19));
+    const { fromSSO } = await __webpack_require__.e(/* import() */ 874).then(__webpack_require__.t.bind(__webpack_require__, 59874, 19));
     return fromSSO({
         profile,
         logger: options.logger,
@@ -183,7 +183,7 @@ const isWebIdentityProfile = (arg) => Boolean(arg) &&
     typeof arg.web_identity_token_file === "string" &&
     typeof arg.role_arn === "string" &&
     ["undefined", "string"].indexOf(typeof arg.role_session_name) > -1;
-const resolveWebIdentityCredentials = async (profile, options, callerClientConfig) => Promise.all(/* import() */[__webpack_require__.e(100), __webpack_require__.e(112)]).then(__webpack_require__.t.bind(__webpack_require__, 8112, 23)).then(({ fromTokenFile }) => fromTokenFile({
+const resolveWebIdentityCredentials = async (profile, options, callerClientConfig) => Promise.all(/* import() */[__webpack_require__.e(100), __webpack_require__.e(112)]).then(__webpack_require__.t.bind(__webpack_require__, 88112, 23)).then(({ fromTokenFile }) => fromTokenFile({
     webIdentityTokenFile: profile.web_identity_token_file,
     roleArn: profile.role_arn,
     roleSessionName: profile.role_session_name,
@@ -233,19 +233,19 @@ exports.fromIni = fromIni;
 
 /***/ }),
 
-/***/ 2844:
+/***/ 52844:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 
-var client = __webpack_require__(9300);
+var client = __webpack_require__(19300);
 var propertyProvider = __webpack_require__(2074);
-var sharedIniFileLoader = __webpack_require__(8123);
-var protocolHttp = __webpack_require__(9752);
-var node_crypto = __webpack_require__(7598);
-var node_fs = __webpack_require__(3024);
-var node_os = __webpack_require__(8161);
-var node_path = __webpack_require__(4379);
+var sharedIniFileLoader = __webpack_require__(10504);
+var protocolHttp = __webpack_require__(29752);
+var node_crypto = __webpack_require__(77598);
+var node_fs = __webpack_require__(73024);
+var node_os = __webpack_require__(48161);
+var node_path = __webpack_require__(76760);
 
 class LoginCredentialsFetcher {
     profileData;
@@ -284,7 +284,7 @@ class LoginCredentialsFetcher {
         return this.profileData.login_session;
     }
     async refresh(token) {
-        const { SigninClient, CreateOAuth2TokenCommand } = await __webpack_require__.e(/* import() */ 990).then(__webpack_require__.t.bind(__webpack_require__, 990, 23));
+        const { SigninClient, CreateOAuth2TokenCommand } = await __webpack_require__.e(/* import() */ 990).then(__webpack_require__.t.bind(__webpack_require__, 70990, 23));
         const { logger, userAgentAppId } = this.callerClientConfig ?? {};
         const isH2 = (requestHandler) => {
             return requestHandler?.metadata?.handlerProtocol === "h2";
