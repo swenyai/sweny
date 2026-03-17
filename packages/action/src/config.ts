@@ -179,7 +179,7 @@ function parseMcpServers(json: string): Record<string, MCPServerConfig> {
 }
 
 /** All recognized workspace tool names. Update here when adding a new Category B MCP server. */
-export const SUPPORTED_WORKSPACE_TOOLS = new Set(["slack", "notion", "pagerduty", "monday"] as const);
+export const SUPPORTED_WORKSPACE_TOOLS = new Set<string>(["slack", "notion", "pagerduty", "monday"]);
 
 export function validateInputs(config: ActionConfig): string[] {
   const errors: string[] = [];
@@ -322,9 +322,7 @@ export function validateInputs(config: ActionConfig): string[] {
   // Workspace tools: reject unknown names early
   for (const tool of config.workspaceTools) {
     if (!SUPPORTED_WORKSPACE_TOOLS.has(tool)) {
-      errors.push(
-        `Unknown workspace tool: "${tool}". Supported values: ${[...SUPPORTED_WORKSPACE_TOOLS].join(", ")}`,
-      );
+      errors.push(`Unknown workspace tool: "${tool}". Supported values: ${[...SUPPORTED_WORKSPACE_TOOLS].join(", ")}`);
     }
   }
 
@@ -332,7 +330,6 @@ export function validateInputs(config: ActionConfig): string[] {
   if (!["auto", "review"].includes(config.reviewMode)) {
     errors.push("`review-mode` must be one of: auto, review");
   }
-
 
   // Integer bounds
   if (config.maxInvestigateTurns < 1 || config.maxInvestigateTurns > 500) {
