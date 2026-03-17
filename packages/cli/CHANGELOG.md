@@ -1,5 +1,14 @@
 # @sweny-ai/cli
 
+## 1.8.1
+
+### Patch Changes
+
+- a7ab63e: Add missing npm package metadata: keywords, bugs URL, and description improvements across all published packages. Fix engine description to say "Workflow" (not "Recipe"). Align Node.js engine requirement for cli and agent to >=22.0.0 to match providers (which uses global fetch).
+- Updated dependencies [a7ab63e]
+  - @sweny-ai/engine@3.2.2
+  - @sweny-ai/providers@1.1.1
+
 ## 1.8.0
 
 ### Minor Changes
