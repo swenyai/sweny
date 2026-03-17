@@ -19,6 +19,7 @@ export function App() {
   const setDefinition = useEditorStore((s) => s.setDefinition);
   const definition = useEditorStore((s) => s.definition);
   const mode = useEditorStore((s) => s.mode);
+  const setSelection = useEditorStore((s) => s.setSelection);
   const [activeId, setActiveId] = useState("triage");
   const [showImport, setShowImport] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -140,11 +141,19 @@ export function App() {
         </div>
       )}
       {mode === "design" && validationErrors.length > 0 && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-1.5 flex items-center gap-2 flex-shrink-0">
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-1.5 flex items-center gap-2 flex-shrink-0 flex-wrap">
           <span className="text-amber-600 text-xs font-medium">
             ⚠ {validationErrors.length} validation {validationErrors.length === 1 ? "error" : "errors"}:
           </span>
-          <span className="text-amber-700 text-xs">{validationErrors.map((e) => e.message).join(" · ")}</span>
+          {validationErrors.map((e) => (
+            <button
+              key={e.message}
+              onClick={() => (e.stateId ? setSelection({ kind: "step", id: e.stateId }) : undefined)}
+              className={`text-amber-700 text-xs ${e.stateId ? "hover:underline cursor-pointer" : "cursor-default"}`}
+            >
+              {e.message}
+            </button>
+          ))}
         </div>
       )}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>

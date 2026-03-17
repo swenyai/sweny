@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { WorkflowPhase, StepDefinition, StepResult } from "@sweny-ai/engine";
+import { validateWorkflow } from "@sweny-ai/engine";
 import { useEditorStore } from "../store/editor-store.js";
 import { BUILTIN_STEP_TYPES, findStepType } from "../lib/step-types.js";
 
@@ -32,6 +33,7 @@ export function PropertiesPanel() {
     if (!step) return <EmptyPanel />;
     const execResult = completedSteps[id] as StepResult | undefined;
     const isRunning = id === currentStepId;
+    const isUnreachable = validateWorkflow(definition).some((e) => e.code === "UNREACHABLE_STEP" && e.stateId === id);
     return (
       <StepPanel
         key={id}
@@ -39,6 +41,7 @@ export function PropertiesPanel() {
         step={step}
         stepIds={stepIds}
         isInitial={definition.initial === id}
+        isUnreachable={isUnreachable}
         readOnly={readOnly}
         execResult={execResult}
         isRunning={isRunning}
@@ -168,6 +171,7 @@ interface StepPanelProps {
   step: StepDefinition;
   stepIds: string[];
   isInitial: boolean;
+  isUnreachable: boolean;
   readOnly: boolean;
   execResult?: StepResult;
   isRunning: boolean;
@@ -186,6 +190,7 @@ function StepPanel({
   step,
   stepIds,
   isInitial,
+  isUnreachable,
   readOnly,
   execResult,
   isRunning,
@@ -219,6 +224,13 @@ function StepPanel({
   return (
     <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
       <h2 className="font-semibold text-gray-800 mb-3 text-sm">Step</h2>
+
+      {/* Unreachable warning — shown in design mode */}
+      {isUnreachable && !readOnly && (
+        <div className="bg-orange-50 border border-orange-200 rounded p-2 text-xs text-orange-700 mb-2">
+          ⚠ This step is unreachable from the initial step. Add a transition pointing to it.
+        </div>
+      )}
 
       {/* Execution result card — shown in simulate/live mode */}
       {readOnly && <ExecutionResultCard result={execResult} isRunning={isRunning} />}

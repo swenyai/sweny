@@ -20,6 +20,11 @@ import type { StudioMode } from "./store/editor-store.js";
 const nodeTypes = { stateNode: StateNode };
 const edgeTypes = { transitionEdge: TransitionEdge };
 
+function getUnreachableStepIds(definition: WorkflowDefinition): Set<string> {
+  const errors = validateWorkflow(definition);
+  return new Set(errors.filter((e) => e.code === "UNREACHABLE_STEP" && e.stateId).map((e) => e.stateId!));
+}
+
 function annotateEdgesWithErrors(
   edges: Edge<TransitionEdgeData>[],
   definition: WorkflowDefinition,
@@ -87,6 +92,7 @@ export function WorkflowViewer() {
     setError(null);
     layoutDefinition(definition)
       .then(({ nodes: n, edges: e }) => {
+        const unreachableIds = getUnreachableStepIds(definition);
         setNodes(
           n.map((node) => ({
             ...node,
@@ -94,6 +100,7 @@ export function WorkflowViewer() {
             data: {
               ...node.data,
               execStatus: getNodeExecStatus(node.id, currentStepId, completedSteps, mode),
+              isUnreachable: unreachableIds.has(node.id),
             },
           })),
         );
@@ -115,6 +122,7 @@ export function WorkflowViewer() {
 
   // Keep selection highlight and execStatus in sync without re-running ELK
   useEffect(() => {
+    const unreachableIds = getUnreachableStepIds(definition);
     setNodes((prev) =>
       prev.map((node) => ({
         ...node,
@@ -122,10 +130,11 @@ export function WorkflowViewer() {
         data: {
           ...node.data,
           execStatus: getNodeExecStatus(node.id, currentStepId, completedSteps, mode),
+          isUnreachable: unreachableIds.has(node.id),
         },
       })),
     );
-  }, [currentStepId, completedSteps, mode, selection]);
+  }, [currentStepId, completedSteps, mode, selection, definition]);
 
   function onNodeClick(_: React.MouseEvent, node: RFNode) {
     setSelection({ kind: "step", id: node.id });

@@ -10,6 +10,7 @@ export type StateNodeData = {
   isInitial: boolean;
   isTerminal: boolean;
   execStatus: NodeExecStatus;
+  isUnreachable?: boolean;
 };
 
 export type StateNodeType = Node<StateNodeData, "stateNode">;
@@ -41,7 +42,7 @@ const providerMeta: Record<string, { icon: string; color: string }> = {
 };
 
 export function StateNode({ data }: NodeProps<StateNodeType>) {
-  const { stateId, state, isInitial, isTerminal, execStatus } = data;
+  const { stateId, state, isInitial, isTerminal, execStatus, isUnreachable } = data;
   const accent = phaseAccent[state.phase];
   const exec = execStyle[execStatus];
   // Show provider icon for the first declared dependency (e.g. "observability", "issueTracker")
@@ -50,8 +51,11 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
   const typeEntry = state.type ? findStepType(state.type) : undefined;
   const typeLabel = typeEntry ? typeEntry.label : state.type ? state.type.replace(/^sweny\//, "") : null;
 
-  const borderColor = exec.borderColor || (isInitial ? accent.bar + "cc" : accent.bar + "40");
-  const borderStyle = isTerminal ? "dashed" : "solid";
+  // Unreachable only changes visuals when no execution status overrides the border
+  const showUnreachable = isUnreachable && !exec.borderColor;
+  const borderColor =
+    exec.borderColor || (showUnreachable ? "#f97316" : isInitial ? accent.bar + "cc" : accent.bar + "40");
+  const borderStyle = isTerminal || showUnreachable ? "dashed" : "solid";
   const textOpacity = execStatus === "skipped" ? 0.45 : 1;
 
   return (
@@ -148,6 +152,24 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
           </div>
         )}
       </div>
+
+      {/* Unreachable warning badge */}
+      {showUnreachable && (
+        <span
+          style={{
+            position: "absolute",
+            top: 3,
+            right: 5,
+            fontSize: 9,
+            color: "#f97316",
+            lineHeight: 1,
+            pointerEvents: "none",
+          }}
+          title="This step is unreachable from the initial step"
+        >
+          ⚠
+        </span>
+      )}
 
       {/* Handles */}
       <Handle
