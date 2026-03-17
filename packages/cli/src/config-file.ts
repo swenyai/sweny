@@ -142,4 +142,37 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # source-control-provider: file
 # notification-provider: file
 # output-dir: .sweny/output
+
+# ── Credentials (.env) ───────────────────────────────────────────────
+# Copy the relevant block into your .env file and fill in the values.
+#
+# Claude (coding agent) — https://console.anthropic.com/settings/api-keys
+#   ANTHROPIC_API_KEY=sk-ant-...
+#
+# GitHub (source control + issue tracker)
+#   GITHUB_TOKEN=ghp_...        # https://github.com/settings/tokens (repo + issues scopes)
+#
+# Datadog (observability) — https://app.datadoghq.com/organization-settings
+#   DD_API_KEY=...              # Organization Settings > API Keys
+#   DD_APP_KEY=...              # Organization Settings > Application Keys
+#   DD_SITE=datadoghq.com       # or datadoghq.eu, us3.datadoghq.com, etc.
+#
+# Sentry (observability) — https://sentry.io/settings/auth-tokens/
+#   SENTRY_AUTH_TOKEN=sntrys_...
+#   SENTRY_ORG=your-org-slug    # from sentry.io/organizations/<slug>/
+#   SENTRY_PROJECT=your-project # Project Settings > General > Project Slug
+#
+# Linear (issue tracker) — https://linear.app/settings/api
+#   LINEAR_API_KEY=lin_api_...
+#   LINEAR_TEAM_ID=...          # Settings > Workspace > Teams > [team] > copy ID from URL
+#   LINEAR_BUG_LABEL_ID=...     # Settings > Labels > [label] > copy ID from URL
+#
+# Jira (issue tracker) — https://your-org.atlassian.net
+#   JIRA_BASE_URL=https://your-org.atlassian.net
+#   JIRA_EMAIL=you@company.com  # your Atlassian account email
+#   JIRA_API_TOKEN=...          # https://id.atlassian.com/manage-profile/security/api-tokens
+#
+# Slack (notifications) — https://api.slack.com/apps
+#   NOTIFICATION_WEBHOOK_URL=https://hooks.slack.com/services/...
+#   # or use a bot token: SLACK_BOT_TOKEN=xoxb-...
 `;
