@@ -1,5 +1,15 @@
 # @sweny-ai/web
 
+## 0.1.4
+
+### Patch Changes
+
+- Updated dependencies [1b11317]
+- Updated dependencies [17ce7ac]
+- Updated dependencies [da1d38a]
+- Updated dependencies [943fc8d]
+  - @sweny-ai/studio@4.0.0
+
 ## 0.1.3
 
 ### Patch Changes
