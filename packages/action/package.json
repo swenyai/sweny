@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/action",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Autonomous SRE triage GitHub Action — monitors logs, creates issues, opens fix PRs",
   "private": true,
   "type": "module",
