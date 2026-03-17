@@ -7,6 +7,7 @@ import { ImportModal } from "./ImportModal.js";
 import { HelpPanel } from "./HelpPanel.js";
 import { exportWorkflowYaml } from "../lib/export-yaml.js";
 import { exportAsTypescript } from "../lib/export-typescript.js";
+import { exportAsGitHubActions } from "../lib/export-github-actions.js";
 import { buildPermalinkUrl } from "../lib/permalink.js";
 import { BUILTIN_STEP_TYPES, findStepType } from "../lib/step-types.js";
 
@@ -107,6 +108,18 @@ export function Toolbar({
     const a = document.createElement("a");
     a.href = url;
     a.download = `${def.id}.workflow.ts`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleExportGitHubActions() {
+    const { definition: def } = useEditorStore.getState();
+    const content = exportAsGitHubActions(def);
+    const blob = new Blob([content], { type: "text/yaml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sweny-${def.id}.yml`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -306,6 +319,15 @@ export function Toolbar({
       {/* Export TypeScript */}
       <button onClick={handleExportTypescript} className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs">
         ↓ TypeScript
+      </button>
+
+      {/* Export GitHub Actions */}
+      <button
+        onClick={handleExportGitHubActions}
+        title="Export as GitHub Actions workflow YAML"
+        className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs"
+      >
+        ↓ GitHub Actions
       </button>
 
       {/* Share link */}
