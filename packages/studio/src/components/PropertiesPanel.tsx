@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { WorkflowPhase, StepDefinition, StepResult } from "@sweny-ai/engine";
 import { validateWorkflow } from "@sweny-ai/engine";
 import { useEditorStore } from "../store/editor-store.js";
@@ -26,6 +26,15 @@ export function PropertiesPanel() {
   const readOnly = mode !== "design";
 
   const stepIds = Object.keys(definition.steps);
+  const unreachableIds = useMemo(
+    () =>
+      new Set(
+        validateWorkflow(definition)
+          .filter((e) => e.code === "UNREACHABLE_STEP" && e.stateId)
+          .map((e) => e.stateId!),
+      ),
+    [definition],
+  );
 
   if (selection?.kind === "step") {
     const { id } = selection;
@@ -33,7 +42,7 @@ export function PropertiesPanel() {
     if (!step) return <EmptyPanel />;
     const execResult = completedSteps[id] as StepResult | undefined;
     const isRunning = id === currentStepId;
-    const isUnreachable = validateWorkflow(definition).some((e) => e.code === "UNREACHABLE_STEP" && e.stateId === id);
+    const isUnreachable = unreachableIds.has(id);
     return (
       <StepPanel
         key={id}

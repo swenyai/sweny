@@ -1,8 +1,19 @@
 {
   "name": "@sweny-ai/providers",
   "version": "1.1.0",
-  "description": "Shared provider interfaces and implementations for SWEny",
+  "description": "Shared provider interfaces and implementations for SWEny — Datadog, Sentry, Linear, GitHub, Slack, and more",
   "type": "module",
+  "keywords": [
+    "observability",
+    "monitoring",
+    "datadog",
+    "sentry",
+    "linear",
+    "github",
+    "slack",
+    "devops",
+    "sweny"
+  ],
   "engines": {
     "node": ">=22.0.0"
   },
@@ -139,6 +150,9 @@
   },
   "license": "MIT",
   "homepage": "https://sweny.ai",
+  "bugs": {
+    "url": "https://github.com/swenyai/sweny/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/swenyai/sweny.git",

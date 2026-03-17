@@ -1,10 +1,20 @@
 {
   "name": "@sweny-ai/cli",
   "version": "1.6.0",
-  "description": "SWEny CLI — run triage workflows locally",
+  "description": "SWEny CLI — run AI-powered triage and workflow automation locally",
   "type": "module",
+  "keywords": [
+    "workflow",
+    "cli",
+    "ai",
+    "triage",
+    "devops",
+    "debugging",
+    "automation",
+    "sweny"
+  ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "bin": {
     "sweny": "./dist/main.js"
@@ -39,6 +49,9 @@
   },
   "license": "MIT",
   "homepage": "https://sweny.ai",
+  "bugs": {
+    "url": "https://github.com/swenyai/sweny/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/swenyai/sweny.git",

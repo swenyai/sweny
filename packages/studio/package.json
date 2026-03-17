@@ -1,7 +1,30 @@
 {
   "name": "@sweny-ai/studio",
   "version": "5.1.0",
+  "description": "React component library for visualizing and editing SWEny workflow DAGs — embeddable viewer and editor",
   "type": "module",
+  "keywords": [
+    "workflow",
+    "dag",
+    "react",
+    "visualization",
+    "editor",
+    "react-flow",
+    "sweny"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "homepage": "https://sweny.ai",
+  "bugs": {
+    "url": "https://github.com/swenyai/sweny/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/swenyai/sweny.git",
+    "directory": "packages/studio"
+  },
+  "license": "MIT",
   "exports": {
     "./viewer": {
       "import": "./dist-lib/viewer.js",

@@ -1,8 +1,17 @@
 {
   "name": "@sweny-ai/engine",
   "version": "3.2.0",
-  "description": "Recipe engine for SWEny — composable DAG-based workflows",
+  "description": "Workflow engine for SWEny — composable DAG-based agentic workflows",
   "type": "module",
+  "keywords": [
+    "workflow",
+    "dag",
+    "orchestration",
+    "ai",
+    "automation",
+    "devops",
+    "sweny"
+  ],
   "engines": {
     "node": ">=20.0.0"
   },
@@ -42,6 +51,9 @@
   },
   "license": "MIT",
   "homepage": "https://sweny.ai",
+  "bugs": {
+    "url": "https://github.com/swenyai/sweny/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/swenyai/sweny.git",
