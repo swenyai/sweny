@@ -1956,6 +1956,91 @@ describe("RunObserver", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Step timeouts
+// ---------------------------------------------------------------------------
+
+describe("runWorkflow — step timeouts", () => {
+  it("fails a step that exceeds its timeout", async () => {
+    // Step hangs forever; 30ms timeout fires and fails it
+    const r = createWorkflow<Cfg>(
+      {
+        id: "t",
+        version: "1.0.0",
+        name: "t",
+        initial: "a",
+        steps: { a: { phase: "act", timeout: 30 } },
+      },
+      {
+        a: () => new Promise<StepResult>(() => {}), // never resolves
+      },
+    );
+
+    const result = await runWorkflow(r, {}, providers, opts);
+    expect(result.status).toBe("partial");
+    expect(result.steps[0].result.status).toBe("failed");
+    expect(result.steps[0].result.reason).toMatch(/timed out after 30ms/);
+  }, 2000);
+
+  it("succeeds a step that completes before its timeout", async () => {
+    // Step resolves synchronously — well within any timeout
+    const r = createWorkflow<Cfg>(
+      {
+        id: "t",
+        version: "1.0.0",
+        name: "t",
+        initial: "a",
+        steps: { a: { phase: "act", timeout: 500 } },
+      },
+      {
+        a: async () => ({ status: "success" }),
+      },
+    );
+
+    const result = await runWorkflow(r, {}, providers, opts);
+    expect(result.status).toBe("completed");
+    expect(result.steps[0].result.status).toBe("success");
+  });
+
+  it("does not apply timeout when field is absent", async () => {
+    const r = createWorkflow<Cfg>(
+      {
+        id: "t",
+        version: "1.0.0",
+        name: "t",
+        initial: "a",
+        steps: { a: { phase: "act" } },
+      },
+      { a: async () => ({ status: "success" }) },
+    );
+    const result = await runWorkflow(r, {}, providers, opts);
+    expect(result.status).toBe("completed");
+  });
+
+  it("critical timed-out step aborts the workflow", async () => {
+    const r = createWorkflow<Cfg>(
+      {
+        id: "t",
+        version: "1.0.0",
+        name: "t",
+        initial: "a",
+        steps: {
+          a: { phase: "act", timeout: 30, critical: true, next: "b" },
+          b: { phase: "report" },
+        },
+      },
+      {
+        a: () => new Promise<StepResult>(() => {}), // hangs
+        b: async () => ({ status: "success" }),
+      },
+    );
+
+    const result = await runWorkflow(r, {}, providers, opts);
+    expect(result.status).toBe("failed");
+    expect(result.steps).toHaveLength(1); // "b" never ran
+  }, 2000);
+});
+
+// ---------------------------------------------------------------------------
 // WorkflowContext — unused import guard (ensures WorkflowContext is referenced)
 // ---------------------------------------------------------------------------
 

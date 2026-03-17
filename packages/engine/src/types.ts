@@ -203,6 +203,12 @@ export interface StepDefinition {
    * Not needed when using createWorkflow() with explicit implementations.
    */
   type?: string;
+  /**
+   * Maximum milliseconds this step may run before being forcibly failed.
+   * When the timeout fires the step result is `{ status: "failed", reason: "timed out after Nms" }`.
+   * When omitted (or 0), no timeout is enforced.
+   */
+  timeout?: number;
 }
 
 /**

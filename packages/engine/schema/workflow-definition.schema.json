@@ -96,6 +96,11 @@
             "minLength": 1
           },
           "description": "Provider roles this step depends on (e.g. ['observability', 'sourceControl']). Metadata only — for pre-flight validation and documentation."
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum milliseconds this step may run before being forcibly failed. When omitted, no timeout is enforced."
         }
       }
     }
