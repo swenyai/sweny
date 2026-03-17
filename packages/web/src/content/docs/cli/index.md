@@ -230,8 +230,86 @@ Use `--json` for machine-readable output — useful for piping to other tools or
 sweny triage --dry-run --json | jq '.status'
 ```
 
+## Other commands
+
+### sweny check
+
+Verify that all configured providers can connect before running a full workflow.
+Run this after initial setup to confirm credentials are correct:
+
+```bash
+sweny check
+```
+
+Checks each configured provider (observability, issue tracker, source control,
+coding agent, notification) and prints ✓ / ✗ per provider with an actionable
+error message and a link to get the missing credential.
+
+### sweny implement
+
+Implement a fix for an existing issue without running log investigation first.
+Useful when you already know what needs fixing:
+
+```bash
+sweny implement --issue-identifier ENG-123
+```
+
+Fetches the issue from your tracker, investigates the codebase, implements a fix,
+and opens a PR. Requires issue tracker, source control, and coding agent providers —
+no observability provider needed.
+
+### sweny workflow
+
+Run, validate, export, and inspect custom workflow files.
+
+**Run a workflow file with live output:**
+
+```bash
+sweny workflow run .sweny/workflows/my-workflow.yml
+```
+
+Streams live step-by-step output to stderr as the workflow runs:
+
+```
+  ▲ my-workflow
+
+  ○ verify-setup…
+  ✓ verify-setup  234ms
+  ○ do-work…
+  ✓ do-work  4.2s
+  ○ notify…
+  ✓ notify  180ms
+```
+
+Flags:
+- `--dry-run` — validate without running
+- `--steps <path>` — path to a JS module that registers custom step types
+- `--json` — output result as JSON on stdout; suppress progress output
+
+**Validate a workflow file without running it:**
+
+```bash
+sweny workflow validate .sweny/workflows/my-workflow.yml
+# exits 0 if valid, 1 with errors if not — good for CI
+```
+
+**List all available step types:**
+
+```bash
+sweny workflow list
+sweny workflow list --steps ./my-custom-steps.js  # include custom types
+```
+
+**Export a built-in workflow as YAML** (useful as a starting point for customization):
+
+```bash
+sweny workflow export triage > .sweny/workflows/triage.yml
+sweny workflow export implement > .sweny/workflows/implement.yml
+```
+
 ## What's next?
 
 - [CLI Inputs](/cli/inputs/) — full reference for all flags and environment variables
-- [CLI Examples](/cli/examples/) — common configurations and recipes
+- [CLI Examples](/cli/examples/) — common configurations and examples
+- [Workflow Authoring](/studio/recipe-authoring/) — build custom workflows with your own steps
 - [Action Inputs](/action/inputs/) — equivalent GitHub Action configuration (the CLI mirrors these)
