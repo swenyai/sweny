@@ -19,12 +19,12 @@ This monorepo contains the SWEny platform:
 
 | Package | Description |
 |---------|-------------|
-| **[@sweny-ai/engine](packages/engine)** | Recipe engine — DAG runner, built-in triage and implement recipes |
+| **[@sweny-ai/engine](packages/engine)** | Workflow engine — DAG runner, built-in triage and implement workflows |
 | **[@sweny-ai/cli](packages/cli)** | CLI — run triage and implement from your terminal |
 | **[SWEny Triage](#sweny-triage)** | GitHub Action — autonomous SRE triage |
 | **[@sweny-ai/providers](packages/providers)** | 30+ provider implementations |
 | **[@sweny-ai/agent](packages/agent)** | AI assistant — Slack bot + CLI |
-| **[@sweny-ai/studio](packages/studio)** | Visual recipe editor and execution monitor |
+| **[@sweny-ai/studio](packages/studio)** | Visual workflow editor and execution monitor |
 | **[@sweny-ai/web](packages/web)** | sweny.ai website |
 
 ---
@@ -183,11 +183,11 @@ SWEny creates GitHub Issues by default — zero additional config. Want Linear o
 
 ### Inputs
 
-#### Recipe
+#### Workflow
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `recipe` | Recipe to run (`triage`, `implement`) | `triage` |
+| `workflow` | Workflow to run (`triage`, `implement`) | `triage` |
 
 #### Authentication
 
@@ -392,7 +392,7 @@ If using cross-repo dispatch, pass a `bot-token` with `repo` and `actions` scope
 - uses: swenyai/sweny@v3
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-    recipe: implement
+    workflow: implement
     linear-issue: ENG-123
     linear-api-key: ${{ secrets.LINEAR_API_KEY }}
     linear-team-id: ${{ vars.LINEAR_TEAM_ID }}
@@ -616,8 +616,7 @@ registerStepType({
 sweny workflow run my-workflow.yaml --steps ./my-steps.ts
 ```
 
-See [Recipe Authoring](docs/recipe-authoring.md) for the full guide on writing
-custom steps, providers, and wiring definitions.
+See [Workflow Authoring](https://sweny.ai/studio/recipe-authoring) for the full guide on writing custom steps, providers, and wiring definitions.
 
 ---
 
@@ -699,11 +698,10 @@ is open source — you can audit exactly what code runs on your data.
 
 | Guide | Description |
 |-------|-------------|
-| [Recipe Authoring](docs/recipe-authoring.md) | Write, wire, run, and test custom recipes |
-| [Provider Authoring](docs/provider-authoring.md) | Build new observability, issue-tracking, or notification providers |
-| [Studio](docs/studio.md) | Visual recipe editor and execution monitor |
-| [Self-Hosted Worker](docs/self-hosted-worker.md) | Run the engine on your own infrastructure |
-| [Recipe System Spec](packages/engine/SPEC.md) | Formal specification — data model, execution semantics, observer protocol |
+| [Workflow Authoring](https://sweny.ai/studio/recipe-authoring) | Write, wire, run, and test custom workflows |
+| [Provider Authoring](https://sweny.ai/getting-started/providers) | Build new observability, issue-tracking, or notification providers |
+| [Studio](https://sweny.ai/studio) | Visual workflow editor and execution monitor |
+| [Workflow Spec](packages/engine/SPEC.md) | Formal specification — data model, execution semantics, observer protocol |
 
 ---
 

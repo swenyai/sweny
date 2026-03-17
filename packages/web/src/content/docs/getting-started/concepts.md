@@ -38,8 +38,7 @@ This means you can swap Datadog for CloudWatch, or Linear for Jira, without chan
 | **Learn** | Observability | Datadog, Sentry, CloudWatch, Splunk, Elasticsearch, New Relic, Grafana Loki |
 | **Act** | Issue Tracking | Linear, GitHub Issues, Jira |
 | **Act** | Source Control | GitHub, GitLab |
-| **Act** | Incident Management | PagerDuty, OpsGenie |
 | **Act** | Coding Agent | Claude Code, OpenAI Codex, Google Gemini |
-| **Report** | Notification | GitHub Summary, Slack, Teams, Discord, Email, Webhook |
+| **Report** | Notification | GitHub Summary, Console, Slack, Teams, Discord, Email, Webhook, File |
 
-See [Provider Reference](/providers/observability/) to configure your observability, issue tracking, and notification providers.
+See [Provider Reference](/getting-started/providers/) to configure your observability, issue tracking, and notification providers.
