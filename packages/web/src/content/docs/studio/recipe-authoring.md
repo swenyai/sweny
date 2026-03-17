@@ -156,7 +156,7 @@ const result = await runWorkflow(myWorkflow, config, registry, {
   observer: myObserver,
 });
 
-console.log(result.status); // "success" | "failed" | "partial"
+console.log(result.status); // "completed" | "failed" | "partial"
 console.log(result.steps);  // per-step results in execution order
 ```
 
@@ -260,7 +260,7 @@ describe("myWorkflow", () => {
       registry,
     );
 
-    expect(result.status).toBe("success");
+    expect(result.status).toBe("completed");
   });
 });
 ```

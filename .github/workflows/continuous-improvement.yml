@@ -37,7 +37,7 @@ jobs:
       actions: read
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -61,7 +61,7 @@ jobs:
           echo "Collected $(jq length /tmp/ci-failures.json) failed runs"
 
       - name: Run SWEny
-        uses: swenyai/sweny@v1
+        uses: swenyai/sweny@v3
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
@@ -99,12 +99,22 @@ jobs:
             - Documentation gaps: inputs/outputs that are undocumented or misleading
             - Performance: slow build steps, redundant work in the action entrypoint
 
-            The codebase is a TypeScript monorepo:
-              packages/providers  — 30+ provider implementations (observability, issue tracking, etc.)
-              packages/engine     — workflow runner (Learn → Act → Report)
+            The codebase is a TypeScript ESM monorepo (Node 22, Vitest 4):
+              packages/providers  — 30+ provider implementations (observability, issue tracking,
+                                    source control, notification, coding-agent, MCP, storage)
+              packages/engine     — workflow runner (WorkflowDefinition DAG, Learn → Act → Report)
+                                    Key exports: runWorkflow, createWorkflow, validateWorkflow
               packages/action     — GitHub Action entrypoint (dist/index.js via ncc)
-              packages/agent      — Slack bot + CLI AI assistant
-              packages/cli        — sweny CLI (triage command)
+              packages/agent      — Slack bot + CLI AI assistant (Claude Code SDK)
+              packages/cli        — sweny CLI: triage, implement, check, workflow run/validate/list/export
+              packages/studio     — React component library: WorkflowViewer DAG visualization
+
+            Build order matters: providers must build before engine, engine before cli/agent/action.
+            Run `npm run build --workspace=packages/providers` before typechecking engine.
+
+            Security: the last push reported 8 Dependabot vulnerabilities (3 high, 4 moderate, 1 low).
+            If CI logs don't show a clear target, investigate the security advisories via GitHub MCP
+            and fix any that are in published packages or the action runtime.
 
             Prioritize a single high-confidence, well-scoped fix. Open a clean PR with a
             clear description so the team can review and merge it quickly.
