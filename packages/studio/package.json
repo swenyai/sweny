@@ -37,7 +37,8 @@
     "./style.css": "./dist-lib/style.css"
   },
   "files": [
-    "dist-lib"
+    "dist-lib",
+    "README.md"
   ],
   "sideEffects": [
     "dist-lib/style.css"
