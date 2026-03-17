@@ -314,7 +314,7 @@ class JiraProvider implements IssueTrackingProvider, PrLinkCapable, LabelHistory
 
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split("T")[0]; // YYYY-MM-DD format for Jira JQL
 
-    const jql = `project = "${projectId}" AND labels = "${labelId}" AND created >= "${since}" ORDER BY created DESC`;
+    const jql = `project = "${escapeJql(projectId)}" AND labels = "${escapeJql(labelId)}" AND created >= "${since}" ORDER BY created DESC`;
 
     const result = await this.request<{
       issues: Array<{

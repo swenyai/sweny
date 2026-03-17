@@ -336,6 +336,68 @@ describe("JiraProvider", () => {
     expect(commentBody.body.content[0].content[0].text).toContain("https://github.com/org/repo/pull/7");
   });
 
+  it("searchIssues includes label clauses in JQL when labels option is set", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ issues: [] }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await makeJira().searchIssues({ projectId: "PROJ", query: "crash", labels: ["bug", "triage"] });
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    const decodedUrl = decodeURIComponent(url);
+    expect(decodedUrl).toContain('labels = "bug"');
+    expect(decodedUrl).toContain('labels = "triage"');
+  });
+
+  it("searchIssues includes status IN clause in JQL when states option is set", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ issues: [] }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await makeJira().searchIssues({ projectId: "PROJ", query: "crash", states: ["Open", "In Progress"] });
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    const decodedUrl = decodeURIComponent(url);
+    expect(decodedUrl).toContain('status IN ("Open", "In Progress")');
+  });
+
+  it("updateIssue with stateId fetches transitions then POSTs transition", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        // GET /transitions
+        ok: true,
+        json: async () => ({
+          transitions: [
+            { id: "31", to: { name: "In Progress" } },
+            { id: "41", to: { name: "Done" } },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        // POST /transitions
+        ok: true,
+        status: 204,
+        json: async () => undefined,
+      });
+    globalThis.fetch = mockFetch;
+
+    await makeJira().updateIssue("PROJ-10", { stateId: "In Progress" });
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const [transUrl] = mockFetch.mock.calls[0];
+    expect(transUrl).toContain("/issue/PROJ-10/transitions");
+    const [postUrl, postOpts] = mockFetch.mock.calls[1];
+    expect(postUrl).toContain("/issue/PROJ-10/transitions");
+    expect(postOpts.method).toBe("POST");
+    const body = JSON.parse(postOpts.body);
+    expect(body.transition.id).toBe("31");
+  });
+
   it("throws on non-ok response", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
@@ -429,6 +491,24 @@ describe("jira LabelHistoryCapable", () => {
 
     const url = mockFetch.mock.calls[0][0] as string;
     expect(decodeURIComponent(url)).toMatch(/created >= "\d{4}-\d{2}-\d{2}"/);
+  });
+
+  it("escapes special chars in projectId and labelId to prevent JQL injection", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ issues: [] }),
+    });
+    globalThis.fetch = mockFetch;
+
+    await makeJira().searchIssuesByLabel('PROJ"bad', 'label"evil\\value');
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    const decodedUrl = decodeURIComponent(url);
+    // The raw double-quote must be escaped to \" in the JQL
+    expect(decodedUrl).toContain('project = "PROJ\\"bad"');
+    expect(decodedUrl).toContain('labels = "label\\"evil\\\\value"');
+    // Ensure the raw unescaped values are NOT present
+    expect(decodedUrl).not.toMatch(/project = "PROJ"bad/);
   });
 
   it("searchIssuesByLabel returns null descriptionSnippet when description is null", async () => {

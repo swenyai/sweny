@@ -41,6 +41,12 @@ vi.mock("node:child_process", async (importOriginal) => {
       }
       return actual.execSync(cmd as string, opts as Parameters<typeof actual.execSync>[1]);
     },
+    execFileSync: (cmd: string, args?: string[], opts?: unknown) => {
+      if (cmd === "git") {
+        throw new Error("not a git repository (mocked)");
+      }
+      return actual.execFileSync(cmd, args as string[], opts as Parameters<typeof actual.execFileSync>[2]);
+    },
   };
 });
 

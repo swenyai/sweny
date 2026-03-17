@@ -319,7 +319,7 @@ describe("LinearProvider", () => {
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.variables.teamId).toBe("team-uuid");
-    expect(body.variables.filter.labels).toEqual({ id: { eq: "label-triage" } });
+    expect(body.variables.filter.labels).toEqual({ some: { id: { eq: "label-triage" } } });
   });
 });
 

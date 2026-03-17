@@ -342,6 +342,17 @@ describe("validateInputs", () => {
       const errors = validateInputs(base({ observabilityProvider: "file", observabilityCredentials: { path: "" } }));
       expect(errors.some((e) => e.includes("--log-file"))).toBe(true);
     });
+
+    it("errors for unknown observability provider", () => {
+      const errors = validateInputs(base({ observabilityProvider: "splonk", observabilityCredentials: {} }));
+      expect(errors.some((e) => e.includes("Unknown --observability-provider") && e.includes("splonk"))).toBe(true);
+      expect(errors.some((e) => e.includes("datadog"))).toBe(true);
+    });
+
+    it("accepts honeycomb as a valid observability provider", () => {
+      const errors = validateInputs(base({ observabilityProvider: "honeycomb", observabilityCredentials: {} }));
+      expect(errors.some((e) => e.includes("Unknown --observability-provider"))).toBe(false);
+    });
   });
 
   // ── Issue tracker ────────────────────────────────────────────────
@@ -366,6 +377,12 @@ describe("validateInputs", () => {
       const errors = validateInputs(base({ issueTrackerProvider: "github-issues" }));
       expect(errors.filter((e) => e.includes("issue tracker"))).toHaveLength(0);
     });
+
+    it("errors for unknown issue tracker provider", () => {
+      const errors = validateInputs(base({ issueTrackerProvider: "notion" }));
+      expect(errors.some((e) => e.includes("Unknown --issue-tracker-provider") && e.includes("notion"))).toBe(true);
+      expect(errors.some((e) => e.includes("linear"))).toBe(true);
+    });
   });
 
   // ── Source control ───────────────────────────────────────────────
@@ -385,6 +402,12 @@ describe("validateInputs", () => {
       const errors = validateInputs(base({ sourceControlProvider: "gitlab", gitlabToken: "", gitlabProjectId: "" }));
       expect(errors.some((e) => e.includes("GITLAB_TOKEN"))).toBe(true);
       expect(errors.some((e) => e.includes("GITLAB_PROJECT_ID"))).toBe(true);
+    });
+
+    it("errors for unknown source control provider", () => {
+      const errors = validateInputs(base({ sourceControlProvider: "bitbucket" }));
+      expect(errors.some((e) => e.includes("Unknown --source-control-provider") && e.includes("bitbucket"))).toBe(true);
+      expect(errors.some((e) => e.includes("github"))).toBe(true);
     });
   });
 
@@ -418,6 +441,12 @@ describe("validateInputs", () => {
     it("passes for console notification with no extra credentials", () => {
       const errors = validateInputs(base({ notificationProvider: "console" }));
       expect(errors).toHaveLength(0);
+    });
+
+    it("errors for unknown notification provider", () => {
+      const errors = validateInputs(base({ notificationProvider: "pushover" }));
+      expect(errors.some((e) => e.includes("Unknown --notification-provider") && e.includes("pushover"))).toBe(true);
+      expect(errors.some((e) => e.includes("slack"))).toBe(true);
     });
   });
 
