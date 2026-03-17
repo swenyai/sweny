@@ -12,7 +12,7 @@ Providers connect SWEny to your existing tools — your observability platform, 
 | **Observability** | Datadog, Sentry, CloudWatch, Splunk, Elasticsearch, New Relic, Grafana Loki | `observability-provider` |
 | **Issue Tracking** | Linear, GitHub Issues, Jira | `issue-tracker-provider` |
 | **Source Control** | GitHub, GitLab | `source-control-provider` |
-| **Notification** | GitHub Summary, Slack, Teams, Discord, Email, Webhook | `notification-provider` |
+| **Notification** | GitHub Summary, Slack, Teams, Discord, Email, Webhook, Console, File | `notification-provider` |
 | **Incident** | PagerDuty, OpsGenie | `incident-provider` |
 | **Messaging** | Slack, Microsoft Teams | `messaging-provider` |
 | **Coding Agent** | Claude Code, OpenAI Codex, Google Gemini | `coding-agent-provider` |
@@ -34,6 +34,14 @@ When running as a GitHub Action, the default is **GitHub Actions Summary** — z
 ### Source control
 
 **GitHub is the default** when running as a GitHub Action. GitLab is supported for cross-repo scenarios. See [Source Control Providers](/providers/source-control/).
+
+### Incident management
+
+PagerDuty and OpsGenie are available for workflows that need to create or acknowledge incidents. They're not used by the built-in Triage workflow by default — Triage opens PRs, not pages. Use the incident provider when building custom workflows that should page on-call. See [Incident Providers](/providers/incident/).
+
+### Messaging
+
+The messaging provider is used by the **interactive agent** (Slack bot) to send and update threaded responses. It's different from the notification provider — messaging supports bidirectional threads, while notification is fire-and-forget. If you're using the GitHub Action or CLI, you don't need to configure a messaging provider. See [Messaging Providers](/providers/messaging/).
 
 ## Multiple notification channels
 

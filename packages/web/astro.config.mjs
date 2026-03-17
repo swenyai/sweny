@@ -27,6 +27,7 @@ export default defineConfig({
             { label: "Concepts", slug: "getting-started/concepts" },
             { label: "Walkthrough", slug: "getting-started/walkthrough" },
             { label: "Troubleshooting", slug: "getting-started/troubleshooting" },
+            { label: "FAQ", slug: "getting-started/faq" },
           ],
         },
         {
