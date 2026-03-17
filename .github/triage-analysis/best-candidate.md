@@ -1,105 +1,83 @@
 <!-- TRIAGE_FINGERPRINT
-error_pattern: TypeError: Cannot read properties of undefined (reading 'userId') at auth.ts:42
-service: api-gateway
-first_seen: 2026-03-12
-run_id: direct-run-2026-03-12
+error_pattern: Code style issues found in 6 files. Run Prettier with --write to fix.
+service: sweny-ci
+first_seen: 2026-03-17
+run_id: 23199468449
 -->
 
 RECOMMENDATION: implement
 
-TARGET_SERVICE: api-gateway
+TARGET_SERVICE: sweny-ci
 TARGET_REPO: swenyai/sweny
 
-**Issue Tracker Issue**: None found - New issue will be created
+**GitHub Issues Issue**: None found - New issue will be created
 
-# Auth Middleware Null Guard Missing on userId Access
+# Prettier Format Violations Break CI on Main
 
 ## Summary
 
-`AuthMiddleware.verify` at `auth.ts:42` crashes with a TypeError when the decoded JWT/session
-object is `undefined`. This produces 500s on all authenticated routes instead of the correct
-401/403. The error appeared 3 times in 24h across profile, settings, and orders endpoints.
+6 files were committed without Prettier formatting, breaking the `format:check` CI step
+on every push to main. This prevents any PR from merging until fixed.
 
 ## Root Cause
 
-Line 42 of `auth.ts` accesses `.userId` directly without a null guard:
+The `format:check` CI step runs `prettier --check .`. The following files did not conform
+to the project's Prettier config:
 
-```typescript
-// Current (crashes when decodedToken is undefined/null):
-const userId = decodedToken.userId;
-```
+- `packages/action/tests/mapToTriageConfig.test.ts`
+- `packages/providers/src/coding-agent/claude-code.ts`
+- `packages/providers/src/coding-agent/google-gemini.ts`
+- `packages/providers/src/coding-agent/openai-codex.ts`
+- `packages/providers/src/source-control/github.ts`
+- `packages/providers/src/source-control/gitlab.ts`
 
-When `jwt.verify()` returns a falsy value (e.g., on an invalid or expired token in some
-library configurations) instead of throwing, the subsequent property access throws an
-unhandled TypeError that bubbles up as a 500.
-
-## Exact Code Change
-
-**File**: `/src/middleware/auth.ts`, line ~42
-
-```typescript
-// Before:
-const userId = decodedToken.userId;
-
-// After:
-if (!decodedToken) {
-  return next(new UnauthorizedError('Invalid or missing authentication token'));
-}
-const userId = decodedToken.userId;
-```
-
-If the codebase uses `res.status()` directly instead of error middleware:
-
-```typescript
-// Alternative (express-style):
-if (!decodedToken) {
-  return res.status(401).json({ error: 'Unauthorized' });
-}
-const userId = decodedToken.userId;
-```
-
-The guard should be placed immediately before the `.userId` access (line 42) and should
-return a 401, not a 500, to correctly signal an authentication failure.
+No pre-commit hook exists to catch this locally, so violations reached CI.
 
 ## Evidence
 
+CI run `23199468449` (main, 2026-03-17):
 ```
-TypeError: Cannot read properties of undefined (reading 'userId')
-    at AuthMiddleware.verify (/src/middleware/auth.ts:42:28)
-    at processRequest (/src/server.ts:118:5)
-
-Affected requests (24h):
-  GET  /api/v1/users/profile   -> 500  (req_abc123)
-  GET  /api/v1/users/settings  -> 500  (req_def456)
-  POST /api/v1/orders          -> 500  (req_ghi789)
+[warn] packages/action/tests/mapToTriageConfig.test.ts
+[warn] packages/providers/src/coding-agent/claude-code.ts
+[warn] packages/providers/src/coding-agent/google-gemini.ts
+[warn] packages/providers/src/coding-agent/openai-codex.ts
+[warn] packages/providers/src/source-control/github.ts
+[warn] packages/providers/src/source-control/gitlab.ts
+[error] Code style issues found in 6 files. Run Prettier with --write to fix.
+Process completed with exit code 1.
 ```
 
-## Files to Modify
+Same failure repeated in runs: 23195029818, 23195412282, 23195001538.
 
-- `/src/middleware/auth.ts` — add null guard at line ~42 before `decodedToken.userId` access
+## Fix Applied
+
+Ran `npx prettier --write` on all 6 files. Verified with `npx prettier --check` — all clean.
+
+## Files Modified
+
+| File | Package | Published |
+|------|---------|-----------|
+| `packages/action/tests/mapToTriageConfig.test.ts` | `@sweny-ai/action` | No (private) |
+| `packages/providers/src/coding-agent/claude-code.ts` | `@sweny-ai/providers` | Yes |
+| `packages/providers/src/coding-agent/google-gemini.ts` | `@sweny-ai/providers` | Yes |
+| `packages/providers/src/coding-agent/openai-codex.ts` | `@sweny-ai/providers` | Yes |
+| `packages/providers/src/source-control/github.ts` | `@sweny-ai/providers` | Yes |
+| `packages/providers/src/source-control/gitlab.ts` | `@sweny-ai/providers` | Yes |
+
+## Changeset
+
+`@sweny-ai/providers` patch bump — formatting-only, no behavioral change.
 
 ## Test Plan
 
-- [ ] Send a request with an intentionally malformed JWT — expect 401, not 500
-- [ ] Send a request with no Authorization header — expect 401
-- [ ] Send a request with a valid JWT — expect normal response (auth passes through)
-- [ ] Send a request with an expired JWT — expect 401
-- [ ] Confirm no new TypeErrors appear in error logs after deploy
+- [ ] `npm run format:check` passes
+- [ ] `npm test` passes (no regressions in source-control or coding-agent tests)
 
 ## Rollback Plan
 
-The change is additive (only adds a guard before existing logic). If the guard introduces
-unexpected behavior, revert by removing the `if (!decodedToken)` block. The underlying crash
-will return but without causing regressions in other paths.
+Formatting changes are purely cosmetic. If needed, revert the commit. The only effect of
+reverting is CI fails the format check again.
 
 ## Confidence
 
-High. Stack trace pinpoints the exact line; the fix is a single null guard — minimal blast
-radius, standard defensive pattern, fully reversible.
-
-## Note on Service Map
-
-`.github/service-map.yml` was not found in this repository. The `api-gateway` service
-referenced in the logs could not be matched to a specific repo. TARGET_REPO is set to
-the current repo (`swenyai/sweny`) as a fallback. If `api-gateway` lives in a different
-repository, this issue should be dispatched there once the service map is created.
+High. Direct evidence from CI logs. Mechanical Prettier fix — no logic changes.

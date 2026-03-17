@@ -1,87 +1,65 @@
-# Investigation Log — 2026-03-12
+# Investigation Log — 2026-03-17
 
 ## Approach
 
-Default mode (no Issue Tracker issue, no additional instructions). Read local log file at
-`packages/cli/fixtures/sample-errors.json` and investigate top errors by frequency and severity.
+Additional instructions direct improvement of the SWEny codebase itself.
+Primary inputs: CI failure logs at `/tmp/ci-failures.json` + holistic codebase review.
 
-## Step 1 — Read log file
+## Step 1: Read CI Failure Log
 
-```bash
-cat "packages/cli/fixtures/sample-errors.json"
+`/tmp/ci-failures.json` contains 20 entries, all from 2026-03-17.
+
+Workflows failing:
+- **CI on main** (run IDs: 23199468449, 23195029818) — repeated failures
+- **Continuous Improvement on main** (run IDs: 23195412282, 23195001538)
+- **CI on dependabot branches** — multiple dependency update branches
+
+## Step 2: Inspect Most Recent Failure
+
+Fetched logs for run `23199468449` (most recent CI failure on main).
+
+**Failure step**: `Format — Run npm run format:check`
+
+```
+[warn] packages/action/tests/mapToTriageConfig.test.ts
+[warn] packages/providers/src/coding-agent/claude-code.ts
+[warn] packages/providers/src/coding-agent/google-gemini.ts
+[warn] packages/providers/src/coding-agent/openai-codex.ts
+[warn] packages/providers/src/source-control/github.ts
+[warn] packages/providers/src/source-control/gitlab.ts
+[error] Code style issues found in 6 files. Run Prettier with --write to fix.
+Process completed with exit code 1.
 ```
 
-**Result**: JSON array with 8 entries (7 error/warning level) covering 3 services:
-`api-gateway`, `payment-service`, `worker`.
+## Step 3: Root Cause Analysis
 
-## Step 2 — Read service map
+6 files were committed without running Prettier first. The `format:check` step in CI runs
+`prettier --check .` and fails the build when files don't conform to the project's formatting
+rules. These were likely new files added or modified in recent commits without running the
+formatter locally.
 
-```bash
-cat ".github/service-map.yml"
-```
+## Step 4: Fix Applied
 
-**Result**: File not found. Service-to-repo ownership mapping is unavailable.
-TARGET_REPO defaults to current repo (`swenyai/sweny`).
+Ran `npx prettier --write` on all 6 offending files:
+- `packages/action/tests/mapToTriageConfig.test.ts`
+- `packages/providers/src/coding-agent/claude-code.ts`
+- `packages/providers/src/coding-agent/google-gemini.ts`
+- `packages/providers/src/coding-agent/openai-codex.ts`
+- `packages/providers/src/source-control/github.ts`
+- `packages/providers/src/source-control/gitlab.ts`
 
-## Step 3 — Check known issues
+Verified clean with `npx prettier --check` — all files now pass.
 
-Known issue LOCAL-1: _CLI Typecheck and Format Failures After DAG Spec v2 Migration_ (open).
-None of the production errors in the sample log match LOCAL-1 — these are distinct runtime errors
-from different services.
+## Step 5: Known Issues Cross-Check
 
-## Step 4 — Error triage by frequency and severity
+- PR #61 (open): newrelic/sentry config schemas — confirmed already committed (`7bd135a`); PR still open but fix is in main. Not related to this CI failure.
+- PR #44, #32, #34: closed, not re-introduced by this change.
 
-| Rank | Service | Error | Count | Status |
-|------|---------|-------|-------|--------|
-| 1 | `api-gateway` | `TypeError: Cannot read properties of undefined (reading 'userId')` at `auth.ts:42` | 3 | 500 |
-| 2 | `worker` | `ECONNREFUSED 127.0.0.1:5432` — PostgreSQL connection refused | 2 | — |
-| 3 | `payment-service` | Stripe webhook signature verification failed | 1 | 400 |
+## Step 6: Changeset
 
-One additional warning (payment retry 3/5) not classified as an error.
+Files modified are in:
+- `packages/action` (private, not published) — no changeset needed
+- `packages/providers` (published as `@sweny-ai/providers`) — formatting-only = patch
+- `packages/providers/src/source-control/` and `packages/providers/src/coding-agent/` are published
 
-## Step 5 — Root cause analysis: api-gateway auth TypeError
-
-Stack trace (present in 2 of 3 occurrences):
-```
-TypeError: Cannot read properties of undefined (reading 'userId')
-    at AuthMiddleware.verify (/src/middleware/auth.ts:42:28)
-    at processRequest (/src/server.ts:118:5)
-```
-
-Affected endpoints:
-- `GET /api/v1/users/profile` (req_abc123)
-- `GET /api/v1/users/settings` (req_def456)
-- `POST /api/v1/orders` (req_ghi789)
-
-All three are authenticated routes. The middleware accesses `.userId` on a value that is
-`undefined` — the decoded JWT/session object. The guard is missing before the property
-access on line 42 of `auth.ts`.
-
-Canonical fix pattern:
-```typescript
-// Before (line 42 — crashes when decodedToken/session is undefined):
-const userId = decodedToken.userId;
-
-// After:
-if (!decodedToken) throw new UnauthorizedError('Missing or invalid token');
-const userId = decodedToken.userId;
-```
-
-## Step 6 — Root cause analysis: worker PostgreSQL ECONNREFUSED
-
-Two jobs (`job_abc` / `send_notification`, `job_def` / `process_payment`) failed immediately
-(retry_count: 0) with `ECONNREFUSED 127.0.0.1:5432`. This points to a PostgreSQL instance
-that is either down or not reachable at localhost. Likely infrastructure issue rather than
-a code bug — though the worker should be retrying rather than failing immediately.
-
-## Step 7 — Root cause analysis: payment-service Stripe webhook failure
-
-Single occurrence — Stripe signature mismatch on `/webhooks/stripe`. Most commonly caused
-by a rotated webhook secret that was not updated in the service's environment config.
-Low frequency (1 hit), lower priority.
-
-## Conclusion
-
-Best candidate for fixing: `api-gateway` auth middleware null guard at `auth.ts:42`.
-Highest frequency (3 of 8 log entries = 37%), direct user-facing 500 errors on core endpoints,
-clear and minimal code fix with high confidence.
+Created `.changeset/fix-prettier-format-violations.md` (patch).
