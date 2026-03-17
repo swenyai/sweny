@@ -17,14 +17,14 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           # Use a PAT so the version-bump commit triggers CI on re-push.
           # Falls back to GITHUB_TOKEN (version-bump won't re-trigger CI, but publish still works).
           token: ${{ secrets.GH_PAT || github.token }}
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -68,3 +68,17 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Rebuild action dist and update v3 tag
+        run: |
+          npm run package --workspace=packages/action
+          git add dist/
+          if git diff --cached --quiet; then
+            echo "dist unchanged, skipping commit"
+          else
+            git commit -m "chore: rebuild action dist [skip ci]"
+            git push
+          fi
+          # Keep the v3 floating tag pointing at the latest main commit
+          git tag -f v3
+          git push origin v3 --force

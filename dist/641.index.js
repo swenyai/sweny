@@ -2,7 +2,7 @@ export const id = 641;
 export const ids = [641];
 export const modules = {
 
-/***/ 2385:
+/***/ 92385:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -55,20 +55,20 @@ exports.checkUrl = checkUrl;
 
 /***/ }),
 
-/***/ 164:
+/***/ 70164:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.fromHttp = void 0;
-const tslib_1 = __webpack_require__(4176);
-const client_1 = __webpack_require__(9300);
-const node_http_handler_1 = __webpack_require__(8771);
+const tslib_1 = __webpack_require__(94176);
+const client_1 = __webpack_require__(19300);
+const node_http_handler_1 = __webpack_require__(18771);
 const property_provider_1 = __webpack_require__(2074);
-const promises_1 = tslib_1.__importDefault(__webpack_require__(1455));
-const checkUrl_1 = __webpack_require__(2385);
-const requestHelpers_1 = __webpack_require__(6846);
-const retry_wrapper_1 = __webpack_require__(5094);
+const promises_1 = tslib_1.__importDefault(__webpack_require__(51455));
+const checkUrl_1 = __webpack_require__(92385);
+const requestHelpers_1 = __webpack_require__(56846);
+const retry_wrapper_1 = __webpack_require__(65094);
 const AWS_CONTAINER_CREDENTIALS_RELATIVE_URI = "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI";
 const DEFAULT_LINK_LOCAL_HOST = "http://169.254.170.2";
 const AWS_CONTAINER_CREDENTIALS_FULL_URI = "AWS_CONTAINER_CREDENTIALS_FULL_URI";
@@ -132,7 +132,7 @@ exports.fromHttp = fromHttp;
 
 /***/ }),
 
-/***/ 6846:
+/***/ 56846:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -140,9 +140,9 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.createGetRequest = createGetRequest;
 exports.getCredentials = getCredentials;
 const property_provider_1 = __webpack_require__(2074);
-const protocol_http_1 = __webpack_require__(9752);
-const smithy_client_1 = __webpack_require__(8015);
-const util_stream_1 = __webpack_require__(8392);
+const protocol_http_1 = __webpack_require__(29752);
+const smithy_client_1 = __webpack_require__(58015);
+const util_stream_1 = __webpack_require__(48392);
 function createGetRequest(url) {
     return new protocol_http_1.HttpRequest({
         protocol: url.protocol,
@@ -192,7 +192,7 @@ async function getCredentials(response, logger) {
 
 /***/ }),
 
-/***/ 5094:
+/***/ 65094:
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -216,14 +216,14 @@ exports.retryWrapper = retryWrapper;
 
 /***/ }),
 
-/***/ 9641:
+/***/ 49641:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 var __webpack_unused_export__;
 
 __webpack_unused_export__ = ({ value: true });
 exports.fromHttp = void 0;
-var fromHttp_1 = __webpack_require__(164);
+var fromHttp_1 = __webpack_require__(70164);
 Object.defineProperty(exports, "fromHttp", ({ enumerable: true, get: function () { return fromHttp_1.fromHttp; } }));
 
 
