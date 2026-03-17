@@ -1,5 +1,11 @@
 # @sweny-ai/studio
 
+## 5.1.0
+
+### Minor Changes
+
+- e810ddc: New "↓ GitHub Actions" export button generates a ready-to-commit `.github/workflows/sweny-{id}.yml` with daily schedule, manual dispatch trigger, and auto-detected secret placeholders based on the step types in your workflow.
+
 ## 5.0.0
 
 ### Patch Changes
