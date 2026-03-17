@@ -2,14 +2,14 @@ export const id = 494;
 export const ids = [494];
 export const modules = {
 
-/***/ 3913:
+/***/ 13913:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.resolveHttpAuthSchemeConfig = exports.defaultSecretsManagerHttpAuthSchemeProvider = exports.defaultSecretsManagerHttpAuthSchemeParametersProvider = void 0;
-const core_1 = __webpack_require__(9116);
-const util_middleware_1 = __webpack_require__(4160);
+const core_1 = __webpack_require__(39116);
+const util_middleware_1 = __webpack_require__(54160);
 const defaultSecretsManagerHttpAuthSchemeParametersProvider = async (config, context, input) => {
     return {
         operation: (0, util_middleware_1.getSmithyContext)(context).operation,
@@ -55,15 +55,15 @@ exports.resolveHttpAuthSchemeConfig = resolveHttpAuthSchemeConfig;
 
 /***/ }),
 
-/***/ 4863:
+/***/ 14863:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.defaultEndpointResolver = void 0;
-const util_endpoints_1 = __webpack_require__(4024);
-const util_endpoints_2 = __webpack_require__(9622);
-const ruleset_1 = __webpack_require__(7644);
+const util_endpoints_1 = __webpack_require__(94024);
+const util_endpoints_2 = __webpack_require__(49622);
+const ruleset_1 = __webpack_require__(27644);
 const cache = new util_endpoints_2.EndpointCache({
     size: 50,
     params: ["Endpoint", "Region", "UseDualStack", "UseFIPS"],
@@ -80,7 +80,7 @@ util_endpoints_2.customEndpointFunctions.aws = util_endpoints_1.awsEndpointFunct
 
 /***/ }),
 
-/***/ 7644:
+/***/ 27644:
 /***/ ((__unused_webpack_module, exports) => {
 
 
@@ -94,29 +94,29 @@ exports.ruleSet = _data;
 
 /***/ }),
 
-/***/ 5494:
+/***/ 75494:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 
-var middlewareHostHeader = __webpack_require__(4746);
-var middlewareLogger = __webpack_require__(438);
-var middlewareRecursionDetection = __webpack_require__(2588);
+var middlewareHostHeader = __webpack_require__(54746);
+var middlewareLogger = __webpack_require__(10438);
+var middlewareRecursionDetection = __webpack_require__(52588);
 var middlewareUserAgent = __webpack_require__(3979);
-var configResolver = __webpack_require__(3768);
-var core = __webpack_require__(5086);
-var schema = __webpack_require__(5982);
-var middlewareContentLength = __webpack_require__(2352);
-var middlewareEndpoint = __webpack_require__(775);
-var middlewareRetry = __webpack_require__(6318);
-var smithyClient = __webpack_require__(8015);
-var httpAuthSchemeProvider = __webpack_require__(3913);
+var configResolver = __webpack_require__(93768);
+var core = __webpack_require__(75086);
+var schema = __webpack_require__(15982);
+var middlewareContentLength = __webpack_require__(82352);
+var middlewareEndpoint = __webpack_require__(10775);
+var middlewareRetry = __webpack_require__(46318);
+var smithyClient = __webpack_require__(58015);
+var httpAuthSchemeProvider = __webpack_require__(13913);
 var runtimeConfig = __webpack_require__(6312);
-var regionConfigResolver = __webpack_require__(2627);
-var protocolHttp = __webpack_require__(9752);
-var schemas_0 = __webpack_require__(8790);
-var errors = __webpack_require__(5994);
-var SecretsManagerServiceException = __webpack_require__(4417);
+var regionConfigResolver = __webpack_require__(52627);
+var protocolHttp = __webpack_require__(29752);
+var schemas_0 = __webpack_require__(88790);
+var errors = __webpack_require__(15994);
+var SecretsManagerServiceException = __webpack_require__(14417);
 
 const resolveClientEndpointParameters = (options) => {
     return Object.assign(options, {
@@ -612,13 +612,13 @@ Object.keys(errors).forEach(function (k) {
 
 /***/ }),
 
-/***/ 4417:
+/***/ 14417:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SecretsManagerServiceException = exports.__ServiceException = void 0;
-const smithy_client_1 = __webpack_require__(8015);
+const smithy_client_1 = __webpack_require__(58015);
 Object.defineProperty(exports, "__ServiceException", ({ enumerable: true, get: function () { return smithy_client_1.ServiceException; } }));
 class SecretsManagerServiceException extends smithy_client_1.ServiceException {
     constructor(options) {
@@ -631,13 +631,13 @@ exports.SecretsManagerServiceException = SecretsManagerServiceException;
 
 /***/ }),
 
-/***/ 5994:
+/***/ 15994:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.PublicPolicyException = exports.ResourceExistsException = exports.PreconditionNotMetException = exports.MalformedPolicyDocumentException = exports.LimitExceededException = exports.EncryptionFailure = exports.ResourceNotFoundException = exports.InvalidRequestException = exports.InvalidParameterException = exports.InvalidNextTokenException = exports.InternalServiceError = exports.DecryptionFailure = void 0;
-const SecretsManagerServiceException_1 = __webpack_require__(4417);
+const SecretsManagerServiceException_1 = __webpack_require__(14417);
 class DecryptionFailure extends SecretsManagerServiceException_1.SecretsManagerServiceException {
     name = "DecryptionFailure";
     $fault = "client";
@@ -828,21 +828,21 @@ exports.PublicPolicyException = PublicPolicyException;
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getRuntimeConfig = void 0;
-const tslib_1 = __webpack_require__(4176);
-const package_json_1 = tslib_1.__importDefault(__webpack_require__(9361));
-const core_1 = __webpack_require__(9116);
-const credential_provider_node_1 = __webpack_require__(7777);
-const util_user_agent_node_1 = __webpack_require__(6388);
-const config_resolver_1 = __webpack_require__(3768);
-const hash_node_1 = __webpack_require__(1296);
-const middleware_retry_1 = __webpack_require__(6318);
-const node_config_provider_1 = __webpack_require__(1172);
-const node_http_handler_1 = __webpack_require__(8771);
-const smithy_client_1 = __webpack_require__(8015);
-const util_body_length_node_1 = __webpack_require__(8194);
-const util_defaults_mode_node_1 = __webpack_require__(7215);
-const util_retry_1 = __webpack_require__(4506);
-const runtimeConfig_shared_1 = __webpack_require__(1881);
+const tslib_1 = __webpack_require__(94176);
+const package_json_1 = tslib_1.__importDefault(__webpack_require__(59361));
+const core_1 = __webpack_require__(39116);
+const credential_provider_node_1 = __webpack_require__(97777);
+const util_user_agent_node_1 = __webpack_require__(16388);
+const config_resolver_1 = __webpack_require__(93768);
+const hash_node_1 = __webpack_require__(51296);
+const middleware_retry_1 = __webpack_require__(46318);
+const node_config_provider_1 = __webpack_require__(71172);
+const node_http_handler_1 = __webpack_require__(18771);
+const smithy_client_1 = __webpack_require__(58015);
+const util_body_length_node_1 = __webpack_require__(68194);
+const util_defaults_mode_node_1 = __webpack_require__(17215);
+const util_retry_1 = __webpack_require__(54506);
+const runtimeConfig_shared_1 = __webpack_require__(11881);
 const getRuntimeConfig = (config) => {
     (0, smithy_client_1.emitWarningIfUnsupportedVersion)(process.version);
     const defaultsMode = (0, util_defaults_mode_node_1.resolveDefaultsModeConfig)(config);
@@ -882,21 +882,21 @@ exports.getRuntimeConfig = getRuntimeConfig;
 
 /***/ }),
 
-/***/ 1881:
+/***/ 11881:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getRuntimeConfig = void 0;
-const core_1 = __webpack_require__(9116);
-const protocols_1 = __webpack_require__(3628);
-const smithy_client_1 = __webpack_require__(8015);
+const core_1 = __webpack_require__(39116);
+const protocols_1 = __webpack_require__(23628);
+const smithy_client_1 = __webpack_require__(58015);
 const url_parser_1 = __webpack_require__(7834);
-const util_base64_1 = __webpack_require__(7245);
-const util_utf8_1 = __webpack_require__(6005);
-const httpAuthSchemeProvider_1 = __webpack_require__(3913);
-const endpointResolver_1 = __webpack_require__(4863);
-const schemas_0_1 = __webpack_require__(8790);
+const util_base64_1 = __webpack_require__(77245);
+const util_utf8_1 = __webpack_require__(76005);
+const httpAuthSchemeProvider_1 = __webpack_require__(13913);
+const endpointResolver_1 = __webpack_require__(14863);
+const schemas_0_1 = __webpack_require__(88790);
 const getRuntimeConfig = (config) => {
     return {
         apiVersion: "2017-10-17",
@@ -932,7 +932,7 @@ exports.getRuntimeConfig = getRuntimeConfig;
 
 /***/ }),
 
-/***/ 8790:
+/***/ 88790:
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 
@@ -1128,9 +1128,9 @@ const _e = "error";
 const _s = "smithy.ts.sdk.synthetic.com.amazonaws.secretsmanager";
 const _se = "server";
 const n0 = "com.amazonaws.secretsmanager";
-const schema_1 = __webpack_require__(5982);
-const errors_1 = __webpack_require__(5994);
-const SecretsManagerServiceException_1 = __webpack_require__(4417);
+const schema_1 = __webpack_require__(15982);
+const errors_1 = __webpack_require__(15994);
+const SecretsManagerServiceException_1 = __webpack_require__(14417);
 const _s_registry = schema_1.TypeRegistry.for(_s);
 exports.SecretsManagerServiceException$ = [-3, _s, "SecretsManagerServiceException", 0, [], []];
 _s_registry.registerError(exports.SecretsManagerServiceException$, SecretsManagerServiceException_1.SecretsManagerServiceException);
@@ -1604,10 +1604,10 @@ exports.ValidateResourcePolicy$ = [9, n0, _VRP,
 
 /***/ }),
 
-/***/ 9361:
+/***/ 59361:
 /***/ ((module) => {
 
-module.exports = /*#__PURE__*/JSON.parse('{"name":"@aws-sdk/client-secrets-manager","description":"AWS SDK for JavaScript Secrets Manager Client for Node.js, Browser and React Native","version":"3.1000.0","scripts":{"build":"concurrently \'yarn:build:types\' \'yarn:build:es\' && yarn build:cjs","build:cjs":"node ../../scripts/compilation/inline client-secrets-manager","build:es":"tsc -p tsconfig.es.json","build:include:deps":"yarn g:turbo run build -F=\\"$npm_package_name\\"","build:types":"tsc -p tsconfig.types.json","build:types:downlevel":"downlevel-dts dist-types dist-types/ts3.4","clean":"premove dist-cjs dist-es dist-types tsconfig.cjs.tsbuildinfo tsconfig.es.tsbuildinfo tsconfig.types.tsbuildinfo","extract:docs":"api-extractor run --local","generate:client":"node ../../scripts/generate-clients/single-service --solo secrets-manager","test":"yarn g:vitest run --passWithNoTests","test:index":"tsc --noEmit ./test/index-types.ts && node ./test/index-objects.spec.mjs","test:integration":"yarn g:vitest run --passWithNoTests -c vitest.config.integ.mts","test:integration:watch":"yarn g:vitest run --passWithNoTests -c vitest.config.integ.mts","test:watch":"yarn g:vitest watch --passWithNoTests"},"main":"./dist-cjs/index.js","types":"./dist-types/index.d.ts","module":"./dist-es/index.js","sideEffects":false,"dependencies":{"@aws-crypto/sha256-browser":"5.2.0","@aws-crypto/sha256-js":"5.2.0","@aws-sdk/core":"^3.973.15","@aws-sdk/credential-provider-node":"^3.972.14","@aws-sdk/middleware-host-header":"^3.972.6","@aws-sdk/middleware-logger":"^3.972.6","@aws-sdk/middleware-recursion-detection":"^3.972.6","@aws-sdk/middleware-user-agent":"^3.972.15","@aws-sdk/region-config-resolver":"^3.972.6","@aws-sdk/types":"^3.973.4","@aws-sdk/util-endpoints":"^3.996.3","@aws-sdk/util-user-agent-browser":"^3.972.6","@aws-sdk/util-user-agent-node":"^3.973.0","@smithy/config-resolver":"^4.4.9","@smithy/core":"^3.23.6","@smithy/fetch-http-handler":"^5.3.11","@smithy/hash-node":"^4.2.10","@smithy/invalid-dependency":"^4.2.10","@smithy/middleware-content-length":"^4.2.10","@smithy/middleware-endpoint":"^4.4.20","@smithy/middleware-retry":"^4.4.37","@smithy/middleware-serde":"^4.2.11","@smithy/middleware-stack":"^4.2.10","@smithy/node-config-provider":"^4.3.10","@smithy/node-http-handler":"^4.4.12","@smithy/protocol-http":"^5.3.10","@smithy/smithy-client":"^4.12.0","@smithy/types":"^4.13.0","@smithy/url-parser":"^4.2.10","@smithy/util-base64":"^4.3.1","@smithy/util-body-length-browser":"^4.2.1","@smithy/util-body-length-node":"^4.2.2","@smithy/util-defaults-mode-browser":"^4.3.36","@smithy/util-defaults-mode-node":"^4.2.39","@smithy/util-endpoints":"^3.3.1","@smithy/util-middleware":"^4.2.10","@smithy/util-retry":"^4.2.10","@smithy/util-utf8":"^4.2.1","tslib":"^2.6.2"},"devDependencies":{"@smithy/snapshot-testing":"^1.0.7","@tsconfig/node20":"20.1.8","@types/node":"^20.14.8","concurrently":"7.0.0","downlevel-dts":"0.10.1","premove":"4.0.0","typescript":"~5.8.3","vitest":"^4.0.17"},"engines":{"node":">=20.0.0"},"typesVersions":{"<4.0":{"dist-types/*":["dist-types/ts3.4/*"]}},"files":["dist-*/**"],"author":{"name":"AWS SDK for JavaScript Team","url":"https://aws.amazon.com/javascript/"},"license":"Apache-2.0","browser":{"./dist-es/runtimeConfig":"./dist-es/runtimeConfig.browser"},"react-native":{"./dist-es/runtimeConfig":"./dist-es/runtimeConfig.native"},"homepage":"https://github.com/aws/aws-sdk-js-v3/tree/main/clients/client-secrets-manager","repository":{"type":"git","url":"https://github.com/aws/aws-sdk-js-v3.git","directory":"clients/client-secrets-manager"}}');
+module.exports = /*#__PURE__*/JSON.parse('{"name":"@aws-sdk/client-secrets-manager","description":"AWS SDK for JavaScript Secrets Manager Client for Node.js, Browser and React Native","version":"3.1004.0","scripts":{"build":"concurrently \'yarn:build:types\' \'yarn:build:es\' && yarn build:cjs","build:cjs":"node ../../scripts/compilation/inline client-secrets-manager","build:es":"tsc -p tsconfig.es.json","build:include:deps":"yarn g:turbo run build -F=\\"$npm_package_name\\"","build:types":"tsc -p tsconfig.types.json","build:types:downlevel":"downlevel-dts dist-types dist-types/ts3.4","clean":"premove dist-cjs dist-es dist-types tsconfig.cjs.tsbuildinfo tsconfig.es.tsbuildinfo tsconfig.types.tsbuildinfo","extract:docs":"api-extractor run --local","generate:client":"node ../../scripts/generate-clients/single-service --solo secrets-manager","test":"yarn g:vitest run --passWithNoTests","test:index":"tsc --noEmit ./test/index-types.ts && node ./test/index-objects.spec.mjs","test:integration":"yarn g:vitest run --passWithNoTests -c vitest.config.integ.mts","test:integration:watch":"yarn g:vitest run --passWithNoTests -c vitest.config.integ.mts","test:watch":"yarn g:vitest watch --passWithNoTests"},"main":"./dist-cjs/index.js","types":"./dist-types/index.d.ts","module":"./dist-es/index.js","sideEffects":false,"dependencies":{"@aws-crypto/sha256-browser":"5.2.0","@aws-crypto/sha256-js":"5.2.0","@aws-sdk/core":"^3.973.18","@aws-sdk/credential-provider-node":"^3.972.18","@aws-sdk/middleware-host-header":"^3.972.7","@aws-sdk/middleware-logger":"^3.972.7","@aws-sdk/middleware-recursion-detection":"^3.972.7","@aws-sdk/middleware-user-agent":"^3.972.19","@aws-sdk/region-config-resolver":"^3.972.7","@aws-sdk/types":"^3.973.5","@aws-sdk/util-endpoints":"^3.996.4","@aws-sdk/util-user-agent-browser":"^3.972.7","@aws-sdk/util-user-agent-node":"^3.973.4","@smithy/config-resolver":"^4.4.10","@smithy/core":"^3.23.8","@smithy/fetch-http-handler":"^5.3.13","@smithy/hash-node":"^4.2.11","@smithy/invalid-dependency":"^4.2.11","@smithy/middleware-content-length":"^4.2.11","@smithy/middleware-endpoint":"^4.4.22","@smithy/middleware-retry":"^4.4.39","@smithy/middleware-serde":"^4.2.12","@smithy/middleware-stack":"^4.2.11","@smithy/node-config-provider":"^4.3.11","@smithy/node-http-handler":"^4.4.14","@smithy/protocol-http":"^5.3.11","@smithy/smithy-client":"^4.12.2","@smithy/types":"^4.13.0","@smithy/url-parser":"^4.2.11","@smithy/util-base64":"^4.3.2","@smithy/util-body-length-browser":"^4.2.2","@smithy/util-body-length-node":"^4.2.3","@smithy/util-defaults-mode-browser":"^4.3.38","@smithy/util-defaults-mode-node":"^4.2.41","@smithy/util-endpoints":"^3.3.2","@smithy/util-middleware":"^4.2.11","@smithy/util-retry":"^4.2.11","@smithy/util-utf8":"^4.2.2","tslib":"^2.6.2"},"devDependencies":{"@smithy/snapshot-testing":"^1.0.9","@tsconfig/node20":"20.1.8","@types/node":"^20.14.8","concurrently":"7.0.0","downlevel-dts":"0.10.1","premove":"4.0.0","typescript":"~5.8.3","vitest":"^4.0.17"},"engines":{"node":">=20.0.0"},"typesVersions":{"<4.5":{"dist-types/*":["dist-types/ts3.4/*"]}},"files":["dist-*/**"],"author":{"name":"AWS SDK for JavaScript Team","url":"https://aws.amazon.com/javascript/"},"license":"Apache-2.0","browser":{"./dist-es/runtimeConfig":"./dist-es/runtimeConfig.browser"},"react-native":{"./dist-es/runtimeConfig":"./dist-es/runtimeConfig.native"},"homepage":"https://github.com/aws/aws-sdk-js-v3/tree/main/clients/client-secrets-manager","repository":{"type":"git","url":"https://github.com/aws/aws-sdk-js-v3.git","directory":"clients/client-secrets-manager"}}');
 
 /***/ })
 
