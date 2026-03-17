@@ -1,9 +1,9 @@
 ---
-title: Engine & Recipes
+title: Engine & Workflows
 description: How SWEny's workflow engine orchestrates Learn, Act, Report pipelines.
 ---
 
-SWEny's engine runs your recipe automatically — you don't need to write any code. It manages the flow between phases, handles provider connections, and routes to the right next step based on what each step returns.
+SWEny's engine runs your workflow automatically — you don't need to write any code. It manages the flow between phases, handles provider connections, and routes to the right next step based on what each step returns.
 
 ## The three phases
 
@@ -34,13 +34,13 @@ The Report phase delivers results through your team's channels:
 
 ## Key concepts
 
-**Recipe** — A pre-configured workflow for a specific use case. Recipes bundle the right steps together and define how they connect. You pick a recipe and configure it — no step wiring needed.
+**Workflow** — A DAG of steps organized into the three phases. Workflows are defined in YAML or TypeScript, executed by the engine, and can be visualized in Studio. Built-in workflows (triage, implement) are ready to use out of the box — or build your own.
 
-**Step** — A single unit of work. Steps run in phase order, and each step's output is available to downstream steps. If a step fails, the engine routes to the appropriate fallback based on the recipe definition.
+**Step** — A single unit of work. Steps run in phase order, and each step's output is available to downstream steps. If a step fails, the engine routes to the appropriate fallback based on the workflow definition.
 
 **Provider** — A connection to an external service (Datadog, Linear, GitHub, Slack, etc.). You configure which providers SWEny uses through Action inputs or `.sweny.yml`. Providers are injected automatically into the steps that need them.
 
-## Built-in recipes
+## Built-in workflows
 
 ### Triage
 
@@ -64,4 +64,4 @@ Takes an existing issue identifier and produces a fix PR:
 
 - [Quick Start](/getting-started/) — add Triage to your repo in 5 minutes
 - [Provider Reference](/providers/observability/) — configure observability, issue tracking, and notifications
-- [Recipe Authoring](/studio/recipe-authoring/) — build a custom recipe with your own steps
+- [Workflow Authoring](/studio/recipe-authoring/) — build a custom workflow with your own steps

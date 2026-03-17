@@ -23,11 +23,7 @@ A **Step** is a single unit of work within a workflow. Each step receives a cont
 
 Built-in steps include things like "query logs", "deduplicate issues", "investigate error", "create ticket", "write fix", and "send notification".
 
-## Recipe
-
-A **Recipe** is a pre-built workflow with sensible defaults for a specific use case. Instead of wiring together steps manually, you pick a recipe and configure it.
-
-**[SWEny Triage](/recipes/triage/)** is the first recipe — it automates the on-call triage loop by monitoring production logs, investigating the highest-impact issue, and opening a fix PR.
+**[SWEny Triage](/recipes/triage/)** is the built-in triage workflow — it automates the on-call triage loop by monitoring production logs, investigating the highest-impact issue, and opening a fix PR.
 
 ## Providers
 

@@ -3,7 +3,7 @@ title: SWEny
 description: An AI-powered engineering platform that learns from your logs, fixes issues, and reports results
 template: splash
 hero:
-  tagline: "SWEny is a platform for building AI-powered engineering workflows. Connect any observability source, take action with AI, and report results through any channel. Triage is the first recipe — it monitors your production logs, investigates errors, and opens fix PRs automatically."
+  tagline: "SWEny is a platform for building AI-powered engineering workflows. Connect any observability source, take action with AI, and report results through any channel. Triage is the first built-in workflow — it monitors your production logs, investigates errors, and opens fix PRs automatically."
   actions:
     - text: Get Started in 5 Minutes
       link: /getting-started/
@@ -25,7 +25,7 @@ SWEny's workflow engine orchestrates three phases — **Learn**, **Act**, **Repo
 2. **Act** — an AI agent investigates root causes through your codebase, files tickets, creates branches, and opens fix PRs
 3. **Report** — sends results to the channels your team already uses: Slack, Teams, Discord, email, or webhooks
 
-Triage is the first recipe built on this engine. It runs on a schedule, finds novel production errors, and fixes them without waking anyone up. See [Engine & Recipes](/getting-started/engine/) to learn how the engine works and how to build your own recipes.
+Triage is the first built-in workflow. It runs on a schedule, finds novel production errors, and fixes them without waking anyone up. See [Engine & Workflows](/getting-started/engine/) to learn how the engine works and how to build your own workflows.
 
 ## See it in action
 
@@ -68,7 +68,7 @@ Both modes are powered by SWEny's workflow engine, which manages provider connec
 
 ```yaml
 # .github/workflows/sweny-triage.yml
-- uses: swenyai/sweny@v0.2
+- uses: swenyai/sweny@v3
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}
