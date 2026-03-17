@@ -1,5 +1,12 @@
 # @sweny-ai/studio
 
+## 5.0.0
+
+### Patch Changes
+
+- Updated dependencies [46d6e86]
+  - @sweny-ai/engine@3.2.0
+
 ## 4.0.0
 
 ### Minor Changes

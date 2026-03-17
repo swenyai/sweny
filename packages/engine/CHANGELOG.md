@@ -1,5 +1,11 @@
 # @sweny-ai/engine
 
+## 3.2.0
+
+### Minor Changes
+
+- 46d6e86: Steps now support a `timeout` field (milliseconds). When set, the step is forcibly failed if it does not complete within the allotted time — preventing hung workflows. Works in both the Node.js runner and the browser-safe runner.
+
 ## 3.1.0
 
 ### Minor Changes

@@ -1,5 +1,11 @@
 # @sweny-ai/web
 
+## 0.1.5
+
+### Patch Changes
+
+- @sweny-ai/studio@5.0.0
+
 ## 0.1.4
 
 ### Patch Changes
