@@ -346,16 +346,22 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.linearApiKey)
         errors.push("Missing: LINEAR_API_KEY — find API keys at https://linear.app/settings/api");
       if (!config.linearTeamId)
-        errors.push("Missing: LINEAR_TEAM_ID or --linear-team-id is required for linear issue tracker");
+        errors.push(
+          "Missing: LINEAR_TEAM_ID — find it in Linear > Settings > Workspace > Teams > [your team] > copy the ID from the URL",
+        );
       break;
     case "github-issues":
       if (!config.githubToken && !config.botToken)
         errors.push("Missing: GITHUB_TOKEN — create a Personal Access Token at https://github.com/settings/tokens");
       break;
     case "jira":
-      if (!config.jiraBaseUrl) errors.push("Missing: JIRA_BASE_URL is required for jira issue tracker");
-      if (!config.jiraEmail) errors.push("Missing: JIRA_EMAIL is required for jira issue tracker");
-      if (!config.jiraApiToken) errors.push("Missing: JIRA_API_TOKEN is required for jira issue tracker");
+      if (!config.jiraBaseUrl)
+        errors.push("Missing: JIRA_BASE_URL — set to your Atlassian domain, e.g. https://your-org.atlassian.net");
+      if (!config.jiraEmail) errors.push("Missing: JIRA_EMAIL — your Atlassian account email address");
+      if (!config.jiraApiToken)
+        errors.push(
+          "Missing: JIRA_API_TOKEN — create a token at https://id.atlassian.com/manage-profile/security/api-tokens",
+        );
       break;
     case "file":
       // No external credentials needed
@@ -373,8 +379,14 @@ export function validateInputs(config: CliConfig): string[] {
         errors.push("Missing: GITHUB_TOKEN — create a Personal Access Token at https://github.com/settings/tokens");
       break;
     case "gitlab":
-      if (!config.gitlabToken) errors.push("Missing: GITLAB_TOKEN is required for gitlab provider");
-      if (!config.gitlabProjectId) errors.push("Missing: GITLAB_PROJECT_ID is required for gitlab provider");
+      if (!config.gitlabToken)
+        errors.push(
+          "Missing: GITLAB_TOKEN — create a Personal Access Token at https://gitlab.com/-/user_settings/personal_access_tokens (api + read_repository + write_repository scopes)",
+        );
+      if (!config.gitlabProjectId)
+        errors.push(
+          "Missing: GITLAB_PROJECT_ID — find it in GitLab > [your project] > Settings > General (numeric ID at the top)",
+        );
       break;
     case "file":
       // No external credentials needed
