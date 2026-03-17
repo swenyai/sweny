@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   ReactFlow,
   Background,
@@ -20,16 +20,15 @@ import type { StudioMode } from "./store/editor-store.js";
 const nodeTypes = { stateNode: StateNode };
 const edgeTypes = { transitionEdge: TransitionEdge };
 
-function getUnreachableStepIds(definition: WorkflowDefinition): Set<string> {
-  const errors = validateWorkflow(definition);
+function getUnreachableStepIds(errors: ReturnType<typeof validateWorkflow>): Set<string> {
   return new Set(errors.filter((e) => e.code === "UNREACHABLE_STEP" && e.stateId).map((e) => e.stateId!));
 }
 
 function annotateEdgesWithErrors(
   edges: Edge<TransitionEdgeData>[],
   definition: WorkflowDefinition,
+  errors: ReturnType<typeof validateWorkflow>,
 ): Edge<TransitionEdgeData>[] {
-  const errors = validateWorkflow(definition);
   const unknownTargets = new Set(
     errors
       .filter((e) => e.code === "UNKNOWN_TARGET" && e.stateId && e.targetId)
@@ -81,6 +80,10 @@ export function WorkflowViewer() {
     completedSteps,
     mode,
   } = useEditorStore();
+  // Validate once per definition change — shared by all effects below
+  const validationErrors = useMemo(() => validateWorkflow(definition), [definition]);
+  const unreachableIds = useMemo(() => getUnreachableStepIds(validationErrors), [validationErrors]);
+
   const [nodes, setNodes] = useState<StateNodeType[]>([]);
   const [edges, setEdges] = useState<Edge<TransitionEdgeData>[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +95,6 @@ export function WorkflowViewer() {
     setError(null);
     layoutDefinition(definition)
       .then(({ nodes: n, edges: e }) => {
-        const unreachableIds = getUnreachableStepIds(definition);
         setNodes(
           n.map((node) => ({
             ...node,
@@ -104,7 +106,7 @@ export function WorkflowViewer() {
             },
           })),
         );
-        setEdges(annotateEdgesWithErrors(e, definition));
+        setEdges(annotateEdgesWithErrors(e, definition, validationErrors));
         markLayoutFresh();
         initialLayoutDone.current = true;
       })
@@ -112,17 +114,16 @@ export function WorkflowViewer() {
         setError(`Layout failed: ${err instanceof Error ? err.message : String(err)}`);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [definition, isLayoutStale]);
+  }, [definition, isLayoutStale, validationErrors, unreachableIds]);
 
   // Re-annotate edges with isError when definition changes, without re-running ELK
   useEffect(() => {
     if (!initialLayoutDone.current) return;
-    setEdges((prev) => annotateEdgesWithErrors(prev, definition));
-  }, [definition]);
+    setEdges((prev) => annotateEdgesWithErrors(prev, definition, validationErrors));
+  }, [definition, validationErrors]);
 
   // Keep selection highlight and execStatus in sync without re-running ELK
   useEffect(() => {
-    const unreachableIds = getUnreachableStepIds(definition);
     setNodes((prev) =>
       prev.map((node) => ({
         ...node,
@@ -134,7 +135,7 @@ export function WorkflowViewer() {
         },
       })),
     );
-  }, [currentStepId, completedSteps, mode, selection, definition]);
+  }, [currentStepId, completedSteps, mode, selection, unreachableIds]);
 
   function onNodeClick(_: React.MouseEvent, node: RFNode) {
     setSelection({ kind: "step", id: node.id });

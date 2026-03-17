@@ -17,7 +17,7 @@ on:
 
 GitHub fires the workflow. SWEny starts.
 
-## Phase 1: Investigate
+## Phase 1: Learn
 
 SWEny queries your observability platform for recent errors. With the default 24-hour time range, it pulls logs from the last day:
 
@@ -44,7 +44,7 @@ Before filing anything, SWEny searches your issue tracker and open PRs:
 
 If a matching issue exists, SWEny adds a "+1 occurrence" comment with the latest error count and skips to the next issue. If it's genuinely new, it proceeds to Phase 2.
 
-## Phase 2: Implement
+## Phase 2: Act
 
 The agent creates a branch, reads the relevant source files, and writes a fix:
 
@@ -72,7 +72,7 @@ The PR includes:
 - A test case covering the failure scenario
 - A link back to the Linear ticket
 
-## Phase 3: Notify
+## Phase 3: Report
 
 SWEny posts a summary to your GitHub Actions run:
 
@@ -115,6 +115,7 @@ Costs depend on your Claude plan. With an OAuth token (Max/Pro subscription), tr
 To control costs:
 - Set `max-investigate-turns` to cap the investigation turn count (default: 50)
 - Use `service-filter` to focus on specific services
+- Use `time-range: 4h` instead of `24h` to reduce the log volume the agent processes
 - Use `dry-run: true` to test without creating PRs
 - Use `investigation-depth: quick` for faster, cheaper runs
 

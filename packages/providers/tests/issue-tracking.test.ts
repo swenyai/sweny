@@ -423,7 +423,8 @@ describe("GitHubIssuesProvider", () => {
     });
     const issue = await provider.getIssue("#10");
 
-    expect(issue.id).toBe("555");
+    // id is the issue number (used for API calls like PATCH /issues/:id)
+    expect(issue.id).toBe("10");
     expect(issue.identifier).toBe("#10");
     expect(issue.title).toBe("Auth regression");
     expect(issue.branchName).toBe("fix/10");

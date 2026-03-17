@@ -80,9 +80,25 @@ sweny triage \
   --dry-run
 ```
 
-## Work on a specific issue
+## Implement a fix for a specific issue
 
-Point SWEny at an existing issue instead of scanning for new ones:
+Run the implement workflow directly on a known issue — skips log scanning:
+
+```bash
+sweny implement --issue-identifier ENG-123
+```
+
+Pass additional guidance to the agent:
+
+```bash
+sweny implement \
+  --issue-identifier ENG-123 \
+  --additional-instructions 'Add a null check before accessing event.payload.metadata'
+```
+
+## Work on a specific issue (triage workflow)
+
+Point the triage workflow at an existing issue instead of scanning for new ones:
 
 ```bash
 sweny triage \

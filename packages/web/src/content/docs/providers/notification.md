@@ -3,6 +3,19 @@ title: Notification
 description: Send triage results to Slack, Teams, Discord, email, webhooks, or GitHub Actions.
 ---
 
+## Quick reference
+
+| If you want... | Use |
+|----------------|-----|
+| Results inline in a GitHub Actions run | `github-summary` (Action default) |
+| Results printed to the terminal | `console` (CLI default) |
+| A message in a Slack channel | `slack` |
+| A message in Microsoft Teams | `teams` |
+| A message in Discord | `discord` |
+| An email to your team | `email` |
+| Structured JSON to a custom endpoint | `webhook` |
+| Results written to disk | `file` |
+
 ```typescript
 import { githubSummary, slackWebhook, teamsWebhook, discordWebhook, email, webhook } from "@sweny-ai/providers/notification";
 ```

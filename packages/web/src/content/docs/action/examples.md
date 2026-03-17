@@ -50,6 +50,22 @@ Only look at errors from a subset of services:
     time-range: '4h'
 ```
 
+## Implement a fix for a specific issue
+
+Run the implement workflow directly on a known issue — skips log scanning:
+
+```yaml
+- uses: swenyai/sweny@v3
+  with:
+    workflow: implement
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    linear-api-key: ${{ secrets.LINEAR_API_KEY }}
+    linear-issue: 'ENG-456'
+    additional-instructions: 'Add a null check before accessing event.payload.metadata'
+```
+
+Use this for issue-driven workflows triggered by a `workflow_dispatch` or when a Linear ticket has already been filed by another process.
+
 ## Required permissions
 
 Your workflow needs these permissions for SWEny to create branches and PRs:

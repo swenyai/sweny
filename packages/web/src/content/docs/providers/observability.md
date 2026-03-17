@@ -167,7 +167,7 @@ Required fields per entry: `timestamp`, `service`, `level`, `message`.
 - name: Export recent errors
   run: ./scripts/export-logs.sh > /tmp/logs.json
 
-- uses: swenyai/sweny@main
+- uses: swenyai/sweny@v3
   with:
     observability-provider: file
     log-file-path: /tmp/logs.json

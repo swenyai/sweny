@@ -7,8 +7,8 @@ branding:
   color: "orange"
 
 inputs:
-  recipe:
-    description: "Recipe to run (triage, implement). Default: triage."
+  workflow:
+    description: "Workflow to run (triage, implement). Default: triage."
     required: false
     default: "triage"
 
@@ -307,9 +307,9 @@ outputs:
   recommendation:
     description: "Investigation recommendation (implement, +1 existing ENG-XXX, skip)"
   issue-identifier:
-    description: "Linear issue identifier (e.g., ENG-123)"
+    description: "Issue identifier from the configured tracker (e.g., ENG-123 for Linear, #42 for GitHub Issues)"
   issue-url:
-    description: "Linear issue URL"
+    description: "URL of the created or found issue"
   pr-url:
     description: "URL of the created pull request"
   pr-number:

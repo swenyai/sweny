@@ -101,7 +101,9 @@ class GitHubIssuesProvider implements IssueTrackingProvider, PrLinkCapable {
     this.log.info(`Created issue ${identifier} (${result.html_url})`);
 
     return {
-      id: String(result.id),
+      // Use issue number (not the internal node ID) — all GitHub Issues API endpoints
+      // that accept an issue reference expect the issue number, not the node ID.
+      id: String(result.number),
       identifier,
       title: result.title,
       url: result.html_url,
@@ -123,7 +125,7 @@ class GitHubIssuesProvider implements IssueTrackingProvider, PrLinkCapable {
     }>(`/repos/${this.owner}/${this.repo}/issues/${issueNumber}`);
 
     return {
-      id: String(result.id),
+      id: String(result.number),
       identifier: `#${result.number}`,
       title: result.title,
       url: result.html_url,
@@ -177,7 +179,7 @@ class GitHubIssuesProvider implements IssueTrackingProvider, PrLinkCapable {
     this.log.info(`Found ${result.items.length} matching issues`);
 
     return result.items.map((i) => ({
-      id: String(i.id),
+      id: String(i.number),
       identifier: `#${i.number}`,
       title: i.title,
       url: i.html_url,

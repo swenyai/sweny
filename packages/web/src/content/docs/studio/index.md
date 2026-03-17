@@ -44,7 +44,7 @@ Studio faithfully represents the engine's priority order when multiple routing r
 
 **Export TypeScript** generates a `createWorkflow()` call with the full definition inlined, ready to drop into a `packages/engine` consumer.
 
-**Export GitHub Actions** generates a complete `.github/workflows/sweny-triage.yml` with all required secrets documented.
+**Export GitHub Actions** generates a complete `.github/workflows/sweny-triage.yml` pinned to `swenyai/sweny@v3`, with all required secrets documented.
 
 ## Permalink
 

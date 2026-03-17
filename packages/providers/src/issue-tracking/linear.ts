@@ -252,7 +252,8 @@ class LinearProvider implements IssueTrackingProvider, PrLinkCapable, LabelHisto
     };
 
     if (opts.labels && opts.labels.length > 0) {
-      filter.labels = { id: { eq: opts.labels[0] } };
+      // Match issues that have ANY of the requested labels
+      filter.labels = { some: { id: { in: opts.labels } } };
     }
 
     const result = await this.request<{

@@ -85,6 +85,12 @@ export function App() {
   // Keyboard shortcuts
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      // Don't intercept shortcuts while the user is typing in an input field
+      const target = e.target as HTMLElement;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable) {
+        return;
+      }
+
       const meta = e.metaKey || e.ctrlKey;
       const { undo, redo } = useEditorStore.temporal.getState();
       const { selection, deleteStep, setSelection } = useEditorStore.getState();

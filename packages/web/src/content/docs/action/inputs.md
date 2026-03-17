@@ -3,6 +3,14 @@ title: Action Inputs
 description: All configuration inputs for the SWEny Triage GitHub Action.
 ---
 
+## Workflow selection
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `workflow` | Workflow to run (`triage`, `implement`) | `triage` |
+
+The `triage` workflow scans logs, investigates error patterns, and opens fix PRs. The `implement` workflow skips log scanning and works directly on a specified issue — set `linear-issue` (or `issue-identifier`) to target it.
+
 ## Authentication
 
 | Input | Description | Required |
@@ -90,23 +98,32 @@ Note: `github-issues` uses the existing `github-token` input for authentication.
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `notification-provider` | Provider to use (`github-summary`, `slack`, `teams`, `discord`, `email`, `webhook`) | `github-summary` |
-| `notification-webhook-url` | Webhook URL for Slack, Teams, Discord, or generic webhook | — |
+| `notification-provider` | Provider to use (`github-summary`, `slack`, `teams`, `discord`, `email`, `webhook`, `file`) | `github-summary` |
+| `notification-webhook-url` | Webhook URL — required for `slack`, `teams`, `discord`, or `webhook` providers | — |
 | `sendgrid-api-key` | SendGrid API key (when `notification-provider` is `email`) | — |
 | `email-from` | Sender email address (when `notification-provider` is `email`) | — |
 | `email-to` | Recipient email addresses, comma-separated | — |
 | `webhook-signing-secret` | HMAC-SHA256 signing secret for generic webhook notifications | — |
+| `output-dir` | Directory for file-based provider output (`file` notification, dry-run artifacts) | `.github/sweny-output` |
 
 ## Behavior
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `dry-run` | Analyze only, don't create PRs | `false` |
-| `novelty-mode` | Only report issues not already tracked | `true` |
-| `linear-issue` | Work on a specific Linear issue (e.g., `ENG-123`) | — |
+| `review-mode` | PR merge behaviour: `auto` (enable GitHub auto-merge when CI passes — suppressed automatically for high-risk changes such as migrations, auth, or >20 files) or `review` (open PR and wait for human approval) | `review` |
+| `novelty-mode` | Skip issues already tracked in the configured issue tracker. Set to `false` to re-investigate regardless of existing tickets | `true` |
+| `linear-issue` | Identifier of an existing issue to work on (e.g., `ENG-123`). Skips log investigation and runs the implement workflow directly | — |
 | `additional-instructions` | Extra guidance for the agent | — |
 | `service-map-path` | Path to service ownership map | `.github/service-map.yml` |
 | `base-branch` | Target branch for PRs | `main` |
 | `pr-labels` | Comma-separated labels to apply to created PRs | `agent,triage,needs-review` |
-| `github-token` | GitHub token for PRs | `${{ github.token }}` |
-| `bot-token` | Token with cross-repo permissions | — |
+| `github-token` | GitHub token for API access and PR creation | `${{ github.token }}` |
+| `bot-token` | Optional bot token with elevated permissions (cross-repo dispatch, protected branch pushes) | — |
+
+## Workspace tools & MCP servers
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `workspace-tools` | Comma-separated workspace integrations to enable (`slack`, `notion`, `pagerduty`, `monday`). Each tool injects its MCP server into the coding agent when the corresponding credential env var is present | — |
+| `mcp-servers` | Additional MCP servers as a JSON object. Each key is a server name; each value is an `MCPServerConfig` (`type`, `command`, `args`, `env`, `url`, `headers`). Provider-based MCP servers (GitHub, Linear, Datadog) are injected automatically | — |

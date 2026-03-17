@@ -14,6 +14,11 @@ import type { ProviderConfigSchema } from "../config-schema.js";
 
 const execFileAsync = promisify(execFile);
 
+/** Escape special regex metacharacters in a literal string. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export interface GitHubSourceControlConfig {
   token: string;
   owner: string;
@@ -202,7 +207,7 @@ export function github(
 
         for (const pr of openPrs) {
           const text = `${pr.title} ${pr.body || ""}`;
-          if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+          if (new RegExp(`\\b${escapeRegExp(searchTerm)}\\b`, "i").test(text)) {
             log.info(`Found open PR with match: ${pr.html_url}`);
             return { number: pr.number, url: pr.html_url, state: "open", title: pr.title };
           }
@@ -225,7 +230,7 @@ export function github(
         for (const pr of closedPrs) {
           if (pr.merged_at && new Date(pr.merged_at) > cutoff) {
             const text = `${pr.title} ${pr.body || ""}`;
-            if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+            if (new RegExp(`\\b${escapeRegExp(searchTerm)}\\b`, "i").test(text)) {
               log.info(`Found merged PR with match: ${pr.html_url}`);
               return { number: pr.number, url: pr.html_url, state: "merged", title: pr.title };
             }

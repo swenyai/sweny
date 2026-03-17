@@ -29,7 +29,7 @@ If you're already using Datadog, Sentry, CloudWatch, or another supported platfo
 
 ### Notifications
 
-The default is **GitHub Actions Summary** — zero setup, results appear inline in your workflow run. For team channels, configure a Slack webhook URL, Teams webhook, Discord webhook, or SendGrid email. See [Notification Providers](/providers/notification/).
+When running as a GitHub Action, the default is **GitHub Actions Summary** — zero setup, results appear inline in your workflow run. When running via the CLI, the default is **console** — results stream to stdout. For team channels, configure a Slack webhook URL, Teams webhook, Discord webhook, or SendGrid email. See [Notification Providers](/providers/notification/).
 
 ### Source control
 

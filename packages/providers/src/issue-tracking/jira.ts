@@ -14,6 +14,11 @@ import type {
 } from "./types.js";
 import type { ProviderConfigSchema } from "../config-schema.js";
 
+/** Escape a value for safe embedding inside a JQL quoted string. */
+function escapeJql(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 export const jiraConfigSchema = z.object({
   baseUrl: z
     .string()
@@ -207,15 +212,18 @@ class JiraProvider implements IssueTrackingProvider, PrLinkCapable, LabelHistory
   async searchIssues(opts: IssueSearchOptions): Promise<Issue[]> {
     this.log.info(`Searching Jira issues: "${opts.query}" in project ${opts.projectId}`);
 
-    const jqlParts: string[] = [`project = "${opts.projectId}"`, `summary ~ "${opts.query}"`];
+    const jqlParts: string[] = [
+      `project = "${escapeJql(opts.projectId ?? "")}"`,
+      `summary ~ "${escapeJql(opts.query)}"`,
+    ];
 
     if (opts.labels && opts.labels.length > 0) {
-      const labelClauses = opts.labels.map((l) => `labels = "${l}"`).join(" AND ");
+      const labelClauses = opts.labels.map((l) => `labels = "${escapeJql(l)}"`).join(" AND ");
       jqlParts.push(`(${labelClauses})`);
     }
 
     if (opts.states && opts.states.length > 0) {
-      const stateList = opts.states.map((s) => `"${s}"`).join(", ");
+      const stateList = opts.states.map((s) => `"${escapeJql(s)}"`).join(", ");
       jqlParts.push(`status IN (${stateList})`);
     }
 

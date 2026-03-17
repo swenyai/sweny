@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
@@ -71,15 +71,15 @@ class FileSourceControlProvider implements SourceControlProvider {
 
   private detectGit(): boolean {
     try {
-      execSync("git rev-parse --is-inside-work-tree", { stdio: "pipe" });
+      execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { stdio: "pipe" });
       return true;
     } catch {
       return false;
     }
   }
 
-  private git(cmd: string): string {
-    return execSync(`git ${cmd}`, { encoding: "utf-8", stdio: "pipe" }).trim();
+  private git(...args: string[]): string {
+    return execFileSync("git", args, { encoding: "utf-8", stdio: "pipe" }).trim();
   }
 
   // ── state helpers ────────────────────────────────────────────────────
@@ -119,8 +119,8 @@ class FileSourceControlProvider implements SourceControlProvider {
       return;
     }
     try {
-      this.git('config user.name "sweny-bot"');
-      this.git('config user.email "bot@sweny.ai"');
+      this.git("config", "user.name", "sweny-bot");
+      this.git("config", "user.email", "bot@sweny.ai");
       this.log.info("Configured local git identity: sweny-bot");
     } catch (err) {
       this.log.warn(`Failed to configure git identity: ${err}`);
@@ -132,7 +132,7 @@ class FileSourceControlProvider implements SourceControlProvider {
       this.log.info(`Skipping branch creation (no git repo): ${name}`);
       return;
     }
-    this.git(`checkout -b ${name}`);
+    this.git("checkout", "-b", name);
     this.log.info(`Created branch: ${name}`);
   }
 
@@ -142,14 +142,14 @@ class FileSourceControlProvider implements SourceControlProvider {
 
   async hasChanges(): Promise<boolean> {
     if (!this.inGitRepo) return false;
-    const output = this.git("status --porcelain");
+    const output = this.git("status", "--porcelain");
     return output.length > 0;
   }
 
   async hasNewCommits(): Promise<boolean> {
     if (!this.inGitRepo) return false;
     try {
-      const count = this.git(`rev-list --count ${this.baseBranch}..HEAD`);
+      const count = this.git("rev-list", "--count", `${this.baseBranch}..HEAD`);
       return parseInt(count, 10) > 0;
     } catch {
       return false;
@@ -159,7 +159,7 @@ class FileSourceControlProvider implements SourceControlProvider {
   async getChangedFiles(): Promise<string[]> {
     if (!this.inGitRepo) return [];
     try {
-      const output = this.git(`diff --name-only ${this.baseBranch}..HEAD`);
+      const output = this.git("diff", "--name-only", `${this.baseBranch}..HEAD`);
       return output ? output.split("\n").filter(Boolean) : [];
     } catch {
       return [];
@@ -170,7 +170,7 @@ class FileSourceControlProvider implements SourceControlProvider {
     if (!this.inGitRepo) return;
     for (const p of paths) {
       try {
-        this.git(`checkout HEAD -- ${p}`);
+        this.git("checkout", "HEAD", "--", p);
       } catch {
         // path may not exist — ignore
       }
@@ -182,8 +182,8 @@ class FileSourceControlProvider implements SourceControlProvider {
       this.log.info("Skipping commit (no git repo)");
       return;
     }
-    this.git("add -A");
-    this.git(`commit -m "${message.replace(/"/g, '\\"')}"`);
+    this.git("add", "-A");
+    this.git("commit", "-m", message);
     this.log.info("Staged and committed changes");
   }
 

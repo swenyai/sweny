@@ -13,6 +13,7 @@ SWEny's duplicate detection checks your issue tracker for matching issues before
 - Check `severity-focus` — default is `errors`. Set to `warnings` if your logs use different severity levels
 - Check `service-filter` — a filter like `payment-*` only matches services with that prefix
 - Try `dry-run: true` with `investigation-depth: thorough` to see what SWEny finds without any skip logic
+- Set `novelty-mode: false` to bypass duplicate detection entirely and re-investigate even issues that are already tracked
 
 ### Agent runs out of turns
 
@@ -34,6 +35,19 @@ If you see "max turns reached" in the output, the agent hit the iteration limit 
 - Verify `linear-api-key` has write access to the team specified by `linear-team-id`
 - Check that `linear-bug-label-id` and `linear-triage-label-id` are valid UUIDs for labels in that team
 - Check the Actions run log for error messages from the Linear API
+
+### PR opened but never auto-merged
+
+SWEny opens PRs in `review` mode by default — a human must approve and merge. To enable automatic merging when CI passes:
+
+```yaml
+- uses: swenyai/sweny@v3
+  with:
+    review-mode: auto
+    # ... other inputs
+```
+
+`review-mode: auto` enables GitHub auto-merge on the created PR. SWEny suppresses auto-merge automatically for high-risk changes (database migrations, auth changes, lockfile updates, or diffs touching more than 20 files).
 
 ### PR not opened
 

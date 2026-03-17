@@ -15,6 +15,11 @@ import type { ProviderConfigSchema } from "../config-schema.js";
 
 const execFileAsync = promisify(execFile);
 
+/** Escape special regex metacharacters in a literal string. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export const gitlabConfigSchema = z.object({
   token: z.string().min(1, "GitLab token is required"),
   projectId: z.union([z.string().min(1), z.number()]),
@@ -238,7 +243,7 @@ export function gitlab(
 
         for (const mr of openMrs) {
           const text = `${mr.title} ${mr.description || ""}`;
-          if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+          if (new RegExp(`\\b${escapeRegExp(searchTerm)}\\b`, "i").test(text)) {
             log.info(`Found open MR with match: ${mr.web_url}`);
             return {
               number: mr.iid,
@@ -276,7 +281,7 @@ export function gitlab(
         for (const mr of mergedMrs) {
           if (mr.merged_at && new Date(mr.merged_at) > cutoff) {
             const text = `${mr.title} ${mr.description || ""}`;
-            if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+            if (new RegExp(`\\b${escapeRegExp(searchTerm)}\\b`, "i").test(text)) {
               log.info(`Found merged MR with match: ${mr.web_url}`);
               return {
                 number: mr.iid,

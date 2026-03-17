@@ -9,8 +9,8 @@ After a triage run, these outputs are available for subsequent workflow steps. U
 |--------|------|-------------|
 | `issues-found` | `"true"` / `"false"` | Whether SWEny found novel issues in the logs |
 | `recommendation` | `string` | What SWEny decided: `implement`, `+1 existing ENG-123`, or `skip` |
-| `issue-identifier` | `string` | Issue created or found (e.g., `ENG-456`). Empty if skipped |
-| `issue-url` | `string` | Full URL to the issue. Empty if skipped |
+| `issue-identifier` | `string` | Identifier of the created or found issue (e.g., `ENG-456` for Linear, `#42` for GitHub Issues). Empty if skipped |
+| `issue-url` | `string` | Full URL to the created or found issue. Empty if skipped |
 | `pr-url` | `string` | Pull request URL. Empty if dry-run or no fix was written |
 | `pr-number` | `string` | Pull request number. Empty if no PR was created |
 
@@ -19,8 +19,8 @@ After a triage run, these outputs are available for subsequent workflow steps. U
 | Value | Meaning |
 |-------|---------|
 | `implement` | SWEny found a novel issue, filed a ticket, and opened a PR |
-| `+1 existing ENG-123` | A matching issue already exists — SWEny added an occurrence comment |
-| `skip` | No novel issues found above the threshold |
+| `+1 existing ENG-123` | A matching issue already exists — SWEny added an occurrence comment and skipped implementation |
+| `skip` | No novel issues found above the threshold, or `novelty-mode` is `true` and all issues are already tracked |
 
 ## Using outputs in your workflow
 

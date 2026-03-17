@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Hoist mock functions so they are available when vi.mock() factory runs ──
-const { mockMkdirSync, mockWriteFileSync, mockReadFileSync, mockReaddirSync, mockExecSync } = vi.hoisted(() => ({
+const { mockMkdirSync, mockWriteFileSync, mockReadFileSync, mockReaddirSync, mockExecFileSync } = vi.hoisted(() => ({
   mockMkdirSync: vi.fn(),
   mockWriteFileSync: vi.fn(),
   mockReadFileSync: vi.fn(),
   mockReaddirSync: vi.fn(),
-  mockExecSync: vi.fn(),
+  mockExecFileSync: vi.fn(),
 }));
 
 vi.mock("node:fs", () => ({
@@ -17,7 +17,7 @@ vi.mock("node:fs", () => ({
 }));
 
 vi.mock("node:child_process", () => ({
-  execSync: mockExecSync,
+  execFileSync: mockExecFileSync,
 }));
 
 import { fileNotification, fileNotificationConfigSchema } from "../src/notification/file.js";
@@ -371,9 +371,9 @@ describe("fileSourceControl", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // detectGit() runs in constructor — default to not-in-git-repo
-    mockExecSync.mockImplementation((cmd: string) => {
-      if (cmd === "git rev-parse --is-inside-work-tree") {
+    // detectGit() runs in constructor — default to not-in-git-repo (throw on the detectGit call)
+    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === "rev-parse" && args[1] === "--is-inside-work-tree") {
         throw new Error("not a git repo");
       }
       return "";
@@ -404,16 +404,17 @@ describe("fileSourceControl", () => {
 
   describe("createBranch()", () => {
     it("calls git checkout -b when inside a git repo", async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
-        // All git commands succeed
-        return "";
-      });
+      // Override: detectGit succeeds, all other git commands succeed too
+      mockExecFileSync.mockImplementation(() => "");
 
       const provider = fileSourceControl({ outputDir, logger: silentLogger });
       await provider.createBranch("feature/my-branch");
 
-      const calls = mockExecSync.mock.calls.map((c) => c[0] as string);
-      expect(calls.some((c) => c.includes("checkout -b feature/my-branch"))).toBe(true);
+      // execFileSync is called as (cmd, args, opts) — check args contain the checkout args
+      const argLists = mockExecFileSync.mock.calls.map((c) => c[1] as string[]);
+      expect(
+        argLists.some((args) => args.includes("checkout") && args.includes("-b") && args.includes("feature/my-branch")),
+      ).toBe(true);
     });
 
     it("skips branch creation when not in a git repo", async () => {
@@ -421,8 +422,8 @@ describe("fileSourceControl", () => {
       const provider = fileSourceControl({ outputDir, logger: silentLogger });
       await provider.createBranch("feature/my-branch");
 
-      const calls = mockExecSync.mock.calls.map((c) => c[0] as string);
-      expect(calls.every((c) => !c.includes("checkout -b"))).toBe(true);
+      const argLists = mockExecFileSync.mock.calls.map((c) => c[1] as string[]);
+      expect(argLists.every((args) => !args.includes("checkout") || !args.includes("-b"))).toBe(true);
     });
   });
 

@@ -5,10 +5,10 @@ const HIGH_RISK_PATTERNS: RegExp[] = [
   /\bcrypto\//i,
   /\bsecurity\//i,
   /\.github\/workflows\//i,
-  /^package\.json$/,
-  /^package-lock\.json$/,
-  /^pnpm-lock\.yaml$/,
-  /^yarn\.lock$/,
+  /(^|\/)package\.json$/,
+  /(^|\/)package-lock\.json$/,
+  /(^|\/)pnpm-lock\.yaml$/,
+  /(^|\/)yarn\.lock$/,
   /schema\.(ts|js|sql|prisma)$/i,
 ];
 

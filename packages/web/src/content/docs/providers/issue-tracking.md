@@ -4,7 +4,7 @@ description: Create tickets, search for duplicates, and link PRs.
 ---
 
 ```typescript
-import { linear, githubIssues, jira, canLinkPr, canSearchByFingerprint, canListTriageHistory } from "@sweny-ai/providers/issue-tracking";
+import { linear, githubIssues, jira, fileIssueTracking, canLinkPr, canSearchIssuesByLabel } from "@sweny-ai/providers/issue-tracking";
 ```
 
 ## Interface
@@ -27,12 +27,8 @@ interface PrLinkCapable {
   linkPr(issueId: string, prUrl: string, prNumber: number): Promise<void>;
 }
 
-interface FingerprintCapable {
-  searchByFingerprint(projectId: string, errorPattern: string): Promise<Issue[]>;
-}
-
-interface TriageHistoryCapable {
-  listTriageHistory(projectId: string, labelId: string, days?: number): Promise<TriageHistoryEntry[]>;
+interface LabelHistoryCapable {
+  searchIssuesByLabel(projectId: string, labelId: string, since?: Date): Promise<Issue[]>;
 }
 ```
 
@@ -41,6 +37,10 @@ Use type guards to check capabilities at runtime:
 ```typescript
 if (canLinkPr(tracker)) {
   await tracker.linkPr(issue.id, prUrl, prNumber);
+}
+
+if (canSearchIssuesByLabel(tracker)) {
+  const recent = await tracker.searchIssuesByLabel(projectId, triageLabelId);
 }
 ```
 
@@ -53,7 +53,7 @@ const tracker = linear({
 });
 ```
 
-Supports all optional capabilities: `PrLinkCapable`, `FingerprintCapable`, `TriageHistoryCapable`.
+Supports both optional capabilities: `PrLinkCapable`, `LabelHistoryCapable`.
 
 ### Creating an issue
 
@@ -103,4 +103,19 @@ const tracker = jira({
 });
 ```
 
-Supports `PrLinkCapable`. Uses the Jira REST API v3. Native `fetch` only.
+Supports both optional capabilities: `PrLinkCapable`, `LabelHistoryCapable`. Uses the Jira REST API v3. Native `fetch` only.
+
+## File (testing)
+
+Writes issues to local JSON files — no credentials, no network. Ideal for unit tests, CI workflows, and offline environments.
+
+```typescript
+const tracker = fileIssueTracking({ outputDir: "/tmp/sweny-test" });
+await tracker.verifyAccess(); // initialises the output directory
+
+const issue = await tracker.createIssue({ title: "Test issue", projectId: "LOCAL" });
+// issue.identifier → "LOCAL-1"
+// issue.url → "file:///tmp/sweny-test/LOCAL-1.md"
+```
+
+Call `verifyAccess()` before `createIssue()` to ensure the output directory is initialised. Returned identifiers follow the pattern `LOCAL-N`. Does not implement `PrLinkCapable` or `LabelHistoryCapable`.
