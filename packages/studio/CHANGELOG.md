@@ -1,5 +1,17 @@
 # @sweny-ai/studio
 
+## 5.3.0
+
+### Minor Changes
+
+- eac9979: - feat(studio): execution trace panel + rename RecipeViewer → WorkflowViewer
+
+### Patch Changes
+
+- 2deee05: - fix: review fixes — stderr, shape guard, parse helper, PropertiesPanel IIFE
+- Updated dependencies [2deee05]
+  - @sweny-ai/engine@3.2.1
+
 ## 5.2.0
 
 ### Minor Changes
