@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/cli",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "SWEny CLI — run triage workflows locally",
   "type": "module",
   "engines": {

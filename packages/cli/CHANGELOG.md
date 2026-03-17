@@ -1,5 +1,11 @@
 # @sweny-ai/cli
 
+## 1.7.0
+
+### Minor Changes
+
+- 7c01036: `sweny workflow run` now streams live step-by-step output to stderr as each step enters and exits, matching the experience of `sweny triage`. A new `--json` flag outputs the full result as JSON on stdout while suppressing progress output.
+
 ## 1.6.0
 
 ### Minor Changes
