@@ -28,51 +28,54 @@ export function googleGemini(config?: GoogleGeminiConfig): CodingAgent & { confi
   const quiet = config?.quiet ?? false;
   const onEvent = config?.onEvent;
 
-  return Object.assign({
-    async install(): Promise<void> {
-      if (isCliInstalled("gemini")) {
-        log.info("Google Gemini CLI already installed, skipping");
-        return;
-      }
-      log.info("Installing Google Gemini CLI...");
-      await execCommand("npm", ["install", "-g", "@google/gemini-cli"], { quiet });
-      log.info("Google Gemini CLI installed");
-    },
+  return Object.assign(
+    {
+      async install(): Promise<void> {
+        if (isCliInstalled("gemini")) {
+          log.info("Google Gemini CLI already installed, skipping");
+          return;
+        }
+        log.info("Installing Google Gemini CLI...");
+        await execCommand("npm", ["install", "-g", "@google/gemini-cli"], { quiet });
+        log.info("Google Gemini CLI installed");
+      },
 
-    async run(opts: CodingAgentRunOptions): Promise<number> {
-      log.info("Running Google Gemini agent...");
+      async run(opts: CodingAgentRunOptions): Promise<number> {
+        log.info("Running Google Gemini agent...");
 
-      // Gemini CLI uses --mcp-config <path> with the same JSON format as Claude Code.
-      const args = ["-y", "-p", opts.prompt, ...extraFlags];
+        // Gemini CLI uses --mcp-config <path> with the same JSON format as Claude Code.
+        const args = ["-y", "-p", opts.prompt, ...extraFlags];
 
-      const mcpServers = opts.mcpServers;
-      const mcpConfig = mcpServers && Object.keys(mcpServers).length > 0 ? writeMcpConfig(mcpServers) : null;
+        const mcpServers = opts.mcpServers;
+        const mcpConfig = mcpServers && Object.keys(mcpServers).length > 0 ? writeMcpConfig(mcpServers) : null;
 
-      if (mcpConfig && mcpServers) {
-        args.push("--mcp-config", mcpConfig.path);
-        log.info(`Injecting ${Object.keys(mcpServers).length} MCP server(s): ${Object.keys(mcpServers).join(", ")}`);
-      }
-
-      try {
-        if (onEvent) {
-          return await spawnLines("gemini", args, {
-            env: opts.env,
-            timeoutMs: opts.timeoutMs,
-            logger: log,
-            onLine: (line) => onEvent({ type: "text", text: line }),
-          });
+        if (mcpConfig && mcpServers) {
+          args.push("--mcp-config", mcpConfig.path);
+          log.info(`Injecting ${Object.keys(mcpServers).length} MCP server(s): ${Object.keys(mcpServers).join(", ")}`);
         }
 
-        return await execCommand("gemini", args, {
-          env: { ...process.env, ...opts.env } as Record<string, string>,
-          ignoreReturnCode: true,
-          quiet,
-          timeoutMs: opts.timeoutMs,
-          onStderr: quiet ? (line) => log.debug(line) : undefined,
-        });
-      } finally {
-        mcpConfig?.cleanup();
-      }
+        try {
+          if (onEvent) {
+            return await spawnLines("gemini", args, {
+              env: opts.env,
+              timeoutMs: opts.timeoutMs,
+              logger: log,
+              onLine: (line) => onEvent({ type: "text", text: line }),
+            });
+          }
+
+          return await execCommand("gemini", args, {
+            env: { ...process.env, ...opts.env } as Record<string, string>,
+            ignoreReturnCode: true,
+            quiet,
+            timeoutMs: opts.timeoutMs,
+            onStderr: quiet ? (line) => log.debug(line) : undefined,
+          });
+        } finally {
+          mcpConfig?.cleanup();
+        }
+      },
     },
-  }, { configSchema: googleGeminiProviderConfigSchema });
+    { configSchema: googleGeminiProviderConfigSchema },
+  );
 }
