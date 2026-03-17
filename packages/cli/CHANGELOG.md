@@ -1,5 +1,11 @@
 # @sweny-ai/cli
 
+## 1.6.0
+
+### Minor Changes
+
+- 2adcea8: New `sweny check` command verifies provider credentials and connectivity before you run a workflow. Prints ✓/✗/− for each configured provider (Anthropic, Datadog, Sentry, Linear, GitHub) with direct links to fix authentication issues.
+
 ## 1.5.1
 
 ### Patch Changes
