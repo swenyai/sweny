@@ -87,4 +87,61 @@ npx tsx packages/cli/src/main.ts triage --dry-run --no-cache
 - Branch from `main`
 - Run `npm run typecheck` and `npm test` before submitting
 - Keep PRs focused — one feature or fix per PR
-- Update the CHANGELOG if modifying published packages
+- Create a changeset if modifying published packages (see **Releasing changes** below)
+
+## Releasing changes
+
+This project uses [Changesets](https://github.com/changesets/changesets) for
+automated versioning and npm publishing. When you modify a published package,
+include a changeset file in your PR — CI will fail without one.
+
+### When a changeset is required
+
+Any PR that modifies source files in a published package:
+
+| Package dir | npm name |
+|-------------|----------|
+| `packages/engine` | `@sweny-ai/engine` |
+| `packages/cli` | `@sweny-ai/cli` |
+| `packages/studio` | `@sweny-ai/studio` |
+| `packages/providers` | `@sweny-ai/providers` |
+| `packages/agent` | `@sweny-ai/agent` |
+
+You can skip a changeset for:
+
+- Changes to `packages/web` or `packages/action` (private, not published to npm)
+- CI/workflow-only changes (`.github/`, `scripts/`)
+- Root-level config, docs, or task files
+
+### Creating a changeset
+
+Create a file at `.changeset/<descriptive-slug>.md`:
+
+```md
+---
+"@sweny-ai/engine": minor
+"@sweny-ai/cli": patch
+---
+
+Brief description of what changed and why — written for package consumers.
+```
+
+Or use the interactive CLI:
+
+```bash
+npx changeset
+```
+
+### Bump levels
+
+| Level | When to use |
+|-------|-------------|
+| `patch` | Bug fix, internal refactor, docs, performance improvement |
+| `minor` | New feature, new export, new option (backwards compatible) |
+| `major` | Breaking change — removed export, changed function signature, renamed type |
+
+### Release flow
+
+After your PR merges to `main`, the Changesets GitHub Action opens a
+"chore: release packages" PR that shows the computed version bumps. Merging
+that PR publishes all changed packages to npm automatically.
