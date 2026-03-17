@@ -1,54 +1,79 @@
-# Investigation Log — 2026-03-16
+# Investigation Log — 2026-03-17
 
 ## Approach
+Direct run (no issue override). Followed additional instructions to investigate CI failures
+in `/tmp/ci-failures.json`, then look holistically for the highest-value fix.
 
-Additional instructions: autonomous improvement agent, broad mandate.
-CI failures from `/tmp/ci-failures.json` show recurring `CI on main` and `Deploy Docs` failures.
-GitHub Actions API returned 404 for expired run details, so pivoted to holistic codebase exploration.
+## Step 1 — Parse CI failure log
 
-## Step 1 — Read CI Failures
+Read `/tmp/ci-failures.json`. Failures observed (2026-03-17):
 
-The CI failures log contained ~20 entries:
-- `CI on main` (run_id: 23132498377, 23131264950)
-- `Deploy Docs on main` (run_id: 23132498397, 23131264956)
-- Multiple dependabot branch failures
+| Workflow | Branch | Run ID |
+|----------|--------|--------|
+| Deploy Docs | main | 23204701005 |
+| Post-Release Docs Update | v3 | 23203365068 |
+| CI (×3) | dependabot/npm_and_yarn/types/react-dom-19.2.3 | various |
+| Release | main | 23200577502 |
+| CI (×4) | various dependabot branches | various |
+| CI (×2) | main | 23199604384, 23199468449 |
+| Continuous Improvement | main | 23195412282 |
+| CI | main | 23195029818 |
 
-GitHub Actions API returned 404 — run details not accessible (likely expired).
+## Step 2 — Get job-level failure details via GitHub API
 
-## Step 2 — Codebase Exploration
+```
+GET /repos/swenyai/sweny/actions/runs/23199604384/jobs
+```
 
-Ran broad exploration of:
-- `packages/providers/src/` — all 30+ provider implementations
-- `packages/engine/src/` — runner, validate, schema
-- `packages/cli/src/` — CLI main entry
-- `packages/action/src/` — GitHub Action entrypoint
+Results:
+- **Format** job → FAILURE: `Run npm run format:check`
+  - Files flagged: `packages/action/tests/mapToTriageConfig.test.ts`,
+    `packages/providers/src/coding-agent/claude-code.ts`,
+    `packages/providers/src/coding-agent/google-gemini.ts`
+- All other CI jobs (Typecheck, Lint, Test Node 20, Test Node 22) → SUCCESS
 
-## Step 3 — Identify Provider Config Schema Mismatch Bug
+```
+GET /repos/swenyai/sweny/actions/runs/23204701005/jobs
+```
 
-Read `packages/engine/src/runner-recipe.ts` lines 44-66 — `validateWorkflowConfig()` checks
-env vars listed in `provider.configSchema.fields`. Found that several providers list FEWER
-fields than their Zod schemas require, causing silent pre-flight validation passes that lead
-to runtime crashes.
+Results:
+- **build** job → FAILURE: `Build site`
+  - Error: `"RecipeViewer" is not exported by "../studio/dist-lib/viewer.js"`
+  - File: `packages/web/src/components/RecipeExplorer.tsx:2:9`
 
-**Verified providers:**
+## Step 3 — Cross-reference with known issues
 
-| Provider | Zod required | configSchema.fields | Gap |
-|----------|-------------|---------------------|-----|
-| NewRelic | apiKey, accountId | NR_API_KEY only | NR_ACCOUNT_ID missing |
-| Sentry | authToken, organization, project | SENTRY_AUTH_TOKEN only | SENTRY_ORG, SENTRY_PROJECT missing |
-| Datadog | apiKey, appKey | DD_API_KEY, DD_APPLICATION_KEY | ✅ complete |
-| Splunk | baseUrl, token | SPLUNK_URL, SPLUNK_TOKEN | ✅ complete |
-| Elastic | baseUrl, apiKey | ELASTIC_URL, ELASTIC_API_KEY | ✅ complete |
-| Loki | baseUrl (apiKey/orgId optional) | LOKI_URL | ✅ complete |
-| Linear | apiKey | LINEAR_API_KEY | ✅ complete |
-| Jira | baseUrl, email, apiToken | all 3 listed | ✅ complete |
+- **Format violations**: Already tracked as issue #65 / PR #66 (closed failed attempt).
+  → SKIP per instructions.
+- **RecipeViewer not exported**: No existing issue found. NEW.
 
-Confirmed correct env var names from:
-- `newrelic.ts getAgentEnv()` → exports `NR_ACCOUNT_ID`
-- `sentry.ts getAgentEnv()` → exports `SENTRY_ORG`, `SENTRY_PROJECT`
-- `action/src/config.ts validateInputs()` → checks `newrelic-account-id`, `sentry-org`, `sentry-project`
+## Step 4 — Root cause analysis for RecipeViewer
 
-## Conclusion
+Searched `RecipeViewer` across the codebase:
+- `packages/studio/CHANGELOG.md` confirms: in studio v3.0.0 (major release),
+  `RecipeViewer` was renamed to `WorkflowViewer` as a breaking change:
+  > "Breaking: Studio public exports renamed to workflow terminology.
+  > RecipeViewer → WorkflowViewer"
+- `packages/studio/src/lib-viewer.ts` exports only `WorkflowViewer` (confirmed by read).
+- `packages/web/src/components/RecipeExplorer.tsx` still imports `RecipeViewer` at line 2
+  and uses `<RecipeViewer` at line 1179.
 
-Best candidate: Fix `newrelicProviderConfigSchema` and `sentryProviderConfigSchema` to include
-all required env var fields. Small, targeted, high-impact fix affecting all users of these providers.
+**Root cause**: `RecipeExplorer.tsx` was not updated when studio's public API was renamed
+in v3.0.0. The import references a symbol that no longer exists in `dist-lib/viewer.js`.
+
+## Step 5 — Proposed fix
+
+Update `RecipeExplorer.tsx`:
+1. Line 2: `import { RecipeViewer }` → `import { WorkflowViewer }`
+2. Line 1179: `<RecipeViewer` → `<WorkflowViewer`
+   (JSX is self-closing, so no closing tag needs updating)
+
+The `WorkflowViewer` props interface (`definition`, `executionState`, `height`, `onNodeClick`)
+is fully compatible with how `RecipeViewer` was used — same props, same behavior.
+
+## Step 6 — Scope and risk
+
+- Change is entirely in `packages/web` (private, non-published package).
+- No changeset required (per CLAUDE.md: web is private).
+- No type or API surface changes; purely a name update.
+- Low risk: straightforward rename, TypeScript will catch regressions.

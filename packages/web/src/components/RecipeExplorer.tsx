@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { RecipeViewer } from "@sweny-ai/studio/viewer";
+import { WorkflowViewer } from "@sweny-ai/studio/viewer";
 import { triageDefinition, implementDefinition } from "@sweny-ai/engine/browser";
 import "@sweny-ai/studio/style.css";
 import type { RecipeDefinition, StateDefinition } from "@sweny-ai/engine/browser";
@@ -1176,7 +1176,7 @@ export function RecipeExplorer() {
 
   const graphPane = (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
-      <RecipeViewer
+      <WorkflowViewer
         key={activeIdx}
         definition={liveDefinition}
         height={bodyHeight}
