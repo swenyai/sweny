@@ -4,6 +4,24 @@ import { validateWorkflow } from "./validate.js";
 import { WorkflowConfigError } from "./types.js";
 // Re-export WorkflowConfigError class
 export { WorkflowConfigError };
+/**
+ * Races a promise against a timeout. Rejects with a descriptive error if the
+ * timeout fires first. Clears the timer on either settle to avoid leaks.
+ */
+function withTimeout(promise, ms, stepId) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error(`Step "${stepId}" timed out after ${ms}ms`));
+        }, ms);
+        promise.then((v) => {
+            clearTimeout(timer);
+            resolve(v);
+        }, (e) => {
+            clearTimeout(timer);
+            reject(e);
+        });
+    });
+}
 /** Calls observer.onEvent safely — errors are logged, not thrown. */
 async function emit(observer, event, logger) {
     if (!observer)
@@ -175,7 +193,11 @@ export async function runWorkflow(workflow, config, providers, options) {
         let result;
         try {
             logger.info(`[${definition.name}] ${step.phase}/${stepId}: starting`);
-            result = await implementations[stepId](ctx);
+            let execPromise = implementations[stepId](ctx);
+            if (step.timeout && step.timeout > 0) {
+                execPromise = withTimeout(execPromise, step.timeout, stepId);
+            }
+            result = await execPromise;
             logger.info(`[${definition.name}] ${step.phase}/${stepId}: ${result.status}`);
         }
         catch (err) {
