@@ -38,7 +38,9 @@ import {
   formatResultJson,
   formatValidationErrors,
   formatCrashError,
+  formatCheckResults,
 } from "./output.js";
+import { checkProviderConnectivity } from "./check.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -63,6 +65,25 @@ program
     fs.writeFileSync(target, STARTER_CONFIG, "utf-8");
     console.log(chalk.green("  Created .sweny.yml"));
     console.log(chalk.dim("  Add your secrets to .env and run: sweny triage --dry-run"));
+  });
+
+// ── sweny check ───────────────────────────────────────────────────────
+program
+  .command("check")
+  .description("Verify provider credentials and connectivity")
+  .action(async () => {
+    const fileConfig = loadConfigFile();
+    const config = parseCliInputs({}, fileConfig);
+    const errors = validateInputs(config);
+    if (errors.length > 0) {
+      console.error(formatValidationErrors(errors));
+      process.exit(1);
+    }
+    console.log(chalk.dim("\n  Checking provider connectivity…\n"));
+    const results = await checkProviderConnectivity(config);
+    console.log(formatCheckResults(results));
+    const hasFailure = results.some((r) => r.status === "fail");
+    process.exit(hasFailure ? 1 : 0);
   });
 
 const triageCmd = registerTriageCommand(program);

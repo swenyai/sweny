@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import type { WorkflowResult, WorkflowPhase } from "@sweny-ai/engine";
 import type { CliConfig } from "./config.js";
+import type { CheckResult } from "./check.js";
 
 // ── Color palette ───────────────────────────────────────────────
 export const c = {
@@ -362,6 +363,39 @@ export function formatCrashError(error: unknown): string {
   ];
 
   return ["", boxTop(), ...boxSection(header), boxDivider(), ...boxSection(body), boxBottom(), ""].join("\n");
+}
+
+// ── Check results ────────────────────────────────────────────────
+export function formatCheckResults(results: CheckResult[]): string {
+  const title = `${chalk.bold("Provider Connectivity Check")}`;
+  const header = [title];
+
+  const body: string[] = results.map((r) => {
+    const icon = r.status === "ok" ? c.ok("✓") : r.status === "fail" ? c.fail("✗") : c.subtle("−");
+    const name = chalk.white(r.name);
+    const detail =
+      r.status === "ok" ? c.subtle(r.detail) : r.status === "fail" ? chalk.red(r.detail) : c.subtle(r.detail);
+    return `${icon}  ${name}\n     ${detail}`;
+  });
+
+  const hasFailure = results.some((r) => r.status === "fail");
+  const summary = hasFailure
+    ? c.fail("One or more checks failed — fix the issues above before running sweny triage.")
+    : results.every((r) => r.status === "skip")
+      ? c.subtle("All providers set to file mode — no network checks performed.")
+      : c.ok("All checks passed.");
+
+  return [
+    "",
+    boxTop(),
+    ...boxSection(header),
+    boxDivider(),
+    ...boxSection(body),
+    boxDivider(),
+    ...boxSection([summary]),
+    boxBottom(),
+    "",
+  ].join("\n");
 }
 
 // ── JSON output ─────────────────────────────────────────────────
