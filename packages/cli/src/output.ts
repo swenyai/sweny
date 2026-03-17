@@ -194,7 +194,7 @@ export function formatStepLine(icon: string, counter: string, name: string, elap
 }
 
 // ── Result summary ──────────────────────────────────────────────
-export function formatResultHuman(result: WorkflowResult): string {
+export function formatResultHuman(result: WorkflowResult, config?: CliConfig): string {
   const duration = formatDuration(result.duration);
 
   // Determine outcome variant
@@ -203,6 +203,7 @@ export function formatResultHuman(result: WorkflowResult): string {
   const prData = findStepData(result, "create-pr");
   const implData = findStepData(result, "implement-fix");
   const noveltyData = findStepData(result, "novelty-gate");
+  const crossRepoData = findStepData(result, "cross-repo-check");
   const isDryRun = noveltyData?.action === "dry-run";
 
   if (result.status === "failed") {
@@ -218,7 +219,7 @@ export function formatResultHuman(result: WorkflowResult): string {
   }
 
   // Partial / no action
-  return formatNoActionResult(investigateData, noveltyData, duration);
+  return formatNoActionResult(investigateData, noveltyData, crossRepoData, duration, config);
 }
 
 function formatSuccessResult(
@@ -271,18 +272,48 @@ function formatDryRunResult(investigateData: Record<string, unknown> | undefined
 function formatNoActionResult(
   investigateData: Record<string, unknown> | undefined,
   noveltyData: Record<string, unknown> | undefined,
+  crossRepoData: Record<string, unknown> | undefined,
   duration: string,
+  config?: CliConfig,
 ): string {
   const title = `${c.subtle("−")} ${chalk.bold("No Action Needed")}`;
   const titlePad = BOX_WIDTH - 4 - visLen(title) - visLen(duration);
   const header = [title + " ".repeat(Math.max(1, titlePad)) + c.subtle(duration)];
 
   const body: string[] = [];
+
+  // Cross-repo dispatch takes priority in the description
+  if (crossRepoData?.outcome === "dispatch-failed") {
+    const target = String(crossRepoData.targetRepo ?? "target repo");
+    body.push(chalk.yellow(`Warning: dispatch to ${target} failed — fix was implemented locally.`));
+    body.push("");
+  } else if (crossRepoData?.dispatched) {
+    const target = String(crossRepoData.targetRepo ?? "target repo");
+    body.push(`Dispatched to ${c.link(target)} for implementation.`);
+    body.push("");
+  }
+
   if (noveltyData?.action === "+1") {
-    body.push(`Added +1 to existing ${String(noveltyData.issueIdentifier || "issue")}.`);
+    body.push(`Added +1 to existing ${chalk.bold(String(noveltyData.issueIdentifier || "issue"))}.`);
+    if (noveltyData.issueUrl) {
+      body.push(`${" ".repeat(2)}${c.link(String(noveltyData.issueUrl))}`);
+    }
   } else if (noveltyData?.action === "skip") {
     body.push("No novel issues found in the analyzed period.");
     body.push("All detected patterns match known issues.");
+
+    // Suggest widening the search when using narrow defaults
+    const hints: string[] = [];
+    if (!config?.timeRange || config.timeRange === "24h") {
+      hints.push("--time-range 7d");
+    }
+    if (!config?.serviceFilter || config.serviceFilter === "*") {
+      hints.push("--service-filter <service>");
+    }
+    if (hints.length > 0) {
+      body.push("");
+      body.push(c.subtle(`Tip: try ${hints.join(" or ")} to widen the search`));
+    }
   } else {
     const rec = investigateData?.recommendation;
     if (rec) body.push(`Recommendation: ${String(rec)}`);

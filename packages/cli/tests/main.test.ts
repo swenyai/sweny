@@ -298,7 +298,7 @@ describe("triage action", () => {
 
     await capturedTriageAction!({});
 
-    expect(mockFormatResultHuman).toHaveBeenCalledWith(result);
+    expect(mockFormatResultHuman).toHaveBeenCalledWith(result, expect.objectContaining({ json: false }));
     expect(mockFormatResultJson).not.toHaveBeenCalled();
   });
 

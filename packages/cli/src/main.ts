@@ -287,7 +287,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     if (config.json) {
       console.log(formatResultJson(result));
     } else {
-      console.log(formatResultHuman(result));
+      console.log(formatResultHuman(result, config));
     }
 
     // Terminal bell
