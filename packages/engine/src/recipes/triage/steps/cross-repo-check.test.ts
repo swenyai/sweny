@@ -104,12 +104,14 @@ describe("crossRepoCheck", () => {
     });
   });
 
-  it("dispatch failure still succeeds and warns", async () => {
+  it("dispatch failure still succeeds but records dispatched:false", async () => {
     dispatchWorkflow.mockRejectedValue(new Error("dispatch failed"));
     const ctx = buildCtx({ targetRepo: "other-org/other-repo", issueId: "issue-1" });
     const result = await crossRepoCheck(ctx);
     expect(result.status).toBe("success");
-    expect(result.data?.dispatched).toBe(true);
+    // dispatched must be false — callers (notify step) should see the real outcome
+    expect(result.data?.dispatched).toBe(false);
+    expect(result.data?.outcome).toBe("dispatch-failed");
     expect(silentLogger.warn).toHaveBeenCalledWith(expect.stringContaining("dispatch failed"));
   });
 

@@ -62,7 +62,7 @@ function createMockProviders(): ProviderRegistry {
     configureBotIdentity: vi.fn().mockResolvedValue(undefined),
     resetPaths: vi.fn().mockResolvedValue(undefined),
     findExistingPr: vi.fn().mockResolvedValue(null),
-    createPr: vi.fn().mockResolvedValue(mockPr),
+    createPullRequest: vi.fn().mockResolvedValue(mockPr),
     pushBranch: vi.fn().mockResolvedValue(undefined),
     hasNewCommits: vi.fn().mockResolvedValue(true),
     getChangedFiles: vi.fn().mockResolvedValue(["src/file.ts"]),

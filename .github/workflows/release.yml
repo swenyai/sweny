@@ -17,14 +17,14 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           # Use a PAT so the version-bump commit triggers CI on re-push.
           # Falls back to GITHUB_TOKEN (version-bump won't re-trigger CI, but publish still works).
           token: ${{ secrets.GH_PAT || github.token }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
