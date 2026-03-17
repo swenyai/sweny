@@ -118,71 +118,74 @@ export function claudeCode(config?: ClaudeCodeConfig): CodingAgent & { configSch
   const quiet = config?.quiet ?? false;
   const onEvent = config?.onEvent;
 
-  return Object.assign({
-    async install(): Promise<void> {
-      if (isCliInstalled("claude")) {
-        log.info("Claude Code CLI already installed, skipping");
-        return;
-      }
-      log.info("Installing Claude Code CLI...");
-      await execCommand("npm", ["install", "-g", "@anthropic-ai/claude-code"], { quiet });
-      log.info("Claude Code CLI installed");
-    },
+  return Object.assign(
+    {
+      async install(): Promise<void> {
+        if (isCliInstalled("claude")) {
+          log.info("Claude Code CLI already installed, skipping");
+          return;
+        }
+        log.info("Installing Claude Code CLI...");
+        await execCommand("npm", ["install", "-g", "@anthropic-ai/claude-code"], { quiet });
+        log.info("Claude Code CLI installed");
+      },
 
-    async run(opts: CodingAgentRunOptions): Promise<number> {
-      log.info("Running Claude Code agent...");
+      async run(opts: CodingAgentRunOptions): Promise<number> {
+        log.info("Running Claude Code agent...");
 
-      const args = [
-        "-p",
-        opts.prompt,
-        "--allowedTools",
-        "*",
-        "--dangerously-skip-permissions",
-        "--max-turns",
-        String(opts.maxTurns),
-        ...extraFlags,
-      ];
+        const args = [
+          "-p",
+          opts.prompt,
+          "--allowedTools",
+          "*",
+          "--dangerously-skip-permissions",
+          "--max-turns",
+          String(opts.maxTurns),
+          ...extraFlags,
+        ];
 
-      const mcpServers = opts.mcpServers;
-      const mcpConfig = mcpServers && Object.keys(mcpServers).length > 0 ? writeMcpConfig(mcpServers) : null;
+        const mcpServers = opts.mcpServers;
+        const mcpConfig = mcpServers && Object.keys(mcpServers).length > 0 ? writeMcpConfig(mcpServers) : null;
 
-      if (mcpConfig && mcpServers) {
-        args.push("--mcp-config", mcpConfig.path);
-        log.info(`Injecting ${Object.keys(mcpServers).length} MCP server(s): ${Object.keys(mcpServers).join(", ")}`);
-      }
-
-      try {
-        if (onEvent) {
-          // --output-format stream-json requires --verbose; omitting it causes
-          // the CLI to exit with "stream-json requires --verbose" error.
-          args.push("--output-format", "stream-json", "--verbose");
-          const parse = makeClaudeEventParser();
-          return await spawnLines("claude", args, {
-            env: opts.env,
-            timeoutMs: opts.timeoutMs,
-            logger: log,
-            onLine(line) {
-              try {
-                const evt = JSON.parse(line);
-                const mapped = parse(evt);
-                if (mapped) return onEvent(mapped);
-              } catch {
-                /* skip malformed JSON lines */
-              }
-            },
-          });
+        if (mcpConfig && mcpServers) {
+          args.push("--mcp-config", mcpConfig.path);
+          log.info(`Injecting ${Object.keys(mcpServers).length} MCP server(s): ${Object.keys(mcpServers).join(", ")}`);
         }
 
-        return await execCommand("claude", args, {
-          env: { ...process.env, ...opts.env } as Record<string, string>,
-          ignoreReturnCode: true,
-          quiet,
-          timeoutMs: opts.timeoutMs,
-          onStderr: quiet ? (line) => log.debug(line) : undefined,
-        });
-      } finally {
-        mcpConfig?.cleanup();
-      }
+        try {
+          if (onEvent) {
+            // --output-format stream-json requires --verbose; omitting it causes
+            // the CLI to exit with "stream-json requires --verbose" error.
+            args.push("--output-format", "stream-json", "--verbose");
+            const parse = makeClaudeEventParser();
+            return await spawnLines("claude", args, {
+              env: opts.env,
+              timeoutMs: opts.timeoutMs,
+              logger: log,
+              onLine(line) {
+                try {
+                  const evt = JSON.parse(line);
+                  const mapped = parse(evt);
+                  if (mapped) return onEvent(mapped);
+                } catch {
+                  /* skip malformed JSON lines */
+                }
+              },
+            });
+          }
+
+          return await execCommand("claude", args, {
+            env: { ...process.env, ...opts.env } as Record<string, string>,
+            ignoreReturnCode: true,
+            quiet,
+            timeoutMs: opts.timeoutMs,
+            onStderr: quiet ? (line) => log.debug(line) : undefined,
+          });
+        } finally {
+          mcpConfig?.cleanup();
+        }
+      },
     },
-  }, { configSchema: claudeCodeProviderConfigSchema });
+    { configSchema: claudeCodeProviderConfigSchema },
+  );
 }

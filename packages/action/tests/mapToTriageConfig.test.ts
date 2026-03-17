@@ -391,9 +391,7 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
       githubToken: "",
     };
     const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
-    expect((mcpServers?.["newrelic"] as Record<string, unknown>)?.["url"]).toBe(
-      "https://mcp.eu.newrelic.com/mcp/",
-    );
+    expect((mcpServers?.["newrelic"] as Record<string, unknown>)?.["url"]).toBe("https://mcp.eu.newrelic.com/mcp/");
   });
 
   it("does not inject Sentry MCP when authToken is absent", () => {
@@ -443,7 +441,13 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
 
   it("does not inject Slack MCP when tool is declared but token is absent", () => {
     delete process.env.SLACK_BOT_TOKEN;
-    const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["slack"] }) as {
+    const { mcpServers } = mapToTriageConfig({
+      ...BASE,
+      githubToken: "",
+      botToken: "",
+      mcpServers: {},
+      workspaceTools: ["slack"],
+    }) as {
       mcpServers: Record<string, unknown> | undefined;
     };
     expect(mcpServers?.["slack"]).toBeUndefined();
@@ -453,7 +457,13 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
     process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
     try {
       // workspaceTools is empty — no slack declared
-      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: [] }) as {
+      const { mcpServers } = mapToTriageConfig({
+        ...BASE,
+        githubToken: "",
+        botToken: "",
+        mcpServers: {},
+        workspaceTools: [],
+      }) as {
         mcpServers: Record<string, unknown> | undefined;
       };
       expect(mcpServers?.["slack"]).toBeUndefined();
@@ -497,7 +507,13 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
   it("does not inject Notion MCP when tool not declared (even if token present)", () => {
     process.env.NOTION_TOKEN = "secret_notion_key";
     try {
-      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: [] }) as {
+      const { mcpServers } = mapToTriageConfig({
+        ...BASE,
+        githubToken: "",
+        botToken: "",
+        mcpServers: {},
+        workspaceTools: [],
+      }) as {
         mcpServers: Record<string, unknown> | undefined;
       };
       expect(mcpServers?.["notion"]).toBeUndefined();
@@ -509,7 +525,13 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
   it("does not inject Notion MCP when tool is declared but neither token is set", () => {
     delete process.env.NOTION_TOKEN;
     delete process.env.NOTION_API_KEY;
-    const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", botToken: "", mcpServers: {}, workspaceTools: ["notion"] }) as {
+    const { mcpServers } = mapToTriageConfig({
+      ...BASE,
+      githubToken: "",
+      botToken: "",
+      mcpServers: {},
+      workspaceTools: ["notion"],
+    }) as {
       mcpServers: Record<string, unknown> | undefined;
     };
     expect(mcpServers?.["notion"]).toBeUndefined();

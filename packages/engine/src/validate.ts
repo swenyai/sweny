@@ -47,7 +47,7 @@ export function validateWorkflow(def: WorkflowDefinition): WorkflowDefinitionErr
     const visited = new Set<string>();
     const queue: string[] = [def.initial];
     while (queue.length > 0) {
-      const id = queue.shift()!;
+      const id = queue.shift() as string;
       if (visited.has(id)) continue;
       visited.add(id);
       const step = def.steps[id];

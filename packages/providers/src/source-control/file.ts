@@ -240,7 +240,8 @@ class FileSourceControlProvider implements SourceControlProvider {
       prs = prs.filter((p) => p.state === opts.state);
     }
     if (opts?.labels && opts.labels.length > 0) {
-      prs = prs.filter((p) => opts.labels!.some((l) => p.labels.includes(l)));
+      const labels = opts.labels ?? [];
+      prs = prs.filter((p) => labels.some((l) => p.labels.includes(l)));
     }
     if (opts?.limit) {
       prs = prs.slice(0, opts.limit);

@@ -5,7 +5,15 @@ import prettier from "eslint-config-prettier";
 export default [
   // Global ignores
   {
-    ignores: ["**/dist/", "**/node_modules/", "**/.next/", "**/coverage/", "packages/web/.astro/**", ".claude/**"],
+    ignores: [
+      "**/dist/",
+      "**/dist-tsc/",
+      "**/node_modules/",
+      "**/.next/",
+      "**/coverage/",
+      "packages/web/.astro/**",
+      ".claude/**",
+    ],
   },
 
   // TypeScript files

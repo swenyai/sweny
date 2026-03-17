@@ -1,6 +1,8 @@
 dist/
 dist-lib/
+dist-tsc/
 node_modules/
 *.md
 packages/web/.next/
+packages/web/.astro/
 coverage/

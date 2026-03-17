@@ -28,51 +28,54 @@ export function openaiCodex(config?: OpenAICodexConfig): CodingAgent & { configS
   const quiet = config?.quiet ?? false;
   const onEvent = config?.onEvent;
 
-  return Object.assign({
-    async install(): Promise<void> {
-      if (isCliInstalled("codex")) {
-        log.info("OpenAI Codex CLI already installed, skipping");
-        return;
-      }
-      log.info("Installing OpenAI Codex CLI...");
-      await execCommand("npm", ["install", "-g", "@openai/codex"], { quiet });
-      log.info("OpenAI Codex CLI installed");
-    },
+  return Object.assign(
+    {
+      async install(): Promise<void> {
+        if (isCliInstalled("codex")) {
+          log.info("OpenAI Codex CLI already installed, skipping");
+          return;
+        }
+        log.info("Installing OpenAI Codex CLI...");
+        await execCommand("npm", ["install", "-g", "@openai/codex"], { quiet });
+        log.info("OpenAI Codex CLI installed");
+      },
 
-    async run(opts: CodingAgentRunOptions): Promise<number> {
-      log.info("Running OpenAI Codex agent...");
+      async run(opts: CodingAgentRunOptions): Promise<number> {
+        log.info("Running OpenAI Codex agent...");
 
-      // Codex CLI uses --mcp-config <path> with the same JSON format as Claude Code.
-      const args = ["exec", "--full-auto", opts.prompt, ...extraFlags];
+        // Codex CLI uses --mcp-config <path> with the same JSON format as Claude Code.
+        const args = ["exec", "--full-auto", opts.prompt, ...extraFlags];
 
-      const mcpServers = opts.mcpServers;
-      const mcpConfig = mcpServers && Object.keys(mcpServers).length > 0 ? writeMcpConfig(mcpServers) : null;
+        const mcpServers = opts.mcpServers;
+        const mcpConfig = mcpServers && Object.keys(mcpServers).length > 0 ? writeMcpConfig(mcpServers) : null;
 
-      if (mcpConfig && mcpServers) {
-        args.push("--mcp-config", mcpConfig.path);
-        log.info(`Injecting ${Object.keys(mcpServers).length} MCP server(s): ${Object.keys(mcpServers).join(", ")}`);
-      }
-
-      try {
-        if (onEvent) {
-          return await spawnLines("codex", args, {
-            env: opts.env,
-            timeoutMs: opts.timeoutMs,
-            logger: log,
-            onLine: (line) => onEvent({ type: "text", text: line }),
-          });
+        if (mcpConfig && mcpServers) {
+          args.push("--mcp-config", mcpConfig.path);
+          log.info(`Injecting ${Object.keys(mcpServers).length} MCP server(s): ${Object.keys(mcpServers).join(", ")}`);
         }
 
-        return await execCommand("codex", args, {
-          env: { ...process.env, ...opts.env } as Record<string, string>,
-          ignoreReturnCode: true,
-          quiet,
-          timeoutMs: opts.timeoutMs,
-          onStderr: quiet ? (line) => log.debug(line) : undefined,
-        });
-      } finally {
-        mcpConfig?.cleanup();
-      }
+        try {
+          if (onEvent) {
+            return await spawnLines("codex", args, {
+              env: opts.env,
+              timeoutMs: opts.timeoutMs,
+              logger: log,
+              onLine: (line) => onEvent({ type: "text", text: line }),
+            });
+          }
+
+          return await execCommand("codex", args, {
+            env: { ...process.env, ...opts.env } as Record<string, string>,
+            ignoreReturnCode: true,
+            quiet,
+            timeoutMs: opts.timeoutMs,
+            onStderr: quiet ? (line) => log.debug(line) : undefined,
+          });
+        } finally {
+          mcpConfig?.cleanup();
+        }
+      },
     },
-  }, { configSchema: openaiCodexProviderConfigSchema });
+    { configSchema: openaiCodexProviderConfigSchema },
+  );
 }
