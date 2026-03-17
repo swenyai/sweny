@@ -11,9 +11,13 @@ export default defineConfig({
       customCss: ["./src/styles/explorer-overrides.css"],
       title: "SWEny",
       description: "Autonomous engineering tools powered by Claude AI",
+      lastUpdated: true,
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/swenyai/sweny" }],
       editLink: {
         baseUrl: "https://github.com/swenyai/sweny/edit/main/packages/web/",
+      },
+      components: {
+        Footer: "./src/components/Footer.astro",
       },
       sidebar: [
         {
@@ -26,11 +30,17 @@ export default defineConfig({
           ],
         },
         {
-          label: "Triage Workflow",
+          label: "Workflows",
           items: [
-            { label: "Overview", slug: "recipes/triage" },
-            { label: "Action Inputs", slug: "action/inputs" },
-            { label: "Action Outputs", slug: "action/outputs" },
+            { label: "Triage", slug: "recipes/triage" },
+            { label: "Implement", slug: "recipes/implement" },
+          ],
+        },
+        {
+          label: "GitHub Action",
+          items: [
+            { label: "Inputs", slug: "action/inputs" },
+            { label: "Outputs", slug: "action/outputs" },
             { label: "Examples", slug: "action/examples" },
             { label: "Service Map", slug: "action/service-map" },
           ],
@@ -50,9 +60,9 @@ export default defineConfig({
         {
           label: "Studio",
           items: [
-            { label: "Live Workflow Explorer", slug: "studio/explorer" },
-            { label: "Workflow Authoring", slug: "studio/recipe-authoring" },
             { label: "Overview", slug: "studio" },
+            { label: "Workflow Authoring", slug: "studio/recipe-authoring" },
+            { label: "Live Workflow Explorer", slug: "studio/explorer" },
           ],
         },
         {

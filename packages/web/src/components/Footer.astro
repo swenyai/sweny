@@ -1,0 +1,36 @@
+---
+// Shows the deployed git commit SHA in the site footer.
+// VITE_GIT_COMMIT_SHA is injected by the CI build step.
+const sha = import.meta.env.VITE_GIT_COMMIT_SHA as string | undefined;
+const repoUrl = "https://github.com/swenyai/sweny";
+---
+
+{
+  sha && (
+    <div class="deploy-sha">
+      <a href={`${repoUrl}/commit/${sha}`} rel="noopener noreferrer">
+        {sha}
+      </a>
+    </div>
+  )
+}
+
+<style>
+  .deploy-sha {
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-4);
+    text-align: center;
+    padding-block: 0.5rem;
+  }
+
+  .deploy-sha a {
+    font-family: var(--sl-font-mono);
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .deploy-sha a:hover {
+    color: var(--sl-color-text-accent);
+    text-decoration: underline;
+  }
+</style>

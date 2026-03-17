@@ -298,7 +298,7 @@ inputs:
       each value is an MCPServerConfig (fields: type, command, args, env, url, headers).
       Example — GitHub MCP server:
         {"github":{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github@latest"],"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"YOUR_TOKEN_HERE"}}}
-      See docs/mcp-servers.md for a full catalog including Sentry, filesystem, and HTTP servers.
+      See https://docs.sweny.ai/providers/mcp-servers/ for a full catalog including Sentry, filesystem, and HTTP servers.
     required: false
 
 outputs:

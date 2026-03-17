@@ -127,3 +127,5 @@ Note: `github-issues` uses the existing `github-token` input for authentication.
 |-------|-------------|---------|
 | `workspace-tools` | Comma-separated workspace integrations to enable (`slack`, `notion`, `pagerduty`, `monday`). Each tool injects its MCP server into the coding agent when the corresponding credential env var is present | — |
 | `mcp-servers` | Additional MCP servers as a JSON object. Each key is a server name; each value is an `MCPServerConfig` (`type`, `command`, `args`, `env`, `url`, `headers`). Provider-based MCP servers (GitHub, Linear, Datadog) are injected automatically | — |
+
+See [MCP Servers](/providers/mcp-servers/) for the full server catalog and configuration reference.
