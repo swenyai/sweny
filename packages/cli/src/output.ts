@@ -325,14 +325,37 @@ export function formatValidationErrors(errors: string[]): string {
   return ["", boxTop(), ...boxSection(header), boxDivider(), ...boxSection(body), boxBottom()].join("\n");
 }
 
+// ── Credential hint extraction ───────────────────────────────────
+export function extractCredentialHint(err: unknown): string | null {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/401|unauthorized|authentication/i.test(msg) && /anthropic/i.test(msg)) {
+    return "Check your ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN — get a key at https://console.anthropic.com";
+  }
+  if (/401|403|unauthorized/i.test(msg) && /datadog/i.test(msg)) {
+    return "Check your DD_API_KEY and DD_APP_KEY — find them at https://app.datadoghq.com/organization-settings/api-keys";
+  }
+  if (/401|403|unauthorized/i.test(msg) && /linear/i.test(msg)) {
+    return "Check your LINEAR_API_KEY — find it at https://linear.app/settings/api";
+  }
+  if (/401|403|unauthorized/i.test(msg) && /github/i.test(msg)) {
+    return "Check your GITHUB_TOKEN — create a Personal Access Token at https://github.com/settings/tokens";
+  }
+  if (/ENOTFOUND|ETIMEDOUT|network/i.test(msg)) {
+    return "Network error — check your internet connection and provider endpoint URL.";
+  }
+  return null;
+}
+
 // ── Crash error ─────────────────────────────────────────────────
 export function formatCrashError(error: unknown): string {
   const msg = error instanceof Error ? error.message : "Unknown error";
   const title = `${c.fail("✗")} ${chalk.bold("Unexpected Error")}`;
   const header = [title];
 
+  const hint = extractCredentialHint(error);
   const body: string[] = [
     msg,
+    ...(hint ? ["", `${c.subtle("Hint:")} ${hint}`] : []),
     "",
     c.subtle("If this persists, please open an issue:"),
     c.link("https://github.com/swenyai/sweny/issues"),

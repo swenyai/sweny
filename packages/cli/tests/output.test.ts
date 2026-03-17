@@ -4,6 +4,7 @@ import {
   phaseColor,
   formatValidationErrors,
   formatCrashError,
+  extractCredentialHint,
   formatResultJson,
   getStepDetails,
   formatResultHuman,
@@ -153,6 +154,65 @@ describe("formatValidationErrors", () => {
   });
 });
 
+// ── extractCredentialHint ───────────────────────────────────────────────────
+
+describe("extractCredentialHint", () => {
+  it("returns Anthropic hint for 401 Anthropic error", () => {
+    const hint = extractCredentialHint(new Error("401 Unauthorized from Anthropic API"));
+    expect(hint).toContain("ANTHROPIC_API_KEY");
+  });
+
+  it("returns Anthropic hint for authentication error mentioning anthropic", () => {
+    const hint = extractCredentialHint(new Error("Authentication failed: anthropic rejected the key"));
+    expect(hint).toContain("ANTHROPIC_API_KEY");
+  });
+
+  it("returns Datadog hint for 401 Datadog error", () => {
+    const hint = extractCredentialHint(new Error("401 Unauthorized from datadog metrics API"));
+    expect(hint).toContain("DD_API_KEY");
+    expect(hint).toContain("DD_APP_KEY");
+  });
+
+  it("returns Datadog hint for 403 Datadog error", () => {
+    const hint = extractCredentialHint(new Error("403 Forbidden from Datadog"));
+    expect(hint).toContain("DD_API_KEY");
+  });
+
+  it("returns Linear hint for 401 Linear error", () => {
+    const hint = extractCredentialHint(new Error("401 Unauthorized: Linear API rejected the request"));
+    expect(hint).toContain("LINEAR_API_KEY");
+  });
+
+  it("returns GitHub hint for 401 GitHub error", () => {
+    const hint = extractCredentialHint(new Error("401 Bad credentials from GitHub API"));
+    expect(hint).toContain("GITHUB_TOKEN");
+  });
+
+  it("returns network hint for ENOTFOUND", () => {
+    const hint = extractCredentialHint(new Error("getaddrinfo ENOTFOUND api.datadoghq.com"));
+    expect(hint).toContain("Network error");
+  });
+
+  it("returns network hint for ETIMEDOUT", () => {
+    const hint = extractCredentialHint(new Error("connect ETIMEDOUT 1.2.3.4:443"));
+    expect(hint).toContain("Network error");
+  });
+
+  it("returns null for unrecognized error", () => {
+    expect(extractCredentialHint(new Error("some random runtime error"))).toBeNull();
+  });
+
+  it("returns null for generic 500 server error", () => {
+    expect(extractCredentialHint(new Error("500 Internal Server Error"))).toBeNull();
+  });
+
+  it("handles non-Error values without throwing", () => {
+    expect(() => extractCredentialHint("string error")).not.toThrow();
+    expect(() => extractCredentialHint(null)).not.toThrow();
+    expect(() => extractCredentialHint(42)).not.toThrow();
+  });
+});
+
 // ── formatCrashError ────────────────────────────────────────────────────────
 
 describe("formatCrashError", () => {
@@ -175,6 +235,17 @@ describe("formatCrashError", () => {
   it("handles null gracefully", () => {
     const out = plain(formatCrashError(null));
     expect(out).toContain("Unknown error");
+  });
+
+  it("appends credential hint when error matches a known pattern", () => {
+    const out = plain(formatCrashError(new Error("401 Unauthorized from Anthropic API")));
+    expect(out).toContain("Hint:");
+    expect(out).toContain("ANTHROPIC_API_KEY");
+  });
+
+  it("does not append hint for unrecognized errors", () => {
+    const out = plain(formatCrashError(new Error("some random error")));
+    expect(out).not.toContain("Hint:");
   });
 });
 

@@ -261,17 +261,19 @@ export function validateInputs(config: CliConfig): string[] {
   switch (config.codingAgentProvider) {
     case "claude":
       if (!config.anthropicApiKey && !config.claudeOauthToken) {
-        errors.push("Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN must be set for claude agent");
+        errors.push(
+          "Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN — get a key at https://console.anthropic.com",
+        );
       }
       break;
     case "codex":
       if (!config.openaiApiKey) {
-        errors.push("Missing: OPENAI_API_KEY must be set for codex agent");
+        errors.push("Missing: OPENAI_API_KEY — get a key at https://platform.openai.com/api-keys");
       }
       break;
     case "gemini":
       if (!config.geminiApiKey) {
-        errors.push("Missing: GEMINI_API_KEY or GOOGLE_API_KEY must be set for gemini agent");
+        errors.push("Missing: GEMINI_API_KEY or GOOGLE_API_KEY — get a key at https://aistudio.google.com/app/apikey");
       }
       break;
     default:
@@ -287,12 +289,16 @@ export function validateInputs(config: CliConfig): string[] {
   // Observability credentials by provider
   switch (config.observabilityProvider) {
     case "datadog":
-      if (!config.observabilityCredentials.apiKey) errors.push("Missing: DD_API_KEY is required for datadog provider");
-      if (!config.observabilityCredentials.appKey) errors.push("Missing: DD_APP_KEY is required for datadog provider");
+      if (!config.observabilityCredentials.apiKey)
+        errors.push("Missing: DD_API_KEY — find API keys at https://app.datadoghq.com/organization-settings/api-keys");
+      if (!config.observabilityCredentials.appKey)
+        errors.push(
+          "Missing: DD_APP_KEY — find application keys at https://app.datadoghq.com/organization-settings/application-keys",
+        );
       break;
     case "sentry":
       if (!config.observabilityCredentials.authToken)
-        errors.push("Missing: SENTRY_AUTH_TOKEN is required for sentry provider");
+        errors.push("Missing: SENTRY_AUTH_TOKEN — create a token at https://sentry.io/settings/auth-tokens/");
       if (!config.observabilityCredentials.organization)
         errors.push("Missing: --sentry-org is required for sentry provider");
       if (!config.observabilityCredentials.project)
@@ -329,13 +335,14 @@ export function validateInputs(config: CliConfig): string[] {
   // Issue tracker credentials by provider
   switch (config.issueTrackerProvider) {
     case "linear":
-      if (!config.linearApiKey) errors.push("Missing: LINEAR_API_KEY is required for linear issue tracker");
+      if (!config.linearApiKey)
+        errors.push("Missing: LINEAR_API_KEY — find API keys at https://linear.app/settings/api");
       if (!config.linearTeamId)
         errors.push("Missing: LINEAR_TEAM_ID or --linear-team-id is required for linear issue tracker");
       break;
     case "github-issues":
       if (!config.githubToken && !config.botToken)
-        errors.push("Missing: GITHUB_TOKEN is required for github-issues issue tracker");
+        errors.push("Missing: GITHUB_TOKEN — create a Personal Access Token at https://github.com/settings/tokens");
       break;
     case "jira":
       if (!config.jiraBaseUrl) errors.push("Missing: JIRA_BASE_URL is required for jira issue tracker");
@@ -350,7 +357,8 @@ export function validateInputs(config: CliConfig): string[] {
   // Source control credentials by provider
   switch (config.sourceControlProvider) {
     case "github":
-      if (!config.githubToken && !config.botToken) errors.push("Missing: GITHUB_TOKEN is required for github provider");
+      if (!config.githubToken && !config.botToken)
+        errors.push("Missing: GITHUB_TOKEN — create a Personal Access Token at https://github.com/settings/tokens");
       break;
     case "gitlab":
       if (!config.gitlabToken) errors.push("Missing: GITLAB_TOKEN is required for gitlab provider");
