@@ -116,5 +116,5 @@ jobs:
             If CI logs don't show a clear target, investigate the security advisories via GitHub MCP
             and fix any that are in published packages or the action runtime.
 
-            Prioritize a single high-confidence, well-scoped fix. Open a clean PR with a
-            clear description so the team can review and merge it quickly.
+            Prioritize a single high-confidence, well-scoped fix. The workflow opens the
+            PR automatically after implementation — do not run gh pr create yourself.

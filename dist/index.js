@@ -47572,7 +47572,8 @@ class LinearProvider {
             state: { name: { in: stateNames } },
         };
         if (opts.labels && opts.labels.length > 0) {
-            filter.labels = { id: { eq: opts.labels[0] } };
+            // Match issues that have ANY of the requested labels
+            filter.labels = { some: { id: { in: opts.labels } } };
         }
         const result = await this.request(query, { teamId: opts.projectId, filter });
         const issues = result.team?.issues?.nodes ?? [];
@@ -47628,7 +47629,8 @@ class LinearProvider {
       }
     `;
         const filter = {
-            labels: { id: { eq: labelId } },
+            // `some` wrapper: filter issues where at least one label matches the given ID
+            labels: { some: { id: { eq: labelId } } },
             createdAt: { gte: since },
         };
         const result = await this.request(query, { teamId: projectId, filter });
@@ -47718,7 +47720,9 @@ class GitHubIssuesProvider {
         const identifier = `#${result.number}`;
         this.log.info(`Created issue ${identifier} (${result.html_url})`);
         return {
-            id: String(result.id),
+            // Use issue number (not the internal node ID) — all GitHub Issues API endpoints
+            // that accept an issue reference expect the issue number, not the node ID.
+            id: String(result.number),
             identifier,
             title: result.title,
             url: result.html_url,
@@ -47731,7 +47735,7 @@ class GitHubIssuesProvider {
         this.log.info(`Fetching GitHub issue ${identifier}`);
         const result = await this.request(`/repos/${this.owner}/${this.repo}/issues/${issueNumber}`);
         return {
-            id: String(result.id),
+            id: String(result.number),
             identifier: `#${result.number}`,
             title: result.title,
             url: result.html_url,
@@ -47770,7 +47774,7 @@ class GitHubIssuesProvider {
         const result = await this.request(`/search/issues?q=${encodeURIComponent(q)}&per_page=10`);
         this.log.info(`Found ${result.items.length} matching issues`);
         return result.items.map((i) => ({
-            id: String(i.id),
+            id: String(i.number),
             identifier: `#${i.number}`,
             title: i.title,
             url: i.html_url,
@@ -47795,6 +47799,10 @@ class GitHubIssuesProvider {
 
 
 
+/** Escape a value for safe embedding inside a JQL quoted string. */
+function escapeJql(value) {
+    return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
 const jiraConfigSchema = external/* object */.Ikc({
     baseUrl: external/* string */.YjP()
         .min(1, "Jira base URL is required")
@@ -47942,13 +47950,16 @@ class JiraProvider {
     }
     async searchIssues(opts) {
         this.log.info(`Searching Jira issues: "${opts.query}" in project ${opts.projectId}`);
-        const jqlParts = [`project = "${opts.projectId}"`, `summary ~ "${opts.query}"`];
+        const jqlParts = [
+            `project = "${escapeJql(opts.projectId ?? "")}"`,
+            `summary ~ "${escapeJql(opts.query)}"`,
+        ];
         if (opts.labels && opts.labels.length > 0) {
-            const labelClauses = opts.labels.map((l) => `labels = "${l}"`).join(" AND ");
+            const labelClauses = opts.labels.map((l) => `labels = "${escapeJql(l)}"`).join(" AND ");
             jqlParts.push(`(${labelClauses})`);
         }
         if (opts.states && opts.states.length > 0) {
-            const stateList = opts.states.map((s) => `"${s}"`).join(", ");
+            const stateList = opts.states.map((s) => `"${escapeJql(s)}"`).join(", ");
             jqlParts.push(`status IN (${stateList})`);
         }
         const jql = jqlParts.join(" AND ");
@@ -48012,7 +48023,7 @@ class JiraProvider {
         const days = opts?.days ?? 30;
         this.log.info(`Searching Jira issues by label ${labelId} in project ${projectId} (last ${days} days)`);
         const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split("T")[0]; // YYYY-MM-DD format for Jira JQL
-        const jql = `project = "${projectId}" AND labels = "${labelId}" AND created >= "${since}" ORDER BY created DESC`;
+        const jql = `project = "${escapeJql(projectId)}" AND labels = "${escapeJql(labelId)}" AND created >= "${since}" ORDER BY created DESC`;
         const result = await this.request(`/search?jql=${encodeURIComponent(jql)}&maxResults=50&fields=summary,status,description,labels,created`);
         const issues = result.issues ?? [];
         this.log.info(`Found ${issues.length} issues with label ${labelId}`);
@@ -48970,6 +48981,10 @@ var external_node_util_ = __nccwpck_require__(57975);
 
 
 const execFileAsync = (0,external_node_util_.promisify)(external_node_child_process_.execFile);
+/** Escape special regex metacharacters in a literal string. */
+function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 async function git(args, opts) {
     try {
         const { stdout } = await execFileAsync("git", args);
@@ -49109,7 +49124,7 @@ function github(config) {
             const openPrs = (await ghApi("GET", `/repos/${owner}/${repo}/pulls?state=open&per_page=20`, token));
             for (const pr of openPrs) {
                 const text = `${pr.title} ${pr.body || ""}`;
-                if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+                if (new RegExp(`\\b${escapeRegExp(searchTerm)}\\b`, "i").test(text)) {
                     log.info(`Found open PR with match: ${pr.html_url}`);
                     return { number: pr.number, url: pr.html_url, state: "open", title: pr.title };
                 }
@@ -49120,7 +49135,7 @@ function github(config) {
             for (const pr of closedPrs) {
                 if (pr.merged_at && new Date(pr.merged_at) > cutoff) {
                     const text = `${pr.title} ${pr.body || ""}`;
-                    if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+                    if (new RegExp(`\\b${escapeRegExp(searchTerm)}\\b`, "i").test(text)) {
                         log.info(`Found merged PR with match: ${pr.html_url}`);
                         return { number: pr.number, url: pr.html_url, state: "merged", title: pr.title };
                     }
@@ -49152,6 +49167,10 @@ function github(config) {
 
 
 const gitlab_execFileAsync = (0,external_node_util_.promisify)(external_node_child_process_.execFile);
+/** Escape special regex metacharacters in a literal string. */
+function gitlab_escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 const gitlabConfigSchema = external/* object */.Ikc({
     token: external/* string */.YjP().min(1, "GitLab token is required"),
     projectId: external/* union */.KCZ([external/* string */.YjP().min(1), external/* number */.aig()]),
@@ -49318,7 +49337,7 @@ function gitlab(config) {
             const openMrs = (await glApi("GET", `/projects/${projectId}/merge_requests?${openParams}`, baseUrl, token));
             for (const mr of openMrs) {
                 const text = `${mr.title} ${mr.description || ""}`;
-                if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+                if (new RegExp(`\\b${gitlab_escapeRegExp(searchTerm)}\\b`, "i").test(text)) {
                     log.info(`Found open MR with match: ${mr.web_url}`);
                     return {
                         number: mr.iid,
@@ -49341,7 +49360,7 @@ function gitlab(config) {
             for (const mr of mergedMrs) {
                 if (mr.merged_at && new Date(mr.merged_at) > cutoff) {
                     const text = `${mr.title} ${mr.description || ""}`;
-                    if (new RegExp(`\\b${searchTerm}\\b`, "i").test(text)) {
+                    if (new RegExp(`\\b${gitlab_escapeRegExp(searchTerm)}\\b`, "i").test(text)) {
                         log.info(`Found merged MR with match: ${mr.web_url}`);
                         return {
                             number: mr.iid,
@@ -49413,15 +49432,15 @@ class FileSourceControlProvider {
     }
     detectGit() {
         try {
-            (0,external_node_child_process_.execSync)("git rev-parse --is-inside-work-tree", { stdio: "pipe" });
+            (0,external_node_child_process_.execFileSync)("git", ["rev-parse", "--is-inside-work-tree"], { stdio: "pipe" });
             return true;
         }
         catch {
             return false;
         }
     }
-    git(cmd) {
-        return (0,external_node_child_process_.execSync)(`git ${cmd}`, { encoding: "utf-8", stdio: "pipe" }).trim();
+    git(...args) {
+        return (0,external_node_child_process_.execFileSync)("git", args, { encoding: "utf-8", stdio: "pipe" }).trim();
     }
     // ── state helpers ────────────────────────────────────────────────────
     readState() {
@@ -49455,8 +49474,8 @@ class FileSourceControlProvider {
             return;
         }
         try {
-            this.git('config user.name "sweny-bot"');
-            this.git('config user.email "bot@sweny.ai"');
+            this.git("config", "user.name", "sweny-bot");
+            this.git("config", "user.email", "bot@sweny.ai");
             this.log.info("Configured local git identity: sweny-bot");
         }
         catch (err) {
@@ -49468,7 +49487,7 @@ class FileSourceControlProvider {
             this.log.info(`Skipping branch creation (no git repo): ${name}`);
             return;
         }
-        this.git(`checkout -b ${name}`);
+        this.git("checkout", "-b", name);
         this.log.info(`Created branch: ${name}`);
     }
     async pushBranch(name) {
@@ -49477,14 +49496,14 @@ class FileSourceControlProvider {
     async hasChanges() {
         if (!this.inGitRepo)
             return false;
-        const output = this.git("status --porcelain");
+        const output = this.git("status", "--porcelain");
         return output.length > 0;
     }
     async hasNewCommits() {
         if (!this.inGitRepo)
             return false;
         try {
-            const count = this.git(`rev-list --count ${this.baseBranch}..HEAD`);
+            const count = this.git("rev-list", "--count", `${this.baseBranch}..HEAD`);
             return parseInt(count, 10) > 0;
         }
         catch {
@@ -49495,7 +49514,7 @@ class FileSourceControlProvider {
         if (!this.inGitRepo)
             return [];
         try {
-            const output = this.git(`diff --name-only ${this.baseBranch}..HEAD`);
+            const output = this.git("diff", "--name-only", `${this.baseBranch}..HEAD`);
             return output ? output.split("\n").filter(Boolean) : [];
         }
         catch {
@@ -49507,7 +49526,7 @@ class FileSourceControlProvider {
             return;
         for (const p of paths) {
             try {
-                this.git(`checkout HEAD -- ${p}`);
+                this.git("checkout", "HEAD", "--", p);
             }
             catch {
                 // path may not exist — ignore
@@ -49519,8 +49538,8 @@ class FileSourceControlProvider {
             this.log.info("Skipping commit (no git repo)");
             return;
         }
-        this.git("add -A");
-        this.git(`commit -m "${message.replace(/"/g, '\\"')}"`);
+        this.git("add", "-A");
+        this.git("commit", "-m", message);
         this.log.info("Staged and committed changes");
     }
     async createPullRequest(opts) {
@@ -53063,6 +53082,13 @@ Also read \`${analysisDir}/investigation-log.md\` for context.
 - Do not make breaking changes
 - Prefer defensive coding patterns
 
+## Important Constraints
+
+- **Do NOT run \`gh pr create\` or create a pull request.** The workflow handles PR creation
+  as a separate step after this one. Your job ends at committing and the branch will be pushed
+  automatically. Creating a PR here bypasses issue-linking and auto-close logic.
+- **Do NOT push the branch.** Pushing is also handled by the workflow after this step.
+
 Start by reading the best-candidate.md file.`;
 }
 // ---------------------------------------------------------------------------
@@ -53362,6 +53388,11 @@ async function crossRepoCheck(ctx) {
     }
     catch (err) {
         ctx.logger.warn(`Cross-repo dispatch failed: ${err}`);
+        // Don't abort the triage workflow over a dispatch failure, but record it accurately.
+        return {
+            status: "success",
+            data: { outcome: "dispatch-failed", dispatched: false, targetRepo },
+        };
     }
     return {
         status: "success",
@@ -53385,12 +53416,10 @@ async function implementFix(ctx) {
     // -------------------------------------------------------------------------
     // 1. Check for existing PRs (duplicate check)
     // -------------------------------------------------------------------------
-    const skipMergedCheck = !!config.issueOverride;
-    let existingPr = await sourceControl.findExistingPr(issueIdentifier);
-    if (existingPr && skipMergedCheck && existingPr.state !== "open") {
-        existingPr = null;
-    }
+    const existingPr = await sourceControl.findExistingPr(issueIdentifier);
     if (existingPr) {
+        // With an issue override, a merged/closed PR means the original fix landed
+        // but we want a fresh implementation — continue past it.
         if (config.issueOverride && existingPr.state !== "open") {
             ctx.logger.info(`Found ${existingPr.state} PR: ${existingPr.url} — issue override provided, implementing anyway`);
         }
@@ -53481,10 +53510,10 @@ const HIGH_RISK_PATTERNS = [
     /\bcrypto\//i,
     /\bsecurity\//i,
     /\.github\/workflows\//i,
-    /^package\.json$/,
-    /^package-lock\.json$/,
-    /^pnpm-lock\.yaml$/,
-    /^yarn\.lock$/,
+    /(^|\/)package\.json$/,
+    /(^|\/)package-lock\.json$/,
+    /(^|\/)pnpm-lock\.yaml$/,
+    /(^|\/)yarn\.lock$/,
     /schema\.(ts|js|sql|prisma)$/i,
 ];
 /**
@@ -53667,7 +53696,11 @@ async function sendNotification(ctx) {
     // -------------------------------------------------------------------------
     let status;
     let summary;
-    if (crossRepoData?.dispatched) {
+    if (crossRepoData?.outcome === "dispatch-failed") {
+        status = "warning";
+        summary = `Cross-repo dispatch failed: Could not dispatch to \`${crossRepoData.targetRepo}\` — implementing locally`;
+    }
+    else if (crossRepoData?.dispatched) {
         status = "info";
         summary = `Cross-repo dispatch: Bug belongs to \`${crossRepoData.targetRepo}\` — dispatched for implementation`;
     }

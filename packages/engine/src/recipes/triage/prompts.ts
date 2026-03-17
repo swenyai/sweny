@@ -338,6 +338,13 @@ Also read \`${analysisDir}/investigation-log.md\` for context.
 - Do not make breaking changes
 - Prefer defensive coding patterns
 
+## Important Constraints
+
+- **Do NOT run \`gh pr create\` or create a pull request.** The workflow handles PR creation
+  as a separate step after this one. Your job ends at committing and the branch will be pushed
+  automatically. Creating a PR here bypasses issue-linking and auto-close logic.
+- **Do NOT push the branch.** Pushing is also handled by the workflow after this step.
+
 Start by reading the best-candidate.md file.`;
 }
 
