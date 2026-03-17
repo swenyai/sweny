@@ -15,6 +15,18 @@ async function run(): Promise<void> {
       core.setFailed(validationErrors.join("\n"));
       return;
     }
+
+    // The engine's preflight check reads required env vars from process.env.
+    // Populate them from action inputs so the check passes without requiring
+    // callers to redundantly set environment variables.
+    if (config.githubToken || config.botToken) {
+      process.env.GITHUB_TOKEN = config.githubToken || config.botToken;
+    }
+    if (config.linearApiKey) process.env.LINEAR_API_KEY = config.linearApiKey;
+    if (config.linearTeamId) process.env.LINEAR_TEAM_ID = config.linearTeamId;
+    if (config.anthropicApiKey) process.env.ANTHROPIC_API_KEY = config.anthropicApiKey;
+    if (config.claudeOauthToken) process.env.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+
     const providers = createProviders(config);
 
     const runOptions = {
@@ -244,8 +256,7 @@ function buildAutoMcpServers(config: ActionConfig): Record<string, MCPServerConf
   // Trailing slash is intentional — New Relic's MCP spec requires it.
   const nrApiKey = obsCreds.apiKey;
   if (config.observabilityProvider === "newrelic" && nrApiKey) {
-    const nrEndpoint =
-      obsCreds.region === "eu" ? "https://mcp.eu.newrelic.com/mcp/" : "https://mcp.newrelic.com/mcp/";
+    const nrEndpoint = obsCreds.region === "eu" ? "https://mcp.eu.newrelic.com/mcp/" : "https://mcp.newrelic.com/mcp/";
     auto["newrelic"] = {
       type: "http",
       url: nrEndpoint,
