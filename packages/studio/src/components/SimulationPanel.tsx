@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useEditorStore } from "../store/editor-store.js";
 import { createWorkflow, runWorkflow, createProviderRegistry } from "@sweny-ai/engine";
 import type { StepResult, RunObserver } from "@sweny-ai/engine";
+import { buildStubImplementations } from "../lib/simulate-runner.js";
 
 // A deferred promise that the UI resolves
 class StepLatch {
@@ -36,14 +37,16 @@ export function SimulationPanel() {
   const [customOutcome, setCustomOutcome] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [simError, setSimError] = useState<string | null>(null);
+  const [usingStubs, setUsingStubs] = useState(false);
   const activeLatchRef = useRef<StepLatch | null>(null);
 
   const currentStep = currentStepId ? definition.steps[currentStepId] : null;
   const completedList = Object.entries(completedSteps);
 
-  function handleStart() {
+  function runWith(impls: Record<string, () => Promise<StepResult>>, isStub: boolean) {
     setSimError(null);
     setIsRunning(true);
+    setUsingStubs(isStub);
     activeLatchRef.current = null;
 
     const { definition: def, applyEvent } = useEditorStore.getState();
@@ -51,8 +54,7 @@ export function SimulationPanel() {
 
     let workflow;
     try {
-      const mockImpls = createMockImplementations(Object.keys(def.steps), activeLatchRef);
-      workflow = createWorkflow(def, mockImpls);
+      workflow = createWorkflow(def, impls);
     } catch (err) {
       setSimError(err instanceof Error ? err.message : String(err));
       setIsRunning(false);
@@ -70,6 +72,16 @@ export function SimulationPanel() {
         setIsRunning(false);
         activeLatchRef.current = null;
       });
+  }
+
+  function handleStart() {
+    const { definition: def } = useEditorStore.getState();
+    runWith(createMockImplementations(Object.keys(def.steps), activeLatchRef), false);
+  }
+
+  function handleAutoRun() {
+    const { definition: def } = useEditorStore.getState();
+    runWith(buildStubImplementations(def), true);
   }
 
   function handleStep() {
@@ -96,11 +108,25 @@ export function SimulationPanel() {
           <button
             onClick={handleStart}
             disabled={isRunning}
+            title="Step through each step manually"
             className="px-3 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-500 disabled:opacity-50"
           >
-            {isRunning ? "Running…" : "▶ Start"}
+            {isRunning && !usingStubs ? "Running…" : "▶ Start"}
+          </button>
+          <button
+            onClick={handleAutoRun}
+            disabled={isRunning}
+            title="Run all steps automatically (stubs — always success)"
+            className="px-3 py-1 rounded bg-gray-600 text-white text-xs hover:bg-gray-500 disabled:opacity-50"
+          >
+            {isRunning && usingStubs ? "Running…" : "⚡ Auto"}
           </button>
         </div>
+        {usingStubs && isRunning && (
+          <div className="text-[10px] text-amber-600 bg-amber-50 rounded px-2 py-1">
+            Custom steps run as stubs (always success)
+          </div>
+        )}
 
         {currentStepId && (
           <div className="flex flex-col gap-1">
