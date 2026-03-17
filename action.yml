@@ -7,8 +7,8 @@ branding:
   color: "orange"
 
 inputs:
-  recipe:
-    description: "Recipe to run (triage, implement). Default: triage."
+  workflow:
+    description: "Workflow to run (triage, implement). Default: triage."
     required: false
     default: "triage"
 
