@@ -225,7 +225,8 @@ export interface WorkflowDefinitionError {
   code:
     | "MISSING_INITIAL" // initial does not exist in steps
     | "UNKNOWN_TARGET" // an on/next target does not exist in steps and isn't "end"
-    | "MISSING_IMPLEMENTATION"; // a step id has no implementation (checked by createWorkflow)
+    | "MISSING_IMPLEMENTATION" // a step id has no implementation (checked by createWorkflow)
+    | "UNREACHABLE_STEP"; // a step has no path from the initial step
   message: string;
   stateId?: string;
   targetId?: string;
