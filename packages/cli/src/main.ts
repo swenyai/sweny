@@ -20,7 +20,14 @@ import {
 } from "@sweny-ai/engine";
 // Register built-in step types so resolveWorkflow() can look them up
 import "@sweny-ai/engine/builtin-steps";
-import type { StepCache, TriageConfig, WorkflowPhase, ImplementConfig, WorkflowDefinition } from "@sweny-ai/engine";
+import type {
+  StepCache,
+  TriageConfig,
+  WorkflowPhase,
+  ImplementConfig,
+  WorkflowDefinition,
+  RunObserver,
+} from "@sweny-ai/engine";
 import { createFsCache, hashConfig } from "./cache.js";
 import { loadDotenv, loadConfigFile, STARTER_CONFIG } from "./config-file.js";
 import { registerTriageCommand, registerImplementCommand, parseCliInputs, validateInputs } from "./config.js";
@@ -650,7 +657,7 @@ export function loadWorkflowFile(filePath: string): WorkflowDefinition {
 
 export async function workflowRunAction(
   file: string,
-  options: Record<string, unknown> & { steps?: string },
+  options: Record<string, unknown> & { steps?: string; json?: boolean },
 ): Promise<void> {
   if (options.steps) {
     const stepsPath = path.resolve(options.steps);
@@ -693,9 +700,11 @@ export async function workflowRunAction(
 
   const fileConfig = loadConfigFile();
   const config = parseCliInputs(options, fileConfig);
+  const isJson = Boolean(options.json);
+  const isTTY = !isJson && (process.stderr.isTTY ?? false);
 
   const logger = {
-    info: (...args: unknown[]) => console.log(...args),
+    info: isJson ? () => {} : (...args: unknown[]) => console.log(...args),
     debug: () => {},
     warn: (...args: unknown[]) => console.warn(...args),
     error: (...args: unknown[]) => console.error(...args),
@@ -703,16 +712,62 @@ export async function workflowRunAction(
 
   const providers = createProviders(config, logger);
 
-  console.log(chalk.cyan(`\n  sweny workflow run ${file}\n`));
+  // Track per-step entry time to compute elapsed on exit
+  const stepEnterTimes = new Map<string, number>();
+
+  const observer: RunObserver | undefined = isJson
+    ? undefined
+    : {
+        onEvent(event) {
+          switch (event.type) {
+            case "workflow:start":
+              process.stderr.write(`\n  ▲ ${chalk.bold(event.workflowName)}\n\n`);
+              break;
+            case "step:enter":
+              stepEnterTimes.set(event.stepId, Date.now());
+              process.stderr.write(`  ${c.subtle("○")} ${chalk.dim(event.stepId)}…\n`);
+              break;
+            case "step:exit": {
+              const icon =
+                event.result.status === "success"
+                  ? c.ok("✓")
+                  : event.result.status === "skipped"
+                    ? c.subtle("−")
+                    : c.fail("✗");
+              const cached = event.cached ? chalk.dim(" [cached]") : "";
+              const enterTime = stepEnterTimes.get(event.stepId) ?? event.timestamp;
+              const elapsedMs = Date.now() - enterTime;
+              const elapsed = chalk.dim(elapsedMs < 1000 ? `${elapsedMs}ms` : `${Math.round(elapsedMs / 100) / 10}s`);
+              if (isTTY) {
+                // Overwrite the pending "○ stepId…" line with the final status
+                process.stderr.write(`\x1B[1A\x1B[2K  ${icon} ${event.stepId}${cached}  ${elapsed}\n`);
+              } else {
+                process.stderr.write(`  ${icon} ${event.stepId}${cached}  ${elapsed}\n`);
+              }
+              break;
+            }
+            case "workflow:end":
+              process.stderr.write(`\n`);
+              break;
+          }
+        },
+      };
 
   try {
-    const result = await runWorkflow(workflow, mapToTriageConfig(config), providers, { logger });
+    const result = await runWorkflow(workflow, mapToTriageConfig(config), providers, { logger, observer });
+
+    if (isJson) {
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      process.exit(result.status === "failed" ? 1 : 0);
+      return;
+    }
+
     if (result.status === "failed") {
-      console.error(chalk.red(`\n  Workflow failed\n`));
+      console.error(chalk.red(`  Workflow failed\n`));
       process.exit(1);
       return;
     }
-    console.log(chalk.green(`\n  Workflow completed (${result.status})\n`));
+    console.log(chalk.green(`  Workflow completed (${result.status})\n`));
     process.exit(0);
   } catch (err) {
     console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
@@ -788,6 +843,7 @@ workflowCmd
   .description("Run a workflow from a YAML or JSON file")
   .option("--dry-run", "Validate workflow without running")
   .option("--steps <path>", "Path to a module that registers custom step types")
+  .option("--json", "Output result as JSON on stdout; suppress progress output")
   .action(workflowRunAction);
 
 workflowCmd
