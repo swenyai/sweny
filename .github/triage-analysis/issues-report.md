@@ -1,113 +1,68 @@
-# Issues Report — 2026-03-16
+# Issues Report — 2026-03-17
 
-## Issue 1: NewRelic and Sentry Provider Config Schemas Missing Required Env Var Fields
+## Issue 1: RecipeViewer Import Breaks Deploy Docs Build
 
 - **Severity**: High
-- **Environment**: All (production and local — any env using these providers)
-- **Frequency**: Affects all users of NewRelic or Sentry providers
+- **Environment**: CI (Deploy Docs workflow on main)
+- **Frequency**: Every push to main since studio v3.0.0 rename
 
 ### Description
-
-The engine's pre-flight validation (`validateWorkflowConfig` in `runner-recipe.ts`) checks
-`provider.configSchema.fields` to verify required environment variables are set before the
-workflow starts. Two providers have incomplete `fields` arrays — they list fewer env vars than
-their Zod schemas require — causing the pre-flight check to silently pass when critical env vars
-are missing, producing confusing runtime failures mid-workflow instead of a clear upfront error.
-
-**NewRelic** (`packages/providers/src/observability/newrelic.ts`):
-- Zod schema requires: `apiKey`, `accountId`
-- `newrelicProviderConfigSchema.fields` lists: only `NR_API_KEY`
-- Missing: `NR_ACCOUNT_ID`
-
-**Sentry** (`packages/providers/src/observability/sentry.ts`):
-- Zod schema requires: `authToken`, `organization`, `project`
-- `sentryProviderConfigSchema.fields` lists: only `SENTRY_AUTH_TOKEN`
-- Missing: `SENTRY_ORG`, `SENTRY_PROJECT`
+`packages/web/src/components/RecipeExplorer.tsx` imports `RecipeViewer` from
+`@sweny-ai/studio/viewer`, but this export was renamed to `WorkflowViewer` in studio v3.0.0.
+Rollup cannot resolve the import and the Deploy Docs build fails with exit code 1.
 
 ### Evidence
-
-`newrelic.ts` line 17-21 — configSchema only lists one field:
-```typescript
-export const newrelicProviderConfigSchema: ProviderConfigSchema = {
-  role: "observability",
-  name: "New Relic",
-  fields: [{ key: "apiKey", envVar: "NR_API_KEY", description: "New Relic User API key" }],
-  //       ^^^^^ missing accountId / NR_ACCOUNT_ID
-};
 ```
+[ERROR] [vite] ✗ Build failed in 2.11s
+src/components/RecipeExplorer.tsx (2:9): "RecipeViewer" is not exported by
+"../studio/dist-lib/viewer.js", imported by "src/components/RecipeExplorer.tsx".
 
-But `newrelic.ts` line 163-168 — `getAgentEnv()` shows the expected env vars:
-```typescript
-getAgentEnv(): Record<string, string> {
-  return {
-    NR_API_KEY: this.apiKey,
-    NR_ACCOUNT_ID: this.accountId,   // ← this IS required
-    NR_REGION: this.region,
-  };
-}
+file: /home/runner/work/sweny/sweny/packages/web/src/components/RecipeExplorer.tsx:2:9
+  1: import { useState, useRef, useCallback, useEffect } from "react";
+  2: import { RecipeViewer } from "@sweny-ai/studio/viewer";
+              ^
 ```
-
-`sentry.ts` line 18-22 — configSchema only lists one field, but Zod requires three:
-```typescript
-export const sentryProviderConfigSchema: ProviderConfigSchema = {
-  role: "observability",
-  name: "Sentry",
-  fields: [{ key: "authToken", envVar: "SENTRY_AUTH_TOKEN", description: "Sentry authentication token" }],
-  //       ^^^^^ missing organization/SENTRY_ORG, project/SENTRY_PROJECT
-};
-```
-
-`runner-recipe.ts` line 56-58 — the validation that is missed:
-```typescript
-const missing = provider.configSchema.fields
-  .filter((f) => f.required !== false && !process.env[f.envVar])
-  .map((f) => f.envVar);
-```
+Run ID: 23204701005, Job: build (67436666701)
 
 ### Root Cause Analysis
-
-When new required fields were added to the Zod schemas (accountId for NewRelic,
-organization/project for Sentry), the corresponding `ProviderConfigSchema.fields` arrays
-were not updated. The two validation paths (Zod and configSchema) became out of sync.
+Studio v3.0.0 renamed `RecipeViewer` → `WorkflowViewer` (breaking change documented in
+CHANGELOG.md). The `packages/web` package was not updated when this rename happened.
+`lib-viewer.ts` now exports only `WorkflowViewer`.
 
 ### Impact
-
-- Users running NewRelic or Sentry without `NR_ACCOUNT_ID` / `SENTRY_ORG` / `SENTRY_PROJECT`
-  pass pre-flight but get cryptic runtime failures when the provider actually executes API calls
-- Debug experience is poor: no clear error message pointing to the missing variable
-- All workflows using these providers are affected
+- Deploy Docs workflow fails on every push to main.
+- Documentation site cannot be rebuilt or deployed.
+- The `packages/web` SPA (RecipeExplorer page) is broken at build time.
 
 ### Suggested Fix
-
-Add the missing fields to each provider's `ProviderConfigSchema.fields`:
-
-**newrelic.ts**:
-```typescript
-fields: [
-  { key: "apiKey", envVar: "NR_API_KEY", description: "New Relic User API key" },
-  { key: "accountId", envVar: "NR_ACCOUNT_ID", description: "New Relic account ID" },
-],
-```
-
-**sentry.ts**:
-```typescript
-fields: [
-  { key: "authToken", envVar: "SENTRY_AUTH_TOKEN", description: "Sentry authentication token" },
-  { key: "organization", envVar: "SENTRY_ORG", description: "Sentry organization slug" },
-  { key: "project", envVar: "SENTRY_PROJECT", description: "Sentry project slug" },
-],
-```
+In `packages/web/src/components/RecipeExplorer.tsx`:
+1. Line 2: Change `import { RecipeViewer }` to `import { WorkflowViewer }`
+2. Line 1179: Change `<RecipeViewer` to `<WorkflowViewer`
 
 ### Files to Modify
-
-- `packages/providers/src/observability/newrelic.ts` — line 20, add accountId field
-- `packages/providers/src/observability/sentry.ts` — line 21, add organization and project fields
+- `packages/web/src/components/RecipeExplorer.tsx`
 
 ### Confidence Level
-
-Very High — direct code inspection confirms the mismatch; env var names confirmed via
-`getAgentEnv()` and `action/src/config.ts` validation logic.
+High — the rename in studio is documented, the old symbol provably does not exist in
+`dist-lib/viewer.js`, and the props interface is identical.
 
 ### GitHub Issues Status
-
 No existing GitHub Issues issue found — New issue will be created.
+
+---
+
+## Issue 2: Prettier Format Violations Break CI on Main (Known Issue)
+
+- **Severity**: Medium
+- **Environment**: CI (main branch)
+- **Frequency**: Every push to main
+
+### Description
+`npm run format:check` fails on three files with prettier violations.
+Files: `packages/action/tests/mapToTriageConfig.test.ts`,
+`packages/providers/src/coding-agent/claude-code.ts`,
+`packages/providers/src/coding-agent/google-gemini.ts`
+
+### GitHub Issues Status
+**Existing issue #65** — already tracked. PR #66 closed as failed attempt.
+→ No new issue or fix proposed for this. Recommend +1 on issue #65.
