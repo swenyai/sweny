@@ -17,6 +17,7 @@ vi.mock("./prompts.js", () => ({
   buildInvestigationPrompt: vi.fn().mockReturnValue("mock investigation prompt"),
   buildImplementPrompt: vi.fn().mockReturnValue("mock implement prompt"),
   buildPrDescriptionPrompt: vi.fn().mockReturnValue("mock pr description prompt"),
+  issueLink: vi.fn().mockReturnValue("[ENG-100](https://tracker.example.com/ENG-100)"),
 }));
 
 // Mock service-map to avoid fs reads inside parseServiceMap

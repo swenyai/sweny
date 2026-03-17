@@ -6,10 +6,15 @@ import { createCtx, silentLogger } from "../test-helpers.js";
 import type { StepResult } from "../../../types.js";
 
 vi.mock("fs");
-vi.mock("../prompts.js", () => ({
-  buildPrDescriptionPrompt: vi.fn().mockReturnValue("mock pr desc prompt"),
-  issueLink: vi.fn().mockReturnValue("[IDENTIFIER](https://issue.url)"),
-}));
+vi.mock("../prompts.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../prompts.js")>();
+  return {
+    ...real,
+    buildPrDescriptionPrompt: vi.fn().mockReturnValue("mock pr desc prompt"),
+    // issueLink is a pure function — use the real implementation so footer tests
+    // exercise the actual "Closes #N" / display-link logic.
+  };
+});
 vi.mock("@sweny-ai/providers/issue-tracking", () => ({
   canLinkPr: vi.fn(),
 }));
@@ -57,6 +62,7 @@ describe("createPr", () => {
     withAutoMerge?: boolean;
     skipImplementResult?: boolean;
     reviewMode?: "auto" | "review";
+    issueTrackerName?: string;
   }) {
     const results = new Map<string, StepResult>();
     results.set("create-issue", {
@@ -78,7 +84,10 @@ describe("createPr", () => {
     return createCtx({
       results,
       providers: buildRegistry({ withLinkPr: opts?.withLinkPr, withAutoMerge: opts?.withAutoMerge }),
-      config: opts?.reviewMode ? { reviewMode: opts.reviewMode } : undefined,
+      config: {
+        ...(opts?.reviewMode ? { reviewMode: opts.reviewMode } : {}),
+        ...(opts?.issueTrackerName ? { issueTrackerName: opts.issueTrackerName } : {}),
+      },
     });
   }
 
@@ -120,7 +129,7 @@ describe("createPr", () => {
     const ctx = buildCtx();
     await createPr(ctx);
     expect(createPullRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ body: "## Custom PR Description\nDetails here" }),
+      expect.objectContaining({ body: expect.stringContaining("## Custom PR Description\nDetails here") }),
     );
   });
 
@@ -260,5 +269,57 @@ describe("createPr", () => {
     const ctx = buildCtx({ reviewMode: "auto" });
     // enableAutoMerge throws but createPr should not propagate it
     await expect(createPr(ctx)).resolves.toMatchObject({ status: "success" });
+  });
+
+  // ---------------------------------------------------------------------------
+  // PR body footer (issue closing keyword)
+  // ---------------------------------------------------------------------------
+
+  it("appends 'Closes #N' to PR body for github-issues tracker", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const ctx = buildCtx({
+      issueTrackerName: "github-issues",
+      issueIdentifier: "#69",
+      issueUrl: "https://github.com/org/repo/issues/69",
+    });
+    await createPr(ctx);
+    const body: string = createPullRequest.mock.calls[0][0].body;
+    expect(body).toContain("Closes #69");
+  });
+
+  it("appends display link footer for non-GitHub tracker (linear)", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const ctx = buildCtx({
+      issueTrackerName: "linear",
+      issueIdentifier: "ENG-123",
+      issueUrl: "https://linear.app/org/issue/ENG-123",
+    });
+    await createPr(ctx);
+    const body: string = createPullRequest.mock.calls[0][0].body;
+    expect(body).toContain("ENG-123");
+    expect(body).not.toContain("Closes");
+  });
+
+  it("does not duplicate footer when Claude already wrote 'Closes #N'", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("## Fix\n\nCloses #69");
+    const ctx = buildCtx({
+      issueTrackerName: "github-issues",
+      issueIdentifier: "#69",
+      issueUrl: "https://github.com/org/repo/issues/69",
+    });
+    await createPr(ctx);
+    const body: string = createPullRequest.mock.calls[0][0].body;
+    const count = (body.match(/Closes #69/g) ?? []).length;
+    expect(count).toBe(1);
+  });
+
+  it("does not append footer when issueIdentifier is empty", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("## Fix\n\nDetails");
+    const ctx = buildCtx({ issueIdentifier: "", issueUrl: "" });
+    await createPr(ctx);
+    const body: string = createPullRequest.mock.calls[0][0].body;
+    expect(body).toBe("## Fix\n\nDetails");
   });
 });
