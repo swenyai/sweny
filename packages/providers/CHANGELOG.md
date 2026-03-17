@@ -1,5 +1,12 @@
 # @sweny-ai/providers
 
+## 1.1.2
+
+### Patch Changes
+
+- 3f87cc3: - fix(ci): resolve format and lint failures on main
+- a625f3c: Fix Prettier formatting violations in coding-agent and source-control provider files. No behavioral changes — formatting only.
+
 ## 1.1.1
 
 ### Patch Changes

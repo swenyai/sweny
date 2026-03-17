@@ -1,5 +1,14 @@
 # @sweny-ai/engine
 
+## 3.2.3
+
+### Patch Changes
+
+- 3f87cc3: - fix(ci): resolve format and lint failures on main
+- Updated dependencies [3f87cc3]
+- Updated dependencies [a625f3c]
+  - @sweny-ai/providers@1.1.2
+
 ## 3.2.2
 
 ### Patch Changes
