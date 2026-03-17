@@ -1,5 +1,17 @@
 # @sweny-ai/engine
 
+## 3.1.0
+
+### Minor Changes
+
+- 9325572: `validateWorkflow()` now detects unreachable steps (error code `UNREACHABLE_STEP`).
+  Steps with no execution path from `initial` are reported as validation errors,
+  helping catch dead code in workflow definitions early.
+
+### Patch Changes
+
+- 2af077b: Add `"UNREACHABLE_STEP"` to the `WorkflowDefinitionError.code` union — this code was emitted by `validateWorkflow()` but missing from the type, causing a TypeScript error in consuming code.
+
 ## 3.0.3
 
 ### Patch Changes

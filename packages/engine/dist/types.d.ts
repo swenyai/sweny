@@ -200,7 +200,7 @@ export interface Workflow<TConfig = unknown> {
 }
 /** Validation error describing a structural problem with a WorkflowDefinition. */
 export interface WorkflowDefinitionError {
-    code: "MISSING_INITIAL" | "UNKNOWN_TARGET" | "MISSING_IMPLEMENTATION";
+    code: "MISSING_INITIAL" | "UNKNOWN_TARGET" | "MISSING_IMPLEMENTATION" | "UNREACHABLE_STEP";
     message: string;
     stateId?: string;
     targetId?: string;

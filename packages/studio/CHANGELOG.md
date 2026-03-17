@@ -1,5 +1,23 @@
 # @sweny-ai/studio
 
+## 4.0.0
+
+### Minor Changes
+
+- 17ce7ac: Simulate mode now has an "Auto-run" button that runs all steps as stubs (always success), making it easy to visualize the full execution flow of any workflow — including custom workflows — without manual stepping.
+- da1d38a: Steps can now be renamed directly in the PropertiesPanel. Renaming cascades
+  all transition targets (`next`, `on`, and `initial`) throughout the definition.
+- 943fc8d: The Studio toolbar now has a "↓ TypeScript" export button. Downloads a `.ts`
+  file with the workflow definition typed as `WorkflowDefinition` and per-step
+  implementation stubs, ready to use with `@sweny-ai/engine`.
+
+### Patch Changes
+
+- 1b11317: Add first-time user onboarding: empty-state overlay when no steps exist, keyboard shortcuts help panel (? key), and TypeScript export button in the toolbar.
+- Updated dependencies [2af077b]
+- Updated dependencies [9325572]
+  - @sweny-ai/engine@3.1.0
+
 ## 3.3.0
 
 ### Minor Changes

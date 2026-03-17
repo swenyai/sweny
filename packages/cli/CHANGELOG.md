@@ -1,5 +1,14 @@
 # @sweny-ai/cli
 
+## 1.5.1
+
+### Patch Changes
+
+- c425659: CLI now prints actionable hints for credential errors: pre-run validation messages include direct links to get API keys, and runtime failures with auth/network errors display a targeted hint suggesting which credential to check.
+- Updated dependencies [2af077b]
+- Updated dependencies [9325572]
+  - @sweny-ai/engine@3.1.0
+
 ## 1.5.0
 
 ### Minor Changes
