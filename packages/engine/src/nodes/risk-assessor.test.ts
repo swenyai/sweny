@@ -79,4 +79,37 @@ describe("assessRisk", () => {
     expect(result.level).toBe("low");
     expect(result.reasons).toHaveLength(0);
   });
+
+  it("returns high for auth/ directory", () => {
+    expect(assessRisk(["src/auth/jwt.ts"]).level).toBe("high");
+    expect(assessRisk(["services/auth/handler.ts"]).level).toBe("high");
+  });
+
+  it("returns high for crypto/ directory", () => {
+    expect(assessRisk(["src/crypto/cipher.ts"]).level).toBe("high");
+  });
+
+  it("returns high for security/ directory", () => {
+    expect(assessRisk(["lib/security/policy.ts"]).level).toBe("high");
+  });
+
+  it("exactly 20 countable files stays low", () => {
+    const files = Array.from({ length: 20 }, (_, i) => `src/file${i}.ts`);
+    expect(assessRisk(files).level).toBe("low");
+  });
+
+  it("exactly 21 countable files is high", () => {
+    const files = Array.from({ length: 21 }, (_, i) => `src/file${i}.ts`);
+    expect(assessRisk(files).level).toBe("high");
+  });
+
+  it("returns high for nested package.json", () => {
+    expect(assessRisk(["packages/foo/package.json"]).level).toBe("high");
+  });
+
+  it("returns high for nested lockfiles", () => {
+    expect(assessRisk(["packages/foo/package-lock.json"]).level).toBe("high");
+    expect(assessRisk(["services/bar/pnpm-lock.yaml"]).level).toBe("high");
+    expect(assessRisk(["apps/ui/yarn.lock"]).level).toBe("high");
+  });
 });

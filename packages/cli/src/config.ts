@@ -330,6 +330,13 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.observabilityCredentials.path)
         errors.push("Missing: --log-file <path> is required for file provider");
       break;
+    case "honeycomb":
+      // honeycomb is a recognised name — credentials validated at runtime by the provider
+      break;
+    default:
+      errors.push(
+        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, honeycomb, file`,
+      );
   }
 
   // Issue tracker credentials by provider
@@ -352,6 +359,10 @@ export function validateInputs(config: CliConfig): string[] {
     case "file":
       // No external credentials needed
       break;
+    default:
+      errors.push(
+        `Unknown --issue-tracker-provider "${config.issueTrackerProvider}". Valid values: linear, jira, github-issues, file`,
+      );
   }
 
   // Source control credentials by provider
@@ -367,10 +378,17 @@ export function validateInputs(config: CliConfig): string[] {
     case "file":
       // No external credentials needed
       break;
+    default:
+      errors.push(
+        `Unknown --source-control-provider "${config.sourceControlProvider}". Valid values: github, gitlab, file`,
+      );
   }
 
   // Notification credentials by provider
   switch (config.notificationProvider) {
+    case "console":
+      // No credentials needed
+      break;
     case "slack":
     case "teams":
     case "discord":
@@ -386,6 +404,10 @@ export function validateInputs(config: CliConfig): string[] {
     case "file":
       // No external credentials needed
       break;
+    default:
+      errors.push(
+        `Unknown --notification-provider "${config.notificationProvider}". Valid values: console, slack, teams, discord, webhook, email, file`,
+      );
   }
 
   // Workspace tools: reject unknown names early

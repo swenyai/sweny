@@ -186,6 +186,43 @@ describe("sendNotification", () => {
     expect(payload.sections).toContainEqual(expect.objectContaining({ title: "Issues Found" }));
   });
 
+  it("shows dispatch-failed status as warning", async () => {
+    const ctx = buildCtx({
+      investigate: { status: "success", data: investigationData() },
+      "cross-repo-check": {
+        status: "success",
+        data: { outcome: "dispatch-failed", dispatched: false, targetRepo: "org/unreachable-repo" },
+      },
+    });
+
+    await sendNotification(ctx);
+
+    const payload = send.mock.calls[0][0];
+    expect(payload.status).toBe("warning");
+    expect(payload.summary).toContain("dispatch failed");
+    expect(payload.summary).toContain("org/unreachable-repo");
+  });
+
+  it("appends both log files when both exist", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      if (String(p).includes("investigation-log")) return "Investigation details";
+      if (String(p).includes("issues-report")) return "Issues found";
+      return "";
+    });
+
+    const ctx = buildCtx({
+      investigate: { status: "success", data: investigationData() },
+    });
+
+    await sendNotification(ctx);
+
+    const payload = send.mock.calls[0][0];
+    expect(payload.sections).toHaveLength(2);
+    expect(payload.sections[0].title).toBe("Investigation Log");
+    expect(payload.sections[1].title).toBe("Issues Found");
+  });
+
   it("falls back to issue data when no PR data exists", async () => {
     const ctx = buildCtx({
       investigate: { status: "success", data: investigationData() },

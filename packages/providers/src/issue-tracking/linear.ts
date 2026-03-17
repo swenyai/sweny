@@ -344,7 +344,8 @@ class LinearProvider implements IssueTrackingProvider, PrLinkCapable, LabelHisto
     `;
 
     const filter: Record<string, unknown> = {
-      labels: { id: { eq: labelId } },
+      // `some` wrapper: filter issues where at least one label matches the given ID
+      labels: { some: { id: { eq: labelId } } },
       createdAt: { gte: since },
     };
 

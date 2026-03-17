@@ -126,6 +126,7 @@ export interface PrData {
 
 /** Data from cross-repo-check step. */
 export interface CrossRepoData {
+  outcome: "local" | "dispatched" | "dispatch-failed";
   dispatched: boolean;
   targetRepo?: string;
 }

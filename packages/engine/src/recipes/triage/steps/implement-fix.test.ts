@@ -82,6 +82,15 @@ describe("implementFix", () => {
     expect(result.data?.existingPrUrl).toBe("https://github.com/org/repo/pull/42");
   });
 
+  it("open PR with issueOverride still skips (override only helps non-open state)", async () => {
+    findExistingPr.mockResolvedValue({ url: "https://github.com/org/repo/pull/10", state: "open" });
+    const ctx = buildCtx({ config: { issueOverride: "ENG-1" } });
+    const result = await implementFix(ctx);
+    expect(result.status).toBe("skipped");
+    expect(result.reason).toContain("https://github.com/org/repo/pull/10");
+    expect(install).not.toHaveBeenCalled();
+  });
+
   it("merged PR with issueOverride continues implementation", async () => {
     findExistingPr.mockResolvedValue({ url: "https://github.com/org/repo/pull/10", state: "merged" });
     hasNewCommits.mockResolvedValue(true);
@@ -123,6 +132,14 @@ describe("implementFix", () => {
       maxTurns: 25,
       env: { KEY: "val" },
     });
+  });
+
+  it("passes mcpServers from config to codingAgent.run()", async () => {
+    hasNewCommits.mockResolvedValue(true);
+    const mcpServers = { "my-server": { command: "npx", args: ["my-mcp"] } };
+    const ctx = buildCtx({ config: { mcpServers } });
+    await implementFix(ctx);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ mcpServers }));
   });
 
   it("fix-declined.md exists returns skip", async () => {
