@@ -368,6 +368,34 @@ export const PROVIDER_CATALOG: ProviderOption[] = [
     ],
   },
 
+  {
+    id: "axiom",
+    name: "Axiom",
+    category: "observability",
+    description: "Query events and logs from Axiom using APL (Axiom Processing Language).",
+    color: "#6366f1",
+    icon: "⚡",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "axiom",
+    envVars: [
+      { key: "AXIOM_TOKEN", description: "Axiom API token", required: true, secret: true },
+      {
+        key: "AXIOM_DATASET",
+        description: "Axiom dataset name",
+        required: true,
+        secret: false,
+        example: "production",
+      },
+      {
+        key: "AXIOM_ORG_ID",
+        description: "Axiom org ID (required for multi-org accounts)",
+        required: false,
+        secret: false,
+        example: "my-org",
+      },
+    ],
+  },
+
   // ── Issue Tracking ─────────────────────────────────────────────────────────
 
   {

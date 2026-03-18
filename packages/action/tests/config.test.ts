@@ -385,6 +385,24 @@ describe("parseInputs", () => {
     expect(config.observabilityCredentials.dataset).toBe("production");
   });
 
+  it("parses axiom credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "axiom",
+      "axiom-api-token": "axiom-tok-xxx",
+      "axiom-dataset": "production",
+      "axiom-org-id": "my-org",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("axiom");
+    expect(config.observabilityCredentials.apiToken).toBe("axiom-tok-xxx");
+    expect(config.observabilityCredentials.dataset).toBe("production");
+    expect(config.observabilityCredentials.orgId).toBe("my-org");
+  });
+
   it("parses jira fields from inputs", () => {
     const inputMap: Record<string, string> = {
       "jira-base-url": "https://myco.atlassian.net",
@@ -695,6 +713,12 @@ describe("validateInputs", () => {
     const errors = validateInputs(baseConfig({ observabilityProvider: "honeycomb", observabilityCredentials: {} }));
     expect(errors).toContainEqual(expect.stringContaining("honeycomb-api-key"));
     expect(errors).toContainEqual(expect.stringContaining("honeycomb-dataset"));
+  });
+
+  it("validates axiom requires axiom-api-token and axiom-dataset", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "axiom", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("axiom-api-token"));
+    expect(errors).toContainEqual(expect.stringContaining("axiom-dataset"));
   });
 
   it("validates slack notification requires webhook-url", () => {

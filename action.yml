@@ -37,7 +37,7 @@ inputs:
 
   # Observability provider
   observability-provider:
-    description: "Observability provider to use (datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, vercel, supabase, netlify, fly, render, file)"
+    description: "Observability provider to use (datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, honeycomb, axiom, heroku, opsgenie, pagerduty, prometheus, vercel, supabase, netlify, fly, render, file)"
     required: false
     default: "datadog"
 
@@ -191,6 +191,17 @@ inputs:
     required: false
   honeycomb-dataset:
     description: "Honeycomb dataset name"
+    required: false
+
+  # Axiom credentials (when observability-provider = axiom)
+  axiom-api-token:
+    description: "Axiom API token"
+    required: false
+  axiom-dataset:
+    description: "Axiom dataset name"
+    required: false
+  axiom-org-id:
+    description: "Axiom org ID (required for multi-org accounts)"
     required: false
 
   # Heroku credentials (when observability-provider = heroku)

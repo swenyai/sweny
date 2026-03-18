@@ -282,6 +282,12 @@ export function validateInputs(config: ActionConfig): string[] {
           "Missing required input: `honeycomb-dataset` is required when `observability-provider` is `honeycomb`",
         );
       break;
+    case "axiom":
+      if (!config.observabilityCredentials.apiToken)
+        errors.push("Missing required input: `axiom-api-token` is required when `observability-provider` is `axiom`");
+      if (!config.observabilityCredentials.dataset)
+        errors.push("Missing required input: `axiom-dataset` is required when `observability-provider` is `axiom`");
+      break;
     case "vercel":
       if (!config.observabilityCredentials.token)
         errors.push("Missing required input: `vercel-token` is required when `observability-provider` is `vercel`");
@@ -479,6 +485,12 @@ function parseObservabilityCredentials(provider: string): Record<string, string>
       return {
         apiKey: core.getInput("honeycomb-api-key"),
         dataset: core.getInput("honeycomb-dataset"),
+      };
+    case "axiom":
+      return {
+        apiToken: core.getInput("axiom-api-token"),
+        dataset: core.getInput("axiom-dataset"),
+        orgId: core.getInput("axiom-org-id"),
       };
     case "vercel":
       return {

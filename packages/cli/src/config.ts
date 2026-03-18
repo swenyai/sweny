@@ -146,6 +146,8 @@ export function registerTriageCommand(program: Command): Command {
     .option("--heroku-app-name <name>", "Heroku application name (required for heroku provider)")
     .option("--opsgenie-region <region>", "OpsGenie region (default: us)")
     .option("--honeycomb-dataset <name>", "Honeycomb dataset name (required for honeycomb provider)")
+    .option("--axiom-dataset <name>", "Axiom dataset name (required for axiom provider)")
+    .option("--axiom-org-id <id>", "Axiom org ID (required for multi-org Axiom accounts)")
     .option("--gitlab-base-url <url>", "GitLab base URL (default: https://gitlab.com)")
     .option("--json", "Output results as JSON", false)
     .option("--bell", "Ring terminal bell on completion", false)
@@ -360,6 +362,11 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.observabilityCredentials.dataset)
         errors.push("Missing: HONEYCOMB_DATASET is required for honeycomb provider");
       break;
+    case "axiom":
+      if (!config.observabilityCredentials.apiToken) errors.push("Missing: AXIOM_TOKEN is required for axiom provider");
+      if (!config.observabilityCredentials.dataset)
+        errors.push("Missing: AXIOM_DATASET or --axiom-dataset is required for axiom provider");
+      break;
     case "vercel":
       if (!config.observabilityCredentials.token)
         errors.push("Missing: VERCEL_TOKEN — create a token at https://vercel.com/account/tokens");
@@ -396,7 +403,7 @@ export function validateInputs(config: CliConfig): string[] {
       break;
     default:
       errors.push(
-        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, honeycomb, heroku, opsgenie, vercel, supabase, netlify, fly, render, file`,
+        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, honeycomb, heroku, opsgenie, axiom, vercel, supabase, netlify, fly, render, file`,
       );
   }
 
@@ -606,6 +613,12 @@ function parseObservabilityCredentials(
       return {
         apiKey: env.HONEYCOMB_API_KEY || "",
         dataset: (options.honeycombDataset as string) || env.HONEYCOMB_DATASET || f("honeycomb-dataset") || "",
+      };
+    case "axiom":
+      return {
+        apiToken: env.AXIOM_TOKEN || "",
+        dataset: (options.axiomDataset as string) || env.AXIOM_DATASET || f("axiom-dataset") || "",
+        orgId: (options.axiomOrgId as string) || env.AXIOM_ORG_ID || f("axiom-org-id") || "",
       };
     case "vercel":
       return {
