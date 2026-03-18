@@ -168,6 +168,34 @@ export const PROVIDER_CATALOG: ProviderOption[] = [
     ],
   },
 
+  {
+    id: "vercel",
+    name: "Vercel",
+    category: "observability",
+    description: "Query runtime logs from Vercel serverless function deployments.",
+    color: "#000000",
+    icon: "▲",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "vercel",
+    envVars: [
+      { key: "VERCEL_TOKEN", description: "Vercel personal access token", required: true, secret: true },
+      {
+        key: "VERCEL_PROJECT_ID",
+        description: "Vercel project ID",
+        required: true,
+        secret: false,
+        example: "prj_xxxxxxxxxxxxxxxxxxxx",
+      },
+      {
+        key: "VERCEL_TEAM_ID",
+        description: "Vercel team ID (optional, for team-owned projects)",
+        required: false,
+        secret: false,
+        example: "team_xxxxxxxxxxxxxxxxxxxx",
+      },
+    ],
+  },
+
   // ── Issue Tracking ─────────────────────────────────────────────────────────
 
   {
