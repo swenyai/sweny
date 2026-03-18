@@ -171,8 +171,8 @@ class VercelProvider implements ObservabilityProvider {
   }
 
   getPromptInstructions(): string {
-    const teamParam = this.teamId ? `?teamId=${this.teamId}` : "";
-    const teamSuffix = this.teamId ? `&teamId=${this.teamId}` : "";
+    const teamParam = this.teamId ? "?teamId=${VERCEL_TEAM_ID}" : "";
+    const teamSuffix = this.teamId ? "&teamId=${VERCEL_TEAM_ID}" : "";
 
     return `### Vercel Runtime Logs API
 - \`VERCEL_TOKEN\` - Personal access token (use in Authorization: Bearer header)

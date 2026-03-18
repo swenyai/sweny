@@ -63,6 +63,13 @@ function tableToService(table: string): string {
   return table.replace("_logs", "");
 }
 
+function inferLevel(message: string): string {
+  const lower = message.toLowerCase();
+  if (/\b(fatal|error|exception|panic)\b/.test(lower)) return "error";
+  if (/\b(warn|warning)\b/.test(lower)) return "warning";
+  return "info";
+}
+
 class SupabaseProvider implements ObservabilityProvider {
   private readonly managementApiKey: string;
   private readonly projectRef: string;
@@ -139,7 +146,7 @@ class SupabaseProvider implements ObservabilityProvider {
         all.push({
           timestamp: row.timestamp,
           service: tableToService(table),
-          level: opts.severity === "error" ? "error" : opts.severity === "warning" ? "warning" : "info",
+          level: inferLevel(row.event_message),
           message: row.event_message,
           attributes: row.metadata ?? {},
         });
@@ -193,7 +200,9 @@ You have DIRECT ACCESS to Supabase's Management API to query project logs via SQ
 
 Available log tables: \`postgres_logs\`, \`edge_logs\`, \`api_logs\`, \`auth_logs\`, \`storage_logs\`, \`realtime_logs\`
 
-All tables have: \`timestamp\` (ISO 8601), \`event_message\` (string), \`metadata\` (JSON object)
+All tables have: \`timestamp\` (ISO 8601 string), \`event_message\` (string), \`metadata\` (JSON object).
+Use ISO 8601 timestamps in WHERE clauses — e.g., \`'2024-01-01T00:00:00.000Z'\`.
+To get "last 1 hour": compute \`new Date(Date.now() - 3600000).toISOString()\` and substitute below.
 
 #### Example: Verify access / get project info
 \`\`\`bash
@@ -201,20 +210,22 @@ curl -s "https://api.supabase.com/v1/projects/\${SUPABASE_PROJECT_REF}" \\
   -H "Authorization: Bearer \${SUPABASE_MANAGEMENT_KEY}"
 \`\`\`
 
-#### Example: Query recent postgres errors
+#### Example: Query recent postgres errors (last 1h)
 \`\`\`bash
+SINCE=$(date -u -v-1H +"%Y-%m-%dT%H:%M:%S.000Z" 2>/dev/null || date -u --date="1 hour ago" +"%Y-%m-%dT%H:%M:%S.000Z")
 curl -s -X POST "https://api.supabase.com/v1/projects/\${SUPABASE_PROJECT_REF}/analytics/endpoints/logs.all" \\
   -H "Authorization: Bearer \${SUPABASE_MANAGEMENT_KEY}" \\
   -H "Content-Type: application/json" \\
-  -d '{"sql": "SELECT timestamp, event_message, metadata FROM postgres_logs WHERE timestamp > now() - interval 1 hour AND LOWER(event_message) LIKE '"'"'%error%'"'"' ORDER BY timestamp DESC LIMIT 100"}'
+  -d "{\"sql\": \"SELECT timestamp, event_message, metadata FROM postgres_logs WHERE timestamp > '$SINCE' AND (LOWER(event_message) LIKE '%error%' OR LOWER(event_message) LIKE '%fatal%') ORDER BY timestamp DESC LIMIT 100\"}"
 \`\`\`
 
-#### Example: Query recent edge function logs
+#### Example: Query recent edge function logs (last 1h)
 \`\`\`bash
+SINCE=$(date -u -v-1H +"%Y-%m-%dT%H:%M:%S.000Z" 2>/dev/null || date -u --date="1 hour ago" +"%Y-%m-%dT%H:%M:%S.000Z")
 curl -s -X POST "https://api.supabase.com/v1/projects/\${SUPABASE_PROJECT_REF}/analytics/endpoints/logs.all" \\
   -H "Authorization: Bearer \${SUPABASE_MANAGEMENT_KEY}" \\
   -H "Content-Type: application/json" \\
-  -d '{"sql": "SELECT timestamp, event_message, metadata FROM edge_logs WHERE timestamp > now() - interval 1 hour ORDER BY timestamp DESC LIMIT 100"}'
+  -d "{\"sql\": \"SELECT timestamp, event_message, metadata FROM edge_logs WHERE timestamp > '$SINCE' ORDER BY timestamp DESC LIMIT 100\"}"
 \`\`\``;
   }
 }

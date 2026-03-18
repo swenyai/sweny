@@ -25,7 +25,7 @@ import { claudeCode, openaiCodex, googleGemini } from "./coding-agent/index.js";
  * Instantiate an observability provider by name.
  *
  * @param name        - Provider key: "datadog" | "sentry" | "cloudwatch" | "splunk" |
- *                      "elastic" | "newrelic" | "loki" | "file"
+ *                      "elastic" | "newrelic" | "loki" | "file" | "vercel" | "supabase"
  * @param credentials - Key/value map of provider-specific credentials (same shape as
  *                      `parseObservabilityCredentials` returns in the CLI/Action).
  * @param logger      - Logger instance to pass to the provider.

@@ -167,8 +167,8 @@ describe("SupabaseProvider", () => {
 
   it("queryLogs maps rows to LogEntry correctly", async () => {
     const rows = [
-      makeLogRow("Connection timeout", "2026-03-18T10:00:01Z"),
-      makeLogRow("Query failed", "2026-03-18T10:00:00Z"),
+      makeLogRow("ERROR: connection timeout", "2026-03-18T10:00:01Z"),
+      makeLogRow("connection established", "2026-03-18T10:00:00Z"),
     ];
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
@@ -183,9 +183,34 @@ describe("SupabaseProvider", () => {
       timestamp: "2026-03-18T10:00:01Z",
       service: "postgres",
       level: "error",
-      message: "Connection timeout",
+      message: "ERROR: connection timeout",
       attributes: { extra: "data" },
     });
+    expect(logs[1]).toMatchObject({
+      timestamp: "2026-03-18T10:00:00Z",
+      service: "postgres",
+      level: "info",
+      message: "connection established",
+    });
+  });
+
+  it("queryLogs infers level from event_message content, not query severity", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        result: [
+          makeLogRow("FATAL: too many connections", "2026-03-18T10:00:03Z"),
+          makeLogRow("WARNING: slow query detected", "2026-03-18T10:00:02Z"),
+          makeLogRow("connection established", "2026-03-18T10:00:01Z"),
+        ],
+      }),
+    }));
+
+    const logs = await makeProvider().queryLogs({ timeRange: "1h", serviceFilter: "postgres", severity: "info" });
+
+    expect(logs[0].level).toBe("error");
+    expect(logs[1].level).toBe("warning");
+    expect(logs[2].level).toBe("info");
   });
 
   it("queryLogs returns empty array when all tables return no results", async () => {
@@ -213,23 +238,6 @@ describe("SupabaseProvider", () => {
 
   // aggregate
   it("aggregate queries all tables with error severity and returns counts", async () => {
-    let callCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-      callCount++;
-      const urlStr = url.toString();
-      if (urlStr.includes("analytics")) {
-        const body = JSON.parse((arguments[1] as any)?.body ?? "{}");
-        if (body.sql?.includes("postgres_logs")) {
-          return { ok: true, json: async () => ({ result: [makeLogRow("err1"), makeLogRow("err2")] }) };
-        }
-        if (body.sql?.includes("edge_logs")) {
-          return { ok: true, json: async () => ({ result: [makeLogRow("err3")] }) };
-        }
-        return { ok: true, json: async () => ({ result: [] }) };
-      }
-      return { ok: true, json: async () => ({}) };
-    });
-
     const mockFetch = vi.fn().mockImplementation(async (_url, opts) => {
       const urlStr = _url.toString();
       if (!urlStr.includes("analytics")) return { ok: true, json: async () => ({}) };
