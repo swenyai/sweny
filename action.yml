@@ -37,7 +37,7 @@ inputs:
 
   # Observability provider
   observability-provider:
-    description: "Observability provider to use (datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file)"
+    description: "Observability provider to use (datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, vercel, supabase, file)"
     required: false
     default: "datadog"
 
@@ -127,6 +127,25 @@ inputs:
   # File provider (when observability-provider = file)
   log-file-path:
     description: "Path to a local JSON log file (required when observability-provider is file)"
+    required: false
+
+  # Vercel credentials (when observability-provider = vercel)
+  vercel-token:
+    description: "Vercel personal access token"
+    required: false
+  vercel-project-id:
+    description: "Vercel project ID (prj_...)"
+    required: false
+  vercel-team-id:
+    description: "Vercel team ID (team_..., optional for team-owned projects)"
+    required: false
+
+  # Supabase credentials (when observability-provider = supabase)
+  supabase-management-key:
+    description: "Supabase management API key"
+    required: false
+  supabase-project-ref:
+    description: "Supabase project reference ID"
     required: false
 
   # Issue tracker provider

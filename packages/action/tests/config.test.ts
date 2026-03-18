@@ -225,6 +225,40 @@ describe("parseInputs", () => {
     expect(config.observabilityCredentials.orgId).toBe("tenant-1");
   });
 
+  it("parses vercel credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "vercel",
+      "vercel-token": "tok_xxx",
+      "vercel-project-id": "prj_abc",
+      "vercel-team-id": "team_xyz",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("vercel");
+    expect(config.observabilityCredentials.token).toBe("tok_xxx");
+    expect(config.observabilityCredentials.projectId).toBe("prj_abc");
+    expect(config.observabilityCredentials.teamId).toBe("team_xyz");
+  });
+
+  it("parses supabase credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "supabase",
+      "supabase-management-key": "sbp_xxx",
+      "supabase-project-ref": "abcdefgh",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("supabase");
+    expect(config.observabilityCredentials.managementApiKey).toBe("sbp_xxx");
+    expect(config.observabilityCredentials.projectRef).toBe("abcdefgh");
+  });
+
   it("parses jira fields from inputs", () => {
     const inputMap: Record<string, string> = {
       "jira-base-url": "https://myco.atlassian.net",
@@ -478,6 +512,18 @@ describe("validateInputs", () => {
   it("validates loki requires url", () => {
     const errors = validateInputs(baseConfig({ observabilityProvider: "loki", observabilityCredentials: {} }));
     expect(errors).toContainEqual(expect.stringContaining("loki-url"));
+  });
+
+  it("validates vercel requires token and project-id", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "vercel", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("vercel-token"));
+    expect(errors).toContainEqual(expect.stringContaining("vercel-project-id"));
+  });
+
+  it("validates supabase requires management-key and project-ref", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "supabase", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("supabase-management-key"));
+    expect(errors).toContainEqual(expect.stringContaining("supabase-project-ref"));
   });
 
   it("validates slack notification requires webhook-url", () => {

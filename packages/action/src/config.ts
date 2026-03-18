@@ -248,6 +248,24 @@ export function validateInputs(config: ActionConfig): string[] {
       if (!config.logFilePath)
         errors.push("Missing required input: `log-file-path` is required when `observability-provider` is `file`");
       break;
+    case "vercel":
+      if (!config.observabilityCredentials.token)
+        errors.push("Missing required input: `vercel-token` is required when `observability-provider` is `vercel`");
+      if (!config.observabilityCredentials.projectId)
+        errors.push(
+          "Missing required input: `vercel-project-id` is required when `observability-provider` is `vercel`",
+        );
+      break;
+    case "supabase":
+      if (!config.observabilityCredentials.managementApiKey)
+        errors.push(
+          "Missing required input: `supabase-management-key` is required when `observability-provider` is `supabase`",
+        );
+      if (!config.observabilityCredentials.projectRef)
+        errors.push(
+          "Missing required input: `supabase-project-ref` is required when `observability-provider` is `supabase`",
+        );
+      break;
   }
 
   // Issue tracker credentials by provider
@@ -383,6 +401,17 @@ function parseObservabilityCredentials(provider: string): Record<string, string>
     case "file":
       return {
         path: core.getInput("log-file-path"),
+      };
+    case "vercel":
+      return {
+        token: core.getInput("vercel-token"),
+        projectId: core.getInput("vercel-project-id"),
+        teamId: core.getInput("vercel-team-id"),
+      };
+    case "supabase":
+      return {
+        managementApiKey: core.getInput("supabase-management-key"),
+        projectRef: core.getInput("supabase-project-ref"),
       };
     default:
       return {};
