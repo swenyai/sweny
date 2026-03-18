@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/engine",
-  "version": "3.2.4",
+  "version": "3.2.5",
   "description": "Workflow engine for SWEny — composable DAG-based agentic workflows",
   "type": "module",
   "keywords": [
@@ -35,10 +35,10 @@
     "./schema": "./schema/workflow-definition.schema.json"
   },
   "dependencies": {
-    "@sweny-ai/providers": ">=1.1.2"
+    "@sweny-ai/providers": ">=1.1.4"
   },
   "peerDependencies": {
-    "@sweny-ai/providers": ">=1.1.2"
+    "@sweny-ai/providers": ">=1.1.4"
   },
   "devDependencies": {
     "@types/node": "^25",

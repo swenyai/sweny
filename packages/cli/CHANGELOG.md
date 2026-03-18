@@ -1,5 +1,22 @@
 # @sweny-ai/cli
 
+## 1.9.0
+
+### Minor Changes
+
+- f354f14: Skip results now suggest `--time-range` or `--service-filter` to widen the search; +1 results show the updated issue URL; cross-repo dispatch status is surfaced in the CLI summary.
+- f340618: Unknown provider names now fail immediately at startup with a clear error listing valid values — catches typos like `datdog` before the spinner starts.
+- 142ab8c: Warn at startup when an explicitly configured `serviceMapPath` points to a missing file, instead of silently disabling cross-repo routing.
+- d3e1ca3: `sweny init` now generates a config with a commented credential reference section showing the env var names and direct links to where each API key can be found.
+- cac43bb: Credential validation errors for Linear team ID, Jira credentials, and GitLab now include actionable hints pointing to where each value can be found.
+
+### Patch Changes
+
+- Updated dependencies [b2eb6e7]
+- Updated dependencies [b3e16fd]
+  - @sweny-ai/engine@3.2.5
+  - @sweny-ai/providers@1.1.4
+
 ## 1.8.1
 
 ### Patch Changes
