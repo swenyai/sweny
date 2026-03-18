@@ -102,7 +102,7 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # CLI flags override this file; env vars override this file; this file overrides defaults.
 
 # ── Providers ────────────────────────────────────────────────────────
-# observability-provider: datadog        # datadog | sentry | cloudwatch | splunk | elastic | newrelic | loki | file
+# observability-provider: datadog        # datadog | sentry | cloudwatch | splunk | elastic | newrelic | loki | vercel | supabase | file
 # issue-tracker-provider: github-issues  # github-issues | linear | jira
 # source-control-provider: github        # github | gitlab
 # coding-agent-provider: claude          # claude | codex | gemini
@@ -171,6 +171,15 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 #   JIRA_BASE_URL=https://your-org.atlassian.net
 #   JIRA_EMAIL=you@company.com  # your Atlassian account email
 #   JIRA_API_TOKEN=...          # https://id.atlassian.com/manage-profile/security/api-tokens
+#
+# Vercel (observability) — https://vercel.com/account/tokens
+#   VERCEL_TOKEN=...
+#   VERCEL_PROJECT_ID=prj_...      # Project Settings > General > Project ID
+#   VERCEL_TEAM_ID=team_...        # optional, for team-owned projects
+#
+# Supabase (observability) — https://supabase.com/dashboard/account/tokens
+#   SUPABASE_MANAGEMENT_KEY=...
+#   SUPABASE_PROJECT_REF=...       # Project Settings > General > Reference ID
 #
 # Slack (notifications) — https://api.slack.com/apps
 #   NOTIFICATION_WEBHOOK_URL=https://hooks.slack.com/services/...

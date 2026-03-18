@@ -334,9 +334,23 @@ export function validateInputs(config: CliConfig): string[] {
     case "honeycomb":
       // honeycomb is a recognised name — credentials validated at runtime by the provider
       break;
+    case "vercel":
+      if (!config.observabilityCredentials.token)
+        errors.push("Missing: VERCEL_TOKEN — create a token at https://vercel.com/account/tokens");
+      if (!config.observabilityCredentials.projectId)
+        errors.push("Missing: VERCEL_PROJECT_ID — find it in your Vercel project settings");
+      break;
+    case "supabase":
+      if (!config.observabilityCredentials.managementApiKey)
+        errors.push(
+          "Missing: SUPABASE_MANAGEMENT_KEY — create a token at https://supabase.com/dashboard/account/tokens",
+        );
+      if (!config.observabilityCredentials.projectRef)
+        errors.push("Missing: SUPABASE_PROJECT_REF — find it in your Supabase project settings > General");
+      break;
     default:
       errors.push(
-        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, honeycomb, file`,
+        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, honeycomb, vercel, supabase, file`,
       );
   }
 
@@ -522,6 +536,17 @@ function parseObservabilityCredentials(
     case "file":
       return {
         path: (options.logFile as string) || env.SWENY_LOG_FILE || f("log-file") || "",
+      };
+    case "vercel":
+      return {
+        token: env.VERCEL_TOKEN || "",
+        projectId: env.VERCEL_PROJECT_ID || f("vercel-project-id") || "",
+        teamId: env.VERCEL_TEAM_ID || f("vercel-team-id") || "",
+      };
+    case "supabase":
+      return {
+        managementApiKey: env.SUPABASE_MANAGEMENT_KEY || "",
+        projectRef: env.SUPABASE_PROJECT_REF || f("supabase-project-ref") || "",
       };
     default:
       return {};
