@@ -473,9 +473,6 @@ function buildAutoMcpServers(config: CliConfig): Record<string, MCPServerConfig>
   const tools = new Set(config.workspaceTools);
 
   // Slack MCP — requires workspace-tools includes "slack" AND SLACK_BOT_TOKEN is set.
-  // Note: @modelcontextprotocol/server-slack is deprecated upstream; users can override
-  // with their own `mcp-servers` entry once Slack publishes a stable replacement package.
-  // Bot token provides full bidirectional API access; separate from notification webhook.
   if (tools.has("slack")) {
     const slackBotToken = process.env.SLACK_BOT_TOKEN;
     if (slackBotToken) {
@@ -491,7 +488,6 @@ function buildAutoMcpServers(config: CliConfig): Record<string, MCPServerConfig>
   }
 
   // Notion MCP — requires workspace-tools includes "notion" AND NOTION_TOKEN is set.
-  // @notionhq/notion-mcp-server reads NOTION_TOKEN; NOTION_API_KEY accepted as fallback.
   if (tools.has("notion")) {
     const notionToken = process.env.NOTION_TOKEN || process.env.NOTION_API_KEY;
     if (notionToken) {
@@ -505,7 +501,6 @@ function buildAutoMcpServers(config: CliConfig): Record<string, MCPServerConfig>
   }
 
   // PagerDuty MCP — requires workspace-tools includes "pagerduty" AND PAGERDUTY_API_TOKEN is set.
-  // HTTP remote endpoint; auth uses "Token token=<key>" (not "Bearer").
   if (tools.has("pagerduty")) {
     const pagerdutyToken = process.env.PAGERDUTY_API_TOKEN;
     if (pagerdutyToken) {

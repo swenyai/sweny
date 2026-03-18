@@ -350,10 +350,6 @@ export function validateInputs(config: CliConfig): string[] {
           "Missing: LINEAR_TEAM_ID — find it in Linear > Settings > Workspace > Teams > [your team] > copy the ID from the URL",
         );
       break;
-    case "github-issues":
-      if (!config.githubToken && !config.botToken)
-        errors.push("Missing: GITHUB_TOKEN — create a Personal Access Token at https://github.com/settings/tokens");
-      break;
     case "jira":
       if (!config.jiraBaseUrl)
         errors.push("Missing: JIRA_BASE_URL — set to your Atlassian domain, e.g. https://your-org.atlassian.net");
