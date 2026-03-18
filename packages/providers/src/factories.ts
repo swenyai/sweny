@@ -7,7 +7,18 @@
 import type { Logger } from "./logger.js";
 import type { ObservabilityProvider } from "./observability/index.js";
 import type { CodingAgent } from "./coding-agent/index.js";
-import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file, vercel } from "./observability/index.js";
+import {
+  datadog,
+  sentry,
+  cloudwatch,
+  splunk,
+  elastic,
+  newrelic,
+  loki,
+  file,
+  vercel,
+  supabase,
+} from "./observability/index.js";
 import { claudeCode, openaiCodex, googleGemini } from "./coding-agent/index.js";
 
 /**
@@ -54,6 +65,8 @@ export function createObservabilityProvider(
       return file({ path: credentials.path, logger });
     case "vercel":
       return vercel({ token: credentials.token, projectId: credentials.projectId, teamId: credentials.teamId, logger });
+    case "supabase":
+      return supabase({ managementApiKey: credentials.managementApiKey, projectRef: credentials.projectRef, logger });
     default:
       throw new Error(`Unsupported observability provider: ${name}`);
   }

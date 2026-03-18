@@ -169,6 +169,26 @@ export const PROVIDER_CATALOG: ProviderOption[] = [
   },
 
   {
+    id: "supabase",
+    name: "Supabase",
+    category: "observability",
+    description: "Query postgres, edge function, API, and auth logs from Supabase projects.",
+    color: "#3ECF8E",
+    icon: "⚡",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "supabase",
+    envVars: [
+      { key: "SUPABASE_MANAGEMENT_KEY", description: "Supabase management API key", required: true, secret: true },
+      {
+        key: "SUPABASE_PROJECT_REF",
+        description: "Supabase project reference ID",
+        required: true,
+        secret: false,
+        example: "abcdefghijklmnop",
+      },
+    ],
+  },
+  {
     id: "vercel",
     name: "Vercel",
     category: "observability",

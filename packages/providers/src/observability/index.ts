@@ -11,3 +11,4 @@ export { file, fileConfigSchema, type FileConfig } from "./file.js";
 export { prometheus, prometheusConfigSchema, type PrometheusConfig } from "./prometheus.js";
 export { pagerduty, pagerdutyConfigSchema, type PagerDutyConfig } from "./pagerduty.js";
 export { vercel, vercelConfigSchema, type VercelConfig } from "./vercel.js";
+export { supabase, supabaseConfigSchema, type SupabaseConfig } from "./supabase.js";
