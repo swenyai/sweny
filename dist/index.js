@@ -54422,10 +54422,6 @@ function validateInputs(config) {
             if (!config.linearTeamId)
                 errors.push("Missing required input: `linear-team-id` is required when `issue-tracker-provider` is `linear`");
             break;
-        case "github-issues":
-            if (!config.githubToken && !config.botToken)
-                errors.push("Missing required input: `github-token` is required when `issue-tracker-provider` is `github-issues`");
-            break;
         case "jira":
             if (!config.jiraBaseUrl)
                 errors.push("Missing required input: `jira-base-url` is required when `issue-tracker-provider` is `jira`");
