@@ -1,5 +1,12 @@
 # @sweny-ai/providers
 
+## 1.1.5
+
+### Patch Changes
+
+- ec56c12: - fix(engine): clear stale fix-declined.md before implement-fix agent run
+  - fix: provider enum validation, JQL injection, e2e test isolation, +47 tests
+
 ## 1.1.4
 
 ### Patch Changes

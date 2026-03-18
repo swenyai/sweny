@@ -1,5 +1,14 @@
 # @sweny-ai/engine
 
+## 3.2.7
+
+### Patch Changes
+
+- ec56c12: - fix(engine): clear stale fix-declined.md before implement-fix agent run
+  - fix: provider enum validation, JQL injection, e2e test isolation, +47 tests
+- Updated dependencies [ec56c12]
+  - @sweny-ai/providers@1.1.5
+
 ## 3.2.6
 
 ### Patch Changes
@@ -10,7 +19,6 @@
   run's implement-fix step to be skipped even when the new agent succeeded. The
   file is now deleted before the coding agent starts, so only a freshly-written
   decline signals a skip.
-
 
 ## 3.2.5
 
