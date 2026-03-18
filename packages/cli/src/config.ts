@@ -359,6 +359,7 @@ export function validateInputs(config: CliConfig): string[] {
           "Missing: JIRA_API_TOKEN — create a token at https://id.atlassian.com/manage-profile/security/api-tokens",
         );
       break;
+    case "github-issues":
     case "file":
       // No external credentials needed
       break;
