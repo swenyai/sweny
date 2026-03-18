@@ -1,5 +1,16 @@
 # @sweny-ai/engine
 
+## 3.2.6
+
+### Patch Changes
+
+- 7b92353: Clear stale fix-declined.md before each implement-fix run
+
+  A `fix-declined.md` left over from a prior triage run would cause the current
+  run's implement-fix step to be skipped even when the new agent succeeded. The
+  file is now deleted before the coding agent starts, so only a freshly-written
+  decline signals a skip.
+
 ## 3.2.5
 
 ### Patch Changes

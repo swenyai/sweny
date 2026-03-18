@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/engine",
-  "version": "3.2.5",
+  "version": "3.2.6",
   "description": "Workflow engine for SWEny — composable DAG-based agentic workflows",
   "type": "module",
   "keywords": [
