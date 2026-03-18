@@ -575,11 +575,11 @@ describe("validateInputs", () => {
   it("rejects unknown workspace tool names", () => {
     const errors = validateInputs(baseConfig({ workspaceTools: ["slack", "unknowntool"] }));
     expect(errors).toContainEqual(expect.stringContaining("unknowntool"));
-    expect(errors).toContainEqual(expect.stringContaining("slack, notion, pagerduty, monday"));
+    expect(errors).toContainEqual(expect.stringContaining("asana"));
   });
 
   it("accepts all supported workspace tool names", () => {
-    const errors = validateInputs(baseConfig({ workspaceTools: ["slack", "notion", "pagerduty", "monday"] }));
+    const errors = validateInputs(baseConfig({ workspaceTools: ["slack", "notion", "pagerduty", "monday", "asana"] }));
     expect(errors).toEqual([]);
   });
 

@@ -220,6 +220,22 @@ function buildAutoMcpServers(config: ActionConfig): Record<string, MCPServerConf
     };
   }
 
+  // Jira / Confluence (Atlassian) MCP — inject when issue tracker is jira.
+  // Uses @sooperset/mcp-atlassian which supports API token auth (email + token).
+  // Env vars: JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN.
+  if (config.issueTrackerProvider === "jira" && config.jiraBaseUrl && config.jiraEmail && config.jiraApiToken) {
+    auto["jira"] = {
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@sooperset/mcp-atlassian@latest"],
+      env: {
+        JIRA_URL: config.jiraBaseUrl,
+        JIRA_EMAIL: config.jiraEmail,
+        JIRA_API_TOKEN: config.jiraApiToken,
+      },
+    };
+  }
+
   // Datadog MCP — HTTP transport (/unstable is the current versioned path for this endpoint)
   const ddKey = obsCreds.apiKey;
   const ddAppKey = obsCreds.appKey;
@@ -324,6 +340,20 @@ function buildAutoMcpServers(config: ActionConfig): Record<string, MCPServerConf
         command: "npx",
         args: ["-y", "@mondaydotcomorg/monday-api-mcp@latest"],
         env: { MONDAY_TOKEN: mondayToken },
+      };
+    }
+  }
+
+  // Asana MCP — requires workspace-tools includes "asana" AND ASANA_ACCESS_TOKEN is set.
+  // Personal Access Tokens from Settings > Apps > Developer apps in Asana.
+  if (tools.has("asana")) {
+    const asanaToken = process.env.ASANA_ACCESS_TOKEN;
+    if (asanaToken) {
+      auto["asana"] = {
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "asana-mcp@latest"],
+        env: { ASANA_ACCESS_TOKEN: asanaToken },
       };
     }
   }

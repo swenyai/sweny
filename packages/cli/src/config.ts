@@ -90,7 +90,7 @@ export interface CliConfig {
 
   // Workspace tool integrations — explicit opt-in for Category B MCP servers.
   // Credential env vars must also be present for injection to occur.
-  // Supported: slack, notion, pagerduty, monday
+  // Supported: slack, notion, pagerduty, monday, asana
   workspaceTools: string[];
 }
 
@@ -157,7 +157,7 @@ export function registerTriageCommand(program: Command): Command {
     .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
     .option(
       "--workspace-tools <tools>",
-      "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday)",
+      "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday, asana)",
     );
 }
 
@@ -260,7 +260,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
 }
 
 /** All recognized workspace tool names. Update here when adding a new Category B MCP server. */
-export const SUPPORTED_WORKSPACE_TOOLS = new Set(["slack", "notion", "pagerduty", "monday"]);
+export const SUPPORTED_WORKSPACE_TOOLS = new Set(["slack", "notion", "pagerduty", "monday", "asana"]);
 
 export function validateInputs(config: CliConfig): string[] {
   const errors: string[] = [];
@@ -669,7 +669,7 @@ export function registerImplementCommand(program: Command): Command {
     .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
     .option(
       "--workspace-tools <tools>",
-      "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday)",
+      "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday, asana)",
     )
     .option(
       "--review-mode <mode>",

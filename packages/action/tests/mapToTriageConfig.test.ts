@@ -262,6 +262,54 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
     expect(mcpServers?.["linear"]).toBeUndefined();
   });
 
+  it("injects Jira MCP server when issue tracker is jira with full credentials", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      issueTrackerProvider: "jira",
+      jiraBaseUrl: "https://myco.atlassian.net",
+      jiraEmail: "bot@myco.com",
+      jiraApiToken: "jira-tok",
+      githubToken: "",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> };
+    expect(mcpServers?.["jira"]).toMatchObject({
+      type: "stdio",
+      command: "npx",
+      env: {
+        JIRA_URL: "https://myco.atlassian.net",
+        JIRA_EMAIL: "bot@myco.com",
+        JIRA_API_TOKEN: "jira-tok",
+      },
+    });
+  });
+
+  it("does not inject Jira MCP server when jiraApiToken is absent", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      issueTrackerProvider: "jira",
+      jiraBaseUrl: "https://myco.atlassian.net",
+      jiraEmail: "bot@myco.com",
+      jiraApiToken: "",
+      githubToken: "",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> | undefined };
+    expect(mcpServers?.["jira"]).toBeUndefined();
+  });
+
+  it("does not inject Jira MCP server when issue tracker is not jira", () => {
+    const config: ActionConfig = {
+      ...BASE,
+      issueTrackerProvider: "linear",
+      linearApiKey: "",
+      jiraBaseUrl: "https://myco.atlassian.net",
+      jiraEmail: "bot@myco.com",
+      jiraApiToken: "jira-tok",
+      githubToken: "",
+    };
+    const { mcpServers } = mapToTriageConfig(config) as { mcpServers: Record<string, unknown> | undefined };
+    expect(mcpServers?.["jira"]).toBeUndefined();
+  });
+
   it("user-supplied mcpServers override auto-injected ones on key conflict", () => {
     const config: ActionConfig = {
       ...BASE,
@@ -566,6 +614,50 @@ describe("mapToTriageConfig — buildAutoMcpServers", () => {
       });
     } finally {
       delete process.env.MONDAY_TOKEN;
+    }
+  });
+
+  it("injects Asana MCP server when declared and ASANA_ACCESS_TOKEN is set", () => {
+    process.env.ASANA_ACCESS_TOKEN = "asana-pat-abc";
+    try {
+      const { mcpServers } = mapToTriageConfig({ ...BASE, githubToken: "", workspaceTools: ["asana"] }) as {
+        mcpServers: Record<string, unknown>;
+      };
+      expect(mcpServers?.["asana"]).toMatchObject({
+        type: "stdio",
+        command: "npx",
+        env: { ASANA_ACCESS_TOKEN: "asana-pat-abc" },
+      });
+    } finally {
+      delete process.env.ASANA_ACCESS_TOKEN;
+    }
+  });
+
+  it("does not inject Asana MCP when token is absent", () => {
+    delete process.env.ASANA_ACCESS_TOKEN;
+    const { mcpServers } = mapToTriageConfig({
+      ...BASE,
+      githubToken: "",
+      botToken: "",
+      mcpServers: {},
+      workspaceTools: ["asana"],
+    }) as { mcpServers: Record<string, unknown> | undefined };
+    expect(mcpServers?.["asana"]).toBeUndefined();
+  });
+
+  it("does not inject Asana MCP when tool is not declared", () => {
+    process.env.ASANA_ACCESS_TOKEN = "asana-pat-abc";
+    try {
+      const { mcpServers } = mapToTriageConfig({
+        ...BASE,
+        githubToken: "",
+        botToken: "",
+        mcpServers: {},
+        workspaceTools: [],
+      }) as { mcpServers: Record<string, unknown> | undefined };
+      expect(mcpServers?.["asana"]).toBeUndefined();
+    } finally {
+      delete process.env.ASANA_ACCESS_TOKEN;
     }
   });
 

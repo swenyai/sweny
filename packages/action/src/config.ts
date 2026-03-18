@@ -77,7 +77,7 @@ export interface ActionConfig {
   mcpServers: Record<string, MCPServerConfig>;
 
   // Workspace tool integrations — explicit opt-in for Category B MCP servers.
-  // Supported: slack, notion, pagerduty, monday
+  // Supported: slack, notion, pagerduty, monday, asana
   workspaceTools: string[];
 
   // Runtime context
@@ -179,7 +179,7 @@ function parseMcpServers(json: string): Record<string, MCPServerConfig> {
 }
 
 /** All recognized workspace tool names. Update here when adding a new Category B MCP server. */
-export const SUPPORTED_WORKSPACE_TOOLS = new Set<string>(["slack", "notion", "pagerduty", "monday"]);
+export const SUPPORTED_WORKSPACE_TOOLS = new Set<string>(["slack", "notion", "pagerduty", "monday", "asana"]);
 
 export function validateInputs(config: ActionConfig): string[] {
   const errors: string[] = [];

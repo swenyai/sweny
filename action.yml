@@ -377,7 +377,7 @@ inputs:
     description: >-
       Comma-separated list of workspace tool integrations to enable.
       Each tool injects its MCP server into the coding agent when the corresponding
-      credential env var is also present. Supported values: slack, notion, pagerduty, monday.
+      credential env var is also present. Supported values: slack, notion, pagerduty, monday, asana.
       Example: "slack,notion"
     required: false
     default: ""
