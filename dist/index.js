@@ -53449,6 +53449,12 @@ async function implementFix(ctx) {
     // -------------------------------------------------------------------------
     // 3. Install Claude and implement fix
     // -------------------------------------------------------------------------
+    // Remove any fix-declined.md left over from a prior run — only a file written
+    // during *this* agent invocation should cause the step to be skipped.
+    const fixDeclinedPath = `${analysisDir}/fix-declined.md`;
+    if (external_node_fs_.existsSync(fixDeclinedPath)) {
+        external_node_fs_.rmSync(fixDeclinedPath);
+    }
     await codingAgent.install();
     const implementPrompt = buildImplementPrompt(issueIdentifier, analysisDir, config.issueTrackerName);
     await codingAgent.run({
@@ -53461,7 +53467,6 @@ async function implementFix(ctx) {
     // 4. Check for code changes
     // -------------------------------------------------------------------------
     // Check if fix was declined
-    const fixDeclinedPath = `${analysisDir}/fix-declined.md`;
     if (external_node_fs_.existsSync(fixDeclinedPath)) {
         const reason = external_node_fs_.readFileSync(fixDeclinedPath, "utf-8").trim();
         ctx.logger.info(`Fix was declined by Claude: ${reason.slice(0, 200)}`);
