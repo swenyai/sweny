@@ -185,6 +185,14 @@ inputs:
     description: "PagerDuty API key"
     required: false
 
+  # Honeycomb credentials (when observability-provider = honeycomb)
+  honeycomb-api-key:
+    description: "Honeycomb API key"
+    required: false
+  honeycomb-dataset:
+    description: "Honeycomb dataset name"
+    required: false
+
   # Heroku credentials (when observability-provider = heroku)
   heroku-api-key:
     description: "Heroku API key"

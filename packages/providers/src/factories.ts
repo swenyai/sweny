@@ -25,6 +25,7 @@ import {
   render,
   heroku,
   opsgenie,
+  honeycomb,
 } from "./observability/index.js";
 import { claudeCode, openaiCodex, googleGemini } from "./coding-agent/index.js";
 
@@ -93,6 +94,8 @@ export function createObservabilityProvider(
         region: (credentials.region ?? "us") as "us" | "eu",
         logger,
       });
+    case "honeycomb":
+      return honeycomb({ apiKey: credentials.apiKey, dataset: credentials.dataset, logger });
     default:
       throw new Error(`Unsupported observability provider: ${name}`);
   }

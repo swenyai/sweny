@@ -145,6 +145,7 @@ export function registerTriageCommand(program: Command): Command {
     .option("--prometheus-token <token>", "Prometheus bearer token (optional)")
     .option("--heroku-app-name <name>", "Heroku application name (required for heroku provider)")
     .option("--opsgenie-region <region>", "OpsGenie region (default: us)")
+    .option("--honeycomb-dataset <name>", "Honeycomb dataset name (required for honeycomb provider)")
     .option("--gitlab-base-url <url>", "GitLab base URL (default: https://gitlab.com)")
     .option("--json", "Output results as JSON", false)
     .option("--bell", "Ring terminal bell on completion", false)
@@ -354,7 +355,10 @@ export function validateInputs(config: CliConfig): string[] {
         errors.push("Missing: OPSGENIE_API_KEY is required for opsgenie provider");
       break;
     case "honeycomb":
-      // honeycomb is a recognised name — credentials validated at runtime by the provider
+      if (!config.observabilityCredentials.apiKey)
+        errors.push("Missing: HONEYCOMB_API_KEY is required for honeycomb provider");
+      if (!config.observabilityCredentials.dataset)
+        errors.push("Missing: HONEYCOMB_DATASET is required for honeycomb provider");
       break;
     case "vercel":
       if (!config.observabilityCredentials.token)
@@ -392,7 +396,7 @@ export function validateInputs(config: CliConfig): string[] {
       break;
     default:
       errors.push(
-        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, heroku, opsgenie, honeycomb, vercel, supabase, netlify, fly, render, file`,
+        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, honeycomb, heroku, opsgenie, vercel, supabase, netlify, fly, render, file`,
       );
   }
 
@@ -597,6 +601,11 @@ function parseObservabilityCredentials(
       return {
         apiKey: env.OPSGENIE_API_KEY || "",
         region: (options.opsgenieRegion as string) || env.OPSGENIE_REGION || f("opsgenie-region") || "us",
+      };
+    case "honeycomb":
+      return {
+        apiKey: env.HONEYCOMB_API_KEY || "",
+        dataset: (options.honeycombDataset as string) || env.HONEYCOMB_DATASET || f("honeycomb-dataset") || "",
       };
     case "vercel":
       return {

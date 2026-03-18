@@ -272,6 +272,16 @@ export function validateInputs(config: ActionConfig): string[] {
           "Missing required input: `opsgenie-api-key` is required when `observability-provider` is `opsgenie`",
         );
       break;
+    case "honeycomb":
+      if (!config.observabilityCredentials.apiKey)
+        errors.push(
+          "Missing required input: `honeycomb-api-key` is required when `observability-provider` is `honeycomb`",
+        );
+      if (!config.observabilityCredentials.dataset)
+        errors.push(
+          "Missing required input: `honeycomb-dataset` is required when `observability-provider` is `honeycomb`",
+        );
+      break;
     case "vercel":
       if (!config.observabilityCredentials.token)
         errors.push("Missing required input: `vercel-token` is required when `observability-provider` is `vercel`");
@@ -464,6 +474,11 @@ function parseObservabilityCredentials(provider: string): Record<string, string>
       return {
         apiKey: core.getInput("opsgenie-api-key"),
         region: core.getInput("opsgenie-region") || "us",
+      };
+    case "honeycomb":
+      return {
+        apiKey: core.getInput("honeycomb-api-key"),
+        dataset: core.getInput("honeycomb-dataset"),
       };
     case "vercel":
       return {

@@ -200,6 +200,10 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # PagerDuty (observability) — https://your-account.pagerduty.com/api_keys
 #   PAGERDUTY_API_KEY=...
 #
+# Honeycomb (observability) — https://docs.honeycomb.io/api/
+#   HONEYCOMB_API_KEY=...
+#   HONEYCOMB_DATASET=...        # dataset name (e.g. production)
+#
 # Heroku (observability) — https://devcenter.heroku.com/articles/platform-api-reference
 #   HEROKU_API_KEY=...           # https://dashboard.heroku.com/account
 #   HEROKU_APP_NAME=...          # the name of your Heroku application

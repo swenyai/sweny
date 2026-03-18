@@ -308,6 +308,26 @@ export const PROVIDER_CATALOG: ProviderOption[] = [
   },
 
   {
+    id: "honeycomb",
+    name: "Honeycomb",
+    category: "observability",
+    description: "Query events and traces from Honeycomb using the Query API.",
+    color: "#F5A623",
+    icon: "🍯",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "honeycomb",
+    envVars: [
+      { key: "HONEYCOMB_API_KEY", description: "Honeycomb API key", required: true, secret: true },
+      {
+        key: "HONEYCOMB_DATASET",
+        description: "Honeycomb dataset name",
+        required: true,
+        secret: false,
+        example: "production",
+      },
+    ],
+  },
+  {
     id: "heroku",
     name: "Heroku",
     category: "observability",

@@ -369,6 +369,22 @@ describe("parseInputs", () => {
     expect(config.observabilityCredentials.region).toBe("eu");
   });
 
+  it("parses honeycomb credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "honeycomb",
+      "honeycomb-api-key": "hcaik_xxx",
+      "honeycomb-dataset": "production",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("honeycomb");
+    expect(config.observabilityCredentials.apiKey).toBe("hcaik_xxx");
+    expect(config.observabilityCredentials.dataset).toBe("production");
+  });
+
   it("parses jira fields from inputs", () => {
     const inputMap: Record<string, string> = {
       "jira-base-url": "https://myco.atlassian.net",
@@ -673,6 +689,12 @@ describe("validateInputs", () => {
   it("validates opsgenie requires opsgenie-api-key", () => {
     const errors = validateInputs(baseConfig({ observabilityProvider: "opsgenie", observabilityCredentials: {} }));
     expect(errors).toContainEqual(expect.stringContaining("opsgenie-api-key"));
+  });
+
+  it("validates honeycomb requires honeycomb-api-key and honeycomb-dataset", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "honeycomb", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("honeycomb-api-key"));
+    expect(errors).toContainEqual(expect.stringContaining("honeycomb-dataset"));
   });
 
   it("validates slack notification requires webhook-url", () => {
