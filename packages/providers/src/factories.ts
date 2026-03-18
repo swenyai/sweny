@@ -23,6 +23,8 @@ import {
   netlify,
   fly,
   render,
+  heroku,
+  opsgenie,
 } from "./observability/index.js";
 import { claudeCode, openaiCodex, googleGemini } from "./coding-agent/index.js";
 
@@ -31,7 +33,7 @@ import { claudeCode, openaiCodex, googleGemini } from "./coding-agent/index.js";
  *
  * @param name        - Provider key: "datadog" | "sentry" | "cloudwatch" | "splunk" |
  *                      "elastic" | "newrelic" | "loki" | "file" | "prometheus" | "pagerduty" |
- *                      "vercel" | "supabase" | "netlify" | "fly" | "render"
+ *                      "vercel" | "supabase" | "netlify" | "fly" | "render" | "heroku" | "opsgenie"
  * @param credentials - Key/value map of provider-specific credentials (same shape as
  *                      `parseObservabilityCredentials` returns in the CLI/Action).
  * @param logger      - Logger instance to pass to the provider.
@@ -83,6 +85,14 @@ export function createObservabilityProvider(
       return fly({ token: credentials.token, appName: credentials.appName, logger });
     case "render":
       return render({ apiKey: credentials.apiKey, serviceId: credentials.serviceId, logger });
+    case "heroku":
+      return heroku({ apiKey: credentials.apiKey, appName: credentials.appName, logger });
+    case "opsgenie":
+      return opsgenie({
+        apiKey: credentials.apiKey,
+        region: (credentials.region ?? "us") as "us" | "eu",
+        logger,
+      });
     default:
       throw new Error(`Unsupported observability provider: ${name}`);
   }

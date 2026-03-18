@@ -337,6 +337,38 @@ describe("parseInputs", () => {
     expect(config.observabilityCredentials.apiKey).toBe("pd-key-xxx");
   });
 
+  it("parses heroku credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "heroku",
+      "heroku-api-key": "heroku-key-xxx",
+      "heroku-app-name": "my-heroku-app",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("heroku");
+    expect(config.observabilityCredentials.apiKey).toBe("heroku-key-xxx");
+    expect(config.observabilityCredentials.appName).toBe("my-heroku-app");
+  });
+
+  it("parses opsgenie credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "opsgenie",
+      "opsgenie-api-key": "og-key-xxx",
+      "opsgenie-region": "eu",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("opsgenie");
+    expect(config.observabilityCredentials.apiKey).toBe("og-key-xxx");
+    expect(config.observabilityCredentials.region).toBe("eu");
+  });
+
   it("parses jira fields from inputs", () => {
     const inputMap: Record<string, string> = {
       "jira-base-url": "https://myco.atlassian.net",
@@ -630,6 +662,17 @@ describe("validateInputs", () => {
   it("validates pagerduty requires pagerduty-api-key", () => {
     const errors = validateInputs(baseConfig({ observabilityProvider: "pagerduty", observabilityCredentials: {} }));
     expect(errors).toContainEqual(expect.stringContaining("pagerduty-api-key"));
+  });
+
+  it("validates heroku requires heroku-api-key and heroku-app-name", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "heroku", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("heroku-api-key"));
+    expect(errors).toContainEqual(expect.stringContaining("heroku-app-name"));
+  });
+
+  it("validates opsgenie requires opsgenie-api-key", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "opsgenie", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("opsgenie-api-key"));
   });
 
   it("validates slack notification requires webhook-url", () => {

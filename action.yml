@@ -185,6 +185,22 @@ inputs:
     description: "PagerDuty API key"
     required: false
 
+  # Heroku credentials (when observability-provider = heroku)
+  heroku-api-key:
+    description: "Heroku API key"
+    required: false
+  heroku-app-name:
+    description: "Heroku application name"
+    required: false
+
+  # OpsGenie credentials (when observability-provider = opsgenie)
+  opsgenie-api-key:
+    description: "OpsGenie API key"
+    required: false
+  opsgenie-region:
+    description: "OpsGenie region (us or eu, default: us)"
+    required: false
+
   # Issue tracker provider
   issue-tracker-provider:
     description: "Issue tracker provider to use (github-issues, linear, jira)"

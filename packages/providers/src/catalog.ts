@@ -307,6 +307,47 @@ export const PROVIDER_CATALOG: ProviderOption[] = [
     ],
   },
 
+  {
+    id: "heroku",
+    name: "Heroku",
+    category: "observability",
+    description: "Query runtime logs from Heroku dynos via the Logplex API.",
+    color: "#430098",
+    icon: "⬡",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "heroku",
+    envVars: [
+      { key: "HEROKU_API_KEY", description: "Heroku API key", required: true, secret: true },
+      {
+        key: "HEROKU_APP_NAME",
+        description: "Heroku application name",
+        required: true,
+        secret: false,
+        example: "my-app",
+      },
+    ],
+  },
+  {
+    id: "opsgenie",
+    name: "OpsGenie",
+    category: "observability",
+    description: "Query open and recent incidents from Atlassian OpsGenie.",
+    color: "#172B4D",
+    icon: "🚨",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "opsgenie",
+    envVars: [
+      { key: "OPSGENIE_API_KEY", description: "OpsGenie API key", required: true, secret: true },
+      {
+        key: "OPSGENIE_REGION",
+        description: "OpsGenie region (us or eu, default: us)",
+        required: false,
+        secret: false,
+        example: "eu",
+      },
+    ],
+  },
+
   // ── Issue Tracking ─────────────────────────────────────────────────────────
 
   {

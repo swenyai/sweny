@@ -260,6 +260,18 @@ export function validateInputs(config: ActionConfig): string[] {
           "Missing required input: `pagerduty-api-key` is required when `observability-provider` is `pagerduty`",
         );
       break;
+    case "heroku":
+      if (!config.observabilityCredentials.apiKey)
+        errors.push("Missing required input: `heroku-api-key` is required when `observability-provider` is `heroku`");
+      if (!config.observabilityCredentials.appName)
+        errors.push("Missing required input: `heroku-app-name` is required when `observability-provider` is `heroku`");
+      break;
+    case "opsgenie":
+      if (!config.observabilityCredentials.apiKey)
+        errors.push(
+          "Missing required input: `opsgenie-api-key` is required when `observability-provider` is `opsgenie`",
+        );
+      break;
     case "vercel":
       if (!config.observabilityCredentials.token)
         errors.push("Missing required input: `vercel-token` is required when `observability-provider` is `vercel`");
@@ -442,6 +454,16 @@ function parseObservabilityCredentials(provider: string): Record<string, string>
     case "pagerduty":
       return {
         apiKey: core.getInput("pagerduty-api-key"),
+      };
+    case "heroku":
+      return {
+        apiKey: core.getInput("heroku-api-key"),
+        appName: core.getInput("heroku-app-name"),
+      };
+    case "opsgenie":
+      return {
+        apiKey: core.getInput("opsgenie-api-key"),
+        region: core.getInput("opsgenie-region") || "us",
       };
     case "vercel":
       return {

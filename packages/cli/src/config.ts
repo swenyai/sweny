@@ -143,6 +143,8 @@ export function registerTriageCommand(program: Command): Command {
     .option("--newrelic-region <region>", "New Relic region (default: us)")
     .option("--prometheus-url <url>", "Prometheus base URL (required for prometheus provider)")
     .option("--prometheus-token <token>", "Prometheus bearer token (optional)")
+    .option("--heroku-app-name <name>", "Heroku application name (required for heroku provider)")
+    .option("--opsgenie-region <region>", "OpsGenie region (default: us)")
     .option("--gitlab-base-url <url>", "GitLab base URL (default: https://gitlab.com)")
     .option("--json", "Output results as JSON", false)
     .option("--bell", "Ring terminal bell on completion", false)
@@ -341,6 +343,16 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.observabilityCredentials.apiKey)
         errors.push("Missing: PAGERDUTY_API_KEY is required for pagerduty provider");
       break;
+    case "heroku":
+      if (!config.observabilityCredentials.apiKey)
+        errors.push("Missing: HEROKU_API_KEY is required for heroku provider");
+      if (!config.observabilityCredentials.appName)
+        errors.push("Missing: HEROKU_APP_NAME or --heroku-app-name is required for heroku provider");
+      break;
+    case "opsgenie":
+      if (!config.observabilityCredentials.apiKey)
+        errors.push("Missing: OPSGENIE_API_KEY is required for opsgenie provider");
+      break;
     case "honeycomb":
       // honeycomb is a recognised name — credentials validated at runtime by the provider
       break;
@@ -380,7 +392,7 @@ export function validateInputs(config: CliConfig): string[] {
       break;
     default:
       errors.push(
-        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, honeycomb, vercel, supabase, netlify, fly, render, file`,
+        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, heroku, opsgenie, honeycomb, vercel, supabase, netlify, fly, render, file`,
       );
   }
 
@@ -575,6 +587,16 @@ function parseObservabilityCredentials(
     case "pagerduty":
       return {
         apiKey: env.PAGERDUTY_API_KEY || "",
+      };
+    case "heroku":
+      return {
+        apiKey: env.HEROKU_API_KEY || "",
+        appName: (options.herokuAppName as string) || env.HEROKU_APP_NAME || f("heroku-app-name") || "",
+      };
+    case "opsgenie":
+      return {
+        apiKey: env.OPSGENIE_API_KEY || "",
+        region: (options.opsgenieRegion as string) || env.OPSGENIE_REGION || f("opsgenie-region") || "us",
       };
     case "vercel":
       return {

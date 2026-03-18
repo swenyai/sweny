@@ -15,3 +15,5 @@ export { supabase, supabaseConfigSchema, type SupabaseConfig } from "./supabase.
 export { netlify, netlifyConfigSchema, type NetlifyConfig } from "./netlify.js";
 export { fly, flyConfigSchema, type FlyConfig } from "./fly.js";
 export { render, renderConfigSchema, type RenderConfig } from "./render.js";
+export { heroku, herokuConfigSchema, type HerokuConfig } from "./heroku.js";
+export { opsgenie, opsgenieConfigSchema, type OpsGenieConfig } from "./opsgenie.js";

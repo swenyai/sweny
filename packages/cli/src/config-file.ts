@@ -102,7 +102,7 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # CLI flags override this file; env vars override this file; this file overrides defaults.
 
 # ── Providers ────────────────────────────────────────────────────────
-# observability-provider: datadog        # datadog | sentry | cloudwatch | splunk | elastic | newrelic | loki | prometheus | pagerduty | vercel | supabase | netlify | fly | render | file
+# observability-provider: datadog        # datadog | sentry | cloudwatch | splunk | elastic | newrelic | loki | prometheus | pagerduty | heroku | opsgenie | vercel | supabase | netlify | fly | render | file
 # issue-tracker-provider: github-issues  # github-issues | linear | jira
 # source-control-provider: github        # github | gitlab
 # coding-agent-provider: claude          # claude | codex | gemini
@@ -199,6 +199,14 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 #
 # PagerDuty (observability) — https://your-account.pagerduty.com/api_keys
 #   PAGERDUTY_API_KEY=...
+#
+# Heroku (observability) — https://devcenter.heroku.com/articles/platform-api-reference
+#   HEROKU_API_KEY=...           # https://dashboard.heroku.com/account
+#   HEROKU_APP_NAME=...          # the name of your Heroku application
+#
+# OpsGenie (observability) — https://support.atlassian.com/opsgenie/docs/api-key-management/
+#   OPSGENIE_API_KEY=...
+#   OPSGENIE_REGION=us           # or eu for EU-hosted accounts
 #
 # Slack (notifications) — https://api.slack.com/apps
 #   NOTIFICATION_WEBHOOK_URL=https://hooks.slack.com/services/...
