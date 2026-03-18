@@ -1,5 +1,13 @@
 # @sweny-ai/cli
 
+## 1.9.1
+
+### Patch Changes
+
+- e7eb186: Skip results now suggest `--time-range` or `--service-filter` to widen the search; +1 results show the updated issue URL; cross-repo dispatch status is surfaced in the CLI summary.
+- e7eb186: Warn at startup when an explicitly configured `serviceMapPath` points to a missing file, instead of silently disabling cross-repo routing.
+- e7eb186: `sweny init` now generates a config with a commented credential reference section showing the env var names and direct links to where each API key can be found.
+
 ## 1.9.0
 
 ### Minor Changes
