@@ -102,7 +102,7 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # CLI flags override this file; env vars override this file; this file overrides defaults.
 
 # ── Providers ────────────────────────────────────────────────────────
-# observability-provider: datadog        # datadog | sentry | cloudwatch | splunk | elastic | newrelic | loki | vercel | supabase | file
+# observability-provider: datadog        # datadog | sentry | cloudwatch | splunk | elastic | newrelic | loki | vercel | supabase | netlify | fly | render | file
 # issue-tracker-provider: github-issues  # github-issues | linear | jira
 # source-control-provider: github        # github | gitlab
 # coding-agent-provider: claude          # claude | codex | gemini
@@ -180,6 +180,18 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # Supabase (observability) — https://supabase.com/dashboard/account/tokens
 #   SUPABASE_MANAGEMENT_KEY=...
 #   SUPABASE_PROJECT_REF=...       # Project Settings > General > Reference ID
+#
+# Netlify (observability) — https://app.netlify.com/user/applications#personal-access-tokens
+#   NETLIFY_TOKEN=...
+#   NETLIFY_SITE_ID=...         # Site Settings > General > Site ID
+#
+# Fly.io (observability) — https://fly.io/user/personal_access_tokens
+#   FLY_TOKEN=...
+#   FLY_APP_NAME=...             # the name of your Fly.io application
+#
+# Render (observability) — https://dashboard.render.com/u/settings
+#   RENDER_API_KEY=...
+#   RENDER_SERVICE_ID=srv-...    # from your service's Settings page
 #
 # Slack (notifications) — https://api.slack.com/apps
 #   NOTIFICATION_WEBHOOK_URL=https://hooks.slack.com/services/...

@@ -37,7 +37,7 @@ inputs:
 
   # Observability provider
   observability-provider:
-    description: "Observability provider to use (datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, vercel, supabase, file)"
+    description: "Observability provider to use (datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, vercel, supabase, netlify, fly, render, file)"
     required: false
     default: "datadog"
 
@@ -146,6 +146,30 @@ inputs:
     required: false
   supabase-project-ref:
     description: "Supabase project reference ID"
+    required: false
+
+  # Netlify credentials (when observability-provider = netlify)
+  netlify-token:
+    description: "Netlify personal access token"
+    required: false
+  netlify-site-id:
+    description: "Netlify site ID (find in Site Settings > General)"
+    required: false
+
+  # Fly.io credentials (when observability-provider = fly)
+  fly-token:
+    description: "Fly.io personal access token"
+    required: false
+  fly-app-name:
+    description: "Fly.io application name"
+    required: false
+
+  # Render credentials (when observability-provider = render)
+  render-api-key:
+    description: "Render API key"
+    required: false
+  render-service-id:
+    description: "Render service ID (srv-...)"
     required: false
 
   # Issue tracker provider

@@ -348,9 +348,29 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.observabilityCredentials.projectRef)
         errors.push("Missing: SUPABASE_PROJECT_REF — find it in your Supabase project settings > General");
       break;
+    case "netlify":
+      if (!config.observabilityCredentials.token)
+        errors.push(
+          "Missing: NETLIFY_TOKEN — create a token at https://app.netlify.com/user/applications#personal-access-tokens",
+        );
+      if (!config.observabilityCredentials.siteId)
+        errors.push("Missing: NETLIFY_SITE_ID — find it in Site Settings > General > Site details");
+      break;
+    case "fly":
+      if (!config.observabilityCredentials.token)
+        errors.push("Missing: FLY_TOKEN — create a token at https://fly.io/user/personal_access_tokens");
+      if (!config.observabilityCredentials.appName)
+        errors.push("Missing: FLY_APP_NAME — the name of your Fly.io application");
+      break;
+    case "render":
+      if (!config.observabilityCredentials.apiKey)
+        errors.push("Missing: RENDER_API_KEY — create an API key at https://dashboard.render.com/u/settings");
+      if (!config.observabilityCredentials.serviceId)
+        errors.push("Missing: RENDER_SERVICE_ID — find it in your service's Settings page (srv-...)");
+      break;
     default:
       errors.push(
-        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, honeycomb, vercel, supabase, file`,
+        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, honeycomb, vercel, supabase, netlify, fly, render, file`,
       );
   }
 
@@ -547,6 +567,21 @@ function parseObservabilityCredentials(
       return {
         managementApiKey: env.SUPABASE_MANAGEMENT_KEY || "",
         projectRef: env.SUPABASE_PROJECT_REF || f("supabase-project-ref") || "",
+      };
+    case "netlify":
+      return {
+        token: env.NETLIFY_TOKEN || "",
+        siteId: env.NETLIFY_SITE_ID || f("netlify-site-id") || "",
+      };
+    case "fly":
+      return {
+        token: env.FLY_TOKEN || "",
+        appName: env.FLY_APP_NAME || f("fly-app-name") || "",
+      };
+    case "render":
+      return {
+        apiKey: env.RENDER_API_KEY || "",
+        serviceId: env.RENDER_SERVICE_ID || f("render-service-id") || "",
       };
     default:
       return {};

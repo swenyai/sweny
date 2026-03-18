@@ -12,3 +12,6 @@ export { prometheus, prometheusConfigSchema, type PrometheusConfig } from "./pro
 export { pagerduty, pagerdutyConfigSchema, type PagerDutyConfig } from "./pagerduty.js";
 export { vercel, vercelConfigSchema, type VercelConfig } from "./vercel.js";
 export { supabase, supabaseConfigSchema, type SupabaseConfig } from "./supabase.js";
+export { netlify, netlifyConfigSchema, type NetlifyConfig } from "./netlify.js";
+export { fly, flyConfigSchema, type FlyConfig } from "./fly.js";
+export { render, renderConfigSchema, type RenderConfig } from "./render.js";

@@ -259,6 +259,54 @@ describe("parseInputs", () => {
     expect(config.observabilityCredentials.projectRef).toBe("abcdefgh");
   });
 
+  it("parses netlify credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "netlify",
+      "netlify-token": "nfy_xxx",
+      "netlify-site-id": "abc123de",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("netlify");
+    expect(config.observabilityCredentials.token).toBe("nfy_xxx");
+    expect(config.observabilityCredentials.siteId).toBe("abc123de");
+  });
+
+  it("parses fly credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "fly",
+      "fly-token": "fly_xxx",
+      "fly-app-name": "my-app",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("fly");
+    expect(config.observabilityCredentials.token).toBe("fly_xxx");
+    expect(config.observabilityCredentials.appName).toBe("my-app");
+  });
+
+  it("parses render credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "render",
+      "render-api-key": "rnd_xxx",
+      "render-service-id": "srv-abc",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("render");
+    expect(config.observabilityCredentials.apiKey).toBe("rnd_xxx");
+    expect(config.observabilityCredentials.serviceId).toBe("srv-abc");
+  });
+
   it("parses jira fields from inputs", () => {
     const inputMap: Record<string, string> = {
       "jira-base-url": "https://myco.atlassian.net",
@@ -524,6 +572,24 @@ describe("validateInputs", () => {
     const errors = validateInputs(baseConfig({ observabilityProvider: "supabase", observabilityCredentials: {} }));
     expect(errors).toContainEqual(expect.stringContaining("supabase-management-key"));
     expect(errors).toContainEqual(expect.stringContaining("supabase-project-ref"));
+  });
+
+  it("validates netlify requires netlify-token and netlify-site-id", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "netlify", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("netlify-token"));
+    expect(errors).toContainEqual(expect.stringContaining("netlify-site-id"));
+  });
+
+  it("validates fly requires fly-token and fly-app-name", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "fly", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("fly-token"));
+    expect(errors).toContainEqual(expect.stringContaining("fly-app-name"));
+  });
+
+  it("validates render requires render-api-key and render-service-id", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "render", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("render-api-key"));
+    expect(errors).toContainEqual(expect.stringContaining("render-service-id"));
   });
 
   it("validates slack notification requires webhook-url", () => {

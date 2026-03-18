@@ -266,6 +266,26 @@ export function validateInputs(config: ActionConfig): string[] {
           "Missing required input: `supabase-project-ref` is required when `observability-provider` is `supabase`",
         );
       break;
+    case "netlify":
+      if (!config.observabilityCredentials.token)
+        errors.push("Missing required input: `netlify-token` is required when `observability-provider` is `netlify`");
+      if (!config.observabilityCredentials.siteId)
+        errors.push("Missing required input: `netlify-site-id` is required when `observability-provider` is `netlify`");
+      break;
+    case "fly":
+      if (!config.observabilityCredentials.token)
+        errors.push("Missing required input: `fly-token` is required when `observability-provider` is `fly`");
+      if (!config.observabilityCredentials.appName)
+        errors.push("Missing required input: `fly-app-name` is required when `observability-provider` is `fly`");
+      break;
+    case "render":
+      if (!config.observabilityCredentials.apiKey)
+        errors.push("Missing required input: `render-api-key` is required when `observability-provider` is `render`");
+      if (!config.observabilityCredentials.serviceId)
+        errors.push(
+          "Missing required input: `render-service-id` is required when `observability-provider` is `render`",
+        );
+      break;
   }
 
   // Issue tracker credentials by provider
@@ -412,6 +432,21 @@ function parseObservabilityCredentials(provider: string): Record<string, string>
       return {
         managementApiKey: core.getInput("supabase-management-key"),
         projectRef: core.getInput("supabase-project-ref"),
+      };
+    case "netlify":
+      return {
+        token: core.getInput("netlify-token"),
+        siteId: core.getInput("netlify-site-id"),
+      };
+    case "fly":
+      return {
+        token: core.getInput("fly-token"),
+        appName: core.getInput("fly-app-name"),
+      };
+    case "render":
+      return {
+        apiKey: core.getInput("render-api-key"),
+        serviceId: core.getInput("render-service-id"),
       };
     default:
       return {};

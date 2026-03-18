@@ -216,6 +216,61 @@ export const PROVIDER_CATALOG: ProviderOption[] = [
     ],
   },
 
+  {
+    id: "netlify",
+    name: "Netlify",
+    category: "observability",
+    description: "Query build and deploy logs from Netlify sites.",
+    color: "#00C7B7",
+    icon: "◈",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "netlify",
+    envVars: [
+      { key: "NETLIFY_TOKEN", description: "Netlify personal access token", required: true, secret: true },
+      {
+        key: "NETLIFY_SITE_ID",
+        description: "Netlify site ID",
+        required: true,
+        secret: false,
+        example: "abc123de-f456-...",
+      },
+    ],
+  },
+  {
+    id: "fly",
+    name: "Fly.io",
+    category: "observability",
+    description: "Query runtime logs from Fly.io applications.",
+    color: "#7C3AED",
+    icon: "✈",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "fly",
+    envVars: [
+      { key: "FLY_TOKEN", description: "Fly.io personal access token", required: true, secret: true },
+      { key: "FLY_APP_NAME", description: "Fly.io application name", required: true, secret: false, example: "my-app" },
+    ],
+  },
+  {
+    id: "render",
+    name: "Render",
+    category: "observability",
+    description: "Query runtime logs from Render web services and workers.",
+    color: "#46E3B7",
+    icon: "⬡",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "render",
+    envVars: [
+      { key: "RENDER_API_KEY", description: "Render API key", required: true, secret: true },
+      {
+        key: "RENDER_SERVICE_ID",
+        description: "Render service ID (srv-...)",
+        required: true,
+        secret: false,
+        example: "srv-xxxxxxxxxxxx",
+      },
+    ],
+  },
+
   // ── Issue Tracking ─────────────────────────────────────────────────────────
 
   {

@@ -18,6 +18,9 @@ import {
   file,
   vercel,
   supabase,
+  netlify,
+  fly,
+  render,
 } from "./observability/index.js";
 import { claudeCode, openaiCodex, googleGemini } from "./coding-agent/index.js";
 
@@ -25,7 +28,8 @@ import { claudeCode, openaiCodex, googleGemini } from "./coding-agent/index.js";
  * Instantiate an observability provider by name.
  *
  * @param name        - Provider key: "datadog" | "sentry" | "cloudwatch" | "splunk" |
- *                      "elastic" | "newrelic" | "loki" | "file" | "vercel" | "supabase"
+ *                      "elastic" | "newrelic" | "loki" | "file" | "vercel" | "supabase" |
+ *                      "netlify" | "fly" | "render"
  * @param credentials - Key/value map of provider-specific credentials (same shape as
  *                      `parseObservabilityCredentials` returns in the CLI/Action).
  * @param logger      - Logger instance to pass to the provider.
@@ -67,6 +71,12 @@ export function createObservabilityProvider(
       return vercel({ token: credentials.token, projectId: credentials.projectId, teamId: credentials.teamId, logger });
     case "supabase":
       return supabase({ managementApiKey: credentials.managementApiKey, projectRef: credentials.projectRef, logger });
+    case "netlify":
+      return netlify({ token: credentials.token, siteId: credentials.siteId, logger });
+    case "fly":
+      return fly({ token: credentials.token, appName: credentials.appName, logger });
+    case "render":
+      return render({ apiKey: credentials.apiKey, serviceId: credentials.serviceId, logger });
     default:
       throw new Error(`Unsupported observability provider: ${name}`);
   }
