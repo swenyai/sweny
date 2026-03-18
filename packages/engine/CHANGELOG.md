@@ -11,6 +11,7 @@
   file is now deleted before the coding agent starts, so only a freshly-written
   decline signals a skip.
 
+
 ## 3.2.5
 
 ### Patch Changes

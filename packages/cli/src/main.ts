@@ -30,7 +30,13 @@ import type {
 } from "@sweny-ai/engine";
 import { createFsCache, hashConfig } from "./cache.js";
 import { loadDotenv, loadConfigFile, STARTER_CONFIG } from "./config-file.js";
-import { registerTriageCommand, registerImplementCommand, parseCliInputs, validateInputs } from "./config.js";
+import {
+  registerTriageCommand,
+  registerImplementCommand,
+  parseCliInputs,
+  validateInputs,
+  validateWarnings,
+} from "./config.js";
 import type { CliConfig } from "./config.js";
 import { createProviders, createImplementProviders } from "./providers/index.js";
 import type { MCPServerConfig } from "@sweny-ai/providers";
@@ -105,6 +111,11 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     console.error(formatValidationErrors(errors));
     console.error(c.subtle("\n  Run sweny triage --help for usage information.\n"));
     process.exit(1);
+  }
+
+  // Non-fatal warnings (e.g. missing service map file)
+  for (const warning of validateWarnings(config)) {
+    console.warn(chalk.yellow(`  ⚠  ${warning}`));
   }
 
   // ── Shared logger ─────────────────────────────────────────
@@ -287,7 +298,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     if (config.json) {
       console.log(formatResultJson(result));
     } else {
-      console.log(formatResultHuman(result));
+      console.log(formatResultHuman(result, config));
     }
 
     // Terminal bell
@@ -462,9 +473,6 @@ function buildAutoMcpServers(config: CliConfig): Record<string, MCPServerConfig>
   const tools = new Set(config.workspaceTools);
 
   // Slack MCP — requires workspace-tools includes "slack" AND SLACK_BOT_TOKEN is set.
-  // Note: @modelcontextprotocol/server-slack is deprecated upstream; users can override
-  // with their own `mcp-servers` entry once Slack publishes a stable replacement package.
-  // Bot token provides full bidirectional API access; separate from notification webhook.
   if (tools.has("slack")) {
     const slackBotToken = process.env.SLACK_BOT_TOKEN;
     if (slackBotToken) {
@@ -480,7 +488,6 @@ function buildAutoMcpServers(config: CliConfig): Record<string, MCPServerConfig>
   }
 
   // Notion MCP — requires workspace-tools includes "notion" AND NOTION_TOKEN is set.
-  // @notionhq/notion-mcp-server reads NOTION_TOKEN; NOTION_API_KEY accepted as fallback.
   if (tools.has("notion")) {
     const notionToken = process.env.NOTION_TOKEN || process.env.NOTION_API_KEY;
     if (notionToken) {
@@ -494,7 +501,6 @@ function buildAutoMcpServers(config: CliConfig): Record<string, MCPServerConfig>
   }
 
   // PagerDuty MCP — requires workspace-tools includes "pagerduty" AND PAGERDUTY_API_TOKEN is set.
-  // HTTP remote endpoint; auth uses "Token token=<key>" (not "Bearer").
   if (tools.has("pagerduty")) {
     const pagerdutyToken = process.env.PAGERDUTY_API_TOKEN;
     if (pagerdutyToken) {

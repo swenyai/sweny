@@ -473,4 +473,107 @@ describe("formatResultHuman", () => {
     const out = plain(formatResultHuman(result as any));
     expect(out).toContain("1m 5s");
   });
+
+  // ── Actionable hints ──────────────────────────────────────────────────────
+
+  describe("actionable hints on skip", () => {
+    function makeSkipResult() {
+      return makeResult({ steps: [makeStep("novelty-gate", "act", { action: "skip" })] });
+    }
+
+    it("shows --time-range hint when no config provided (defaults apply)", () => {
+      const out = plain(formatResultHuman(makeSkipResult() as any));
+      expect(out).toContain("--time-range");
+    });
+
+    it("shows --time-range hint when timeRange is default 24h", () => {
+      const config = { timeRange: "24h", serviceFilter: "*" } as any;
+      const out = plain(formatResultHuman(makeSkipResult() as any, config));
+      expect(out).toContain("--time-range");
+    });
+
+    it("omits --time-range hint when timeRange is already non-default", () => {
+      const config = { timeRange: "7d", serviceFilter: "*" } as any;
+      const out = plain(formatResultHuman(makeSkipResult() as any, config));
+      expect(out).not.toContain("--time-range");
+    });
+
+    it("shows --service-filter hint when serviceFilter is default *", () => {
+      const config = { timeRange: "24h", serviceFilter: "*" } as any;
+      const out = plain(formatResultHuman(makeSkipResult() as any, config));
+      expect(out).toContain("--service-filter");
+    });
+
+    it("omits --service-filter hint when serviceFilter already set", () => {
+      const config = { timeRange: "24h", serviceFilter: "api-service" } as any;
+      const out = plain(formatResultHuman(makeSkipResult() as any, config));
+      expect(out).not.toContain("--service-filter");
+    });
+
+    it("omits both hints when both time-range and service-filter already set", () => {
+      const config = { timeRange: "7d", serviceFilter: "api-service" } as any;
+      const out = plain(formatResultHuman(makeSkipResult() as any, config));
+      expect(out).not.toContain("--time-range");
+      expect(out).not.toContain("--service-filter");
+    });
+  });
+
+  describe("+1 result shows issue URL", () => {
+    it("shows issue URL when issueUrl is present in novelty-gate data", () => {
+      const result = makeResult({
+        steps: [
+          makeStep("novelty-gate", "act", {
+            action: "+1",
+            issueIdentifier: "ENG-42",
+            issueUrl: "https://linear.app/acme/issue/ENG-42",
+          }),
+        ],
+      });
+      const out = plain(formatResultHuman(result as any));
+      expect(out).toContain("ENG-42");
+      expect(out).toContain("https://linear.app/acme/issue/ENG-42");
+    });
+
+    it("renders cleanly when +1 has no issueUrl", () => {
+      const result = makeResult({
+        steps: [makeStep("novelty-gate", "act", { action: "+1", issueIdentifier: "ENG-7" })],
+      });
+      const out = plain(formatResultHuman(result as any));
+      expect(out).toContain("ENG-7");
+      expect(out).not.toContain("undefined");
+    });
+  });
+
+  describe("cross-repo dispatch messaging", () => {
+    it("shows dispatched target repo in no-action result", () => {
+      const result = makeResult({
+        steps: [
+          makeStep("cross-repo-check", "act", {
+            outcome: "dispatched",
+            dispatched: true,
+            targetRepo: "org/backend",
+          }),
+          makeStep("novelty-gate", "act", { action: "skip" }),
+        ],
+      });
+      const out = plain(formatResultHuman(result as any));
+      expect(out).toContain("org/backend");
+    });
+
+    it("shows dispatch-failed warning in no-action result", () => {
+      const result = makeResult({
+        steps: [
+          makeStep("cross-repo-check", "act", {
+            outcome: "dispatch-failed",
+            dispatched: false,
+            targetRepo: "org/unreachable",
+          }),
+          makeStep("novelty-gate", "act", { action: "skip" }),
+        ],
+      });
+      const out = plain(formatResultHuman(result as any));
+      expect(out).toContain("org/unreachable");
+      expect(out).toContain("failed");
+    });
+  });
 });

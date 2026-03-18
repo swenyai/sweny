@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as os from "node:os";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // Prevent real git calls in detectRepository()
 vi.mock("node:child_process", () => ({
   execSync: vi.fn().mockReturnValue("git@github.com:acme/api.git"),
 }));
 
-const { parseCliInputs, validateInputs } = await import("../src/config.js");
+const { parseCliInputs, validateInputs, validateWarnings } = await import("../src/config.js");
 
 // ── parseCliInputs ──────────────────────────────────────────────────────────
 
@@ -378,6 +381,36 @@ describe("validateInputs", () => {
       expect(errors.filter((e) => e.includes("issue tracker"))).toHaveLength(0);
     });
 
+    it("LINEAR_TEAM_ID error includes where-to-find hint", () => {
+      const errors = validateInputs(base({ issueTrackerProvider: "linear", linearApiKey: "sk", linearTeamId: "" }));
+      const teamIdError = errors.find((e) => e.includes("LINEAR_TEAM_ID"));
+      expect(teamIdError).toBeDefined();
+      expect(teamIdError).toMatch(/settings|Settings|linear\.app/i);
+    });
+
+    it("JIRA_API_TOKEN error includes Atlassian token URL", () => {
+      const errors = validateInputs(
+        base({
+          issueTrackerProvider: "jira",
+          jiraBaseUrl: "https://org.atlassian.net",
+          jiraEmail: "a@b.com",
+          jiraApiToken: "",
+        }),
+      );
+      const tokenError = errors.find((e) => e.includes("JIRA_API_TOKEN"));
+      expect(tokenError).toBeDefined();
+      expect(tokenError).toMatch(/atlassian/i);
+    });
+
+    it("JIRA_BASE_URL error includes example domain hint", () => {
+      const errors = validateInputs(
+        base({ issueTrackerProvider: "jira", jiraBaseUrl: "", jiraEmail: "a@b.com", jiraApiToken: "token" }),
+      );
+      const urlError = errors.find((e) => e.includes("JIRA_BASE_URL"));
+      expect(urlError).toBeDefined();
+      expect(urlError).toMatch(/atlassian\.net/i);
+    });
+
     it("errors for unknown issue tracker provider", () => {
       const errors = validateInputs(base({ issueTrackerProvider: "notion" }));
       expect(errors.some((e) => e.includes("Unknown --issue-tracker-provider") && e.includes("notion"))).toBe(true);
@@ -402,6 +435,20 @@ describe("validateInputs", () => {
       const errors = validateInputs(base({ sourceControlProvider: "gitlab", gitlabToken: "", gitlabProjectId: "" }));
       expect(errors.some((e) => e.includes("GITLAB_TOKEN"))).toBe(true);
       expect(errors.some((e) => e.includes("GITLAB_PROJECT_ID"))).toBe(true);
+    });
+
+    it("GITLAB_TOKEN error includes GitLab token management URL", () => {
+      const errors = validateInputs(base({ sourceControlProvider: "gitlab", gitlabToken: "", gitlabProjectId: "123" }));
+      const tokenError = errors.find((e) => e.includes("GITLAB_TOKEN"));
+      expect(tokenError).toBeDefined();
+      expect(tokenError).toMatch(/personal_access_tokens|settings/i);
+    });
+
+    it("GITLAB_PROJECT_ID error includes where-to-find hint", () => {
+      const errors = validateInputs(base({ sourceControlProvider: "gitlab", gitlabToken: "tok", gitlabProjectId: "" }));
+      const idError = errors.find((e) => e.includes("GITLAB_PROJECT_ID"));
+      expect(idError).toBeDefined();
+      expect(idError).toMatch(/settings|Settings/i);
     });
 
     it("errors for unknown source control provider", () => {
@@ -498,5 +545,40 @@ describe("validateInputs", () => {
       expect(errors.some((e) => e.includes("zapier"))).toBe(true);
       expect(errors.some((e) => e.includes("slack, notion, pagerduty, monday"))).toBe(true);
     });
+  });
+});
+
+// ── validateWarnings ──────────────────────────────────────────────────────────
+
+describe("validateWarnings", () => {
+  it("returns no warnings when serviceMapPath is undefined", () => {
+    expect(validateWarnings({ serviceMapPath: undefined as unknown as string })).toEqual([]);
+  });
+
+  it("returns no warnings for the default service map path (not explicitly set)", () => {
+    expect(validateWarnings({ serviceMapPath: ".github/service-map.yml" })).toEqual([]);
+  });
+
+  it("returns no warnings when an explicitly set serviceMapPath exists on disk", () => {
+    const tmp = path.join(os.tmpdir(), `sweny-test-service-map-${Date.now()}.yml`);
+    fs.writeFileSync(tmp, "services: {}");
+    try {
+      const warnings = validateWarnings({ serviceMapPath: tmp });
+      expect(warnings).toEqual([]);
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+  it("warns when an explicitly set serviceMapPath does not exist", () => {
+    const warnings = validateWarnings({ serviceMapPath: "/nonexistent/path/service-map.yml" });
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("Service map file not found");
+    expect(warnings[0]).toContain("/nonexistent/path/service-map.yml");
+    expect(warnings[0]).toContain("Cross-repo routing will be disabled");
+  });
+
+  it("returns no warnings when serviceMapPath is empty string", () => {
+    expect(validateWarnings({ serviceMapPath: "" })).toEqual([]);
   });
 });
