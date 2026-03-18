@@ -68,11 +68,12 @@ describe("netlify factory", () => {
     });
   });
 
-  it("getPromptInstructions contains Netlify, NETLIFY_TOKEN, and curl", () => {
+  it("getPromptInstructions contains Netlify, NETLIFY_TOKEN, curl, and configured siteId", () => {
     const instructions = makeProvider().getPromptInstructions();
     expect(instructions).toContain("Netlify");
     expect(instructions).toContain("NETLIFY_TOKEN");
     expect(instructions).toContain("curl");
+    expect(instructions).toContain("abc123de"); // configured siteId
   });
 });
 
@@ -181,6 +182,30 @@ describe("NetlifyProvider", () => {
     expect(logs.some((l) => l.service === "production")).toBe(false);
   });
 
+  it("queryLogs filters to warning-level lines when severity is 'warning'", async () => {
+    const deploy = makeDeploy("dep3");
+    const mockFetch = vi.fn().mockImplementation(async (url) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("/deploys?")) {
+        return { ok: true, json: async () => [deploy] };
+      }
+      if (urlStr.includes("/log")) {
+        return {
+          ok: true,
+          json: async () => ({ log: "Warning: high memory usage\nError: disk full\nBuild started" }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(mockFetch);
+
+    const logs = await makeProvider().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "warning" });
+
+    expect(logs.every((l) => l.level === "warning")).toBe(true);
+    expect(logs.some((l) => l.message.includes("Warning: high memory usage"))).toBe(true);
+    expect(logs.some((l) => l.message.includes("Error: disk full"))).toBe(false);
+  });
+
   it("queryLogs returns empty when no deploys in time range", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
       ok: true,
@@ -213,6 +238,29 @@ describe("NetlifyProvider", () => {
 
     expect(results.some((r) => r.service === "production" && r.count === 2)).toBe(true);
     expect(results.some((r) => r.service === "preview" && r.count === 1)).toBe(true);
+  });
+
+  it("aggregate respects serviceFilter and only includes matching contexts", async () => {
+    const deploys = [makeDeploy("dep1", "production"), makeDeploy("dep2", "staging")];
+    const mockFetch = vi.fn().mockImplementation(async (url) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("/deploys?")) {
+        return { ok: true, json: async () => deploys };
+      }
+      if (urlStr.includes("/dep1/log")) {
+        return { ok: true, json: async () => ({ log: "Error: prod error" }) };
+      }
+      if (urlStr.includes("/dep2/log")) {
+        return { ok: true, json: async () => ({ log: "Error: staging error" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(mockFetch);
+
+    const results = await makeProvider().aggregate({ timeRange: "24h", serviceFilter: "staging" });
+
+    expect(results.some((r) => r.service === "staging")).toBe(true);
+    expect(results.some((r) => r.service === "production")).toBe(false);
   });
 
   it("aggregate returns empty when no errors in any deploy", async () => {

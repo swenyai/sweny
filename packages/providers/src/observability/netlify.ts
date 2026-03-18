@@ -47,7 +47,7 @@ interface NetlifyDeploy {
   id: string;
   state: string;
   created_at: string;
-  context: string;
+  context: string | null;
   error_message: string | null;
   deploy_time: number;
   title?: string;
@@ -104,7 +104,7 @@ class NetlifyProvider implements ObservabilityProvider {
     const entries: LogEntry[] = [];
 
     for (const deploy of deploys) {
-      if (opts.serviceFilter !== "*" && !deploy.context.includes(opts.serviceFilter)) {
+      if (opts.serviceFilter !== "*" && !(deploy.context ?? "").includes(opts.serviceFilter)) {
         continue;
       }
 
@@ -118,7 +118,7 @@ class NetlifyProvider implements ObservabilityProvider {
 
         entries.push({
           timestamp: deploy.created_at,
-          service: deploy.context || "production",
+          service: deploy.context ?? "production",
           level,
           message: line.trim(),
           attributes: { deployId: deploy.id, state: deploy.state },
@@ -140,7 +140,7 @@ class NetlifyProvider implements ObservabilityProvider {
     const counts = new Map<string, number>();
 
     for (const deploy of deploys) {
-      if (opts.serviceFilter !== "*" && !deploy.context.includes(opts.serviceFilter)) {
+      if (opts.serviceFilter !== "*" && !(deploy.context ?? "").includes(opts.serviceFilter)) {
         continue;
       }
 
@@ -149,7 +149,7 @@ class NetlifyProvider implements ObservabilityProvider {
       const errorCount = lines.filter((l) => inferLevel(l) === "error").length;
 
       if (errorCount > 0) {
-        const service = deploy.context || "production";
+        const service = deploy.context ?? "production";
         counts.set(service, (counts.get(service) ?? 0) + errorCount);
       }
     }

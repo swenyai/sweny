@@ -38,7 +38,7 @@ function timeRangeToIso(range: string): string {
 
 function inferLevel(message: string): string {
   const lower = message.toLowerCase();
-  if (/\b(fatal|error|exception|panic)\b/.test(lower)) return "error";
+  if (/\b(fatal|error|exception|panic|failed)\b/.test(lower)) return "error";
   if (/\b(warn|warning)\b/.test(lower)) return "warning";
   return "info";
 }
@@ -94,7 +94,7 @@ class RenderProvider implements ObservabilityProvider {
       service: log.instance?.serviceId ?? this.serviceId,
       level: inferLevel(log.message),
       message: log.message,
-      attributes: { instanceId: log.instance?.id },
+      attributes: log.instance ? { instanceId: log.instance.id } : {},
     }));
 
     // Post-filter by severity
@@ -118,10 +118,16 @@ class RenderProvider implements ObservabilityProvider {
       `/v1/services/${encodeURIComponent(this.serviceId)}/logs?startTime=${encodeURIComponent(startTime)}&limit=200&direction=backward`,
     );
 
-    const errorCount = (result.logs ?? []).filter((l) => inferLevel(l.message) === "error").length;
-    if (errorCount === 0) return [];
+    let errorLogs = (result.logs ?? []).filter((l) => inferLevel(l.message) === "error");
 
-    return [{ service: this.serviceId, count: errorCount }];
+    // Post-filter by service
+    if (opts.serviceFilter !== "*") {
+      errorLogs = errorLogs.filter((l) => (l.instance?.serviceId ?? this.serviceId).includes(opts.serviceFilter));
+    }
+
+    if (errorLogs.length === 0) return [];
+
+    return [{ service: this.serviceId, count: errorLogs.length }];
   }
 
   getAgentEnv(): Record<string, string> {

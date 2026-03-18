@@ -73,11 +73,12 @@ describe("fly factory", () => {
     });
   });
 
-  it("getPromptInstructions contains Fly, FLY_TOKEN, and curl", () => {
+  it("getPromptInstructions contains Fly, FLY_TOKEN, curl, and configured appName", () => {
     const instructions = makeProvider().getPromptInstructions();
     expect(instructions).toContain("Fly");
     expect(instructions).toContain("FLY_TOKEN");
     expect(instructions).toContain("curl");
+    expect(instructions).toContain("test-app"); // configured appName
   });
 });
 
@@ -174,6 +175,28 @@ describe("FlyProvider", () => {
     expect(logs.some((l) => l.service === "iad")).toBe(false);
   });
 
+  it("queryLogs filters by severity: 'warning' keeps only warn/warning entries", async () => {
+    const ndjson = [
+      makeFlyLog("info", "App started"),
+      makeFlyLog("warn", "High memory usage"),
+      makeFlyLog("warning", "Slow response time"),
+      makeFlyLog("error", "Connection failed"),
+    ].join("\n");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
+      ok: true,
+      text: async () => ndjson,
+    }));
+
+    const logs = await makeProvider().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "warning" });
+
+    expect(logs.every((l) => l.level === "warning")).toBe(true);
+    expect(logs.some((l) => l.message === "High memory usage")).toBe(true);
+    expect(logs.some((l) => l.message === "Slow response time")).toBe(true);
+    expect(logs.some((l) => l.message === "App started")).toBe(false);
+    expect(logs.some((l) => l.message === "Connection failed")).toBe(false);
+  });
+
   it("queryLogs returns empty on empty NDJSON response", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
       ok: true,
@@ -216,6 +239,20 @@ describe("FlyProvider", () => {
 
     expect(results.some((r) => r.service === "iad" && r.count === 2)).toBe(true);
     expect(results.some((r) => r.service === "lhr" && r.count === 1)).toBe(true);
+  });
+
+  it("aggregate respects serviceFilter and only includes matching region", async () => {
+    const ndjson = [makeFlyLog("error", "iad error", "iad"), makeFlyLog("error", "lhr error", "lhr")].join("\n");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
+      ok: true,
+      text: async () => ndjson,
+    }));
+
+    const results = await makeProvider().aggregate({ timeRange: "24h", serviceFilter: "iad" });
+
+    expect(results.some((r) => r.service === "iad")).toBe(true);
+    expect(results.some((r) => r.service === "lhr")).toBe(false);
   });
 
   it("aggregate returns empty when no error+fatal logs", async () => {

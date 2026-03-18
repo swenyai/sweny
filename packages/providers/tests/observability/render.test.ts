@@ -73,11 +73,12 @@ describe("render factory", () => {
     });
   });
 
-  it("getPromptInstructions contains Render, RENDER_API_KEY, and curl", () => {
+  it("getPromptInstructions contains Render, RENDER_API_KEY, curl, and configured serviceId", () => {
     const instructions = makeProvider().getPromptInstructions();
     expect(instructions).toContain("Render");
     expect(instructions).toContain("RENDER_API_KEY");
     expect(instructions).toContain("curl");
+    expect(instructions).toContain("srv-abc"); // configured serviceId
   });
 });
 
@@ -174,6 +175,25 @@ describe("RenderProvider", () => {
     expect(url).toContain("startTime=");
   });
 
+  it("queryLogs post-filters by severity 'warning' to keep only warning-level entries", async () => {
+    const logs = [
+      makeFakeLog("ERROR: something broke"),
+      makeFakeLog("WARNING: slow response"),
+      makeFakeLog("All systems nominal"),
+    ];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ logs }),
+    }));
+
+    const result = await makeProvider().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "warning" });
+
+    expect(result.every((l) => l.level === "warning")).toBe(true);
+    expect(result.some((l) => l.message.includes("WARNING"))).toBe(true);
+    expect(result.some((l) => l.message.includes("ERROR"))).toBe(false);
+  });
+
   it("queryLogs returns empty when logs array is empty", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
       ok: true,
@@ -185,6 +205,20 @@ describe("RenderProvider", () => {
   });
 
   // aggregate
+  it("queryLogs infers 'failed' keyword as error level", async () => {
+    const logs = [makeFakeLog("Build failed"), makeFakeLog("Deploy started")];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ logs }),
+    }));
+
+    const result = await makeProvider().queryLogs({ timeRange: "1h", serviceFilter: "*", severity: "*" });
+
+    expect(result.find((l) => l.message === "Build failed")?.level).toBe("error");
+    expect(result.find((l) => l.message === "Deploy started")?.level).toBe("info");
+  });
+
   it("aggregate returns count of error entries as a single AggregateResult", async () => {
     const logs = [makeFakeLog("ERROR: timeout"), makeFakeLog("ERROR: not found"), makeFakeLog("Starting service")];
 

@@ -167,7 +167,12 @@ class FlyProvider implements ObservabilityProvider {
     entries = entries.filter((e) => e.timestamp > sinceIso);
 
     // Filter to error+fatal
-    const errors = entries.filter((e) => e.level === "error" || e.level === "fatal");
+    let errors = entries.filter((e) => e.level === "error" || e.level === "fatal");
+
+    // Filter by service (region)
+    if (opts.serviceFilter !== "*") {
+      errors = errors.filter((e) => e.meta?.region === opts.serviceFilter);
+    }
 
     // Group by region
     const counts = new Map<string, number>();
