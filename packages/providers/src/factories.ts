@@ -16,6 +16,8 @@ import {
   newrelic,
   loki,
   file,
+  prometheus,
+  pagerduty,
   vercel,
   supabase,
   netlify,
@@ -28,8 +30,8 @@ import { claudeCode, openaiCodex, googleGemini } from "./coding-agent/index.js";
  * Instantiate an observability provider by name.
  *
  * @param name        - Provider key: "datadog" | "sentry" | "cloudwatch" | "splunk" |
- *                      "elastic" | "newrelic" | "loki" | "file" | "vercel" | "supabase" |
- *                      "netlify" | "fly" | "render"
+ *                      "elastic" | "newrelic" | "loki" | "file" | "prometheus" | "pagerduty" |
+ *                      "vercel" | "supabase" | "netlify" | "fly" | "render"
  * @param credentials - Key/value map of provider-specific credentials (same shape as
  *                      `parseObservabilityCredentials` returns in the CLI/Action).
  * @param logger      - Logger instance to pass to the provider.
@@ -67,6 +69,10 @@ export function createObservabilityProvider(
       return loki({ baseUrl: credentials.baseUrl, apiKey: credentials.apiKey, orgId: credentials.orgId, logger });
     case "file":
       return file({ path: credentials.path, logger });
+    case "prometheus":
+      return prometheus({ url: credentials.url, token: credentials.token || undefined, logger });
+    case "pagerduty":
+      return pagerduty({ apiKey: credentials.apiKey, logger });
     case "vercel":
       return vercel({ token: credentials.token, projectId: credentials.projectId, teamId: credentials.teamId, logger });
     case "supabase":

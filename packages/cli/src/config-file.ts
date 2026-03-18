@@ -102,7 +102,7 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # CLI flags override this file; env vars override this file; this file overrides defaults.
 
 # ── Providers ────────────────────────────────────────────────────────
-# observability-provider: datadog        # datadog | sentry | cloudwatch | splunk | elastic | newrelic | loki | vercel | supabase | netlify | fly | render | file
+# observability-provider: datadog        # datadog | sentry | cloudwatch | splunk | elastic | newrelic | loki | prometheus | pagerduty | vercel | supabase | netlify | fly | render | file
 # issue-tracker-provider: github-issues  # github-issues | linear | jira
 # source-control-provider: github        # github | gitlab
 # coding-agent-provider: claude          # claude | codex | gemini
@@ -192,6 +192,13 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # Render (observability) — https://dashboard.render.com/u/settings
 #   RENDER_API_KEY=...
 #   RENDER_SERVICE_ID=srv-...    # from your service's Settings page
+#
+# Prometheus (observability) — self-hosted or Grafana Cloud
+#   PROMETHEUS_URL=http://prometheus.internal:9090
+#   PROMETHEUS_TOKEN=...         # optional, for secured instances
+#
+# PagerDuty (observability) — https://your-account.pagerduty.com/api_keys
+#   PAGERDUTY_API_KEY=...
 #
 # Slack (notifications) — https://api.slack.com/apps
 #   NOTIFICATION_WEBHOOK_URL=https://hooks.slack.com/services/...

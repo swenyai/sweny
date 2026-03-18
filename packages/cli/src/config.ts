@@ -141,6 +141,8 @@ export function registerTriageCommand(program: Command): Command {
     .option("--splunk-index <index>", "Splunk index (default: main)")
     .option("--elastic-index <index>", "Elasticsearch index (default: logs-*)")
     .option("--newrelic-region <region>", "New Relic region (default: us)")
+    .option("--prometheus-url <url>", "Prometheus base URL (required for prometheus provider)")
+    .option("--prometheus-token <token>", "Prometheus bearer token (optional)")
     .option("--gitlab-base-url <url>", "GitLab base URL (default: https://gitlab.com)")
     .option("--json", "Output results as JSON", false)
     .option("--bell", "Ring terminal bell on completion", false)
@@ -331,6 +333,14 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.observabilityCredentials.path)
         errors.push("Missing: --log-file <path> is required for file provider");
       break;
+    case "prometheus":
+      if (!config.observabilityCredentials.url)
+        errors.push("Missing: PROMETHEUS_URL or --prometheus-url is required for prometheus provider");
+      break;
+    case "pagerduty":
+      if (!config.observabilityCredentials.apiKey)
+        errors.push("Missing: PAGERDUTY_API_KEY is required for pagerduty provider");
+      break;
     case "honeycomb":
       // honeycomb is a recognised name — credentials validated at runtime by the provider
       break;
@@ -370,7 +380,7 @@ export function validateInputs(config: CliConfig): string[] {
       break;
     default:
       errors.push(
-        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, honeycomb, vercel, supabase, netlify, fly, render, file`,
+        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, honeycomb, vercel, supabase, netlify, fly, render, file`,
       );
   }
 
@@ -556,6 +566,15 @@ function parseObservabilityCredentials(
     case "file":
       return {
         path: (options.logFile as string) || env.SWENY_LOG_FILE || f("log-file") || "",
+      };
+    case "prometheus":
+      return {
+        url: (options.prometheusUrl as string) || env.PROMETHEUS_URL || f("prometheus-url") || "",
+        token: (options.prometheusToken as string) || env.PROMETHEUS_TOKEN || f("prometheus-token") || "",
+      };
+    case "pagerduty":
+      return {
+        apiKey: env.PAGERDUTY_API_KEY || "",
       };
     case "vercel":
       return {

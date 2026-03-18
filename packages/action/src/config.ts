@@ -248,6 +248,18 @@ export function validateInputs(config: ActionConfig): string[] {
       if (!config.logFilePath)
         errors.push("Missing required input: `log-file-path` is required when `observability-provider` is `file`");
       break;
+    case "prometheus":
+      if (!config.observabilityCredentials.url)
+        errors.push(
+          "Missing required input: `prometheus-url` is required when `observability-provider` is `prometheus`",
+        );
+      break;
+    case "pagerduty":
+      if (!config.observabilityCredentials.apiKey)
+        errors.push(
+          "Missing required input: `pagerduty-api-key` is required when `observability-provider` is `pagerduty`",
+        );
+      break;
     case "vercel":
       if (!config.observabilityCredentials.token)
         errors.push("Missing required input: `vercel-token` is required when `observability-provider` is `vercel`");
@@ -421,6 +433,15 @@ function parseObservabilityCredentials(provider: string): Record<string, string>
     case "file":
       return {
         path: core.getInput("log-file-path"),
+      };
+    case "prometheus":
+      return {
+        url: core.getInput("prometheus-url"),
+        token: core.getInput("prometheus-token"),
+      };
+    case "pagerduty":
+      return {
+        apiKey: core.getInput("pagerduty-api-key"),
       };
     case "vercel":
       return {

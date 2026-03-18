@@ -307,6 +307,36 @@ describe("parseInputs", () => {
     expect(config.observabilityCredentials.serviceId).toBe("srv-abc");
   });
 
+  it("parses prometheus credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "prometheus",
+      "prometheus-url": "http://prometheus.internal:9090",
+      "prometheus-token": "prom-token",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("prometheus");
+    expect(config.observabilityCredentials.url).toBe("http://prometheus.internal:9090");
+    expect(config.observabilityCredentials.token).toBe("prom-token");
+  });
+
+  it("parses pagerduty credentials correctly", () => {
+    const inputMap: Record<string, string> = {
+      "observability-provider": "pagerduty",
+      "pagerduty-api-key": "pd-key-xxx",
+    };
+    mockGetInput.mockImplementation((name: string) => inputMap[name] ?? "");
+    mockGetBooleanInput.mockReturnValue(false);
+
+    const config = parseInputs();
+
+    expect(config.observabilityProvider).toBe("pagerduty");
+    expect(config.observabilityCredentials.apiKey).toBe("pd-key-xxx");
+  });
+
   it("parses jira fields from inputs", () => {
     const inputMap: Record<string, string> = {
       "jira-base-url": "https://myco.atlassian.net",
@@ -590,6 +620,16 @@ describe("validateInputs", () => {
     const errors = validateInputs(baseConfig({ observabilityProvider: "render", observabilityCredentials: {} }));
     expect(errors).toContainEqual(expect.stringContaining("render-api-key"));
     expect(errors).toContainEqual(expect.stringContaining("render-service-id"));
+  });
+
+  it("validates prometheus requires prometheus-url", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "prometheus", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("prometheus-url"));
+  });
+
+  it("validates pagerduty requires pagerduty-api-key", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "pagerduty", observabilityCredentials: {} }));
+    expect(errors).toContainEqual(expect.stringContaining("pagerduty-api-key"));
   });
 
   it("validates slack notification requires webhook-url", () => {

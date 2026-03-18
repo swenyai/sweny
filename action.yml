@@ -172,6 +172,19 @@ inputs:
     description: "Render service ID (srv-...)"
     required: false
 
+  # Prometheus credentials (when observability-provider = prometheus)
+  prometheus-url:
+    description: "Prometheus base URL (e.g. http://prometheus.internal:9090)"
+    required: false
+  prometheus-token:
+    description: "Prometheus bearer token (optional, for secured instances)"
+    required: false
+
+  # PagerDuty credentials (when observability-provider = pagerduty)
+  pagerduty-api-key:
+    description: "PagerDuty API key"
+    required: false
+
   # Issue tracker provider
   issue-tracker-provider:
     description: "Issue tracker provider to use (github-issues, linear, jira)"

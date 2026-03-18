@@ -217,6 +217,42 @@ export const PROVIDER_CATALOG: ProviderOption[] = [
   },
 
   {
+    id: "prometheus",
+    name: "Prometheus",
+    category: "observability",
+    description: "Query firing alerts from a Prometheus or Thanos instance.",
+    color: "#E6522C",
+    icon: "🔥",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "prometheus",
+    envVars: [
+      {
+        key: "PROMETHEUS_URL",
+        description: "Prometheus base URL",
+        required: true,
+        secret: false,
+        example: "http://prometheus.internal:9090",
+      },
+      {
+        key: "PROMETHEUS_TOKEN",
+        description: "Bearer token (optional, for secured instances)",
+        required: false,
+        secret: true,
+      },
+    ],
+  },
+  {
+    id: "pagerduty",
+    name: "PagerDuty",
+    category: "observability",
+    description: "Query triggered and acknowledged incidents from PagerDuty.",
+    color: "#06AC38",
+    icon: "🚨",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "pagerduty",
+    envVars: [{ key: "PAGERDUTY_API_KEY", description: "PagerDuty API key", required: true, secret: true }],
+  },
+  {
     id: "netlify",
     name: "Netlify",
     category: "observability",
