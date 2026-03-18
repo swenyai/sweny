@@ -215,6 +215,24 @@ describe("implement workflow e2e (file providers + mock agent)", () => {
     expect(implementStep?.result.status).toBe("skipped");
     expect(implementStep?.result.reason).toContain("Fix declined");
   });
+
+  it("stale fix-declined.md from a prior run does not skip implement-fix", async () => {
+    const issueId = await seedIssue(tmpDir);
+
+    // Pre-seed a fix-declined.md as if it was left over from a previous run
+    const analysisDir = path.join(tmpDir, "analysis");
+    fs.mkdirSync(analysisDir, { recursive: true });
+    fs.writeFileSync(path.join(analysisDir, "fix-declined.md"), "# Fix Declined — prior run");
+
+    const onRun = vi.fn();
+    const providers = buildProviders(tmpDir, onRun);
+    const config = buildConfig(issueId, tmpDir);
+
+    await runWorkflow(implementWorkflow, config, providers, { logger: silentLogger });
+
+    // The stale file should have been cleared — agent must have been invoked
+    expect(onRun).toHaveBeenCalled();
+  });
 });
 
 // ── create-pr path coverage ───────────────────────────────────────────────────
