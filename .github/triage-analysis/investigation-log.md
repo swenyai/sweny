@@ -1,79 +1,84 @@
-# Investigation Log — 2026-03-17
+# Investigation Log — 2026-03-19
 
 ## Approach
-Direct run (no issue override). Followed additional instructions to investigate CI failures
-in `/tmp/ci-failures.json`, then look holistically for the highest-value fix.
+
+Additional instructions: prioritize security advisories if no clear CI target.
+CI failure log showed only generic "CI on main" / "Release on main" failures (no specific error detail — just run IDs).
+Shifted to Dependabot security alerts as primary target.
 
 ## Step 1 — Parse CI failure log
 
-Read `/tmp/ci-failures.json`. Failures observed (2026-03-17):
+Read `/tmp/ci-failures.json`. Failures observed (2026-03-17 to 2026-03-18):
+- Multiple "CI on main" failures (run IDs: 23216459126, 23216453944, 23215201519, 23215136626)
+- Multiple "Release on main" failures
+- One "CI on 75" failure (run ID: 23222880779)
 
-| Workflow | Branch | Run ID |
-|----------|--------|--------|
-| Deploy Docs | main | 23204701005 |
-| Post-Release Docs Update | v3 | 23203365068 |
-| CI (×3) | dependabot/npm_and_yarn/types/react-dom-19.2.3 | various |
-| Release | main | 23200577502 |
-| CI (×4) | various dependabot branches | various |
-| CI (×2) | main | 23199604384, 23199468449 |
-| Continuous Improvement | main | 23195412282 |
-| CI | main | 23195029818 |
+No specific error detail in log — only workflow names and run IDs.
 
-## Step 2 — Get job-level failure details via GitHub API
+## Step 2 — Fetch Dependabot security alerts
 
 ```
-GET /repos/swenyai/sweny/actions/runs/23199604384/jobs
+GET /repos/swenyai/sweny/dependabot/alerts?state=open
 ```
 
-Results:
-- **Format** job → FAILURE: `Run npm run format:check`
-  - Files flagged: `packages/action/tests/mapToTriageConfig.test.ts`,
-    `packages/providers/src/coding-agent/claude-code.ts`,
-    `packages/providers/src/coding-agent/google-gemini.ts`
-- All other CI jobs (Typecheck, Lint, Test Node 20, Test Node 22) → SUCCESS
+Result: 3 open alerts:
+| # | Severity | Package | Summary | Patched |
+|---|----------|---------|---------|---------|
+| 32 | HIGH | h3 | SSE Injection via unsanitized newlines | >= 1.15.6 |
+| 31 | MEDIUM | h3 | Path Traversal via percent-encoded dots in serveStatic | >= 1.15.6 |
+| 21 | MEDIUM | esbuild | Dev server accepts cross-origin requests | >= 0.25.0 |
 
+## Step 3 — Investigate h3 dependency chain
+
+```bash
+grep "node_modules/h3" package-lock.json
+# → h3@1.15.5 (vulnerable)
+
+# Find h3's direct dependents:
+# → node_modules/unstorage: h3 ^1.15.5
+
+# Find unstorage's dependents:
+# → node_modules/astro: unstorage@^1.17.4
+
+# Find which workspace uses astro:
+find packages -name package.json | xargs grep -l "astro"
+# → packages/web/package.json
 ```
-GET /repos/swenyai/sweny/actions/runs/23204701005/jobs
+
+Chain: `packages/web` (private) → `astro@^5.6.1` → `unstorage@1.17.4` → `h3@1.15.5` (vulnerable)
+
+## Step 4 — Investigate esbuild
+
+```bash
+grep -A3 '"node_modules/esbuild"' package-lock.json
+# → root esbuild@0.27.3 (already > 0.24.2, patched)
 ```
 
-Results:
-- **build** job → FAILURE: `Build site`
-  - Error: `"RecipeViewer" is not exported by "../studio/dist-lib/viewer.js"`
-  - File: `packages/web/src/components/RecipeExplorer.tsx:2:9`
+The vulnerable esbuild is `packages/studio/node_modules/esbuild` (scoped, via vite).
+The npm audit reports a fix is available via `npm audit fix --force` which would install vite@8.0.1 — a major breaking change. Not suitable for a safe security patch.
 
-## Step 3 — Cross-reference with known issues
+## Step 5 — Apply h3 fix
 
-- **Format violations**: Already tracked as issue #65 / PR #66 (closed failed attempt).
-  → SKIP per instructions.
-- **RecipeViewer not exported**: No existing issue found. NEW.
+Reviewed PR #76 (fast-xml-parser fix) for the established pattern: add to root `overrides` in package.json.
 
-## Step 4 — Root cause analysis for RecipeViewer
+**Added** `"h3": "^1.15.6"` to root `overrides` section in `package.json`.
 
-Searched `RecipeViewer` across the codebase:
-- `packages/studio/CHANGELOG.md` confirms: in studio v3.0.0 (major release),
-  `RecipeViewer` was renamed to `WorkflowViewer` as a breaking change:
-  > "Breaking: Studio public exports renamed to workflow terminology.
-  > RecipeViewer → WorkflowViewer"
-- `packages/studio/src/lib-viewer.ts` exports only `WorkflowViewer` (confirmed by read).
-- `packages/web/src/components/RecipeExplorer.tsx` still imports `RecipeViewer` at line 2
-  and uses `<RecipeViewer` at line 1179.
+Ran:
+```bash
+npm_config_ignore_scripts=true npm install
+# → h3 still at 1.15.5 (lockfile pinned)
 
-**Root cause**: `RecipeExplorer.tsx` was not updated when studio's public API was renamed
-in v3.0.0. The import references a symbol that no longer exists in `dist-lib/viewer.js`.
+npm_config_ignore_scripts=true npm audit fix
+# → h3 upgraded to 1.15.8 ✓
+```
 
-## Step 5 — Proposed fix
+## Step 6 — Final audit verification
 
-Update `RecipeExplorer.tsx`:
-1. Line 2: `import { RecipeViewer }` → `import { WorkflowViewer }`
-2. Line 1179: `<RecipeViewer` → `<WorkflowViewer`
-   (JSX is self-closing, so no closing tag needs updating)
+```bash
+npm_config_ignore_scripts=true npm audit
+```
 
-The `WorkflowViewer` props interface (`definition`, `executionState`, `height`, `onNodeClick`)
-is fully compatible with how `RecipeViewer` was used — same props, same behavior.
+Result: h3 vulnerabilities resolved. Remaining:
+- 2 moderate (esbuild in packages/studio via vite — requires breaking vite@8 upgrade, out of scope)
 
-## Step 6 — Scope and risk
-
-- Change is entirely in `packages/web` (private, non-published package).
-- No changeset required (per CLAUDE.md: web is private).
-- No type or API surface changes; purely a name update.
-- Low risk: straightforward rename, TypeScript will catch regressions.
+No changeset required: root-level package.json override + lockfile update only (no published package changes).

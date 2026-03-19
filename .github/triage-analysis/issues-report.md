@@ -1,68 +1,78 @@
-# Issues Report — 2026-03-17
+# Issues Report — 2026-03-19
 
-## Issue 1: RecipeViewer Import Breaks Deploy Docs Build
+## Issue 1: h3 HIGH/MEDIUM Vulnerabilities via astro → unstorage Dependency
 
-- **Severity**: High
-- **Environment**: CI (Deploy Docs workflow on main)
-- **Frequency**: Every push to main since studio v3.0.0 rename
+- **Severity**: High (alert #32) + Medium (alert #31)
+- **Environment**: All environments (root lockfile, affects anyone running `npm install`)
+- **Frequency**: Present since astro pulled unstorage@1.17.4 with h3@^1.15.5 pinning
 
 ### Description
-`packages/web/src/components/RecipeExplorer.tsx` imports `RecipeViewer` from
-`@sweny-ai/studio/viewer`, but this export was renamed to `WorkflowViewer` in studio v3.0.0.
-Rollup cannot resolve the import and the Deploy Docs build fails with exit code 1.
+
+h3 version 1.15.5 is present in the lockfile as a transitive dependency:
+`packages/web` → `astro@^5.6.1` → `unstorage@1.17.4` → `h3@1.15.5`
+
+h3 <= 1.15.5 has two known vulnerabilities:
+1. **HIGH**: SSE Injection via unsanitized newlines in `createEventStream()` — attacker controlling any SSE field (`id`, `event`, `data`) can inject arbitrary events to connected clients.
+2. **MEDIUM**: Path Traversal via percent-encoded dot segments in `serveStatic` — allows arbitrary file read.
 
 ### Evidence
-```
-[ERROR] [vite] ✗ Build failed in 2.11s
-src/components/RecipeExplorer.tsx (2:9): "RecipeViewer" is not exported by
-"../studio/dist-lib/viewer.js", imported by "src/components/RecipeExplorer.tsx".
 
-file: /home/runner/work/sweny/sweny/packages/web/src/components/RecipeExplorer.tsx:2:9
-  1: import { useState, useRef, useCallback, useEffect } from "react";
-  2: import { RecipeViewer } from "@sweny-ai/studio/viewer";
-              ^
-```
-Run ID: 23204701005, Job: build (67436666701)
+- Dependabot alert #32: GHSA-22cc-p3c6-wpvm (SSE Injection, HIGH)
+- Dependabot alert #31: GHSA-wr4h-v87w-p3r7 (Path Traversal, MEDIUM)
+- `grep "node_modules/h3" package-lock.json` → `"version": "1.15.5"` (vulnerable)
+- `npm audit` confirmed both CVEs before fix
 
 ### Root Cause Analysis
-Studio v3.0.0 renamed `RecipeViewer` → `WorkflowViewer` (breaking change documented in
-CHANGELOG.md). The `packages/web` package was not updated when this rename happened.
-`lib-viewer.ts` now exports only `WorkflowViewer`.
+
+`unstorage@1.17.4` specifies `"h3": "^1.15.5"` as a dependency. npm resolved this to 1.15.5
+(the minimum), which is below the patched version 1.15.6. No root-level override was present.
 
 ### Impact
-- Deploy Docs workflow fails on every push to main.
-- Documentation site cannot be rebuilt or deployed.
-- The `packages/web` SPA (RecipeExplorer page) is broken at build time.
 
-### Suggested Fix
-In `packages/web/src/components/RecipeExplorer.tsx`:
-1. Line 2: Change `import { RecipeViewer }` to `import { WorkflowViewer }`
-2. Line 1179: Change `<RecipeViewer` to `<WorkflowViewer`
+- h3 SSE functionality is used internally by unstorage/astro dev server.
+- Path traversal affects `serveStatic` usage in h3-based servers.
+- `packages/web` is private and not published to npm, so no consumer impact via the registry.
+  However, the vulnerability is present in developer environments and CI.
 
-### Files to Modify
-- `packages/web/src/components/RecipeExplorer.tsx`
+### Fix Applied
+
+Added `"h3": "^1.15.6"` to root `overrides` in `package.json`, then ran `npm audit fix`
+to upgrade h3 from 1.15.5 to 1.15.8 in `package-lock.json`.
+
+### Files Modified
+
+- `package.json` — added `"h3": "^1.15.6"` to `overrides`
+- `package-lock.json` — regenerated with h3@1.15.8
 
 ### Confidence Level
-High — the rename in studio is documented, the old symbol provably does not exist in
-`dist-lib/viewer.js`, and the props interface is identical.
+
+High — npm audit confirms resolution. Pattern matches the established PR #76 fix for fast-xml-parser.
 
 ### GitHub Issues Status
+
 No existing GitHub Issues issue found — New issue will be created.
 
 ---
 
-## Issue 2: Prettier Format Violations Break CI on Main (Known Issue)
+## Issue 2: esbuild Dev Server Vulnerability in packages/studio (Known Limitation)
 
 - **Severity**: Medium
-- **Environment**: CI (main branch)
-- **Frequency**: Every push to main
+- **Environment**: Development only (Vite dev server)
+- **Frequency**: Ongoing (Dependabot alert #21)
 
 ### Description
-`npm run format:check` fails on three files with prettier violations.
-Files: `packages/action/tests/mapToTriageConfig.test.ts`,
-`packages/providers/src/coding-agent/claude-code.ts`,
-`packages/providers/src/coding-agent/google-gemini.ts`
+
+`packages/studio/node_modules/esbuild` (via vite) is at version 0.24.x (≤ 0.24.2).
+Esbuild ≤ 0.24.2 allows any website to send requests to the local dev server.
+This is a development-only risk (dev server binding).
+
+### Fix Assessment
+
+`npm audit fix --force` would install vite@8.0.1 — a major breaking change.
+The root-level esbuild is already at 0.27.3 (patched). The vulnerable instance is scoped
+to vite's local install. Fixing requires a vite major version upgrade — out of scope for
+a targeted security patch. Tracked separately.
 
 ### GitHub Issues Status
-**Existing issue #65** — already tracked. PR #66 closed as failed attempt.
-→ No new issue or fix proposed for this. Recommend +1 on issue #65.
+
+No existing GitHub Issues issue found — tracked as a separate future upgrade.
