@@ -1,5 +1,20 @@
 # @sweny-ai/engine
 
+## 4.0.0
+
+### Patch Changes
+
+- Updated dependencies [c412d72]
+- Updated dependencies [b34a0ce]
+- Updated dependencies [a2d3679]
+- Updated dependencies [ee995c8]
+- Updated dependencies [b34a0ce]
+- Updated dependencies [ed18def]
+- Updated dependencies [b34a0ce]
+- Updated dependencies [cf13870]
+- Updated dependencies [6914c92]
+  - @sweny-ai/providers@1.2.0
+
 ## 3.2.7
 
 ### Patch Changes

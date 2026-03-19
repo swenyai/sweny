@@ -1,5 +1,34 @@
 # @sweny-ai/action
 
+## 0.2.0
+
+### Minor Changes
+
+- 3f8ae88: Add Vercel and Supabase as supported observability providers in the GitHub Action.
+  New inputs: vercel-token, vercel-project-id, vercel-team-id, supabase-management-key, supabase-project-ref.
+- c412d72: Add Axiom observability provider for querying events and logs using APL (Axiom Processing Language).
+- b34a0ce: Add Fly.io observability provider for querying runtime application logs.
+- a2d3679: Add Heroku and OpsGenie observability providers for querying runtime logs and alert incidents.
+- ee995c8: Add Honeycomb observability provider for querying events and traces using the Honeycomb Query API.
+- ae842be: Auto-inject Jira MCP server (Category A) when issue-tracker-provider is jira, and add Asana as a new Category B workspace tool.
+- b34a0ce: Add Netlify observability provider for querying build and deploy logs.
+- ed18def: Wire up Prometheus and PagerDuty observability providers to factories, catalog, CLI, and Action integration layers.
+- b34a0ce: Add Render observability provider for querying runtime logs from web services and workers.
+
+### Patch Changes
+
+- Updated dependencies [c412d72]
+- Updated dependencies [b34a0ce]
+- Updated dependencies [a2d3679]
+- Updated dependencies [ee995c8]
+- Updated dependencies [b34a0ce]
+- Updated dependencies [ed18def]
+- Updated dependencies [b34a0ce]
+- Updated dependencies [cf13870]
+- Updated dependencies [6914c92]
+  - @sweny-ai/providers@1.2.0
+  - @sweny-ai/engine@4.0.0
+
 ## 0.1.2
 
 ### Patch Changes

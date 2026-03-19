@@ -1,5 +1,36 @@
 # @sweny-ai/cli
 
+## 1.10.0
+
+### Minor Changes
+
+- c412d72: Add Axiom observability provider for querying events and logs using APL (Axiom Processing Language).
+- a2f6d59: Add Vercel and Supabase as valid observability providers in the CLI. Reads credentials
+  from VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_TEAM_ID (Vercel) and SUPABASE_MANAGEMENT_KEY,
+  SUPABASE_PROJECT_REF (Supabase) environment variables. Also available as .sweny.yml keys.
+- b34a0ce: Add Fly.io observability provider for querying runtime application logs.
+- a2d3679: Add Heroku and OpsGenie observability providers for querying runtime logs and alert incidents.
+- ee995c8: Add Honeycomb observability provider for querying events and traces using the Honeycomb Query API.
+- ae842be: Auto-inject Jira MCP server (Category A) when issue-tracker-provider is jira, and add Asana as a new Category B workspace tool.
+- b34a0ce: Add Netlify observability provider for querying build and deploy logs.
+- ed18def: Wire up Prometheus and PagerDuty observability providers to factories, catalog, CLI, and Action integration layers.
+- b34a0ce: Add Render observability provider for querying runtime logs from web services and workers.
+
+### Patch Changes
+
+- ed3af55: Expose `--additional-instructions` on `sweny implement`. The flag was wired into the engine config but never registered on the CLI subcommand, so it was silently ignored. Also fixes the CLI examples doc which incorrectly used a non-existent `--issue-identifier` flag instead of the positional `<issueId>` argument.
+- Updated dependencies [c412d72]
+- Updated dependencies [b34a0ce]
+- Updated dependencies [a2d3679]
+- Updated dependencies [ee995c8]
+- Updated dependencies [b34a0ce]
+- Updated dependencies [ed18def]
+- Updated dependencies [b34a0ce]
+- Updated dependencies [cf13870]
+- Updated dependencies [6914c92]
+  - @sweny-ai/providers@1.2.0
+  - @sweny-ai/engine@4.0.0
+
 ## 1.9.1
 
 ### Patch Changes

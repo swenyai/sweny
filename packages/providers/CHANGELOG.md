@@ -1,5 +1,19 @@
 # @sweny-ai/providers
 
+## 1.2.0
+
+### Minor Changes
+
+- c412d72: Add Axiom observability provider for querying events and logs using APL (Axiom Processing Language).
+- b34a0ce: Add Fly.io observability provider for querying runtime application logs.
+- a2d3679: Add Heroku and OpsGenie observability providers for querying runtime logs and alert incidents.
+- ee995c8: Add Honeycomb observability provider for querying events and traces using the Honeycomb Query API.
+- b34a0ce: Add Netlify observability provider for querying build and deploy logs.
+- ed18def: Wire up Prometheus and PagerDuty observability providers to factories, catalog, CLI, and Action integration layers.
+- b34a0ce: Add Render observability provider for querying runtime logs from web services and workers.
+- cf13870: Add Supabase observability provider for querying postgres, edge function, API, and auth logs.
+- 6914c92: Add Vercel observability provider for querying serverless function runtime logs.
+
 ## 1.1.5
 
 ### Patch Changes
