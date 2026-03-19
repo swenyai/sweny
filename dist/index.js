@@ -47104,7 +47104,7 @@ const prometheusConfigSchema = external/* object */.Ikc({
     token: external/* string */.YjP().optional(),
     logger: external/* custom */.IeY().optional(),
 });
-function prometheus(config) {
+function prometheus_prometheus(config) {
     const parsed = prometheusConfigSchema.parse(config);
     return new PrometheusProvider(parsed);
 }
@@ -47233,7 +47233,7 @@ const pagerdutyConfigSchema = external/* object */.Ikc({
     apiKey: external/* string */.YjP().min(1, "PagerDuty API key is required"),
     logger: external/* custom */.IeY().optional(),
 });
-function pagerduty(config) {
+function pagerduty_pagerduty(config) {
     const parsed = pagerdutyConfigSchema.parse(config);
     return new PagerDutyProvider(parsed);
 }
@@ -47360,7 +47360,1542 @@ curl -s "https://api.pagerduty.com/incidents?statuses[]=triggered&statuses[]=ack
     }
 }
 //# sourceMappingURL=pagerduty.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/vercel.js
+
+
+
+const vercelConfigSchema = external/* object */.Ikc({
+    token: external/* string */.YjP().min(1, "Vercel token is required"),
+    projectId: external/* string */.YjP().min(1, "Vercel project ID is required"),
+    teamId: external/* string */.YjP().optional(),
+    logger: external/* custom */.IeY().optional(),
+});
+const vercelProviderConfigSchema = {
+    role: "observability",
+    name: "Vercel",
+    fields: [
+        { key: "token", envVar: "VERCEL_TOKEN", description: "Vercel personal access token" },
+        { key: "projectId", envVar: "VERCEL_PROJECT_ID", description: "Vercel project ID" },
+        { key: "teamId", envVar: "VERCEL_TEAM_ID", description: "Vercel team ID (optional)", required: false },
+    ],
+};
+function vercel_vercel(config) {
+    const parsed = vercelConfigSchema.parse(config);
+    const provider = new VercelProvider(parsed);
+    return Object.assign(provider, { configSchema: vercelProviderConfigSchema });
+}
+function timeRangeToMs(range) {
+    const match = /^(\d+)(h|d|w)$/.exec(range);
+    if (!match)
+        return Date.now() - 3_600_000;
+    const [, n, unit] = match;
+    const ms = { h: 3_600_000, d: 86_400_000, w: 604_800_000 }[unit];
+    return Date.now() - parseInt(n, 10) * ms;
+}
+class VercelProvider {
+    token;
+    projectId;
+    teamId;
+    log;
+    constructor(config) {
+        this.token = config.token;
+        this.projectId = config.projectId;
+        this.teamId = config.teamId;
+        this.log = config.logger ?? consoleLogger;
+    }
+    teamParam() {
+        return this.teamId ? `&teamId=${encodeURIComponent(this.teamId)}` : "";
+    }
+    async get(path) {
+        const url = `https://api.vercel.com${path}`;
+        const response = await fetch(url, {
+            headers: { Authorization: `Bearer ${this.token}` },
+        });
+        if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            throw new ProviderApiError("Vercel", response.status, response.statusText, body);
+        }
+        return (await response.json());
+    }
+    async verifyAccess() {
+        this.log.info(`Verifying Vercel access (project: ${this.projectId})`);
+        await this.get(`/v9/projects/${encodeURIComponent(this.projectId)}${this.teamId ? `?teamId=${encodeURIComponent(this.teamId)}` : ""}`);
+        this.log.info("Vercel API access verified");
+    }
+    async listDeployments() {
+        const result = await this.get(`/v6/deployments?projectId=${encodeURIComponent(this.projectId)}&limit=5&state=READY${this.teamParam()}`);
+        return result.deployments ?? [];
+    }
+    async getDeploymentEvents(deploymentId, sinceMs) {
+        const result = await this.get(`/v3/deployments/${encodeURIComponent(deploymentId)}/events?direction=backward&limit=200&since=${sinceMs}${this.teamParam()}`);
+        return Array.isArray(result) ? result : [];
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying Vercel logs (severity: ${opts.severity}, range: ${opts.timeRange})`);
+        const sinceMs = timeRangeToMs(opts.timeRange);
+        const deployments = await this.listDeployments();
+        const entries = [];
+        for (const deployment of deployments) {
+            if (opts.serviceFilter !== "*" && !deployment.name.includes(opts.serviceFilter)) {
+                continue;
+            }
+            const events = await this.getDeploymentEvents(deployment.uid, sinceMs);
+            for (const event of events) {
+                if (event.type !== "stdout" && event.type !== "stderr")
+                    continue;
+                if (opts.severity === "error" && event.type !== "stderr")
+                    continue;
+                entries.push({
+                    timestamp: new Date(event.created).toISOString(),
+                    service: deployment.name,
+                    level: event.type === "stderr" ? "error" : "info",
+                    message: event.payload?.text ?? "",
+                    attributes: { deploymentId: deployment.uid, eventType: event.type },
+                });
+            }
+        }
+        entries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        const result = entries.slice(0, 200);
+        this.log.info(`Found ${result.length} Vercel log entries`);
+        return result;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating Vercel errors (range: ${opts.timeRange})`);
+        const sinceMs = timeRangeToMs(opts.timeRange);
+        const deployments = await this.listDeployments();
+        const counts = new Map();
+        for (const deployment of deployments) {
+            if (opts.serviceFilter !== "*" && !deployment.name.includes(opts.serviceFilter)) {
+                continue;
+            }
+            const events = await this.getDeploymentEvents(deployment.uid, sinceMs);
+            const errorCount = events.filter((e) => e.type === "stderr").length;
+            if (errorCount > 0) {
+                counts.set(deployment.name, (counts.get(deployment.name) ?? 0) + errorCount);
+            }
+        }
+        const results = Array.from(counts.entries())
+            .map(([service, count]) => ({ service, count }))
+            .sort((a, b) => b.count - a.count);
+        this.log.info(`Aggregated ${results.length} service groups`);
+        return results;
+    }
+    getAgentEnv() {
+        const env = {
+            VERCEL_TOKEN: this.token,
+            VERCEL_PROJECT_ID: this.projectId,
+        };
+        if (this.teamId)
+            env.VERCEL_TEAM_ID = this.teamId;
+        return env;
+    }
+    getPromptInstructions() {
+        const teamParam = this.teamId ? "?teamId=${VERCEL_TEAM_ID}" : "";
+        const teamSuffix = this.teamId ? "&teamId=${VERCEL_TEAM_ID}" : "";
+        return `### Vercel Runtime Logs API
+- \`VERCEL_TOKEN\` - Personal access token (use in Authorization: Bearer header)
+- \`VERCEL_PROJECT_ID\` - Project ID (${this.projectId})
+${this.teamId ? `- \`VERCEL_TEAM_ID\` - Team ID (${this.teamId})\n` : ""}
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+You have DIRECT ACCESS to Vercel's API via curl commands to investigate serverless function logs.
+
+#### Example: Get project info (verify access)
+\`\`\`bash
+curl -s "https://api.vercel.com/v9/projects/\${VERCEL_PROJECT_ID}${teamParam}" \\
+  -H "Authorization: Bearer \${VERCEL_TOKEN}"
+\`\`\`
+
+#### Example: List recent deployments
+\`\`\`bash
+curl -s "https://api.vercel.com/v6/deployments?projectId=\${VERCEL_PROJECT_ID}&limit=5&state=READY${teamSuffix}" \\
+  -H "Authorization: Bearer \${VERCEL_TOKEN}"
+\`\`\`
+
+#### Example: Get runtime logs for a deployment
+\`\`\`bash
+# Replace DEPLOYMENT_ID with a uid from the deployments list above
+curl -s "https://api.vercel.com/v3/deployments/DEPLOYMENT_ID/events?direction=backward&limit=200${teamSuffix}" \\
+  -H "Authorization: Bearer \${VERCEL_TOKEN}"
+\`\`\`
+
+Event types: \`stdout\` = info logs, \`stderr\` = error logs, \`command\`/\`exit\` = lifecycle events.
+Filter for errors: look for \`"type": "stderr"\` entries.`;
+    }
+}
+//# sourceMappingURL=vercel.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/supabase.js
+
+
+
+const supabaseConfigSchema = external/* object */.Ikc({
+    managementApiKey: external/* string */.YjP().min(1, "Supabase management API key is required"),
+    projectRef: external/* string */.YjP().min(1, "Supabase project ref is required"),
+    logger: external/* custom */.IeY().optional(),
+});
+const supabaseProviderConfigSchema = {
+    role: "observability",
+    name: "Supabase",
+    fields: [
+        { key: "managementApiKey", envVar: "SUPABASE_MANAGEMENT_KEY", description: "Supabase management API key" },
+        { key: "projectRef", envVar: "SUPABASE_PROJECT_REF", description: "Supabase project reference ID" },
+    ],
+};
+function supabase_supabase(config) {
+    const parsed = supabaseConfigSchema.parse(config);
+    const provider = new SupabaseProvider(parsed);
+    return Object.assign(provider, { configSchema: supabaseProviderConfigSchema });
+}
+function timeRangeToIso(range) {
+    const match = /^(\d+)(h|d|w)$/.exec(range);
+    if (!match)
+        return new Date(Date.now() - 3_600_000).toISOString();
+    const [, n, unit] = match;
+    const ms = { h: 3_600_000, d: 86_400_000, w: 604_800_000 }[unit];
+    return new Date(Date.now() - parseInt(n, 10) * ms).toISOString();
+}
+function sourceTables(serviceFilter) {
+    if (serviceFilter === "*")
+        return ["postgres_logs", "edge_logs", "api_logs", "auth_logs"];
+    const map = {
+        postgres: "postgres_logs",
+        edge: "edge_logs",
+        api: "api_logs",
+        auth: "auth_logs",
+        storage: "storage_logs",
+        realtime: "realtime_logs",
+    };
+    return [map[serviceFilter] ?? "postgres_logs"];
+}
+function severityClause(severity) {
+    if (severity === "error") {
+        return "AND (LOWER(event_message) LIKE '%error%' OR LOWER(event_message) LIKE '%exception%' OR LOWER(event_message) LIKE '%fatal%')";
+    }
+    if (severity === "warning" || severity === "warn") {
+        return "AND LOWER(event_message) LIKE '%warn%'";
+    }
+    return "";
+}
+function tableToService(table) {
+    return table.replace("_logs", "");
+}
+function inferLevel(message) {
+    const lower = message.toLowerCase();
+    if (/\b(fatal|error|exception|panic)\b/.test(lower))
+        return "error";
+    if (/\b(warn|warning)\b/.test(lower))
+        return "warning";
+    return "info";
+}
+class SupabaseProvider {
+    managementApiKey;
+    projectRef;
+    log;
+    constructor(config) {
+        this.managementApiKey = config.managementApiKey;
+        this.projectRef = config.projectRef;
+        this.log = config.logger ?? consoleLogger;
+    }
+    async request(path, body) {
+        const url = `https://api.supabase.com${path}`;
+        const response = await fetch(url, {
+            method: body ? "POST" : "GET",
+            headers: {
+                Authorization: `Bearer ${this.managementApiKey}`,
+                ...(body ? { "Content-Type": "application/json" } : {}),
+            },
+            ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => "");
+            throw new ProviderApiError("Supabase", response.status, response.statusText, text);
+        }
+        return (await response.json());
+    }
+    async verifyAccess() {
+        this.log.info(`Verifying Supabase access (project: ${this.projectRef})`);
+        await this.request(`/v1/projects/${this.projectRef}`);
+        this.log.info("Supabase API access verified");
+    }
+    async queryTable(table, sinceIso, extraClause) {
+        const sql = [
+            `SELECT timestamp, event_message, metadata`,
+            `FROM ${table}`,
+            `WHERE timestamp > '${sinceIso}'`,
+            extraClause,
+            `ORDER BY timestamp DESC`,
+            `LIMIT 100`,
+        ]
+            .filter(Boolean)
+            .join(" ");
+        const result = await this.request(`/v1/projects/${this.projectRef}/analytics/endpoints/logs.all`, { sql });
+        return result.result ?? [];
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying Supabase logs (severity: ${opts.severity}, range: ${opts.timeRange})`);
+        const sinceIso = timeRangeToIso(opts.timeRange);
+        const tables = sourceTables(opts.serviceFilter);
+        const extraClause = severityClause(opts.severity);
+        const all = [];
+        for (const table of tables) {
+            const rows = await this.queryTable(table, sinceIso, extraClause);
+            for (const row of rows) {
+                all.push({
+                    timestamp: row.timestamp,
+                    service: tableToService(table),
+                    level: inferLevel(row.event_message),
+                    message: row.event_message,
+                    attributes: row.metadata ?? {},
+                });
+            }
+        }
+        all.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        const result = all.slice(0, 200);
+        this.log.info(`Found ${result.length} Supabase log entries`);
+        return result;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating Supabase errors (range: ${opts.timeRange})`);
+        const sinceIso = timeRangeToIso(opts.timeRange);
+        const tables = sourceTables(opts.serviceFilter);
+        const errorClause = severityClause("error");
+        const results = [];
+        for (const table of tables) {
+            const rows = await this.queryTable(table, sinceIso, errorClause);
+            if (rows.length > 0) {
+                results.push({ service: tableToService(table), count: rows.length });
+            }
+        }
+        results.sort((a, b) => b.count - a.count);
+        this.log.info(`Aggregated ${results.length} service groups`);
+        return results;
+    }
+    getAgentEnv() {
+        return {
+            SUPABASE_MANAGEMENT_KEY: this.managementApiKey,
+            SUPABASE_PROJECT_REF: this.projectRef,
+        };
+    }
+    getPromptInstructions() {
+        return `### Supabase Logs API
+- \`SUPABASE_MANAGEMENT_KEY\` - Management API key (use in Authorization: Bearer header)
+- \`SUPABASE_PROJECT_REF\` - Project reference ID (${this.projectRef})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+You have DIRECT ACCESS to Supabase's Management API to query project logs via SQL.
+
+Available log tables: \`postgres_logs\`, \`edge_logs\`, \`api_logs\`, \`auth_logs\`, \`storage_logs\`, \`realtime_logs\`
+
+All tables have: \`timestamp\` (ISO 8601 string), \`event_message\` (string), \`metadata\` (JSON object).
+Use ISO 8601 timestamps in WHERE clauses — e.g., \`'2024-01-01T00:00:00.000Z'\`.
+To get "last 1 hour": compute \`new Date(Date.now() - 3600000).toISOString()\` and substitute below.
+
+#### Example: Verify access / get project info
+\`\`\`bash
+curl -s "https://api.supabase.com/v1/projects/\${SUPABASE_PROJECT_REF}" \\
+  -H "Authorization: Bearer \${SUPABASE_MANAGEMENT_KEY}"
+\`\`\`
+
+#### Example: Query recent postgres errors (last 1h)
+\`\`\`bash
+SINCE=$(date -u -v-1H +"%Y-%m-%dT%H:%M:%S.000Z" 2>/dev/null || date -u --date="1 hour ago" +"%Y-%m-%dT%H:%M:%S.000Z")
+curl -s -X POST "https://api.supabase.com/v1/projects/\${SUPABASE_PROJECT_REF}/analytics/endpoints/logs.all" \\
+  -H "Authorization: Bearer \${SUPABASE_MANAGEMENT_KEY}" \\
+  -H "Content-Type: application/json" \\
+  -d "{\"sql\": \"SELECT timestamp, event_message, metadata FROM postgres_logs WHERE timestamp > '$SINCE' AND (LOWER(event_message) LIKE '%error%' OR LOWER(event_message) LIKE '%fatal%') ORDER BY timestamp DESC LIMIT 100\"}"
+\`\`\`
+
+#### Example: Query recent edge function logs (last 1h)
+\`\`\`bash
+SINCE=$(date -u -v-1H +"%Y-%m-%dT%H:%M:%S.000Z" 2>/dev/null || date -u --date="1 hour ago" +"%Y-%m-%dT%H:%M:%S.000Z")
+curl -s -X POST "https://api.supabase.com/v1/projects/\${SUPABASE_PROJECT_REF}/analytics/endpoints/logs.all" \\
+  -H "Authorization: Bearer \${SUPABASE_MANAGEMENT_KEY}" \\
+  -H "Content-Type: application/json" \\
+  -d "{\"sql\": \"SELECT timestamp, event_message, metadata FROM edge_logs WHERE timestamp > '$SINCE' ORDER BY timestamp DESC LIMIT 100\"}"
+\`\`\``;
+    }
+}
+//# sourceMappingURL=supabase.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/netlify.js
+
+
+
+const netlifyConfigSchema = external/* object */.Ikc({
+    token: external/* string */.YjP().min(1, "Netlify token is required"),
+    siteId: external/* string */.YjP().min(1, "Netlify site ID is required"),
+    logger: external/* custom */.IeY().optional(),
+});
+const netlifyProviderConfigSchema = {
+    role: "observability",
+    name: "Netlify",
+    fields: [
+        { key: "token", envVar: "NETLIFY_TOKEN", description: "Netlify personal access token" },
+        { key: "siteId", envVar: "NETLIFY_SITE_ID", description: "Netlify site ID" },
+    ],
+};
+function netlify_netlify(config) {
+    const parsed = netlifyConfigSchema.parse(config);
+    const provider = new NetlifyProvider(parsed);
+    return Object.assign(provider, { configSchema: netlifyProviderConfigSchema });
+}
+function netlify_timeRangeToMs(range) {
+    const match = /^(\d+)(h|d|w)$/.exec(range);
+    if (!match)
+        return Date.now() - 3_600_000;
+    const [, n, unit] = match;
+    const ms = { h: 3_600_000, d: 86_400_000, w: 604_800_000 }[unit];
+    return Date.now() - parseInt(n, 10) * ms;
+}
+function netlify_inferLevel(message) {
+    const lower = message.toLowerCase();
+    if (/\b(fatal|error|exception|panic|failed)\b/.test(lower))
+        return "error";
+    if (/\b(warn|warning)\b/.test(lower))
+        return "warning";
+    return "info";
+}
+class NetlifyProvider {
+    token;
+    siteId;
+    log;
+    constructor(config) {
+        this.token = config.token;
+        this.siteId = config.siteId;
+        this.log = config.logger ?? consoleLogger;
+    }
+    async get(path) {
+        const url = `https://api.netlify.com${path}`;
+        const response = await fetch(url, {
+            headers: { Authorization: `Bearer ${this.token}`, Accept: "application/json" },
+        });
+        if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            throw new ProviderApiError("Netlify", response.status, response.statusText, body);
+        }
+        return (await response.json());
+    }
+    async verifyAccess() {
+        this.log.info("Verifying Netlify access");
+        await this.get("/api/v1/user");
+        this.log.info("Netlify API access verified");
+    }
+    async listDeploys(sinceMs) {
+        const deploys = await this.get(`/api/v1/sites/${encodeURIComponent(this.siteId)}/deploys?page=1&per_page=10`);
+        const sinceIso = new Date(sinceMs).toISOString();
+        return deploys.filter((d) => d.created_at > sinceIso);
+    }
+    async getDeployLog(deployId) {
+        const result = await this.get(`/api/v1/deploys/${encodeURIComponent(deployId)}/log`);
+        return result.log ?? "";
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying Netlify logs (severity: ${opts.severity}, range: ${opts.timeRange})`);
+        const deploys = await this.listDeploys(netlify_timeRangeToMs(opts.timeRange));
+        const entries = [];
+        for (const deploy of deploys) {
+            if (opts.serviceFilter !== "*" && !(deploy.context ?? "").includes(opts.serviceFilter)) {
+                continue;
+            }
+            const logText = await this.getDeployLog(deploy.id);
+            const lines = logText.split("\n").filter(Boolean);
+            for (const line of lines) {
+                const level = netlify_inferLevel(line);
+                if (opts.severity === "error" && level !== "error")
+                    continue;
+                if (opts.severity === "warning" && level !== "warning")
+                    continue;
+                entries.push({
+                    timestamp: deploy.created_at,
+                    service: deploy.context ?? "production",
+                    level,
+                    message: line.trim(),
+                    attributes: { deployId: deploy.id, state: deploy.state },
+                });
+            }
+        }
+        entries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        const result = entries.slice(0, 200);
+        this.log.info(`Found ${result.length} Netlify log entries`);
+        return result;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating Netlify errors (range: ${opts.timeRange})`);
+        const deploys = await this.listDeploys(netlify_timeRangeToMs(opts.timeRange));
+        const counts = new Map();
+        for (const deploy of deploys) {
+            if (opts.serviceFilter !== "*" && !(deploy.context ?? "").includes(opts.serviceFilter)) {
+                continue;
+            }
+            const logText = await this.getDeployLog(deploy.id);
+            const lines = logText.split("\n").filter(Boolean);
+            const errorCount = lines.filter((l) => netlify_inferLevel(l) === "error").length;
+            if (errorCount > 0) {
+                const service = deploy.context ?? "production";
+                counts.set(service, (counts.get(service) ?? 0) + errorCount);
+            }
+        }
+        const results = Array.from(counts.entries())
+            .map(([service, count]) => ({ service, count }))
+            .sort((a, b) => b.count - a.count);
+        this.log.info(`Aggregated ${results.length} service groups`);
+        return results;
+    }
+    getAgentEnv() {
+        return { NETLIFY_TOKEN: this.token, NETLIFY_SITE_ID: this.siteId };
+    }
+    getPromptInstructions() {
+        return `### Netlify Logs API
+- \`NETLIFY_TOKEN\` - Personal access token (use in Authorization: Bearer header)
+- \`NETLIFY_SITE_ID\` - Site ID (${this.siteId})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+You have DIRECT ACCESS to Netlify's API to query build and deploy logs.
+
+#### Example: Verify access (get current user)
+\`\`\`bash
+curl -s "https://api.netlify.com/api/v1/user" \\
+  -H "Authorization: Bearer \${NETLIFY_TOKEN}"
+\`\`\`
+
+#### Example: List recent deploys for a site
+\`\`\`bash
+curl -s "https://api.netlify.com/api/v1/sites/\${NETLIFY_SITE_ID}/deploys?page=1&per_page=5" \\
+  -H "Authorization: Bearer \${NETLIFY_TOKEN}"
+\`\`\`
+
+#### Example: Get build log for a specific deploy
+\`\`\`bash
+# Replace DEPLOY_ID with an id from the deploys list above
+curl -s "https://api.netlify.com/api/v1/deploys/DEPLOY_ID/log" \\
+  -H "Authorization: Bearer \${NETLIFY_TOKEN}"
+\`\`\`
+
+Build log severity: lines containing 'error', 'failed', 'ERR' = error; 'warn', 'WARNING' = warning; otherwise info.
+Service grouping: use \`context\` field from deploy (e.g. "production", "staging", "deploy-preview").`;
+    }
+}
+//# sourceMappingURL=netlify.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/fly.js
+
+
+
+const flyConfigSchema = external/* object */.Ikc({
+    token: external/* string */.YjP().min(1, "Fly.io token is required"),
+    appName: external/* string */.YjP().min(1, "Fly.io app name is required"),
+    logger: external/* custom */.IeY().optional(),
+});
+const flyProviderConfigSchema = {
+    role: "observability",
+    name: "Fly.io",
+    fields: [
+        { key: "token", envVar: "FLY_TOKEN", description: "Fly.io personal access token" },
+        { key: "appName", envVar: "FLY_APP_NAME", description: "Fly.io application name" },
+    ],
+};
+function fly_fly(config) {
+    const parsed = flyConfigSchema.parse(config);
+    const provider = new FlyProvider(parsed);
+    return Object.assign(provider, { configSchema: flyProviderConfigSchema });
+}
+function fly_timeRangeToIso(range) {
+    const match = /^(\d+)(h|d|w)$/.exec(range);
+    if (!match)
+        return new Date(Date.now() - 3_600_000).toISOString();
+    const [, n, unit] = match;
+    const ms = { h: 3_600_000, d: 86_400_000, w: 604_800_000 }[unit];
+    return new Date(Date.now() - parseInt(n, 10) * ms).toISOString();
+}
+function mapLevel(level) {
+    if (level === "error" || level === "fatal")
+        return "error";
+    if (level === "warn" || level === "warning")
+        return "warning";
+    return "info";
+}
+class FlyProvider {
+    token;
+    appName;
+    log;
+    constructor(config) {
+        this.token = config.token;
+        this.appName = config.appName;
+        this.log = config.logger ?? consoleLogger;
+    }
+    async get(path) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5_000);
+        try {
+            const response = await fetch(`https://api.fly.io${path}`, {
+                headers: { Authorization: `Bearer ${this.token}` },
+                signal: controller.signal,
+            });
+            if (!response.ok) {
+                const body = await response.text().catch(() => "");
+                throw new ProviderApiError("Fly", response.status, response.statusText, body);
+            }
+            return (await response.json());
+        }
+        finally {
+            clearTimeout(timeout);
+        }
+    }
+    async getLogs(path) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5_000);
+        try {
+            const response = await fetch(`https://api.fly.io${path}`, {
+                headers: { Authorization: `Bearer ${this.token}` },
+                signal: controller.signal,
+            });
+            if (!response.ok) {
+                const body = await response.text().catch(() => "");
+                throw new ProviderApiError("Fly", response.status, response.statusText, body);
+            }
+            return await response.text();
+        }
+        catch (err) {
+            if (err instanceof Error && err.name === "AbortError")
+                return "";
+            throw err;
+        }
+        finally {
+            clearTimeout(timeout);
+        }
+    }
+    parseLogLines(text) {
+        return text
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => {
+            try {
+                return JSON.parse(line);
+            }
+            catch {
+                return null;
+            }
+        })
+            .filter((entry) => entry !== null);
+    }
+    async verifyAccess() {
+        this.log.info(`Verifying Fly.io access (app: ${this.appName})`);
+        await this.get(`/v1/apps/${encodeURIComponent(this.appName)}`);
+        this.log.info("Fly.io API access verified");
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying Fly.io logs (severity: ${opts.severity}, range: ${opts.timeRange})`);
+        const sinceIso = fly_timeRangeToIso(opts.timeRange);
+        const text = await this.getLogs(`/v1/apps/${encodeURIComponent(this.appName)}/logs`);
+        let entries = this.parseLogLines(text);
+        // Filter by time range
+        entries = entries.filter((e) => e.timestamp > sinceIso);
+        // Filter by severity
+        if (opts.severity === "error") {
+            entries = entries.filter((e) => e.level === "error" || e.level === "fatal");
+        }
+        else if (opts.severity === "warning") {
+            entries = entries.filter((e) => e.level === "warn" || e.level === "warning");
+        }
+        // Filter by service (region)
+        if (opts.serviceFilter !== "*") {
+            entries = entries.filter((e) => e.meta?.region === opts.serviceFilter);
+        }
+        const logs = entries.map((e) => ({
+            timestamp: e.timestamp,
+            service: e.meta?.region ?? "unknown",
+            level: mapLevel(e.level),
+            message: e.message,
+            attributes: e.meta ?? {},
+        }));
+        logs.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        const result = logs.slice(0, 200);
+        this.log.info(`Found ${result.length} Fly.io log entries`);
+        return result;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating Fly.io errors (range: ${opts.timeRange})`);
+        const sinceIso = fly_timeRangeToIso(opts.timeRange);
+        const text = await this.getLogs(`/v1/apps/${encodeURIComponent(this.appName)}/logs`);
+        let entries = this.parseLogLines(text);
+        // Filter by time range
+        entries = entries.filter((e) => e.timestamp > sinceIso);
+        // Filter to error+fatal
+        let errors = entries.filter((e) => e.level === "error" || e.level === "fatal");
+        // Filter by service (region)
+        if (opts.serviceFilter !== "*") {
+            errors = errors.filter((e) => e.meta?.region === opts.serviceFilter);
+        }
+        // Group by region
+        const counts = new Map();
+        for (const e of errors) {
+            const region = e.meta?.region ?? "unknown";
+            counts.set(region, (counts.get(region) ?? 0) + 1);
+        }
+        const results = Array.from(counts.entries())
+            .map(([service, count]) => ({ service, count }))
+            .sort((a, b) => b.count - a.count);
+        this.log.info(`Aggregated ${results.length} service groups`);
+        return results;
+    }
+    getAgentEnv() {
+        return { FLY_TOKEN: this.token, FLY_APP_NAME: this.appName };
+    }
+    getPromptInstructions() {
+        return `### Fly.io Logs API
+- \`FLY_TOKEN\` - Personal access token (use in Authorization: Bearer header)
+- \`FLY_APP_NAME\` - Application name (${this.appName})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+You have DIRECT ACCESS to Fly.io's API to query application logs.
+
+**Note**: The logs endpoint returns streaming NDJSON — each line is a JSON object. Use --max-time to cap the response.
+
+#### Example: Verify access (get app info)
+\`\`\`bash
+curl -s "https://api.fly.io/v1/apps/\${FLY_APP_NAME}" \\
+  -H "Authorization: Bearer \${FLY_TOKEN}"
+\`\`\`
+
+#### Example: Get recent application logs (NDJSON)
+\`\`\`bash
+curl -s --max-time 10 "https://api.fly.io/v1/apps/\${FLY_APP_NAME}/logs" \\
+  -H "Authorization: Bearer \${FLY_TOKEN}"
+# Each line is: {"level":"info","message":"...","timestamp":"...","meta":{"region":"iad","app":"..."}}
+\`\`\`
+
+Log levels: \`info\`, \`warn\`, \`error\`, \`debug\`, \`fatal\`. Filter errors: level === "error" or "fatal".
+Service grouping: use \`meta.region\` as the service identifier.`;
+    }
+}
+//# sourceMappingURL=fly.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/render.js
+
+
+
+const renderConfigSchema = external/* object */.Ikc({
+    apiKey: external/* string */.YjP().min(1, "Render API key is required"),
+    serviceId: external/* string */.YjP().min(1, "Render service ID is required"),
+    logger: external/* custom */.IeY().optional(),
+});
+const renderProviderConfigSchema = {
+    role: "observability",
+    name: "Render",
+    fields: [
+        { key: "apiKey", envVar: "RENDER_API_KEY", description: "Render API key" },
+        { key: "serviceId", envVar: "RENDER_SERVICE_ID", description: "Render service ID" },
+    ],
+};
+function render_render(config) {
+    const parsed = renderConfigSchema.parse(config);
+    const provider = new RenderProvider(parsed);
+    return Object.assign(provider, { configSchema: renderProviderConfigSchema });
+}
+function render_timeRangeToIso(range) {
+    const match = /^(\d+)(h|d|w)$/.exec(range);
+    if (!match)
+        return new Date(Date.now() - 3_600_000).toISOString();
+    const [, n, unit] = match;
+    const ms = { h: 3_600_000, d: 86_400_000, w: 604_800_000 }[unit];
+    return new Date(Date.now() - parseInt(n, 10) * ms).toISOString();
+}
+function render_inferLevel(message) {
+    const lower = message.toLowerCase();
+    if (/\b(fatal|error|exception|panic|failed)\b/.test(lower))
+        return "error";
+    if (/\b(warn|warning)\b/.test(lower))
+        return "warning";
+    return "info";
+}
+class RenderProvider {
+    apiKey;
+    serviceId;
+    log;
+    constructor(config) {
+        this.apiKey = config.apiKey;
+        this.serviceId = config.serviceId;
+        this.log = config.logger ?? consoleLogger;
+    }
+    async request(path) {
+        const url = `https://api.render.com${path}`;
+        const response = await fetch(url, {
+            headers: { Authorization: `Bearer ${this.apiKey}`, Accept: "application/json" },
+        });
+        if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            throw new ProviderApiError("Render", response.status, response.statusText, body);
+        }
+        return (await response.json());
+    }
+    async verifyAccess() {
+        this.log.info(`Verifying Render access (service: ${this.serviceId})`);
+        await this.request(`/v1/services/${encodeURIComponent(this.serviceId)}`);
+        this.log.info("Render API access verified");
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying Render logs (severity: ${opts.severity}, range: ${opts.timeRange})`);
+        const startTime = render_timeRangeToIso(opts.timeRange);
+        const endTime = new Date().toISOString();
+        const result = await this.request(`/v1/services/${encodeURIComponent(this.serviceId)}/logs?startTime=${encodeURIComponent(startTime)}&endTime=${encodeURIComponent(endTime)}&limit=200&direction=backward`);
+        let logs = (result.logs ?? []).map((log) => ({
+            timestamp: log.timestamp,
+            service: log.instance?.serviceId ?? this.serviceId,
+            level: render_inferLevel(log.message),
+            message: log.message,
+            attributes: log.instance ? { instanceId: log.instance.id } : {},
+        }));
+        // Post-filter by severity
+        if (opts.severity === "error")
+            logs = logs.filter((l) => l.level === "error");
+        else if (opts.severity === "warning")
+            logs = logs.filter((l) => l.level === "warning");
+        // Post-filter by service
+        if (opts.serviceFilter !== "*")
+            logs = logs.filter((l) => l.service.includes(opts.serviceFilter));
+        const resultLogs = logs.slice(0, 200);
+        this.log.info(`Found ${resultLogs.length} Render log entries`);
+        return resultLogs;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating Render errors (range: ${opts.timeRange})`);
+        const startTime = render_timeRangeToIso(opts.timeRange);
+        const result = await this.request(`/v1/services/${encodeURIComponent(this.serviceId)}/logs?startTime=${encodeURIComponent(startTime)}&limit=200&direction=backward`);
+        let errorLogs = (result.logs ?? []).filter((l) => render_inferLevel(l.message) === "error");
+        // Post-filter by service
+        if (opts.serviceFilter !== "*") {
+            errorLogs = errorLogs.filter((l) => (l.instance?.serviceId ?? this.serviceId).includes(opts.serviceFilter));
+        }
+        if (errorLogs.length === 0)
+            return [];
+        return [{ service: this.serviceId, count: errorLogs.length }];
+    }
+    getAgentEnv() {
+        return { RENDER_API_KEY: this.apiKey, RENDER_SERVICE_ID: this.serviceId };
+    }
+    getPromptInstructions() {
+        return `### Render Logs API
+- \`RENDER_API_KEY\` - API key (use in Authorization: Bearer header)
+- \`RENDER_SERVICE_ID\` - Service ID (${this.serviceId})
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+You have DIRECT ACCESS to Render's API to query runtime logs from web services and workers.
+
+**Note**: Render logs API does not return a severity field — infer level from message content.
+
+#### Example: Verify access (get service details)
+\`\`\`bash
+curl -s "https://api.render.com/v1/services/\${RENDER_SERVICE_ID}" \\
+  -H "Authorization: Bearer \${RENDER_API_KEY}" \\
+  -H "Accept: application/json"
+\`\`\`
+
+#### Example: Query recent logs (last 1h)
+\`\`\`bash
+SINCE=$(date -u -v-1H +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u --date="1 hour ago" +"%Y-%m-%dT%H:%M:%SZ")
+curl -s "https://api.render.com/v1/services/\${RENDER_SERVICE_ID}/logs?startTime=\${SINCE}&limit=200&direction=backward" \\
+  -H "Authorization: Bearer \${RENDER_API_KEY}" \\
+  -H "Accept: application/json"
+\`\`\`
+
+Response shape: \`{ "logs": [{ "id": "...", "timestamp": "...", "message": "...", "instance": { "id": "...", "serviceId": "..." } }] }\`
+Severity is inferred: "error"/"exception"/"fatal" → error, "warn"/"warning" → warning, else info.`;
+    }
+}
+//# sourceMappingURL=render.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/heroku.js
+
+
+
+const herokuConfigSchema = external/* object */.Ikc({
+    apiKey: external/* string */.YjP().min(1, "Heroku API key is required"),
+    appName: external/* string */.YjP().min(1, "Heroku app name is required"),
+    logger: external/* custom */.IeY().optional(),
+});
+function heroku_heroku(config) {
+    const parsed = herokuConfigSchema.parse(config);
+    return new HerokuProvider(parsed);
+}
+const heroku_BASE_URL = "https://api.heroku.com";
+// Heroku logplex line: "2024-01-01T00:00:00+00:00 app[web.1]: message"
+const LOG_LINE_RE = /^(\d{4}-\d{2}-\d{2}T[\d:.+-]+)\s+\S+\[([^\]]+)\]:\s*(.*)$/;
+function heroku_inferLevel(message) {
+    const lower = message.toLowerCase();
+    if (/\b(fatal|error|exception|panic|failed)\b/.test(lower))
+        return "error";
+    if (/\b(warn|warning)\b/.test(lower))
+        return "warning";
+    return "info";
+}
+function heroku_timeRangeToMs(timeRange) {
+    const match = /^(\d+)([hdm])$/.exec(timeRange);
+    if (!match)
+        return 24 * 60 * 60 * 1000;
+    const value = parseInt(match[1], 10);
+    const unit = match[2];
+    if (unit === "m")
+        return value * 60 * 1000;
+    if (unit === "h")
+        return value * 60 * 60 * 1000;
+    return value * 24 * 60 * 60 * 1000;
+}
+class HerokuProvider {
+    apiKey;
+    appName;
+    log;
+    constructor(config) {
+        this.apiKey = config.apiKey;
+        this.appName = config.appName;
+        this.log = config.logger ?? consoleLogger;
+    }
+    get headers() {
+        return {
+            Authorization: `Bearer ${this.apiKey}`,
+            Accept: "application/vnd.heroku+json; version=3",
+            "Content-Type": "application/json",
+        };
+    }
+    async request(path, opts) {
+        const response = await fetch(`${heroku_BASE_URL}${path}`, {
+            method: opts?.method ?? "GET",
+            headers: this.headers,
+            body: opts?.body,
+        });
+        if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            throw new ProviderApiError("Heroku", response.status, response.statusText, body);
+        }
+        return (await response.json());
+    }
+    async verifyAccess() {
+        this.log.info(`Verifying Heroku access for app: ${this.appName}`);
+        await this.request(`/apps/${this.appName}`);
+        this.log.info("Heroku API access verified");
+    }
+    parseLogLines(text) {
+        return text
+            .split("\n")
+            .filter(Boolean)
+            .flatMap((line) => {
+            const match = LOG_LINE_RE.exec(line);
+            if (!match)
+                return [];
+            const [, timestamp, dyno, message] = match;
+            // "web.1" → "web", "heroku/router" → "heroku"
+            const dynoType = dyno.split(/[./]/)[0];
+            return [{ timestamp, dyno, dynoType, message }];
+        });
+    }
+    async fetchLogText(lines) {
+        const session = await this.request(`/apps/${this.appName}/log-sessions`, {
+            method: "POST",
+            body: JSON.stringify({ lines, tail: false }),
+        });
+        const logResp = await fetch(session.logplex_url);
+        if (!logResp.ok) {
+            throw new ProviderApiError("Heroku", logResp.status, logResp.statusText, "");
+        }
+        return logResp.text();
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying Heroku logs for app: ${this.appName} (range: ${opts.timeRange})`);
+        const since = Date.now() - heroku_timeRangeToMs(opts.timeRange);
+        const text = await this.fetchLogText(1500);
+        const parsed = this.parseLogLines(text);
+        let entries = parsed
+            .filter((l) => new Date(l.timestamp).getTime() >= since)
+            .map((l) => ({
+            timestamp: l.timestamp,
+            service: l.dynoType,
+            level: heroku_inferLevel(l.message),
+            message: l.message,
+            attributes: { dyno: l.dyno },
+        }));
+        if (opts.serviceFilter !== "*") {
+            entries = entries.filter((e) => e.service === opts.serviceFilter);
+        }
+        if (opts.severity !== "*") {
+            entries = entries.filter((e) => e.level === opts.severity.toLowerCase());
+        }
+        this.log.info(`Found ${entries.length} log entries`);
+        return entries;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating Heroku error logs for app: ${this.appName}`);
+        const since = Date.now() - heroku_timeRangeToMs(opts.timeRange);
+        const text = await this.fetchLogText(1500);
+        let errorLines = this.parseLogLines(text)
+            .filter((l) => new Date(l.timestamp).getTime() >= since)
+            .filter((l) => heroku_inferLevel(l.message) === "error");
+        if (opts.serviceFilter !== "*") {
+            errorLines = errorLines.filter((l) => l.dynoType === opts.serviceFilter);
+        }
+        const counts = new Map();
+        for (const l of errorLines) {
+            counts.set(l.dynoType, (counts.get(l.dynoType) ?? 0) + 1);
+        }
+        const results = Array.from(counts.entries()).map(([service, count]) => ({
+            service,
+            count,
+        }));
+        this.log.info(`Aggregated ${results.length} dyno groups`);
+        return results;
+    }
+    getAgentEnv() {
+        return {
+            HEROKU_API_KEY: this.apiKey,
+            HEROKU_APP_NAME: this.appName,
+        };
+    }
+    getPromptInstructions() {
+        return `### Heroku Logs API
+- \`HEROKU_API_KEY\` - Heroku API key (use as \`Authorization: Bearer $HEROKU_API_KEY\`)
+- \`HEROKU_APP_NAME\` - Heroku application name (\`${this.appName}\`)
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+You have DIRECT ACCESS to the Heroku Platform API via curl commands.
+
+#### Example: Fetch recent log lines via a log session
+\`\`\`bash
+logplex_url=$(curl -s -X POST "https://api.heroku.com/apps/$HEROKU_APP_NAME/log-sessions" \\
+  -H "Authorization: Bearer $HEROKU_API_KEY" \\
+  -H "Accept: application/vnd.heroku+json; version=3" \\
+  -H "Content-Type: application/json" \\
+  -d '{"lines": 200, "tail": false}' | jq -r '.logplex_url')
+curl -s "$logplex_url"
+\`\`\`
+
+#### Example: Get app info
+\`\`\`bash
+curl -s "https://api.heroku.com/apps/$HEROKU_APP_NAME" \\
+  -H "Authorization: Bearer $HEROKU_API_KEY" \\
+  -H "Accept: application/vnd.heroku+json; version=3"
+\`\`\``;
+    }
+}
+//# sourceMappingURL=heroku.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/opsgenie.js
+
+
+
+const opsgenieConfigSchema = external/* object */.Ikc({
+    apiKey: external/* string */.YjP().min(1, "OpsGenie API key is required"),
+    region: external/* enum */.k5n(["us", "eu"]).optional().default("us"),
+    logger: external/* custom */.IeY().optional(),
+});
+function opsgenie_opsgenie(config) {
+    const parsed = opsgenieConfigSchema.parse(config);
+    return new OpsGenieProvider(parsed);
+}
+const BASE_URLS = {
+    us: "https://api.opsgenie.com",
+    eu: "https://api.eu.opsgenie.com",
+};
+function priorityToLevel(priority) {
+    if (priority === "P1")
+        return "fatal";
+    if (priority === "P2")
+        return "error";
+    if (priority === "P3" || priority === "P4")
+        return "warning";
+    return "info";
+}
+function opsgenie_timeRangeToIso(timeRange) {
+    const now = Date.now();
+    const match = /^(\d+)([hdm])$/.exec(timeRange);
+    if (!match)
+        return new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    const value = parseInt(match[1], 10);
+    const unit = match[2];
+    const ms = unit === "m" ? value * 60 * 1000 : unit === "h" ? value * 60 * 60 * 1000 : value * 24 * 60 * 60 * 1000;
+    return new Date(now - ms).toISOString();
+}
+class OpsGenieProvider {
+    apiKey;
+    baseUrl;
+    log;
+    constructor(config) {
+        this.apiKey = config.apiKey;
+        this.baseUrl = BASE_URLS[config.region ?? "us"];
+        this.log = config.logger ?? consoleLogger;
+    }
+    get headers() {
+        return {
+            Authorization: `GenieKey ${this.apiKey}`,
+            "Content-Type": "application/json",
+        };
+    }
+    async get(path) {
+        const response = await fetch(`${this.baseUrl}${path}`, {
+            method: "GET",
+            headers: this.headers,
+        });
+        if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            throw new ProviderApiError("OpsGenie", response.status, response.statusText, body);
+        }
+        return (await response.json());
+    }
+    async verifyAccess() {
+        this.log.info("Verifying OpsGenie access");
+        await this.get("/v2/users?limit=1");
+        this.log.info("OpsGenie API access verified");
+    }
+    alertToLogEntry(alert) {
+        const service = alert.teams?.[0]?.name ?? alert.source ?? "unknown";
+        return {
+            timestamp: alert.createdAt,
+            service,
+            level: priorityToLevel(alert.priority),
+            message: alert.message,
+            attributes: {
+                id: alert.id,
+                status: alert.status,
+                priority: alert.priority,
+                alias: alert.alias,
+                tags: alert.tags,
+            },
+        };
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying OpsGenie alerts (range: ${opts.timeRange}, severity: ${opts.severity})`);
+        const since = opsgenie_timeRangeToIso(opts.timeRange);
+        const queryParts = [`createdAt > ${since}`];
+        if (opts.serviceFilter && opts.serviceFilter !== "*") {
+            queryParts.push(`teams: "${opts.serviceFilter}"`);
+        }
+        const params = new URLSearchParams({
+            limit: "100",
+            order: "desc",
+            query: queryParts.join(" AND "),
+        });
+        const result = await this.get(`/v2/alerts?${params.toString()}`);
+        let entries = (result.data ?? []).map((a) => this.alertToLogEntry(a));
+        if (opts.severity !== "*") {
+            entries = entries.filter((e) => e.level === opts.severity.toLowerCase());
+        }
+        this.log.info(`Found ${entries.length} alerts`);
+        return entries;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating OpsGenie alerts for ${opts.serviceFilter}`);
+        const all = await this.queryLogs({ ...opts, severity: "*" });
+        const errorAlerts = all.filter((a) => a.level === "error" || a.level === "fatal");
+        const counts = new Map();
+        for (const alert of errorAlerts) {
+            counts.set(alert.service, (counts.get(alert.service) ?? 0) + 1);
+        }
+        const results = Array.from(counts.entries()).map(([service, count]) => ({
+            service,
+            count,
+        }));
+        this.log.info(`Aggregated ${results.length} team/source groups`);
+        return results;
+    }
+    getAgentEnv() {
+        return {
+            OPSGENIE_API_KEY: this.apiKey,
+        };
+    }
+    getPromptInstructions() {
+        return `### OpsGenie Alerts API
+- \`OPSGENIE_API_KEY\` - OpsGenie API key (use as \`Authorization: GenieKey $OPSGENIE_API_KEY\`)
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+You have DIRECT ACCESS to the OpsGenie REST API via curl commands.
+
+#### Example: List recent open alerts
+\`\`\`bash
+curl -s "${this.baseUrl}/v2/alerts?status=open&limit=100&order=desc" \\
+  -H "Authorization: GenieKey $OPSGENIE_API_KEY"
+\`\`\`
+
+#### Example: Filter alerts by team
+\`\`\`bash
+curl -s "${this.baseUrl}/v2/alerts?query=teams:%22my-team%22&limit=100" \\
+  -H "Authorization: GenieKey $OPSGENIE_API_KEY"
+\`\`\``;
+    }
+}
+//# sourceMappingURL=opsgenie.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/honeycomb.js
+
+
+
+const honeycombConfigSchema = external/* object */.Ikc({
+    apiKey: external/* string */.YjP().min(1, "Honeycomb API key is required"),
+    dataset: external/* string */.YjP().min(1, "Honeycomb dataset name is required"),
+    logger: external/* custom */.IeY().optional(),
+});
+function honeycomb_honeycomb(config) {
+    const parsed = honeycombConfigSchema.parse(config);
+    return new HoneycombProvider(parsed);
+}
+const honeycomb_BASE_URL = "https://api.honeycomb.io";
+class HoneycombProvider {
+    apiKey;
+    dataset;
+    log;
+    constructor(config) {
+        this.apiKey = config.apiKey;
+        this.dataset = config.dataset;
+        this.log = config.logger ?? consoleLogger;
+    }
+    get headers() {
+        return {
+            "X-Honeycomb-Team": this.apiKey,
+            "Content-Type": "application/json",
+        };
+    }
+    async post(path, body) {
+        const response = await fetch(`${honeycomb_BASE_URL}${path}`, {
+            method: "POST",
+            headers: this.headers,
+            body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => "");
+            throw new ProviderApiError("Honeycomb", response.status, response.statusText, text);
+        }
+        return (await response.json());
+    }
+    async get(path) {
+        const response = await fetch(`${honeycomb_BASE_URL}${path}`, {
+            method: "GET",
+            headers: this.headers,
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => "");
+            throw new ProviderApiError("Honeycomb", response.status, response.statusText, text);
+        }
+        return (await response.json());
+    }
+    async verifyAccess() {
+        this.log.info("Verifying Honeycomb access");
+        await this.get("/1/auth");
+        this.log.info("Honeycomb API access verified");
+    }
+    timeRangeToSeconds(timeRange) {
+        const match = /^(\d+)([hdm])$/.exec(timeRange);
+        if (!match)
+            return 86400;
+        const value = parseInt(match[1], 10);
+        const unit = match[2];
+        if (unit === "m")
+            return value * 60;
+        if (unit === "h")
+            return value * 3600;
+        return value * 86400;
+    }
+    async runQuery(queryBody) {
+        const { id } = await this.post(`/1/queries/${this.dataset}`, queryBody);
+        // Poll until complete (up to 10 attempts, 1s apart)
+        for (let i = 0; i < 10; i++) {
+            const result = await this.get(`/1/query_results/${this.dataset}/${id}`);
+            if (result.complete) {
+                return result.data?.results ?? [];
+            }
+            await new Promise((r) => setTimeout(r, 1000));
+        }
+        return [];
+    }
+    rowToLogEntry(row) {
+        const d = row.data;
+        const level = String(d.level ?? d.severity ?? d.SeverityText ?? "info").toLowerCase();
+        const message = String(d.message ?? d.name ?? d.body ?? "");
+        const service = String(d["service.name"] ?? d.service ?? d["app.name"] ?? "unknown");
+        const timestamp = String(d.timestamp ?? d.time ?? new Date().toISOString());
+        const RESERVED = new Set([
+            "timestamp",
+            "time",
+            "level",
+            "severity",
+            "SeverityText",
+            "message",
+            "name",
+            "body",
+            "service.name",
+            "service",
+            "app.name",
+        ]);
+        const attributes = Object.fromEntries(Object.entries(d)
+            .filter(([k]) => !RESERVED.has(k))
+            .map(([k, v]) => [k, String(v)]));
+        return { timestamp, service, level, message, attributes };
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying Honeycomb dataset: ${this.dataset} (range: ${opts.timeRange})`);
+        const queryBody = {
+            time_range: this.timeRangeToSeconds(opts.timeRange),
+            limit: 200,
+        };
+        const filters = [];
+        if (opts.severity !== "*") {
+            filters.push({ column: "level", op: "=", value: opts.severity });
+        }
+        if (opts.serviceFilter !== "*") {
+            filters.push({ column: "service.name", op: "=", value: opts.serviceFilter });
+        }
+        if (filters.length > 0) {
+            queryBody.filters = filters;
+        }
+        const rows = await this.runQuery(queryBody);
+        const entries = rows.map((r) => this.rowToLogEntry(r));
+        this.log.info(`Found ${entries.length} log entries`);
+        return entries;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating Honeycomb error counts in dataset: ${this.dataset}`);
+        const filters = [{ column: "level", op: "=", value: "error" }];
+        if (opts.serviceFilter !== "*") {
+            filters.push({ column: "service.name", op: "=", value: opts.serviceFilter });
+        }
+        const queryBody = {
+            time_range: this.timeRangeToSeconds(opts.timeRange),
+            calculations: [{ op: "COUNT" }],
+            breakdowns: ["service.name"],
+            filters,
+        };
+        const rows = await this.runQuery(queryBody);
+        const results = rows
+            .map((r) => ({
+            service: String(r.data["service.name"] ?? "unknown"),
+            count: Number(r.data.COUNT ?? r.data.count ?? 0),
+        }))
+            .filter((r) => r.count > 0);
+        this.log.info(`Aggregated ${results.length} service groups`);
+        return results;
+    }
+    getAgentEnv() {
+        return {
+            HONEYCOMB_API_KEY: this.apiKey,
+            HONEYCOMB_DATASET: this.dataset,
+        };
+    }
+    getPromptInstructions() {
+        return `### Honeycomb Query API
+- \`HONEYCOMB_API_KEY\` - Honeycomb API key (use as \`X-Honeycomb-Team: $HONEYCOMB_API_KEY\` header)
+- \`HONEYCOMB_DATASET\` - Honeycomb dataset name (\`${this.dataset}\`)
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+You have DIRECT ACCESS to the Honeycomb Query API via curl commands.
+
+#### Example: Count errors by service in the last hour
+\`\`\`bash
+query_id=$(curl -s -X POST "https://api.honeycomb.io/1/queries/$HONEYCOMB_DATASET" \\
+  -H "X-Honeycomb-Team: $HONEYCOMB_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"time_range":3600,"calculations":[{"op":"COUNT"}],"breakdowns":["service.name"],"filters":[{"column":"level","op":"=","value":"error"}]}' | jq -r '.id')
+curl -s "https://api.honeycomb.io/1/query_results/$HONEYCOMB_DATASET/$query_id" \\
+  -H "X-Honeycomb-Team: $HONEYCOMB_API_KEY"
+\`\`\`
+
+#### Example: Fetch recent raw events
+\`\`\`bash
+query_id=$(curl -s -X POST "https://api.honeycomb.io/1/queries/$HONEYCOMB_DATASET" \\
+  -H "X-Honeycomb-Team: $HONEYCOMB_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"time_range":3600,"limit":100}' | jq -r '.id')
+curl -s "https://api.honeycomb.io/1/query_results/$HONEYCOMB_DATASET/$query_id" \\
+  -H "X-Honeycomb-Team: $HONEYCOMB_API_KEY"
+\`\`\``;
+    }
+}
+//# sourceMappingURL=honeycomb.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/axiom.js
+
+
+
+const axiomConfigSchema = external/* object */.Ikc({
+    apiToken: external/* string */.YjP().min(1, "Axiom API token is required"),
+    dataset: external/* string */.YjP().min(1, "Axiom dataset name is required"),
+    orgId: external/* string */.YjP().optional(),
+    logger: external/* custom */.IeY().optional(),
+});
+function axiom_axiom(config) {
+    const parsed = axiomConfigSchema.parse(config);
+    return new AxiomProvider(parsed);
+}
+const axiom_BASE_URL = "https://api.axiom.co";
+class AxiomProvider {
+    apiToken;
+    dataset;
+    orgId;
+    log;
+    constructor(config) {
+        this.apiToken = config.apiToken;
+        this.dataset = config.dataset;
+        this.orgId = config.orgId;
+        this.log = config.logger ?? consoleLogger;
+    }
+    get headers() {
+        const h = {
+            Authorization: `Bearer ${this.apiToken}`,
+            "Content-Type": "application/json",
+        };
+        if (this.orgId)
+            h["X-Axiom-Org-Id"] = this.orgId;
+        return h;
+    }
+    timeRangeToWindow(timeRange) {
+        const match = /^(\d+)([hdm])$/.exec(timeRange);
+        let ms = 86400 * 1000;
+        if (match) {
+            const v = parseInt(match[1], 10);
+            if (match[2] === "m")
+                ms = v * 60 * 1000;
+            else if (match[2] === "h")
+                ms = v * 3600 * 1000;
+            else
+                ms = v * 86400 * 1000;
+        }
+        const now = Date.now();
+        return {
+            startTime: new Date(now - ms).toISOString(),
+            endTime: new Date(now).toISOString(),
+        };
+    }
+    async runApl(apl, startTime, endTime) {
+        const response = await fetch(`${axiom_BASE_URL}/v1/datasets/_apl?format=legacy`, {
+            method: "POST",
+            headers: this.headers,
+            body: JSON.stringify({ apl, startTime, endTime }),
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => "");
+            throw new ProviderApiError("Axiom", response.status, response.statusText, text);
+        }
+        const result = (await response.json());
+        return result.matches ?? [];
+    }
+    async verifyAccess() {
+        this.log.info("Verifying Axiom access");
+        const response = await fetch(`${axiom_BASE_URL}/v1/datasets`, {
+            method: "GET",
+            headers: this.headers,
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => "");
+            throw new ProviderApiError("Axiom", response.status, response.statusText, text);
+        }
+        this.log.info("Axiom API access verified");
+    }
+    matchToLogEntry(match) {
+        const d = match.data;
+        const level = String(d.level ?? d.severity ?? d["@level"] ?? "info").toLowerCase();
+        const message = String(d.message ?? d.msg ?? d["@message"] ?? d.body ?? "");
+        const service = String(d["service.name"] ?? d.service ?? d.app ?? "unknown");
+        const timestamp = match._time || new Date().toISOString();
+        const RESERVED = new Set([
+            "level",
+            "severity",
+            "@level",
+            "message",
+            "msg",
+            "@message",
+            "body",
+            "service.name",
+            "service",
+            "app",
+        ]);
+        const attributes = Object.fromEntries(Object.entries(d)
+            .filter(([k]) => !RESERVED.has(k))
+            .map(([k, v]) => [k, String(v)]));
+        return { timestamp, service, level, message, attributes };
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying Axiom dataset: ${this.dataset} (range: ${opts.timeRange})`);
+        const { startTime, endTime } = this.timeRangeToWindow(opts.timeRange);
+        const parts = [`['${this.dataset}']`];
+        if (opts.severity !== "*") {
+            parts.push(`| where level == "${opts.severity}"`);
+        }
+        if (opts.serviceFilter !== "*") {
+            parts.push(`| where service == "${opts.serviceFilter}"`);
+        }
+        parts.push("| sort by _time desc | limit 200");
+        const apl = parts.join(" ");
+        const matches = await this.runApl(apl, startTime, endTime);
+        const entries = matches.map((m) => this.matchToLogEntry(m));
+        this.log.info(`Found ${entries.length} log entries`);
+        return entries;
+    }
+    async aggregate(opts) {
+        this.log.info(`Aggregating Axiom error counts in dataset: ${this.dataset}`);
+        const { startTime, endTime } = this.timeRangeToWindow(opts.timeRange);
+        const parts = [`['${this.dataset}']`, `| where level == "error"`];
+        if (opts.serviceFilter !== "*") {
+            parts.push(`| where service == "${opts.serviceFilter}"`);
+        }
+        parts.push("| summarize count() by service");
+        parts.push("| sort by _count desc");
+        const apl = parts.join(" ");
+        const matches = await this.runApl(apl, startTime, endTime);
+        const results = matches
+            .map((m) => ({
+            service: String(m.data.service ?? "unknown"),
+            count: Number(m.data["_count"] ?? m.data["count()"] ?? m.data.count ?? 0),
+        }))
+            .filter((r) => r.count > 0);
+        this.log.info(`Aggregated ${results.length} service groups`);
+        return results;
+    }
+    getAgentEnv() {
+        const env = {
+            AXIOM_TOKEN: this.apiToken,
+            AXIOM_DATASET: this.dataset,
+        };
+        if (this.orgId)
+            env.AXIOM_ORG_ID = this.orgId;
+        return env;
+    }
+    getPromptInstructions() {
+        const orgLine = this.orgId ? `\n  -H "X-Axiom-Org-Id: $AXIOM_ORG_ID" \\` : "";
+        const orgNote = this.orgId ? `\n- \`AXIOM_ORG_ID\` - Axiom org ID (\`${this.orgId}\`)` : "";
+        return `### Axiom Query API (APL)
+- \`AXIOM_TOKEN\` - Axiom API token (use as \`Authorization: Bearer $AXIOM_TOKEN\` header)
+- \`AXIOM_DATASET\` - Axiom dataset name (\`${this.dataset}\`)${orgNote}
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+You have DIRECT ACCESS to the Axiom APL Query API via curl commands.
+
+#### Example: Count errors by service in the last hour
+\`\`\`bash
+START=$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)
+END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+curl -s -X POST "https://api.axiom.co/v1/datasets/_apl?format=legacy" \\
+  -H "Authorization: Bearer $AXIOM_TOKEN" \\${orgLine}
+  -H "Content-Type: application/json" \\
+  -d "{\\"apl\\":\\"['${this.dataset}'] | where level == 'error' | summarize count() by service | sort by _count desc\\",\\"startTime\\":\\"$START\\",\\"endTime\\":\\"$END\\"}"
+\`\`\`
+
+#### Example: Fetch recent raw events
+\`\`\`bash
+START=$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)
+END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+curl -s -X POST "https://api.axiom.co/v1/datasets/_apl?format=legacy" \\
+  -H "Authorization: Bearer $AXIOM_TOKEN" \\${orgLine}
+  -H "Content-Type: application/json" \\
+  -d "{\\"apl\\":\\"['${this.dataset}'] | sort by _time desc | limit 100\\",\\"startTime\\":\\"$START\\",\\"endTime\\":\\"$END\\"}"
+\`\`\``;
+    }
+}
+//# sourceMappingURL=axiom.js.map
 ;// CONCATENATED MODULE: ../providers/dist/observability/index.js
+
+
+
+
+
+
+
+
+
 
 
 
@@ -49741,7 +51276,7 @@ const pagerduty_pagerdutyConfigSchema = external/* object */.Ikc({
     routingKey: external/* string */.YjP().min(1, "PagerDuty routing key (integration key) is required"),
     logger: external/* custom */.IeY().optional(),
 });
-function pagerduty_pagerduty(config) {
+function incident_pagerduty_pagerduty(config) {
     const parsed = pagerduty_pagerdutyConfigSchema.parse(config);
     return new pagerduty_PagerDutyProvider(parsed);
 }
@@ -49852,16 +51387,16 @@ class pagerduty_PagerDutyProvider {
 
 
 
-const opsgenieConfigSchema = external/* object */.Ikc({
+const opsgenie_opsgenieConfigSchema = external/* object */.Ikc({
     apiKey: external/* string */.YjP().min(1, "OpsGenie API key is required"),
     region: external/* enum */.k5n(["us", "eu"]).default("us"),
     logger: external/* custom */.IeY().optional(),
 });
-function opsgenie(config) {
-    const parsed = opsgenieConfigSchema.parse(config);
-    return new OpsGenieProvider(parsed);
+function incident_opsgenie_opsgenie(config) {
+    const parsed = opsgenie_opsgenieConfigSchema.parse(config);
+    return new opsgenie_OpsGenieProvider(parsed);
 }
-class OpsGenieProvider {
+class opsgenie_OpsGenieProvider {
     apiKey;
     baseUrl;
     log;
@@ -51615,7 +53150,9 @@ class AwsSecretsManagerProvider {
  * Instantiate an observability provider by name.
  *
  * @param name        - Provider key: "datadog" | "sentry" | "cloudwatch" | "splunk" |
- *                      "elastic" | "newrelic" | "loki" | "file"
+ *                      "elastic" | "newrelic" | "loki" | "file" | "prometheus" | "pagerduty" |
+ *                      "vercel" | "supabase" | "netlify" | "fly" | "render" | "heroku" | "opsgenie" |
+ *                      "honeycomb" | "axiom"
  * @param credentials - Key/value map of provider-specific credentials (same shape as
  *                      `parseObservabilityCredentials` returns in the CLI/Action).
  * @param logger      - Logger instance to pass to the provider.
@@ -51649,6 +53186,37 @@ function createObservabilityProvider(name, credentials, logger) {
             return loki({ baseUrl: credentials.baseUrl, apiKey: credentials.apiKey, orgId: credentials.orgId, logger });
         case "file":
             return file({ path: credentials.path, logger });
+        case "prometheus":
+            return prometheus({ url: credentials.url, token: credentials.token || undefined, logger });
+        case "pagerduty":
+            return pagerduty({ apiKey: credentials.apiKey, logger });
+        case "vercel":
+            return vercel({ token: credentials.token, projectId: credentials.projectId, teamId: credentials.teamId, logger });
+        case "supabase":
+            return supabase({ managementApiKey: credentials.managementApiKey, projectRef: credentials.projectRef, logger });
+        case "netlify":
+            return netlify({ token: credentials.token, siteId: credentials.siteId, logger });
+        case "fly":
+            return fly({ token: credentials.token, appName: credentials.appName, logger });
+        case "render":
+            return render({ apiKey: credentials.apiKey, serviceId: credentials.serviceId, logger });
+        case "heroku":
+            return heroku({ apiKey: credentials.apiKey, appName: credentials.appName, logger });
+        case "opsgenie":
+            return opsgenie({
+                apiKey: credentials.apiKey,
+                region: (credentials.region ?? "us"),
+                logger,
+            });
+        case "honeycomb":
+            return honeycomb({ apiKey: credentials.apiKey, dataset: credentials.dataset, logger });
+        case "axiom":
+            return axiom({
+                apiToken: credentials.apiToken,
+                dataset: credentials.dataset,
+                orgId: credentials.orgId || undefined,
+                logger,
+            });
         default:
             throw new Error(`Unsupported observability provider: ${name}`);
     }
@@ -51809,6 +53377,230 @@ const PROVIDER_CATALOG = [
                 secret: false,
             },
             { key: "LOKI_PASSWORD", description: "Grafana Cloud API key", required: false, secret: true },
+        ],
+    },
+    {
+        id: "supabase",
+        name: "Supabase",
+        category: "observability",
+        description: "Query postgres, edge function, API, and auth logs from Supabase projects.",
+        color: "#3ECF8E",
+        icon: "⚡",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "supabase",
+        envVars: [
+            { key: "SUPABASE_MANAGEMENT_KEY", description: "Supabase management API key", required: true, secret: true },
+            {
+                key: "SUPABASE_PROJECT_REF",
+                description: "Supabase project reference ID",
+                required: true,
+                secret: false,
+                example: "abcdefghijklmnop",
+            },
+        ],
+    },
+    {
+        id: "vercel",
+        name: "Vercel",
+        category: "observability",
+        description: "Query runtime logs from Vercel serverless function deployments.",
+        color: "#000000",
+        icon: "▲",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "vercel",
+        envVars: [
+            { key: "VERCEL_TOKEN", description: "Vercel personal access token", required: true, secret: true },
+            {
+                key: "VERCEL_PROJECT_ID",
+                description: "Vercel project ID",
+                required: true,
+                secret: false,
+                example: "prj_xxxxxxxxxxxxxxxxxxxx",
+            },
+            {
+                key: "VERCEL_TEAM_ID",
+                description: "Vercel team ID (optional, for team-owned projects)",
+                required: false,
+                secret: false,
+                example: "team_xxxxxxxxxxxxxxxxxxxx",
+            },
+        ],
+    },
+    {
+        id: "prometheus",
+        name: "Prometheus",
+        category: "observability",
+        description: "Query firing alerts from a Prometheus or Thanos instance.",
+        color: "#E6522C",
+        icon: "🔥",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "prometheus",
+        envVars: [
+            {
+                key: "PROMETHEUS_URL",
+                description: "Prometheus base URL",
+                required: true,
+                secret: false,
+                example: "http://prometheus.internal:9090",
+            },
+            {
+                key: "PROMETHEUS_TOKEN",
+                description: "Bearer token (optional, for secured instances)",
+                required: false,
+                secret: true,
+            },
+        ],
+    },
+    {
+        id: "pagerduty",
+        name: "PagerDuty",
+        category: "observability",
+        description: "Query triggered and acknowledged incidents from PagerDuty.",
+        color: "#06AC38",
+        icon: "🚨",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "pagerduty",
+        envVars: [{ key: "PAGERDUTY_API_KEY", description: "PagerDuty API key", required: true, secret: true }],
+    },
+    {
+        id: "netlify",
+        name: "Netlify",
+        category: "observability",
+        description: "Query build and deploy logs from Netlify sites.",
+        color: "#00C7B7",
+        icon: "◈",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "netlify",
+        envVars: [
+            { key: "NETLIFY_TOKEN", description: "Netlify personal access token", required: true, secret: true },
+            {
+                key: "NETLIFY_SITE_ID",
+                description: "Netlify site ID",
+                required: true,
+                secret: false,
+                example: "abc123de-f456-...",
+            },
+        ],
+    },
+    {
+        id: "fly",
+        name: "Fly.io",
+        category: "observability",
+        description: "Query runtime logs from Fly.io applications.",
+        color: "#7C3AED",
+        icon: "✈",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "fly",
+        envVars: [
+            { key: "FLY_TOKEN", description: "Fly.io personal access token", required: true, secret: true },
+            { key: "FLY_APP_NAME", description: "Fly.io application name", required: true, secret: false, example: "my-app" },
+        ],
+    },
+    {
+        id: "render",
+        name: "Render",
+        category: "observability",
+        description: "Query runtime logs from Render web services and workers.",
+        color: "#46E3B7",
+        icon: "⬡",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "render",
+        envVars: [
+            { key: "RENDER_API_KEY", description: "Render API key", required: true, secret: true },
+            {
+                key: "RENDER_SERVICE_ID",
+                description: "Render service ID (srv-...)",
+                required: true,
+                secret: false,
+                example: "srv-xxxxxxxxxxxx",
+            },
+        ],
+    },
+    {
+        id: "honeycomb",
+        name: "Honeycomb",
+        category: "observability",
+        description: "Query events and traces from Honeycomb using the Query API.",
+        color: "#F5A623",
+        icon: "🍯",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "honeycomb",
+        envVars: [
+            { key: "HONEYCOMB_API_KEY", description: "Honeycomb API key", required: true, secret: true },
+            {
+                key: "HONEYCOMB_DATASET",
+                description: "Honeycomb dataset name",
+                required: true,
+                secret: false,
+                example: "production",
+            },
+        ],
+    },
+    {
+        id: "heroku",
+        name: "Heroku",
+        category: "observability",
+        description: "Query runtime logs from Heroku dynos via the Logplex API.",
+        color: "#430098",
+        icon: "⬡",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "heroku",
+        envVars: [
+            { key: "HEROKU_API_KEY", description: "Heroku API key", required: true, secret: true },
+            {
+                key: "HEROKU_APP_NAME",
+                description: "Heroku application name",
+                required: true,
+                secret: false,
+                example: "my-app",
+            },
+        ],
+    },
+    {
+        id: "opsgenie",
+        name: "OpsGenie",
+        category: "observability",
+        description: "Query open and recent incidents from Atlassian OpsGenie.",
+        color: "#172B4D",
+        icon: "🚨",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "opsgenie",
+        envVars: [
+            { key: "OPSGENIE_API_KEY", description: "OpsGenie API key", required: true, secret: true },
+            {
+                key: "OPSGENIE_REGION",
+                description: "OpsGenie region (us or eu, default: us)",
+                required: false,
+                secret: false,
+                example: "eu",
+            },
+        ],
+    },
+    {
+        id: "axiom",
+        name: "Axiom",
+        category: "observability",
+        description: "Query events and logs from Axiom using APL (Axiom Processing Language).",
+        color: "#6366f1",
+        icon: "⚡",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "axiom",
+        envVars: [
+            { key: "AXIOM_TOKEN", description: "Axiom API token", required: true, secret: true },
+            {
+                key: "AXIOM_DATASET",
+                description: "Axiom dataset name",
+                required: true,
+                secret: false,
+                example: "production",
+            },
+            {
+                key: "AXIOM_ORG_ID",
+                description: "Axiom org ID (required for multi-org accounts)",
+                required: false,
+                secret: false,
+                example: "my-org",
+            },
         ],
     },
     // ── Issue Tracking ─────────────────────────────────────────────────────────
@@ -54356,7 +56148,7 @@ function parseMcpServers(json) {
     }
 }
 /** All recognized workspace tool names. Update here when adding a new Category B MCP server. */
-const SUPPORTED_WORKSPACE_TOOLS = new Set(["slack", "notion", "pagerduty", "monday"]);
+const SUPPORTED_WORKSPACE_TOOLS = new Set(["slack", "notion", "pagerduty", "monday", "asana"]);
 function validateInputs(config) {
     const errors = [];
     // Implement workflow requires an issue identifier
@@ -54412,6 +56204,66 @@ function validateInputs(config) {
         case "file":
             if (!config.logFilePath)
                 errors.push("Missing required input: `log-file-path` is required when `observability-provider` is `file`");
+            break;
+        case "prometheus":
+            if (!config.observabilityCredentials.url)
+                errors.push("Missing required input: `prometheus-url` is required when `observability-provider` is `prometheus`");
+            break;
+        case "pagerduty":
+            if (!config.observabilityCredentials.apiKey)
+                errors.push("Missing required input: `pagerduty-api-key` is required when `observability-provider` is `pagerduty`");
+            break;
+        case "heroku":
+            if (!config.observabilityCredentials.apiKey)
+                errors.push("Missing required input: `heroku-api-key` is required when `observability-provider` is `heroku`");
+            if (!config.observabilityCredentials.appName)
+                errors.push("Missing required input: `heroku-app-name` is required when `observability-provider` is `heroku`");
+            break;
+        case "opsgenie":
+            if (!config.observabilityCredentials.apiKey)
+                errors.push("Missing required input: `opsgenie-api-key` is required when `observability-provider` is `opsgenie`");
+            break;
+        case "honeycomb":
+            if (!config.observabilityCredentials.apiKey)
+                errors.push("Missing required input: `honeycomb-api-key` is required when `observability-provider` is `honeycomb`");
+            if (!config.observabilityCredentials.dataset)
+                errors.push("Missing required input: `honeycomb-dataset` is required when `observability-provider` is `honeycomb`");
+            break;
+        case "axiom":
+            if (!config.observabilityCredentials.apiToken)
+                errors.push("Missing required input: `axiom-api-token` is required when `observability-provider` is `axiom`");
+            if (!config.observabilityCredentials.dataset)
+                errors.push("Missing required input: `axiom-dataset` is required when `observability-provider` is `axiom`");
+            break;
+        case "vercel":
+            if (!config.observabilityCredentials.token)
+                errors.push("Missing required input: `vercel-token` is required when `observability-provider` is `vercel`");
+            if (!config.observabilityCredentials.projectId)
+                errors.push("Missing required input: `vercel-project-id` is required when `observability-provider` is `vercel`");
+            break;
+        case "supabase":
+            if (!config.observabilityCredentials.managementApiKey)
+                errors.push("Missing required input: `supabase-management-key` is required when `observability-provider` is `supabase`");
+            if (!config.observabilityCredentials.projectRef)
+                errors.push("Missing required input: `supabase-project-ref` is required when `observability-provider` is `supabase`");
+            break;
+        case "netlify":
+            if (!config.observabilityCredentials.token)
+                errors.push("Missing required input: `netlify-token` is required when `observability-provider` is `netlify`");
+            if (!config.observabilityCredentials.siteId)
+                errors.push("Missing required input: `netlify-site-id` is required when `observability-provider` is `netlify`");
+            break;
+        case "fly":
+            if (!config.observabilityCredentials.token)
+                errors.push("Missing required input: `fly-token` is required when `observability-provider` is `fly`");
+            if (!config.observabilityCredentials.appName)
+                errors.push("Missing required input: `fly-app-name` is required when `observability-provider` is `fly`");
+            break;
+        case "render":
+            if (!config.observabilityCredentials.apiKey)
+                errors.push("Missing required input: `render-api-key` is required when `observability-provider` is `render`");
+            if (!config.observabilityCredentials.serviceId)
+                errors.push("Missing required input: `render-service-id` is required when `observability-provider` is `render`");
             break;
     }
     // Issue tracker credentials by provider
@@ -54535,6 +56387,62 @@ function parseObservabilityCredentials(provider) {
         case "file":
             return {
                 path: main_core.getInput("log-file-path"),
+            };
+        case "prometheus":
+            return {
+                url: main_core.getInput("prometheus-url"),
+                token: main_core.getInput("prometheus-token"),
+            };
+        case "pagerduty":
+            return {
+                apiKey: main_core.getInput("pagerduty-api-key"),
+            };
+        case "heroku":
+            return {
+                apiKey: main_core.getInput("heroku-api-key"),
+                appName: main_core.getInput("heroku-app-name"),
+            };
+        case "opsgenie":
+            return {
+                apiKey: main_core.getInput("opsgenie-api-key"),
+                region: main_core.getInput("opsgenie-region") || "us",
+            };
+        case "honeycomb":
+            return {
+                apiKey: main_core.getInput("honeycomb-api-key"),
+                dataset: main_core.getInput("honeycomb-dataset"),
+            };
+        case "axiom":
+            return {
+                apiToken: main_core.getInput("axiom-api-token"),
+                dataset: main_core.getInput("axiom-dataset"),
+                orgId: main_core.getInput("axiom-org-id"),
+            };
+        case "vercel":
+            return {
+                token: main_core.getInput("vercel-token"),
+                projectId: main_core.getInput("vercel-project-id"),
+                teamId: main_core.getInput("vercel-team-id"),
+            };
+        case "supabase":
+            return {
+                managementApiKey: main_core.getInput("supabase-management-key"),
+                projectRef: main_core.getInput("supabase-project-ref"),
+            };
+        case "netlify":
+            return {
+                token: main_core.getInput("netlify-token"),
+                siteId: main_core.getInput("netlify-site-id"),
+            };
+        case "fly":
+            return {
+                token: main_core.getInput("fly-token"),
+                appName: main_core.getInput("fly-app-name"),
+            };
+        case "render":
+            return {
+                apiKey: main_core.getInput("render-api-key"),
+                serviceId: main_core.getInput("render-service-id"),
             };
         default:
             return {};
@@ -54956,6 +56864,21 @@ function buildAutoMcpServers(config) {
             headers: { Authorization: `Bearer ${config.linearApiKey}` },
         };
     }
+    // Jira / Confluence (Atlassian) MCP — inject when issue tracker is jira.
+    // Uses @sooperset/mcp-atlassian which supports API token auth (email + token).
+    // Env vars: JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN.
+    if (config.issueTrackerProvider === "jira" && config.jiraBaseUrl && config.jiraEmail && config.jiraApiToken) {
+        auto["jira"] = {
+            type: "stdio",
+            command: "npx",
+            args: ["-y", "@sooperset/mcp-atlassian@latest"],
+            env: {
+                JIRA_URL: config.jiraBaseUrl,
+                JIRA_EMAIL: config.jiraEmail,
+                JIRA_API_TOKEN: config.jiraApiToken,
+            },
+        };
+    }
     // Datadog MCP — HTTP transport (/unstable is the current versioned path for this endpoint)
     const ddKey = obsCreds.apiKey;
     const ddAppKey = obsCreds.appKey;
@@ -55054,6 +56977,19 @@ function buildAutoMcpServers(config) {
                 command: "npx",
                 args: ["-y", "@mondaydotcomorg/monday-api-mcp@latest"],
                 env: { MONDAY_TOKEN: mondayToken },
+            };
+        }
+    }
+    // Asana MCP — requires workspace-tools includes "asana" AND ASANA_ACCESS_TOKEN is set.
+    // Personal Access Tokens from Settings > Apps > Developer apps in Asana.
+    if (tools.has("asana")) {
+        const asanaToken = process.env.ASANA_ACCESS_TOKEN;
+        if (asanaToken) {
+            auto["asana"] = {
+                type: "stdio",
+                command: "npx",
+                args: ["-y", "asana-mcp@latest"],
+                env: { ASANA_ACCESS_TOKEN: asanaToken },
             };
         }
     }
