@@ -82,3 +82,14 @@ jobs:
           # Keep the v3 floating tag pointing at the latest main commit
           git tag -f v3
           git push origin v3 --force
+          # Push an immutable versioned tag (e.g. v3.10.0) derived from @sweny-ai/engine
+          # so consumers can pin to an exact release instead of the floating v3.
+          # Skips silently if the tag already exists (no version bump this run).
+          ENGINE_VERSION=$(node -p "require('./packages/engine/package.json').version")
+          VERSIONED_TAG="v3.${ENGINE_VERSION}"
+          if git tag "$VERSIONED_TAG" 2>/dev/null; then
+            git push origin "$VERSIONED_TAG"
+            echo "Pushed $VERSIONED_TAG"
+          else
+            echo "$VERSIONED_TAG already exists, skipping"
+          fi
