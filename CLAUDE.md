@@ -44,8 +44,8 @@ You may omit a changeset for:
 ## Release flow
 
 1. Merge feature work to `main` (with changeset files included)
-2. Changesets action opens PR #N "chore: release packages" — shows computed version bumps
-3. Merge that PR → packages publish to npm automatically
+2. `.github/workflows/release.yml` runs automatically — bumps versions, commits, and publishes to npm in one step
+3. No intermediate PR — publishing is fully automatic on every push to `main` that has pending changesets
 
 ## Package structure
 
