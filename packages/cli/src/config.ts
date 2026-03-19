@@ -675,7 +675,8 @@ export function registerImplementCommand(program: Command): Command {
       "--review-mode <mode>",
       "PR merge behavior: auto (GitHub auto-merge when CI passes) | review (human approval, default)",
       "review",
-    );
+    )
+    .option("--additional-instructions <text>", "Extra instructions for the coding agent");
 }
 
 /**

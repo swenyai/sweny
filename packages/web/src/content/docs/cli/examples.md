@@ -85,14 +85,13 @@ sweny triage \
 Run the implement workflow directly on a known issue — skips log scanning:
 
 ```bash
-sweny implement --issue-identifier ENG-123
+sweny implement ENG-123
 ```
 
 Pass additional guidance to the agent:
 
 ```bash
-sweny implement \
-  --issue-identifier ENG-123 \
+sweny implement ENG-123 \
   --additional-instructions 'Add a null check before accessing event.payload.metadata'
 ```
 
