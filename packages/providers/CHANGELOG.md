@@ -1,5 +1,13 @@
 # @sweny-ai/providers
 
+## 1.3.0
+
+### Minor Changes
+
+- ab9bf4c: Add Better Stack Telemetry as an observability provider.
+
+  Token-based auth (`BETTERSTACK_API_TOKEN`) works in GitHub Actions without OAuth. The provider auto-injects the Better Stack MCP server (`https://mcp.betterstack.com`) so the coding agent has full ClickHouse SQL access to logs, metrics, spans, and error tracking.
+
 ## 1.2.0
 
 ### Minor Changes

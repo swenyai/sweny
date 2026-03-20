@@ -1,5 +1,11 @@
 # @sweny-ai/studio
 
+## 7.0.0
+
+### Patch Changes
+
+- @sweny-ai/engine@5.0.0
+
 ## 6.0.0
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/studio",
-  "version": "6.0.0",
+  "version": "7.0.0",
   "description": "React component library for visualizing and editing SWEny workflow DAGs — embeddable viewer and editor",
   "type": "module",
   "keywords": [
