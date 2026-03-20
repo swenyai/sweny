@@ -54,6 +54,7 @@ import {
   formatCheckResults,
 } from "./output.js";
 import { checkProviderConnectivity } from "./check.js";
+import { registerSetupCommand } from "./setup.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -98,6 +99,8 @@ program
     const hasFailure = results.some((r) => r.status === "fail");
     process.exit(hasFailure ? 1 : 0);
   });
+
+registerSetupCommand(program);
 
 const triageCmd = registerTriageCommand(program);
 
@@ -631,6 +634,7 @@ export function mapToTriageConfig(config: CliConfig): TriageConfig {
     projectId: config.linearTeamId || (config.issueTrackerProvider === "file" ? "local" : ""),
     bugLabelId: config.linearBugLabelId || (config.issueTrackerProvider === "file" ? "bug" : ""),
     triageLabelId: config.linearTriageLabelId || (config.issueTrackerProvider === "file" ? "triage" : ""),
+    issueLabels: config.issueLabels.length > 0 ? config.issueLabels : undefined,
     stateBacklog: config.linearStateBacklog || (config.issueTrackerProvider === "file" ? "open" : ""),
     stateInProgress: config.linearStateInProgress || (config.issueTrackerProvider === "file" ? "in-progress" : ""),
     statePeerReview: config.linearStatePeerReview || (config.issueTrackerProvider === "file" ? "peer-review" : ""),

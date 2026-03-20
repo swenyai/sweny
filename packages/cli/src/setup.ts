@@ -38,6 +38,11 @@ const SIGNAL_LABELS: LabelDef[] = [
     color: "6B7280",
     description: "Guard rail — automation must not touch this issue or PR",
   },
+  {
+    name: "needs-review",
+    color: "0EA5E9",
+    description: "PR opened by the agent and waiting for human review",
+  },
 ];
 
 const WORK_TYPE_LABELS: LabelDef[] = [
@@ -57,6 +62,30 @@ const WORK_TYPE_LABELS: LabelDef[] = [
     name: "optimization",
     color: "059669",
     description: "Performance or code optimization by the agent",
+    isWorkType: true,
+  },
+  {
+    name: "research",
+    color: "D97706",
+    description: "Spike, investigation, or report by the agent — exploratory work without a direct code change",
+    isWorkType: true,
+  },
+  {
+    name: "support",
+    color: "0891B2",
+    description: "Work initiated from a support request by the agent",
+    isWorkType: true,
+  },
+  {
+    name: "spec",
+    color: "BE185D",
+    description: "Spec generation — agent converted non-technical input into a structured spec",
+    isWorkType: true,
+  },
+  {
+    name: "task",
+    color: "78716C",
+    description: "Open-ended prompt or generic work by the agent that does not fit another category",
     isWorkType: true,
   },
 ];
@@ -177,9 +206,9 @@ export async function setupLinear(apiKey: string, teamId: string): Promise<void>
     signalIds[def.name] = label.id;
   }
 
-  // 4. Bug label (standalone, may already exist as "Bug")
-  const bugFound = byName.get("bug") ?? byName.get("Bug") ?? (await ensure(BUG_LABEL).catch(() => null));
-  const bugId = bugFound?.id ?? "";
+  // 4. Bug label (standalone, may already exist)
+  const bugLabel = byName.get("bug") ?? (await ensure(BUG_LABEL));
+  const bugId = bugLabel.id;
 
   // ── Print config snippet ─────────────────────────────────────────────────
   const triageId = workTypeIds["triage"] ?? byName.get("triage")?.id ?? "";
@@ -192,13 +221,15 @@ ${chalk.bold("  Add these to your .sweny.yml:")}
 ${chalk.cyan(`  issue-tracker-provider: linear
   linear-team-id: ${teamId}
   linear-triage-label-id: ${triageId}
-  linear-bug-label-id: ${bugId}`)}
+  linear-bug-label-id: ${bugId}
+  issue-labels: ${agentLabel.id}`)}
 
 ${chalk.bold("  Or as environment variables / GitHub Actions secrets:")}
 
 ${chalk.cyan(`  LINEAR_TEAM_ID=${teamId}
   LINEAR_TRIAGE_LABEL_ID=${triageId}
-  LINEAR_BUG_LABEL_ID=${bugId}`)}
+  LINEAR_BUG_LABEL_ID=${bugId}
+  SWENY_ISSUE_LABELS=${agentLabel.id}`)}
 
 ${chalk.dim("  Full label inventory:")}
 ${chalk.dim(`  agent               ${agentLabel.id}`)}
@@ -237,11 +268,22 @@ async function githubRequest<T>(token: string, method: string, path: string, bod
   return (await res.json()) as T;
 }
 
+async function listAllGithubLabels(token: string, repo: string): Promise<GitHubLabel[]> {
+  const labels: GitHubLabel[] = [];
+  let page = 1;
+  while (true) {
+    const batch = await githubRequest<GitHubLabel[]>(token, "GET", `/repos/${repo}/labels?per_page=100&page=${page}`);
+    labels.push(...batch);
+    if (batch.length < 100) break;
+    page++;
+  }
+  return labels;
+}
+
 export async function setupGithub(token: string, repo: string): Promise<void> {
   console.log(chalk.dim("\n  Fetching existing labels…\n"));
 
-  // List existing labels
-  const existing = await githubRequest<GitHubLabel[]>(token, "GET", `/repos/${repo}/labels?per_page=100`);
+  const existing = await listAllGithubLabels(token, repo);
   const byName = new Set(existing.map((l) => l.name.toLowerCase()));
 
   const allLabels: LabelDef[] = [AGENT_PARENT, ...WORK_TYPE_LABELS, ...SIGNAL_LABELS, BUG_LABEL];
@@ -270,7 +312,8 @@ ${chalk.bold("  Done.")} ${created.length} created, ${skipped.length} already ex
 ${chalk.bold("  Add these to your .sweny.yml:")}
 
 ${chalk.cyan(`  source-control-provider: github
-  pr-labels: agent,triage,needs-review`)}
+  pr-labels: agent,triage,needs-review
+  issue-labels: agent`)}
 
 ${chalk.dim("  GitHub labels are referenced by name — no UUIDs needed.")}
 `);

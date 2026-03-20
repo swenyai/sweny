@@ -38,6 +38,7 @@ export interface CliConfig {
   // PR / branch settings
   baseBranch: string;
   prLabels: string[];
+  issueLabels: string[];
 
   // Behavior
   dryRun: boolean;
@@ -128,6 +129,10 @@ export function registerTriageCommand(program: Command): Command {
     .option("--linear-team-id <id>", "Linear team ID")
     .option("--linear-bug-label-id <id>", "Linear bug label ID")
     .option("--linear-triage-label-id <id>", "Linear triage label ID")
+    .option(
+      "--issue-labels <labels>",
+      "Comma-separated extra labels applied to every agent-created issue (e.g. agent UUID for Linear, 'agent' for GitHub Issues)",
+    )
     .option("--linear-state-backlog <name>", "Linear backlog state name")
     .option("--linear-state-in-progress <name>", "Linear in-progress state name")
     .option("--linear-state-peer-review <name>", "Linear peer-review state name")
@@ -187,6 +192,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
     linearBugLabelId: (options.linearBugLabelId as string) || env.LINEAR_BUG_LABEL_ID || f("linear-bug-label-id") || "",
     linearTriageLabelId:
       (options.linearTriageLabelId as string) || env.LINEAR_TRIAGE_LABEL_ID || f("linear-triage-label-id") || "",
+
     linearStateBacklog:
       (options.linearStateBacklog as string) || env.LINEAR_STATE_BACKLOG || f("linear-state-backlog") || "",
     linearStateInProgress:
@@ -205,6 +211,10 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
     prLabels: ((options.prLabels as string) || f("pr-labels") || "agent,triage,needs-review")
       .split(",")
       .map((l) => l.trim()),
+    issueLabels: ((options.issueLabels as string) || env.SWENY_ISSUE_LABELS || f("issue-labels") || "")
+      .split(",")
+      .map((l) => l.trim())
+      .filter(Boolean),
 
     // Per-invocation flags: CLI only — never from config file
     dryRun: Boolean(options.dryRun),
