@@ -173,6 +173,20 @@ export interface LabelHistoryCapable {
   ): Promise<IssueHistoryEntry[]>;
 }
 
+/**
+ * Capability for searching issues by embedded TRIAGE_FINGERPRINT metadata.
+ * Providers that implement this support hard dedup by hash rather than title matching.
+ */
+export interface FingerprintSearchCapable {
+  /**
+   * Search for issues whose description contains a matching TRIAGE_FINGERPRINT hash.
+   * @param projectId - Project or team identifier.
+   * @param hash - The fingerprint hash to search for (16-char hex from fingerprintEvent).
+   * @returns Matching issues, typically 0 or 1.
+   */
+  searchByFingerprint(projectId: string, hash: string): Promise<Issue[]>;
+}
+
 // ---------------------------------------------------------------------------
 // Type guards
 // ---------------------------------------------------------------------------
@@ -193,4 +207,15 @@ export function canLinkPr(p: IssueTrackingProvider): p is IssueTrackingProvider 
  */
 export function canSearchIssuesByLabel(p: IssueTrackingProvider): p is IssueTrackingProvider & LabelHistoryCapable {
   return "searchIssuesByLabel" in p && typeof (p as Record<string, unknown>).searchIssuesByLabel === "function";
+}
+
+/**
+ * Type guard: checks whether the provider supports fingerprint-based issue search.
+ * @param p - Issue tracking provider to check.
+ * @returns True if the provider implements FingerprintSearchCapable.
+ */
+export function canSearchByFingerprint(
+  p: IssueTrackingProvider,
+): p is IssueTrackingProvider & FingerprintSearchCapable {
+  return "searchByFingerprint" in p && typeof (p as Record<string, unknown>).searchByFingerprint === "function";
 }

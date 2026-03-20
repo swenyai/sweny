@@ -17,6 +17,7 @@ export const defaultConfig = {
     projectId: "proj-1",
     bugLabelId: "label-bug",
     triageLabelId: "label-triage",
+    issueLabels: ["label-agent"],
     stateBacklog: "state-backlog",
     stateInProgress: "state-progress",
     statePeerReview: "state-review",

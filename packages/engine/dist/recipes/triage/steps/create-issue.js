@@ -59,7 +59,7 @@ export async function createIssue(ctx) {
             if (fs.existsSync(bestCandidatePath)) {
                 description = fs.readFileSync(bestCandidatePath, "utf-8").slice(0, DESCRIPTION_MAX_LENGTH);
             }
-            const labelIds = [config.bugLabelId, config.triageLabelId].filter((l) => !!l);
+            const labelIds = [config.bugLabelId, config.triageLabelId, ...(config.issueLabels ?? [])].filter((l) => !!l);
             issue = await issueTracker.createIssue({
                 title: issueTitle,
                 projectId: config.projectId,

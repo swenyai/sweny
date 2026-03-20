@@ -10,6 +10,7 @@ import type {
   IssueSearchOptions,
   PrLinkCapable,
   LabelHistoryCapable,
+  FingerprintSearchCapable,
   IssueHistoryEntry,
 } from "./types.js";
 import type { ProviderConfigSchema } from "../config-schema.js";
@@ -33,13 +34,16 @@ export const linearProviderConfigSchema: ProviderConfigSchema = {
 
 export function linear(
   config: LinearConfig,
-): IssueTrackingProvider & PrLinkCapable & LabelHistoryCapable & { configSchema: ProviderConfigSchema } {
+): IssueTrackingProvider &
+  PrLinkCapable &
+  LabelHistoryCapable &
+  FingerprintSearchCapable & { configSchema: ProviderConfigSchema } {
   const parsed = linearConfigSchema.parse(config);
   const provider = new LinearProvider(parsed);
   return Object.assign(provider, { configSchema: linearProviderConfigSchema });
 }
 
-class LinearProvider implements IssueTrackingProvider, PrLinkCapable, LabelHistoryCapable {
+class LinearProvider implements IssueTrackingProvider, PrLinkCapable, LabelHistoryCapable, FingerprintSearchCapable {
   private readonly apiKey: string;
   private readonly log: Logger;
 
@@ -311,6 +315,61 @@ class LinearProvider implements IssueTrackingProvider, PrLinkCapable, LabelHisto
     await this.addComment(issueId, `**Pull Request Created**: [PR #${prNumber}](${prUrl})`);
 
     this.log.info(`PR #${prNumber} linked to issue ${issueId}`);
+  }
+
+  async searchByFingerprint(projectId: string, hash: string): Promise<Issue[]> {
+    this.log.info(`Searching for issues with fingerprint hash ${hash}`);
+
+    // The fingerprint block embeds the hash as "fingerprint: <hash>" inside
+    // an HTML comment, so a contains search on that string is reliable.
+    const searchToken = `fingerprint: ${hash}`;
+
+    const query = `
+      query FingerprintSearch($teamId: String!, $filter: IssueFilter) {
+        team(id: $teamId) {
+          issues(filter: $filter, first: 10) {
+            nodes {
+              id
+              identifier
+              title
+              url
+              branchName
+              state { name }
+            }
+          }
+        }
+      }
+    `;
+
+    const result = await this.request<{
+      team: {
+        issues: {
+          nodes: Array<{
+            id: string;
+            identifier: string;
+            title: string;
+            url: string;
+            branchName: string;
+            state: { name: string };
+          }>;
+        };
+      };
+    }>(query, {
+      teamId: projectId,
+      filter: { description: { contains: searchToken } },
+    });
+
+    const issues = result.team?.issues?.nodes ?? [];
+    this.log.info(`Found ${issues.length} issue(s) matching fingerprint ${hash}`);
+
+    return issues.map((i) => ({
+      id: i.id,
+      identifier: i.identifier,
+      title: i.title,
+      url: i.url,
+      branchName: i.branchName,
+      state: i.state.name,
+    }));
   }
 
   async searchIssuesByLabel(

@@ -12,6 +12,12 @@ export interface TriageConfig {
     projectId: string;
     bugLabelId: string;
     triageLabelId: string;
+    /**
+     * Extra labels applied to every agent-created issue (in addition to bugLabelId and triageLabelId).
+     * Provider-agnostic: pass UUIDs for Linear, label names for GitHub Issues / Jira.
+     * Use this to apply the compound "agent" marker label from the label system.
+     */
+    issueLabels?: string[];
     stateBacklog: string;
     stateInProgress: string;
     statePeerReview: string;

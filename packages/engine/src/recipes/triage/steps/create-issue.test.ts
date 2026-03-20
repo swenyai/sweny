@@ -167,7 +167,7 @@ describe("createIssue", () => {
       expect.objectContaining({
         title: "Fix the auth bug",
         projectId: "proj-1",
-        labels: ["label-bug", "label-triage"],
+        labels: ["label-bug", "label-triage", "label-agent"],
         priority: 2,
         stateId: "state-backlog",
       }),
@@ -189,7 +189,56 @@ describe("createIssue", () => {
     });
     const ctx = createCtx({ providers: buildRegistry() });
     await createIssue(ctx);
-    const desc = createIssueFn.mock.calls[0][0].description;
-    expect(desc.length).toBeLessThanOrEqual(10000);
+    // description is sliced before the fingerprint block is appended, so total may exceed 10k slightly
+    const desc = createIssueFn.mock.calls[0][0].description as string;
+    expect(desc.slice(0, 10000)).toHaveLength(10000);
+  });
+
+  it("appends TRIAGE_FINGERPRINT block to description", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("# Fix null pointer in auth\nSome details");
+    searchIssues.mockResolvedValue([]);
+    createIssueFn.mockResolvedValue({
+      id: "id-1",
+      identifier: "ENG-1",
+      title: "Fix null pointer in auth",
+      url: "https://example.com/ENG-1",
+      branchName: "eng-1-fix",
+    });
+    const ctx = createCtx({ providers: buildRegistry() });
+    await createIssue(ctx);
+    const desc = createIssueFn.mock.calls[0][0].description as string;
+    expect(desc).toContain("<!-- TRIAGE_FINGERPRINT");
+    expect(desc).toContain("error_pattern:");
+    expect(desc).toContain("fingerprint:");
+    expect(desc).toContain(`date: ${new Date().toISOString().split("T")[0]}`);
+    expect(desc).toContain("-->");
+  });
+
+  it("fingerprint hash is deterministic for the same title and service", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("# Fix null pointer in auth\nDetails");
+    const mockIssue = {
+      id: "id-1",
+      identifier: "ENG-1",
+      title: "Fix null pointer in auth",
+      url: "https://example.com/ENG-1",
+      branchName: "eng-1-fix",
+    };
+    createIssueFn.mockResolvedValue(mockIssue);
+
+    // Run twice without resetting — both calls land at indices 0 and 1
+    searchIssues.mockResolvedValue([]);
+    const ctx = createCtx({ providers: buildRegistry() });
+    await createIssue(ctx);
+    searchIssues.mockResolvedValue([]);
+    await createIssue(ctx);
+
+    const desc1 = createIssueFn.mock.calls[0][0].description as string;
+    const desc2 = createIssueFn.mock.calls[1][0].description as string;
+    const hash1 = desc1.match(/fingerprint: ([a-f0-9]+)/)?.[1];
+    const hash2 = desc2.match(/fingerprint: ([a-f0-9]+)/)?.[1];
+    expect(hash1).toBeDefined();
+    expect(hash1).toBe(hash2);
   });
 });

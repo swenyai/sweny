@@ -1,10 +1,43 @@
 import * as fs from "node:fs";
 import type { Issue, IssueTrackingProvider } from "@sweny-ai/providers/issue-tracking";
 import type { StepResult, WorkflowContext } from "../../../types.js";
+import { fingerprintEvent } from "../../../lib/fingerprint.js";
 import type { TriageConfig } from "../types.js";
 
 const TITLE_MAX_LENGTH = 100;
 const DESCRIPTION_MAX_LENGTH = 10000;
+
+/**
+ * Appends a TRIAGE_FINGERPRINT HTML comment block to the issue description.
+ * The hash is derived from the normalized error pattern and service filter so
+ * it's stable across runs for the same underlying error.
+ *
+ * The block format matches ENG-648 and is used by `searchByFingerprint` in
+ * the Linear provider to do hard dedup beyond title-matching.
+ */
+function appendFingerprintBlock(description: string, issueTitle: string, serviceFilter: string): string {
+  const date = new Date().toISOString().split("T")[0];
+  // Normalize: lowercase, strip common fix-prefix words, collapse whitespace
+  const errorPattern = issueTitle
+    .toLowerCase()
+    .replace(/^(fix|resolve|handle|add|update|improve)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const service = serviceFilter && serviceFilter !== "*" ? serviceFilter : "unknown";
+  const hash = fingerprintEvent({ error_pattern: errorPattern, service });
+
+  const block = [
+    "",
+    "<!-- TRIAGE_FINGERPRINT",
+    `error_pattern: ${errorPattern}`,
+    `service: ${service}`,
+    `fingerprint: ${hash}`,
+    `date: ${date}`,
+    "-->",
+  ].join("\n");
+
+  return description + block;
+}
 
 /** Extract issue title from best-candidate.md, then get-or-create an issue in the tracker. */
 export async function createIssue(ctx: WorkflowContext<TriageConfig>): Promise<StepResult> {
@@ -68,7 +101,11 @@ export async function createIssue(ctx: WorkflowContext<TriageConfig>): Promise<S
         description = fs.readFileSync(bestCandidatePath, "utf-8").slice(0, DESCRIPTION_MAX_LENGTH);
       }
 
-      const labelIds = [config.bugLabelId, config.triageLabelId].filter((l): l is string => !!l);
+      description = appendFingerprintBlock(description, issueTitle, config.serviceFilter);
+
+      const labelIds = [config.bugLabelId, config.triageLabelId, ...(config.issueLabels ?? [])].filter(
+        (l): l is string => !!l,
+      );
 
       issue = await issueTracker.createIssue({
         title: issueTitle,
