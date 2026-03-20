@@ -48890,21 +48890,45 @@ curl -s -X POST "https://api.axiom.co/v1/datasets/_apl?format=legacy" \\
 
 
 
+// ── Config ─────────────────────────────────────────────────────────────────
 const betterstackConfigSchema = external/* object */.Ikc({
     apiToken: external/* string */.YjP().min(1, "Better Stack API token is required"),
-    sourceId: external/* string */.YjP().optional(),
+    /**
+     * Source ID shown in the Better Stack UI (e.g. 961958).
+     * Used to auto-discover the ClickHouse table name via the Sources API.
+     */
+    sourceId: external/* union */.KCZ([external/* number */.aig(), external/* string */.YjP()]).optional(),
+    /**
+     * Full qualified ClickHouse table name (e.g. "t273774.offload_ecs_production").
+     * When set, skips the Sources API discovery call.
+     * Use this if you know your table name and want to avoid the extra request.
+     */
+    tableName: external/* string */.YjP().optional(),
     logger: external/* custom */.IeY().optional(),
+})
+    .refine((d) => d.sourceId !== undefined || d.tableName !== undefined, {
+    message: "Either sourceId or tableName must be provided",
 });
 const betterstackProviderConfigSchema = {
     role: "observability",
     name: "Better Stack",
     fields: [
-        { key: "apiToken", envVar: "BETTERSTACK_API_TOKEN", description: "Better Stack Telemetry API token" },
+        {
+            key: "apiToken",
+            envVar: "BETTERSTACK_API_TOKEN",
+            description: "Better Stack Telemetry API token",
+        },
         {
             key: "sourceId",
             envVar: "BETTERSTACK_SOURCE_ID",
             required: false,
-            description: "Better Stack log source ID (optional, queries all sources if omitted)",
+            description: "Better Stack log source ID (shown in the UI). Used to auto-discover the ClickHouse table.",
+        },
+        {
+            key: "tableName",
+            envVar: "BETTERSTACK_TABLE_NAME",
+            required: false,
+            description: 'Full qualified ClickHouse table name (e.g. "t273774.my_source"). Overrides sourceId discovery.',
         },
     ],
 };
@@ -48913,107 +48937,260 @@ function betterstack(config) {
     const provider = new BetterStackProvider(parsed);
     return Object.assign(provider, { configSchema: betterstackProviderConfigSchema });
 }
+// ── Constants ──────────────────────────────────────────────────────────────
 const betterstack_BASE_URL = "https://telemetry.betterstack.com";
+// Matches NestJS ANSI-coloured log level tokens.
+const NEST_LEVEL_RE = /\b(LOG|WARN|ERROR|DEBUG|VERBOSE)\b/;
+// Matches Python/uvicorn log prefix: "INFO:     " or "WARNING:  ".
+const PYTHON_LEVEL_RE = /^(INFO|WARNING|ERROR|DEBUG|CRITICAL):\s+/i;
+// Strips ANSI escape sequences.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+// Strips NestJS "[Context] " bracket tokens so only the message remains.
+const NEST_CONTEXT_RE = /\[[^\]]+\]\s*/g;
+// ── Utilities ──────────────────────────────────────────────────────────────
 /** Escape a string value for use inside a ClickHouse SQL single-quoted literal. */
 function escapeSql(value) {
     return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
+/** Normalise a raw log level token to a lowercase canonical value. */
+function normalizeLevel(raw) {
+    const u = raw.trim().toUpperCase();
+    if (u === "LOG")
+        return "info";
+    if (u === "VERBOSE")
+        return "debug";
+    if (u === "WARNING")
+        return "warn";
+    if (u === "CRITICAL")
+        return "error";
+    return u.toLowerCase(); // error | warn | debug | info
+}
+/**
+ * Parse a raw stdout log line into { level, message }.
+ * Handles NestJS ANSI-coloured output and Python/uvicorn plain text.
+ */
+function parseLogLine(raw) {
+    const clean = raw.replace(ANSI_RE, "").trim();
+    // Python/uvicorn: "INFO:     10.0.0.1:123 - "GET / HTTP/1.1" 200 OK"
+    const pythonMatch = PYTHON_LEVEL_RE.exec(clean);
+    if (pythonMatch) {
+        return {
+            level: normalizeLevel(pythonMatch[1]),
+            message: clean.slice(pythonMatch[0].length).trim(),
+        };
+    }
+    // NestJS: "[Nest] 1  - 03/20/2026, 7:04 PM   WARN [Gateway] Something went wrong"
+    const nestMatch = NEST_LEVEL_RE.exec(clean);
+    if (nestMatch) {
+        const afterLevel = clean.slice(nestMatch.index + nestMatch[0].length);
+        const message = afterLevel.replace(NEST_CONTEXT_RE, "").trim();
+        return { level: normalizeLevel(nestMatch[1]), message: message || clean };
+    }
+    return { level: "info", message: clean };
+}
+/**
+ * Derive a human-readable service name from an ECS container_name field.
+ * "/ecs-offload-server-prod-285-offload-server-e0c69fbbb5edf0be5900" → "offload-server-prod"
+ */
+function parseServiceName(containerName) {
+    const name = containerName.replace(/^\//, "");
+    const withoutHash = name.replace(/-[0-9a-f]{16,}$/i, "");
+    const withoutRevision = withoutHash.replace(/-\d+-[^-].*$/, "");
+    return withoutRevision.replace(/^ecs-/, "") || withoutHash;
+}
+/** Derive hot/cold ClickHouse collection identifiers from a full table name. */
+function deriveCollections(fullTableName) {
+    // "t273774.offload_ecs_production" → "t273774_offload_ecs_production"
+    const slug = fullTableName.replace(".", "_");
+    return { hot: `${slug}_logs`, cold: `${slug}_s3` };
+}
+/** Returns true when the time range fits entirely within the hot-storage window (≤ 30 min). */
+function isHotRange(timeRange) {
+    const m = /^(\d+)m$/i.exec(timeRange);
+    return m !== null && parseInt(m[1], 10) <= 30;
+}
+// ── Provider ───────────────────────────────────────────────────────────────
 class BetterStackProvider {
     apiToken;
     sourceId;
+    configuredTableName;
     log;
+    /** Resolved once on first use and cached for the lifetime of this instance. */
+    collections = null;
     constructor(config) {
         this.apiToken = config.apiToken;
-        this.sourceId = config.sourceId;
+        this.sourceId = config.sourceId !== undefined ? String(config.sourceId) : undefined;
+        this.configuredTableName = config.tableName;
         this.log = config.logger ?? logger_consoleLogger;
     }
-    get headers() {
-        return {
-            Authorization: `Bearer ${this.apiToken}`,
-            "Content-Type": "application/json",
-        };
+    get authHeaders() {
+        return { Authorization: `Bearer ${this.apiToken}`, "Content-Type": "application/json" };
     }
     timeRangeToInterval(timeRange) {
-        const match = /^(\d+)([hdm])$/.exec(timeRange);
-        if (!match)
+        const m = /^(\d+)([hdm])$/i.exec(timeRange);
+        if (!m)
             return "1 DAY";
-        const v = parseInt(match[1], 10);
-        if (match[2] === "m")
+        const v = parseInt(m[1], 10);
+        const unit = m[2].toLowerCase();
+        if (unit === "m")
             return `${v} MINUTE`;
-        if (match[2] === "h")
+        if (unit === "h")
             return `${v} HOUR`;
         return `${v} DAY`;
     }
     /**
-     * Build base WHERE conditions shared by both queryLogs and aggregate.
-     * All user-supplied filter values are escaped before interpolation.
+     * Resolve the ClickHouse collection names for this source.
+     *
+     * - If `tableName` is configured → derive collections directly (no API call).
+     * - If only `sourceId` is configured → fetch source details from the API once,
+     *   extract the qualified table name, then derive collections.
+     *
+     * The result is cached so subsequent calls are free.
      */
-    buildConditions(opts) {
-        const conditions = [`dt >= now() - INTERVAL ${this.timeRangeToInterval(opts.timeRange)}`];
-        if (opts.severity && opts.severity !== "*") {
-            conditions.push(`level = '${escapeSql(opts.severity)}'`);
+    async resolveCollections() {
+        if (this.collections)
+            return this.collections;
+        if (this.configuredTableName) {
+            this.collections = deriveCollections(this.configuredTableName);
+            this.log.debug(`Using configured table: ${this.configuredTableName}`);
+            return this.collections;
         }
-        if (opts.serviceFilter !== "*") {
-            conditions.push(`service = '${escapeSql(opts.serviceFilter)}'`);
+        this.log.debug(`Discovering ClickHouse table for source ${this.sourceId}`);
+        const res = await fetch(`${betterstack_BASE_URL}/api/v1/sources/${this.sourceId}`, {
+            headers: this.authHeaders,
+        });
+        if (!res.ok) {
+            throw new errors_ProviderApiError("BetterStack", res.status, res.statusText, await res.text().catch(() => ""));
         }
-        if (this.sourceId) {
-            conditions.push(`source_id = '${escapeSql(this.sourceId)}'`);
+        const body = (await res.json());
+        const attrs = body.data?.attributes ?? {};
+        const fullTable = attrs.clickhouse_table_name ??
+            attrs.qualified_table_name ??
+            (attrs.team_id && attrs.table_name ? `t${attrs.team_id}.${attrs.table_name}` : undefined);
+        if (!fullTable) {
+            throw new ProviderConfigError("BetterStack", `Could not determine ClickHouse table name from source ${this.sourceId}. ` +
+                'Please set tableName directly (e.g. "t273774.my_source").');
         }
-        return conditions;
+        this.log.debug(`Resolved table: ${fullTable}`);
+        this.collections = deriveCollections(fullTable);
+        return this.collections;
+    }
+    /**
+     * Build a SQL SELECT that spans both hot (remote) and cold (s3Cluster) storage,
+     * using non-overlapping time boundaries to avoid duplicate rows.
+     * For ranges ≤ 30 min, only hot storage is queried.
+     */
+    buildLogQuery(cols, fields, conditions, timeRange, limit) {
+        const where = conditions.join(" AND ");
+        if (isHotRange(timeRange)) {
+            return `SELECT ${fields} FROM remote(${cols.hot}) WHERE ${where} ORDER BY dt DESC LIMIT ${limit}`;
+        }
+        return `
+SELECT * FROM (
+  SELECT ${fields} FROM remote(${cols.hot})
+    WHERE ${where} AND dt > now() - INTERVAL 30 MINUTE
+  UNION ALL
+  SELECT ${fields} FROM s3Cluster(primary, ${cols.cold})
+    WHERE _row_type = 1 AND ${where} AND dt <= now() - INTERVAL 30 MINUTE
+)
+ORDER BY dt DESC
+LIMIT ${limit}`.trim();
     }
     async runQuery(sql) {
-        const response = await fetch(`${betterstack_BASE_URL}/api/v1/query`, {
+        const res = await fetch(`${betterstack_BASE_URL}/api/v1/query`, {
             method: "POST",
-            headers: this.headers,
+            headers: this.authHeaders,
             body: JSON.stringify({ query: sql, format: "JSON" }),
         });
-        if (!response.ok) {
-            const text = await response.text().catch(() => "");
-            throw new errors_ProviderApiError("BetterStack", response.status, response.statusText, text);
+        if (!res.ok) {
+            throw new errors_ProviderApiError("BetterStack", res.status, res.statusText, await res.text().catch(() => ""));
         }
-        const result = (await response.json());
-        return result.data ?? [];
-    }
-    async verifyAccess() {
-        this.log.info("Verifying Better Stack access");
-        const response = await fetch(`${betterstack_BASE_URL}/api/v1/sources`, {
-            method: "GET",
-            headers: this.headers,
-        });
-        if (!response.ok) {
-            const text = await response.text().catch(() => "");
-            throw new errors_ProviderApiError("BetterStack", response.status, response.statusText, text);
-        }
-        this.log.info("Better Stack API access verified");
+        const body = (await res.json());
+        return body.data ?? [];
     }
     rowToLogEntry(row) {
-        const timestamp = String(row.dt ?? row.timestamp ?? new Date().toISOString());
-        const message = String(row.message ?? row.msg ?? "");
-        const level = String(row.level ?? row.severity ?? "info").toLowerCase();
-        const service = String(row.service ?? "unknown");
-        const RESERVED = new Set(["dt", "timestamp", "message", "msg", "level", "severity", "service"]);
-        const attributes = Object.fromEntries(Object.entries(row)
-            .filter(([k]) => !RESERVED.has(k))
-            .map(([k, v]) => [k, String(v)]));
+        const timestamp = String(row.dt ?? new Date().toISOString());
+        const { level, message } = parseLogLine(String(row.log ?? ""));
+        const service = row.container_name ? parseServiceName(String(row.container_name)) : "unknown";
+        const RESERVED = new Set(["dt", "log", "container_name"]);
+        const attributes = Object.fromEntries(Object.entries(row).filter(([k]) => !RESERVED.has(k)));
         return { timestamp, service, level, message, attributes };
+    }
+    // ── ObservabilityProvider ────────────────────────────────────────────────
+    async verifyAccess() {
+        this.log.info("Verifying Better Stack access");
+        // Validates the token and (when sourceId is set) confirms the source exists.
+        // Also warms the collections cache so the first query pays no extra cost.
+        await this.resolveCollections();
+        // If only tableName was provided (no sourceId), make a lightweight token check.
+        if (!this.sourceId) {
+            const res = await fetch(`${betterstack_BASE_URL}/api/v1/sources?per_page=1`, { headers: this.authHeaders });
+            if (!res.ok) {
+                throw new errors_ProviderApiError("BetterStack", res.status, res.statusText, await res.text().catch(() => ""));
+            }
+        }
+        this.log.info("Better Stack access verified");
     }
     async queryLogs(opts) {
         this.log.info(`Querying Better Stack logs (range: ${opts.timeRange})`);
-        const where = this.buildConditions(opts).join(" AND ");
-        const sql = `SELECT dt, message, level, service FROM logs WHERE ${where} ORDER BY dt DESC LIMIT 200`;
+        const cols = await this.resolveCollections();
+        const interval = this.timeRangeToInterval(opts.timeRange);
+        const conditions = [`dt >= now() - INTERVAL ${interval}`];
+        if (opts.severity !== "*") {
+            // Level is embedded in the raw log line; use case-insensitive substring match.
+            conditions.push(`JSONExtract(raw, 'log', 'Nullable(String)') ILIKE '%${escapeSql(opts.severity.toUpperCase())}%'`);
+        }
+        if (opts.serviceFilter !== "*") {
+            conditions.push(`JSONExtract(raw, 'container_name', 'Nullable(String)') ILIKE '%${escapeSql(opts.serviceFilter)}%'`);
+        }
+        const fields = [
+            "dt",
+            "JSONExtract(raw, 'log', 'Nullable(String)') AS log",
+            "JSONExtract(raw, 'container_name', 'Nullable(String)') AS container_name",
+        ].join(", ");
+        const sql = this.buildLogQuery(cols, fields, conditions, opts.timeRange, 200);
         const rows = await this.runQuery(sql);
         const entries = rows.map((r) => this.rowToLogEntry(r));
         this.log.info(`Found ${entries.length} log entries`);
         return entries;
     }
     async aggregate(opts) {
-        this.log.info("Aggregating Better Stack error counts");
-        const where = this.buildConditions({ ...opts, severity: "error" }).join(" AND ");
-        const sql = `SELECT service, count() AS cnt FROM logs WHERE ${where} GROUP BY service ORDER BY cnt DESC`;
+        this.log.info("Aggregating Better Stack error counts by service");
+        const cols = await this.resolveCollections();
+        const interval = this.timeRangeToInterval(opts.timeRange);
+        const conditions = [
+            `dt >= now() - INTERVAL ${interval}`,
+            `JSONExtract(raw, 'log', 'Nullable(String)') ILIKE '%ERROR%'`,
+        ];
+        if (opts.serviceFilter !== "*") {
+            conditions.push(`JSONExtract(raw, 'container_name', 'Nullable(String)') ILIKE '%${escapeSql(opts.serviceFilter)}%'`);
+        }
+        const where = conditions.join(" AND ");
+        const selectCnt = (from, extra) => `SELECT JSONExtract(raw, 'container_name', 'Nullable(String)') AS container_name, count() AS cnt
+       FROM ${from}
+       WHERE ${extra ? `${extra} AND ` : ""}${where}
+       GROUP BY container_name`;
+        let sql;
+        if (isHotRange(opts.timeRange)) {
+            sql = `${selectCnt(`remote(${cols.hot})`)} ORDER BY cnt DESC`;
+        }
+        else {
+            sql = `
+SELECT container_name, sum(cnt) AS cnt FROM (
+  ${selectCnt(`remote(${cols.hot})`, "dt > now() - INTERVAL 30 MINUTE")}
+  UNION ALL
+  ${selectCnt(`s3Cluster(primary, ${cols.cold})`, "_row_type = 1 AND dt <= now() - INTERVAL 30 MINUTE")}
+)
+GROUP BY container_name
+ORDER BY cnt DESC`.trim();
+        }
         const rows = await this.runQuery(sql);
         const results = rows
-            .map((r) => ({ service: String(r.service ?? "unknown"), count: Number(r.cnt ?? 0) }))
-            .filter((r) => r.count > 0);
+            .filter((r) => r.container_name && Number(r.cnt ?? 0) > 0)
+            .map((r) => ({
+            service: parseServiceName(String(r.container_name)),
+            count: Number(r.cnt),
+        }));
         this.log.info(`Aggregated ${results.length} service groups`);
         return results;
     }
@@ -49021,36 +49198,62 @@ class BetterStackProvider {
         const env = { BETTERSTACK_API_TOKEN: this.apiToken };
         if (this.sourceId)
             env.BETTERSTACK_SOURCE_ID = this.sourceId;
+        if (this.configuredTableName)
+            env.BETTERSTACK_TABLE_NAME = this.configuredTableName;
+        if (this.collections) {
+            env.BETTERSTACK_HOT_COLLECTION = this.collections.hot;
+            env.BETTERSTACK_COLD_COLLECTION = this.collections.cold;
+        }
         return env;
     }
     getPromptInstructions() {
-        const sourceNote = this.sourceId ? `\n- \`BETTERSTACK_SOURCE_ID\` - log source ID (\`${this.sourceId}\`)` : "";
+        const cols = this.collections;
+        const hot = cols?.hot ?? "<hot_collection>";
+        const cold = cols?.cold ?? "<cold_collection>";
         return `### Better Stack Telemetry
-- \`BETTERSTACK_API_TOKEN\` - API token (use as \`Authorization: Bearer $BETTERSTACK_API_TOKEN\`)${sourceNote}
+- \`BETTERSTACK_API_TOKEN\` - API token (\`Authorization: Bearer $BETTERSTACK_API_TOKEN\`)
+${cols ? `- Hot collection (last 30 min): \`${hot}\`\n- Cold collection (historical): \`${cold}\`` : ""}
 
-**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+**DO NOT make up data.** Only use real data from the API. If no data is found, say so.
 
-You have access to the Better Stack MCP server which exposes ClickHouse SQL query tools and telemetry data.
+You have access to the Better Stack MCP server with ClickHouse SQL query tools.
 
-The MCP server is already configured. Use MCP tools to:
-- Execute ClickHouse SQL queries against logs, spans, metrics, and exceptions
-- Query sources, dashboards, and error tracking data
-- Build and run log explorations
+#### Log structure
+All fields live inside the \`raw\` JSON column — extract with \`JSONExtract(raw, 'field', 'Nullable(String)')\`.
+Key fields: \`log\` (raw stdout line, may have ANSI codes), \`container_name\` (ECS container), \`ecs_task_definition\`.
+Level and message must be parsed from the \`log\` string (NestJS ANSI format or Python plain text).
 
-#### Example: Direct REST query (fallback if MCP unavailable)
-\`\`\`bash
-curl -s -X POST "https://telemetry.betterstack.com/api/v1/query" \\
-  -H "Authorization: Bearer $BETTERSTACK_API_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d '{"query":"SELECT dt, message, level, service FROM logs WHERE dt >= now() - INTERVAL 1 HOUR AND level = '\''error'\'' ORDER BY dt DESC LIMIT 100","format":"JSON"}'
+#### Example: Recent errors (hot storage only)
+\`\`\`sql
+SELECT dt,
+  JSONExtract(raw, 'log', 'Nullable(String)') AS log,
+  JSONExtract(raw, 'container_name', 'Nullable(String)') AS container_name
+FROM remote(${hot})
+WHERE dt > now() - INTERVAL 1 HOUR
+  AND JSONExtract(raw, 'log', 'Nullable(String)') ILIKE '%ERROR%'
+ORDER BY dt DESC
+LIMIT 100
 \`\`\`
 
-#### Example: Count errors by service
-\`\`\`bash
-curl -s -X POST "https://telemetry.betterstack.com/api/v1/query" \\
-  -H "Authorization: Bearer $BETTERSTACK_API_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d '{"query":"SELECT service, count() AS cnt FROM logs WHERE dt >= now() - INTERVAL 1 HOUR AND level = '\''error'\'' GROUP BY service ORDER BY cnt DESC","format":"JSON"}'
+#### Example: Error counts by service spanning 24h (hot + cold)
+\`\`\`sql
+SELECT container_name, sum(cnt) AS total FROM (
+  SELECT JSONExtract(raw, 'container_name', 'Nullable(String)') AS container_name, count() AS cnt
+  FROM remote(${hot})
+  WHERE dt > now() - INTERVAL 30 MINUTE
+    AND JSONExtract(raw, 'log', 'Nullable(String)') ILIKE '%ERROR%'
+  GROUP BY container_name
+  UNION ALL
+  SELECT JSONExtract(raw, 'container_name', 'Nullable(String)') AS container_name, count() AS cnt
+  FROM s3Cluster(primary, ${cold})
+  WHERE _row_type = 1
+    AND dt <= now() - INTERVAL 30 MINUTE
+    AND dt > now() - INTERVAL 24 HOUR
+    AND JSONExtract(raw, 'log', 'Nullable(String)') ILIKE '%ERROR%'
+  GROUP BY container_name
+)
+GROUP BY container_name
+ORDER BY total DESC
 \`\`\``;
     }
 }
