@@ -7,9 +7,10 @@ export type {
   IssueHistoryEntry,
   PrLinkCapable,
   LabelHistoryCapable,
+  FingerprintSearchCapable,
 } from "./types.js";
 
-export { canLinkPr, canSearchIssuesByLabel } from "./types.js";
+export { canLinkPr, canSearchIssuesByLabel, canSearchByFingerprint } from "./types.js";
 
 export { linear, linearConfigSchema, type LinearConfig } from "./linear.js";
 export { githubIssues, githubIssuesConfigSchema, type GitHubIssuesConfig } from "./github-issues.js";

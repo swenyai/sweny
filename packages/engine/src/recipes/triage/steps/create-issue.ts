@@ -1,11 +1,30 @@
 import * as fs from "node:fs";
-import type { Issue, IssueTrackingProvider } from "@sweny-ai/providers/issue-tracking";
+import type { Issue, IssueTrackingProvider, FingerprintSearchCapable } from "@sweny-ai/providers/issue-tracking";
+import { canSearchByFingerprint } from "@sweny-ai/providers/issue-tracking";
 import type { StepResult, WorkflowContext } from "../../../types.js";
 import { fingerprintEvent } from "../../../lib/fingerprint.js";
 import type { TriageConfig } from "../types.js";
 
 const TITLE_MAX_LENGTH = 100;
 const DESCRIPTION_MAX_LENGTH = 10000;
+
+/**
+ * Normalise an issue title into a stable error_pattern string.
+ * Strips common fix-prefix words and collapses whitespace so that
+ * "Fix null pointer in auth" and "Resolve null pointer in auth" hash identically.
+ */
+function normalizeErrorPattern(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/^(fix|resolve|handle|add|update|improve)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Resolve the service identifier from the service filter (collapses wildcards to "unknown"). */
+function resolveService(serviceFilter: string): string {
+  return serviceFilter && serviceFilter !== "*" ? serviceFilter : "unknown";
+}
 
 /**
  * Appends a TRIAGE_FINGERPRINT HTML comment block to the issue description.
@@ -17,13 +36,8 @@ const DESCRIPTION_MAX_LENGTH = 10000;
  */
 function appendFingerprintBlock(description: string, issueTitle: string, serviceFilter: string): string {
   const date = new Date().toISOString().split("T")[0];
-  // Normalize: lowercase, strip common fix-prefix words, collapse whitespace
-  const errorPattern = issueTitle
-    .toLowerCase()
-    .replace(/^(fix|resolve|handle|add|update|improve)\s+/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const service = serviceFilter && serviceFilter !== "*" ? serviceFilter : "unknown";
+  const errorPattern = normalizeErrorPattern(issueTitle);
+  const service = resolveService(serviceFilter);
   const hash = fingerprintEvent({ error_pattern: errorPattern, service });
 
   const block = [
@@ -80,8 +94,41 @@ export async function createIssue(ctx: WorkflowContext<TriageConfig>): Promise<S
     issue = await issueTracker.getIssue(config.issueOverride);
     ctx.logger.info(`Working on issue: ${issue.identifier} - ${issue.url}`);
   } else {
-    // Search for existing issue or create new one
-    ctx.logger.info(`Searching for existing issues matching: ${issueTitle}`);
+    const date = new Date().toISOString().split("T")[0];
+
+    // ── Hard dedup: fingerprint hash search ──────────────────────────────────
+    // Compute the same hash that will be embedded in the issue description.
+    // If the provider finds an existing issue with this fingerprint, it's a
+    // definitive duplicate regardless of how the LLM may have reworded the title.
+    const fingerprintHash = fingerprintEvent({
+      error_pattern: normalizeErrorPattern(issueTitle),
+      service: resolveService(config.serviceFilter),
+    });
+
+    if (canSearchByFingerprint(issueTracker)) {
+      ctx.logger.info(`Hard dedup: searching for fingerprint ${fingerprintHash}`);
+      const fingerprintMatches = await (
+        issueTracker as IssueTrackingProvider & FingerprintSearchCapable
+      ).searchByFingerprint(config.projectId, fingerprintHash);
+      if (fingerprintMatches.length > 0) {
+        issue = fingerprintMatches[0];
+        await issueTracker.addComment(issue.id, `+1 detected on ${date} (fingerprint match: ${fingerprintHash})`);
+        ctx.logger.info(`Fingerprint match — +1 on ${issue.identifier}`);
+        return {
+          status: "success",
+          data: {
+            issueId: issue.id,
+            issueIdentifier: issue.identifier,
+            issueTitle: issue.title || issueTitle,
+            issueUrl: issue.url,
+            issueBranchName: issue.branchName,
+          },
+        };
+      }
+    }
+
+    // ── Soft dedup: title substring search ───────────────────────────────────
+    ctx.logger.info(`Soft dedup: searching for existing issues matching: ${issueTitle}`);
     const searchResults = await issueTracker.searchIssues({
       projectId: config.projectId,
       query: issueTitle,
@@ -90,9 +137,8 @@ export async function createIssue(ctx: WorkflowContext<TriageConfig>): Promise<S
 
     if (searchResults.length > 0) {
       issue = searchResults[0];
-      const date = new Date().toISOString().split("T")[0];
       await issueTracker.addComment(issue.id, `+1 detected on ${date}`);
-      ctx.logger.info(`Found existing issue: ${issue.identifier} - ${issue.url}`);
+      ctx.logger.info(`Title match — +1 on ${issue.identifier}`);
     } else {
       ctx.logger.info("No existing issue found, creating new one...");
       let description = "";

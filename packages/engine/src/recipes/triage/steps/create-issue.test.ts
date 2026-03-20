@@ -194,6 +194,91 @@ describe("createIssue", () => {
     expect(desc.slice(0, 10000)).toHaveLength(10000);
   });
 
+  it("hard dedup: fingerprint match adds +1 and skips creation", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue("# Fix null pointer in auth\nDetails");
+    const existingIssue = {
+      id: "id-existing",
+      identifier: "ENG-10",
+      title: "Fix null pointer in auth",
+      url: "https://example.com/ENG-10",
+      branchName: "eng-10-fix",
+    };
+    const searchByFingerprint = vi.fn().mockResolvedValue([existingIssue]);
+    addComment.mockResolvedValue(undefined);
+    const registry = createProviderRegistry();
+    registry.set("issueTracker", {
+      getIssue,
+      searchIssues,
+      createIssue: createIssueFn,
+      addComment,
+      searchByFingerprint,
+    });
+    const ctx = createCtx({ providers: registry });
+
+    const result = await createIssue(ctx);
+
+    expect(result.status).toBe("success");
+    expect(result.data?.issueIdentifier).toBe("ENG-10");
+    // fingerprint search found a match — should NOT do title search or create
+    expect(searchIssues).not.toHaveBeenCalled();
+    expect(createIssueFn).not.toHaveBeenCalled();
+    // should add +1 comment with the fingerprint hash
+    expect(addComment).toHaveBeenCalledWith("id-existing", expect.stringContaining("fingerprint match"));
+  });
+
+  it("hard dedup: falls through to soft dedup when fingerprint search finds nothing", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const searchByFingerprint = vi.fn().mockResolvedValue([]);
+    searchIssues.mockResolvedValue([
+      {
+        id: "id-soft",
+        identifier: "ENG-20",
+        title: "Some existing bug",
+        url: "https://example.com/ENG-20",
+        branchName: "eng-20",
+      },
+    ]);
+    addComment.mockResolvedValue(undefined);
+    const registry = createProviderRegistry();
+    registry.set("issueTracker", {
+      getIssue,
+      searchIssues,
+      createIssue: createIssueFn,
+      addComment,
+      searchByFingerprint,
+    });
+    const ctx = createCtx({ providers: registry });
+
+    const result = await createIssue(ctx);
+
+    expect(result.status).toBe("success");
+    expect(searchByFingerprint).toHaveBeenCalled();
+    expect(searchIssues).toHaveBeenCalled();
+    expect(createIssueFn).not.toHaveBeenCalled();
+    expect(addComment).toHaveBeenCalledWith("id-soft", expect.stringContaining("+1 detected on"));
+  });
+
+  it("skips hard dedup when provider does not support searchByFingerprint", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    searchIssues.mockResolvedValue([]);
+    createIssueFn.mockResolvedValue({
+      id: "id-new",
+      identifier: "ENG-50",
+      title: "SWEny Triage: Automated bug fix",
+      url: "https://example.com/ENG-50",
+      branchName: "eng-50-fix",
+    });
+    // registry built without searchByFingerprint
+    const ctx = createCtx({ providers: buildRegistry() });
+
+    const result = await createIssue(ctx);
+
+    expect(result.status).toBe("success");
+    expect(searchIssues).toHaveBeenCalled();
+    expect(createIssueFn).toHaveBeenCalled();
+  });
+
   it("appends TRIAGE_FINGERPRINT block to description", async () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue("# Fix null pointer in auth\nSome details");
