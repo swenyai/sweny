@@ -47115,7 +47115,7 @@ class PrometheusProvider {
     constructor(config) {
         this.url = config.url.replace(/\/$/, "");
         this.token = config.token;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     buildHeaders() {
         const headers = {};
@@ -47132,7 +47132,7 @@ class PrometheusProvider {
         });
         if (!response.ok) {
             const body = await response.text().catch(() => "");
-            throw new ProviderApiError("Prometheus", response.status, response.statusText, body);
+            throw new errors_ProviderApiError("Prometheus", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -47243,7 +47243,7 @@ class PagerDutyProvider {
     log;
     constructor(config) {
         this.apiKey = config.apiKey;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     get headers() {
         return {
@@ -47259,7 +47259,7 @@ class PagerDutyProvider {
         });
         if (!response.ok) {
             const body = await response.text().catch(() => "");
-            throw new ProviderApiError("PagerDuty", response.status, response.statusText, body);
+            throw new errors_ProviderApiError("PagerDuty", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -47401,7 +47401,7 @@ class VercelProvider {
         this.token = config.token;
         this.projectId = config.projectId;
         this.teamId = config.teamId;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     teamParam() {
         return this.teamId ? `&teamId=${encodeURIComponent(this.teamId)}` : "";
@@ -47413,7 +47413,7 @@ class VercelProvider {
         });
         if (!response.ok) {
             const body = await response.text().catch(() => "");
-            throw new ProviderApiError("Vercel", response.status, response.statusText, body);
+            throw new errors_ProviderApiError("Vercel", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -47594,7 +47594,7 @@ class SupabaseProvider {
     constructor(config) {
         this.managementApiKey = config.managementApiKey;
         this.projectRef = config.projectRef;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async request(path, body) {
         const url = `https://api.supabase.com${path}`;
@@ -47608,7 +47608,7 @@ class SupabaseProvider {
         });
         if (!response.ok) {
             const text = await response.text().catch(() => "");
-            throw new ProviderApiError("Supabase", response.status, response.statusText, text);
+            throw new errors_ProviderApiError("Supabase", response.status, response.statusText, text);
         }
         return (await response.json());
     }
@@ -47762,7 +47762,7 @@ class NetlifyProvider {
     constructor(config) {
         this.token = config.token;
         this.siteId = config.siteId;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async get(path) {
         const url = `https://api.netlify.com${path}`;
@@ -47771,7 +47771,7 @@ class NetlifyProvider {
         });
         if (!response.ok) {
             const body = await response.text().catch(() => "");
-            throw new ProviderApiError("Netlify", response.status, response.statusText, body);
+            throw new errors_ProviderApiError("Netlify", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -47921,7 +47921,7 @@ class FlyProvider {
     constructor(config) {
         this.token = config.token;
         this.appName = config.appName;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async get(path) {
         const controller = new AbortController();
@@ -47933,7 +47933,7 @@ class FlyProvider {
             });
             if (!response.ok) {
                 const body = await response.text().catch(() => "");
-                throw new ProviderApiError("Fly", response.status, response.statusText, body);
+                throw new errors_ProviderApiError("Fly", response.status, response.statusText, body);
             }
             return (await response.json());
         }
@@ -47951,7 +47951,7 @@ class FlyProvider {
             });
             if (!response.ok) {
                 const body = await response.text().catch(() => "");
-                throw new ProviderApiError("Fly", response.status, response.statusText, body);
+                throw new errors_ProviderApiError("Fly", response.status, response.statusText, body);
             }
             return await response.text();
         }
@@ -48115,7 +48115,7 @@ class RenderProvider {
     constructor(config) {
         this.apiKey = config.apiKey;
         this.serviceId = config.serviceId;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     async request(path) {
         const url = `https://api.render.com${path}`;
@@ -48124,7 +48124,7 @@ class RenderProvider {
         });
         if (!response.ok) {
             const body = await response.text().catch(() => "");
-            throw new ProviderApiError("Render", response.status, response.statusText, body);
+            throw new errors_ProviderApiError("Render", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -48247,7 +48247,7 @@ class HerokuProvider {
     constructor(config) {
         this.apiKey = config.apiKey;
         this.appName = config.appName;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     get headers() {
         return {
@@ -48264,7 +48264,7 @@ class HerokuProvider {
         });
         if (!response.ok) {
             const body = await response.text().catch(() => "");
-            throw new ProviderApiError("Heroku", response.status, response.statusText, body);
+            throw new errors_ProviderApiError("Heroku", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -48294,7 +48294,7 @@ class HerokuProvider {
         });
         const logResp = await fetch(session.logplex_url);
         if (!logResp.ok) {
-            throw new ProviderApiError("Heroku", logResp.status, logResp.statusText, "");
+            throw new errors_ProviderApiError("Heroku", logResp.status, logResp.statusText, "");
         }
         return logResp.text();
     }
@@ -48419,7 +48419,7 @@ class OpsGenieProvider {
     constructor(config) {
         this.apiKey = config.apiKey;
         this.baseUrl = BASE_URLS[config.region ?? "us"];
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     get headers() {
         return {
@@ -48434,7 +48434,7 @@ class OpsGenieProvider {
         });
         if (!response.ok) {
             const body = await response.text().catch(() => "");
-            throw new ProviderApiError("OpsGenie", response.status, response.statusText, body);
+            throw new errors_ProviderApiError("OpsGenie", response.status, response.statusText, body);
         }
         return (await response.json());
     }
@@ -48542,7 +48542,7 @@ class HoneycombProvider {
     constructor(config) {
         this.apiKey = config.apiKey;
         this.dataset = config.dataset;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     get headers() {
         return {
@@ -48558,7 +48558,7 @@ class HoneycombProvider {
         });
         if (!response.ok) {
             const text = await response.text().catch(() => "");
-            throw new ProviderApiError("Honeycomb", response.status, response.statusText, text);
+            throw new errors_ProviderApiError("Honeycomb", response.status, response.statusText, text);
         }
         return (await response.json());
     }
@@ -48569,7 +48569,7 @@ class HoneycombProvider {
         });
         if (!response.ok) {
             const text = await response.text().catch(() => "");
-            throw new ProviderApiError("Honeycomb", response.status, response.statusText, text);
+            throw new errors_ProviderApiError("Honeycomb", response.status, response.statusText, text);
         }
         return (await response.json());
     }
@@ -48730,7 +48730,7 @@ class AxiomProvider {
         this.apiToken = config.apiToken;
         this.dataset = config.dataset;
         this.orgId = config.orgId;
-        this.log = config.logger ?? consoleLogger;
+        this.log = config.logger ?? logger_consoleLogger;
     }
     get headers() {
         const h = {
@@ -48767,7 +48767,7 @@ class AxiomProvider {
         });
         if (!response.ok) {
             const text = await response.text().catch(() => "");
-            throw new ProviderApiError("Axiom", response.status, response.statusText, text);
+            throw new errors_ProviderApiError("Axiom", response.status, response.statusText, text);
         }
         const result = (await response.json());
         return result.matches ?? [];
@@ -48780,7 +48780,7 @@ class AxiomProvider {
         });
         if (!response.ok) {
             const text = await response.text().catch(() => "");
-            throw new ProviderApiError("Axiom", response.status, response.statusText, text);
+            throw new errors_ProviderApiError("Axiom", response.status, response.statusText, text);
         }
         this.log.info("Axiom API access verified");
     }
@@ -48886,7 +48886,177 @@ curl -s -X POST "https://api.axiom.co/v1/datasets/_apl?format=legacy" \\
     }
 }
 //# sourceMappingURL=axiom.js.map
+;// CONCATENATED MODULE: ../providers/dist/observability/betterstack.js
+
+
+
+const betterstackConfigSchema = external/* object */.Ikc({
+    apiToken: external/* string */.YjP().min(1, "Better Stack API token is required"),
+    sourceId: external/* string */.YjP().optional(),
+    logger: external/* custom */.IeY().optional(),
+});
+const betterstackProviderConfigSchema = {
+    role: "observability",
+    name: "Better Stack",
+    fields: [
+        { key: "apiToken", envVar: "BETTERSTACK_API_TOKEN", description: "Better Stack Telemetry API token" },
+        {
+            key: "sourceId",
+            envVar: "BETTERSTACK_SOURCE_ID",
+            required: false,
+            description: "Better Stack log source ID (optional, queries all sources if omitted)",
+        },
+    ],
+};
+function betterstack(config) {
+    const parsed = betterstackConfigSchema.parse(config);
+    const provider = new BetterStackProvider(parsed);
+    return Object.assign(provider, { configSchema: betterstackProviderConfigSchema });
+}
+const betterstack_BASE_URL = "https://telemetry.betterstack.com";
+/** Escape a string value for use inside a ClickHouse SQL single-quoted literal. */
+function escapeSql(value) {
+    return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+class BetterStackProvider {
+    apiToken;
+    sourceId;
+    log;
+    constructor(config) {
+        this.apiToken = config.apiToken;
+        this.sourceId = config.sourceId;
+        this.log = config.logger ?? logger_consoleLogger;
+    }
+    get headers() {
+        return {
+            Authorization: `Bearer ${this.apiToken}`,
+            "Content-Type": "application/json",
+        };
+    }
+    timeRangeToInterval(timeRange) {
+        const match = /^(\d+)([hdm])$/.exec(timeRange);
+        if (!match)
+            return "1 DAY";
+        const v = parseInt(match[1], 10);
+        if (match[2] === "m")
+            return `${v} MINUTE`;
+        if (match[2] === "h")
+            return `${v} HOUR`;
+        return `${v} DAY`;
+    }
+    /**
+     * Build base WHERE conditions shared by both queryLogs and aggregate.
+     * All user-supplied filter values are escaped before interpolation.
+     */
+    buildConditions(opts) {
+        const conditions = [`dt >= now() - INTERVAL ${this.timeRangeToInterval(opts.timeRange)}`];
+        if (opts.severity && opts.severity !== "*") {
+            conditions.push(`level = '${escapeSql(opts.severity)}'`);
+        }
+        if (opts.serviceFilter !== "*") {
+            conditions.push(`service = '${escapeSql(opts.serviceFilter)}'`);
+        }
+        if (this.sourceId) {
+            conditions.push(`source_id = '${escapeSql(this.sourceId)}'`);
+        }
+        return conditions;
+    }
+    async runQuery(sql) {
+        const response = await fetch(`${betterstack_BASE_URL}/api/v1/query`, {
+            method: "POST",
+            headers: this.headers,
+            body: JSON.stringify({ query: sql, format: "JSON" }),
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("BetterStack", response.status, response.statusText, text);
+        }
+        const result = (await response.json());
+        return result.data ?? [];
+    }
+    async verifyAccess() {
+        this.log.info("Verifying Better Stack access");
+        const response = await fetch(`${betterstack_BASE_URL}/api/v1/sources`, {
+            method: "GET",
+            headers: this.headers,
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => "");
+            throw new errors_ProviderApiError("BetterStack", response.status, response.statusText, text);
+        }
+        this.log.info("Better Stack API access verified");
+    }
+    rowToLogEntry(row) {
+        const timestamp = String(row.dt ?? row.timestamp ?? new Date().toISOString());
+        const message = String(row.message ?? row.msg ?? "");
+        const level = String(row.level ?? row.severity ?? "info").toLowerCase();
+        const service = String(row.service ?? "unknown");
+        const RESERVED = new Set(["dt", "timestamp", "message", "msg", "level", "severity", "service"]);
+        const attributes = Object.fromEntries(Object.entries(row)
+            .filter(([k]) => !RESERVED.has(k))
+            .map(([k, v]) => [k, String(v)]));
+        return { timestamp, service, level, message, attributes };
+    }
+    async queryLogs(opts) {
+        this.log.info(`Querying Better Stack logs (range: ${opts.timeRange})`);
+        const where = this.buildConditions(opts).join(" AND ");
+        const sql = `SELECT dt, message, level, service FROM logs WHERE ${where} ORDER BY dt DESC LIMIT 200`;
+        const rows = await this.runQuery(sql);
+        const entries = rows.map((r) => this.rowToLogEntry(r));
+        this.log.info(`Found ${entries.length} log entries`);
+        return entries;
+    }
+    async aggregate(opts) {
+        this.log.info("Aggregating Better Stack error counts");
+        const where = this.buildConditions({ ...opts, severity: "error" }).join(" AND ");
+        const sql = `SELECT service, count() AS cnt FROM logs WHERE ${where} GROUP BY service ORDER BY cnt DESC`;
+        const rows = await this.runQuery(sql);
+        const results = rows
+            .map((r) => ({ service: String(r.service ?? "unknown"), count: Number(r.cnt ?? 0) }))
+            .filter((r) => r.count > 0);
+        this.log.info(`Aggregated ${results.length} service groups`);
+        return results;
+    }
+    getAgentEnv() {
+        const env = { BETTERSTACK_API_TOKEN: this.apiToken };
+        if (this.sourceId)
+            env.BETTERSTACK_SOURCE_ID = this.sourceId;
+        return env;
+    }
+    getPromptInstructions() {
+        const sourceNote = this.sourceId ? `\n- \`BETTERSTACK_SOURCE_ID\` - log source ID (\`${this.sourceId}\`)` : "";
+        return `### Better Stack Telemetry
+- \`BETTERSTACK_API_TOKEN\` - API token (use as \`Authorization: Bearer $BETTERSTACK_API_TOKEN\`)${sourceNote}
+
+**DO NOT make up data** - only use real data from APIs. If no data, report that honestly.
+
+You have access to the Better Stack MCP server which exposes ClickHouse SQL query tools and telemetry data.
+
+The MCP server is already configured. Use MCP tools to:
+- Execute ClickHouse SQL queries against logs, spans, metrics, and exceptions
+- Query sources, dashboards, and error tracking data
+- Build and run log explorations
+
+#### Example: Direct REST query (fallback if MCP unavailable)
+\`\`\`bash
+curl -s -X POST "https://telemetry.betterstack.com/api/v1/query" \\
+  -H "Authorization: Bearer $BETTERSTACK_API_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"query":"SELECT dt, message, level, service FROM logs WHERE dt >= now() - INTERVAL 1 HOUR AND level = '\''error'\'' ORDER BY dt DESC LIMIT 100","format":"JSON"}'
+\`\`\`
+
+#### Example: Count errors by service
+\`\`\`bash
+curl -s -X POST "https://telemetry.betterstack.com/api/v1/query" \\
+  -H "Authorization: Bearer $BETTERSTACK_API_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"query":"SELECT service, count() AS cnt FROM logs WHERE dt >= now() - INTERVAL 1 HOUR AND level = '\''error'\'' GROUP BY service ORDER BY cnt DESC","format":"JSON"}'
+\`\`\``;
+    }
+}
+//# sourceMappingURL=betterstack.js.map
 ;// CONCATENATED MODULE: ../providers/dist/observability/index.js
+
 
 
 
@@ -53603,6 +53773,31 @@ const PROVIDER_CATALOG = [
             },
         ],
     },
+    {
+        id: "betterstack",
+        name: "Better Stack",
+        category: "observability",
+        description: "Query logs, metrics, and traces from Better Stack Telemetry using ClickHouse SQL.",
+        color: "#FF6154",
+        icon: "📈",
+        importPath: "@sweny-ai/providers/observability",
+        factoryFn: "betterstack",
+        envVars: [
+            {
+                key: "BETTERSTACK_API_TOKEN",
+                description: "Better Stack Telemetry API token (team-scoped)",
+                required: true,
+                secret: true,
+            },
+            {
+                key: "BETTERSTACK_SOURCE_ID",
+                description: "Telemetry source ID to scope queries (optional, queries all sources if omitted)",
+                required: false,
+                secret: false,
+                example: "12345",
+            },
+        ],
+    },
     // ── Issue Tracking ─────────────────────────────────────────────────────────
     {
         id: "linear",
@@ -56235,6 +56430,10 @@ function validateInputs(config) {
             if (!config.observabilityCredentials.dataset)
                 errors.push("Missing required input: `axiom-dataset` is required when `observability-provider` is `axiom`");
             break;
+        case "betterstack":
+            if (!config.observabilityCredentials.apiToken)
+                errors.push("Missing required input: `betterstack-api-token` is required when `observability-provider` is `betterstack`");
+            break;
         case "vercel":
             if (!config.observabilityCredentials.token)
                 errors.push("Missing required input: `vercel-token` is required when `observability-provider` is `vercel`");
@@ -56418,6 +56617,11 @@ function parseObservabilityCredentials(provider) {
                 dataset: main_core.getInput("axiom-dataset"),
                 orgId: main_core.getInput("axiom-org-id"),
             };
+        case "betterstack":
+            return {
+                apiToken: main_core.getInput("betterstack-api-token"),
+                sourceId: main_core.getInput("betterstack-source-id"),
+            };
         case "vercel":
             return {
                 token: main_core.getInput("vercel-token"),
@@ -56521,10 +56725,61 @@ function createProviders(config) {
             });
             break;
         case "file":
-            observability = file_file({
-                path: obsCreds.path,
+            observability = file_file({ path: obsCreds.path, logger: actionsLogger });
+            break;
+        case "prometheus":
+            observability = prometheus_prometheus({ url: obsCreds.url, token: obsCreds.token, logger: actionsLogger });
+            break;
+        case "pagerduty":
+            observability = pagerduty_pagerduty({ apiKey: obsCreds.apiKey, logger: actionsLogger });
+            break;
+        case "vercel":
+            observability = vercel_vercel({
+                token: obsCreds.token,
+                projectId: obsCreds.projectId,
+                teamId: obsCreds.teamId,
                 logger: actionsLogger,
             });
+            break;
+        case "supabase":
+            observability = supabase_supabase({
+                managementApiKey: obsCreds.managementApiKey,
+                projectRef: obsCreds.projectRef,
+                logger: actionsLogger,
+            });
+            break;
+        case "netlify":
+            observability = netlify_netlify({ token: obsCreds.token, siteId: obsCreds.siteId, logger: actionsLogger });
+            break;
+        case "fly":
+            observability = fly_fly({ token: obsCreds.token, appName: obsCreds.appName, logger: actionsLogger });
+            break;
+        case "render":
+            observability = render_render({ apiKey: obsCreds.apiKey, serviceId: obsCreds.serviceId, logger: actionsLogger });
+            break;
+        case "heroku":
+            observability = heroku_heroku({ apiKey: obsCreds.apiKey, appName: obsCreds.appName, logger: actionsLogger });
+            break;
+        case "opsgenie":
+            observability = opsgenie_opsgenie({
+                apiKey: obsCreds.apiKey,
+                region: obsCreds.region,
+                logger: actionsLogger,
+            });
+            break;
+        case "honeycomb":
+            observability = honeycomb_honeycomb({ apiKey: obsCreds.apiKey, dataset: obsCreds.dataset, logger: actionsLogger });
+            break;
+        case "axiom":
+            observability = axiom_axiom({
+                apiToken: obsCreds.apiToken,
+                dataset: obsCreds.dataset,
+                orgId: obsCreds.orgId,
+                logger: actionsLogger,
+            });
+            break;
+        case "betterstack":
+            observability = betterstack({ apiToken: obsCreds.apiToken, sourceId: obsCreds.sourceId, logger: actionsLogger });
             break;
         default:
             throw new Error(`Unsupported observability provider: ${config.observabilityProvider}`);
@@ -56919,6 +57174,15 @@ function buildAutoMcpServers(config) {
             type: "http",
             url: nrEndpoint,
             headers: { "Api-Key": nrApiKey },
+        };
+    }
+    // Better Stack MCP — HTTP remote MCP; supports Bearer token auth (no OAuth required).
+    // Exposes ClickHouse SQL query tools for logs, metrics, spans, and error tracking.
+    if (config.observabilityProvider === "betterstack" && obsCreds.apiToken) {
+        auto["betterstack"] = {
+            type: "http",
+            url: "https://mcp.betterstack.com",
+            headers: { Authorization: `Bearer ${obsCreds.apiToken}` },
         };
     }
     // ── Category B: Workspace tools (explicit opt-in via workspace-tools input) ─
