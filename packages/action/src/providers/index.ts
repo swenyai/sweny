@@ -2,7 +2,28 @@ import * as core from "@actions/core";
 import { createProviderRegistry } from "@sweny-ai/engine";
 import type { ProviderRegistry } from "@sweny-ai/engine";
 import { ActionConfig } from "../config.js";
-import { datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, file } from "@sweny-ai/providers/observability";
+import {
+  datadog,
+  sentry,
+  cloudwatch,
+  splunk,
+  elastic,
+  newrelic,
+  loki,
+  file,
+  prometheus,
+  pagerduty,
+  vercel,
+  supabase,
+  netlify,
+  fly,
+  render,
+  heroku,
+  opsgenie,
+  honeycomb,
+  axiom,
+  betterstack,
+} from "@sweny-ai/providers/observability";
 import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
 import { linear, jira, githubIssues, fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
 import { github, gitlab, fileSourceControl } from "@sweny-ai/providers/source-control";
@@ -83,10 +104,61 @@ export function createProviders(config: ActionConfig): ProviderRegistry {
       });
       break;
     case "file":
-      observability = file({
-        path: obsCreds.path,
+      observability = file({ path: obsCreds.path, logger: actionsLogger });
+      break;
+    case "prometheus":
+      observability = prometheus({ url: obsCreds.url, token: obsCreds.token, logger: actionsLogger });
+      break;
+    case "pagerduty":
+      observability = pagerduty({ apiKey: obsCreds.apiKey, logger: actionsLogger });
+      break;
+    case "vercel":
+      observability = vercel({
+        token: obsCreds.token,
+        projectId: obsCreds.projectId,
+        teamId: obsCreds.teamId,
         logger: actionsLogger,
       });
+      break;
+    case "supabase":
+      observability = supabase({
+        managementApiKey: obsCreds.managementApiKey,
+        projectRef: obsCreds.projectRef,
+        logger: actionsLogger,
+      });
+      break;
+    case "netlify":
+      observability = netlify({ token: obsCreds.token, siteId: obsCreds.siteId, logger: actionsLogger });
+      break;
+    case "fly":
+      observability = fly({ token: obsCreds.token, appName: obsCreds.appName, logger: actionsLogger });
+      break;
+    case "render":
+      observability = render({ apiKey: obsCreds.apiKey, serviceId: obsCreds.serviceId, logger: actionsLogger });
+      break;
+    case "heroku":
+      observability = heroku({ apiKey: obsCreds.apiKey, appName: obsCreds.appName, logger: actionsLogger });
+      break;
+    case "opsgenie":
+      observability = opsgenie({
+        apiKey: obsCreds.apiKey,
+        region: obsCreds.region as "us" | "eu",
+        logger: actionsLogger,
+      });
+      break;
+    case "honeycomb":
+      observability = honeycomb({ apiKey: obsCreds.apiKey, dataset: obsCreds.dataset, logger: actionsLogger });
+      break;
+    case "axiom":
+      observability = axiom({
+        apiToken: obsCreds.apiToken,
+        dataset: obsCreds.dataset,
+        orgId: obsCreds.orgId,
+        logger: actionsLogger,
+      });
+      break;
+    case "betterstack":
+      observability = betterstack({ apiToken: obsCreds.apiToken, sourceId: obsCreds.sourceId, logger: actionsLogger });
       break;
     default:
       throw new Error(`Unsupported observability provider: ${config.observabilityProvider}`);

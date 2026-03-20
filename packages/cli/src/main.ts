@@ -467,6 +467,16 @@ function buildAutoMcpServers(config: CliConfig): Record<string, MCPServerConfig>
     };
   }
 
+  // Better Stack MCP — HTTP remote MCP; supports Bearer token auth (no OAuth required).
+  // Exposes ClickHouse SQL query tools for logs, metrics, spans, and error tracking.
+  if (config.observabilityProvider === "betterstack" && obsCreds.apiToken) {
+    auto["betterstack"] = {
+      type: "http",
+      url: "https://mcp.betterstack.com",
+      headers: { Authorization: `Bearer ${obsCreds.apiToken}` },
+    };
+  }
+
   // ── Category B: Workspace tools (explicit opt-in via workspaceTools config) ─
   // Both the tool name must appear in workspaceTools AND the credential env var must be set.
 

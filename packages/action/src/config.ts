@@ -288,6 +288,12 @@ export function validateInputs(config: ActionConfig): string[] {
       if (!config.observabilityCredentials.dataset)
         errors.push("Missing required input: `axiom-dataset` is required when `observability-provider` is `axiom`");
       break;
+    case "betterstack":
+      if (!config.observabilityCredentials.apiToken)
+        errors.push(
+          "Missing required input: `betterstack-api-token` is required when `observability-provider` is `betterstack`",
+        );
+      break;
     case "vercel":
       if (!config.observabilityCredentials.token)
         errors.push("Missing required input: `vercel-token` is required when `observability-provider` is `vercel`");
@@ -491,6 +497,11 @@ function parseObservabilityCredentials(provider: string): Record<string, string>
         apiToken: core.getInput("axiom-api-token"),
         dataset: core.getInput("axiom-dataset"),
         orgId: core.getInput("axiom-org-id"),
+      };
+    case "betterstack":
+      return {
+        apiToken: core.getInput("betterstack-api-token"),
+        sourceId: core.getInput("betterstack-source-id"),
       };
     case "vercel":
       return {

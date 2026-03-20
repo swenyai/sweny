@@ -360,8 +360,8 @@ describe("createProviders", () => {
   });
 
   it("throws for unsupported observability provider", () => {
-    expect(() => createProviders(makeConfig({ observabilityProvider: "prometheus" }))).toThrow(
-      "Unsupported observability provider: prometheus",
+    expect(() => createProviders(makeConfig({ observabilityProvider: "unknown-provider" as never }))).toThrow(
+      "Unsupported observability provider: unknown-provider",
     );
   });
 
@@ -375,6 +375,29 @@ describe("createProviders", () => {
     expect(() => createProviders(makeConfig({ sourceControlProvider: "bitbucket" }))).toThrow(
       "Unsupported source control provider: bitbucket",
     );
+  });
+
+  it("creates providers with betterstack observability", () => {
+    const registry = createProviders(
+      makeConfig({
+        observabilityProvider: "betterstack",
+        observabilityCredentials: {
+          apiToken: "bt-test-token",
+          sourceId: "12345",
+        },
+      }),
+    );
+    const observability = registry.get<ObservabilityProvider>("observability");
+    expect(observability).toBeDefined();
+    expect(typeof observability.verifyAccess).toBe("function");
+    expect(typeof observability.queryLogs).toBe("function");
+    expect(typeof observability.aggregate).toBe("function");
+    expect(typeof observability.getAgentEnv).toBe("function");
+    expect(typeof observability.getPromptInstructions).toBe("function");
+
+    const env = observability.getAgentEnv();
+    expect(env.BETTERSTACK_API_TOKEN).toBe("bt-test-token");
+    expect(env.BETTERSTACK_SOURCE_ID).toBe("12345");
   });
 
   it("creates providers with file observability", () => {

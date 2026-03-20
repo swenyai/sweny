@@ -395,6 +395,31 @@ export const PROVIDER_CATALOG: ProviderOption[] = [
       },
     ],
   },
+  {
+    id: "betterstack",
+    name: "Better Stack",
+    category: "observability",
+    description: "Query logs, metrics, and traces from Better Stack Telemetry using ClickHouse SQL.",
+    color: "#FF6154",
+    icon: "📈",
+    importPath: "@sweny-ai/providers/observability",
+    factoryFn: "betterstack",
+    envVars: [
+      {
+        key: "BETTERSTACK_API_TOKEN",
+        description: "Better Stack Telemetry API token (team-scoped)",
+        required: true,
+        secret: true,
+      },
+      {
+        key: "BETTERSTACK_SOURCE_ID",
+        description: "Telemetry source ID to scope queries (optional, queries all sources if omitted)",
+        required: false,
+        secret: false,
+        example: "12345",
+      },
+    ],
+  },
 
   // ── Issue Tracking ─────────────────────────────────────────────────────────
 

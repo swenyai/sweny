@@ -19,3 +19,4 @@ export { heroku, herokuConfigSchema, type HerokuConfig } from "./heroku.js";
 export { opsgenie, opsgenieConfigSchema, type OpsGenieConfig } from "./opsgenie.js";
 export { honeycomb, honeycombConfigSchema, type HoneycombConfig } from "./honeycomb.js";
 export { axiom, axiomConfigSchema, type AxiomConfig } from "./axiom.js";
+export { betterstack, betterstackConfigSchema, type BetterStackConfig } from "./betterstack.js";
