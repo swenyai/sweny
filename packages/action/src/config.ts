@@ -293,6 +293,10 @@ export function validateInputs(config: ActionConfig): string[] {
         errors.push(
           "Missing required input: `betterstack-api-token` is required when `observability-provider` is `betterstack`",
         );
+      if (!config.observabilityCredentials.sourceId && !config.observabilityCredentials.tableName)
+        errors.push(
+          "Missing required input: either `betterstack-source-id` or `betterstack-table-name` is required when `observability-provider` is `betterstack`",
+        );
       break;
     case "vercel":
       if (!config.observabilityCredentials.token)
@@ -502,6 +506,7 @@ function parseObservabilityCredentials(provider: string): Record<string, string>
       return {
         apiToken: core.getInput("betterstack-api-token"),
         sourceId: core.getInput("betterstack-source-id"),
+        tableName: core.getInput("betterstack-table-name"),
       };
     case "vercel":
       return {

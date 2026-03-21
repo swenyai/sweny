@@ -153,6 +153,8 @@ export function registerTriageCommand(program: Command): Command {
     .option("--honeycomb-dataset <name>", "Honeycomb dataset name (required for honeycomb provider)")
     .option("--axiom-dataset <name>", "Axiom dataset name (required for axiom provider)")
     .option("--axiom-org-id <id>", "Axiom org ID (required for multi-org Axiom accounts)")
+    .option("--betterstack-source-id <id>", "Better Stack log source ID (used to auto-discover ClickHouse table)")
+    .option("--betterstack-table-name <name>", 'Better Stack ClickHouse table name, e.g. "t273774.my_source"')
     .option("--gitlab-base-url <url>", "GitLab base URL (default: https://gitlab.com)")
     .option("--json", "Output results as JSON", false)
     .option("--bell", "Ring terminal bell on completion", false)
@@ -377,6 +379,14 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.observabilityCredentials.dataset)
         errors.push("Missing: AXIOM_DATASET or --axiom-dataset is required for axiom provider");
       break;
+    case "betterstack":
+      if (!config.observabilityCredentials.apiToken)
+        errors.push("Missing: BETTERSTACK_API_TOKEN is required for betterstack provider");
+      if (!config.observabilityCredentials.sourceId && !config.observabilityCredentials.tableName)
+        errors.push(
+          "Missing: either BETTERSTACK_SOURCE_ID (--betterstack-source-id) or BETTERSTACK_TABLE_NAME (--betterstack-table-name) is required for betterstack provider",
+        );
+      break;
     case "vercel":
       if (!config.observabilityCredentials.token)
         errors.push("Missing: VERCEL_TOKEN — create a token at https://vercel.com/account/tokens");
@@ -413,7 +423,7 @@ export function validateInputs(config: CliConfig): string[] {
       break;
     default:
       errors.push(
-        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, honeycomb, heroku, opsgenie, axiom, vercel, supabase, netlify, fly, render, file`,
+        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, honeycomb, heroku, opsgenie, axiom, betterstack, vercel, supabase, netlify, fly, render, file`,
       );
   }
 
@@ -629,6 +639,14 @@ function parseObservabilityCredentials(
         apiToken: env.AXIOM_TOKEN || "",
         dataset: (options.axiomDataset as string) || env.AXIOM_DATASET || f("axiom-dataset") || "",
         orgId: (options.axiomOrgId as string) || env.AXIOM_ORG_ID || f("axiom-org-id") || "",
+      };
+    case "betterstack":
+      return {
+        apiToken: env.BETTERSTACK_API_TOKEN || "",
+        sourceId:
+          (options.betterstackSourceId as string) || env.BETTERSTACK_SOURCE_ID || f("betterstack-source-id") || "",
+        tableName:
+          (options.betterstackTableName as string) || env.BETTERSTACK_TABLE_NAME || f("betterstack-table-name") || "",
       };
     case "vercel":
       return {

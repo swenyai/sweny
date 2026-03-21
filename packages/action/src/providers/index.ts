@@ -158,7 +158,12 @@ export function createProviders(config: ActionConfig): ProviderRegistry {
       });
       break;
     case "betterstack":
-      observability = betterstack({ apiToken: obsCreds.apiToken, sourceId: obsCreds.sourceId, logger: actionsLogger });
+      observability = betterstack({
+        apiToken: obsCreds.apiToken,
+        sourceId: obsCreds.sourceId || undefined,
+        tableName: obsCreds.tableName || undefined,
+        logger: actionsLogger,
+      });
       break;
     default:
       throw new Error(`Unsupported observability provider: ${config.observabilityProvider}`);

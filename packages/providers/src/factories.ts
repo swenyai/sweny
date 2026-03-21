@@ -27,6 +27,7 @@ import {
   opsgenie,
   honeycomb,
   axiom,
+  betterstack,
 } from "./observability/index.js";
 import { claudeCode, openaiCodex, googleGemini } from "./coding-agent/index.js";
 
@@ -36,7 +37,7 @@ import { claudeCode, openaiCodex, googleGemini } from "./coding-agent/index.js";
  * @param name        - Provider key: "datadog" | "sentry" | "cloudwatch" | "splunk" |
  *                      "elastic" | "newrelic" | "loki" | "file" | "prometheus" | "pagerduty" |
  *                      "vercel" | "supabase" | "netlify" | "fly" | "render" | "heroku" | "opsgenie" |
- *                      "honeycomb" | "axiom"
+ *                      "honeycomb" | "axiom" | "betterstack"
  * @param credentials - Key/value map of provider-specific credentials (same shape as
  *                      `parseObservabilityCredentials` returns in the CLI/Action).
  * @param logger      - Logger instance to pass to the provider.
@@ -103,6 +104,13 @@ export function createObservabilityProvider(
         apiToken: credentials.apiToken,
         dataset: credentials.dataset,
         orgId: credentials.orgId || undefined,
+        logger,
+      });
+    case "betterstack":
+      return betterstack({
+        apiToken: credentials.apiToken,
+        sourceId: credentials.sourceId || undefined,
+        tableName: credentials.tableName || undefined,
         logger,
       });
     default:

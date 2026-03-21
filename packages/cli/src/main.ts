@@ -620,6 +620,11 @@ export function mapToTriageConfig(config: CliConfig): TriageConfig {
       if (obsCreds.apiKey) agentEnv.LOKI_API_KEY = obsCreds.apiKey;
       if (obsCreds.orgId) agentEnv.LOKI_ORG_ID = obsCreds.orgId;
       break;
+    case "betterstack":
+      if (obsCreds.apiToken) agentEnv.BETTERSTACK_API_TOKEN = obsCreds.apiToken;
+      if (obsCreds.sourceId) agentEnv.BETTERSTACK_SOURCE_ID = obsCreds.sourceId;
+      if (obsCreds.tableName) agentEnv.BETTERSTACK_TABLE_NAME = obsCreds.tableName;
+      break;
   }
 
   return {
