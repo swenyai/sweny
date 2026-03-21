@@ -10,6 +10,7 @@ node_modules/
 
 # Ignore dist for library packages (built locally)
 packages/agent/dist/
+packages/engine/dist/
 packages/providers/dist/
 packages/action/dist/
 packages/cli/dist/

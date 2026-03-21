@@ -35,6 +35,12 @@ jobs:
 
       - run: npm ci
 
+      - name: Build providers
+        run: npm run build --workspace=packages/providers
+
+      - name: Build engine
+        run: npm run build --workspace=packages/engine
+
       - name: Build studio library
         run: npm run build:lib --workspace=packages/studio
 

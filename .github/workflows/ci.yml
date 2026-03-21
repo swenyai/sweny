@@ -53,6 +53,9 @@ jobs:
       - name: Build providers
         run: npm run build --workspace=packages/providers
 
+      - name: Build engine
+        run: npm run build --workspace=packages/engine
+
       - run: npm run typecheck
 
   test:
@@ -73,6 +76,9 @@ jobs:
 
       - name: Build providers
         run: npm run build --workspace=packages/providers
+
+      - name: Build engine
+        run: npm run build --workspace=packages/engine
 
       - run: npm run test
 

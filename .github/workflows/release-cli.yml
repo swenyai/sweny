@@ -33,6 +33,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck --workspace=packages/cli
 
+      - name: Test
+        run: npm run test --workspace=packages/cli
+
       - name: Publish
         run: npm publish --access public --workspace=packages/cli
         env:
