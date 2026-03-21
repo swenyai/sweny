@@ -62,6 +62,7 @@ const BASE: CliConfig = {
   jiraBaseUrl: "",
   jiraEmail: "",
   jiraApiToken: "",
+  issueLabels: [],
   mcpServers: {},
   workspaceTools: [],
 };

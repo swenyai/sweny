@@ -62,6 +62,7 @@ function fileConfig(): CliConfig {
     cacheTtl: 86400,
     noCache: false,
     outputDir: ".sweny/output",
+    issueLabels: [],
     mcpServers: {},
     workspaceTools: [],
   };

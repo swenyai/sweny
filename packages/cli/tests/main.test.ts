@@ -79,6 +79,7 @@ const BASE_CONFIG = {
   claudeOauthToken: "",
   openaiApiKey: "",
   geminiApiKey: "",
+  issueLabels: [],
   mcpServers: {},
   workspaceTools: [],
 };

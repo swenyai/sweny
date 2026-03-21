@@ -128,6 +128,10 @@ const BASE_CONFIG: CliConfig = {
   noCache: false,
 
   outputDir: ".sweny/output",
+
+  issueLabels: [],
+  mcpServers: {},
+  workspaceTools: [],
 };
 
 // ── Observability provider selection ─────────────────────────────────────────

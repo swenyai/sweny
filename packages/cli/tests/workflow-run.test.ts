@@ -110,6 +110,7 @@ async function loadModule() {
       jiraBaseUrl: "",
       jiraEmail: "",
       jiraApiToken: "",
+      issueLabels: [],
       mcpServers: {},
       workspaceTools: [],
     }),
