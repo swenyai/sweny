@@ -1,5 +1,11 @@
 # @sweny-ai/engine
 
+## 5.0.1
+
+### Patch Changes
+
+- 48fb006: Fix investigate step not passing observability provider credentials to the coding agent subprocess. Previously only a hardcoded set of legacy providers (Datadog, Sentry, etc.) had their env vars forwarded to Claude; providers added later (Supabase, Vercel, Netlify, Fly, Render, etc.) were silently omitted, so Claude had no credentials to query logs during investigation. Now uses `observability.getAgentEnv()` directly, which every provider already implements.
+
 ## 5.0.0
 
 ### Patch Changes

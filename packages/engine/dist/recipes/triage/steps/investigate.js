@@ -22,7 +22,7 @@ export async function investigate(ctx) {
     await codingAgent.run({
         prompt,
         maxTurns: config.maxInvestigateTurns,
-        env: { ...config.agentEnv },
+        env: { ...observability.getAgentEnv(), ...config.agentEnv },
         mcpServers: config.mcpServers,
     });
     // Parse results

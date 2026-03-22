@@ -92,8 +92,7 @@ export async function createIssue(ctx) {
         });
         if (canSearchByFingerprint(issueTracker)) {
             ctx.logger.info(`Hard dedup: searching for fingerprint ${fingerprintHash}`);
-            const fingerprintMatches = await issueTracker
-                .searchByFingerprint(config.projectId, fingerprintHash);
+            const fingerprintMatches = await issueTracker.searchByFingerprint(config.projectId, fingerprintHash);
             if (fingerprintMatches.length > 0) {
                 issue = fingerprintMatches[0];
                 await issueTracker.addComment(issue.id, `+1 detected on ${date} (fingerprint match: ${fingerprintHash})`);
