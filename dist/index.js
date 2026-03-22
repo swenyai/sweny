@@ -54052,7 +54052,7 @@ const PROVIDER_CATALOG = [
             },
             {
                 key: "BETTERSTACK_TABLE_NAME",
-                description: 'Full qualified ClickHouse table name. Skips source discovery when set.',
+                description: "Full qualified ClickHouse table name. Skips source discovery when set.",
                 required: false,
                 secret: false,
                 example: "t273774.my_source",
@@ -55405,7 +55405,7 @@ async function investigate(ctx) {
     await codingAgent.run({
         prompt,
         maxTurns: config.maxInvestigateTurns,
-        env: { ...config.agentEnv },
+        env: { ...observability.getAgentEnv(), ...config.agentEnv },
         mcpServers: config.mcpServers,
     });
     // Parse results
@@ -55609,8 +55609,7 @@ async function createIssue(ctx) {
         });
         if (canSearchByFingerprint(issueTracker)) {
             ctx.logger.info(`Hard dedup: searching for fingerprint ${fingerprintHash}`);
-            const fingerprintMatches = await issueTracker
-                .searchByFingerprint(config.projectId, fingerprintHash);
+            const fingerprintMatches = await issueTracker.searchByFingerprint(config.projectId, fingerprintHash);
             if (fingerprintMatches.length > 0) {
                 issue = fingerprintMatches[0];
                 await issueTracker.addComment(issue.id, `+1 detected on ${date} (fingerprint match: ${fingerprintHash})`);
@@ -57252,6 +57251,14 @@ async function run() {
         if (config.claudeOauthToken)
             process.env.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
         const providers = createProviders(config);
+        // Bridge observability credentials into process.env so the engine's preflight
+        // env-var check passes. Credentials were already validated by validateInputs;
+        // this just makes them visible to runner-recipe's configSchema check.
+        const obsEnv = providers.get("observability").getAgentEnv();
+        for (const [k, v] of Object.entries(obsEnv)) {
+            if (v)
+                process.env[k] = v;
+        }
         const runOptions = {
             logger: main_actionsLogger,
             beforeStep: async (step) => {
