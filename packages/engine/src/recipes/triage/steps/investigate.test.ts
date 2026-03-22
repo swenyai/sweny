@@ -13,7 +13,10 @@ vi.mock("../prompts.js", () => ({
 describe("investigate", () => {
   const install = vi.fn().mockResolvedValue(undefined);
   const run = vi.fn().mockResolvedValue(undefined);
-  const observability = { verifyAccess: vi.fn() };
+  const observability = {
+    verifyAccess: vi.fn(),
+    getAgentEnv: vi.fn<[], Record<string, string>>().mockReturnValue({}),
+  };
   const codingAgent = { install, run };
 
   function buildCtx(overrides?: { knownIssuesContent?: string; config?: Record<string, unknown> }) {
@@ -34,6 +37,7 @@ describe("investigate", () => {
     vi.restoreAllMocks();
     install.mockResolvedValue(undefined);
     run.mockResolvedValue(undefined);
+    observability.getAgentEnv.mockReturnValue({});
     vi.mocked(fs.mkdirSync).mockReturnValue(undefined);
     vi.mocked(fs.writeFileSync).mockReturnValue(undefined);
     vi.mocked(fs.existsSync).mockReturnValue(false);
@@ -64,11 +68,45 @@ describe("investigate", () => {
   it("calls codingAgent.run with correct maxTurns and env", async () => {
     const ctx = buildCtx({ config: { maxInvestigateTurns: 15, agentEnv: { FOO: "bar" } } });
     await investigate(ctx);
+    expect(observability.getAgentEnv).toHaveBeenCalled();
     expect(run).toHaveBeenCalledWith({
       prompt: "mock investigation prompt",
       maxTurns: 15,
       env: { FOO: "bar" },
     });
+  });
+
+  it("merges provider getAgentEnv into the agent subprocess env", async () => {
+    observability.getAgentEnv.mockReturnValue({
+      SUPABASE_MANAGEMENT_KEY: "mgmt-key",
+      SUPABASE_PROJECT_REF: "proj-ref",
+    });
+    const ctx = buildCtx({ config: { agentEnv: { GITHUB_TOKEN: "gh-tok" } } });
+    await investigate(ctx);
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: {
+          SUPABASE_MANAGEMENT_KEY: "mgmt-key",
+          SUPABASE_PROJECT_REF: "proj-ref",
+          GITHUB_TOKEN: "gh-tok",
+        },
+      }),
+    );
+  });
+
+  it("config.agentEnv takes precedence over provider getAgentEnv on key conflict", async () => {
+    observability.getAgentEnv.mockReturnValue({ SHARED_KEY: "from-provider", PROV_ONLY: "prov-val" });
+    const ctx = buildCtx({ config: { agentEnv: { SHARED_KEY: "from-config", CFG_ONLY: "cfg-val" } } });
+    await investigate(ctx);
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: {
+          SHARED_KEY: "from-config",
+          PROV_ONLY: "prov-val",
+          CFG_ONLY: "cfg-val",
+        },
+      }),
+    );
   });
 
   it("parses: no best-candidate file returns skip", async () => {

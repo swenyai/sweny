@@ -4,6 +4,7 @@ import type { TriageConfig, ImplementConfig, WorkflowResult } from "@sweny-ai/en
 import { parseInputs, validateInputs, ActionConfig } from "./config.js";
 import { createProviders } from "./providers/index.js";
 import type { MCPServerConfig } from "@sweny-ai/providers";
+import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
 
 const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
 
@@ -28,6 +29,14 @@ async function run(): Promise<void> {
     if (config.claudeOauthToken) process.env.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
 
     const providers = createProviders(config);
+
+    // Bridge observability credentials into process.env so the engine's preflight
+    // env-var check passes. Credentials were already validated by validateInputs;
+    // this just makes them visible to runner-recipe's configSchema check.
+    const obsEnv = providers.get<ObservabilityProvider>("observability").getAgentEnv();
+    for (const [k, v] of Object.entries(obsEnv)) {
+      if (v) process.env[k] = v;
+    }
 
     const runOptions = {
       logger: actionsLogger,
