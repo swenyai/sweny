@@ -13,6 +13,7 @@ const mockParseInputs = vi.fn();
 const mockValidateInputs = vi.fn();
 const mockCreateProviders = vi.fn();
 const mockRunRecipe = vi.fn();
+const mockGetAgentEnv = vi.fn<[], Record<string, string>>().mockReturnValue({});
 
 // ---------------------------------------------------------------------------
 // Helper: re-register all doMocks and dynamically import main.ts fresh
@@ -102,7 +103,7 @@ const DEFAULT_CONFIG = {
   mcpServers: {},
 };
 
-const DEFAULT_PROVIDERS = new Map();
+const DEFAULT_PROVIDERS = new Map([["observability", { getAgentEnv: mockGetAgentEnv }]]);
 
 // ---------------------------------------------------------------------------
 // Shared beforeEach: reset all mocks and set up happy-path defaults
@@ -110,6 +111,7 @@ const DEFAULT_PROVIDERS = new Map();
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGetAgentEnv.mockReturnValue({});
   mockParseInputs.mockReturnValue(DEFAULT_CONFIG);
   mockValidateInputs.mockReturnValue([]);
   mockCreateProviders.mockReturnValue(DEFAULT_PROVIDERS);
@@ -155,7 +157,10 @@ describe("run() orchestration", () => {
   });
 
   it("passes triageWorkflow as first arg and providers as third arg to runWorkflow", async () => {
-    const fakeProviders = new Map([["obs", {}]]);
+    const fakeProviders = new Map([
+      ["obs", {}],
+      ["observability", { getAgentEnv: vi.fn().mockReturnValue({}) }],
+    ]);
     mockCreateProviders.mockReturnValue(fakeProviders);
 
     await loadMain();
@@ -172,6 +177,18 @@ describe("run() orchestration", () => {
 
     const [firstArg] = mockRunRecipe.mock.calls[0];
     expect(firstArg).toMatchObject({ name: "implement" });
+  });
+
+  it("bridges observability getAgentEnv into process.env before runWorkflow", async () => {
+    mockGetAgentEnv.mockReturnValue({
+      SUPABASE_MANAGEMENT_KEY: "mgmt-key-123",
+      SUPABASE_PROJECT_REF: "proj-ref-abc",
+    });
+
+    await loadMain();
+
+    expect(process.env.SUPABASE_MANAGEMENT_KEY).toBe("mgmt-key-123");
+    expect(process.env.SUPABASE_PROJECT_REF).toBe("proj-ref-abc");
   });
 
   it("calls core.setFailed with error.message when runWorkflow throws Error", async () => {
