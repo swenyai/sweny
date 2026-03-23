@@ -21,6 +21,7 @@ This monorepo contains the SWEny platform:
 |---------|-------------|
 | **[@sweny-ai/engine](packages/engine)** | Workflow engine — DAG runner, built-in triage and implement workflows |
 | **[@sweny-ai/cli](packages/cli)** | CLI — run triage and implement from your terminal |
+| **[@sweny-ai/worker](packages/worker)** | Self-hosted job executor — BYO Worker for audit and VPC isolation |
 | **[SWEny Triage](#sweny-triage)** | GitHub Action — autonomous SRE triage |
 | **[@sweny-ai/providers](packages/providers)** | 30+ provider implementations |
 | **[@sweny-ai/agent](packages/agent)** | AI assistant — Slack bot + CLI |
@@ -41,6 +42,7 @@ SWEny workflows follow three phases:
 ┌─────────────────────────────────────────────┐
 │  Entry Points                               │
 │  GitHub Action · Slack Bot · CLI · Cloud     │
+│  BYO Worker                                 │
 ├─────────────────────────────────────────────┤
 │  @sweny-ai/engine                              │
 │  Recipe Runner · DAG Executor · Step Context │
