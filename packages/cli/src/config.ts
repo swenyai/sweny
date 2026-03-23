@@ -91,7 +91,7 @@ export interface CliConfig {
 
   // Workspace tool integrations — explicit opt-in for Category B MCP servers.
   // Credential env vars must also be present for injection to occur.
-  // Supported: slack, notion, pagerduty, monday, asana
+  // Supported: slack, notion, pagerduty, monday
   workspaceTools: string[];
 }
 
@@ -164,7 +164,7 @@ export function registerTriageCommand(program: Command): Command {
     .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
     .option(
       "--workspace-tools <tools>",
-      "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday, asana)",
+      "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday)",
     );
 }
 
@@ -271,8 +271,15 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
   };
 }
 
-/** All recognized workspace tool names. Update here when adding a new Category B MCP server. */
-export const SUPPORTED_WORKSPACE_TOOLS = new Set(["slack", "notion", "pagerduty", "monday", "asana"]);
+/**
+ * All recognized workspace tool names. Update here when adding a new Category B MCP server.
+ *
+ * Requirements to add a tool:
+ *   - Must have an HTTP transport endpoint (preferred) OR a stable pre-installed binary path
+ *   - npx -y is intentionally NOT used — runtime package downloads bypass lockfiles
+ *   - Asana is intentionally absent: no stable HTTP MCP endpoint as of current release
+ */
+export const SUPPORTED_WORKSPACE_TOOLS = new Set(["slack", "notion", "pagerduty", "monday"]);
 
 export function validateInputs(config: CliConfig): string[] {
   const errors: string[] = [];
@@ -697,7 +704,7 @@ export function registerImplementCommand(program: Command): Command {
     .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
     .option(
       "--workspace-tools <tools>",
-      "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday, asana)",
+      "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday)",
     )
     .option(
       "--review-mode <mode>",

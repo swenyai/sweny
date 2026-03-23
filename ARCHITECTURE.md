@@ -8,11 +8,12 @@
 - **cli** — `sweny` CLI for local/CI use
 - **agent** — Claude Code subprocess management
 
-## Open (sweny-worker, coming soon)
+## Open (sweny-worker, `packages/worker/`)
 
-- **worker** — the cloud job executor (queue consumer + runRecipe)
-  The worker is just the open-source engine running inside a queue.
-  Opening it lets customers audit and verify what runs on their data.
+- **worker** — the BullMQ job executor (queue consumer + runRecipe)
+  The worker is the open-source engine running inside a BullMQ queue consumer.
+  Customers can audit and verify exactly what runs on their data, and optionally
+  run the worker in their own VPC (BYO Worker tier).
 
 ## Closed (cloud repo — sweny.ai platform)
 
@@ -54,3 +55,26 @@ Customers who want to verify what ran on their data can:
 
 The `WorkerJobPayload` type (in `packages/shared/src/worker-payload.ts`) defines the exact
 public interface: no billing info, no internal org state, no platform secrets cross this boundary.
+
+## MCP Transport Standards and npx
+
+General rule: **don't use `npx -y`** — runtime package downloads bypass lockfiles and
+security audits, and the package version is non-deterministic.
+
+**Exception**: `buildAutoMcpServers()` in the CLI uses `npx -y` for a small set of
+official first-party vendor MCP servers that have no stable HTTP endpoint:
+
+| Server | Package | Why npx |
+|--------|---------|---------|
+| GitHub | `@modelcontextprotocol/server-github` | No public HTTP MCP endpoint |
+| GitLab | `@modelcontextprotocol/server-gitlab` | No public HTTP MCP endpoint |
+| Sentry | `@sentry/mcp-server` | No public HTTP MCP endpoint |
+| Slack | `@modelcontextprotocol/server-slack` | No public HTTP MCP endpoint |
+| Notion | `@notionhq/notion-mcp-server` | No public HTTP MCP endpoint |
+| Monday.com | `@mondaydotcomorg/monday-api-mcp` | No public HTTP MCP endpoint |
+
+These packages are all official vendor packages, not third-party. Users can override any
+auto-injected server with a pre-installed binary by setting `mcp-servers-json` in `.sweny.yml`.
+
+For services that DO have HTTP MCP endpoints (Datadog, Linear, New Relic, Better Stack,
+PagerDuty), we always prefer the HTTP transport — no download required.

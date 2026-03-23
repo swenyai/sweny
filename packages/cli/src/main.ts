@@ -380,7 +380,14 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
  *
  * Design rules:
  * - HTTP transport preferred for cloud-hosted services (no local install, vendor-managed).
- * - stdio (npx) used when no stable HTTP endpoint exists; the agent handles process spawning.
+ * - stdio (npx) used ONLY for official vendor MCP servers that have no HTTP endpoint yet.
+ *   This is an intentional exception to the general "no npx -y" rule in ARCHITECTURE.md.
+ *   All packages used here are official first-party packages from the service vendor.
+ *   The trade-off (runtime download vs. pre-installation) is accepted because:
+ *     (a) these packages ship in Claude Code's blessed MCP catalog
+ *     (b) users can override with a pre-installed binary via mcp-servers-json
+ *   To use a pre-installed binary instead: set mcp-servers-json in .sweny.yml with
+ *   `{ "github": { "type": "stdio", "command": "/path/to/github-mcp" } }`
  * - Category A: injected from structured provider config (sourceControlProvider, etc.)
  * - Category B: injected when specific env vars are present — zero new config required.
  * - User-supplied mcpServers always win on key conflict (explicit > auto).
