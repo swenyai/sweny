@@ -1,5 +1,11 @@
 # @sweny-ai/cli
 
+## 1.10.2
+
+### Patch Changes
+
+- a0fb2ff: Remove `asana` from supported workspace tools — no auto-injection implementation exists (no stable HTTP MCP endpoint). Users can still configure Asana via `mcp-servers-json` manually.
+
 ## 1.10.1
 
 ### Patch Changes
