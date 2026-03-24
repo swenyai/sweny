@@ -36,7 +36,7 @@
     "@sweny-ai/providers": "*",
     "chalk": "^5",
     "commander": "^14",
-    "yaml": "^2.0.0"
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@types/node": "^25",
