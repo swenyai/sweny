@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/web",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "type": "module",
   "description": "sweny.ai — public website",
@@ -13,7 +13,7 @@
   "dependencies": {
     "@astrojs/react": "^4.4.2",
     "@astrojs/starlight": "^0.37.7",
-    "@sweny-ai/studio": "^7.0.0",
+    "@sweny-ai/studio": "^8.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "astro": "^5.6.1",

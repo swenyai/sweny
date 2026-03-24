@@ -1,5 +1,12 @@
 # @sweny-ai/engine
 
+## 6.0.0
+
+### Patch Changes
+
+- Updated dependencies [83cb967]
+  - @sweny-ai/providers@1.4.0
+
 ## 5.0.1
 
 ### Patch Changes
