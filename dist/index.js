@@ -45957,6 +45957,32 @@ curl -s "\${SENTRY_BASE_URL}/api/0/issues/{issue_id}/" \\
   -H "Authorization: Bearer \${SENTRY_AUTH_TOKEN}"
 \`\`\``;
     }
+    getMcpServers() {
+        const env = {
+            SENTRY_ACCESS_TOKEN: this.authToken,
+        };
+        // SENTRY_HOST is only needed for self-hosted instances.
+        // @sentry/mcp-server defaults to sentry.io when unset.
+        // The package expects a hostname (e.g. "sentry.example.com"), not a full URL.
+        if (this.baseUrl !== "https://sentry.io") {
+            try {
+                const hostname = new URL(this.baseUrl).hostname;
+                if (hostname)
+                    env.SENTRY_HOST = hostname;
+            }
+            catch {
+                // malformed baseUrl — leave SENTRY_HOST unset; server defaults to sentry.io
+            }
+        }
+        return {
+            sentry: {
+                type: "stdio",
+                command: "npx",
+                args: ["-y", "@sentry/mcp-server@latest"],
+                env,
+            },
+        };
+    }
     async aggregate(opts) {
         this.log.info(`Aggregating Sentry errors (range: ${opts.timeRange})`);
         const params = {
