@@ -531,4 +531,28 @@ describe("runJob", () => {
     const argsStr = gitArgs.join(" ");
     expect(argsStr).not.toContain("ghp_test_token");
   });
+
+  it("injects Sentry MCP server into triage config when SENTRY_AUTH_TOKEN is present", async () => {
+    const credentials = { ...baseCredentials, SENTRY_AUTH_TOKEN: "sntryu_test_token" };
+    mockRunWorkflow.mockResolvedValue(triageResult());
+
+    await runJob(makePayload({}, credentials), INTERNAL_API_URL, "claude");
+
+    const triageConfig = mockRunWorkflow.mock.calls[0][1];
+    expect(triageConfig.mcpServers).toBeDefined();
+    expect(triageConfig.mcpServers).toHaveProperty("sentry");
+    expect(triageConfig.mcpServers.sentry.command).toBe("npx");
+    expect(triageConfig.mcpServers.sentry.env.SENTRY_ACCESS_TOKEN).toBe("sntryu_test_token");
+  });
+
+  it("does not inject mcpServers when no Sentry credentials are present", async () => {
+    mockRunWorkflow.mockResolvedValue(triageResult());
+
+    await runJob(makePayload(), INTERNAL_API_URL, "claude");
+
+    const triageConfig = mockRunWorkflow.mock.calls[0][1];
+    // Empty servers → mcpServers spread is {}, which means the config key is still set
+    // but the important check is that no sentry key exists
+    expect(triageConfig.mcpServers).not.toHaveProperty("sentry");
+  });
 });

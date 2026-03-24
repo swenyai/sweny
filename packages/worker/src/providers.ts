@@ -27,6 +27,7 @@ import {
 import { linear, jira, githubIssues } from "@sweny-ai/providers/issue-tracking";
 import { github, gitlab } from "@sweny-ai/providers/source-control";
 import { claudeCode, googleGemini, openaiCodex } from "@sweny-ai/providers/coding-agent";
+import type { MCPServerConfig } from "@sweny-ai/providers";
 import { createProviderRegistry } from "@sweny-ai/engine";
 import type { ProviderRegistry } from "@sweny-ai/engine";
 import type { WorkerJobPayload } from "@sweny-ai/shared";
@@ -234,6 +235,41 @@ export function hydrateProviders(
   registry.set("notification", { send: async () => {} });
 
   return registry;
+}
+
+/**
+ * Build MCP servers to auto-inject based on detected credentials.
+ * These are merged with any user-supplied mcpServers in the job config,
+ * with user-supplied values taking precedence.
+ */
+export function buildMcpServers(credentials: Record<string, string>): Record<string, MCPServerConfig> {
+  const servers: Record<string, MCPServerConfig> = {};
+
+  if (credentials["SENTRY_AUTH_TOKEN"]) {
+    const sentryEnv: Record<string, string> = {
+      SENTRY_ACCESS_TOKEN: credentials["SENTRY_AUTH_TOKEN"],
+    };
+    // SENTRY_HOST is only needed for self-hosted instances.
+    // @sentry/mcp-server defaults to sentry.io when unset.
+    // The package expects a hostname (e.g. "sentry.example.com"), not a full URL.
+    const baseUrl = credentials["SENTRY_BASE_URL"];
+    if (baseUrl && baseUrl !== "https://sentry.io") {
+      try {
+        const hostname = new URL(baseUrl).hostname;
+        if (hostname) sentryEnv.SENTRY_HOST = hostname;
+      } catch {
+        // malformed URL — leave SENTRY_HOST unset
+      }
+    }
+    servers["sentry"] = {
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@sentry/mcp-server@latest"],
+      env: sentryEnv,
+    };
+  }
+
+  return servers;
 }
 
 /**

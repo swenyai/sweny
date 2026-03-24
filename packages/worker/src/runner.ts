@@ -23,7 +23,7 @@ import type { ImplementConfig } from "@sweny-ai/engine";
 import type { MCPServerConfig } from "@sweny-ai/providers";
 import type { WorkerJobPayload } from "@sweny-ai/shared";
 import { decryptBundle } from "./crypto.js";
-import { hydrateProviders, buildAgentEnv } from "./providers.js";
+import { hydrateProviders, buildAgentEnv, buildMcpServers } from "./providers.js";
 import { logger as rootLogger } from "./logger.js";
 
 const exec = promisify(execFile);
@@ -139,6 +139,7 @@ export async function runJob(
     // Step 5: Hydrate providers and run the recipe
     const providers = hydrateProviders(credentials, payload, jobLogger, codingAgent);
     const agentEnv = buildAgentEnv(credentials);
+    const providerMcpServers = buildMcpServers(credentials);
 
     let result: WorkflowResult;
 
@@ -158,7 +159,10 @@ export async function runJob(
         projectId: credentials["LINEAR_TEAM_ID"] ?? credentials["JIRA_PROJECT_KEY"] ?? "",
         stateInProgress: "",
         statePeerReview: "",
-        mcpServers: cfg["mcpServers"] as Record<string, MCPServerConfig> | undefined,
+        mcpServers: {
+          ...providerMcpServers,
+          ...(cfg["mcpServers"] as Record<string, MCPServerConfig> | undefined),
+        },
       };
 
       jobLogger.info(`Running implement recipe for issue ${issueIdentifier}`);
@@ -186,7 +190,10 @@ export async function runJob(
         issueOverride: "",
         additionalInstructions: (cfg["additionalInstructions"] as string | undefined) ?? "",
         agentEnv,
-        mcpServers: cfg["mcpServers"] as Record<string, MCPServerConfig> | undefined,
+        mcpServers: {
+          ...providerMcpServers,
+          ...(cfg["mcpServers"] as Record<string, MCPServerConfig> | undefined),
+        },
       };
 
       jobLogger.info("Running triage recipe");

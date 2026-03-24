@@ -1,3 +1,5 @@
+import type { MCPServerConfig } from "../mcp/index.js";
+
 /** A single log entry returned from an observability provider. */
 export interface LogEntry {
   /** ISO 8601 timestamp of the log entry. */
@@ -57,4 +59,11 @@ export interface ObservabilityProvider {
 
   /** Provider-specific API documentation injected into the investigation prompt. */
   getPromptInstructions(): string;
+
+  /**
+   * Optional: MCP servers this provider contributes to the coding agent.
+   * When present, the returned servers are auto-injected into every agent run
+   * alongside any user-supplied mcpServers in the job config.
+   */
+  getMcpServers?(): Record<string, MCPServerConfig>;
 }

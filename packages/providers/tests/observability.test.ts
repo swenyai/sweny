@@ -107,6 +107,7 @@ describe("sentry factory", () => {
     expect(typeof provider.aggregate).toBe("function");
     expect(typeof provider.getAgentEnv).toBe("function");
     expect(typeof provider.getPromptInstructions).toBe("function");
+    expect(typeof provider.getMcpServers).toBe("function");
   });
 
   it("getAgentEnv returns SENTRY_ env vars", () => {
@@ -126,6 +127,48 @@ describe("sentry factory", () => {
     expect(instructions).toContain("Sentry");
     expect(instructions).toContain("SENTRY_AUTH_TOKEN");
     expect(instructions).toContain("curl");
+  });
+
+  it("getMcpServers returns stdio config for @sentry/mcp-server", () => {
+    const provider = sentry({ authToken: "tok", organization: "o", project: "p" });
+    const servers = provider.getMcpServers!();
+    expect(servers).toHaveProperty("sentry");
+    expect(servers.sentry.type).toBe("stdio");
+    expect(servers.sentry.command).toBe("npx");
+    expect(servers.sentry.args).toContain("@sentry/mcp-server@latest");
+    expect(servers.sentry.env?.SENTRY_ACCESS_TOKEN).toBe("tok");
+  });
+
+  it("getMcpServers does not set SENTRY_HOST for default sentry.io", () => {
+    // SaaS users: SENTRY_HOST must be absent — the MCP server defaults to sentry.io
+    const provider = sentry({ authToken: "tok", organization: "o", project: "p" });
+    const servers = provider.getMcpServers!();
+    expect(servers.sentry.env).not.toHaveProperty("SENTRY_HOST");
+  });
+
+  it("getMcpServers sets SENTRY_HOST as hostname-only for self-hosted instances", () => {
+    // @sentry/mcp-server expects just the hostname, not the full URL with protocol
+    const provider = sentry({
+      authToken: "tok",
+      organization: "o",
+      project: "p",
+      baseUrl: "https://sentry.example.com",
+    });
+    const servers = provider.getMcpServers!();
+    expect(servers.sentry.env?.SENTRY_HOST).toBe("sentry.example.com");
+  });
+
+  it("getMcpServers does not set SENTRY_HOST when baseUrl is malformed", () => {
+    const provider = sentry({
+      authToken: "tok",
+      organization: "o",
+      project: "p",
+      baseUrl: "not-a-valid-url",
+    });
+    // Should not throw, and should not set SENTRY_HOST
+    expect(() => provider.getMcpServers!()).not.toThrow();
+    const servers = provider.getMcpServers!();
+    expect(servers.sentry.env).not.toHaveProperty("SENTRY_HOST");
   });
 });
 
