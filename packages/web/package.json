@@ -13,6 +13,7 @@
   "dependencies": {
     "@astrojs/react": "^4.4.2",
     "@astrojs/starlight": "^0.37.7",
+    "@sweny-ai/core": "*",
     "@sweny-ai/studio": "^8.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
