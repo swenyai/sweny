@@ -100,7 +100,7 @@
     "@aws-sdk/client-secrets-manager": "^3",
     "@aws-sdk/credential-provider-node": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
-    "@modelcontextprotocol/sdk": "^1.0",
+    "@modelcontextprotocol/sdk": "^1.28",
     "@slack/web-api": "^7"
   },
   "peerDependenciesMeta": {
@@ -140,7 +140,7 @@
     "@aws-sdk/client-secrets-manager": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
     "@changesets/cli": "^2.30.0",
-    "@modelcontextprotocol/sdk": "^1.0",
+    "@modelcontextprotocol/sdk": "^1.28",
     "@slack/web-api": "^7",
     "@types/node": "^25",
     "typescript": "^5.6",
