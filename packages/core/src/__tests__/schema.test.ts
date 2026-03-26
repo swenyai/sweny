@@ -106,6 +106,7 @@ describe("Zod schemas", () => {
         id: "test",
         name: "Test",
         description: "A test skill",
+        category: "general",
         config: {
           TOKEN: { description: "API token", required: true, env: "TOKEN" },
         },

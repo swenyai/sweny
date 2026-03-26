@@ -4,7 +4,7 @@
  * Replaces: observability/sentry.ts
  */
 
-import type { Skill, ToolContext } from "../types.js";
+import type { Skill, ToolContext, SkillCategory } from "../types.js";
 
 async function sentryApi(path: string, ctx: ToolContext): Promise<unknown> {
   const base = ctx.config.SENTRY_BASE_URL || "https://sentry.io";
@@ -20,6 +20,7 @@ export const sentry: Skill = {
   id: "sentry",
   name: "Sentry",
   description: "Query errors, issues, and performance data from Sentry",
+  category: "observability",
   config: {
     SENTRY_AUTH_TOKEN: {
       description: "Sentry authentication token",

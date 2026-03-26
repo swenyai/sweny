@@ -30,10 +30,13 @@ export const toolZ = z.object({
   input_schema: jsonSchemaZ,
 });
 
+export const skillCategoryZ = z.enum(["git", "observability", "tasks", "notification", "general"]);
+
 export const skillZ = z.object({
   id: z.string().min(1),
   name: z.string(),
   description: z.string(),
+  category: skillCategoryZ,
   config: z.record(configFieldZ),
   tools: z.array(toolZ),
 });

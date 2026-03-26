@@ -1,13 +1,18 @@
 /**
  * Triage Workflow
  *
- * Investigate a production alert → determine root cause → create
- * issue → notify team. The entire triage recipe in one file.
+ * Investigate a production alert → gather context from available
+ * providers → determine root cause → create issue → notify team.
  *
- * Compare: the previous version was 15 files, ~3200 lines of
- * TypeScript implementing each step as handwritten code that called
- * typed provider interfaces. This version is a DAG definition —
- * Claude does the work at each node using the available skill tools.
+ * Provider-agnostic: nodes list all compatible skills per category.
+ * The executor uses whichever skills are configured. Pre-execution
+ * validation ensures required categories have at least one provider.
+ *
+ * Categories used:
+ *   git:            github (+ bitbucket, gitlab in future)
+ *   observability:  sentry, datadog, betterstack (+ aws, pagerduty in future)
+ *   tasks:          linear, github (issues) (+ jira in future)
+ *   notification:   slack, notification (discord/teams/webhook)
  */
 
 import type { Workflow } from "../types.js";
@@ -21,14 +26,14 @@ export const triageWorkflow: Workflow = {
   nodes: {
     gather: {
       name: "Gather Context",
-      instruction: `You are investigating a production alert. Gather all relevant context:
+      instruction: `You are investigating a production alert. Gather all relevant context using the available tools:
 
-1. Use observability tools (Sentry/Datadog) to pull error details, stack traces, logs, and metrics around the time of the alert.
-2. Use GitHub to check recent commits and pull requests that might be related.
-3. Search for similar past issues in the issue tracker.
+1. **Observability**: Pull error details, stack traces, recent logs, metrics, and active incidents around the time of the alert. Use whichever observability tools are available to you.
+2. **Source control**: Check recent commits, pull requests, and deploys that might be related.
+3. **Issue tracker**: Search for similar past issues or known problems.
 
-Be thorough — the investigation step depends on complete context.`,
-      skills: ["github", "sentry", "datadog", "linear"],
+Be thorough — the investigation step depends on complete context. Use every tool available to you.`,
+      skills: ["github", "sentry", "datadog", "betterstack", "linear"],
     },
 
     investigate: {
@@ -67,8 +72,8 @@ If this is a known issue that already has a ticket, mark it as duplicate.`,
 3. Add appropriate labels (bug, severity level, affected service).
 4. Link to relevant commits, PRs, or existing issues.
 
-Create the issue in whichever tracker is available (Linear or GitHub Issues).`,
-      skills: ["github", "linear"],
+Create the issue in whichever tracker is available to you.`,
+      skills: ["linear", "github"],
     },
 
     notify: {
@@ -79,7 +84,7 @@ Create the issue in whichever tracker is available (Linear or GitHub Issues).`,
 2. For critical/high severity, make the notification urgent.
 3. For medium/low, a standard notification is fine.
 
-Use whichever notification channel is available.`,
+Use whichever notification channel is available to you.`,
       skills: ["slack", "notification"],
     },
 

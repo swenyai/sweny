@@ -4,7 +4,7 @@
  * Replaces: issue-tracking/linear.ts (~400 lines → ~80 lines)
  */
 
-import type { Skill, ToolContext } from "../types.js";
+import type { Skill, ToolContext, SkillCategory } from "../types.js";
 
 async function linearGql(query: string, variables: Record<string, unknown>, ctx: ToolContext) {
   const res = await fetch("https://api.linear.app/graphql", {
@@ -26,6 +26,7 @@ export const linear: Skill = {
   id: "linear",
   name: "Linear",
   description: "Create, search, and update issues in Linear",
+  category: "tasks",
   config: {
     LINEAR_API_KEY: {
       description: "Linear API key",

@@ -25,6 +25,7 @@
 // Core types
 export type {
   Skill,
+  SkillCategory,
   Tool,
   ToolContext,
   ConfigField,
@@ -57,11 +58,16 @@ export {
   slack,
   sentry,
   datadog,
+  betterstack,
   notification,
   builtinSkills,
   createSkillMap,
   allSkills,
+  isSkillConfigured,
+  configuredSkills,
+  validateWorkflowSkills,
 } from "./skills/index.js";
+export type { SkillValidationResult } from "./skills/index.js";
 
 // Schema & validation
 export { workflowZ, nodeZ, edgeZ, skillZ, parseWorkflow, validateWorkflow, workflowJsonSchema } from "./schema.js";

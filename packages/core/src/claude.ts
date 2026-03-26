@@ -1,40 +1,47 @@
 /**
- * Claude Client — Anthropic SDK wrapper
+ * Claude Client — Headless Claude Code backend
  *
- * Handles the tool-use loop: send instruction + tools → Claude calls
- * tools → we execute them → send results back → repeat until done.
+ * Uses the @anthropic-ai/claude-agent-sdk to run headless Claude Code
+ * as the LLM backend. Tools are exposed via an in-process MCP server
+ * that Claude Code calls during execution.
  *
- * This is the only file that imports the Anthropic SDK.
+ * This is the ONLY supported LLM backend. The whole point of sweny
+ * is to use headless Claude Code — never the raw Anthropic API.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
-import type { Claude, Tool, ToolContext, NodeResult, ToolCall, JSONSchema } from "./types.js";
+import { query, createSdkMcpServer, tool as sdkTool, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
+import type { Claude, Tool, ToolContext, NodeResult, ToolCall, JSONSchema, Logger } from "./types.js";
 import { consoleLogger } from "./types.js";
 
 const SYSTEM_PROMPT = `You are a step in an automated workflow. Execute the instruction precisely using the tools available to you. Be thorough but concise. When you're done, summarize your findings and results.`;
 
 export interface ClaudeClientOptions {
-  apiKey?: string;
+  /** Model override */
   model?: string;
-  maxTokens?: number;
+  /** Max turns for tool use loop (default: 20) */
   maxTurns?: number;
-  /** Default tool context used when ClaudeClient is called directly (not via executor) */
+  /** Working directory for Claude Code (default: process.cwd()) */
+  cwd?: string;
+  /** Logger */
+  logger?: Logger;
+  /** Default tool context for standalone usage (not via executor) */
   defaultContext?: ToolContext;
 }
 
 export class ClaudeClient implements Claude {
-  private client: Anthropic;
-  private model: string;
-  private maxTokens: number;
+  private model: string | undefined;
   private maxTurns: number;
+  private cwd: string;
+  private logger: Logger;
   private defaultContext: ToolContext;
 
   constructor(opts: ClaudeClientOptions = {}) {
-    this.client = new Anthropic({ apiKey: opts.apiKey });
-    this.model = opts.model ?? "claude-sonnet-4-20250514";
-    this.maxTokens = opts.maxTokens ?? 4096;
+    this.model = opts.model;
     this.maxTurns = opts.maxTurns ?? 20;
-    this.defaultContext = opts.defaultContext ?? { config: {}, logger: consoleLogger };
+    this.cwd = opts.cwd ?? process.cwd();
+    this.logger = opts.logger ?? consoleLogger;
+    this.defaultContext = opts.defaultContext ?? { config: {}, logger: this.logger };
   }
 
   async run(opts: {
@@ -44,8 +51,19 @@ export class ClaudeClient implements Claude {
     outputSchema?: JSONSchema;
   }): Promise<NodeResult> {
     const { instruction, context, tools, outputSchema } = opts;
+    const toolCalls: ToolCall[] = [];
 
-    const userMessage = [
+    // Convert core tools to SDK MCP tools
+    const sdkTools = tools.map((t) => coreToolToSdkTool(t, this.defaultContext, toolCalls));
+
+    // Create in-process MCP server
+    const mcpServer = createSdkMcpServer({
+      name: "sweny-core",
+      tools: sdkTools,
+    });
+
+    // Build prompt
+    const prompt = [
       `## Instruction\n\n${instruction}`,
       `## Context\n\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``,
       outputSchema
@@ -55,83 +73,54 @@ export class ClaudeClient implements Claude {
       .filter(Boolean)
       .join("\n\n");
 
-    const claudeTools: Anthropic.Messages.Tool[] = tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      input_schema: t.input_schema as Anthropic.Messages.Tool.InputSchema,
-    }));
+    // Spread process.env so Claude Code inherits PATH, HOME, auth tokens, etc.
+    const env: Record<string, string> = Object.fromEntries(
+      Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
+    );
 
-    const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: userMessage }];
+    let response = "";
 
-    const handlerMap = new Map(tools.map((t) => [t.name, t.handler]));
-    const toolCalls: ToolCall[] = [];
-    let turns = 0;
-
-    while (turns++ < this.maxTurns) {
-      const response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        system: SYSTEM_PROMPT,
-        messages,
-        ...(claudeTools.length > 0 ? { tools: claudeTools } : {}),
+    try {
+      const stream = query({
+        prompt,
+        options: {
+          maxTurns: this.maxTurns,
+          systemPrompt: SYSTEM_PROMPT,
+          cwd: this.cwd,
+          env,
+          permissionMode: "bypassPermissions",
+          ...(this.model ? { model: this.model } : {}),
+          ...(sdkTools.length > 0 ? { mcpServers: { "sweny-core": mcpServer } } : {}),
+        },
       });
 
-      const toolUseBlocks = response.content.filter((b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use");
-      const textBlocks = response.content.filter((b): b is Anthropic.Messages.TextBlock => b.type === "text");
-
-      // If no tool calls or end_turn — we're done
-      if (toolUseBlocks.length === 0 || response.stop_reason === "end_turn") {
-        const text = textBlocks.map((b) => b.text).join("\n");
-        return {
-          status: "success",
-          data: { summary: text, ...tryParseJSON(text) },
-          toolCalls,
-        };
-      }
-
-      // Execute tool calls
-      messages.push({ role: "assistant", content: response.content });
-
-      const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
-
-      for (const block of toolUseBlocks) {
-        const handler = handlerMap.get(block.name);
-        if (!handler) {
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: block.id,
-            content: `Unknown tool: ${block.name}`,
-            is_error: true,
-          });
-          continue;
-        }
-
-        try {
-          const output = await handler(block.input, this.defaultContext);
-          toolCalls.push({ tool: block.name, input: block.input, output });
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: block.id,
-            content: typeof output === "string" ? output : JSON.stringify(output),
-          });
-        } catch (err: any) {
-          toolCalls.push({ tool: block.name, input: block.input, output: { error: err.message } });
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: block.id,
-            content: `Error: ${err.message}`,
-            is_error: true,
-          });
+      for await (const message of stream) {
+        if (message.type === "result") {
+          const resultMsg = message as SDKResultMessage;
+          if (resultMsg.subtype === "success" && "result" in resultMsg) {
+            response = resultMsg.result;
+          } else if ("errors" in resultMsg) {
+            const errors = (resultMsg as any).errors as string[] | undefined;
+            return {
+              status: "failed",
+              data: { error: errors?.join("\n") ?? "Execution failed" },
+              toolCalls,
+            };
+          }
         }
       }
-
-      messages.push({ role: "user", content: toolResults });
+    } catch (err: any) {
+      this.logger.error(`Claude Code query failed: ${err.message}`);
+      return {
+        status: "failed",
+        data: { error: err.message },
+        toolCalls,
+      };
     }
 
-    // Exceeded max turns
     return {
-      status: "failed",
-      data: { reason: `Exceeded max turns (${this.maxTurns})` },
+      status: "success",
+      data: { summary: response, ...tryParseJSON(response) },
       toolCalls,
     };
   }
@@ -142,27 +131,47 @@ export class ClaudeClient implements Claude {
     choices: { id: string; description: string }[];
   }): Promise<string> {
     const { question, context, choices } = opts;
-
     const choiceList = choices.map((c) => `- "${c.id}": ${c.description}`).join("\n");
 
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 256,
-      messages: [
-        {
-          role: "user",
-          content: [
-            question,
-            `\nContext:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``,
-            `\nChoices:\n${choiceList}`,
-            `\nRespond with ONLY the choice ID, nothing else.`,
-          ].join("\n"),
+    const prompt = [
+      question,
+      `\nContext:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``,
+      `\nChoices:\n${choiceList}`,
+      `\nRespond with ONLY the choice ID, nothing else.`,
+    ].join("\n");
+
+    const env: Record<string, string> = Object.fromEntries(
+      Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
+    );
+
+    let response = "";
+
+    try {
+      const stream = query({
+        prompt,
+        options: {
+          maxTurns: 1,
+          cwd: this.cwd,
+          env,
+          permissionMode: "bypassPermissions",
+          ...(this.model ? { model: this.model } : {}),
         },
-      ],
-    });
+      });
 
-    const text = response.content.find((b): b is Anthropic.Messages.TextBlock => b.type === "text")?.text?.trim() ?? "";
+      for await (const message of stream) {
+        if (message.type === "result") {
+          const resultMsg = message as SDKResultMessage;
+          if (resultMsg.subtype === "success" && "result" in resultMsg) {
+            response = resultMsg.result;
+          }
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`Evaluate query failed: ${err.message}. Falling back to first choice.`);
+      return choices[0].id;
+    }
 
+    const text = response.trim().replace(/^["']|["']$/g, "");
     const validIds = choices.map((c) => c.id);
 
     // Exact match
@@ -172,10 +181,108 @@ export class ClaudeClient implements Claude {
     const match = validIds.find((id) => text.includes(id));
     if (match) return match;
 
-    // Fallback to first choice
+    // Fallback
+    this.logger.warn(`Could not parse route choice from: "${text.slice(0, 100)}". Falling back to first choice.`);
     return validIds[0];
   }
 }
+
+// ─── Tool conversion ────────────────────────────────────────────
+
+/**
+ * Convert a core Tool to an SDK MCP tool definition.
+ * Bridges JSON Schema → Zod and wraps the handler to return CallToolResult.
+ */
+function coreToolToSdkTool(coreTool: Tool, defaultCtx: ToolContext, toolCalls: ToolCall[]) {
+  const zodShape = jsonSchemaToZodShape(coreTool.input_schema);
+
+  return sdkTool(coreTool.name, coreTool.description, zodShape, async (args: Record<string, unknown>) => {
+    try {
+      // The executor wraps handlers to inject ToolContext.
+      // When used standalone, defaultCtx is the fallback.
+      const output = await coreTool.handler(args, defaultCtx);
+      toolCalls.push({ tool: coreTool.name, input: args, output });
+      return {
+        content: [{ type: "text" as const, text: typeof output === "string" ? output : JSON.stringify(output) }],
+      };
+    } catch (err: any) {
+      toolCalls.push({ tool: coreTool.name, input: args, output: { error: err.message } });
+      return {
+        content: [{ type: "text" as const, text: `Error: ${err.message}` }],
+        isError: true,
+      };
+    }
+  });
+}
+
+// ─── JSON Schema → Zod conversion ───────────────────────────────
+
+/**
+ * Convert a JSON Schema object to a Zod raw shape for the agent SDK.
+ * Preserves property names, types, and descriptions so Claude sees
+ * accurate tool parameters through the MCP protocol.
+ */
+function jsonSchemaToZodShape(schema: JSONSchema): Record<string, z.ZodType> {
+  const props = (schema as any)?.properties ?? {};
+  const required = new Set<string>((schema as any)?.required ?? []);
+  const shape: Record<string, z.ZodType> = {};
+
+  for (const [key, prop] of Object.entries(props)) {
+    let zodType = jsonPropertyToZod(prop as Record<string, unknown>);
+    if (!required.has(key)) {
+      zodType = zodType.optional();
+    }
+    shape[key] = zodType;
+  }
+
+  return shape;
+}
+
+function jsonPropertyToZod(prop: Record<string, unknown>): z.ZodType {
+  if (!prop || typeof prop !== "object") return z.unknown();
+
+  const desc = typeof prop.description === "string" ? prop.description : undefined;
+
+  switch (prop.type) {
+    case "string": {
+      if (prop.enum && Array.isArray(prop.enum)) {
+        const e = z.enum(prop.enum as [string, ...string[]]);
+        return desc ? e.describe(desc) : e;
+      }
+      const s = z.string();
+      return desc ? s.describe(desc) : s;
+    }
+    case "number":
+    case "integer": {
+      const n = z.number();
+      return desc ? n.describe(desc) : n;
+    }
+    case "boolean": {
+      const b = z.boolean();
+      return desc ? b.describe(desc) : b;
+    }
+    case "array": {
+      const items = prop.items ? jsonPropertyToZod(prop.items as Record<string, unknown>) : z.unknown();
+      const a = z.array(items);
+      return desc ? a.describe(desc) : a;
+    }
+    case "object": {
+      if (prop.properties && typeof prop.properties === "object") {
+        const nested = jsonSchemaToZodShape(prop as JSONSchema);
+        const o = z.object(nested);
+        return desc ? o.describe(desc) : o;
+      }
+      const r = z.record(z.string(), z.unknown());
+      return desc ? r.describe(desc) : r;
+    }
+    default: {
+      const u = z.unknown();
+      return desc ? u.describe(desc) : u;
+    }
+  }
+}
+
+// ─── JSON extraction ────────────────────────────────────────────
 
 /**
  * Extract a JSON object from Claude's text response.
@@ -187,6 +294,8 @@ export class ClaudeClient implements Claude {
  * 4. Empty object — safe fallback
  */
 function tryParseJSON(text: string): Record<string, unknown> {
+  if (!text) return {};
+
   // 1. Code block
   const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (codeBlockMatch) {

@@ -194,6 +194,7 @@ describe("getSkillCatalog", () => {
       id: "custom",
       name: "Custom",
       description: "A custom skill",
+      category: "general" as const,
       config: {},
       tools: [{ name: "custom_tool", description: "Does custom", input_schema: {}, handler: async () => {} }],
     };

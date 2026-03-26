@@ -5,7 +5,7 @@
  * ~800 lines → ~120 lines
  */
 
-import type { Skill, ToolContext } from "../types.js";
+import type { Skill, ToolContext, SkillCategory } from "../types.js";
 
 async function gh(path: string, ctx: ToolContext, init?: RequestInit): Promise<unknown> {
   const res = await fetch(`https://api.github.com${path}`, {
@@ -26,6 +26,7 @@ export const github: Skill = {
   id: "github",
   name: "GitHub",
   description: "Search code, manage issues and pull requests on GitHub",
+  category: "git",
   config: {
     GITHUB_TOKEN: {
       description: "GitHub personal access token or app installation token",

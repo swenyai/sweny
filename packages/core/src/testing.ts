@@ -197,6 +197,7 @@ export function createFileSkill(outputDir: string): Skill {
   return {
     id: "filesystem",
     name: "Local Filesystem",
+    category: "general" as const,
     description: "Read logs and write issues/PRs/notifications to local files (for testing)",
     config: {},
     tools: [

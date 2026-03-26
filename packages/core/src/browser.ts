@@ -2,13 +2,14 @@
  * Browser-safe entry point for @sweny-ai/core
  *
  * Re-exports everything EXCEPT ClaudeClient (which depends on
- * @anthropic-ai/sdk, a Node-only package). Use this entry point
+ * @anthropic-ai/claude-agent-sdk, a Node-only package). Use this entry point
  * in browser environments (Vite, webpack, Astro, etc.).
  */
 
 // Core types
 export type {
   Skill,
+  SkillCategory,
   Tool,
   ToolContext,
   ConfigField,
@@ -37,11 +38,16 @@ export {
   slack,
   sentry,
   datadog,
+  betterstack,
   notification,
   builtinSkills,
   createSkillMap,
   allSkills,
+  isSkillConfigured,
+  configuredSkills,
+  validateWorkflowSkills,
 } from "./skills/index.js";
+export type { SkillValidationResult } from "./skills/index.js";
 
 // Schema & validation
 export { workflowZ, nodeZ, edgeZ, skillZ, parseWorkflow, validateWorkflow, workflowJsonSchema } from "./schema.js";

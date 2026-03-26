@@ -4,7 +4,7 @@
  * Replaces: observability/datadog.ts
  */
 
-import type { Skill, ToolContext } from "../types.js";
+import type { Skill, ToolContext, SkillCategory } from "../types.js";
 
 async function ddApi(path: string, ctx: ToolContext, init?: RequestInit & { v2?: boolean }): Promise<unknown> {
   const base = ctx.config.DD_SITE ? `https://api.${ctx.config.DD_SITE}` : "https://api.datadoghq.com";
@@ -27,6 +27,7 @@ export const datadog: Skill = {
   id: "datadog",
   name: "Datadog",
   description: "Query logs, metrics, and monitors from Datadog",
+  category: "observability",
   config: {
     DD_API_KEY: {
       description: "Datadog API key",

@@ -50,7 +50,6 @@ describe.runIf(available.claude)("e2e workflow with real Claude", () => {
   it("executes a 2-node analysis workflow", async () => {
     const claude = new ClaudeClient({
       model: "claude-haiku-4-5-20251001", // Use Haiku for speed/cost in tests
-      maxTokens: 1024,
       maxTurns: 3,
     });
 

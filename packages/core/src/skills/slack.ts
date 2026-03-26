@@ -5,12 +5,13 @@
  * Two separate provider modules → one skill with simple tools
  */
 
-import type { Skill, ToolContext } from "../types.js";
+import type { Skill, ToolContext, SkillCategory } from "../types.js";
 
 export const slack: Skill = {
   id: "slack",
   name: "Slack",
   description: "Send messages and notifications to Slack channels",
+  category: "notification",
   config: {
     SLACK_WEBHOOK_URL: {
       description: "Slack incoming webhook URL",

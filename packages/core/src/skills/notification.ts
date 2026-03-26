@@ -8,12 +8,13 @@
  * This skill handles generic webhooks, Discord, Teams, and email.
  */
 
-import type { Skill, ToolContext } from "../types.js";
+import type { Skill, ToolContext, SkillCategory } from "../types.js";
 
 export const notification: Skill = {
   id: "notification",
   name: "Notification",
   description: "Send notifications via webhook, Discord, Teams, or email",
+  category: "notification",
   config: {
     NOTIFICATION_WEBHOOK_URL: {
       description: "Generic webhook URL for notifications",

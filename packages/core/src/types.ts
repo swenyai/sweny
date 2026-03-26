@@ -30,11 +30,15 @@ export interface ConfigField {
   env?: string;
 }
 
+/** Skill categories — used for validation and grouping */
+export type SkillCategory = "git" | "observability" | "tasks" | "notification" | "general";
+
 /** A skill groups related tools with shared config requirements */
 export interface Skill {
   id: string;
   name: string;
   description: string;
+  category: SkillCategory;
   config: Record<string, ConfigField>;
   tools: Tool[];
 }
