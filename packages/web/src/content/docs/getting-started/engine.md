@@ -1,44 +1,43 @@
 ---
-title: Engine & Workflows
-description: How SWEny's workflow engine orchestrates Learn, Act, Report pipelines.
+title: Core & Workflows
+description: How SWEny's DAG executor orchestrates AI-powered engineering workflows with skills.
 ---
 
-SWEny's engine runs your workflow automatically — you don't need to write any code. It manages the flow between phases, handles provider connections, and routes to the right next step based on what each step returns.
+SWEny's core runs your workflow automatically — you define what Claude should do at each node and which skills (tools) it needs. The executor walks the DAG, running Claude at each node with the specified tools, and uses natural-language edge conditions to decide the path.
 
-## The three phases
+## How it works
 
-### Learn
+### Nodes
 
-The Learn phase connects to your observability stack and issue tracker to gather context:
+Each node in the workflow gives Claude:
 
-- Queries logs from your observability provider (Datadog, Sentry, CloudWatch, Splunk, Elasticsearch, New Relic, or Grafana Loki)
-- Aggregates errors by service and pattern
-- Searches your issue tracker for duplicates and checks open PRs to avoid double-filing
-- Produces a ranked list of novel issues worth investigating
+- An **instruction** — a detailed prompt describing the task
+- A list of **skills** — tool groups Claude can use (e.g. `github`, `sentry`, `slack`)
+- An optional **output schema** — structured data Claude should return
 
-### Act
+Claude reads the instruction, uses the available tools, and produces a result. The executor captures tool calls, outputs, and status.
 
-The Act phase hands context to an AI coding agent that takes action:
+### Edges
 
-- Reads error logs and traces root causes through the codebase
-- Files detailed tickets with root cause analysis and a suggested fix approach
-- Creates branches, implements fixes, and opens PRs for human review
+Edges connect nodes. They can be:
 
-### Report
+- **Unconditional** — always taken (e.g. `gather → investigate`)
+- **Conditional** — taken only when a natural-language `when` condition is met (e.g. `investigate → create_issue` when "severity is medium or higher")
 
-The Report phase delivers results through your team's channels:
+When a node has multiple outbound edges, Claude evaluates the conditions and picks the best match.
 
-- Posts summaries to GitHub Actions, Slack, Teams, or Discord
-- Sends email digests via SendGrid
-- Fires generic webhooks for custom integrations
+### Skills
 
-## Key concepts
+Skills are groups of tools that connect Claude to external services:
 
-**Workflow** — A DAG of steps organized into the three phases. Workflows are defined in YAML or TypeScript, executed by the engine, and can be visualized in Studio. Built-in workflows (triage, implement) are ready to use out of the box — or build your own.
+- **GitHub** — search code, get issues, create PRs, list commits
+- **Linear** — create issues, search issues, update issues
+- **Sentry** — list issues, get issue details, search events
+- **Datadog** — search logs, list monitors, query metrics
+- **Slack** — send messages via webhook or bot API
+- **Notification** — Discord webhooks, Teams webhooks, email, generic webhooks
 
-**Step** — A single unit of work. Steps run in phase order, and each step's output is available to downstream steps. If a step fails, the engine routes to the appropriate fallback based on the workflow definition.
-
-**Provider** — A connection to an external service (Datadog, Linear, GitHub, Slack, etc.). You configure which providers SWEny uses through Action inputs or `.sweny.yml`. Providers are injected automatically into the steps that need them.
+Skills are configured via environment variables. Set `GITHUB_TOKEN` and the GitHub skill works. Set `DD_API_KEY` + `DD_APP_KEY` and Datadog is ready.
 
 ## Built-in workflows
 
@@ -46,9 +45,12 @@ The Report phase delivers results through your team's channels:
 
 Automates the on-call triage loop:
 
-1. **Learn** — query logs, aggregate by pattern, filter out known issues
-2. **Act** — investigate the top novel issue, file a ticket, write and push a fix
-3. **Report** — post a summary with links to the ticket and PR
+1. **Gather** — query logs from Sentry/Datadog, check recent commits on GitHub, search for similar issues in Linear
+2. **Investigate** — correlate errors with code changes, determine root cause, assess severity
+3. **Create Issue** — file a detailed ticket with root cause analysis
+4. **Notify** — send a summary to Slack/Discord/email
+
+Conditional edges let the workflow skip straight to a "done" node when the issue is a known duplicate or low severity.
 
 See [Quick Start](/getting-started/) to set up Triage in your repo.
 
@@ -56,12 +58,15 @@ See [Quick Start](/getting-started/) to set up Triage in your repo.
 
 Takes an existing issue identifier and produces a fix PR:
 
-1. **Learn** — fetch the issue details from your tracker
-2. **Act** — investigate the issue, implement a fix, open a PR
-3. **Report** — post the result to your notification channel
+1. **Analyze** — fetch issue details, read relevant source files, plan the fix
+2. **Implement** — create a branch, make changes, commit
+3. **Open PR** — push and create a pull request
+4. **Notify** — send the result to your team
+
+If the fix is too complex or risky, a conditional edge routes to a "skip" node that comments on the issue instead.
 
 ## What's next
 
 - [Quick Start](/getting-started/) — add Triage to your repo in 5 minutes
-- [Provider Reference](/providers/observability/) — configure observability, issue tracking, and notifications
-- [Workflow Authoring](/studio/recipe-authoring/) — build a custom workflow with your own steps
+- [Workflow Authoring](/studio/recipe-authoring/) — build a custom workflow with your own nodes and skills
+- [Studio](/studio/) — visual editor for designing and monitoring workflows

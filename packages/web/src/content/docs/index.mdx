@@ -1,9 +1,9 @@
 ---
 title: SWEny
-description: An AI-powered engineering platform that learns from your logs, fixes issues, and reports results
+description: An AI-powered engineering platform that builds workflows from skills, executes them as DAGs, and reports results
 template: splash
 hero:
-  tagline: "SWEny is a platform for building AI-powered engineering workflows. Connect any observability source, take action with AI, and report results through any channel. Triage is the first built-in workflow — it monitors your production logs, investigates errors, and opens fix PRs automatically."
+  tagline: "SWEny is a platform for building AI-powered engineering workflows. Define what Claude should do at each step, give it the right tools (skills), and let the DAG executor handle the rest. Triage is the first built-in workflow — it monitors your production alerts, investigates errors, and opens fix PRs automatically."
   actions:
     - text: Get Started in 5 Minutes
       link: /getting-started/
@@ -19,46 +19,39 @@ import { Card, CardGrid } from "@astrojs/starlight/components";
 
 ## What it does
 
-SWEny's workflow engine orchestrates three phases — **Learn**, **Act**, **Report** — to automate engineering tasks end-to-end:
+SWEny workflows are **DAGs of AI-powered nodes**. Each node gives Claude an instruction and a set of skills (tools). Claude does the work — queries logs, searches code, creates issues, opens PRs — and the executor routes to the next node based on natural-language edge conditions.
 
-1. **Learn** — connects to your observability stack, pulls errors and log data, checks your issue tracker for duplicates, and builds context
-2. **Act** — an AI agent investigates root causes through your codebase, files tickets, creates branches, and opens fix PRs
-3. **Report** — sends results to the channels your team already uses: Slack, Teams, Discord, email, or webhooks
+1. **Gather context** — Claude uses observability and code search skills to understand what happened
+2. **Take action** — Claude creates issues, writes fixes, and opens PRs using the tools available at each node
+3. **Report results** — Claude sends summaries through Slack, Discord, Teams, email, or webhooks
 
-Triage is the first built-in workflow. It runs on a schedule, finds novel production errors, and fixes them without waking anyone up. See [Engine & Workflows](/getting-started/engine/) to learn how the engine works and how to build your own workflows.
+Triage is the first built-in workflow. It runs on a schedule, finds novel production errors, and fixes them without waking anyone up. See [Core & Workflows](/getting-started/engine/) to learn how the executor works and how to build your own workflows.
 
 ## See it in action
 
 Want to understand the full flow? Read the [end-to-end walkthrough](/getting-started/walkthrough/) — a real error spike from Datadog through to a merged PR.
 
-## Works with your stack
+## Skills — connect to your stack
 
 <CardGrid stagger>
+  <Card title="GitHub" icon="github">
+    Search code, read files, create issues, open pull requests, list commits. The most-used skill across all workflows.
+  </Card>
   <Card title="Observability" icon="magnifier">
-    **Datadog**, **Sentry**, **CloudWatch**, **Splunk**, **Elasticsearch**, **New Relic**, **Grafana Loki** — query logs
-    and aggregate errors from your existing monitoring.
+    **Sentry** and **Datadog** skills — query errors, search logs, list monitors, and pull metrics from your existing
+    monitoring stack.
   </Card>
   <Card title="Issue Tracking" icon="list-format">
-    **Linear**, **GitHub Issues**, **Jira** — create tickets, search for duplicates, link PRs automatically.
-  </Card>
-  <Card title="Source Control" icon="github">
-    **GitHub**, **GitLab** — create branches, push commits, open PRs, dispatch cross-repo workflows.
+    **Linear** and **GitHub Issues** — create tickets, search for duplicates, update status, and link PRs automatically.
   </Card>
   <Card title="Notification" icon="comment">
-    **GitHub Summary**, **Slack**, **Teams**, **Discord**, **Email**, **Webhook**, **Console**, **File** — send results
-    wherever your team works, or to stdout/disk for local testing.
-  </Card>
-  <Card title="Incident" icon="warning">
-    **PagerDuty**, **OpsGenie** — create incidents, acknowledge, resolve, check on-call schedules.
-  </Card>
-  <Card title="Storage" icon="document">
-    **Filesystem**, **S3**, **Kubernetes PVC** — persist sessions, memory, and workspace files for the agent.
+    **Slack**, **Discord**, **Teams**, **Email**, **Webhook** — send results wherever your team works.
   </Card>
 </CardGrid>
 
 ## Two deployment modes
 
-Both modes are powered by SWEny's workflow engine, which manages provider connections, step orchestration, and the Learn/Act/Report pipeline.
+Both modes are powered by SWEny's DAG executor, which manages skill resolution, node orchestration, and edge routing.
 
 **GitHub Action** — runs on a cron schedule in your CI. No servers, no infrastructure. This is the primary deployment.
 

@@ -56,7 +56,7 @@ export default defineConfig({
           ],
         },
         {
-          label: "Provider Reference",
+          label: "Skill Reference",
           autogenerate: { directory: "providers" },
         },
         {
@@ -71,8 +71,8 @@ export default defineConfig({
           label: "Advanced",
           collapsed: true,
           items: [
-            { label: "Engine & Workflows", slug: "getting-started/engine" },
-            { label: "Provider Architecture", slug: "getting-started/providers" },
+            { label: "Core & Workflows", slug: "getting-started/engine" },
+            { label: "Skills Architecture", slug: "getting-started/providers" },
             { label: "Deploying the Agent", slug: "getting-started/agent" },
             { label: "Agent Plugins", slug: "agent/plugins" },
             { label: "Built-in Plugins", slug: "agent/built-in-plugins" },
