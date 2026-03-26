@@ -1,79 +1,66 @@
-# Investigation Log — 2026-03-17
+# Investigation Log — 2026-03-24
 
-## Approach
-Direct run (no issue override). Followed additional instructions to investigate CI failures
-in `/tmp/ci-failures.json`, then look holistically for the highest-value fix.
+## Parameters
+- Service Pattern: `*`
+- Time Range: 7d
+- Focus Area: errors
+- Investigation Depth: thorough
 
-## Step 1 — Parse CI failure log
+## Step 1: Read log file (`/tmp/ci-failures.json`)
 
-Read `/tmp/ci-failures.json`. Failures observed (2026-03-17):
+3 entries total:
+- 2x `TypeError: Cannot read properties of undefined (reading 'userId')` — service: api, env: production
+- 1x `UnhandledPromiseRejection: Database connection timeout after 5000ms` — service: api, env: production
 
-| Workflow | Branch | Run ID |
-|----------|--------|--------|
-| Deploy Docs | main | 23204701005 |
-| Post-Release Docs Update | v3 | 23203365068 |
-| CI (×3) | dependabot/npm_and_yarn/types/react-dom-19.2.3 | various |
-| Release | main | 23200577502 |
-| CI (×4) | various dependabot branches | various |
-| CI (×2) | main | 23199604384, 23199468449 |
-| Continuous Improvement | main | 23195412282 |
-| CI | main | 23195029818 |
+## Step 2: Cross-reference with known issues
 
-## Step 2 — Get job-level failure details via GitHub API
+- **LOCAL-1** (CLI Typecheck Failures): Searched codebase for `triageRecipe.nodes` — **no matches found**. The fix appears to have already been applied to the codebase. Issue still marked open.
+- **LOCAL-2** (Auth Middleware Null Guard): The 2x userId TypeError errors match this issue exactly (same error pattern, same service). Already tracked.
 
-```
-GET /repos/swenyai/sweny/actions/runs/23199604384/jobs
-```
+## Step 3: Investigate database connection timeout
 
-Results:
-- **Format** job → FAILURE: `Run npm run format:check`
-  - Files flagged: `packages/action/tests/mapToTriageConfig.test.ts`,
-    `packages/providers/src/coding-agent/claude-code.ts`,
-    `packages/providers/src/coding-agent/google-gemini.ts`
-- All other CI jobs (Typecheck, Lint, Test Node 20, Test Node 22) → SUCCESS
+- Searched entire codebase for database client code (pg, mysql, prisma, drizzle, knex, etc.) — **none found**
+- The only 5000ms timeout in the codebase is in `packages/providers/src/observability/fly.ts` (HTTP fetch timeout), not a database connection
+- The worker's Redis/BullMQ connection (`packages/worker/src/index.ts:94`) uses library defaults with no explicit timeout
+- `packages/worker/Dockerfile` explicitly states: "No direct database access required"
+- Conclusion: The "api" service in the logs is external to this repo. This repo is a toolkit/SDK monorepo, not an API service.
 
-```
-GET /repos/swenyai/sweny/actions/runs/23204701005/jobs
-```
+## Step 4: Check Sentry for production errors
 
-Results:
-- **build** job → FAILURE: `Build site`
-  - Error: `"RecipeViewer" is not exported by "../studio/dist-lib/viewer.js"`
-  - File: `packages/web/src/components/RecipeExplorer.tsx:2:9`
+- Found Sentry org: `offload-pw` (region: `us.sentry.io`)
+- Queried for unresolved errors from last 7 days: **no issues found**
 
-## Step 3 — Cross-reference with known issues
+## Step 5: Investigate CI failures
 
-- **Format violations**: Already tracked as issue #65 / PR #66 (closed failed attempt).
-  → SKIP per instructions.
-- **RecipeViewer not exported**: No existing issue found. NEW.
+Checked recent GitHub Actions runs:
+- **Main branch CI (run 23498008798)**: All jobs pass (Lint, Format, Typecheck, Test Node 20/22, Smoke)
+- **5 dependabot PRs failing**: All fail with `TS2307: Cannot find module '@sweny-ai/shared'` in the Typecheck job
+  - Root cause: These branches were created before commit `39d95b9` which added the `Build shared` step to CI
+  - All dependabot branches have the old `ci.yml` without the `Build shared` step
+  - Resolution: Rebasing these branches on main will pick up the fix
+  - Worker imports are all `import type` (erased at runtime), so the test job passes fine
 
-## Step 4 — Root cause analysis for RecipeViewer
+## Step 6: Investigate auto-changeset PR accumulation
 
-Searched `RecipeViewer` across the codebase:
-- `packages/studio/CHANGELOG.md` confirms: in studio v3.0.0 (major release),
-  `RecipeViewer` was renamed to `WorkflowViewer` as a breaking change:
-  > "Breaking: Studio public exports renamed to workflow terminology.
-  > RecipeViewer → WorkflowViewer"
-- `packages/studio/src/lib-viewer.ts` exports only `WorkflowViewer` (confirmed by read).
-- `packages/web/src/components/RecipeExplorer.tsx` still imports `RecipeViewer` at line 2
-  and uses `<RecipeViewer` at line 1179.
+Found **7 stale auto-changeset PRs** (PRs #80-#86) all with identical titles.
 
-**Root cause**: `RecipeExplorer.tsx` was not updated when studio's public API was renamed
-in v3.0.0. The import references a symbol that no longer exists in `dist-lib/viewer.js`.
+Root cause: `.github/workflows/auto-changeset.yml` creates a new branch and PR on every push to main that touches published package source code. It:
+1. Uses `auto-changeset/${{ github.sha }}` as the branch name (unique per push)
+2. Never checks for existing open auto-changeset PRs
+3. Never closes previous auto-changeset PRs
 
-## Step 5 — Proposed fix
+This causes unbounded PR accumulation. Each PR supersedes the previous one (since the script recalculates from the last release), making all but the newest one obsolete.
 
-Update `RecipeExplorer.tsx`:
-1. Line 2: `import { RecipeViewer }` → `import { WorkflowViewer }`
-2. Line 1179: `<RecipeViewer` → `<WorkflowViewer`
-   (JSX is self-closing, so no closing tag needs updating)
+## Step 7: Service map
 
-The `WorkflowViewer` props interface (`definition`, `executionState`, `height`, `onNodeClick`)
-is fully compatible with how `RecipeViewer` was used — same props, same behavior.
+No `.github/service-map.yml` exists in this repository. All TARGET_REPO assignments default to `swenyai/sweny`.
 
-## Step 6 — Scope and risk
+## Summary of findings
 
-- Change is entirely in `packages/web` (private, non-published package).
-- No changeset required (per CLAUDE.md: web is private).
-- No type or API surface changes; purely a name update.
-- Low risk: straightforward rename, TypeScript will catch regressions.
+| # | Issue | Status | Severity | Actionable? |
+|---|-------|--------|----------|-------------|
+| 1 | userId TypeError (auth null guard) | Known (LOCAL-2) | P2 | +1 existing |
+| 2 | DB connection timeout | External service | Low | Skip (not in this repo) |
+| 3 | Auto-changeset PR accumulation | **New** | P3 | **Yes — workflow fix** |
+| 4 | Dependabot PRs blocked | Operational | P3 | Rebase needed |
+| 5 | LOCAL-1 possibly already fixed | Needs verification | P4 | Close if confirmed |

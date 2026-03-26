@@ -1,0 +1,46 @@
+{
+  "name": "@sweny-ai/core",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Skill library + DAG workflow orchestration powered by Claude",
+  "license": "MIT",
+  "exports": {
+    ".": "./dist/index.js",
+    "./skills": "./dist/skills/index.js",
+    "./workflows": "./dist/workflows/index.js",
+    "./testing": "./dist/testing.js",
+    "./schema": "./dist/schema.js"
+  },
+  "typesVersions": {
+    "*": {
+      "skills": [
+        "dist/skills/index.d.ts"
+      ],
+      "workflows": [
+        "dist/workflows/index.d.ts"
+      ],
+      "testing": [
+        "dist/testing.d.ts"
+      ],
+      "schema": [
+        "dist/schema.d.ts"
+      ]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --exclude 'src/__tests__/integration/**'",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "zod": "^3.24"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.1"
+  }
+}
