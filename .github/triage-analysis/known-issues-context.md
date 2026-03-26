@@ -4,12 +4,12 @@ These issues have already been identified by previous SWEny Triage runs.
 Do NOT create new issues or propose fixes for these same problems.
 
 ## Tracked Issues
-- **LOCAL-1** [open] CLI Typecheck and Format Failures After DAG Spec v2 Migration — file:///Users/nate/src/swenyai/sweny/.sweny/output/issues/LOCAL-1.md
+_Issue tracker does not support label history search_
 
 ## Pull Requests
 ### Merged (fixed)
-_None_
+- PR #76: fix(#75): fast-xml-parser dos vulnerability via transitive aws sdk dependency — https://github.com/swenyai/sweny/pull/76
 ### Open (in progress)
-_None_
+- PR #79: fix(#78): h3 high severity vulnerability via astro transitive dependency — https://github.com/swenyai/sweny/pull/79
 ### Closed (failed attempts)
 _None_
