@@ -53,8 +53,8 @@ jobs:
       - name: Build providers
         run: npm run build --workspace=packages/providers
 
-      - name: Build shared
-        run: npm run build --workspace=packages/shared
+      - name: Build core
+        run: npm run build --workspace=packages/core
 
       - run: npm run typecheck
 
@@ -77,6 +77,9 @@ jobs:
       - name: Build providers
         run: npm run build --workspace=packages/providers
 
+      - name: Build core
+        run: npm run build --workspace=packages/core
+
       - run: npm run test
 
   smoke-test:
@@ -95,6 +98,9 @@ jobs:
 
       - name: Build providers
         run: npm run build --workspace=packages/providers
+
+      - name: Build core
+        run: npm run build --workspace=packages/core
 
       - name: Remove optional peer deps from node_modules
         run: |
