@@ -262,7 +262,10 @@ export const useEditorStore = create<EditorState>()(
                 delete edge.when;
               }
             }
-            if (patch.to !== undefined) edge.to = patch.to;
+            if (patch.to !== undefined) {
+              edge.to = patch.to;
+              s.isLayoutStale = true;
+            }
           }),
         ),
 

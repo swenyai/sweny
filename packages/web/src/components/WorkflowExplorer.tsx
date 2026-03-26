@@ -1,14 +1,20 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { WorkflowViewer } from "@sweny-ai/studio/viewer";
 import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
-import { getSkillCatalog } from "@sweny-ai/core/studio";
+import { builtinSkills } from "@sweny-ai/core/browser";
 import "@sweny-ai/studio/style.css";
-import type { Workflow, Node } from "@sweny-ai/core/browser";
+import type { Workflow, Node, Skill } from "@sweny-ai/core/browser";
+import {
+  usedSkillIds,
+  nodesUsingSkill,
+  collectSkillEnvVars,
+  generateEnvTemplate,
+  generateCodeSnippet,
+} from "../lib/workflow-helpers";
 
-// ── Skill catalog (from core, browser-safe) ──────────────────────────────────
+// ── Skill catalog (from core, browser-safe — includes config for env vars) ───
 
-const SKILL_CATALOG = getSkillCatalog();
-const SKILL_MAP = new Map(SKILL_CATALOG.map((s) => [s.id, s]));
+const SKILL_MAP = new Map<string, Skill>(builtinSkills.map((s) => [s.id, s]));
 
 // Skill accent colors — consistent with Studio node rendering
 const SKILL_COLORS: Record<string, string> = {
@@ -44,131 +50,6 @@ const WORKFLOWS: { id: string; label: string; description: string; workflow: Wor
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type ViewMode = "visual" | "skills" | "split" | "source";
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** All unique skill IDs used across a workflow's nodes. */
-function usedSkillIds(workflow: Workflow): string[] {
-  const seen = new Set<string>();
-  for (const node of Object.values(workflow.nodes)) {
-    for (const sid of node.skills) seen.add(sid);
-  }
-  return [...seen].sort();
-}
-
-/** Which nodes use a given skill. */
-function nodesUsingSkill(workflow: Workflow, skillId: string): string[] {
-  return Object.entries(workflow.nodes)
-    .filter(([, node]) => node.skills.includes(skillId))
-    .map(([id]) => id);
-}
-
-/** Collect all env vars needed for a workflow's skills, deduped. */
-function collectSkillEnvVars(workflow: Workflow): Array<{
-  key: string;
-  description: string;
-  required: boolean;
-  skillId: string;
-  skillName: string;
-}> {
-  const seen = new Set<string>();
-  const result: ReturnType<typeof collectSkillEnvVars> = [];
-  const ids = usedSkillIds(workflow);
-
-  // We need the full skill objects (with config) — import them from the builtin skills
-  // The catalog from getSkillCatalog() doesn't have config, so we'll build from the catalog + a hardcoded config map
-  // Actually, let's just import the builtin skills directly via their exported config
-  // For the browser entry, we have builtinSkills exported which includes config
-  // But getSkillCatalog() strips config. Let me just use a lightweight approach:
-  // The env vars for each skill are well-known, so we derive them from the skill catalog's tool names.
-  // Actually, the simplest approach: import builtinSkills from @sweny-ai/core which is re-exported in browser.ts
-
-  for (const sid of ids) {
-    const catalogEntry = SKILL_MAP.get(sid);
-    if (!catalogEntry) continue;
-    // Config fields aren't in the catalog (getSkillCatalog strips them for safety).
-    // Use the well-known env var mapping for display purposes.
-    const envVars = SKILL_ENV_VARS[sid] ?? [];
-    for (const ev of envVars) {
-      if (!seen.has(ev.key)) {
-        seen.add(ev.key);
-        result.push({ ...ev, skillId: sid, skillName: catalogEntry.name });
-      }
-    }
-  }
-  return result;
-}
-
-// Browser-safe env var specs (mirrors skill.config but without importing Node-only skill objects)
-const SKILL_ENV_VARS: Record<string, Array<{ key: string; description: string; required: boolean }>> = {
-  github: [{ key: "GITHUB_TOKEN", description: "GitHub personal access token", required: true }],
-  linear: [{ key: "LINEAR_API_KEY", description: "Linear API key", required: true }],
-  sentry: [
-    { key: "SENTRY_AUTH_TOKEN", description: "Sentry authentication token", required: true },
-    { key: "SENTRY_ORG", description: "Sentry organization slug", required: true },
-    { key: "SENTRY_BASE_URL", description: "Sentry API base URL", required: false },
-  ],
-  datadog: [
-    { key: "DD_API_KEY", description: "Datadog API key", required: true },
-    { key: "DD_APP_KEY", description: "Datadog application key", required: true },
-    { key: "DD_SITE", description: "Datadog site (e.g. datadoghq.eu)", required: false },
-  ],
-  slack: [
-    { key: "SLACK_WEBHOOK_URL", description: "Slack incoming webhook URL", required: false },
-    { key: "SLACK_BOT_TOKEN", description: "Slack bot token for API calls", required: false },
-  ],
-  notification: [
-    { key: "NOTIFICATION_WEBHOOK_URL", description: "Generic webhook URL", required: false },
-    { key: "DISCORD_WEBHOOK_URL", description: "Discord webhook URL", required: false },
-  ],
-};
-
-/** Generate .env template for a workflow's skills. */
-function generateEnvTemplate(workflow: Workflow): string {
-  const envVars = collectSkillEnvVars(workflow);
-  if (envVars.length === 0) return "# No environment variables required.";
-
-  const bySkill: Record<string, typeof envVars> = {};
-  for (const v of envVars) {
-    bySkill[v.skillId] = bySkill[v.skillId] ?? [];
-    bySkill[v.skillId].push(v);
-  }
-
-  const lines: string[] = [
-    "# Environment variables for this workflow",
-    "# Required vars are marked with (required)",
-    "",
-  ];
-  for (const [, entries] of Object.entries(bySkill)) {
-    lines.push(`# ${entries[0].skillName}`);
-    for (const e of entries) {
-      lines.push(`${e.key}=${e.required ? "" : "  # optional"}`);
-    }
-    lines.push("");
-  }
-  return lines.join("\n").trimEnd();
-}
-
-/** Generate TypeScript setup code. */
-function generateCodeSnippet(workflow: Workflow): string {
-  const skillIds = usedSkillIds(workflow);
-  const imports = skillIds.join(", ");
-  const workflowVar = workflow.id === "triage" ? "triageWorkflow" : "implementWorkflow";
-
-  return `import { execute, createSkillMap, ClaudeClient, ${imports} } from "@sweny-ai/core";
-import { ${workflowVar} } from "@sweny-ai/core/workflows";
-
-const skills = createSkillMap([${imports}]);
-const claude = new ClaudeClient({ apiKey: process.env.ANTHROPIC_API_KEY! });
-
-const results = await execute(${workflowVar}, {
-  input: "your alert or issue description here",
-  skills,
-  claude,
-});
-
-console.log(results); // Record<string, NodeResult>`;
-}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -529,10 +410,10 @@ function SkillsPanel({ workflow }: { workflow: Workflow }) {
   const [copied, setCopied] = useState(false);
 
   const skillIds = usedSkillIds(workflow);
-  const envVars = collectSkillEnvVars(workflow);
+  const envVars = collectSkillEnvVars(workflow, SKILL_MAP);
   const requiredCount = envVars.filter((v) => v.required).length;
 
-  const envText = generateEnvTemplate(workflow);
+  const envText = generateEnvTemplate(workflow, SKILL_MAP);
   const codeText = generateCodeSnippet(workflow);
   const outputText = outputTab === "env" ? envText : codeText;
 
@@ -577,7 +458,11 @@ function SkillsPanel({ workflow }: { workflow: Workflow }) {
           if (!catalog) return null;
           const nodes = nodesUsingSkill(workflow, sid);
           const color = skillColor(sid);
-          const envs = SKILL_ENV_VARS[sid] ?? [];
+          const envs = Object.entries(catalog.config).map(([key, field]) => ({
+            key,
+            description: field.description,
+            required: field.required ?? false,
+          }));
 
           return (
             <div
