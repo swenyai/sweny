@@ -1,68 +1,76 @@
-# Issues Report — 2026-03-17
+# Issues Report — 2026-03-26
 
-## Issue 1: RecipeViewer Import Breaks Deploy Docs Build
+## Issue 1: picomatch ReDoS Vulnerability (HIGH)
 
-- **Severity**: High
-- **Environment**: CI (Deploy Docs workflow on main)
-- **Frequency**: Every push to main since studio v3.0.0 rename
+- **Severity**: High (CVSS 7.5)
+- **Environment**: All (build, dev, CI)
+- **Frequency**: Persistent — all 4 installed instances are vulnerable
 
 ### Description
-`packages/web/src/components/RecipeExplorer.tsx` imports `RecipeViewer` from
-`@sweny-ai/studio/viewer`, but this export was renamed to `WorkflowViewer` in studio v3.0.0.
-Rollup cannot resolve the import and the Deploy Docs build fails with exit code 1.
+
+picomatch, the glob-matching library used by Vite, Rollup, Astro, chokidar/anymatch, micromatch,
+and tailwindcss, has a ReDoS (Regular Expression Denial of Service) vulnerability via extglob
+quantifiers in crafted patterns. GHSA-c2c7-rcm5-vvqj, CVSS 7.5.
 
 ### Evidence
-```
-[ERROR] [vite] ✗ Build failed in 2.11s
-src/components/RecipeExplorer.tsx (2:9): "RecipeViewer" is not exported by
-"../studio/dist-lib/viewer.js", imported by "src/components/RecipeExplorer.tsx".
 
-file: /home/runner/work/sweny/sweny/packages/web/src/components/RecipeExplorer.tsx:2:9
-  1: import { useState, useRef, useCallback, useEffect } from "react";
-  2: import { RecipeViewer } from "@sweny-ai/studio/viewer";
-              ^
-```
-Run ID: 23204701005, Job: build (67436666701)
+npm audit output:
+- `node_modules/picomatch` → 4.0.3, vulnerable range `>=4.0.0 <4.0.4`
+- `node_modules/anymatch/node_modules/picomatch` → 2.3.1, vulnerable range `<2.3.2`
+- `node_modules/micromatch/node_modules/picomatch` → 2.3.1 (dev)
+- `node_modules/tailwindcss/node_modules/picomatch` → 2.3.1 (dev)
 
 ### Root Cause Analysis
-Studio v3.0.0 renamed `RecipeViewer` → `WorkflowViewer` (breaking change documented in
-CHANGELOG.md). The `packages/web` package was not updated when this rename happened.
-`lib-viewer.ts` now exports only `WorkflowViewer`.
+
+npm only installs versions satisfying declared semver ranges. picomatch@4.0.3 satisfies `^4.0.2`
+(used by Vite/Rollup). picomatch@2.3.1 satisfies `^2.3.1` (micromatch), `^2.0.4` (anymatch),
+`^2.2.1` (readdirp). None of these ranges pin to a fixed minimum that excludes the vulnerable
+versions. The advisory was published after these lockfile entries were generated.
 
 ### Impact
-- Deploy Docs workflow fails on every push to main.
-- Documentation site cannot be rebuilt or deployed.
-- The `packages/web` SPA (RecipeExplorer page) is broken at build time.
+
+ReDoS via crafted glob patterns. Primarily in development tooling (build, watch, lint) rather than
+published package runtime. The astro/unstorage → anymatch chain is in the web docs package (private).
+Production published packages (@sweny-ai/*) do not include picomatch as a runtime dep.
 
 ### Suggested Fix
-In `packages/web/src/components/RecipeExplorer.tsx`:
-1. Line 2: Change `import { RecipeViewer }` to `import { WorkflowViewer }`
-2. Line 1179: Change `<RecipeViewer` to `<WorkflowViewer`
+
+Add npm `overrides` in root `package.json`:
+```json
+"picomatch": "^4.0.4",
+"anymatch": { "picomatch": "^2.3.2" },
+"micromatch": { "picomatch": "^2.3.2" },
+"readdirp": { "picomatch": "^2.3.2" }
+```
+
+Then run `npm install --package-lock-only` to regenerate the lockfile.
 
 ### Files to Modify
-- `packages/web/src/components/RecipeExplorer.tsx`
+- `package.json` (overrides)
+- `package-lock.json` (regenerated)
 
-### Confidence Level
-High — the rename in studio is documented, the old symbol provably does not exist in
-`dist-lib/viewer.js`, and the props interface is identical.
-
-### GitHub Issues Status
-No existing GitHub Issues issue found — New issue will be created.
+### Confidence Level: High
+### GitHub Issues Status: No existing GitHub Issues issue found
 
 ---
 
-## Issue 2: Prettier Format Violations Break CI on Main (Known Issue)
+## Issue 2: fast-xml-parser Entity Expansion Bypass (MODERATE) — Companion Fix
 
-- **Severity**: Medium
-- **Environment**: CI (main branch)
-- **Frequency**: Every push to main
+- **Severity**: Moderate (CVSS 5.9)
+- **Environment**: All (transitive via AWS SDK and other packages)
+- **Frequency**: Persistent
 
 ### Description
-`npm run format:check` fails on three files with prettier violations.
-Files: `packages/action/tests/mapToTriageConfig.test.ts`,
-`packages/providers/src/coding-agent/claude-code.ts`,
-`packages/providers/src/coding-agent/google-gemini.ts`
 
-### GitHub Issues Status
-**Existing issue #65** — already tracked. PR #66 closed as failed attempt.
-→ No new issue or fix proposed for this. Recommend +1 on issue #65.
+A NEW advisory GHSA-jp2q-39xq-3w4g affects fast-xml-parser `>=4.0.0-beta.3 <=5.5.6`:
+Entity expansion limits are bypassed when the limit is set to zero due to JavaScript falsy
+evaluation. This is DIFFERENT from the advisory fixed by PR #76 (AWS SDK DoS).
+
+The existing override `"fast-xml-parser": "^5.5.6"` resolves to version 5.5.6, which is still
+within the vulnerable range. Fixed in 5.5.7+; latest is 5.5.9.
+
+### Suggested Fix
+
+Bump override from `"^5.5.6"` to `">=5.5.7"` in both `overrides` and `devDependencies`.
+
+### GitHub Issues Status: No existing GitHub Issues issue found

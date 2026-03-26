@@ -1,79 +1,66 @@
-# Investigation Log — 2026-03-17
+# Investigation Log — 2026-03-26
 
 ## Approach
-Direct run (no issue override). Followed additional instructions to investigate CI failures
-in `/tmp/ci-failures.json`, then look holistically for the highest-value fix.
 
-## Step 1 — Parse CI failure log
+No GitHub issue provided. Running as autonomous improvement agent per Additional Instructions.
+Focus: security vulnerabilities and CI failures.
 
-Read `/tmp/ci-failures.json`. Failures observed (2026-03-17):
+## Step 1: CI Failure Analysis
 
-| Workflow | Branch | Run ID |
-|----------|--------|--------|
-| Deploy Docs | main | 23204701005 |
-| Post-Release Docs Update | v3 | 23203365068 |
-| CI (×3) | dependabot/npm_and_yarn/types/react-dom-19.2.3 | various |
-| Release | main | 23200577502 |
-| CI (×4) | various dependabot branches | various |
-| CI (×2) | main | 23199604384, 23199468449 |
-| Continuous Improvement | main | 23195412282 |
-| CI | main | 23195029818 |
+Read `/tmp/ci-failures.json` (222 lines). All CI failures fall into two categories:
+1. Dependabot branch CI failures (expected — auto-PRs may not pass CI immediately)
+2. Main branch CI failures on 2026-03-24 for "CI" and "Release Worker" workflows
 
-## Step 2 — Get job-level failure details via GitHub API
+The main-branch failures appear to be related to the push that added the Sentry MCP provider
+(commit `83cb967`) and were resolved in subsequent commits. No new actionable pattern.
 
-```
-GET /repos/swenyai/sweny/actions/runs/23199604384/jobs
-```
+## Step 2: Security Vulnerability Audit
 
-Results:
-- **Format** job → FAILURE: `Run npm run format:check`
-  - Files flagged: `packages/action/tests/mapToTriageConfig.test.ts`,
-    `packages/providers/src/coding-agent/claude-code.ts`,
-    `packages/providers/src/coding-agent/google-gemini.ts`
-- All other CI jobs (Typecheck, Lint, Test Node 20, Test Node 22) → SUCCESS
+Ran `npm audit --json` against the monorepo. Found 7 vulnerabilities:
 
-```
-GET /repos/swenyai/sweny/actions/runs/23204701005/jobs
-```
+| Package | Severity | Advisory | Installed | Fixed |
+|---------|----------|----------|-----------|-------|
+| h3 | HIGH | GHSA-22cc-p3c6-wpvm + 3 others | transitive | PR #79 open |
+| picomatch | HIGH | GHSA-c2c7-rcm5-vvqj | 4.0.3 + 2.3.1 (3 nests) | 4.0.4 / 2.3.2 |
+| fast-xml-parser | MODERATE | GHSA-jp2q-39xq-3w4g | 5.5.6 | 5.5.7+ |
+| esbuild | MODERATE | GHSA-67mh-4wv8-2f99 | dev-only | dev-only |
+| smol-toml | MODERATE | GHSA-v3rj-xjv7-4jmq | transitive | - |
+| yaml | MODERATE | GHSA-48c2-rrv3-qjmp | transitive | - |
 
-Results:
-- **build** job → FAILURE: `Build site`
-  - Error: `"RecipeViewer" is not exported by "../studio/dist-lib/viewer.js"`
-  - File: `packages/web/src/components/RecipeExplorer.tsx:2:9`
+## Step 3: Cross-reference Known Issues
 
-## Step 3 — Cross-reference with known issues
+- PR #76 (merged): fast-xml-parser DOS via AWS SDK — different advisory than GHSA-jp2q-39xq-3w4g
+- PR #79 (open): h3 high severity — already in progress, skip
 
-- **Format violations**: Already tracked as issue #65 / PR #66 (closed failed attempt).
-  → SKIP per instructions.
-- **RecipeViewer not exported**: No existing issue found. NEW.
+## Step 4: picomatch Deep Dive
 
-## Step 4 — Root cause analysis for RecipeViewer
+`npm ls picomatch` shows 4 distinct vulnerable instances in package-lock.json:
+- `node_modules/picomatch` → 4.0.3 (vulnerable range: 4.0.0–4.0.3, fixed: 4.0.4)
+- `node_modules/anymatch/node_modules/picomatch` → 2.3.1 (vulnerable range: ≤2.3.1, fixed: 2.3.2)
+- `node_modules/micromatch/node_modules/picomatch` → 2.3.1 (dev: true)
+- `node_modules/tailwindcss/node_modules/picomatch` → 2.3.1 (dev: true)
 
-Searched `RecipeViewer` across the codebase:
-- `packages/studio/CHANGELOG.md` confirms: in studio v3.0.0 (major release),
-  `RecipeViewer` was renamed to `WorkflowViewer` as a breaking change:
-  > "Breaking: Studio public exports renamed to workflow terminology.
-  > RecipeViewer → WorkflowViewer"
-- `packages/studio/src/lib-viewer.ts` exports only `WorkflowViewer` (confirmed by read).
-- `packages/web/src/components/RecipeExplorer.tsx` still imports `RecipeViewer` at line 2
-  and uses `<RecipeViewer` at line 1179.
+Dependency chains:
+- astro, @rollup/pluginutils, vite → picomatch@^4.0.2 → gets 4.0.3 (top-level)
+- anymatch → picomatch@^2.0.4 → gets 2.3.1 (nested; anymatch used by unstorage → astro)
+- micromatch → picomatch@^2.3.1 → gets 2.3.1 (nested; dev-only lint-staged)
+- tailwindcss/readdirp → picomatch@^2.2.1 → gets 2.3.1 (nested in tailwindcss)
 
-**Root cause**: `RecipeExplorer.tsx` was not updated when studio's public API was renamed
-in v3.0.0. The import references a symbol that no longer exists in `dist-lib/viewer.js`.
+## Step 5: fast-xml-parser Deep Dive
 
-## Step 5 — Proposed fix
+Current override in package.json: `"fast-xml-parser": "^5.5.6"` → resolves to 5.5.6.
+New advisory GHSA-jp2q-39xq-3w4g affects `>=4.0.0-beta.3 <=5.5.6` (Entity Expansion bypass).
+Latest version: 5.5.9. Fix: bump override to `>=5.5.7`.
+This is a DIFFERENT advisory from the one fixed by PR #76.
 
-Update `RecipeExplorer.tsx`:
-1. Line 2: `import { RecipeViewer }` → `import { WorkflowViewer }`
-2. Line 1179: `<RecipeViewer` → `<WorkflowViewer`
-   (JSX is self-closing, so no closing tag needs updating)
+## Decision
 
-The `WorkflowViewer` props interface (`definition`, `executionState`, `height`, `onNodeClick`)
-is fully compatible with how `RecipeViewer` was used — same props, same behavior.
+Fix: **picomatch ReDoS vulnerability** (HIGH severity, CVSS 7.5) + **fast-xml-parser** bump
+(MODERATE, same file change). Both addressed via npm `overrides` in root `package.json`.
 
-## Step 6 — Scope and risk
-
-- Change is entirely in `packages/web` (private, non-published package).
-- No changeset required (per CLAUDE.md: web is private).
-- No type or API surface changes; purely a name update.
-- Low risk: straightforward rename, TypeScript will catch regressions.
+Strategy:
+- Add `"picomatch": "^4.0.4"` top-level override (fixes top-level 4.x)
+- Add nested overrides for anymatch, micromatch, readdirp to lock their picomatch to ^2.3.2
+  (prevents the top-level 4.x override from breaking 2.x consumers)
+- Bump `fast-xml-parser` override from `^5.5.6` to `>=5.5.7`
+- Update package-lock.json with `npm install --package-lock-only`
