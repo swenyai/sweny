@@ -10,9 +10,12 @@ node_modules/
 
 # Ignore dist for library packages (built locally)
 packages/agent/dist/
+packages/core/dist/
+packages/engine/dist/
 packages/providers/dist/
 packages/action/dist/
 packages/cli/dist/
+packages/studio/dist/
 
 # Root dist/ is NOT ignored — required for GitHub Action (compiled action entry point)
 # But declaration files from ncc are not needed

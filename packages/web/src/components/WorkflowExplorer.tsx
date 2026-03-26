@@ -1,517 +1,120 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { WorkflowViewer } from "@sweny-ai/studio/viewer";
-import { triageDefinition, implementDefinition } from "@sweny-ai/engine/browser";
+import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
+import { builtinSkills } from "@sweny-ai/core/browser";
 import "@sweny-ai/studio/style.css";
-import type { WorkflowDefinition, StepDefinition } from "@sweny-ai/engine/browser";
+import type { Workflow, Node, Skill } from "@sweny-ai/core/browser";
+import {
+  usedSkillIds,
+  nodesUsingSkill,
+  collectSkillEnvVars,
+  generateEnvTemplate,
+  generateCodeSnippet,
+} from "../lib/workflow-helpers";
 
-// ── Inline provider catalog (browser-safe subset) ────────────────────────────
+// ── Skill catalog (from core, browser-safe — includes config for env vars) ───
 
-interface EnvVarSpec {
-  key: string;
-  description: string;
-  required: boolean;
-  secret: boolean;
-  example?: string;
-}
-interface ProviderOption {
-  id: string;
-  name: string;
-  category: string;
-  color: string;
-  envVars: EnvVarSpec[];
-  importPath: string;
-  factoryFn: string;
-}
+const SKILL_MAP = new Map<string, Skill>(builtinSkills.map((s) => [s.id, s]));
 
-const CATALOG: ProviderOption[] = [
-  // observability
-  {
-    id: "datadog",
-    name: "Datadog",
-    category: "observability",
-    color: "#8b5cf6",
-    importPath: "@sweny-ai/providers/observability",
-    factoryFn: "datadog",
-    envVars: [
-      { key: "DATADOG_API_KEY", description: "API key", required: true, secret: true },
-      { key: "DATADOG_APP_KEY", description: "Application key", required: true, secret: true },
-      {
-        key: "DATADOG_SITE",
-        description: "Site (default: datadoghq.com)",
-        required: false,
-        secret: false,
-        example: "datadoghq.eu",
-      },
-    ],
-  },
-  {
-    id: "sentry",
-    name: "Sentry",
-    category: "observability",
-    color: "#362D59",
-    importPath: "@sweny-ai/providers/observability",
-    factoryFn: "sentry",
-    envVars: [
-      { key: "SENTRY_AUTH_TOKEN", description: "Auth token", required: true, secret: true },
-      { key: "SENTRY_ORG", description: "Organization slug", required: true, secret: false, example: "my-company" },
-      { key: "SENTRY_PROJECT", description: "Project slug (blank = all)", required: false, secret: false },
-    ],
-  },
-  {
-    id: "cloudwatch",
-    name: "CloudWatch",
-    category: "observability",
-    color: "#FF9900",
-    importPath: "@sweny-ai/providers/observability",
-    factoryFn: "cloudwatch",
-    envVars: [
-      { key: "AWS_ACCESS_KEY_ID", description: "AWS access key ID", required: true, secret: true },
-      { key: "AWS_SECRET_ACCESS_KEY", description: "AWS secret access key", required: true, secret: true },
-      { key: "AWS_REGION", description: "Region", required: true, secret: false, example: "us-east-1" },
-      { key: "CLOUDWATCH_LOG_GROUP", description: "Default log group", required: false, secret: false },
-    ],
-  },
-  {
-    id: "elastic",
-    name: "Elasticsearch",
-    category: "observability",
-    color: "#005571",
-    importPath: "@sweny-ai/providers/observability",
-    factoryFn: "elastic",
-    envVars: [
-      { key: "ELASTICSEARCH_URL", description: "Endpoint URL", required: true, secret: false },
-      { key: "ELASTICSEARCH_API_KEY", description: "API key", required: true, secret: true },
-      { key: "ELASTICSEARCH_INDEX", description: "Index pattern", required: false, secret: false, example: "logs-*" },
-    ],
-  },
-  {
-    id: "newrelic",
-    name: "New Relic",
-    category: "observability",
-    color: "#008C99",
-    importPath: "@sweny-ai/providers/observability",
-    factoryFn: "newrelic",
-    envVars: [
-      { key: "NEW_RELIC_API_KEY", description: "User API key", required: true, secret: true },
-      { key: "NEW_RELIC_ACCOUNT_ID", description: "Account ID", required: true, secret: false },
-    ],
-  },
-  {
-    id: "loki",
-    name: "Grafana Loki",
-    category: "observability",
-    color: "#F05A28",
-    importPath: "@sweny-ai/providers/observability",
-    factoryFn: "loki",
-    envVars: [
-      { key: "LOKI_URL", description: "Loki endpoint", required: true, secret: false, example: "http://loki:3100" },
-      { key: "LOKI_USERNAME", description: "Grafana Cloud username", required: false, secret: false },
-      { key: "LOKI_PASSWORD", description: "Grafana Cloud API key", required: false, secret: true },
-    ],
-  },
-  // issueTracking
-  {
-    id: "linear",
-    name: "Linear",
-    category: "issueTracking",
-    color: "#5E6AD2",
-    importPath: "@sweny-ai/providers/issue-tracking",
-    factoryFn: "linear",
-    envVars: [
-      { key: "LINEAR_API_KEY", description: "Personal API key", required: true, secret: true },
-      { key: "LINEAR_TEAM_ID", description: "Default team ID", required: true, secret: false },
-      { key: "LINEAR_PROJECT_ID", description: "Default project ID", required: false, secret: false },
-    ],
-  },
-  {
-    id: "github-issues",
-    name: "GitHub Issues",
-    category: "issueTracking",
-    color: "#24292F",
-    importPath: "@sweny-ai/providers/issue-tracking",
-    factoryFn: "githubIssues",
-    envVars: [
-      { key: "GITHUB_TOKEN", description: "Personal access token", required: true, secret: true },
-      { key: "GITHUB_OWNER", description: "Owner (org or user)", required: true, secret: false },
-      { key: "GITHUB_REPO", description: "Repository name", required: true, secret: false },
-    ],
-  },
-  {
-    id: "jira",
-    name: "Jira",
-    category: "issueTracking",
-    color: "#0052CC",
-    importPath: "@sweny-ai/providers/issue-tracking",
-    factoryFn: "jira",
-    envVars: [
-      { key: "JIRA_URL", description: "Instance URL", required: true, secret: false },
-      { key: "JIRA_EMAIL", description: "Account email", required: true, secret: false },
-      { key: "JIRA_API_TOKEN", description: "API token", required: true, secret: true },
-      { key: "JIRA_PROJECT_KEY", description: "Project key", required: true, secret: false, example: "ENG" },
-    ],
-  },
-  // sourceControl
-  {
-    id: "github",
-    name: "GitHub",
-    category: "sourceControl",
-    color: "#24292F",
-    importPath: "@sweny-ai/providers/source-control",
-    factoryFn: "github",
-    envVars: [
-      { key: "GITHUB_TOKEN", description: "Token (repo + workflow scopes)", required: true, secret: true },
-      { key: "GITHUB_OWNER", description: "Owner (org or user)", required: true, secret: false },
-      { key: "GITHUB_REPO", description: "Repository name", required: true, secret: false },
-    ],
-  },
-  {
-    id: "gitlab",
-    name: "GitLab",
-    category: "sourceControl",
-    color: "#FC6D26",
-    importPath: "@sweny-ai/providers/source-control",
-    factoryFn: "gitlab",
-    envVars: [
-      { key: "GITLAB_TOKEN", description: "Personal access token", required: true, secret: true },
-      { key: "GITLAB_URL", description: "Instance URL", required: false, secret: false },
-      { key: "GITLAB_PROJECT_ID", description: "Project ID or path", required: true, secret: false },
-    ],
-  },
-  // codingAgent
-  {
-    id: "claude-code",
-    name: "Claude Code",
-    category: "codingAgent",
-    color: "#D97706",
-    importPath: "@sweny-ai/providers/coding-agent",
-    factoryFn: "claudeCode",
-    envVars: [
-      {
-        key: "ANTHROPIC_API_KEY",
-        description: "Anthropic API key",
-        required: true,
-        secret: true,
-        example: "sk-ant-...",
-      },
-    ],
-  },
-  {
-    id: "openai-codex",
-    name: "OpenAI Codex",
-    category: "codingAgent",
-    color: "#10A37F",
-    importPath: "@sweny-ai/providers/coding-agent",
-    factoryFn: "openaiCodex",
-    envVars: [{ key: "OPENAI_API_KEY", description: "OpenAI API key", required: true, secret: true }],
-  },
-  // notification
-  {
-    id: "slack-webhook",
-    name: "Slack Webhook",
-    category: "notification",
-    color: "#4A154B",
-    importPath: "@sweny-ai/providers/notification",
-    factoryFn: "slackWebhook",
-    envVars: [{ key: "SLACK_WEBHOOK_URL", description: "Incoming webhook URL", required: true, secret: true }],
-  },
-  {
-    id: "discord-webhook",
-    name: "Discord Webhook",
-    category: "notification",
-    color: "#5865F2",
-    importPath: "@sweny-ai/providers/notification",
-    factoryFn: "discordWebhook",
-    envVars: [{ key: "DISCORD_WEBHOOK_URL", description: "Webhook URL", required: true, secret: true }],
-  },
-  {
-    id: "teams-webhook",
-    name: "Microsoft Teams",
-    category: "notification",
-    color: "#6264A7",
-    importPath: "@sweny-ai/providers/notification",
-    factoryFn: "teamsWebhook",
-    envVars: [{ key: "TEAMS_WEBHOOK_URL", description: "Incoming webhook URL", required: true, secret: true }],
-  },
-  {
-    id: "email",
-    name: "Email (SMTP)",
-    category: "notification",
-    color: "#EA4335",
-    importPath: "@sweny-ai/providers/notification",
-    factoryFn: "email",
-    envVars: [
-      { key: "SMTP_HOST", description: "SMTP server hostname", required: true, secret: false },
-      { key: "SMTP_PORT", description: "Port (default: 587)", required: false, secret: false, example: "587" },
-      { key: "SMTP_USER", description: "SMTP username", required: true, secret: false },
-      { key: "SMTP_PASS", description: "SMTP password or API key", required: true, secret: true },
-      { key: "SMTP_FROM", description: "Sender address", required: true, secret: false },
-      { key: "SMTP_TO", description: "Recipient address(es)", required: true, secret: false },
-    ],
-  },
-  {
-    id: "github-summary",
-    name: "GitHub Step Summary",
-    category: "notification",
-    color: "#24292F",
-    importPath: "@sweny-ai/providers/notification",
-    factoryFn: "githubSummary",
-    envVars: [],
-  },
-];
+// Skill accent colors — consistent with Studio node rendering
+const SKILL_COLORS: Record<string, string> = {
+  github: "#8b5cf6",
+  linear: "#5E6AD2",
+  sentry: "#362D59",
+  datadog: "#632CA6",
+  slack: "#4A154B",
+  notification: "#10b981",
+};
 
-function getCatalogForCategory(category: string): ProviderOption[] {
-  return CATALOG.filter((p) => p.category === category);
+function skillColor(id: string): string {
+  return SKILL_COLORS[id] ?? "#6366f1";
 }
 
 // ── Workflow data ─────────────────────────────────────────────────────────────
 
-const WORKFLOWS: { id: string; label: string; description: string; definition: WorkflowDefinition }[] = [
+const WORKFLOWS: { id: string; label: string; description: string; workflow: Workflow }[] = [
   {
     id: "triage",
     label: "Triage",
-    description: "Monitors production logs, investigates novel errors, implements fixes, and opens PRs — autonomously.",
-    definition: triageDefinition as WorkflowDefinition,
+    description: "Investigate a production alert, determine root cause, create an issue, and notify the team.",
+    workflow: triageWorkflow,
   },
   {
     id: "implement",
     label: "Implement",
-    description: "Takes an existing issue identifier and produces a reviewed PR with a working fix.",
-    definition: implementDefinition as WorkflowDefinition,
+    description: "Analyze an issue, implement a fix, open a pull request, and notify the team.",
+    workflow: implementWorkflow,
   },
 ];
 
-const PHASE_META = {
-  learn: { label: "Learn", color: "#3b82f6", bg: "rgba(59,130,246,0.12)" },
-  act: { label: "Act", color: "#f59e0b", bg: "rgba(245,158,11,0.12)" },
-  report: { label: "Report", color: "#22c55e", bg: "rgba(34,197,94,0.12)" },
-} as const;
-
-const CATEGORY_LABELS: Record<string, string> = {
-  observability: "Observability",
-  issueTracking: "Issue Tracking",
-  sourceControl: "Source Control",
-  codingAgent: "Coding Agent",
-  notification: "Notification",
-};
-
-const CATEGORY_META: Record<string, { icon: string; color: string }> = {
-  observability: { icon: "◉", color: "#818cf8" },
-  issueTracking: { icon: "◈", color: "#f472b6" },
-  sourceControl: { icon: "⎇", color: "#34d399" },
-  codingAgent: { icon: "⬡", color: "#fb923c" },
-  notification: { icon: "◎", color: "#a78bfa" },
-};
-
-// Hardcoded category→stepIds fallback for built-in workflows (used when
-// engine dist doesn't carry provider fields e.g. cached older build).
-const WORKFLOW_CATEGORIES: Record<string, Array<{ category: string; stateIds: string[] }>> = {
-  triage: [
-    { category: "observability", stateIds: ["dedup-check", "build-context"] },
-    { category: "codingAgent", stateIds: ["investigate", "implement-fix"] },
-    { category: "issueTracking", stateIds: ["novelty-gate", "create-issue"] },
-    { category: "sourceControl", stateIds: ["cross-repo-check", "create-pr"] },
-    { category: "notification", stateIds: ["notify"] },
-  ],
-  implement: [
-    { category: "issueTracking", stateIds: ["fetch-issue"] },
-    { category: "codingAgent", stateIds: ["implement"] },
-    { category: "sourceControl", stateIds: ["create-pr"] },
-    { category: "notification", stateIds: ["notify"] },
-  ],
-};
-
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ViewMode = "visual" | "split" | "source" | "configure";
-type ProviderConfig = Record<string, string>; // category → providerId
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-type StepDefWithProvider = StepDefinition & { provider?: string };
-
-function workflowStats(definition: WorkflowDefinition) {
-  const steps = Object.values(definition.steps);
-  return {
-    total: steps.length,
-    learn: steps.filter((s) => s.phase === "learn").length,
-    act: steps.filter((s) => s.phase === "act").length,
-    report: steps.filter((s) => s.phase === "report").length,
-  };
-}
-
-function outboundTransitions(state: StepDefinition) {
-  const transitions: { label: string; target: string }[] = [];
-  if (state.on) {
-    for (const [outcome, target] of Object.entries(state.on)) {
-      transitions.push({ label: outcome, target });
-    }
-  }
-  if (state.next && !transitions.some((t) => t.target === state.next)) {
-    transitions.push({ label: "→", target: state.next });
-  }
-  return transitions;
-}
-
-/** Derive used provider categories from the definition.
- *  First tries step.provider fields; falls back to WORKFLOW_CATEGORIES. */
-function getUsedCategories(
-  definition: WorkflowDefinition,
-  workflowId: string,
-): Array<{ category: string; stateIds: string[] }> {
-  const catMap: Record<string, string[]> = {};
-  for (const [id, state] of Object.entries(definition.steps)) {
-    const prov = (state as StepDefWithProvider).provider;
-    if (prov) {
-      catMap[prov] = [...(catMap[prov] ?? []), id];
-    }
-  }
-  if (Object.keys(catMap).length > 0) {
-    return Object.entries(catMap).map(([category, stateIds]) => ({ category, stateIds }));
-  }
-  return WORKFLOW_CATEGORIES[workflowId] ?? [];
-}
-
-/** Collect all env vars needed given a category→providerId config, deduped by key. */
-function collectEnvVars(categoryConfig: ProviderConfig): Array<{
-  key: string;
-  description: string;
-  required: boolean;
-  secret: boolean;
-  example?: string;
-  category: string;
-  providerName: string;
-}> {
-  const seen = new Set<string>();
-  const result: ReturnType<typeof collectEnvVars> = [];
-  for (const [category, providerId] of Object.entries(categoryConfig)) {
-    const provider = CATALOG.find((p) => p.id === providerId);
-    if (!provider) continue;
-    for (const ev of provider.envVars) {
-      if (!seen.has(ev.key)) {
-        seen.add(ev.key);
-        result.push({ ...ev, category, providerName: provider.name });
-      }
-    }
-  }
-  return result;
-}
-
-/** Generate .env template string. */
-function generateEnvTemplate(categoryConfig: ProviderConfig): string {
-  const vars = collectEnvVars(categoryConfig);
-  if (vars.length === 0) return "# No providers configured yet.\n# Select a provider for each category above.";
-
-  const byCategory: Record<string, typeof vars> = {};
-  for (const v of vars) {
-    byCategory[v.category] = byCategory[v.category] ?? [];
-    byCategory[v.category].push(v);
-  }
-
-  const lines: string[] = [];
-  for (const [cat, entries] of Object.entries(byCategory)) {
-    const providerName = entries[0].providerName;
-    lines.push(`# ${CATEGORY_LABELS[cat] ?? cat} — ${providerName}`);
-    for (const e of entries) {
-      if (e.example) lines.push(`${e.key}=${e.example}`);
-      else lines.push(`${e.key}=`);
-    }
-    lines.push("");
-  }
-  return lines.join("\n").trimEnd();
-}
-
-/** Generate runWorkflow TypeScript snippet. */
-function generateCodeSnippet(definition: WorkflowDefinition, categoryConfig: ProviderConfig): string {
-  const entries = Object.entries(categoryConfig)
-    .map(([category, providerId]) => ({ category, provider: CATALOG.find((p) => p.id === providerId) }))
-    .filter((x): x is { category: string; provider: ProviderOption } => !!x.provider);
-
-  if (entries.length === 0) return "// Select providers above to generate setup code.";
-
-  const importLines = entries
-    .map(({ provider }) => `import { ${provider.factoryFn} } from "${provider.importPath}";`)
-    .join("\n");
-
-  const registrations = entries.map(({ category, provider }) => {
-    const vars = provider.envVars
-      .filter((v) => v.required)
-      .map((v) => `process.env.${v.key}!`)
-      .join(", ");
-    return `registry.set("${category}", ${provider.factoryFn}(${vars ? `{ /* ${vars} */ }` : "{}"}));`;
-  });
-
-  const workflowId = definition.id === "triage" ? "triageWorkflow" : "implementWorkflow";
-  const workflowImport = `import { ${workflowId} } from "@sweny-ai/engine";`;
-
-  return [
-    `import { runWorkflow, createProviderRegistry } from "@sweny-ai/engine";`,
-    workflowImport,
-    importLines,
-    "",
-    `const registry = createProviderRegistry();`,
-    ...registrations,
-    "",
-    `const result = await runWorkflow(${workflowId}, config, registry);`,
-    `console.log(result.status); // "completed" | "failed" | "partial"`,
-  ].join("\n");
-}
+type ViewMode = "visual" | "skills" | "split" | "source";
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function PhasePill({ phase }: { phase: keyof typeof PHASE_META }) {
-  const { label, color, bg } = PHASE_META[phase];
+function SkillBadge({ skillId, size = "sm" }: { skillId: string; size?: "sm" | "md" }) {
+  const catalog = SKILL_MAP.get(skillId);
+  const name = catalog?.name ?? skillId;
+  const color = skillColor(skillId);
+  const isSm = size === "sm";
   return (
     <span
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: 4,
-        padding: "2px 8px",
-        borderRadius: 999,
-        fontSize: "0.7rem",
+        padding: isSm ? "1px 6px" : "2px 8px",
+        borderRadius: 5,
+        fontSize: isSm ? "0.65rem" : "0.72rem",
         fontWeight: 600,
-        letterSpacing: "0.04em",
-        textTransform: "uppercase",
         color,
-        background: bg,
+        background: color + "18",
         border: `1px solid ${color}33`,
       }}
     >
-      <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
-      {label}
+      <span style={{ width: 5, height: 5, borderRadius: "50%", background: color, flexShrink: 0 }} />
+      {name}
     </span>
   );
 }
 
 function NodeDetail({
-  stateId,
-  state,
-  isInitial,
+  nodeId,
+  node,
+  workflow,
+  isEntry,
+  isTerminal,
   onClose,
 }: {
-  stateId: string;
-  state: StepDefWithProvider;
-  isInitial: boolean;
+  nodeId: string;
+  node: Node;
+  workflow: Workflow;
+  isEntry: boolean;
+  isTerminal: boolean;
   onClose: () => void;
 }) {
-  const transitions = outboundTransitions(state);
+  const outEdges = workflow.edges.filter((e) => e.from === nodeId);
+  const inEdges = workflow.edges.filter((e) => e.to === nodeId);
+  const catalog = node.skills.map((sid) => SKILL_MAP.get(sid)).filter(Boolean);
+
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 12,
+        gap: 14,
         padding: "16px",
         height: "100%",
         boxSizing: "border-box",
         overflowY: "auto",
       }}
     >
+      {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-            <PhasePill phase={state.phase} />
-            {isInitial && (
+            {isEntry && (
               <span
                 style={{
                   fontSize: "0.65rem",
@@ -523,35 +126,34 @@ function NodeDetail({
                   borderRadius: 4,
                 }}
               >
-                INITIAL
+                ENTRY
               </span>
             )}
-            {state.critical && (
+            {isTerminal && (
               <span
                 style={{
                   fontSize: "0.65rem",
                   fontWeight: 600,
-                  color: "#ef4444",
-                  background: "rgba(239,68,68,0.1)",
-                  border: "1px solid rgba(239,68,68,0.2)",
+                  color: "#10b981",
+                  background: "rgba(16,185,129,0.1)",
+                  border: "1px solid rgba(16,185,129,0.2)",
                   padding: "2px 6px",
                   borderRadius: 4,
                 }}
               >
-                CRITICAL
+                TERMINAL
               </span>
             )}
           </div>
+          <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "#f1f5f9", marginBottom: 2 }}>{node.name}</div>
           <div
             style={{
               fontFamily: "var(--sl-font-mono, monospace)",
-              fontSize: "0.9rem",
-              fontWeight: 700,
-              color: "#f1f5f9",
-              wordBreak: "break-all",
+              fontSize: "0.72rem",
+              color: "#64748b",
             }}
           >
-            {stateId}
+            {nodeId}
           </div>
         </div>
         <button
@@ -568,167 +170,184 @@ function NodeDetail({
             fontSize: "1.1rem",
           }}
         >
-          ✕
+          &times;
         </button>
       </div>
-      {state.description ? (
-        <p style={{ margin: 0, fontSize: "0.8rem", color: "#cbd5e1", lineHeight: 1.5 }}>{state.description}</p>
-      ) : (
-        <p style={{ margin: 0, fontSize: "0.8rem", color: "#475569", fontStyle: "italic" }}>No description.</p>
-      )}
-      {state.provider && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span
-            style={{
-              fontSize: "0.65rem",
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "#475569",
-            }}
-          >
-            Provider
-          </span>
-          <span
-            style={{
-              fontSize: "0.7rem",
-              fontWeight: 600,
-              padding: "2px 8px",
-              borderRadius: 5,
-              background: "rgba(255,255,255,0.05)",
-              color: "#94a3b8",
-              border: "1px solid rgba(255,255,255,0.1)",
-            }}
-          >
-            {(
-              {
-                observability: "◉ Observability",
-                issueTracking: "◈ Issue Tracking",
-                sourceControl: "⎇ Source Control",
-                codingAgent: "⬡ Coding Agent",
-                notification: "◎ Notification",
-              } as Record<string, string>
-            )[state.provider] ?? state.provider}
-          </span>
+
+      {/* Instruction */}
+      <div>
+        <div style={sectionLabel}>Instruction</div>
+        <div
+          style={{
+            fontSize: "0.78rem",
+            color: "#cbd5e1",
+            lineHeight: 1.6,
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.07)",
+            borderRadius: 6,
+            padding: "8px 10px",
+            whiteSpace: "pre-wrap",
+            maxHeight: 180,
+            overflowY: "auto",
+          }}
+        >
+          {node.instruction || <em style={{ color: "#475569" }}>No instruction set.</em>}
+        </div>
+      </div>
+
+      {/* Skills */}
+      {node.skills.length > 0 && (
+        <div>
+          <div style={sectionLabel}>Skills</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {catalog.map(
+              (skill) =>
+                skill && (
+                  <div
+                    key={skill.id}
+                    style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.07)",
+                      borderRadius: 6,
+                      padding: "6px 8px",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                      <SkillBadge skillId={skill.id} />
+                      <span style={{ fontSize: "0.65rem", color: "#475569", marginLeft: "auto" }}>
+                        {skill.tools.length} tool{skill.tools.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}>
+                      {skill.tools.map((t) => (
+                        <span
+                          key={t.name}
+                          style={{
+                            fontSize: "0.62rem",
+                            fontFamily: "var(--sl-font-mono, monospace)",
+                            color: "#475569",
+                            background: "rgba(255,255,255,0.04)",
+                            border: "1px solid rgba(255,255,255,0.06)",
+                            borderRadius: 3,
+                            padding: "1px 5px",
+                          }}
+                        >
+                          {t.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ),
+            )}
+          </div>
         </div>
       )}
-      {transitions.length > 0 && (
+
+      {/* Edges */}
+      {(inEdges.length > 0 || outEdges.length > 0) && (
         <div>
-          <div
-            style={{
-              fontSize: "0.65rem",
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "#94a3b8",
-              marginBottom: 8,
-            }}
-          >
-            Transitions
-          </div>
+          <div style={sectionLabel}>Edges</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            {transitions.map(({ label, target }) => (
-              <div
-                key={label}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: "0.75rem",
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  borderRadius: 6,
-                  padding: "4px 8px",
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "var(--sl-font-mono, monospace)",
-                    color: label === "failed" ? "#f87171" : label === "→" ? "#94a3b8" : "#a78bfa",
-                    fontWeight: 600,
-                    minWidth: 60,
-                  }}
-                >
-                  {label}
-                </span>
-                <span style={{ color: "#94a3b8" }}>→</span>
-                <span style={{ fontFamily: "var(--sl-font-mono, monospace)", color: "#f1f5f9" }}>
-                  {target === "end" ? <em style={{ color: "#94a3b8" }}>end</em> : target}
-                </span>
-              </div>
+            {inEdges.map((edge) => (
+              <EdgeChip key={`in-${edge.from}`} direction="in" otherNode={edge.from} when={edge.when} />
+            ))}
+            {outEdges.map((edge) => (
+              <EdgeChip key={`out-${edge.to}`} direction="out" otherNode={edge.to} when={edge.when} />
             ))}
           </div>
         </div>
       )}
-      {transitions.length === 0 && (
+
+      {isTerminal && outEdges.length === 0 && (
         <div style={{ fontSize: "0.75rem", color: "#94a3b8", fontStyle: "italic" }}>
-          Terminal step — workflow ends here.
+          Terminal node — workflow ends here.
         </div>
       )}
     </div>
   );
 }
 
-function WorkflowOverview({
-  workflow,
-  definition,
-}: {
-  workflow: (typeof WORKFLOWS)[number];
-  definition: WorkflowDefinition;
-}) {
-  const stats = workflowStats(definition);
+const sectionLabel: React.CSSProperties = {
+  fontSize: "0.65rem",
+  fontWeight: 700,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  color: "#94a3b8",
+  marginBottom: 6,
+};
+
+function EdgeChip({ direction, otherNode, when }: { direction: "in" | "out"; otherNode: string; when?: string }) {
+  const isConditional = !!when;
+  return (
+    <div
+      style={{
+        fontSize: "0.75rem",
+        background: "rgba(255,255,255,0.04)",
+        border: `1px solid ${isConditional ? "rgba(245,158,11,0.2)" : "rgba(255,255,255,0.08)"}`,
+        borderRadius: 6,
+        padding: "5px 8px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <span style={{ fontSize: "0.65rem", color: direction === "in" ? "#60a5fa" : "#a78bfa", fontWeight: 600 }}>
+          {direction === "in" ? "from" : "to"}
+        </span>
+        <span style={{ fontFamily: "var(--sl-font-mono, monospace)", color: "#f1f5f9", fontWeight: 600 }}>
+          {otherNode}
+        </span>
+      </div>
+      {when && (
+        <div
+          style={{
+            marginTop: 3,
+            fontSize: "0.68rem",
+            color: "#f59e0b",
+            fontStyle: "italic",
+            lineHeight: 1.4,
+          }}
+        >
+          when: {when}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorkflowOverview({ workflow, wf }: { workflow: (typeof WORKFLOWS)[number]; wf: Workflow }) {
+  const nodeIds = Object.keys(wf.nodes);
+  const skillIds = usedSkillIds(wf);
+  const conditionalEdges = wf.edges.filter((e) => e.when);
+
   return (
     <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 14 }}>
       <div>
-        <div
-          style={{
-            fontSize: "0.65rem",
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: "#94a3b8",
-            marginBottom: 6,
-          }}
-        >
-          Workflow
-        </div>
+        <div style={sectionLabel}>Workflow</div>
         <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "#f1f5f9", marginBottom: 6 }}>{workflow.label}</div>
         <p style={{ margin: 0, fontSize: "0.78rem", color: "#cbd5e1", lineHeight: 1.55 }}>{workflow.description}</p>
       </div>
+
+      {/* Stats */}
       <div>
-        <div
-          style={{
-            fontSize: "0.65rem",
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: "#94a3b8",
-            marginBottom: 8,
-          }}
-        >
-          Phases
-        </div>
+        <div style={sectionLabel}>Structure</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {(["learn", "act", "report"] as const).map((phase) => {
-            const { label, color } = PHASE_META[phase];
-            const count = stats[phase];
-            const pct = Math.round((count / stats.total) * 100);
-            return (
-              <div key={phase}>
-                <div
-                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}
-                >
-                  <span style={{ fontSize: "0.72rem", fontWeight: 600, color }}>{label}</span>
-                  <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>{count}</span>
-                </div>
-                <div style={{ height: 4, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
-                  <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2, opacity: 0.7 }} />
-                </div>
-              </div>
-            );
-          })}
+          <StatRow label="Nodes" value={nodeIds.length} color="#6366f1" />
+          <StatRow label="Edges" value={wf.edges.length} color="#60a5fa" />
+          <StatRow label="Conditional" value={conditionalEdges.length} color="#f59e0b" />
+          <StatRow label="Skills" value={skillIds.length} color="#10b981" />
         </div>
       </div>
+
+      {/* Skills used */}
+      <div>
+        <div style={sectionLabel}>Skills Used</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {skillIds.map((sid) => (
+            <SkillBadge key={sid} skillId={sid} size="md" />
+          ))}
+        </div>
+      </div>
+
+      {/* How to use */}
       <div
         style={{
           fontSize: "0.72rem",
@@ -753,37 +372,49 @@ function WorkflowOverview({
         >
           How to use
         </div>
-        <span style={{ color: "#94a3b8" }}>{stats.total} steps</span> · scroll to zoom · drag to pan
+        <span style={{ color: "#94a3b8" }}>{nodeIds.length} nodes</span> connected by{" "}
+        <span style={{ color: "#94a3b8" }}>{wf.edges.length} edges</span>
+        {conditionalEdges.length > 0 && (
+          <>
+            {" "}
+            (<span style={{ color: "#f59e0b" }}>{conditionalEdges.length} conditional</span>)
+          </>
+        )}
         <br />
-        <span style={{ color: "#6366f1", fontWeight: 600 }}>Click any node</span> to inspect its phase, provider,
-        routing, and transitions.
+        Scroll to zoom &middot; drag to pan
+        <br />
+        <span style={{ color: "#6366f1", fontWeight: 600 }}>Click any node</span> to see its instruction, skills, and
+        edges.
       </div>
     </div>
   );
 }
 
-// ── Configure panel ───────────────────────────────────────────────────────────
+function StatRow({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <span style={{ fontSize: "0.72rem", fontWeight: 600, color }}>{label}</span>
+      <span
+        style={{ fontSize: "0.8rem", fontWeight: 700, color: "#f1f5f9", fontFamily: "var(--sl-font-mono, monospace)" }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
 
-function ConfigurePanel({
-  definition,
-  usedCategories,
-  providerConfig,
-  onProviderChange,
-}: {
-  definition: WorkflowDefinition;
-  usedCategories: Array<{ category: string; stateIds: string[] }>;
-  providerConfig: ProviderConfig;
-  onProviderChange: (category: string, providerId: string) => void;
-}) {
+// ── Skills Panel ──────────────────────────────────────────────────────────────
+
+function SkillsPanel({ workflow }: { workflow: Workflow }) {
   const [outputTab, setOutputTab] = useState<"env" | "code">("env");
   const [copied, setCopied] = useState(false);
 
-  const configuredCount = usedCategories.filter(({ category }) => !!providerConfig[category]).length;
-  const total = usedCategories.length;
-  const allConfigured = total > 0 && configuredCount === total;
+  const skillIds = usedSkillIds(workflow);
+  const envVars = collectSkillEnvVars(workflow, SKILL_MAP);
+  const requiredCount = envVars.filter((v) => v.required).length;
 
-  const envText = generateEnvTemplate(providerConfig);
-  const codeText = generateCodeSnippet(definition, providerConfig);
+  const envText = generateEnvTemplate(workflow, SKILL_MAP);
+  const codeText = generateCodeSnippet(workflow);
   const outputText = outputTab === "env" ? envText : codeText;
 
   async function copyOutput() {
@@ -806,54 +437,40 @@ function ConfigurePanel({
               color: "#3d4f6a",
             }}
           >
-            Provider Setup
+            Skills Setup
           </span>
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: allConfigured ? "#22c55e" : configuredCount > 0 ? "#f59e0b" : "#3d4f6a",
-            }}
-          >
-            {allConfigured ? "✓ Ready to run" : `${configuredCount} / ${total} configured`}
+          <span style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8" }}>
+            {skillIds.length} skill{skillIds.length !== 1 ? "s" : ""} &middot; {requiredCount} env var
+            {requiredCount !== 1 ? "s" : ""}
           </span>
         </div>
-        {/* Progress bar */}
-        <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
-          <div
-            style={{
-              width: total > 0 ? `${(configuredCount / total) * 100}%` : "0%",
-              height: "100%",
-              background: allConfigured ? "#22c55e" : "#6366f1",
-              borderRadius: 2,
-              transition: "width 0.3s ease",
-            }}
-          />
-        </div>
-        <p style={{ margin: "6px 0 0", fontSize: 10.5, color: "#2d3f58", lineHeight: 1.5 }}>
-          Pick one provider per category. Env vars and setup code update automatically.
+        <p style={{ margin: "4px 0 0", fontSize: 10.5, color: "#2d3f58", lineHeight: 1.5 }}>
+          Each skill provides Claude with tools at specific nodes. Configure env vars to enable them.
         </p>
       </div>
 
-      {/* Category cards */}
+      {/* Skill cards */}
       <div
         style={{ flex: 1, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}
       >
-        {usedCategories.map(({ category, stateIds }) => {
-          const meta = CATEGORY_META[category];
-          const options = getCatalogForCategory(category);
-          const selectedId = providerConfig[category];
-          const selected = CATALOG.find((p) => p.id === selectedId);
-          const isConfigured = !!selectedId;
+        {skillIds.map((sid) => {
+          const catalog = SKILL_MAP.get(sid);
+          if (!catalog) return null;
+          const nodes = nodesUsingSkill(workflow, sid);
+          const color = skillColor(sid);
+          const envs = Object.entries(catalog.config).map(([key, field]) => ({
+            key,
+            description: field.description,
+            required: field.required ?? false,
+          }));
 
           return (
             <div
-              key={category}
+              key={sid}
               style={{
                 borderRadius: 9,
-                border: `1px solid ${isConfigured ? (meta?.color ?? "#6366f1") + "44" : "rgba(255,255,255,0.07)"}`,
-                background: isConfigured ? (meta?.color ?? "#6366f1") + "0a" : "rgba(255,255,255,0.02)",
-                transition: "border-color 0.2s, background 0.2s",
+                border: `1px solid ${color}44`,
+                background: color + "0a",
               }}
             >
               {/* Card header */}
@@ -862,12 +479,8 @@ function ConfigurePanel({
                   style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 14, color: meta?.color ?? "#818cf8", lineHeight: 1 }}>
-                      {meta?.icon ?? "◆"}
-                    </span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#c8d8e8" }}>
-                      {CATEGORY_LABELS[category] ?? category}
-                    </span>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#c8d8e8" }}>{catalog.name}</span>
                   </div>
                   <span
                     style={{
@@ -877,21 +490,22 @@ function ConfigurePanel({
                       borderRadius: 4,
                       background: "rgba(255,255,255,0.05)",
                       color: "#3d4f6a",
-                      letterSpacing: "0.04em",
                     }}
                   >
-                    {stateIds.length} step{stateIds.length !== 1 ? "s" : ""}
+                    {catalog.tools.length} tool{catalog.tools.length !== 1 ? "s" : ""}
                   </span>
                 </div>
-                {/* Step name chips */}
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                  {stateIds.map((id) => (
+                <p style={{ margin: 0, fontSize: 10.5, color: "#475569", lineHeight: 1.4 }}>{catalog.description}</p>
+                {/* Node chips */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 5 }}>
+                  <span style={{ fontSize: 9, color: "#475569", fontWeight: 600, marginRight: 2 }}>Used by:</span>
+                  {nodes.map((id) => (
                     <span
                       key={id}
                       style={{
                         fontSize: 9.5,
                         fontFamily: "monospace",
-                        color: "#3d4f6a",
+                        color: "#94a3b8",
                         background: "rgba(255,255,255,0.04)",
                         border: "1px solid rgba(255,255,255,0.07)",
                         borderRadius: 4,
@@ -904,103 +518,58 @@ function ConfigurePanel({
                 </div>
               </div>
 
-              {/* Provider dropdown + env vars */}
-              <div style={{ padding: "8px 12px 10px" }}>
-                <select
-                  value={selectedId ?? ""}
-                  onChange={(e) => onProviderChange(category, e.target.value)}
-                  style={{
-                    width: "100%",
-                    background: "#060c18",
-                    color: selectedId ? "#e2e8f0" : "#3d4f6a",
-                    border: `1px solid ${isConfigured ? (meta?.color ?? "#6366f1") + "55" : "rgba(255,255,255,0.1)"}`,
-                    borderRadius: 7,
-                    padding: "6px 28px 6px 10px",
-                    fontSize: 12,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                    outline: "none",
-                    appearance: "none",
-                    backgroundImage:
-                      "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E\")",
-                    backgroundRepeat: "no-repeat",
-                    backgroundPosition: "right 9px center",
-                  }}
-                >
-                  <option value="">— choose {CATEGORY_LABELS[category] ?? category} provider —</option>
-                  {options.map((opt) => (
-                    <option key={opt.id} value={opt.id}>
-                      {opt.name}
-                    </option>
-                  ))}
-                </select>
-
-                {/* Env vars for selected provider */}
-                {selected && selected.envVars.length > 0 && (
-                  <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3 }}>
-                    {selected.envVars.map((ev) => (
-                      <div
-                        key={ev.key}
+              {/* Env vars */}
+              {envs.length > 0 && (
+                <div style={{ padding: "8px 12px 10px", display: "flex", flexDirection: "column", gap: 3 }}>
+                  {envs.map((ev) => (
+                    <div
+                      key={ev.key}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "3px 6px",
+                        borderRadius: 5,
+                        background: "rgba(255,255,255,0.03)",
+                        fontSize: 10.5,
+                      }}
+                    >
+                      <code
+                        style={{ color: ev.required ? "#93c5fd" : "#3d4f6a", fontFamily: "monospace", flexShrink: 0 }}
+                      >
+                        {ev.key}
+                      </code>
+                      <span
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          padding: "3px 6px",
-                          borderRadius: 5,
-                          background: "rgba(255,255,255,0.03)",
-                          fontSize: 10.5,
+                          color: "#2d3f58",
+                          flex: 1,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
                         }}
                       >
-                        <code
-                          style={{ color: ev.required ? "#93c5fd" : "#3d4f6a", fontFamily: "monospace", flexShrink: 0 }}
-                        >
-                          {ev.key}
-                        </code>
-                        <span
-                          style={{
-                            color: "#2d3f58",
-                            flex: 1,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {ev.description}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 8.5,
-                            fontWeight: 700,
-                            padding: "1px 4px",
-                            borderRadius: 3,
-                            background: ev.required ? "rgba(239,68,68,0.15)" : "rgba(100,116,139,0.1)",
-                            color: ev.required ? "#fca5a5" : "#3d4f6a",
-                            flexShrink: 0,
-                          }}
-                        >
-                          {ev.required ? "req" : "opt"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {selected && selected.envVars.length === 0 && (
-                  <p style={{ margin: "6px 0 0", fontSize: 10.5, color: "#2d3f58", fontStyle: "italic" }}>
-                    No environment variables required.
-                  </p>
-                )}
-              </div>
+                        {ev.description}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 8.5,
+                          fontWeight: 700,
+                          padding: "1px 4px",
+                          borderRadius: 3,
+                          background: ev.required ? "rgba(239,68,68,0.15)" : "rgba(100,116,139,0.1)",
+                          color: ev.required ? "#fca5a5" : "#3d4f6a",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {ev.required ? "req" : "opt"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}
-
-        {usedCategories.length === 0 && (
-          <div style={{ textAlign: "center", padding: "40px 16px", color: "#2d3f58", fontSize: 12, lineHeight: 1.6 }}>
-            No provider categories detected.
-            <br />
-            <span style={{ fontSize: 11, opacity: 0.6 }}>Try switching to the Triage or Implement workflow.</span>
-          </div>
-        )}
       </div>
 
       {/* Output section */}
@@ -1037,7 +606,7 @@ function ConfigurePanel({
               color: copied ? "#22c55e" : "#3d4f6a",
             }}
           >
-            {copied ? "✓ Copied" : "Copy"}
+            {copied ? "Copied" : "Copy"}
           </button>
         </div>
         <pre
@@ -1091,37 +660,39 @@ function CopyIcon() {
 
 const TOOLBAR_H = 52;
 const FOOTER_H = 30;
-const PANEL_W_DETAIL = 240;
-const PANEL_W_OVERVIEW = 200;
+const PANEL_W_DETAIL = 260;
+const PANEL_W_OVERVIEW = 210;
 const JSON_PANEL_W = 380;
-const CONFIG_PANEL_W = 380;
+const SKILLS_PANEL_W = 380;
 const EMBEDDED_HEIGHT = "min(80vh, 800px)";
 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function WorkflowExplorer() {
   const [activeIdx, setActiveIdx] = useState(0);
-  const [selectedStateId, setSelectedStateId] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("visual");
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [jsonText, setJsonText] = useState(() => JSON.stringify(WORKFLOWS[0].definition, null, 2));
+  const [jsonText, setJsonText] = useState(() => JSON.stringify(WORKFLOWS[0].workflow, null, 2));
   const [parseError, setParseError] = useState<string | null>(null);
-  const [liveDefinition, setLiveDefinition] = useState<WorkflowDefinition>(WORKFLOWS[0].definition);
-  const [providerConfig, setProviderConfig] = useState<ProviderConfig>({});
+  const [liveWorkflow, setLiveWorkflow] = useState<Workflow>(WORKFLOWS[0].workflow);
   const [copied, setCopied] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const workflow = WORKFLOWS[activeIdx];
-  const selectedState = selectedStateId ? (liveDefinition.steps[selectedStateId] as StepDefWithProvider) : null;
-  const usedCategories = getUsedCategories(liveDefinition, workflow.id);
+  const workflowEntry = WORKFLOWS[activeIdx];
+  const selectedNode = selectedNodeId ? liveWorkflow.nodes[selectedNodeId] : null;
+
+  const terminalIds = useMemo(() => {
+    const hasOutgoing = new Set(liveWorkflow.edges.map((e) => e.from));
+    return new Set(Object.keys(liveWorkflow.nodes).filter((id) => !hasOutgoing.has(id)));
+  }, [liveWorkflow]);
 
   function switchWorkflow(idx: number) {
     setActiveIdx(idx);
-    setSelectedStateId(null);
-    setLiveDefinition(WORKFLOWS[idx].definition);
-    setJsonText(JSON.stringify(WORKFLOWS[idx].definition, null, 2));
+    setSelectedNodeId(null);
+    setLiveWorkflow(WORKFLOWS[idx].workflow);
+    setJsonText(JSON.stringify(WORKFLOWS[idx].workflow, null, 2));
     setParseError(null);
-    setProviderConfig({});
   }
 
   const handleJsonChange = useCallback((text: string) => {
@@ -1129,13 +700,13 @@ export function WorkflowExplorer() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       try {
-        const parsed = JSON.parse(text) as WorkflowDefinition;
-        if (parsed && typeof parsed.initial === "string" && parsed.steps) {
-          setLiveDefinition(parsed);
+        const parsed = JSON.parse(text) as Workflow;
+        if (parsed && typeof parsed.entry === "string" && parsed.nodes && typeof parsed.id === "string") {
+          setLiveWorkflow(parsed);
           setParseError(null);
-          setSelectedStateId(null);
+          setSelectedNodeId(null);
         } else {
-          setParseError("Missing required fields: id, initial, steps");
+          setParseError("Missing required fields: id, entry, nodes");
         }
       } catch (e) {
         setParseError(e instanceof Error ? e.message : "Invalid JSON");
@@ -1184,9 +755,9 @@ export function WorkflowExplorer() {
     <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
       <WorkflowViewer
         key={activeIdx}
-        definition={liveDefinition}
+        workflow={liveWorkflow}
         height={bodyHeight}
-        onNodeClick={(id) => setSelectedStateId((prev) => (prev === id ? null : id))}
+        onNodeClick={(id) => setSelectedNodeId((prev) => (prev === id ? null : id))}
       />
     </div>
   );
@@ -1223,7 +794,7 @@ export function WorkflowExplorer() {
               color: "#3d4f6a",
             }}
           >
-            WorkflowDefinition
+            Workflow
           </span>
           {viewMode === "source" && (
             <span style={{ fontSize: 10, color: "#2d3f58", marginLeft: 8 }}>
@@ -1233,9 +804,9 @@ export function WorkflowExplorer() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {parseError ? (
-            <span style={{ fontSize: 10, color: "#f87171" }}>⚠ invalid</span>
+            <span style={{ fontSize: 10, color: "#f87171" }}>invalid</span>
           ) : (
-            <span style={{ fontSize: 10, color: "#22c55e" }}>✓ valid</span>
+            <span style={{ fontSize: 10, color: "#22c55e" }}>valid</span>
           )}
           <button
             onClick={copyJson}
@@ -1285,7 +856,7 @@ export function WorkflowExplorer() {
   const visualSidePanel = viewMode === "visual" && (
     <div
       style={{
-        width: selectedState ? PANEL_W_DETAIL : PANEL_W_OVERVIEW,
+        width: selectedNode ? PANEL_W_DETAIL : PANEL_W_OVERVIEW,
         flexShrink: 0,
         borderLeft: "1px solid rgba(255,255,255,0.07)",
         background: "rgba(4,8,18,0.5)",
@@ -1293,23 +864,25 @@ export function WorkflowExplorer() {
         transition: "width 0.2s ease",
       }}
     >
-      {selectedState ? (
+      {selectedNode ? (
         <NodeDetail
-          stateId={selectedStateId!}
-          state={selectedState}
-          isInitial={selectedStateId === liveDefinition.initial}
-          onClose={() => setSelectedStateId(null)}
+          nodeId={selectedNodeId!}
+          node={selectedNode}
+          workflow={liveWorkflow}
+          isEntry={selectedNodeId === liveWorkflow.entry}
+          isTerminal={terminalIds.has(selectedNodeId!)}
+          onClose={() => setSelectedNodeId(null)}
         />
       ) : (
-        <WorkflowOverview workflow={workflow} definition={liveDefinition} />
+        <WorkflowOverview workflow={workflowEntry} wf={liveWorkflow} />
       )}
     </div>
   );
 
-  const configurePanel = viewMode === "configure" && (
+  const skillsPanel = viewMode === "skills" && (
     <div
       style={{
-        width: CONFIG_PANEL_W,
+        width: SKILLS_PANEL_W,
         flexShrink: 0,
         borderLeft: "1px solid rgba(255,255,255,0.07)",
         background: "rgba(4,8,18,0.5)",
@@ -1318,12 +891,7 @@ export function WorkflowExplorer() {
         flexDirection: "column",
       }}
     >
-      <ConfigurePanel
-        definition={liveDefinition}
-        usedCategories={usedCategories}
-        providerConfig={providerConfig}
-        onProviderChange={(category, providerId) => setProviderConfig((prev) => ({ ...prev, [category]: providerId }))}
-      />
+      <SkillsPanel workflow={liveWorkflow} />
     </div>
   );
 
@@ -1331,10 +899,12 @@ export function WorkflowExplorer() {
 
   const MODES: [ViewMode, string][] = [
     ["visual", "Visual"],
-    ["configure", "Configure"],
-    ["split", "Split  ↔  JSON"],
+    ["skills", "Skills"],
+    ["split", "Split"],
     ["source", "JSON"],
   ];
+
+  const skillIds = usedSkillIds(liveWorkflow);
 
   const toolbar = (
     <div
@@ -1351,24 +921,8 @@ export function WorkflowExplorer() {
       }}
     >
       {/* Brand mark */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 5,
-          marginRight: 4,
-          flexShrink: 0,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 15,
-            color: "#6366f1",
-            lineHeight: 1,
-          }}
-        >
-          ⬡
-        </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 5, marginRight: 4, flexShrink: 0 }}>
+        <span style={{ fontSize: 15, color: "#6366f1", lineHeight: 1 }}>&#x2B21;</span>
         <span
           style={{
             fontSize: "0.72rem",
@@ -1446,28 +1000,21 @@ export function WorkflowExplorer() {
         ))}
       </div>
 
-      {/* Phase legend — pushed right */}
-      <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", flexShrink: 0 }}>
-        {(["learn", "act", "report"] as const).map((phase) => {
-          const { label, color } = PHASE_META[phase];
+      {/* Skill legend — pushed right */}
+      <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+        {skillIds.slice(0, 5).map((sid) => {
+          const color = skillColor(sid);
+          const name = SKILL_MAP.get(sid)?.name ?? sid;
           return (
-            <div key={phase} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 2,
-                  background: color,
-                  opacity: 0.75,
-                  flexShrink: 0,
-                }}
-              />
+            <div key={sid} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: 2, background: color, opacity: 0.75, flexShrink: 0 }} />
               <span style={{ fontSize: "0.67rem", fontWeight: 500, color: "#3d4f6a", letterSpacing: "0.02em" }}>
-                {label}
+                {name}
               </span>
             </div>
           );
         })}
+        {skillIds.length > 5 && <span style={{ fontSize: "0.65rem", color: "#3d4f6a" }}>+{skillIds.length - 5}</span>}
       </div>
 
       {/* Fullscreen toggle */}
@@ -1498,12 +1045,12 @@ export function WorkflowExplorer() {
 
   const footerHint =
     viewMode === "visual"
-      ? "Scroll to zoom  ·  drag to pan  ·  click a node to inspect"
-      : viewMode === "configure"
-        ? "Click a node to jump to its config  ·  select a provider to reveal env vars"
+      ? "Scroll to zoom  \u00b7  drag to pan  \u00b7  click a node to inspect"
+      : viewMode === "skills"
+        ? "Configure skills and copy env vars or setup code"
         : viewMode === "split"
           ? "Edit JSON on the right to live-update the graph"
-          : "Paste or type a WorkflowDefinition JSON to visualize it";
+          : "Paste or type a Workflow JSON to visualize it";
 
   const footer = (
     <div
@@ -1523,7 +1070,7 @@ export function WorkflowExplorer() {
       }}
     >
       <span>{footerHint}</span>
-      {parseError && viewMode !== "visual" && viewMode !== "configure" && (
+      {parseError && viewMode !== "visual" && viewMode !== "skills" && (
         <span
           style={{
             color: "#f87171",
@@ -1536,10 +1083,10 @@ export function WorkflowExplorer() {
             flexShrink: 1,
           }}
         >
-          ⚠ {parseError}
+          {parseError}
         </span>
       )}
-      <span style={{ flexShrink: 0, opacity: 0.6 }}>@sweny-ai/engine</span>
+      <span style={{ flexShrink: 0, opacity: 0.6 }}>@sweny-ai/core</span>
     </div>
   );
 
@@ -1575,7 +1122,7 @@ export function WorkflowExplorer() {
         {viewMode === "split" && jsonPane}
         {viewMode === "source" && jsonPane}
         {viewMode === "visual" && visualSidePanel}
-        {viewMode === "configure" && configurePanel}
+        {viewMode === "skills" && skillsPanel}
       </div>
       {footer}
     </div>

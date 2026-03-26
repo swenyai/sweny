@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { validateWorkflow } from "@sweny-ai/engine";
-import type { WorkflowDefinition } from "@sweny-ai/engine";
+import { validateWorkflow } from "@sweny-ai/core/schema";
+import type { Workflow } from "@sweny-ai/core";
 
 interface DropOverlayProps {
-  onImport(def: WorkflowDefinition): void;
+  onImport(wf: Workflow): void;
 }
 
 export function DropOverlay({ onImport }: DropOverlayProps) {
@@ -11,7 +11,6 @@ export function DropOverlay({ onImport }: DropOverlayProps) {
   const [error, setError] = useState<string | null>(null);
 
   const onDragOver = useCallback((e: DragEvent) => {
-    // Only activate for file drops
     if (e.dataTransfer?.types.includes("Files")) {
       e.preventDefault();
       setIsDragging(true);
@@ -42,7 +41,7 @@ export function DropOverlay({ onImport }: DropOverlayProps) {
             setError(errors.map((e) => `[${e.code}] ${e.message}`).join("\n"));
             return;
           }
-          onImport(parsed as WorkflowDefinition);
+          onImport(parsed as Workflow);
         } catch (e) {
           setError(`Parse error: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -63,7 +62,6 @@ export function DropOverlay({ onImport }: DropOverlayProps) {
     };
   }, [onDragOver, onDragLeave, onDrop]);
 
-  // Auto-dismiss error after 5 seconds
   useEffect(() => {
     if (!error) return;
     const t = setTimeout(() => setError(null), 5000);
@@ -72,16 +70,13 @@ export function DropOverlay({ onImport }: DropOverlayProps) {
 
   return (
     <>
-      {/* Drop indicator overlay */}
       {isDragging && (
         <div className="fixed inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 z-40 flex items-center justify-center pointer-events-none">
           <div className="bg-white rounded-lg px-8 py-6 shadow-xl text-center">
-            <p className="text-2xl mb-1">📂</p>
             <p className="font-semibold text-gray-800">Drop .workflow.json to import</p>
           </div>
         </div>
       )}
-      {/* Error toast */}
       {error && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white text-xs px-4 py-2 rounded shadow-lg z-50 max-w-sm text-center">
           {error}

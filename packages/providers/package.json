@@ -1,7 +1,8 @@
 {
   "name": "@sweny-ai/providers",
   "version": "1.4.0",
-  "description": "Shared provider interfaces and implementations for SWEny — Datadog, Sentry, Linear, GitHub, Slack, and more",
+  "description": "[DEPRECATED — use @sweny-ai/core] Provider interfaces for SWEny",
+  "deprecated": "This package has been replaced by @sweny-ai/core skills. See https://docs.sweny.ai for migration guide.",
   "type": "module",
   "keywords": [
     "observability",

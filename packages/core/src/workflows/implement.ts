@@ -1,0 +1,92 @@
+/**
+ * Implement Workflow
+ *
+ * Given an issue, implement a fix and open a pull request.
+ *
+ * Compare: the previous version was 8 files, ~2000 lines.
+ * This version is a DAG definition — Claude does the implementation
+ * work at each node using the available skill tools.
+ */
+
+import type { Workflow } from "../types.js";
+
+export const implementWorkflow: Workflow = {
+  id: "implement",
+  name: "Implement Fix",
+  description: "Implement a code fix for an issue and open a pull request",
+  entry: "analyze",
+
+  nodes: {
+    analyze: {
+      name: "Analyze Issue",
+      instruction: `Read the issue details and understand what needs to be fixed:
+
+1. Fetch the issue from the tracker (GitHub or Linear).
+2. Read the relevant source files to understand the current code.
+3. Identify the exact files and lines that need to change.
+4. Plan the fix approach.
+
+Output a clear analysis of what needs to change and why.`,
+      skills: ["github", "linear"],
+      output: {
+        type: "object",
+        properties: {
+          issue_summary: { type: "string" },
+          files_to_change: { type: "array", items: { type: "string" } },
+          fix_plan: { type: "string" },
+          risk_level: { type: "string", enum: ["low", "medium", "high"] },
+        },
+        required: ["issue_summary", "fix_plan"],
+      },
+    },
+
+    implement: {
+      name: "Implement Fix",
+      instruction: `Implement the planned fix:
+
+1. Create a feature branch.
+2. Make the necessary code changes.
+3. Ensure changes are minimal and focused — fix the bug, nothing more.
+4. Stage and commit with a clear commit message referencing the issue.
+
+If the fix is too risky or complex, explain why and skip.`,
+      skills: ["github"],
+    },
+
+    create_pr: {
+      name: "Open Pull Request",
+      instruction: `Open a pull request for the fix:
+
+1. Push the branch to the remote.
+2. Create a PR with a clear title and description.
+3. Reference the original issue in the PR body.
+4. Add appropriate reviewers or labels if possible.
+
+Return the PR URL.`,
+      skills: ["github"],
+    },
+
+    notify: {
+      name: "Notify",
+      instruction: `Send a notification about the implementation result:
+
+1. Include: issue reference, PR link, brief summary of changes.
+2. Keep it concise — one message, not a wall of text.`,
+      skills: ["slack", "notification"],
+    },
+
+    skip: {
+      name: "Skip — Too Complex",
+      instruction: `The fix was determined to be too complex or risky for automated implementation.
+Add a comment to the issue explaining what was found and why it needs manual attention.`,
+      skills: ["github", "linear"],
+    },
+  },
+
+  edges: [
+    { from: "analyze", to: "implement", when: "Fix risk level is low or medium and a clear plan exists" },
+    { from: "analyze", to: "skip", when: "Fix is too complex, risky, or unclear" },
+    { from: "implement", to: "create_pr" },
+    { from: "create_pr", to: "notify" },
+  ],
+};

@@ -1,267 +1,212 @@
 ---
 title: Workflow Authoring
-description: How to build custom SWEny workflows — define steps, wire transitions, run the DAG, and test end-to-end.
+description: How to build custom SWEny workflows — define nodes, wire edges with conditions, and run the DAG with skills.
 ---
 
-A **workflow** is a named DAG of steps. The engine walks the graph, executing each step in turn, routing to the next step based on the outcome — or stopping if no route is defined.
+A **workflow** is a named DAG of nodes. The executor walks the graph, running Claude at each node with the specified skills. Claude evaluates natural-language conditions on edges to decide where to go next — or stops if no outbound edge matches.
 
-Built-in workflows (`triage`, `implement`) are ready to use out of the box. To build your own, install `@sweny-ai/engine` and define a `WorkflowDefinition` + step implementations.
+Built-in workflows (`triage`, `implement`) are ready to use out of the box. To build your own, install `@sweny-ai/core` and define a `Workflow`.
 
 ## Core types
 
 ```ts
-import type {
-  WorkflowDefinition,
-  StepDefinition,
-} from "@sweny-ai/engine";
+import type { Workflow, Node, Edge } from "@sweny-ai/core";
 
-// Pure-data definition — JSON-serializable, renderable, versionable
-interface WorkflowDefinition {
-  id: string;                // unique machine-readable identifier
-  version: string;           // semver, e.g. "1.0.0"
+interface Workflow {
+  id: string;
   name: string;
-  description?: string;
-  initial: string;           // id of the first step
-  steps: Record<string, StepDefinition>;
+  description: string;
+  entry: string;              // id of the first node
+  nodes: Record<string, Node>;
+  edges: Edge[];
 }
 
-interface StepDefinition {
-  phase: "learn" | "act" | "report";
-  description?: string;
-  critical?: boolean;        // failure aborts the whole workflow
-  next?: string;             // default successor step (success/skipped)
-  on?: Record<string, string>; // outcome → target step id (or "end")
-  uses?: string[];           // provider roles this step depends on
-  type?: string;             // built-in step type (e.g. "sweny/investigate")
-  timeout?: number;          // ms — step is aborted if it exceeds this
+interface Node {
+  name: string;
+  instruction: string;        // what Claude does at this node
+  skills: string[];            // which skill tools are available
+  output?: JSONSchema;         // optional structured output schema
 }
-```
 
-## Step phases
-
-| Phase | Intent | Typical use |
-|-------|--------|-------------|
-| `learn` | Read-only — gather context | Fetch logs, verify credentials, query APIs |
-| `act` | Side effects | Write code, commit, open PRs, create issues |
-| `report` | Communicate results | Send Slack messages, write summaries |
-
-Phase controls swimlane grouping in Studio and appears in execution logs. Failure semantics are controlled by `critical`, not phase.
-
-## Writing a step
-
-A step is a plain async function that receives `ctx` and returns a `StepResult`:
-
-```ts
-// src/workflows/my-workflow/steps/my-step.ts
-import type { WorkflowContext, StepResult } from "@sweny-ai/engine";
-import type { IssueTrackingProvider } from "@sweny-ai/providers/issue-tracking";
-import type { MyWorkflowConfig } from "../types.js";
-
-export async function myStep(ctx: WorkflowContext<MyWorkflowConfig>): Promise<StepResult> {
-  const { config, logger, results, providers } = ctx;
-  const tracker = providers.get<IssueTrackingProvider>("issueTracker");
-
-  // Read a previous step's output
-  const prev = results.get("some-earlier-step");
-  if (!prev || prev.status !== "success") {
-    return { status: "skipped", reason: "earlier step did not succeed" };
-  }
-
-  try {
-    await tracker.addComment(prev.data!.issueId as string, "Processing started.");
-    return { status: "success", data: { issueId: prev.data!.issueId } };
-  } catch (err) {
-    return { status: "failed", reason: String(err) };
-  }
+interface Edge {
+  from: string;
+  to: string;
+  when?: string;               // natural language condition (Claude evaluates)
 }
 ```
 
-Set `data.outcome` to drive transition routing with custom keys:
+## Skills
+
+Each node declares which **skills** Claude can use. A skill is a group of tools — for example, the `github` skill provides `github_search_code`, `github_get_issue`, `github_create_pr`, and more.
+
+| Skill | Tools | Purpose |
+|-------|-------|---------|
+| `github` | 6 tools | Search code, manage issues and PRs |
+| `linear` | 3 tools | Create, search, and update Linear issues |
+| `sentry` | 3 tools | Query errors and issues from Sentry |
+| `datadog` | 3 tools | Query logs, metrics, and monitors |
+| `slack` | 2 tools | Send messages via webhook or bot |
+| `notification` | 4 tools | Discord, Teams, email, webhooks |
+
+Skills are configured through environment variables (e.g. `GITHUB_TOKEN`, `DD_API_KEY`). The executor resolves config automatically from `process.env`.
+
+## Writing a workflow
 
 ```ts
-return { status: "success", data: { outcome: "needs-review" } };
-// Triggers: on: { "needs-review": "human-review-step" }
-```
+import type { Workflow } from "@sweny-ai/core";
 
-## Transition routing (priority order)
-
-1. `result.data?.outcome` — explicit string outcome set by the implementation
-2. `result.status` — `"success"`, `"skipped"`, or `"failed"`
-3. `on: "*"` — wildcard fallback
-4. Undefined → workflow terminates
-
-The reserved target `"end"` stops the workflow successfully from any transition.
-
-## Writing a definition
-
-```ts
-// src/workflows/my-workflow/definition.ts
-import type { WorkflowDefinition } from "@sweny-ai/engine";
-
-export const myWorkflowDefinition: WorkflowDefinition = {
+export const myWorkflow: Workflow = {
   id: "my-workflow",
-  version: "1.0.0",
-  name: "my-workflow",
-  initial: "verify-setup",
-  steps: {
-    "verify-setup": {
-      phase: "learn",
-      critical: true,
-      on: { done: "do-work" },
+  name: "My Workflow",
+  description: "Investigate an issue and fix it",
+  entry: "analyze",
+
+  nodes: {
+    analyze: {
+      name: "Analyze Issue",
+      instruction: `Read the issue details and understand what needs to change.
+Use GitHub to check the code and Linear to fetch the ticket.`,
+      skills: ["github", "linear"],
+      output: {
+        type: "object",
+        properties: {
+          summary: { type: "string" },
+          risk: { type: "string", enum: ["low", "medium", "high"] },
+        },
+        required: ["summary", "risk"],
+      },
     },
-    "do-work": {
-      phase: "act",
-      on: { done: "notify", failed: "notify" },
+    implement: {
+      name: "Implement Fix",
+      instruction: "Create a branch, make the fix, and commit.",
+      skills: ["github"],
     },
-    "notify": {
-      phase: "report",
+    notify: {
+      name: "Notify Team",
+      instruction: "Send a summary of what was done.",
+      skills: ["slack", "notification"],
+    },
+    skip: {
+      name: "Skip",
+      instruction: "Log why this was skipped. No action needed.",
+      skills: [],
     },
   },
+
+  edges: [
+    { from: "analyze", to: "implement", when: "Risk is low or medium" },
+    { from: "analyze", to: "skip", when: "Risk is high or the issue is unclear" },
+    { from: "implement", to: "notify" },
+  ],
 };
 ```
 
-## Wiring the workflow
+## Edge routing
 
-```ts
-// src/workflows/my-workflow/index.ts
-import { createWorkflow } from "@sweny-ai/engine";
-import { myWorkflowDefinition } from "./definition.js";
-import { verifySetup } from "./steps/verify-setup.js";
-import { doWork } from "./steps/do-work.js";
-import { sendNotification } from "./steps/notify.js";
-import type { MyWorkflowConfig } from "./types.js";
+Edges can be **unconditional** (no `when` — always taken) or **conditional** (Claude evaluates the `when` clause against the node's output).
 
-export const myWorkflow = createWorkflow<MyWorkflowConfig>(myWorkflowDefinition, {
-  "verify-setup": verifySetup,
-  "do-work":      doWork,
-  "notify":       sendNotification,
-});
-```
-
-`createWorkflow()` validates that every step in the definition has an implementation and throws if not.
+When a node has multiple outbound edges with `when` conditions, Claude picks the best match. If no conditional edge matches and there's an unconditional edge, that one is taken. If nothing matches, the workflow ends at that node.
 
 ## Running a workflow
 
 ```ts
-import { runWorkflow, createProviderRegistry } from "@sweny-ai/engine";
-import { linear } from "@sweny-ai/providers/issue-tracking";
-import { github } from "@sweny-ai/providers/source-control";
+import { execute, createSkillMap, ClaudeClient } from "@sweny-ai/core";
+import { github, linear, slack } from "@sweny-ai/core/skills";
+import { myWorkflow } from "./my-workflow.js";
 
-const registry = createProviderRegistry();
-registry.set("issueTracker", linear({ apiKey: process.env.LINEAR_KEY }));
-registry.set("sourceControl", github({ token: process.env.GH_TOKEN, owner: "my-org", repo: "my-repo" }));
+const skills = createSkillMap([github, linear, slack]);
+const claude = new ClaudeClient({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
-const result = await runWorkflow(myWorkflow, config, registry, {
-  observer: myObserver,
+const results = await execute(myWorkflow, {
+  input: "Fix issue LIN-1234",
+  skills,
+  claude,
+  observer: (event) => console.log(event.type, event),
 });
 
-console.log(result.status); // "completed" | "failed" | "partial"
-console.log(result.steps);  // per-step results in execution order
-```
-
-## Config type
-
-```ts
-import { z } from "zod";
-
-export const myWorkflowConfigSchema = z.object({
-  issueIdentifier: z.string(),
-  repository:      z.string(),
-  dryRun:          z.boolean().default(false),
-});
-
-export type MyWorkflowConfig = z.infer<typeof myWorkflowConfigSchema>;
+// results: Record<string, NodeResult>
+for (const [nodeId, result] of Object.entries(results)) {
+  console.log(`${nodeId}: ${result.status}`);
+}
 ```
 
 ## Observer (real-time events)
 
 ```ts
-import type { RunObserver } from "@sweny-ai/engine";
+import type { Observer, ExecutionEvent } from "@sweny-ai/core";
 
-const observer: RunObserver = {
-  onEvent(event) {
-    switch (event.type) {
-      case "workflow:start":
-        console.log(`Starting: ${event.workflowName}`);
-        break;
-      case "step:enter":
-        console.log(`→ ${event.stepId}`);
-        break;
-      case "step:exit":
-        console.log(`✓ ${event.stepId} [${event.result.status}]`);
-        break;
-      case "workflow:end":
-        console.log(`Done: ${event.status}`);
-        break;
-    }
+const observer: Observer = (event: ExecutionEvent) => {
+  switch (event.type) {
+    case "workflow:start":
+      console.log("Starting workflow");
+      break;
+    case "node:enter":
+      console.log(`→ entering ${event.node}`);
+      break;
+    case "tool:call":
+      console.log(`  calling ${event.tool}`);
+      break;
+    case "node:exit":
+      console.log(`← ${event.node} [${event.result.status}]`);
+      break;
+    case "workflow:end":
+      console.log("Workflow complete");
+      break;
   }
 };
 
-await runWorkflow(myWorkflow, config, registry, { observer });
-```
-
-You can also use the built-in helpers:
-
-```ts
-import { CollectingObserver, CallbackObserver, composeObservers } from "@sweny-ai/engine";
-
-const collector = new CollectingObserver();
-const streamer  = new CallbackObserver((event) => ws.send(JSON.stringify(event)));
-const combined  = composeObservers(collector, streamer);
+const results = await execute(myWorkflow, { input, skills, claude, observer });
 ```
 
 ## Validation
 
 ```ts
-import { validateWorkflow } from "@sweny-ai/engine";
+import { validateWorkflow } from "@sweny-ai/core/schema";
 
-const errors = validateWorkflow(myDefinition);
-// errors: WorkflowDefinitionError[] — each has { code, message, stepId? }
-// codes: MISSING_INITIAL, UNKNOWN_TARGET, UNREACHABLE_STEP
+const errors = validateWorkflow(myWorkflow);
+// errors: WorkflowError[] — each has { code, message, nodeId? }
+// codes: MISSING_ENTRY, UNKNOWN_TARGET, UNREACHABLE_NODE, UNKNOWN_SKILL
 ```
 
 `validateWorkflow()` is browser-safe — Studio calls it continuously while you edit.
 
-## Running a YAML workflow from the CLI
-
-You can run custom workflows without writing any TypeScript using the CLI:
+## Running from the CLI
 
 ```bash
 sweny workflow run ./my-workflow.yml
 ```
 
-The CLI streams live step output as the workflow executes. See [CLI Commands](/cli/) for details.
+The CLI streams live node output as the workflow executes. See [CLI Commands](/cli/) for details.
 
-## Testing
+## Testing with MockClaude
 
-File providers write outputs to disk and don't require real credentials — perfect for testing workflows without connecting to external services:
+`MockClaude` lets you test workflows without an API key:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { runWorkflow, createProviderRegistry } from "@sweny-ai/engine";
-import { fileIssueTracking } from "@sweny-ai/providers/issue-tracking";
-import { myWorkflow } from "./index.js";
+import { execute, createSkillMap } from "@sweny-ai/core";
+import { MockClaude } from "@sweny-ai/core/testing";
+import { github, linear } from "@sweny-ai/core/skills";
+import { myWorkflow } from "./my-workflow.js";
 
 describe("myWorkflow", () => {
-  it("runs to completion with file providers", async () => {
-    const tmpDir = "/tmp/sweny-test";
-    const tracker = fileIssueTracking({ outputDir: tmpDir });
-    await tracker.verifyAccess();
+  it("runs to completion with mock responses", async () => {
+    const mock = new MockClaude({
+      responses: {
+        analyze: { status: "success", data: { summary: "Bug in auth", risk: "low" } },
+        implement: { status: "success" },
+        notify: { status: "success" },
+      },
+    });
 
-    const issue = await tracker.createIssue({ title: "Test issue", projectId: "LOCAL" });
+    const results = await execute(myWorkflow, {
+      input: "Fix auth bug",
+      skills: createSkillMap([github, linear]),
+      claude: mock,
+    });
 
-    const registry = createProviderRegistry();
-    registry.set("issueTracker", tracker);
-
-    const result = await runWorkflow(
-      myWorkflow,
-      { issueIdentifier: issue.identifier, repository: "my-org/my-repo" },
-      registry,
-    );
-
-    expect(result.status).toBe("completed");
+    expect(results.analyze.status).toBe("success");
+    expect(results.implement.status).toBe("success");
   });
 });
 ```
-
-File providers return `LOCAL-N` identifiers. Call `verifyAccess()` before `createIssue()` to ensure the output directory is initialised.

@@ -3,42 +3,55 @@ title: Concepts
 description: Core concepts behind SWEny's workflow platform.
 ---
 
-## Learn → Act → Report
+## Skills + DAG
 
-Every SWEny workflow follows three phases:
+Every SWEny workflow is a **directed acyclic graph** (DAG) of nodes. At each node, Claude receives an instruction and a set of **skills** — tools it can use to interact with external services. Claude does the work, then the executor evaluates edge conditions to decide which node runs next.
 
-1. **Learn** — Gather context from your systems. Query observability logs, search issue trackers for duplicates, check open PRs, and build a picture of what's happening.
-2. **Act** — Take action based on AI-driven analysis. Create tickets, open branches, implement fixes, dispatch to other repos.
-3. **Report** — Deliver results through your team's channels. Post summaries to Slack, email, GitHub, Discord, Teams, or fire webhooks.
-
-The engine enforces this phase ordering. Steps in the Learn phase always run before Act, and Act before Report.
+1. **Nodes** — Each node has a name, an instruction (what Claude should do), and a list of skills (tools Claude can use). Think of nodes as tasks in a pipeline.
+2. **Edges** — Connect nodes. Edges can be unconditional (always taken) or conditional — with a natural-language `when` clause that Claude evaluates at runtime.
+3. **Skills** — Groups of tools that connect Claude to external services. The `github` skill gives Claude tools to search code, manage issues, and open PRs. The `sentry` skill lets Claude query errors and stack traces.
 
 ## Workflow
 
-A **Workflow** is an ordered sequence of steps organized into the three phases. The engine executes steps in order, passing context and results between them. If a step fails, the engine can skip downstream steps or the entire phase.
+A **Workflow** is a DAG of nodes connected by edges. The executor starts at the `entry` node and walks the graph until it reaches a terminal node (one with no outbound edges). Each node's output is available to downstream nodes.
 
-## Step
+Built-in workflows include **Triage** (monitor alerts, investigate, file tickets, notify) and **Implement** (analyze issue, write fix, open PR).
 
-A **Step** is a single unit of work within a workflow. Each step receives a context object with the workflow configuration, provider registry, and results from previous steps. Steps return a result with a status and optional data.
+## Skills
 
-Built-in steps include things like "query logs", "deduplicate issues", "investigate error", "create ticket", "write fix", and "send notification".
+**Skills** give Claude the ability to interact with your existing tools. You pick which skills are available at each node — Claude only sees the tools it needs.
 
-**[SWEny Triage](/recipes/triage/)** is the built-in triage workflow — it automates the on-call triage loop by monitoring production logs, investigating the highest-impact issue, and opening a fix PR.
+| Skill | What Claude can do |
+|-------|--------------------|
+| **GitHub** | Search code, read files, create issues, open PRs |
+| **Linear** | Create, search, and update issues |
+| **Sentry** | Query errors, issues, and performance data |
+| **Datadog** | Query logs, metrics, and monitors |
+| **Slack** | Send messages via webhook or bot API |
+| **Notification** | Discord, Teams, email, generic webhooks |
 
-## Providers
+Skills are configured through environment variables (e.g. `GITHUB_TOKEN`, `DD_API_KEY`). No code required — set the env vars and the skill is ready.
 
-**Providers** connect SWEny to your existing tools — your observability platform, issue tracker, source control, and notification channels. You choose one provider per category and configure it through Action inputs or `.sweny.yml`. No code required.
+## Edge conditions
 
-This means you can swap Datadog for CloudWatch, or Linear for Jira, without changing your workflow logic.
+Edges between nodes can carry natural-language conditions:
 
-## Supported providers
+```yaml
+edges:
+  - from: investigate
+    to: create_issue
+    when: "The issue is novel and severity is medium or higher"
+  - from: investigate
+    to: skip
+    when: "The issue is a duplicate or severity is low"
+```
 
-| Phase | Category | Supported services |
-|-------|----------|--------------------|
-| **Learn** | Observability | Datadog, Sentry, CloudWatch, Splunk, Elasticsearch, New Relic, Grafana Loki |
-| **Act** | Issue Tracking | Linear, GitHub Issues, Jira |
-| **Act** | Source Control | GitHub, GitLab |
-| **Act** | Coding Agent | Claude Code, OpenAI Codex, Google Gemini |
-| **Report** | Notification | GitHub Summary, Console, Slack, Teams, Discord, Email, Webhook, File |
+Claude evaluates these conditions based on what it learned at the source node. This replaces the old outcome-based routing with something more flexible and readable.
 
-See [Provider Reference](/getting-started/providers/) to configure your observability, issue tracking, and notification providers.
+## Built-in workflows
+
+**[Triage](/recipes/triage/)** automates the on-call triage loop — gather context from logs, investigate root cause, create an issue, and notify the team.
+
+**[Implement](/recipes/implement/)** takes an existing issue and produces a fix PR — analyze the issue, implement the fix, open a PR, and notify.
+
+See [Workflow Authoring](/studio/recipe-authoring/) to build your own workflows.

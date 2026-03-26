@@ -1,7 +1,8 @@
 {
   "name": "@sweny-ai/engine",
   "version": "6.0.0",
-  "description": "Workflow engine for SWEny — composable DAG-based agentic workflows",
+  "description": "[DEPRECATED — use @sweny-ai/core] Workflow engine for SWEny",
+  "deprecated": "This package has been replaced by @sweny-ai/core. See https://docs.sweny.ai for migration guide.",
   "type": "module",
   "keywords": [
     "workflow",

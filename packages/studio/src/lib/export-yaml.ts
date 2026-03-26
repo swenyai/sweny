@@ -1,7 +1,12 @@
 import { stringify } from "yaml";
-import { WORKFLOW_YAML_SCHEMA_HEADER } from "@sweny-ai/engine";
-import type { WorkflowDefinition } from "@sweny-ai/engine";
+import type { Workflow } from "@sweny-ai/core";
 
-export function exportWorkflowYaml(definition: WorkflowDefinition): string {
-  return WORKFLOW_YAML_SCHEMA_HEADER + stringify(definition, { indent: 2, lineWidth: 120 });
+const WORKFLOW_YAML_HEADER = `# SWEny Workflow Definition
+# https://sweny.ai/docs/workflows
+# Schema: @sweny-ai/core Workflow type
+---
+`;
+
+export function exportWorkflowYaml(workflow: Workflow): string {
+  return WORKFLOW_YAML_HEADER + stringify(workflow, { indent: 2, lineWidth: 120 });
 }

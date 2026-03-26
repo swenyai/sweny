@@ -8,11 +8,13 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "test": "vitest run"
   },
   "dependencies": {
     "@astrojs/react": "^4.4.2",
     "@astrojs/starlight": "^0.37.7",
+    "@sweny-ai/core": "*",
     "@sweny-ai/studio": "^8.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -21,5 +23,8 @@
     "react-dom": "^19.2.4",
     "sharp": "^0.34.2",
     "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.2"
   }
 }

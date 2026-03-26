@@ -1,7 +1,8 @@
 {
   "name": "@sweny-ai/agent",
   "version": "0.2.1",
-  "description": "AI assistant framework powered by Claude Code SDK — Slack bot + CLI with plugin architecture",
+  "description": "[DEPRECATED — migrating to @sweny-ai/core] AI assistant framework powered by Claude Code SDK",
+  "deprecated": "This package is being migrated to use @sweny-ai/core. See https://docs.sweny.ai for updates.",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"

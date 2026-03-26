@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { triageDefinition, implementDefinition, validateWorkflow } from "@sweny-ai/engine";
+import { validateWorkflow } from "@sweny-ai/core/schema";
+import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
+import type { Workflow } from "@sweny-ai/core";
 import { useEditorStore, useTemporalStore } from "./store/editor-store.js";
 import { WorkflowViewer } from "./WorkflowViewer.js";
 import { PropertiesPanel } from "./components/PropertiesPanel.js";
@@ -7,85 +9,81 @@ import { Toolbar } from "./components/Toolbar.js";
 import { DropOverlay } from "./components/DropOverlay.js";
 import { SimulationPanel } from "./components/SimulationPanel.js";
 import { LiveConnectPanel } from "./components/LiveConnectPanel.js";
-import type { WorkflowDefinition } from "@sweny-ai/engine";
 import { readPermalinkFromHash, encodeWorkflow } from "./lib/permalink.js";
 
-const PRESET_WORKFLOWS: Array<{ id: string; name: string; definition: WorkflowDefinition }> = [
-  { id: "triage", name: "triage", definition: triageDefinition },
-  { id: "implement", name: "implement", definition: implementDefinition },
+const PRESET_WORKFLOWS: Array<{ id: string; name: string; workflow: Workflow }> = [
+  { id: "triage", name: "triage", workflow: triageWorkflow },
+  { id: "implement", name: "implement", workflow: implementWorkflow },
 ];
 
 export function App() {
-  const setDefinition = useEditorStore((s) => s.setDefinition);
-  const definition = useEditorStore((s) => s.definition);
+  const setWorkflow = useEditorStore((s) => s.setWorkflow);
+  const workflow = useEditorStore((s) => s.workflow);
   const mode = useEditorStore((s) => s.mode);
   const setSelection = useEditorStore((s) => s.setSelection);
   const [activeId, setActiveId] = useState("triage");
   const [showImport, setShowImport] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [forkToast, setForkToast] = useState<string | null>(null);
-  const validationErrors = useMemo(() => validateWorkflow(definition), [definition]);
+  const validationErrors = useMemo(() => validateWorkflow(workflow), [workflow]);
 
-  // Whether the currently displayed workflow is an unmodified preset
   const isBuiltinWorkflow = PRESET_WORKFLOWS.some((p) => p.id === activeId);
 
   // On mount, load workflow from URL hash if present
   useEffect(() => {
     const fromLink = readPermalinkFromHash();
     if (fromLink) {
-      setDefinition(fromLink);
-      // Clear undo history so the user doesn't undo back to the default workflow
+      setWorkflow(fromLink);
       useEditorStore.temporal.getState().clear();
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keep URL hash in sync as user edits (use replaceState to avoid polluting history)
+  // Keep URL hash in sync as user edits
   useEffect(() => {
-    const encoded = encodeWorkflow(definition);
+    const encoded = encodeWorkflow(workflow);
     const newHash = `#def=${encoded}`;
     if (window.location.hash !== newHash) {
       window.history.replaceState(null, "", newHash);
     }
-  }, [definition]);
+  }, [workflow]);
 
   const handleWorkflowChange = useCallback(
     (id: string) => {
-      const workflow = PRESET_WORKFLOWS.find((w) => w.id === id);
-      if (!workflow) return;
+      const preset = PRESET_WORKFLOWS.find((w) => w.id === id);
+      if (!preset) return;
       const { clear } = useEditorStore.temporal.getState();
-      clear(); // reset undo history
-      setDefinition(workflow.definition);
+      clear();
+      setWorkflow(preset.workflow);
       setActiveId(id);
     },
-    [setDefinition],
+    [setWorkflow],
   );
 
   const handleFork = useCallback(() => {
     const { clear } = useEditorStore.temporal.getState();
     clear();
     const forked = {
-      ...definition,
-      id: `${definition.id}-fork`,
-      name: `${definition.name} (Fork)`,
+      ...workflow,
+      id: `${workflow.id}-fork`,
+      name: `${workflow.name} (Fork)`,
     };
-    setDefinition(forked);
+    setWorkflow(forked);
     setActiveId("custom");
-    setForkToast(`Forked! Customize your workflow then export as YAML.`);
+    setForkToast(`Forked! Customize your workflow then export.`);
     setTimeout(() => setForkToast(null), 4000);
-  }, [definition, setDefinition]);
+  }, [workflow, setWorkflow]);
 
   const handleDropImport = useCallback(
-    (def: WorkflowDefinition) => {
+    (wf: Workflow) => {
       useEditorStore.temporal.getState().clear();
-      setDefinition(def);
+      setWorkflow(wf);
     },
-    [setDefinition],
+    [setWorkflow],
   );
 
   // Keyboard shortcuts
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      // Don't intercept shortcuts while the user is typing in an input field
       const target = e.target as HTMLElement;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable) {
         return;
@@ -93,7 +91,7 @@ export function App() {
 
       const meta = e.metaKey || e.ctrlKey;
       const { undo, redo } = useEditorStore.temporal.getState();
-      const { selection, deleteStep, setSelection } = useEditorStore.getState();
+      const { selection, deleteNode, setSelection } = useEditorStore.getState();
 
       if (e.key === "?") {
         setShowHelp(true);
@@ -118,9 +116,9 @@ export function App() {
         setSelection(null);
         return;
       }
-      if ((e.key === "Backspace" || e.key === "Delete") && selection?.kind === "step") {
-        if (window.confirm(`Delete step "${selection.id}"?`)) {
-          deleteStep(selection.id);
+      if ((e.key === "Backspace" || e.key === "Delete") && selection?.kind === "node") {
+        if (window.confirm(`Delete node "${selection.id}"?`)) {
+          deleteNode(selection.id);
         }
       }
     }
@@ -149,13 +147,13 @@ export function App() {
       {mode === "design" && validationErrors.length > 0 && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-1.5 flex items-center gap-2 flex-shrink-0 flex-wrap">
           <span className="text-amber-600 text-xs font-medium">
-            ⚠ {validationErrors.length} validation {validationErrors.length === 1 ? "error" : "errors"}:
+            {validationErrors.length} validation {validationErrors.length === 1 ? "error" : "errors"}:
           </span>
           {validationErrors.map((e) => (
             <button
               key={e.message}
-              onClick={() => (e.stateId ? setSelection({ kind: "step", id: e.stateId }) : undefined)}
-              className={`text-amber-700 text-xs ${e.stateId ? "hover:underline cursor-pointer" : "cursor-default"}`}
+              onClick={() => (e.nodeId ? setSelection({ kind: "node", id: e.nodeId }) : undefined)}
+              className={`text-amber-700 text-xs ${e.nodeId ? "hover:underline cursor-pointer" : "cursor-default"}`}
             >
               {e.message}
             </button>
@@ -167,11 +165,9 @@ export function App() {
           <div style={{ flex: 1 }}>
             <WorkflowViewer />
           </div>
-          {/* Bottom execution panel */}
           {mode === "simulate" && <SimulationPanel />}
           {mode === "live" && <LiveConnectPanel />}
         </div>
-        {/* Right sidebar — always visible; shows execution results in simulate/live */}
         <PropertiesPanel />
       </div>
       <DropOverlay onImport={handleDropImport} />
@@ -179,5 +175,4 @@ export function App() {
   );
 }
 
-// Re-export useTemporalStore for use in Toolbar
 export { useTemporalStore };

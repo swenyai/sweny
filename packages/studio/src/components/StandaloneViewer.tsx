@@ -1,38 +1,33 @@
 import { useState, useEffect, useRef } from "react";
 import { ReactFlow, Background, Controls, MiniMap, useReactFlow, type NodeMouseHandler } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { WorkflowDefinition } from "@sweny-ai/engine";
+import type { Workflow } from "@sweny-ai/core";
 import { StateNode } from "./StateNode.js";
 import { TransitionEdge } from "./TransitionEdge.js";
-import { layoutDefinition } from "../layout/elk.js";
-import type { StateNodeType, StateNodeData } from "./StateNode.js";
+import { layoutWorkflow } from "../layout/elk.js";
+import type { StateNodeType, StateNodeData, NodeExecStatus } from "./StateNode.js";
 import type { Edge } from "@xyflow/react";
 import type { TransitionEdgeData } from "./TransitionEdge.js";
 
-const nodeTypes = { stateNode: StateNode };
-const edgeTypes = { transitionEdge: TransitionEdge };
+const nodeTypes = { skillNode: StateNode };
+const edgeTypes = { conditionEdge: TransitionEdge };
 
-const EMPTY_EXECUTION_STATE: Record<string, "current" | "success" | "failed" | "skipped"> = {};
+const EMPTY_EXECUTION_STATE: Record<string, NodeExecStatus> = {};
 
 export interface WorkflowViewerProps {
-  /** The WorkflowDefinition to visualize. */
-  definition: WorkflowDefinition;
+  /** The Workflow to visualize. */
+  workflow: Workflow;
   /**
-   * Highlight these state ids (e.g. from a live execution).
-   * Keys are state ids, values are the execution status.
+   * Highlight these node ids (e.g. from a live execution).
+   * Keys are node ids, values are the execution status.
    */
-  executionState?: Record<string, "current" | "success" | "failed" | "skipped">;
+  executionState?: Record<string, NodeExecStatus>;
   /** Canvas height. Defaults to "100%". */
   height?: string | number;
   /** Called when the user clicks a node. */
-  onNodeClick?: (stateId: string) => void;
+  onNodeClick?: (nodeId: string) => void;
 }
 
-/**
- * Rendered inside <ReactFlow> so it has access to the ReactFlow context.
- * Calls fitView() after ELK places nodes — fixes the blank-canvas bug where
- * the fitView prop runs on mount (empty nodes) and never re-fires.
- */
 function AutoFitView({ nodeCount }: { nodeCount: number }) {
   const { fitView } = useReactFlow();
   const prevCount = useRef(0);
@@ -40,8 +35,6 @@ function AutoFitView({ nodeCount }: { nodeCount: number }) {
   useEffect(() => {
     if (nodeCount > 0 && nodeCount !== prevCount.current) {
       prevCount.current = nodeCount;
-      // Two rAFs: first lets React flush the node positions,
-      // second lets ReactFlow measure them before fitting.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           fitView({ padding: 0.1, duration: 450, minZoom: 0.4 });
@@ -54,7 +47,7 @@ function AutoFitView({ nodeCount }: { nodeCount: number }) {
 }
 
 export function WorkflowViewer({
-  definition,
+  workflow,
   executionState = EMPTY_EXECUTION_STATE,
   height = "100%",
   onNodeClick,
@@ -64,11 +57,10 @@ export function WorkflowViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Re-run ELK only when the definition changes (structure change).
   useEffect(() => {
     setError(null);
     setLoading(true);
-    layoutDefinition(definition)
+    layoutWorkflow(workflow)
       .then(({ nodes: n, edges: e }) => {
         setNodes(
           n.map((node) => ({
@@ -87,9 +79,8 @@ export function WorkflowViewer({
         setLoading(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [definition]);
+  }, [workflow]);
 
-  // Update execution highlights without re-running ELK.
   useEffect(() => {
     setNodes((prev) =>
       prev.map((node) => ({
@@ -103,7 +94,7 @@ export function WorkflowViewer({
   }, [executionState]);
 
   const handleNodeClick: NodeMouseHandler<StateNodeType> = (_evt, node) => {
-    onNodeClick?.(node.data.stateId);
+    onNodeClick?.(node.data.nodeId);
   };
 
   if (error) {
@@ -183,7 +174,7 @@ export function WorkflowViewer({
         fitView={false}
         colorMode="dark"
         defaultEdgeOptions={{
-          type: "transitionEdge",
+          type: "conditionEdge",
           markerEnd: { type: "arrowclosed" as const, color: "#4d7aaa", width: 20, height: 20 },
         }}
       >
@@ -198,9 +189,8 @@ export function WorkflowViewer({
           maskColor="rgba(8,14,30,0.8)"
           nodeColor={(node) => {
             const d = node.data as StateNodeData;
-            if (d?.state?.phase === "learn") return "#3b82f6";
-            if (d?.state?.phase === "act") return "#f59e0b";
-            if (d?.state?.phase === "report") return "#10b981";
+            if (d?.isEntry) return "#3b82f6";
+            if (d?.isTerminal) return "#10b981";
             return "#334155";
           }}
         />

@@ -1,96 +1,86 @@
 import { useState, useMemo } from "react";
-import type { WorkflowPhase, StepDefinition, StepResult } from "@sweny-ai/engine";
-import { validateWorkflow } from "@sweny-ai/engine";
+import type { Node, NodeResult } from "@sweny-ai/core";
+import { validateWorkflow } from "@sweny-ai/core/schema";
+import { getSkillCatalog } from "@sweny-ai/core/studio";
 import { useEditorStore } from "../store/editor-store.js";
-import { BUILTIN_STEP_TYPES, findStepType } from "../lib/step-types.js";
+
+const skillCatalog = getSkillCatalog();
 
 export function PropertiesPanel() {
   const {
-    definition,
+    workflow,
     selection,
     setSelection,
-    updateStep,
+    updateNode,
     updateWorkflowMeta,
-    deleteStep,
-    renameStep,
-    setInitial,
-    addTransition,
-    updateTransitionOutcome,
-    updateTransitionTarget,
-    deleteTransition,
+    deleteNode,
+    renameNode,
+    setEntry,
+    updateEdge,
+    deleteEdge,
     mode,
-    completedSteps,
-    currentStepId,
+    completedNodes,
+    currentNodeId,
   } = useEditorStore();
 
   const readOnly = mode !== "design";
 
-  const stepIds = Object.keys(definition.steps);
+  const nodeIds = Object.keys(workflow.nodes);
   const unreachableIds = useMemo(
     () =>
       new Set(
-        validateWorkflow(definition)
-          .filter((e) => e.code === "UNREACHABLE_STEP" && e.stateId)
-          .map((e) => e.stateId!),
+        validateWorkflow(workflow)
+          .filter((e) => e.code === "UNREACHABLE_NODE" && e.nodeId)
+          .map((e) => e.nodeId!),
       ),
-    [definition],
+    [workflow],
   );
 
-  if (selection?.kind === "step") {
+  if (selection?.kind === "node") {
     const { id } = selection;
-    const step = definition.steps[id];
-    if (!step) return <EmptyPanel />;
-    const execResult = completedSteps[id] as StepResult | undefined;
-    const isRunning = id === currentStepId;
+    const node = workflow.nodes[id];
+    if (!node) return <EmptyPanel />;
+    const execResult = completedNodes[id] as NodeResult | undefined;
+    const isRunning = id === currentNodeId;
     const isUnreachable = unreachableIds.has(id);
     return (
-      <StepPanel
+      <NodePanel
         key={id}
         id={id}
-        step={step}
-        stepIds={stepIds}
-        isInitial={definition.initial === id}
+        node={node}
+        nodeIds={nodeIds}
+        isEntry={workflow.entry === id}
         isUnreachable={isUnreachable}
         readOnly={readOnly}
         execResult={execResult}
         isRunning={isRunning}
-        updateStep={updateStep}
-        renameStep={renameStep}
-        setInitial={setInitial}
-        deleteStep={(sid) => {
-          if (window.confirm(`Delete step "${sid}"?`)) {
-            deleteStep(sid);
+        updateNode={updateNode}
+        renameNode={renameNode}
+        setEntry={setEntry}
+        deleteNode={(nid) => {
+          if (window.confirm(`Delete node "${nid}"?`)) {
+            deleteNode(nid);
           }
         }}
-        addTransition={addTransition}
-        updateTransitionOutcome={updateTransitionOutcome}
-        updateTransitionTarget={updateTransitionTarget}
-        deleteTransition={deleteTransition}
       />
     );
   }
 
   if (selection?.kind === "edge") {
-    const { source, outcome } = selection;
-    const sourceStep = definition.steps[source];
-    let currentTarget = "";
-    if (outcome === "→") {
-      currentTarget = sourceStep?.next ?? "";
-    } else {
-      currentTarget = sourceStep?.on?.[outcome] ?? "";
-    }
+    const { id: edgeId, from, to } = selection;
+    const edge = workflow.edges.find((e) => `${e.from}--${e.to}` === edgeId);
     return (
       <EdgePanel
-        key={`${source}--${outcome}`}
-        source={source}
-        outcome={outcome}
-        currentTarget={currentTarget}
-        stepIds={stepIds}
+        key={edgeId}
+        edgeId={edgeId}
+        from={from}
+        to={to}
+        when={edge?.when ?? ""}
+        nodeIds={nodeIds}
         readOnly={readOnly}
-        updateTransitionOutcome={updateTransitionOutcome}
-        updateTransitionTarget={updateTransitionTarget}
-        deleteTransition={(src, out) => {
-          deleteTransition(src, out);
+        updateEdge={updateEdge}
+        deleteEdge={(eid) => {
+          deleteEdge(eid);
           setSelection(null);
         }}
       />
@@ -98,23 +88,19 @@ export function PropertiesPanel() {
   }
 
   // Nothing selected — workflow meta
-  return <WorkflowMetaPanel definition={definition} updateWorkflowMeta={updateWorkflowMeta} readOnly={readOnly} />;
+  return <WorkflowMetaPanel />;
 }
 
 // ─────────────────────────────────────────────
 // Workflow meta panel
 // ─────────────────────────────────────────────
 
-interface WorkflowMetaPanelProps {
-  definition: ReturnType<typeof useEditorStore.getState>["definition"];
-  updateWorkflowMeta: ReturnType<typeof useEditorStore.getState>["updateWorkflowMeta"];
-  readOnly: boolean;
-}
-
-function WorkflowMetaPanel({ definition, updateWorkflowMeta, readOnly }: WorkflowMetaPanelProps) {
-  const [name, setName] = useState(definition.name ?? "");
-  const [description, setDescription] = useState(definition.description ?? "");
-  const [version, setVersion] = useState(definition.version ?? "");
+function WorkflowMetaPanel() {
+  const { workflow, updateWorkflowMeta, setEntry, mode } = useEditorStore();
+  const readOnly = mode !== "design";
+  const [name, setName] = useState(workflow.name ?? "");
+  const [description, setDescription] = useState(workflow.description ?? "");
+  const nodeIds = Object.keys(workflow.nodes);
 
   return (
     <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
@@ -122,7 +108,7 @@ function WorkflowMetaPanel({ definition, updateWorkflowMeta, readOnly }: Workflo
 
       <div className="mb-3">
         <label className="block text-xs font-medium text-gray-600 mb-1">ID</label>
-        <code className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded block">{definition.id}</code>
+        <code className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded block">{workflow.id}</code>
       </div>
 
       <div className="mb-3">
@@ -149,19 +135,19 @@ function WorkflowMetaPanel({ definition, updateWorkflowMeta, readOnly }: Workflo
       </div>
 
       <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Version</label>
-        <input
+        <label className="block text-xs font-medium text-gray-600 mb-1">Entry node</label>
+        <select
           className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
-          value={version}
-          onChange={(e) => setVersion(e.target.value)}
-          onBlur={() => updateWorkflowMeta({ version })}
+          value={workflow.entry}
+          onChange={(e) => setEntry(e.target.value)}
           disabled={readOnly}
-        />
-      </div>
-
-      <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Initial step</label>
-        <code className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded block">{definition.initial}</code>
+        >
+          {nodeIds.map((id) => (
+            <option key={id} value={id}>
+              {id}
+            </option>
+          ))}
+        </select>
       </div>
 
       <p className="text-xs text-gray-400 mt-4">
@@ -172,76 +158,55 @@ function WorkflowMetaPanel({ definition, updateWorkflowMeta, readOnly }: Workflo
 }
 
 // ─────────────────────────────────────────────
-// Step panel
+// Node panel
 // ─────────────────────────────────────────────
 
-interface StepPanelProps {
+interface NodePanelProps {
   id: string;
-  step: StepDefinition;
-  stepIds: string[];
-  isInitial: boolean;
+  node: Node;
+  nodeIds: string[];
+  isEntry: boolean;
   isUnreachable: boolean;
   readOnly: boolean;
-  execResult?: StepResult;
+  execResult?: NodeResult;
   isRunning: boolean;
-  updateStep: (id: string, patch: Partial<StepDefinition>) => void;
-  renameStep: (oldId: string, newId: string) => string | null;
-  setInitial: (id: string) => void;
-  deleteStep: (id: string) => void;
-  addTransition: (sourceId: string, outcome: string, targetId: string) => void;
-  updateTransitionOutcome: (sourceId: string, oldOutcome: string, newOutcome: string) => void;
-  updateTransitionTarget: (sourceId: string, outcome: string, newTarget: string) => void;
-  deleteTransition: (sourceId: string, outcome: string) => void;
+  updateNode: (id: string, patch: Partial<Node>) => void;
+  renameNode: (oldId: string, newId: string) => string | null;
+  setEntry: (id: string) => void;
+  deleteNode: (id: string) => void;
 }
 
-function StepPanel({
+function NodePanel({
   id,
-  step,
-  stepIds,
-  isInitial,
+  node,
+  nodeIds,
+  isEntry,
   isUnreachable,
   readOnly,
   execResult,
   isRunning,
-  updateStep,
-  renameStep,
-  setInitial,
-  deleteStep,
-  addTransition,
-  updateTransitionOutcome,
-  updateTransitionTarget,
-  deleteTransition,
-}: StepPanelProps) {
-  const [newOutcome, setNewOutcome] = useState("");
-  const [newTarget, setNewTarget] = useState(stepIds[0] ?? "");
-  const [description, setDescription] = useState(step.description ?? "");
+  updateNode,
+  renameNode,
+  setEntry,
+  deleteNode,
+}: NodePanelProps) {
   const [editId, setEditId] = useState(id);
   const [idError, setIdError] = useState<string | null>(null);
-
-  const typeEntry = step.type ? findStepType(step.type) : undefined;
-
-  const targetOptions = [...stepIds, "end"];
-  const onEntries = Object.entries(step.on ?? {});
-
-  function handleAddTransition(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newOutcome.trim() || !newTarget) return;
-    addTransition(id, newOutcome.trim(), newTarget);
-    setNewOutcome("");
-  }
+  const [name, setNodeName] = useState(node.name);
+  const [instruction, setInstruction] = useState(node.instruction);
 
   return (
     <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
-      <h2 className="font-semibold text-gray-800 mb-3 text-sm">Step</h2>
+      <h2 className="font-semibold text-gray-800 mb-3 text-sm">Node</h2>
 
-      {/* Unreachable warning — shown in design mode */}
+      {/* Unreachable warning */}
       {isUnreachable && !readOnly && (
         <div className="bg-orange-50 border border-orange-200 rounded p-2 text-xs text-orange-700 mb-2">
-          ⚠ This step is unreachable from the initial step. Add a transition pointing to it.
+          This node is unreachable from the entry node. Add an edge pointing to it.
         </div>
       )}
 
-      {/* Execution result card — shown in simulate/live mode */}
+      {/* Execution result card */}
       {readOnly && <ExecutionResultCard result={execResult} isRunning={isRunning} />}
 
       <div className="mb-3">
@@ -257,7 +222,7 @@ function StepPanel({
           onBlur={() => {
             const trimmed = editId.trim();
             if (trimmed === id) return;
-            const err = renameStep(id, trimmed);
+            const err = renameNode(id, trimmed);
             if (err) {
               setIdError(err);
               setEditId(id);
@@ -270,228 +235,74 @@ function StepPanel({
       </div>
 
       <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Step type</label>
-        <select
-          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
-          value={step.type ?? ""}
-          disabled={readOnly}
-          onChange={(e) => {
-            const selected = e.target.value;
-            if (!selected) {
-              updateStep(id, { type: undefined });
-            } else {
-              const entry = findStepType(selected);
-              updateStep(id, {
-                type: selected,
-                ...(entry && entry.type !== "custom" ? { phase: entry.phase } : {}),
-              });
-            }
-          }}
-        >
-          <option value="">— none (custom) —</option>
-          {BUILTIN_STEP_TYPES.filter((e) => e.type !== "custom").map((entry) => (
-            <option key={entry.type} value={entry.type}>
-              {entry.label}
-            </option>
-          ))}
-        </select>
-        {typeEntry && (
-          <>
-            <p className="text-xs text-gray-400 mt-1">{typeEntry.description}</p>
-            {typeEntry.uses && typeEntry.uses.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {typeEntry.uses.map((role) => (
-                  <span key={role} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
-                    {role}
-                  </span>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Phase</label>
-        <select
-          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
-          value={step.phase}
-          disabled={readOnly}
-          onChange={(e) => updateStep(id, { phase: e.target.value as WorkflowPhase })}
-        >
-          <option value="learn">learn</option>
-          <option value="act">act</option>
-          <option value="report">report</option>
-        </select>
-      </div>
-
-      <div className="mb-3">
-        <label className={`flex items-center gap-2 text-xs font-medium text-gray-600 ${readOnly ? "opacity-60" : ""}`}>
-          <input
-            type="checkbox"
-            checked={step.critical ?? false}
-            disabled={readOnly}
-            onChange={(e) => updateStep(id, { critical: e.target.checked })}
-          />
-          Critical
-        </label>
-      </div>
-
-      <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
         <input
           className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
-          value={description}
+          value={name}
           disabled={readOnly}
-          onChange={(e) => setDescription(e.target.value)}
-          onBlur={() => updateStep(id, { description })}
+          onChange={(e) => setNodeName(e.target.value)}
+          onBlur={() => updateNode(id, { name })}
         />
       </div>
 
       <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Next (default)</label>
-        <select
-          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
-          value={step.next ?? ""}
+        <label className="block text-xs font-medium text-gray-600 mb-1">Instruction</label>
+        <textarea
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm resize-none font-mono ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
+          rows={6}
+          value={instruction}
           disabled={readOnly}
-          onChange={(e) => {
-            const val = e.target.value;
-            updateStep(id, { next: val === "" ? undefined : val });
-          }}
-        >
-          <option value="">(none)</option>
-          {targetOptions.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+          onChange={(e) => setInstruction(e.target.value)}
+          onBlur={() => updateNode(id, { instruction })}
+          placeholder="What should Claude do at this node?"
+        />
       </div>
 
+      {/* Skills toggle list */}
       <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-2">Transitions (on)</label>
-        {onEntries.length === 0 && <p className="text-xs text-gray-400">No transitions.</p>}
-        {onEntries.map(([outcome, target]) => (
-          <TransitionRow
-            key={outcome}
-            sourceId={id}
-            outcome={outcome}
-            target={target}
-            targetOptions={targetOptions}
-            readOnly={readOnly}
-            updateTransitionOutcome={updateTransitionOutcome}
-            updateTransitionTarget={updateTransitionTarget}
-            deleteTransition={deleteTransition}
-          />
-        ))}
-
-        {/* Add transition row — hidden in read-only mode */}
-        {!readOnly && (
-          <form onSubmit={handleAddTransition} className="flex gap-1 mt-2">
-            <input
-              value={newOutcome}
-              onChange={(e) => setNewOutcome(e.target.value)}
-              placeholder="outcome"
-              className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs min-w-0"
-            />
-            <select
-              value={newTarget}
-              onChange={(e) => setNewTarget(e.target.value)}
-              className="border border-gray-300 rounded px-1 py-1 text-xs"
-            >
-              {targetOptions.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-            <button type="submit" className="px-2 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-500">
-              Add
-            </button>
-          </form>
-        )}
+        <label className="block text-xs font-medium text-gray-600 mb-2">Skills</label>
+        <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
+          {skillCatalog.map((skill) => {
+            const active = node.skills.includes(skill.id);
+            return (
+              <label
+                key={skill.id}
+                className={`flex items-center gap-2 text-xs p-1.5 rounded ${active ? "bg-blue-50" : "hover:bg-gray-50"} ${readOnly ? "opacity-60" : "cursor-pointer"}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={active}
+                  disabled={readOnly}
+                  onChange={() => {
+                    const newSkills = active ? node.skills.filter((s) => s !== skill.id) : [...node.skills, skill.id];
+                    updateNode(id, { skills: newSkills });
+                  }}
+                />
+                <span className="font-medium text-gray-700">{skill.name}</span>
+                <span className="text-gray-400 ml-auto">{skill.tools.length} tools</span>
+              </label>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Danger zone — hidden in read-only mode */}
+      {/* Actions */}
       {!readOnly && (
         <div className="mt-4 pt-4 border-t border-gray-200 flex flex-col gap-2">
           <button
-            onClick={() => setInitial(id)}
-            disabled={isInitial}
+            onClick={() => setEntry(id)}
+            disabled={isEntry}
             className="px-3 py-1 rounded text-xs bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {isInitial ? "Initial step" : "Set as initial"}
+            {isEntry ? "Entry node" : "Set as entry"}
           </button>
           <button
-            onClick={() => deleteStep(id)}
+            onClick={() => deleteNode(id)}
             className="px-3 py-1 rounded text-xs bg-red-600 text-white hover:bg-red-500"
           >
-            Delete step
+            Delete node
           </button>
         </div>
-      )}
-    </div>
-  );
-}
-
-interface TransitionRowProps {
-  sourceId: string;
-  outcome: string;
-  target: string;
-  targetOptions: string[];
-  readOnly: boolean;
-  updateTransitionOutcome: (sourceId: string, oldOutcome: string, newOutcome: string) => void;
-  updateTransitionTarget: (sourceId: string, outcome: string, newTarget: string) => void;
-  deleteTransition: (sourceId: string, outcome: string) => void;
-}
-
-function TransitionRow({
-  sourceId,
-  outcome,
-  target,
-  targetOptions,
-  readOnly,
-  updateTransitionOutcome,
-  updateTransitionTarget,
-  deleteTransition,
-}: TransitionRowProps) {
-  const [editOutcome, setEditOutcome] = useState(outcome);
-
-  return (
-    <div className="flex items-center gap-1 mb-1">
-      <input
-        className={`flex-1 border border-gray-300 rounded px-1 py-0.5 text-xs min-w-0 ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
-        value={editOutcome}
-        disabled={readOnly}
-        onChange={(e) => setEditOutcome(e.target.value)}
-        onBlur={() => {
-          const trimmed = editOutcome.trim();
-          if (trimmed && trimmed !== outcome) {
-            updateTransitionOutcome(sourceId, outcome, trimmed);
-          }
-        }}
-      />
-      <span className="text-gray-400 text-xs">→</span>
-      <select
-        className={`border border-gray-300 rounded px-1 py-0.5 text-xs ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
-        value={target}
-        disabled={readOnly}
-        onChange={(e) => updateTransitionTarget(sourceId, outcome, e.target.value)}
-      >
-        {targetOptions.map((s) => (
-          <option key={s} value={s}>
-            {s}
-          </option>
-        ))}
-      </select>
-      {!readOnly && (
-        <button
-          onClick={() => deleteTransition(sourceId, outcome)}
-          className="text-red-500 hover:text-red-700 text-xs px-1"
-          title="Delete transition"
-        >
-          ×
-        </button>
       )}
     </div>
   );
@@ -502,7 +313,7 @@ function TransitionRow({
 // ─────────────────────────────────────────────
 
 interface ExecutionResultCardProps {
-  result?: StepResult;
+  result?: NodeResult;
   isRunning: boolean;
 }
 
@@ -512,7 +323,7 @@ function ExecutionResultCard({ result, isRunning }: ExecutionResultCardProps) {
   if (isRunning) {
     return (
       <div className="mb-3 p-2 rounded bg-blue-50 border border-blue-200 text-xs animate-pulse">
-        <span className="text-blue-600 font-medium">● running…</span>
+        <span className="text-blue-600 font-medium">running...</span>
       </div>
     );
   }
@@ -528,31 +339,27 @@ function ExecutionResultCard({ result, isRunning }: ExecutionResultCardProps) {
         ? "text-red-700 bg-red-50 border-red-200"
         : "text-gray-600 bg-gray-50 border-gray-200";
 
-  const icon = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "⊘";
-  const dataOutcome = result.data?.outcome != null ? String(result.data.outcome) : null;
-  const extraKeys = Object.keys(result.data ?? {}).filter((k) => k !== "outcome");
-  const hasExtraData = extraKeys.length > 0;
-  const extraJson = hasExtraData ? JSON.stringify(result.data, null, 2) : null;
+  const icon = result.status === "success" ? "ok" : result.status === "failed" ? "fail" : "skip";
+  const hasData = Object.keys(result.data ?? {}).length > 0;
+  const dataJson = hasData ? JSON.stringify(result.data, null, 2) : null;
 
   return (
     <div className={`mb-3 p-2 rounded border text-xs ${statusColor}`}>
       <div className="flex items-center gap-1.5 font-medium">
         <span>{icon}</span>
         <span>{result.status}</span>
-        {result.cached && <span className="px-1 rounded bg-yellow-100 text-yellow-700 text-[10px]">cached</span>}
-        {dataOutcome && (
-          <span className="px-1 rounded bg-white/60 text-[10px] border border-current/20">{dataOutcome}</span>
-        )}
       </div>
-      {result.reason && <p className="mt-1 text-[11px] opacity-80">{result.reason}</p>}
-      {hasExtraData && (
+      {result.toolCalls.length > 0 && (
+        <p className="mt-1 text-[10px] opacity-80">{result.toolCalls.length} tool calls</p>
+      )}
+      {hasData && (
         <div className="mt-1">
           <button onClick={() => setExpanded((v) => !v)} className="text-[10px] underline opacity-70 hover:opacity-100">
-            {expanded ? "▾ Hide data" : "▸ Show data"}
+            {expanded ? "Hide data" : "Show data"}
           </button>
           {expanded && (
             <pre className="mt-1 text-[10px] bg-white/60 rounded p-1 overflow-auto max-h-32 whitespace-pre-wrap">
-              {extraJson!.length > 800 ? extraJson!.slice(0, 800) + "…" : extraJson}
+              {dataJson!.length > 800 ? dataJson!.slice(0, 800) + "..." : dataJson}
             </pre>
           )}
         </div>
@@ -566,77 +373,65 @@ function ExecutionResultCard({ result, isRunning }: ExecutionResultCardProps) {
 // ─────────────────────────────────────────────
 
 interface EdgePanelProps {
-  source: string;
-  outcome: string;
-  currentTarget: string;
-  stepIds: string[];
+  edgeId: string;
+  from: string;
+  to: string;
+  when: string;
+  nodeIds: string[];
   readOnly: boolean;
-  updateTransitionOutcome: (sourceId: string, oldOutcome: string, newOutcome: string) => void;
-  updateTransitionTarget: (sourceId: string, outcome: string, newTarget: string) => void;
-  deleteTransition: (sourceId: string, outcome: string) => void;
+  updateEdge: (edgeId: string, patch: { when?: string; to?: string }) => void;
+  deleteEdge: (edgeId: string) => void;
 }
 
-function EdgePanel({
-  source,
-  outcome,
-  currentTarget,
-  stepIds,
-  readOnly,
-  updateTransitionOutcome,
-  updateTransitionTarget,
-  deleteTransition,
-}: EdgePanelProps) {
-  const [editOutcome, setEditOutcome] = useState(outcome);
-  const targetOptions = [...stepIds, "end"];
+function EdgePanel({ edgeId, from, to, when, nodeIds, readOnly, updateEdge, deleteEdge }: EdgePanelProps) {
+  const [editWhen, setEditWhen] = useState(when);
 
   return (
     <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
-      <h2 className="font-semibold text-gray-800 mb-3 text-sm">Transition</h2>
+      <h2 className="font-semibold text-gray-800 mb-3 text-sm">Edge</h2>
 
       <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Source</label>
-        <code className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded block">{source}</code>
+        <label className="block text-xs font-medium text-gray-600 mb-1">From</label>
+        <code className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded block">{from}</code>
       </div>
 
       <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Outcome</label>
-        <input
-          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
-          value={editOutcome}
-          onChange={(e) => setEditOutcome(e.target.value)}
-          onBlur={() => {
-            const trimmed = editOutcome.trim();
-            if (trimmed && trimmed !== outcome) {
-              updateTransitionOutcome(source, outcome, trimmed);
-            }
-          }}
-          disabled={readOnly}
-        />
-      </div>
-
-      <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Target</label>
+        <label className="block text-xs font-medium text-gray-600 mb-1">To</label>
         <select
           className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
-          value={currentTarget}
-          onChange={(e) => updateTransitionTarget(source, outcome, e.target.value)}
+          value={to}
+          onChange={(e) => updateEdge(edgeId, { to: e.target.value })}
           disabled={readOnly}
         >
-          {targetOptions.map((s) => (
-            <option key={s} value={s}>
-              {s}
+          {nodeIds.map((id) => (
+            <option key={id} value={id}>
+              {id}
             </option>
           ))}
         </select>
       </div>
 
+      <div className="mb-3">
+        <label className="block text-xs font-medium text-gray-600 mb-1">Condition (when)</label>
+        <textarea
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm resize-none ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
+          rows={3}
+          value={editWhen}
+          onChange={(e) => setEditWhen(e.target.value)}
+          onBlur={() => updateEdge(edgeId, { when: editWhen })}
+          disabled={readOnly}
+          placeholder="Leave empty for unconditional edge"
+        />
+        <p className="text-xs text-gray-400 mt-1">Natural language condition — Claude evaluates at runtime</p>
+      </div>
+
       {!readOnly && (
         <div className="mt-4 pt-4 border-t border-gray-200">
           <button
-            onClick={() => deleteTransition(source, outcome)}
+            onClick={() => deleteEdge(edgeId)}
             className="w-full px-3 py-1 rounded text-xs bg-red-600 text-white hover:bg-red-500"
           >
-            Delete transition
+            Delete edge
           </button>
         </div>
       )}
@@ -651,7 +446,7 @@ function EdgePanel({
 function EmptyPanel() {
   return (
     <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
-      <p className="text-xs text-gray-400">Step not found.</p>
+      <p className="text-xs text-gray-400">Node not found.</p>
     </div>
   );
 }
