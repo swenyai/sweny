@@ -50,5 +50,27 @@
   },
   "devDependencies": {
     "vitest": "^3.2.1"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://sweny.ai",
+  "bugs": {
+    "url": "https://github.com/swenyai/sweny/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/swenyai/sweny.git",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "workflow",
+    "dag",
+    "skills",
+    "claude",
+    "ai",
+    "automation",
+    "devops",
+    "sweny"
+  ]
 }

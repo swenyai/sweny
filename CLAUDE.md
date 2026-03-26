@@ -7,11 +7,12 @@ This project uses [Changesets](https://github.com/changesets/changesets) for aut
 **Any time you modify source files in a published package, you MUST create a changeset file before committing.**
 
 Published packages:
-- `packages/engine` → `@sweny-ai/engine`
+- `packages/core` → `@sweny-ai/core` (v3 — skills + DAG executor)
 - `packages/studio` → `@sweny-ai/studio`
 - `packages/cli` → `@sweny-ai/cli`
-- `packages/providers` → `@sweny-ai/providers`
-- `packages/agent` → `@sweny-ai/agent`
+- `packages/engine` → `@sweny-ai/engine` (deprecated — use `@sweny-ai/core`)
+- `packages/providers` → `@sweny-ai/providers` (deprecated — use `@sweny-ai/core` skills)
+- `packages/agent` → `@sweny-ai/agent` (deprecated — migrating to `@sweny-ai/core`)
 
 ### How to create a changeset
 
@@ -51,11 +52,12 @@ You may omit a changeset for:
 
 | Package | Dir | Published |
 |---------|-----|-----------|
-| `@sweny-ai/engine` | `packages/engine` | yes |
+| `@sweny-ai/core` | `packages/core` | yes |
 | `@sweny-ai/studio` | `packages/studio` | yes |
 | `@sweny-ai/cli` | `packages/cli` | yes |
-| `@sweny-ai/providers` | `packages/providers` | yes |
-| `@sweny-ai/agent` | `packages/agent` | yes |
+| `@sweny-ai/engine` | `packages/engine` | yes (deprecated) |
+| `@sweny-ai/providers` | `packages/providers` | yes (deprecated) |
+| `@sweny-ai/agent` | `packages/agent` | yes (deprecated) |
 | `@sweny-ai/action` | `packages/action` | no (private) |
 | `@sweny-ai/web` | `packages/web` | no (private) |
 
