@@ -51,5 +51,6 @@ export type { WorkflowError } from "./schema.js";
 export { workflowToFlow, flowToWorkflow, applyExecutionEvent, exportAsTypescript, getSkillCatalog } from "./studio.js";
 export type { FlowNode, SkillNodeData, FlowEdge } from "./studio.js";
 
-// Testing utilities
-export { MockClaude, createFileSkill } from "./testing.js";
+// Testing utilities — NOT included in browser entry.
+// MockClaude and createFileSkill depend on node:fs.
+// Import from "@sweny-ai/core/testing" in Node environments.

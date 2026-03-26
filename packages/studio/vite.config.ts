@@ -8,9 +8,6 @@ const __dirname = dirname(__filename);
 
 export default defineConfig({
   plugins: [react()],
-  optimizeDeps: {
-    include: ["elkjs/lib/elk.bundled.js"],
-  },
   resolve: {
     alias: {
       // In the browser, redirect "elkjs" to the bundled (no-worker) version

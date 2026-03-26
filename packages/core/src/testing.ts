@@ -164,9 +164,11 @@ export class MockClaude implements Claude {
 }
 
 // ─── File-based Skill ────────────────────────────────────────────
+//
+// node:fs and node:path are imported lazily inside createFileSkill()
+// so that MockClaude can be imported in browser environments without
+// triggering "Module node:fs has been externalized" errors.
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import * as path from "node:path";
 import type { Skill } from "./types.js";
 
 /**
@@ -177,7 +179,20 @@ import type { Skill } from "./types.js";
  * local JSON/markdown files.
  */
 export function createFileSkill(outputDir: string): Skill {
-  const resolved = path.resolve(outputDir);
+  // Lazy-loaded — only resolved when a handler actually runs (Node-only)
+  let _fs: typeof import("node:fs") | null = null;
+  let _path: typeof import("node:path") | null = null;
+  let _resolved: string | null = null;
+
+  async function getFs() {
+    if (!_fs) _fs = await import("node:fs");
+    return _fs;
+  }
+  async function getResolved() {
+    if (!_path) _path = await import("node:path");
+    if (!_resolved) _resolved = _path.resolve(outputDir);
+    return { path: _path, resolved: _resolved };
+  }
 
   return {
     id: "filesystem",
@@ -196,8 +211,10 @@ export function createFileSkill(outputDir: string): Skill {
           required: ["path"],
         },
         handler: async (input: { path: string }) => {
-          const filePath = path.isAbsolute(input.path) ? input.path : path.join(resolved, input.path);
-          const raw = readFileSync(filePath, "utf-8");
+          const fs = await getFs();
+          const { path: p, resolved } = await getResolved();
+          const filePath = p.isAbsolute(input.path) ? input.path : p.join(resolved, input.path);
+          const raw = fs.readFileSync(filePath, "utf-8");
           return JSON.parse(raw);
         },
       },
@@ -212,8 +229,10 @@ export function createFileSkill(outputDir: string): Skill {
           required: ["path"],
         },
         handler: async (input: { path: string }) => {
-          const filePath = path.isAbsolute(input.path) ? input.path : path.join(resolved, input.path);
-          return readFileSync(filePath, "utf-8");
+          const fs = await getFs();
+          const { path: p, resolved } = await getResolved();
+          const filePath = p.isAbsolute(input.path) ? input.path : p.join(resolved, input.path);
+          return fs.readFileSync(filePath, "utf-8");
         },
       },
       {
@@ -228,9 +247,11 @@ export function createFileSkill(outputDir: string): Skill {
           required: ["path", "data"],
         },
         handler: async (input: { path: string; data: Record<string, unknown> }) => {
-          const filePath = path.join(resolved, input.path);
-          mkdirSync(path.dirname(filePath), { recursive: true });
-          writeFileSync(filePath, JSON.stringify(input.data, null, 2), "utf-8");
+          const fs = await getFs();
+          const { path: p, resolved } = await getResolved();
+          const filePath = p.join(resolved, input.path);
+          fs.mkdirSync(p.dirname(filePath), { recursive: true });
+          fs.writeFileSync(filePath, JSON.stringify(input.data, null, 2), "utf-8");
           return { written: filePath };
         },
       },
@@ -246,9 +267,11 @@ export function createFileSkill(outputDir: string): Skill {
           required: ["path", "content"],
         },
         handler: async (input: { path: string; content: string }) => {
-          const filePath = path.join(resolved, input.path);
-          mkdirSync(path.dirname(filePath), { recursive: true });
-          writeFileSync(filePath, input.content, "utf-8");
+          const fs = await getFs();
+          const { path: p, resolved } = await getResolved();
+          const filePath = p.join(resolved, input.path);
+          fs.mkdirSync(p.dirname(filePath), { recursive: true });
+          fs.writeFileSync(filePath, input.content, "utf-8");
           return { written: filePath };
         },
       },
@@ -262,10 +285,11 @@ export function createFileSkill(outputDir: string): Skill {
           },
         },
         handler: async (input: { path?: string }) => {
-          const { readdirSync } = await import("node:fs");
-          const dirPath = input.path ? path.join(resolved, input.path) : resolved;
+          const fs = await getFs();
+          const { path: p, resolved } = await getResolved();
+          const dirPath = input.path ? p.join(resolved, input.path) : resolved;
           try {
-            return readdirSync(dirPath);
+            return fs.readdirSync(dirPath);
           } catch (err: any) {
             return { error: `Failed to list directory: ${err.message}`, files: [] };
           }
