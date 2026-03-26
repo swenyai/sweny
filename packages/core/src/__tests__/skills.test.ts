@@ -11,7 +11,7 @@ import { notification } from "../skills/notification.js";
 
 const mockCtx = (config: Record<string, string> = {}): ToolContext => ({
   config,
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 });
 
 let fetchMock: ReturnType<typeof vi.fn>;

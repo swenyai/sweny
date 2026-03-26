@@ -9,10 +9,10 @@ const __dirname = dirname(__filename);
 /**
  * Library build configuration.
  * Produces two entry points:
- *   dist/lib/viewer.js  — read-only RecipeViewer component (minimal surface)
- *   dist/lib/editor.js  — full editor store + StandaloneViewer (for dashboards)
+ *   dist-lib/viewer.js  — read-only WorkflowViewer component
+ *   dist-lib/editor.js  — full editor store + StandaloneViewer
  *
- * React, react-dom, and @sweny-ai/engine are externals (peer dependencies).
+ * React, react-dom, and @sweny-ai/core are externals (peer dependencies).
  * @xyflow/react, elkjs, zustand, immer, and zundo are bundled.
  */
 export default defineConfig({
@@ -20,7 +20,11 @@ export default defineConfig({
   resolve: {
     alias: {
       elkjs: resolve(__dirname, "../../node_modules/elkjs/lib/elk.bundled.js"),
-      "@sweny-ai/engine": resolve(__dirname, "../../packages/engine/dist/browser.js"),
+      "@sweny-ai/core/studio": resolve(__dirname, "../../packages/core/dist/studio.js"),
+      "@sweny-ai/core/schema": resolve(__dirname, "../../packages/core/dist/schema.js"),
+      "@sweny-ai/core/workflows": resolve(__dirname, "../../packages/core/dist/workflows/index.js"),
+      "@sweny-ai/core/testing": resolve(__dirname, "../../packages/core/dist/testing.js"),
+      "@sweny-ai/core": resolve(__dirname, "../../packages/core/dist/browser.js"),
     },
   },
   build: {
@@ -35,9 +39,17 @@ export default defineConfig({
       formats: ["es"],
     },
     rollupOptions: {
-      external: ["react", "react-dom", "react/jsx-runtime", "@sweny-ai/engine"],
+      external: [
+        "react",
+        "react-dom",
+        "react/jsx-runtime",
+        "@sweny-ai/core",
+        "@sweny-ai/core/studio",
+        "@sweny-ai/core/schema",
+        "@sweny-ai/core/workflows",
+        "@sweny-ai/core/testing",
+      ],
       output: {
-        // Preserve CSS in a single file for consumers to import
         assetFileNames: "style.css",
       },
     },

@@ -6,6 +6,8 @@
   "license": "MIT",
   "exports": {
     ".": "./dist/index.js",
+    "./browser": "./dist/browser.js",
+    "./studio": "./dist/studio.js",
     "./skills": "./dist/skills/index.js",
     "./workflows": "./dist/workflows/index.js",
     "./testing": "./dist/testing.js",
@@ -13,6 +15,12 @@
   },
   "typesVersions": {
     "*": {
+      "browser": [
+        "dist/browser.d.ts"
+      ],
+      "studio": [
+        "dist/studio.d.ts"
+      ],
       "skills": [
         "dist/skills/index.d.ts"
       ],

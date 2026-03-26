@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
@@ -11,139 +11,133 @@ import {
 import "@xyflow/react/dist/style.css";
 import { StateNode, type StateNodeType, type StateNodeData, type NodeExecStatus } from "./components/StateNode.js";
 import { TransitionEdge, type TransitionEdgeData } from "./components/TransitionEdge.js";
-import { layoutDefinition } from "./layout/elk.js";
+import { layoutWorkflow } from "./layout/elk.js";
 import { useEditorStore } from "./store/editor-store.js";
-import { validateWorkflow } from "@sweny-ai/engine";
-import type { WorkflowDefinition, StepResult } from "@sweny-ai/engine";
+import { validateWorkflow } from "@sweny-ai/core/schema";
+import type { NodeResult } from "@sweny-ai/core";
 import type { StudioMode } from "./store/editor-store.js";
 
-const nodeTypes = { stateNode: StateNode };
-const edgeTypes = { transitionEdge: TransitionEdge };
+const nodeTypes = { skillNode: StateNode };
+const edgeTypes = { conditionEdge: TransitionEdge };
 
-function getUnreachableStepIds(errors: ReturnType<typeof validateWorkflow>): Set<string> {
-  return new Set(errors.filter((e) => e.code === "UNREACHABLE_STEP" && e.stateId).map((e) => e.stateId!));
+function getUnreachableNodeIds(errors: ReturnType<typeof validateWorkflow>): Set<string> {
+  return new Set(errors.filter((e) => e.code === "UNREACHABLE_NODE" && e.nodeId).map((e) => e.nodeId!));
 }
 
 function annotateEdgesWithErrors(
   edges: Edge<TransitionEdgeData>[],
-  definition: WorkflowDefinition,
   errors: ReturnType<typeof validateWorkflow>,
 ): Edge<TransitionEdgeData>[] {
   const unknownTargets = new Set(
-    errors
-      .filter((e) => e.code === "UNKNOWN_TARGET" && e.stateId && e.targetId)
-      .map((e) => `${e.stateId}::${e.targetId}`),
+    errors.filter((e) => e.code === "UNKNOWN_EDGE_TARGET" && e.nodeId).map((e) => e.nodeId!),
+  );
+  const unknownSources = new Set(
+    errors.filter((e) => e.code === "UNKNOWN_EDGE_SOURCE" && e.nodeId).map((e) => e.nodeId!),
   );
   return edges.map((edge) => {
-    const sourceStep = definition.steps[edge.source];
-    const target = edge.data?.label === "→" ? sourceStep?.next : sourceStep?.on?.[edge.data?.label ?? ""];
-    const isError = !!target && unknownTargets.has(`${edge.source}::${target}`);
-    return { ...edge, data: { ...(edge.data ?? { label: "" }), isError } };
+    const isError = unknownTargets.has(edge.target) || unknownSources.has(edge.source);
+    return { ...edge, data: { ...(edge.data ?? { isConditional: false }), isError } };
   });
 }
 
 function nodeColor(node: RFNode): string {
   const data = node.data as StateNodeData;
-  // Execution status takes priority over phase color in simulate/live modes
-  if (data?.execStatus === "current") return "#93c5fd"; // blue-300
-  if (data?.execStatus === "success") return "#86efac"; // green-300
-  if (data?.execStatus === "failed") return "#fca5a5"; // red-300
-  if (data?.execStatus === "skipped") return "#d1d5db"; // gray-300
-  if (data?.state?.phase === "learn") return "#bfdbfe";
-  if (data?.state?.phase === "act") return "#fde68a";
-  if (data?.state?.phase === "report") return "#bbf7d0";
+  if (data?.execStatus === "current") return "#93c5fd";
+  if (data?.execStatus === "success") return "#86efac";
+  if (data?.execStatus === "failed") return "#fca5a5";
+  if (data?.execStatus === "skipped") return "#d1d5db";
+  if (data?.isEntry) return "#bfdbfe";
   return "#e5e7eb";
 }
 
 function getNodeExecStatus(
   nodeId: string,
-  currentStepId: string | null,
-  completedSteps: Record<string, StepResult>,
+  currentNodeId: string | null,
+  completedNodes: Record<string, NodeResult>,
   mode: StudioMode,
 ): NodeExecStatus {
   if (mode === "design") return "pending";
-  if (nodeId === currentStepId) return "current";
-  const result = completedSteps[nodeId];
+  if (nodeId === currentNodeId) return "current";
+  const result = completedNodes[nodeId];
   if (!result) return "pending";
-  return result.status; // "success" | "failed" | "skipped"
+  return result.status;
 }
 
 export function WorkflowViewer() {
   const {
-    definition,
+    workflow,
     selection,
     setSelection,
-    addTransition,
+    addEdge: storeAddEdge,
     isLayoutStale,
     markLayoutFresh,
-    currentStepId,
-    completedSteps,
+    currentNodeId,
+    completedNodes,
     mode,
   } = useEditorStore();
-  // Validate once per definition change — shared by all effects below
-  const validationErrors = useMemo(() => validateWorkflow(definition), [definition]);
-  const unreachableIds = useMemo(() => getUnreachableStepIds(validationErrors), [validationErrors]);
+
+  const validationErrors = useMemo(() => validateWorkflow(workflow), [workflow]);
+  const unreachableIds = useMemo(() => getUnreachableNodeIds(validationErrors), [validationErrors]);
 
   const [nodes, setNodes] = useState<StateNodeType[]>([]);
   const [edges, setEdges] = useState<Edge<TransitionEdgeData>[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const initialLayoutDone = useRef(false);
+  const [initialLayoutDone, setInitialLayoutDone] = useState(false);
 
-  // Re-layout whenever definition changes structurally
+  // Re-layout whenever workflow changes structurally
   useEffect(() => {
-    if (!isLayoutStale && initialLayoutDone.current) return; // skip if layout is fresh
+    if (!isLayoutStale && initialLayoutDone) return;
     setError(null);
-    layoutDefinition(definition)
+    layoutWorkflow(workflow)
       .then(({ nodes: n, edges: e }) => {
         setNodes(
           n.map((node) => ({
             ...node,
-            selected: selection?.kind === "step" && selection.id === node.id,
+            selected: selection?.kind === "node" && selection.id === node.id,
             data: {
               ...node.data,
-              execStatus: getNodeExecStatus(node.id, currentStepId, completedSteps, mode),
+              execStatus: getNodeExecStatus(node.id, currentNodeId, completedNodes, mode),
               isUnreachable: unreachableIds.has(node.id),
             },
           })),
         );
-        setEdges(annotateEdgesWithErrors(e, definition, validationErrors));
+        setEdges(annotateEdgesWithErrors(e, validationErrors));
         markLayoutFresh();
-        initialLayoutDone.current = true;
+        setInitialLayoutDone(true);
       })
       .catch((err: unknown) => {
         setError(`Layout failed: ${err instanceof Error ? err.message : String(err)}`);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [definition, isLayoutStale, validationErrors, unreachableIds]);
+  }, [workflow, isLayoutStale, validationErrors, unreachableIds]);
 
-  // Re-annotate edges with isError when definition changes, without re-running ELK
+  // Re-annotate edges when workflow changes without re-running ELK
   useEffect(() => {
-    if (!initialLayoutDone.current) return;
-    setEdges((prev) => annotateEdgesWithErrors(prev, definition, validationErrors));
-  }, [definition, validationErrors]);
+    if (!initialLayoutDone) return;
+    setEdges((prev) => annotateEdgesWithErrors(prev, validationErrors));
+  }, [workflow, validationErrors, initialLayoutDone]);
 
   // Keep selection highlight and execStatus in sync without re-running ELK
   useEffect(() => {
     setNodes((prev) =>
       prev.map((node) => ({
         ...node,
-        selected: selection?.kind === "step" && selection.id === node.id,
+        selected: selection?.kind === "node" && selection.id === node.id,
         data: {
           ...node.data,
-          execStatus: getNodeExecStatus(node.id, currentStepId, completedSteps, mode),
+          execStatus: getNodeExecStatus(node.id, currentNodeId, completedNodes, mode),
           isUnreachable: unreachableIds.has(node.id),
         },
       })),
     );
-  }, [currentStepId, completedSteps, mode, selection, unreachableIds]);
+  }, [currentNodeId, completedNodes, mode, selection, unreachableIds]);
 
   function onNodeClick(_: React.MouseEvent, node: RFNode) {
-    setSelection({ kind: "step", id: node.id });
+    setSelection({ kind: "node", id: node.id });
   }
 
   function onEdgeClick(_: React.MouseEvent, edge: Edge) {
-    const data = edge.data as TransitionEdgeData;
-    setSelection({ kind: "edge", source: edge.source, outcome: data.label });
+    setSelection({ kind: "edge", id: edge.id, from: edge.source, to: edge.target });
   }
 
   function onPaneClick() {
@@ -151,20 +145,19 @@ export function WorkflowViewer() {
   }
 
   function onConnect(connection: Connection) {
-    // New connection dragged by user — default outcome is "success"
     if (connection.source && connection.target) {
-      addTransition(connection.source, "success", connection.target);
+      storeAddEdge(connection.source, connection.target);
     }
   }
 
-  const stepCount = Object.keys(definition.steps).length;
+  const nodeCount = Object.keys(workflow.nodes).length;
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
-      {stepCount === 0 && (
+      {nodeCount === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-gray-400 pointer-events-none z-10">
-          <p className="text-sm">No steps yet.</p>
-          <p className="text-xs">Add your first step using the toolbar above ↑</p>
+          <p className="text-sm">No nodes yet.</p>
+          <p className="text-xs">Add your first node using the toolbar above</p>
         </div>
       )}
       {error ? (

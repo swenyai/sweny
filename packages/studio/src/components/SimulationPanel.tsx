@@ -1,95 +1,40 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useEditorStore } from "../store/editor-store.js";
-import { createWorkflow, runWorkflow, createProviderRegistry } from "@sweny-ai/engine";
-import type { StepResult, RunObserver } from "@sweny-ai/engine";
-import { buildStubImplementations } from "../lib/simulate-runner.js";
-
-// A deferred promise that the UI resolves
-class StepLatch {
-  private resolve!: (result: StepResult) => void;
-  readonly promise: Promise<StepResult> = new Promise((r) => {
-    this.resolve = r;
-  });
-  complete(result: StepResult) {
-    this.resolve(result);
-  }
-}
-
-function createMockImplementations(
-  stepIds: string[],
-  latchRef: React.MutableRefObject<StepLatch | null>,
-): Record<string, () => Promise<StepResult>> {
-  return Object.fromEntries(
-    stepIds.map((id) => [
-      id,
-      async (): Promise<StepResult> => {
-        const latch = new StepLatch();
-        latchRef.current = latch;
-        return latch.promise;
-      },
-    ]),
-  );
-}
+import { execute, createSkillMap } from "@sweny-ai/core";
+import { MockClaude } from "@sweny-ai/core/testing";
+import type { NodeResult } from "@sweny-ai/core";
 
 export function SimulationPanel() {
-  const { currentStepId, completedSteps, executionStatus, definition, resetExecution } = useEditorStore();
-  const [outcome, setOutcome] = useState<StepResult["status"]>("success");
-  const [customOutcome, setCustomOutcome] = useState("");
+  const { currentNodeId, completedNodes, executionStatus, workflow, resetExecution } = useEditorStore();
   const [isRunning, setIsRunning] = useState(false);
   const [simError, setSimError] = useState<string | null>(null);
-  const [usingStubs, setUsingStubs] = useState(false);
-  const activeLatchRef = useRef<StepLatch | null>(null);
 
-  const currentStep = currentStepId ? definition.steps[currentStepId] : null;
-  const completedList = Object.entries(completedSteps);
+  const currentNode = currentNodeId ? workflow.nodes[currentNodeId] : null;
+  const completedList = Object.entries(completedNodes);
 
-  function runWith(impls: Record<string, () => Promise<StepResult>>, isStub: boolean) {
+  function handleAutoRun() {
     setSimError(null);
     setIsRunning(true);
-    setUsingStubs(isStub);
-    activeLatchRef.current = null;
 
-    const { definition: def, applyEvent } = useEditorStore.getState();
+    const { workflow: wf, applyEvent } = useEditorStore.getState();
     resetExecution();
 
-    let workflow;
-    try {
-      workflow = createWorkflow(def, impls);
-    } catch (err) {
-      setSimError(err instanceof Error ? err.message : String(err));
-      setIsRunning(false);
-      return;
+    // Build mock responses — every node succeeds
+    const responses: Record<string, { status: "success" }> = {};
+    for (const id of Object.keys(wf.nodes)) {
+      responses[id] = { status: "success" };
     }
 
-    const providers = createProviderRegistry();
-    const observer: RunObserver = { onEvent: applyEvent };
+    const claude = new MockClaude({ responses, workflow: wf });
+    const skills = createSkillMap([]);
 
-    runWorkflow(workflow, {}, providers, { observer })
+    execute(wf, {}, { skills, claude, observer: applyEvent })
       .catch((err: unknown) => {
         setSimError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
         setIsRunning(false);
-        activeLatchRef.current = null;
       });
-  }
-
-  function handleStart() {
-    const { definition: def } = useEditorStore.getState();
-    runWith(createMockImplementations(Object.keys(def.steps), activeLatchRef), false);
-  }
-
-  function handleAutoRun() {
-    const { definition: def } = useEditorStore.getState();
-    runWith(buildStubImplementations(def), true);
-  }
-
-  function handleStep() {
-    activeLatchRef.current?.complete({
-      status: outcome,
-      data: customOutcome.trim() ? { outcome: customOutcome.trim() } : undefined,
-    });
-    setCustomOutcome("");
   }
 
   const statusColor = {
@@ -106,90 +51,50 @@ export function SimulationPanel() {
       <div className="flex flex-col gap-2 min-w-40">
         <div className="flex gap-2">
           <button
-            onClick={handleStart}
-            disabled={isRunning}
-            title="Step through each step manually"
-            className="px-3 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-500 disabled:opacity-50"
-          >
-            {isRunning && !usingStubs ? "Running…" : "▶ Start"}
-          </button>
-          <button
             onClick={handleAutoRun}
             disabled={isRunning}
-            title="Run all steps automatically (stubs — always success)"
-            className="px-3 py-1 rounded bg-gray-600 text-white text-xs hover:bg-gray-500 disabled:opacity-50"
+            title="Run all nodes automatically (mock — always success)"
+            className="px-3 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-500 disabled:opacity-50"
           >
-            {isRunning && usingStubs ? "Running…" : "⚡ Auto"}
+            {isRunning ? "Running..." : "Simulate"}
           </button>
         </div>
-        {usingStubs && isRunning && (
-          <div className="text-[10px] text-amber-600 bg-amber-50 rounded px-2 py-1">
-            Custom steps run as stubs (always success)
-          </div>
-        )}
-
-        {currentStepId && (
-          <div className="flex flex-col gap-1">
-            <select
-              value={outcome}
-              onChange={(e) => setOutcome(e.target.value as StepResult["status"])}
-              className="border border-gray-300 rounded px-2 py-1 text-xs"
-            >
-              <option value="success">success</option>
-              <option value="skipped">skipped</option>
-              <option value="failed">failed</option>
-            </select>
-            <input
-              value={customOutcome}
-              onChange={(e) => setCustomOutcome(e.target.value)}
-              placeholder="custom outcome (optional)"
-              className="border border-gray-300 rounded px-2 py-1 text-xs"
-            />
-            <button
-              onClick={handleStep}
-              className="px-3 py-1 rounded bg-green-600 text-white text-xs hover:bg-green-500"
-            >
-              → Step
-            </button>
-          </div>
-        )}
+        <p className="text-[10px] text-gray-400">Mock execution — all nodes succeed</p>
       </div>
 
-      {/* Current step */}
+      {/* Current node */}
       <div className="flex-1 min-w-0">
         <div className={`text-xs font-medium mb-1 ${statusColor}`}>Status: {executionStatus}</div>
 
-        {currentStepId && (
+        {currentNodeId && (
           <div className="text-xs text-blue-600 font-medium mb-1 animate-pulse">
-            ● Waiting at: <code>{currentStepId}</code>
-            {currentStep && <span className="text-gray-400 ml-1">({currentStep.phase})</span>}
+            Running: <code>{currentNodeId}</code>
+            {currentNode && <span className="text-gray-400 ml-1">({currentNode.name})</span>}
           </div>
         )}
 
         {simError && <div className="text-xs text-red-600 bg-red-50 rounded p-2 mb-1">{simError}</div>}
 
-        {/* Completed steps — trace log with result details */}
+        {/* Completed nodes trace */}
         {completedList.length > 0 && (
           <div className="mt-1 max-h-36 overflow-y-auto flex flex-col gap-0.5">
             {completedList.map(([id, result]) => {
-              const icon = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "⊘";
+              const icon = result.status === "success" ? "ok" : result.status === "failed" ? "fail" : "skip";
               const iconColor =
                 result.status === "success"
                   ? "text-green-600"
                   : result.status === "failed"
                     ? "text-red-600"
                     : "text-gray-400";
-              const dataOutcome = result.data?.outcome != null ? String(result.data.outcome) : null;
               return (
                 <div key={id} className="flex items-baseline gap-1.5 text-xs leading-tight">
                   <span className={`font-bold flex-shrink-0 ${iconColor}`}>{icon}</span>
                   <span className="font-mono text-gray-700 flex-shrink-0">{id}</span>
-                  {dataOutcome && (
+                  {result.toolCalls.length > 0 && (
                     <span className="px-1 rounded bg-blue-50 text-blue-600 text-[10px] flex-shrink-0">
-                      {dataOutcome}
+                      {result.toolCalls.length} tools
                     </span>
                   )}
-                  {result.reason && <span className="text-gray-400 truncate text-[10px]">— {result.reason}</span>}
                 </div>
               );
             })}

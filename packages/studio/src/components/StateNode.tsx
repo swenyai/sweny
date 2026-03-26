@@ -1,25 +1,19 @@
-import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import type { StepDefinition, WorkflowPhase } from "@sweny-ai/engine";
-import { findStepType } from "../lib/step-types.js";
+import { Handle, Position, type Node as RFNode, type NodeProps } from "@xyflow/react";
+import type { Node } from "@sweny-ai/core";
 
 export type NodeExecStatus = "current" | "success" | "failed" | "skipped" | "pending";
 
 export type StateNodeData = {
-  stateId: string;
-  state: StepDefinition;
-  isInitial: boolean;
+  nodeId: string;
+  node: Node;
+  isEntry: boolean;
   isTerminal: boolean;
+  skills: { id: string; name: string }[];
   execStatus: NodeExecStatus;
   isUnreachable?: boolean;
 };
 
-export type StateNodeType = Node<StateNodeData, "stateNode">;
-
-const phaseAccent: Record<WorkflowPhase, { bar: string; badgeBg: string; badgeText: string }> = {
-  learn: { bar: "#3b82f6", badgeBg: "rgba(59,130,246,0.16)", badgeText: "#93c5fd" },
-  act: { bar: "#f59e0b", badgeBg: "rgba(245,158,11,0.16)", badgeText: "#fcd34d" },
-  report: { bar: "#10b981", badgeBg: "rgba(16,185,129,0.16)", badgeText: "#6ee7b7" },
-};
+export type StateNodeType = RFNode<StateNodeData, "skillNode">;
 
 const execStyle: Record<NodeExecStatus, { shadow: string; bg: string; borderColor: string }> = {
   current: {
@@ -33,28 +27,23 @@ const execStyle: Record<NodeExecStatus, { shadow: string; bg: string; borderColo
   pending: { shadow: "0 2px 12px rgba(0,0,0,0.5)", bg: "rgba(8,14,26,0.92)", borderColor: "" },
 };
 
-const providerMeta: Record<string, { icon: string; color: string }> = {
-  observability: { icon: "◉", color: "#818cf8" },
-  issueTracking: { icon: "◈", color: "#f472b6" },
-  sourceControl: { icon: "⎇", color: "#34d399" },
-  codingAgent: { icon: "⬡", color: "#fb923c" },
-  notification: { icon: "◎", color: "#a78bfa" },
+const skillColors: Record<string, string> = {
+  github: "#6366f1",
+  linear: "#818cf8",
+  sentry: "#f472b6",
+  datadog: "#a78bfa",
+  slack: "#34d399",
+  notification: "#fb923c",
 };
 
 export function StateNode({ data }: NodeProps<StateNodeType>) {
-  const { stateId, state, isInitial, isTerminal, execStatus, isUnreachable } = data;
-  const accent = phaseAccent[state.phase];
+  const { nodeId, node, isEntry, isTerminal, skills, execStatus, isUnreachable } = data;
   const exec = execStyle[execStatus];
-  // Show provider icon for the first declared dependency (e.g. "observability", "issueTracker")
-  const primaryUse = state.uses?.[0] ?? null;
-  const pMeta = primaryUse ? (providerMeta[primaryUse] ?? null) : null;
-  const typeEntry = state.type ? findStepType(state.type) : undefined;
-  const typeLabel = typeEntry ? typeEntry.label : state.type ? state.type.replace(/^sweny\//, "") : null;
 
-  // Unreachable only changes visuals when no execution status overrides the border
+  const accentColor = skills.length > 0 ? (skillColors[skills[0].id] ?? "#6366f1") : "#64748b";
   const showUnreachable = isUnreachable && !exec.borderColor;
   const borderColor =
-    exec.borderColor || (showUnreachable ? "#f97316" : isInitial ? accent.bar + "cc" : accent.bar + "40");
+    exec.borderColor || (showUnreachable ? "#f97316" : isEntry ? accentColor + "cc" : accentColor + "40");
   const borderStyle = isTerminal || showUnreachable ? "dashed" : "solid";
   const textOpacity = execStatus === "skipped" ? 0.45 : 1;
 
@@ -66,7 +55,7 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
         borderRadius: 7,
         overflow: "hidden",
         width: 200,
-        height: typeLabel ? 52 : 40,
+        height: 52,
         background: exec.bg,
         boxShadow: exec.shadow,
         border: `1px ${borderStyle} ${borderColor}`,
@@ -75,9 +64,9 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
         cursor: "pointer",
       }}
     >
-      {/* Phase accent bar */}
+      {/* Accent bar */}
       <div
-        style={{ width: 4, flexShrink: 0, background: accent.bar, opacity: execStatus === "skipped" ? 0.3 : 0.95 }}
+        style={{ width: 4, flexShrink: 0, background: accentColor, opacity: execStatus === "skipped" ? 0.3 : 0.95 }}
       />
 
       {/* Content */}
@@ -91,7 +80,7 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
           minWidth: 0,
         }}
       >
-        {/* Top row: ID + icons + phase badge */}
+        {/* Top row: node name + badges */}
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span
             style={{
@@ -106,49 +95,53 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
               opacity: textOpacity,
             }}
           >
-            {stateId}
+            {node.name || nodeId}
           </span>
 
-          {/* Provider icon */}
-          {pMeta && (
-            <span style={{ fontSize: 10, color: pMeta.color, flexShrink: 0, opacity: textOpacity, lineHeight: 1 }}>
-              {pMeta.icon}
+          {/* Entry badge */}
+          {isEntry && (
+            <span
+              style={{
+                fontSize: 7.5,
+                fontWeight: 800,
+                letterSpacing: "0.07em",
+                textTransform: "uppercase",
+                padding: "2px 5px",
+                borderRadius: 3,
+                background: "rgba(59,130,246,0.16)",
+                color: "#93c5fd",
+                flexShrink: 0,
+                opacity: textOpacity,
+              }}
+            >
+              entry
             </span>
           )}
-
-          {/* Phase badge */}
-          <span
-            style={{
-              fontSize: 7.5,
-              fontWeight: 800,
-              letterSpacing: "0.07em",
-              textTransform: "uppercase",
-              padding: "2px 5px",
-              borderRadius: 3,
-              background: accent.badgeBg,
-              color: accent.badgeText,
-              flexShrink: 0,
-              opacity: textOpacity,
-            }}
-          >
-            {state.phase}
-          </span>
         </div>
 
-        {/* Step type subtitle */}
-        {typeLabel && (
-          <div
-            style={{
-              fontSize: 9,
-              color: "#64748b",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              marginTop: 2,
-              opacity: textOpacity,
-            }}
-          >
-            {typeLabel}
+        {/* Skill badges */}
+        {skills.length > 0 && (
+          <div style={{ display: "flex", gap: 3, marginTop: 2, overflow: "hidden" }}>
+            {skills.slice(0, 3).map((skill) => (
+              <span
+                key={skill.id}
+                style={{
+                  fontSize: 8,
+                  fontWeight: 600,
+                  padding: "1px 4px",
+                  borderRadius: 3,
+                  background: `${skillColors[skill.id] ?? "#6366f1"}20`,
+                  color: skillColors[skill.id] ?? "#6366f1",
+                  flexShrink: 0,
+                  opacity: textOpacity,
+                }}
+              >
+                {skill.name}
+              </span>
+            ))}
+            {skills.length > 3 && (
+              <span style={{ fontSize: 8, color: "#64748b", opacity: textOpacity }}>+{skills.length - 3}</span>
+            )}
           </div>
         )}
       </div>
@@ -165,7 +158,7 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
             lineHeight: 1,
             pointerEvents: "none",
           }}
-          title="This step is unreachable from the initial step"
+          title="This node is unreachable from the entry node"
         >
           ⚠
         </span>

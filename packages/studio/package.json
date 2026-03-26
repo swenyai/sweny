@@ -50,7 +50,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@sweny-ai/engine": "*",
+    "@sweny-ai/core": "*",
     "react": "^18.3.0",
     "react-dom": "^18.3.0"
   },
