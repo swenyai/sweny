@@ -5,7 +5,7 @@ import { getSkillCatalog } from "@sweny-ai/core/studio";
 import { useEditorStore } from "../store/editor-store.js";
 import { SkillIcon } from "./SkillIcon.js";
 import { InstructionEditor } from "./InstructionEditor.js";
-import { generateInstruction, getStoredApiKey } from "../lib/generate-instruction.js";
+import { generateInstruction } from "../lib/generate-instruction.js";
 
 const skillCatalog = getSkillCatalog();
 
@@ -286,17 +286,11 @@ function NodePanel({
             <button
               disabled={aiLoading}
               onClick={async () => {
-                const apiKey = getStoredApiKey();
-                if (!apiKey) {
-                  setAiError("Set your Anthropic API key in Settings (gear icon) to use AI assist");
-                  return;
-                }
                 setAiLoading(true);
                 setAiError(null);
                 try {
                   const { workflow } = useEditorStore.getState();
                   const text = await generateInstruction({
-                    apiKey,
                     nodeName: name,
                     nodeId: id,
                     skills: node.skills,

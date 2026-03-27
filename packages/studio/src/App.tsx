@@ -12,7 +12,6 @@ import { SimulationPanel } from "./components/SimulationPanel.js";
 import { LiveConnectPanel } from "./components/LiveConnectPanel.js";
 import { readPermalinkFromHash, encodeWorkflow } from "./lib/permalink.js";
 import { WorkflowPromptBar } from "./components/WorkflowPromptBar.js";
-import { getStoredApiKey } from "./lib/generate-instruction.js";
 
 const PRESET_WORKFLOWS: Array<{ id: string; name: string; workflow: Workflow }> = [
   { id: "triage", name: "triage", workflow: triageWorkflow },
@@ -174,7 +173,7 @@ export function App() {
           ))}
         </div>
       )}
-      {mode === "design" && getStoredApiKey() && (
+      {mode === "design" && (
         <WorkflowPromptBar
           onWorkflowGenerated={handleAiGenerated}
           currentWorkflow={workflow}

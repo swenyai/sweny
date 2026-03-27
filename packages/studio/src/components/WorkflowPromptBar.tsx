@@ -1,10 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { getSkillCatalog } from "@sweny-ai/core/studio";
 import { buildWorkflowBrowser, refineWorkflowBrowser } from "../lib/workflow-builder-browser.js";
-import { getStoredApiKey } from "../lib/generate-instruction.js";
-
-const catalog = getSkillCatalog();
-const skills = catalog.map((s) => ({ id: s.id, name: s.name, description: s.description }));
 
 interface WorkflowPromptBarProps {
   onWorkflowGenerated: (workflow: import("@sweny-ai/core").Workflow) => void;
@@ -33,11 +28,6 @@ export function WorkflowPromptBar({ onWorkflowGenerated, currentWorkflow, hasGen
   }, []);
 
   async function handleSubmit() {
-    const apiKey = getStoredApiKey();
-    if (!apiKey) {
-      setError("Set your Anthropic API key in Settings (gear icon) first");
-      return;
-    }
     const trimmed = prompt.trim();
     if (!trimmed) return;
 
@@ -45,8 +35,8 @@ export function WorkflowPromptBar({ onWorkflowGenerated, currentWorkflow, hasGen
     setError(null);
     try {
       const workflow = hasGenerated
-        ? await refineWorkflowBrowser(currentWorkflow, trimmed, { apiKey, skills })
-        : await buildWorkflowBrowser(trimmed, { apiKey, skills });
+        ? await refineWorkflowBrowser(currentWorkflow, trimmed)
+        : await buildWorkflowBrowser(trimmed);
       onWorkflowGenerated(workflow);
       setPrompt("");
     } catch (err) {

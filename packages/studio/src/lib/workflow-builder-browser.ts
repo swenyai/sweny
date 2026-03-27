@@ -1,136 +1,46 @@
 /**
- * Browser-compatible workflow builder.
+ * Browser-side workflow builder client.
  *
- * The core's buildWorkflow/refineWorkflow use the Claude interface (headless
- * Claude Code), which is Node-only. This module provides browser-compatible
- * equivalents that call the Anthropic Messages API directly via fetch().
+ * Calls the Vite dev server's AI middleware endpoints, which proxy
+ * requests through Claude Code (headless). No API key needed in the
+ * browser — auth is handled server-side.
  */
 
 import type { Workflow } from "@sweny-ai/core";
-import { workflowZ, validateWorkflow, workflowJsonSchema } from "@sweny-ai/core/schema";
 
-export interface BrowserBuildWorkflowOptions {
-  apiKey: string;
-  skills: { id: string; name: string; description: string }[];
-}
-
-const INSTRUCTION_GUIDANCE = `Each node's \`instruction\` field is a detailed prompt that Claude will execute autonomously.
-Write instructions as if briefing a skilled engineer who has access to the node's tools
-but no other context. Be specific about:
-
-- WHAT to query/search/create (not just "check for errors" — specify filters, time ranges, grouping)
-- HOW to interpret results (what counts as actionable? what thresholds matter?)
-- WHAT output to produce (structured findings, not just "summarize")
-- HOW to handle edge cases (no results found, too many results, ambiguous data)
-
-Bad:  "Query Sentry for errors"
-Good: "Query Sentry for unresolved errors from the last 24 hours. Group by issue
-       fingerprint. For each group, note: error count, affected services, first/last
-       seen timestamps, and stack trace summary. Prioritize by frequency × recency.
-       If no errors found, report that explicitly so downstream nodes can skip."`;
-
-function buildSystemPrompt(skills: BrowserBuildWorkflowOptions["skills"], existingWorkflow?: Workflow): string {
-  const skillList = skills.map((s) => `- ${s.id}: ${s.description}`).join("\n");
-
-  const parts = [
-    "You generate SWEny workflow definitions as JSON.",
-    "",
-    "## Workflow JSON Schema",
-    "```json",
-    JSON.stringify(workflowJsonSchema, null, 2),
-    "```",
-    "",
-    "## Available Skills",
-    skillList || "(none)",
-    "",
-    "## Instruction Quality",
-    INSTRUCTION_GUIDANCE,
-    "",
-    "## Rules",
-    "- Use snake_case for node IDs (e.g. gather_errors, create_ticket)",
-    "- Set `entry` to the first node in the flow",
-    "- Only reference skill IDs from the list above in node `skills` arrays",
-    "- Use natural language for edge `when` conditions",
-    "- Every node must be reachable from the entry node",
-    "- Return ONLY valid JSON — no markdown fences, no explanation",
-  ];
-
-  if (existingWorkflow) {
-    parts.push("", "## Current Workflow (modify this)", "```json", JSON.stringify(existingWorkflow, null, 2), "```");
-  }
-
-  return parts.join("\n");
-}
-
-async function callApi(apiKey: string, system: string, userMessage: string): Promise<Workflow> {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+async function post<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 4096,
-      system,
-      messages: [{ role: "user", content: userMessage }],
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 
-  if (!response.ok) {
-    const body = await response.text();
-    if (response.status === 401) throw new Error("Invalid API key");
-    if (response.status === 429) throw new Error("Rate limited — try again in a moment");
-    throw new Error(`API error ${response.status}: ${body.slice(0, 200)}`);
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(data.error ?? `Server error ${res.status}`);
   }
 
-  const data = (await response.json()) as { content: { type: string; text: string }[] };
-  const text = data.content.find((c) => c.type === "text")?.text;
-  if (!text) throw new Error("No text in API response");
-
-  // Extract JSON from response (may be wrapped in markdown fences)
-  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [null, text];
-  const jsonStr = (jsonMatch[1] ?? text).trim();
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonStr);
-  } catch {
-    throw new Error("Failed to parse workflow JSON from API response");
-  }
-
-  const workflow = workflowZ.parse(parsed);
-  const errors = validateWorkflow(workflow);
-  if (errors.length > 0) {
-    throw new Error(`Generated workflow has validation errors: ${errors.map((e) => e.message).join("; ")}`);
-  }
-
-  return workflow;
+  return data as T;
 }
 
 /**
  * Generate a complete workflow from a natural language description.
- * Browser-compatible — calls the Anthropic API directly via fetch.
+ * Calls the local dev server which runs Claude Code server-side.
  */
-export async function buildWorkflowBrowser(
-  description: string,
-  options: BrowserBuildWorkflowOptions,
-): Promise<Workflow> {
-  const system = buildSystemPrompt(options.skills);
-  return callApi(options.apiKey, system, description);
+export async function buildWorkflowBrowser(description: string): Promise<Workflow> {
+  const { workflow } = await post<{ workflow: Workflow }>("/api/generate-workflow", { description });
+  return workflow;
 }
 
 /**
  * Refine an existing workflow based on a natural language instruction.
- * Browser-compatible — calls the Anthropic API directly via fetch.
+ * Calls the local dev server which runs Claude Code server-side.
  */
-export async function refineWorkflowBrowser(
-  workflow: Workflow,
-  instruction: string,
-  options: BrowserBuildWorkflowOptions,
-): Promise<Workflow> {
-  const system = buildSystemPrompt(options.skills, workflow);
-  return callApi(options.apiKey, system, `Modify the workflow: ${instruction}`);
+export async function refineWorkflowBrowser(workflow: Workflow, instruction: string): Promise<Workflow> {
+  const { workflow: refined } = await post<{ workflow: Workflow }>("/api/refine-workflow", {
+    workflow,
+    instruction,
+  });
+  return refined;
 }
