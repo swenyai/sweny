@@ -141,6 +141,8 @@ function populateEnv(config: ActionConfig): void {
       break;
     case "betterstack":
       set("BETTERSTACK_API_TOKEN", obs.apiToken);
+      set("BETTERSTACK_SOURCE_ID", obs.sourceId);
+      set("BETTERSTACK_TABLE_NAME", obs.tableName);
       break;
   }
 
@@ -181,6 +183,13 @@ function buildWorkflowInput(config: ActionConfig): Record<string, unknown> {
     issueTrackerName: config.issueTrackerProvider,
     projectId: config.linearTeamId,
     issueIdentifier: config.linearIssue,
+    observabilityProvider: config.observabilityProvider,
+    ...(config.observabilityCredentials.sourceId && {
+      betterstackSourceId: config.observabilityCredentials.sourceId,
+    }),
+    ...(config.observabilityCredentials.tableName && {
+      betterstackTableName: config.observabilityCredentials.tableName,
+    }),
   };
 }
 

@@ -32,6 +32,8 @@ export const triageWorkflow: Workflow = {
 2. **Source control**: Check recent commits, pull requests, and deploys that might be related.
 3. **Issue tracker**: Search for similar past issues or known problems.
 
+If input.betterstackSourceId or input.betterstackTableName is provided, use those to scope your BetterStack log queries to the correct source.
+
 Be thorough — the investigation step depends on complete context. Use every tool available to you.`,
       skills: ["github", "sentry", "datadog", "linear"],
     },

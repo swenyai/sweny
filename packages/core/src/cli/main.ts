@@ -140,6 +140,8 @@ function buildCredentialMap(): Record<string, string> {
     "NR_API_KEY",
     "NR_REGION",
     "BETTERSTACK_API_TOKEN",
+    "BETTERSTACK_SOURCE_ID",
+    "BETTERSTACK_TABLE_NAME",
     "SLACK_BOT_TOKEN",
     "SLACK_TEAM_ID",
     "NOTION_TOKEN",
@@ -346,6 +348,13 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     issueOverride: config.issueOverride,
     noveltyMode: config.noveltyMode,
     reviewMode: config.reviewMode,
+    observabilityProvider: config.observabilityProvider,
+    ...(config.observabilityCredentials.sourceId && {
+      betterstackSourceId: config.observabilityCredentials.sourceId,
+    }),
+    ...(config.observabilityCredentials.tableName && {
+      betterstackTableName: config.observabilityCredentials.tableName,
+    }),
   };
 
   try {
@@ -601,6 +610,13 @@ export async function workflowRunAction(
     baseBranch: config.baseBranch,
     prLabels: config.prLabels,
     additionalInstructions: config.additionalInstructions,
+    observabilityProvider: config.observabilityProvider,
+    ...(config.observabilityCredentials.sourceId && {
+      betterstackSourceId: config.observabilityCredentials.sourceId,
+    }),
+    ...(config.observabilityCredentials.tableName && {
+      betterstackTableName: config.observabilityCredentials.tableName,
+    }),
   };
 
   try {

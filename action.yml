@@ -68,6 +68,17 @@ inputs:
     required: false
     default: "https://sentry.io"
 
+  # BetterStack credentials
+  betterstack-api-token:
+    description: "BetterStack API token (for both Uptime and Telemetry)"
+    required: false
+  betterstack-source-id:
+    description: "BetterStack Telemetry source ID — scopes log queries to a specific source"
+    required: false
+  betterstack-table-name:
+    description: 'BetterStack Telemetry ClickHouse table name (e.g., "t273774.my_source")'
+    required: false
+
   # CloudWatch credentials
   cloudwatch-region:
     description: "AWS region for CloudWatch Logs"
