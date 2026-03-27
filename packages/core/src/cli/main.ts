@@ -52,6 +52,27 @@ import {
 import { checkProviderConnectivity } from "./check.js";
 import { registerSetupCommand } from "./setup.js";
 
+// ── Stream observer (NDJSON) ────────────────────────────────────────
+/**
+ * Create an observer that writes NDJSON ExecutionEvents to stdout.
+ * Studio and other consumers parse these line-by-line.
+ */
+function createStreamObserver(): Observer {
+  return (event: ExecutionEvent) => {
+    process.stdout.write(JSON.stringify(event) + "\n");
+  };
+}
+
+/** Compose multiple observers into one. */
+function composeObservers(...observers: (Observer | undefined)[]): Observer | undefined {
+  const valid = observers.filter((o): o is Observer => o != null);
+  if (valid.length === 0) return undefined;
+  if (valid.length === 1) return valid[0];
+  return (event: ExecutionEvent) => {
+    for (const o of valid) o(event);
+  };
+}
+
 // Auto-load .env before Commander parses (so env vars are available for defaults)
 loadDotenv();
 
@@ -179,16 +200,17 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     logger: consoleLogger,
   });
 
-  // ── Spinner state ──────────────────────────────────────────
+  // ── Progress display state ─────────────────────────────────
   const FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
   const isTTY = !config.json && (process.stderr.isTTY ?? false);
+  const MAX_ACTIVITY = 3;
   let spinnerInterval: ReturnType<typeof setInterval> | undefined;
   let spinnerActive = false;
   let frameIdx = 0;
   let stepStart = 0;
   let stepLabel = "";
-  let spinnerStatus = "";
-  let currentPhaseColor: (s: string) => string = chalk.cyan;
+  let recentActivity: string[] = [];
+  let renderedLines = 0; // how many lines the progress block currently occupies
   let stepIndex = 0;
   const totalNodes = Object.keys(triageWorkflow.nodes).length;
 
@@ -199,35 +221,42 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     return `${m}m ${s % 60}s`;
   }
 
-  function clearSpinnerLine() {
-    if (spinnerActive && isTTY) {
-      process.stderr.write("\r\x1b[K");
+  /** Render the multi-line progress block (spinner + activity lines). */
+  function renderProgressBlock() {
+    const cols = process.stderr.columns || 80;
+    const frame = chalk.cyan(FRAMES[frameIdx++ % FRAMES.length]);
+    const counter = c.subtle(`[${stepIndex}/${totalNodes}]`);
+    const elapsed = c.subtle(formatElapsed(Date.now() - stepStart));
+    const headerLine = `  ${frame} ${counter} ${stepLabel}  ${elapsed}`;
+
+    const lines = [headerLine];
+    for (const msg of recentActivity) {
+      // Truncate to terminal width
+      const line = `    ${c.subtle("\u21B3")} ${c.subtle(msg)}`;
+      const vis = line.replace(/\x1B\[[0-9;]*m/g, "").length;
+      lines.push(vis > cols ? line.slice(0, cols - 1) : line);
     }
+
+    // Move cursor up to clear previous render, then clear to end of screen
+    if (renderedLines > 0) {
+      process.stderr.write(`\x1B[${renderedLines}A\x1B[J`);
+    }
+    process.stderr.write(lines.join("\n") + "\n");
+    renderedLines = lines.length;
   }
 
   function startSpinner(label: string) {
     stepStart = Date.now();
     stepLabel = label;
-    spinnerStatus = "";
+    recentActivity = [];
     frameIdx = 0;
     spinnerActive = true;
+    renderedLines = 0;
 
     if (isTTY) {
-      const cols = process.stderr.columns || 80;
-      spinnerInterval = setInterval(() => {
-        const frame = currentPhaseColor(FRAMES[frameIdx++ % FRAMES.length]);
-        const counter = c.subtle(`[${stepIndex}/${totalNodes}]`);
-        const elapsed = c.subtle(formatElapsed(Date.now() - stepStart));
-        const status = spinnerStatus ? ` ${c.subtle("\u2014")} ${c.subtle(spinnerStatus)}` : "";
-        // Truncate to terminal width to prevent line wrapping
-        let line = `  ${frame} ${counter} ${stepLabel}${status} ${elapsed}`;
-        const visibleLen = line.replace(/\x1B\[[0-9;]*m/g, "").length;
-        if (visibleLen > cols) {
-          // Re-render without status if too wide
-          line = `  ${frame} ${counter} ${stepLabel} ${elapsed}`;
-        }
-        process.stderr.write(`\r\x1b[K${line}`);
-      }, 80);
+      process.stderr.write("\x1B[?25l"); // hide cursor
+      renderProgressBlock();
+      spinnerInterval = setInterval(() => renderProgressBlock(), 100);
     } else if (!config.json) {
       spinnerInterval = setInterval(() => {
         const elapsed = formatElapsed(Date.now() - stepStart);
@@ -241,8 +270,10 @@ triageCmd.action(async (options: Record<string, unknown>) => {
       clearInterval(spinnerInterval);
       spinnerInterval = undefined;
     }
-    if (isTTY) {
-      process.stderr.write("\r\x1b[K");
+    if (isTTY && renderedLines > 0) {
+      process.stderr.write(`\x1B[${renderedLines}A\x1B[J`);
+      process.stderr.write("\x1B[?25h"); // show cursor
+      renderedLines = 0;
     }
     spinnerActive = false;
   }
@@ -250,54 +281,52 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   // ── Build observer for DAG events ──────────────────────────
   const runStart = Date.now();
 
-  const observer: Observer | undefined = config.json
+  const progressObserver: Observer | undefined = config.json
     ? undefined
     : (event: ExecutionEvent) => {
         switch (event.type) {
           case "workflow:start":
-            // Already printed the banner
             break;
           case "node:enter":
             stepIndex++;
-            if (!config.json) {
-              startSpinner(event.node);
+            startSpinner(event.node);
+            break;
+          case "node:progress":
+            if (spinnerActive) {
+              recentActivity.push(event.message);
+              if (recentActivity.length > MAX_ACTIVITY) recentActivity.shift();
             }
             break;
           case "tool:call":
-            if (spinnerActive && isTTY) {
-              spinnerStatus = `${event.tool}(...)`;
-            }
+            // tool:call is now superseded by the richer node:progress events
             break;
           case "node:exit": {
             stopSpinner();
-            if (!config.json) {
-              const elapsed = formatElapsed(Date.now() - stepStart);
-              const icon =
-                event.result.status === "success"
-                  ? c.ok("\u2713")
-                  : event.result.status === "skipped"
-                    ? c.subtle("\u2212")
-                    : c.fail("\u2717");
-              const reason = event.result.status !== "success" ? (event.result.data?.error as string) : undefined;
-              const counter = `[${stepIndex}/${totalNodes}]`;
-              console.log(formatStepLine(icon, counter, event.node, elapsed, reason));
+            const elapsed = formatElapsed(Date.now() - stepStart);
+            const icon =
+              event.result.status === "success"
+                ? c.ok("\u2713")
+                : event.result.status === "skipped"
+                  ? c.subtle("\u2212")
+                  : c.fail("\u2717");
+            const reason = event.result.status !== "success" ? (event.result.data?.error as string) : undefined;
+            const counter = `[${stepIndex}/${totalNodes}]`;
+            console.log(formatStepLine(icon, counter, event.node, elapsed, reason));
 
-              // Inline data details
-              const details = getStepDetails(event.node, event.result.data);
-              for (const detail of details) {
-                console.log(`    ${c.subtle("\u21B3")} ${c.subtle(detail)}`);
-              }
+            const details = getStepDetails(event.node, event.result.data);
+            for (const detail of details) {
+              console.log(`    ${c.subtle("\u21B3")} ${c.subtle(detail)}`);
             }
             break;
           }
           case "route":
-            // Optionally log routing decisions
             break;
           case "workflow:end":
-            // Output is handled after execute() returns
             break;
         }
       };
+
+  const observer = composeObservers(progressObserver, config.stream ? createStreamObserver() : undefined);
 
   // ── Build workflow input from config ──────────────────────
   // TODO: The triage workflow input structure may need further refinement
@@ -387,7 +416,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   console.log(chalk.cyan(`\n  sweny implement ${issueId}\n`));
 
   const isTTY = process.stderr.isTTY ?? false;
-  const observer: Observer = (event: ExecutionEvent) => {
+  const implProgressObserver: Observer = (event: ExecutionEvent) => {
     switch (event.type) {
       case "workflow:start":
         process.stderr.write(`\n  \u25B2 ${chalk.bold(event.workflow)}\n\n`);
@@ -414,6 +443,11 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
         break;
     }
   };
+
+  const observer = composeObservers(
+    implProgressObserver,
+    Boolean(options.stream) ? createStreamObserver() : undefined,
+  )!;
 
   // Build workflow input for implement
   const workflowInput = {
@@ -485,7 +519,7 @@ export function loadWorkflowFile(filePath: string): Workflow {
 
 export async function workflowRunAction(
   file: string,
-  options: Record<string, unknown> & { json?: boolean },
+  options: Record<string, unknown> & { json?: boolean; stream?: boolean },
 ): Promise<void> {
   let workflow: Workflow;
   try {
@@ -521,7 +555,7 @@ export async function workflowRunAction(
   // Track per-node entry time to compute elapsed on exit
   const nodeEnterTimes = new Map<string, number>();
 
-  const observer: Observer | undefined = isJson
+  const wfProgressObserver: Observer | undefined = isJson
     ? undefined
     : (event: ExecutionEvent) => {
         switch (event.type) {
@@ -543,7 +577,6 @@ export async function workflowRunAction(
             const elapsedMs = Date.now() - enterTime;
             const elapsed = chalk.dim(elapsedMs < 1000 ? `${elapsedMs}ms` : `${Math.round(elapsedMs / 100) / 10}s`);
             if (isTTY) {
-              // Overwrite the pending "○ nodeId…" line with the final status
               process.stderr.write(`\x1B[1A\x1B[2K  ${icon} ${event.node}  ${elapsed}\n`);
             } else {
               process.stderr.write(`  ${icon} ${event.node}  ${elapsed}\n`);
@@ -555,6 +588,8 @@ export async function workflowRunAction(
             break;
         }
       };
+
+  const observer = composeObservers(wfProgressObserver, options.stream ? createStreamObserver() : undefined);
 
   // Build workflow input from config
   const workflowInput = {
@@ -666,6 +701,7 @@ workflowCmd
   .description("Run a workflow from a YAML or JSON file")
   .option("--dry-run", "Validate workflow without running")
   .option("--json", "Output result as JSON on stdout; suppress progress output")
+  .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)")
   .action(workflowRunAction);
 
 workflowCmd

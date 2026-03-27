@@ -80,6 +80,9 @@ export async function execute(
       context,
       tools: trackedTools,
       outputSchema: node.output,
+      onProgress: (message) => {
+        safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
+      },
     });
 
     results.set(currentId, result);

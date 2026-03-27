@@ -53,8 +53,9 @@ export class ClaudeClient implements Claude {
     context: Record<string, unknown>;
     tools: Tool[];
     outputSchema?: JSONSchema;
+    onProgress?: (message: string) => void;
   }): Promise<NodeResult> {
-    const { instruction, context, tools, outputSchema } = opts;
+    const { instruction, context, tools, outputSchema, onProgress } = opts;
     const toolCalls: ToolCall[] = [];
 
     // Convert core tools to SDK MCP tools
@@ -102,7 +103,20 @@ export class ClaudeClient implements Claude {
       });
 
       for await (const message of stream) {
-        if (message.type === "result") {
+        if (message.type === "tool_progress") {
+          const tp = message as any;
+          if (tp.tool_name && typeof tp.elapsed_time_seconds === "number") {
+            const name = stripMcpPrefix(tp.tool_name);
+            const secs = Math.round(tp.elapsed_time_seconds);
+            onProgress?.(`${name} (${secs}s)`);
+          }
+        } else if (message.type === "tool_use_summary") {
+          const ts = message as any;
+          if (ts.summary) {
+            const clean = ts.summary.replace(/\n/g, " ").trim();
+            onProgress?.(clean.length > 80 ? clean.slice(0, 79) + "\u2026" : clean);
+          }
+        } else if (message.type === "result") {
           const resultMsg = message as SDKResultMessage;
           if (resultMsg.subtype === "success" && "result" in resultMsg) {
             response = resultMsg.result;
@@ -287,6 +301,13 @@ function jsonPropertyToZod(prop: Record<string, unknown>): z.ZodType {
       return desc ? u.describe(desc) : u;
     }
   }
+}
+
+/** Strip MCP server prefix: "mcp__server__tool" → "tool" */
+function stripMcpPrefix(name: string): string {
+  const parts = name.split("__");
+  if (parts.length >= 3 && parts[0] === "mcp") return parts.slice(2).join("__");
+  return name;
 }
 
 // ─── JSON extraction ────────────────────────────────────────────

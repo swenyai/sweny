@@ -76,6 +76,7 @@ export interface CliConfig {
 
   // CLI-specific
   json: boolean;
+  stream: boolean;
   bell: boolean;
 
   // Cache
@@ -157,6 +158,7 @@ export function registerTriageCommand(program: Command): Command {
     .option("--betterstack-table-name <name>", 'Better Stack ClickHouse table name, e.g. "t273774.my_source"')
     .option("--gitlab-base-url <url>", "GitLab base URL (default: https://gitlab.com)")
     .option("--json", "Output results as JSON", false)
+    .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)", false)
     .option("--bell", "Ring terminal bell on completion", false)
     .option("--cache-dir <path>", "Step cache directory (default: .sweny/cache)")
     .option("--cache-ttl <seconds>", "Cache TTL in seconds, 0 = infinite (default: 86400)")
@@ -254,6 +256,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
 
     // Per-invocation flags: CLI only
     json: Boolean(options.json),
+    stream: Boolean(options.stream),
     bell: Boolean(options.bell),
 
     cacheDir: (options.cacheDir as string) || env.SWENY_CACHE_DIR || f("cache-dir") || ".sweny/cache",
@@ -711,7 +714,8 @@ export function registerImplementCommand(program: Command): Command {
       "PR merge behavior: auto (GitHub auto-merge when CI passes) | review (human approval, default)",
       "review",
     )
-    .option("--additional-instructions <text>", "Extra instructions for the coding agent");
+    .option("--additional-instructions <text>", "Extra instructions for the coding agent")
+    .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)", false);
 }
 
 /**
