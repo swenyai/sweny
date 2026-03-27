@@ -1,5 +1,6 @@
 import { Handle, Position, type Node as RFNode, type NodeProps } from "@xyflow/react";
 import type { Node } from "@sweny-ai/core";
+import { SkillIcon } from "./SkillIcon.js";
 
 export type NodeExecStatus = "current" | "success" | "failed" | "skipped" | "pending";
 
@@ -148,8 +149,12 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
                   color: skillColors[skill.id] ?? "#6366f1",
                   flexShrink: 0,
                   opacity: textOpacity,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
                 }}
               >
+                <SkillIcon skillId={skill.id} size={10} />
                 {skill.name}
               </span>
             ))}

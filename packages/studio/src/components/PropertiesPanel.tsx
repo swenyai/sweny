@@ -3,6 +3,7 @@ import type { Node, NodeResult } from "@sweny-ai/core";
 import { validateWorkflow } from "@sweny-ai/core/schema";
 import { getSkillCatalog } from "@sweny-ai/core/studio";
 import { useEditorStore } from "../store/editor-store.js";
+import { SkillIcon } from "./SkillIcon.js";
 
 const skillCatalog = getSkillCatalog();
 
@@ -278,6 +279,7 @@ function NodePanel({
                     updateNode(id, { skills: newSkills });
                   }}
                 />
+                <SkillIcon skillId={skill.id} size={14} />
                 <span className="font-medium text-gray-700">{skill.name}</span>
                 <span className="text-gray-400 ml-auto">{skill.tools.length} tools</span>
               </label>

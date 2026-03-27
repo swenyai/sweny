@@ -1,14 +1,5 @@
 import { type DragEvent } from "react";
-
-const skillColors: Record<string, string> = {
-  github: "#6366f1",
-  linear: "#818cf8",
-  sentry: "#f472b6",
-  datadog: "#a78bfa",
-  betterstack: "#22d3ee",
-  slack: "#34d399",
-  notification: "#fb923c",
-};
+import { SkillIcon, skillColors } from "./SkillIcon.js";
 
 interface NodeTemplate {
   name: string;
@@ -230,12 +221,13 @@ export function NodeToolbox() {
                     {template.skills.map((sid) => (
                       <span
                         key={sid}
-                        className="text-[8px] font-medium px-1.5 py-0.5 rounded"
+                        className="text-[8px] font-medium px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"
                         style={{
                           background: `${skillColors[sid] ?? "#6366f1"}15`,
                           color: skillColors[sid] ?? "#6366f1",
                         }}
                       >
+                        <SkillIcon skillId={sid} size={10} />
                         {sid}
                       </span>
                     ))}
