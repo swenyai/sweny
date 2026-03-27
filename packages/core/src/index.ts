@@ -72,3 +72,7 @@ export type { SkillValidationResult } from "./skills/index.js";
 // Schema & validation
 export { workflowZ, nodeZ, edgeZ, skillZ, parseWorkflow, validateWorkflow, workflowJsonSchema } from "./schema.js";
 export type { WorkflowError } from "./schema.js";
+
+// MCP auto-injection
+export { buildAutoMcpServers } from "./mcp.js";
+export type { McpServerConfig, McpAutoConfig } from "./types.js";

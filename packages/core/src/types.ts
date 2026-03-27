@@ -129,6 +129,26 @@ export interface Claude {
   }): Promise<string>;
 }
 
+// ─── MCP Auto-injection ──────────────────────────────────────────
+
+export interface McpServerConfig {
+  type: "stdio" | "http";
+  command?: string;
+  args?: string[];
+  url?: string;
+  headers?: Record<string, string>;
+  env?: Record<string, string>;
+}
+
+export interface McpAutoConfig {
+  sourceControlProvider?: string;
+  issueTrackerProvider?: string;
+  observabilityProvider?: string;
+  credentials: Record<string, string>;
+  workspaceTools?: string[];
+  userMcpServers?: Record<string, McpServerConfig>;
+}
+
 // ─── Utilities ───────────────────────────────────────────────────
 
 export interface Logger {
