@@ -23,6 +23,10 @@ import { parseWorkflow } from "../schema.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
+import { buildWorkflow, refineWorkflow } from "../workflow-builder.js";
+import { DagRenderer } from "./renderer.js";
+import * as readline from "node:readline";
+
 import { loadDotenv, loadConfigFile, STARTER_CONFIG } from "./config-file.js";
 import {
   registerTriageCommand,
@@ -450,6 +454,17 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
 });
 
 // ── sweny workflow ─────────────────────────────────────────────────────
+
+function promptUser(question: string): Promise<string> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
 const workflowCmd = program.command("workflow").description("Manage and run workflow files");
 
 /** Reads and parses a workflow file (YAML or JSON). Throws on I/O or parse error. */
@@ -657,6 +672,137 @@ workflowCmd
   .command("export <name>")
   .description("Print a built-in workflow as YAML (triage or implement)")
   .action(workflowExportAction);
+
+workflowCmd
+  .command("create <description>")
+  .description("Generate a new workflow from a natural language description")
+  .option("--json", "Output workflow JSON to stdout (no interactive prompt)")
+  .action(async (description: string, options: { json?: boolean }) => {
+    const skills = configuredSkills();
+    const claude = new ClaudeClient({
+      maxTurns: 3,
+      cwd: process.cwd(),
+      logger: consoleLogger,
+    });
+
+    try {
+      let workflow = await buildWorkflow(description, { claude, skills, logger: consoleLogger });
+
+      if (options.json) {
+        process.stdout.write(JSON.stringify(workflow, null, 2) + "\n");
+        process.exit(0);
+        return;
+      }
+
+      while (true) {
+        console.log("");
+        const renderer = new DagRenderer(workflow, { animate: false });
+        console.log(renderer.renderToString());
+        console.log("");
+
+        const defaultPath = `.sweny/workflows/${workflow.id}.yml`;
+        const answer = await promptUser(`  Save to ${defaultPath}? [Y/n/refine] `);
+        const choice = answer.toLowerCase() || "y";
+
+        if (choice === "y" || choice === "yes") {
+          const dir = path.dirname(defaultPath);
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(defaultPath, stringifyYaml(workflow, { indent: 2, lineWidth: 120 }), "utf-8");
+          console.log(chalk.green(`\n  Saved to ${defaultPath}\n`));
+          process.exit(0);
+          return;
+        } else if (choice === "n" || choice === "no") {
+          console.log(chalk.dim("\n  Discarded.\n"));
+          process.exit(0);
+          return;
+        } else if (choice === "refine" || choice === "r") {
+          const refinement = await promptUser("  What would you like to change? ");
+          if (!refinement) continue;
+          console.log(chalk.dim("\n  Refining...\n"));
+          workflow = await refineWorkflow(workflow, refinement, { claude, skills, logger: consoleLogger });
+        } else {
+          console.log(chalk.dim("\n  Refining...\n"));
+          workflow = await refineWorkflow(workflow, choice, { claude, skills, logger: consoleLogger });
+        }
+      }
+    } catch (err) {
+      console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+      process.exit(1);
+    }
+  });
+
+workflowCmd
+  .command("edit <file> [instruction]")
+  .description("Edit an existing workflow file with natural language instructions")
+  .option("--json", "Output updated workflow JSON to stdout (no interactive prompt)")
+  .action(async (file: string, instruction: string | undefined, options: { json?: boolean }) => {
+    let workflow: Workflow;
+    try {
+      workflow = loadWorkflowFile(file);
+    } catch (err) {
+      console.error(chalk.red(`  Error loading ${file}: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+      return;
+    }
+
+    const skills = configuredSkills();
+    const claude = new ClaudeClient({
+      maxTurns: 3,
+      cwd: process.cwd(),
+      logger: consoleLogger,
+    });
+
+    if (!instruction) {
+      instruction = await promptUser("  What would you like to change? ");
+      if (!instruction) {
+        console.log(chalk.dim("  No changes.\n"));
+        process.exit(0);
+        return;
+      }
+    }
+
+    try {
+      let updated = await refineWorkflow(workflow, instruction, { claude, skills, logger: consoleLogger });
+
+      if (options.json) {
+        process.stdout.write(JSON.stringify(updated, null, 2) + "\n");
+        process.exit(0);
+        return;
+      }
+
+      while (true) {
+        console.log("");
+        const renderer = new DagRenderer(updated, { animate: false });
+        console.log(renderer.renderToString());
+        console.log("");
+
+        const answer = await promptUser(`  Save changes to ${file}? [Y/n/refine] `);
+        const choice = answer.toLowerCase() || "y";
+
+        if (choice === "y" || choice === "yes") {
+          fs.writeFileSync(file, stringifyYaml(updated, { indent: 2, lineWidth: 120 }), "utf-8");
+          console.log(chalk.green(`\n  Saved to ${file}\n`));
+          process.exit(0);
+          return;
+        } else if (choice === "n" || choice === "no") {
+          console.log(chalk.dim("\n  Discarded.\n"));
+          process.exit(0);
+          return;
+        } else if (choice === "refine" || choice === "r") {
+          const refinement = await promptUser("  What would you like to change? ");
+          if (!refinement) continue;
+          console.log(chalk.dim("\n  Refining...\n"));
+          updated = await refineWorkflow(updated, refinement, { claude, skills, logger: consoleLogger });
+        } else {
+          console.log(chalk.dim("\n  Refining...\n"));
+          updated = await refineWorkflow(updated, choice, { claude, skills, logger: consoleLogger });
+        }
+      }
+    } catch (err) {
+      console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+      process.exit(1);
+    }
+  });
 
 // TODO: The old CLI had `workflow list` that showed registered step types
 // from the engine. In the new DAG model, we list available skills instead.
