@@ -46,7 +46,15 @@ Be thorough — the investigation step depends on complete context. Use every to
 4. Determine affected services and users.
 5. Recommend a fix approach.
 
-**Novelty check (REQUIRED):** Search the issue tracker for existing open issues that cover the same root cause. Use github_search_issues and/or linear_search_issues with relevant keywords. If you find an existing issue that matches, set is_duplicate=true and duplicate_of to the issue identifier (e.g. "#42" or "ENG-123").`,
+**Novelty check (REQUIRED — you MUST do this before finishing):**
+Search the issue tracker for existing issues (BOTH open AND closed) that cover the same root cause, error pattern, or affected service. Use github_search_issues and/or linear_search_issues with multiple keyword variations.
+
+A match means ANY of:
+- An issue about the same root cause (even if closed/fixed)
+- An issue about the same error message or pattern in the same service
+- An issue that a human would consider "the same bug"
+
+Set is_duplicate=true if ANY match is found. Set is_duplicate=false ONLY if you searched and found zero matches. You MUST always set this field.`,
       skills: ["github", "linear"],
       output: {
         type: "object",
@@ -55,27 +63,26 @@ Be thorough — the investigation step depends on complete context. Use every to
           severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
           affected_services: { type: "array", items: { type: "string" } },
           is_duplicate: { type: "boolean" },
-          duplicate_of: { type: "string", description: "Issue ID if duplicate" },
+          duplicate_of: { type: "string", description: "Issue ID/URL if duplicate" },
           recommendation: { type: "string" },
           fix_approach: { type: "string" },
         },
-        required: ["root_cause", "severity", "recommendation"],
+        required: ["root_cause", "severity", "is_duplicate", "recommendation"],
       },
     },
 
     create_issue: {
-      name: "Create or Update Issue",
-      instruction: `Before creating anything, check whether this root cause is already tracked:
+      name: "Create Issue",
+      instruction: `Create an issue documenting the investigation findings:
 
-1. Search for existing open issues using github_search_issues and/or linear_search_issues with keywords from the root cause, affected service, and error message.
-2. **If a matching issue exists**: Add a comment to it (using github_add_comment or linear_add_comment) noting this re-occurrence with the current timestamp and any new context. Do NOT create a new issue. Return the existing issue's identifier and URL.
-3. **If no matching issue exists**: Create a new issue with:
-   - A clear, actionable title
-   - Root cause, severity, affected services, reproduction steps, and recommended fix
-   - Appropriate labels (bug, severity level, affected service)
-   - Links to relevant commits, PRs, or existing issues
+1. Use a clear, actionable title.
+2. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
+3. Add appropriate labels (bug, severity level, affected service).
+4. Link to relevant commits, PRs, or existing issues.
 
-Use whichever tracker is available to you.`,
+**Safety check**: If during creation you notice a very similar issue already exists, add a comment to it using github_add_comment or linear_add_comment instead of creating a duplicate.
+
+Create the issue in whichever tracker is available to you.`,
       skills: ["linear", "github"],
     },
 
@@ -107,14 +114,14 @@ Log a brief note about why it was skipped. No further action needed.`,
     {
       from: "investigate",
       to: "create_issue",
-      when: "The issue is novel (not a duplicate) and severity is medium or higher",
+      when: "is_duplicate is false AND severity is medium or higher",
     },
 
     // investigate → skip (if duplicate or low priority)
     {
       from: "investigate",
       to: "skip",
-      when: "The issue is a duplicate of an existing ticket, or severity is low",
+      when: "is_duplicate is true, OR severity is low",
     },
 
     // create_issue → notify (always)
