@@ -6,12 +6,11 @@ import { useEditorStore, useTemporalStore } from "./store/editor-store.js";
 import { WorkflowViewer } from "./WorkflowViewer.js";
 import { PropertiesPanel } from "./components/PropertiesPanel.js";
 import { Toolbar } from "./components/Toolbar.js";
-import { NodeToolbox } from "./components/NodeToolbox.js";
+import { AiChat } from "./components/AiChat.js";
 import { DropOverlay } from "./components/DropOverlay.js";
 import { SimulationPanel } from "./components/SimulationPanel.js";
 import { LiveConnectPanel } from "./components/LiveConnectPanel.js";
 import { readPermalinkFromHash, encodeWorkflow } from "./lib/permalink.js";
-import { WorkflowPromptBar } from "./components/WorkflowPromptBar.js";
 
 const PRESET_WORKFLOWS: Array<{ id: string; name: string; workflow: Workflow }> = [
   { id: "triage", name: "triage", workflow: triageWorkflow },
@@ -204,15 +203,10 @@ export function App() {
           ))}
         </div>
       )}
-      {mode === "design" && import.meta.env.DEV && (
-        <WorkflowPromptBar
-          onWorkflowGenerated={handleAiGenerated}
-          currentWorkflow={workflow}
-          hasGenerated={aiGenerated}
-        />
-      )}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {mode === "design" && <NodeToolbox />}
+        {mode === "design" && import.meta.env.DEV && (
+          <AiChat onWorkflowGenerated={handleAiGenerated} currentWorkflow={workflow} hasGenerated={aiGenerated} />
+        )}
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <div style={{ flex: 1 }}>
             <WorkflowViewer />
