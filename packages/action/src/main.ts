@@ -171,20 +171,75 @@ function buildWorkflowInput(config: ActionConfig): Record<string, unknown> {
   };
 }
 
-/** Handle execution events — map to GitHub Actions log groups */
+/** Handle execution events — map to GitHub Actions log groups with full streaming detail */
 function handleEvent(event: ExecutionEvent): void {
   switch (event.type) {
+    case "workflow:start":
+      core.info(`▲ ${event.workflow}`);
+      break;
+
     case "node:enter":
       core.startGroup(`${event.node}: ${event.instruction.slice(0, 80)}`);
+      core.info(`→ ${event.node}`);
       break;
+
+    case "node:progress":
+      core.info(`  ↳ ${event.message}`);
+      break;
+
+    case "tool:call":
+      core.info(`  → ${event.tool}(${summarizeInput(event.input)})`);
+      break;
+
+    case "tool:result":
+      core.info(`  ✓ ${event.tool} → ${summarizeOutput(event.output)}`);
+      break;
+
     case "node:exit":
-      core.info(`${event.node}: ${event.result.status}`);
+      if (event.result.status === "failed") {
+        core.error(`✗ ${event.node}: ${event.result.status}`);
+        if (event.result.data?.error) core.error(`  ${event.result.data.error}`);
+      } else {
+        core.info(`✓ ${event.node}: ${event.result.status} (${event.result.toolCalls.length} tool calls)`);
+      }
       core.endGroup();
       break;
-    case "tool:call":
-      core.info(`  → ${event.tool}`);
+
+    case "route":
+      core.info(`⤳ ${event.from} → ${event.to} (${event.reason})`);
       break;
+
+    case "workflow:end": {
+      const statuses = Object.entries(event.results)
+        .map(([id, r]) => `${id}:${r.status}`)
+        .join(", ");
+      core.info(`▼ workflow complete — ${statuses}`);
+      break;
+    }
   }
+}
+
+/** Summarize tool input for logging (truncated, no secrets) */
+function summarizeInput(input: unknown): string {
+  if (!input || typeof input !== "object") return "";
+  const obj = input as Record<string, unknown>;
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === "string") {
+      parts.push(`${k}=${v.length > 60 ? v.slice(0, 59) + "…" : v}`);
+    } else if (typeof v === "number" || typeof v === "boolean") {
+      parts.push(`${k}=${v}`);
+    }
+  }
+  return parts.join(", ");
+}
+
+/** Summarize tool output for logging (truncated) */
+function summarizeOutput(output: unknown): string {
+  if (output === undefined || output === null) return "ok";
+  if (typeof output === "string") return output.length > 120 ? output.slice(0, 119) + "…" : output;
+  const s = JSON.stringify(output);
+  return s.length > 120 ? s.slice(0, 119) + "…" : s;
 }
 
 /** Set GitHub Action outputs from execution results */
