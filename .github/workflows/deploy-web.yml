@@ -35,6 +35,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Build core (required for studio type declarations)
+        run: npm run build --workspace=packages/core
+
       - name: Build studio library
         run: npm run build:lib --workspace=packages/studio
 
