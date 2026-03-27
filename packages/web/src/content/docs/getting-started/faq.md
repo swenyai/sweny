@@ -1,119 +1,122 @@
 ---
 title: FAQ
-description: Frequently asked questions about SWEny — cost, setup, behavior, security, and custom workflows.
+description: Frequently asked questions about SWEny — cost, AI model, integrations, security, and custom workflows.
 ---
 
-## General
+## How much does SWEny cost?
 
-### What does SWEny cost?
+SWEny is free and open source. You pay for Claude usage only.
 
-SWEny itself has no subscription fee. The AI cost depends on how you authenticate:
+- **Claude Max/Pro subscription** (`claude-oauth-token`) — triage runs are included in your existing subscription. No per-run charge.
+- **Anthropic API key** (`anthropic-api-key`) — pay-per-use. A typical triage run costs roughly $0.10-$0.50 depending on log volume and investigation depth.
 
-- **Claude Max/Pro subscription** (`CLAUDE_CODE_OAUTH_TOKEN`) — covered by your existing subscription, no additional per-run charge.
-- **Anthropic API key** (`ANTHROPIC_API_KEY`) — pay-per-use. A typical triage run with Claude Sonnet costs roughly $0.10–$0.50 depending on log volume and investigation depth.
+## What AI model does SWEny use?
 
-### Does SWEny store my code or logs?
+Claude, via headless [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) — not the raw Anthropic API. Claude Code provides tool use, context management, and structured output built into the runtime. SWEny's executor sends each node's instruction and tools to Claude Code, which handles the rest.
 
-No. Logs are queried in-flight from your observability provider and passed to Claude during the investigation. Nothing is persisted on SWEny servers. SWEny runs entirely inside your CI environment — your code and logs stay in your infrastructure.
+## What observability tools are supported?
 
-### What Claude model does SWEny use?
+**Built-in skills:** Sentry, Datadog, BetterStack. These have native skill integrations with purpose-built tools.
 
-Claude Sonnet (latest) by default. You can switch coding agent providers via `coding-agent-provider` — see [Coding Agent Providers](/providers/coding-agent/) for OpenAI Codex and Google Gemini options.
+**Via Action inputs:** CloudWatch, Splunk, Elasticsearch, New Relic, Grafana Loki, Honeycomb, Axiom, Prometheus, PagerDuty, OpsGenie, Vercel, Supabase, Netlify, Fly.io, Render, Heroku. Set `observability-provider` to the one you use and add the relevant credentials.
 
----
+**Via MCP servers:** Any tool with an MCP server can be added using the `mcp-servers` Action input. See [MCP Servers](/advanced/mcp-servers/).
 
-## Setup
+**For testing:** Set `observability-provider: file` and point `log-file-path` at a local JSON log file. No external API calls.
 
-### Do I need Datadog? What if I use a different observability tool?
+## What issue trackers work?
 
-Datadog is the default but not required. SWEny also works with **Sentry**, **CloudWatch**, **Splunk**, **Elasticsearch**, **New Relic**, and **Grafana Loki** — set `observability-provider` to the one you use. You can also point it at a local JSON file (`observability-provider: file`) for testing without any external service.
+| Tracker | Configuration |
+|---------|--------------|
+| **GitHub Issues** | Default — no extra credentials needed |
+| **Linear** | Set `issue-tracker-provider: linear` + `linear-api-key` + `linear-team-id` |
+| **Jira** | Set `issue-tracker-provider: jira` + `jira-base-url` + `jira-email` + `jira-api-token` |
 
-### Do I need Linear? I use Jira or GitHub Issues.
+## Can I create custom workflows?
 
-GitHub Issues is the default — no extra credentials needed. Jira is supported with an API token and base URL. Set `issue-tracker-provider` to `jira` or `linear` and add the relevant env vars. See [Issue Tracking Providers](/providers/issue-tracking/).
+Yes. Workflows are pure data — YAML or JSON — so you can write them by hand or use Studio's visual editor.
 
-### Does it work with GitLab instead of GitHub?
+- Write a YAML workflow file and run it with the CLI: `npx @sweny-ai/cli workflow run my-workflow.yml`
+- Export a built-in workflow as a starting point: `npx @sweny-ai/cli workflow export triage`
+- Use [Studio](/studio/) to visually build and edit workflows in the browser
 
-Yes. Set `source-control-provider: gitlab` and add `GITLAB_TOKEN` and `GITLAB_PROJECT_ID`. The CLI works against any GitLab instance. The GitHub Action runs in GitHub Actions but can open MRs on GitLab repos. See [Source Control Providers](/providers/source-control/).
+See [Custom Workflows](/workflows/custom/) and [YAML Reference](/workflows/yaml-reference/) for the full guide.
 
-### How do I test without creating real tickets or PRs?
+## How do skills work?
 
-Two options:
+Skills are groups of tools. The `github` skill provides 7 tools: `github_search_code`, `github_get_issue`, `github_search_issues`, `github_create_issue`, `github_create_pr`, `github_list_recent_commits`, and `github_get_file`. Each skill declares its required environment variables — set them and the skill activates automatically.
 
-1. **`dry-run: true`** — runs the full investigation but skips creating tickets, PRs, or notifications. Output goes to `.sweny/output/` (CLI) or `.github/sweny-output/` (Action).
-2. **File-based providers** — set all providers to `file`, point `log-file` at a local JSON log, and the entire run is local-only with no external API calls.
+At each node in the workflow, you list which skill IDs are available. Claude only sees tools from the skills assigned to that node. This keeps each step focused and prevents tool sprawl.
 
-See [CLI Quick Start](/cli/) for a 60-second local-only setup.
+See [Skills Overview](/skills/) for the full catalog and configuration details.
 
----
+## Is my code or data sent anywhere?
 
-## Behavior
+SWEny runs entirely within your infrastructure:
 
-### Why does SWEny say "no novel issues found" every run?
+- **GitHub Action** — runs on GitHub Actions runners. Your code stays in the runner. API calls go only to your configured providers (Sentry, Datadog, Linear, etc.) and to Anthropic (for Claude).
+- **CLI** — runs on your local machine. Same boundaries apply.
 
-Common causes:
+Nothing is persisted on SWEny servers. There are no SWEny servers — the project is a GitHub Action and npm packages.
 
-- **Time range too narrow** — increase `time-range` (e.g., `24h` → `7d`)
-- **All issues already tracked** — `novelty-mode: true` skips issues that match existing tickets; set `novelty-mode: false` to force re-investigation
-- **Service filter too narrow** — check that `service-filter` matches your service names
-- **Observability query returning nothing** — verify credentials with `sweny check`
+## Can I use a different LLM?
 
-See [Troubleshooting](/getting-started/troubleshooting/) for more detail.
+The `coding-agent-provider` input supports three options for the **Implement** workflow:
 
-### Will SWEny create duplicate tickets?
+| Provider | Input value | Credential |
+|----------|------------|------------|
+| Claude (default) | `claude` | `anthropic-api-key` or `claude-oauth-token` |
+| OpenAI Codex | `codex` | `openai-api-key` |
+| Google Gemini | `gemini` | `gemini-api-key` |
 
-No. Before creating a ticket, SWEny checks your issue tracker for recent issues that match the same error pattern. If a match exists, it adds a "+1 occurrence" comment to the existing issue instead of creating a new one.
+The Triage workflow always uses Claude for investigation and routing. The implementation step (writing code, opening PRs) can use any of the three providers.
 
-To disable this behaviour (e.g., for testing), set `novelty-mode: false`.
-
-### Can SWEny fix complex bugs, or just simple ones?
-
-It depends on the codebase and the bug. SWEny is most effective at:
-
-- Bugs with clear error messages and stack traces
-- Root causes localized to a small number of files
-- Issues with well-understood fix patterns (null checks, type coercions, missing guards)
-
-It's less effective at bugs requiring architectural changes, data model redesigns, or reasoning across many loosely-coupled services. Setting `investigation-depth: thorough` and increasing `max-investigate-turns` gives the agent more room to explore.
-
-### Does it auto-merge PRs?
+## Does SWEny auto-merge PRs?
 
 Not by default. The default `review-mode` is `review` — PRs are opened and wait for human approval.
 
-Set `review-mode: auto` to enable GitHub auto-merge when CI passes. Even then, SWEny suppresses auto-merge for high-risk changes (migrations, auth-related files, diffs over 20 files) regardless of the setting.
+Set `review-mode: auto` to enable GitHub auto-merge when CI passes. Even then, SWEny automatically suppresses auto-merge for high-risk changes: migrations, auth-related files, lockfile changes, or diffs touching more than 20 files.
 
----
+## Does SWEny need write access to my repo?
 
-## Security
+Only if you want it to create issues and PRs. For a read-only dry run, set `dry-run: true` and use these minimal permissions:
 
-### Does SWEny need write access to my repo?
+```yaml
+permissions:
+  contents: read
+  issues: read
+```
 
-Only if you want it to create PRs. `dry-run: true` requires only `contents: read` and `pull-requests: read`. To create PRs, grant `contents: write` and `pull-requests: write` in your workflow permissions block.
+For full operation (creating issues, opening PRs), grant:
 
-SWEny only creates branches and PRs — it never pushes directly to protected branches (unless you explicitly configure `review-mode: auto` and GitHub auto-merge is enabled).
+```yaml
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+```
 
-### Can I restrict what the agent can do?
+SWEny never pushes directly to protected branches. It creates feature branches and opens PRs.
 
-Yes:
+## Why does SWEny say "no novel issues found"?
 
-- **`dry-run: true`** — prevents any writes (no tickets, no PRs, no branches)
-- **Workflow permissions** — the agent runs with the `GITHUB_TOKEN` permissions you grant in your workflow file
-- **`review-mode: review`** (default) — all PRs require human approval before merge
+Common causes:
 
----
+- **Time range too narrow** — increase `time-range` (e.g., `4h` to `24h` or `7d`)
+- **All issues already tracked** — `novelty-mode: true` (the default) skips issues that match existing tickets. Set `novelty-mode: false` to force re-investigation
+- **Service filter too narrow** — check that `service-filter` matches your service names
+- **Observability credentials invalid** — verify your API keys are correct and have the right scopes
 
-## Custom Workflows
+## Will SWEny create duplicate tickets?
 
-### Can I build my own workflows?
+No. Before creating an issue, the Triage workflow searches your issue tracker for recent issues matching the same error pattern. If a match exists, it skips to the terminal node instead of filing a duplicate. Set `novelty-mode: false` to disable this behavior during testing.
 
-Yes. SWEny ships a full workflow engine with a TypeScript API. You can:
+## Does it work with GitLab?
 
-- Write YAML workflow files and run them with `sweny workflow run`
-- Export built-in workflows as a starting point: `sweny workflow export triage`
-- Register custom step types in JavaScript and load them with `--steps`
+Yes. Set `source-control-provider: gitlab` and add `gitlab-token` and `gitlab-project-id`. The GitHub Action runs in GitHub Actions but can interact with GitLab repositories. The CLI works against any GitLab instance.
 
-See [Workflow Authoring](/studio/recipe-authoring/) and the [Engine reference](/getting-started/engine/).
+## Where do I get help?
 
-### Can I use SWEny for things other than error triage?
-
-Yes. The workflow engine is general-purpose — Triage and Implement are the built-in workflows, but the engine supports any repetitive engineering task that follows a **Learn → Act → Report** pattern: dependency update PRs, documentation generation, code review summaries, test gap analysis, and more.
+- [Troubleshooting](/advanced/troubleshooting/) — common issues and solutions
+- [GitHub Issues](https://github.com/swenyai/sweny/issues) — report bugs and request features
+- [GitHub Discussions](https://github.com/swenyai/sweny/discussions) — ask questions and share workflows
