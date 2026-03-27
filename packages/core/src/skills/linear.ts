@@ -97,6 +97,51 @@ export const linear: Skill = {
         ),
     },
     {
+      name: "linear_get_issue",
+      description: "Get a Linear issue by ID or identifier (e.g. 'OFF-1020')",
+      input_schema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Linear issue ID (UUID) or identifier (e.g. 'OFF-1020')" },
+        },
+        required: ["id"],
+      },
+      handler: async (input: { id: string }, ctx) =>
+        linearGql(
+          `query($id: String!) {
+            issue(id: $id) {
+              id identifier title url description
+              state { name type }
+              priority priorityLabel
+              assignee { name email }
+              labels { nodes { name } }
+              team { key name }
+              createdAt updatedAt
+            }
+          }`,
+          { id: input.id },
+          ctx,
+        ),
+    },
+    {
+      name: "linear_list_teams",
+      description: "List Linear teams (needed for teamId when creating issues)",
+      input_schema: {
+        type: "object",
+        properties: {},
+      },
+      handler: async (_input: unknown, ctx) =>
+        linearGql(
+          `query {
+            teams {
+              nodes { id key name description }
+            }
+          }`,
+          {},
+          ctx,
+        ),
+    },
+    {
       name: "linear_update_issue",
       description: "Update an existing Linear issue",
       input_schema: {

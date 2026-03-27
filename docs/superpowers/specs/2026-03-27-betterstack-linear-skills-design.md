@@ -23,10 +23,6 @@ BetterStack's official MCP server (`mcp.betterstack.com`) uses a hosted proxy wi
 
 Reference: [BetterStack SQL API docs](https://betterstack.com/docs/logs/query-api/connect-remotely/)
 
-### Multi-cluster reality
-
-BetterStack ClickHouse connections are **locked to a single cluster**. Sources can live on different clusters (e.g. Offload: ECS sources on `eu-fsn-3`, Permit service on `eu-nbg-2`). The skill must support querying across clusters transparently.
-
 ---
 
 ## 1. BetterStack Skill (new file)
@@ -39,19 +35,11 @@ BetterStack ClickHouse connections are **locked to a single cluster**. Sources c
 | Field | Required | Env var | Description |
 |---|---|---|---|
 | `BETTERSTACK_API_TOKEN` | yes | `BETTERSTACK_API_TOKEN` | Telemetry API token (team-scoped) |
-| `BETTERSTACK_QUERY_CONNECTIONS` | yes | `BETTERSTACK_QUERY_CONNECTIONS` | JSON mapping cluster → credentials (see below) |
+| `BETTERSTACK_QUERY_ENDPOINT` | yes | `BETTERSTACK_QUERY_ENDPOINT` | ClickHouse HTTP endpoint (e.g. `https://eu-fsn-3-connect.betterstackdata.com`) |
+| `BETTERSTACK_QUERY_USERNAME` | yes | `BETTERSTACK_QUERY_USERNAME` | ClickHouse connection username |
+| `BETTERSTACK_QUERY_PASSWORD` | yes | `BETTERSTACK_QUERY_PASSWORD` | ClickHouse connection password |
 
-`BETTERSTACK_QUERY_CONNECTIONS` format:
-```json
-{
-  "eu-fsn-3": { "username": "...", "password": "..." },
-  "eu-nbg-2": { "username": "...", "password": "..." }
-}
-```
-
-The endpoint URL is derived from the cluster name: `https://{cluster}-connect.betterstackdata.com`. This avoids redundant config — the cluster name is the only variable.
-
-Users create one ClickHouse connection per cluster in BetterStack → Integrations → Connect ClickHouse HTTP client. If all sources are on one cluster, only that cluster's credentials are needed.
+Each connection is scoped to one cluster. Configure whichever cluster your target sources live on. If you need a different cluster, swap the credentials.
 
 ### Helpers
 
@@ -62,14 +50,10 @@ async function bsApi(path: string, ctx: ToolContext): Promise<unknown>
 // Authorization: Bearer $BETTERSTACK_API_TOKEN
 // 30s timeout
 
-// Parse BETTERSTACK_QUERY_CONNECTIONS into a Map<cluster, {username, password}>
-function getConnections(ctx: ToolContext): Map<string, { username: string; password: string }>
-
-// ClickHouse — log queries, auto-resolves cluster
-async function bsQuery(sql: string, cluster: string, ctx: ToolContext): Promise<unknown>
-// Looks up credentials for the cluster from getConnections()
-// POST https://{cluster}-connect.betterstackdata.com?output_format_pretty_row_numbers=0
-// Basic auth: username:password
+// ClickHouse — log queries
+async function bsQuery(sql: string, ctx: ToolContext): Promise<unknown>
+// POST $BETTERSTACK_QUERY_ENDPOINT?output_format_pretty_row_numbers=0
+// Basic auth: $BETTERSTACK_QUERY_USERNAME:$BETTERSTACK_QUERY_PASSWORD
 // Content-Type: text/plain
 // Body: {sql} FORMAT JSONEachRow
 // Parse NDJSON response → JSON array
@@ -96,8 +80,8 @@ Get full details for a source including table name, cluster, retention settings,
 
 Get queryable fields for a source by running `DESCRIBE TABLE` against the ClickHouse proxy.
 
-- **Input:** `{ table: string, cluster: string }` — table name (e.g. `t273774.offload_ecs_production`) and cluster (e.g. `eu-fsn-3`)
-- **Implementation:** Execute `DESCRIBE TABLE remote({table}_logs)` via `bsQuery(sql, cluster, ctx)`. Parse column names and types.
+- **Input:** `{ table: string }` — table name (e.g. `t273774.offload_ecs_production`)
+- **Implementation:** Execute `DESCRIBE TABLE remote({table}_logs)` via `bsQuery`. Parse column names and types.
 
 #### `betterstack_query`
 
@@ -107,10 +91,8 @@ Execute a read-only ClickHouse SQL query against a telemetry source. Returns JSO
   - `query: string` — ClickHouse SQL (must be SELECT or DESCRIBE)
   - `source_id: number` — source ID (for logging/tracing)
   - `table: string` — table name (e.g. `t273774.offload_ecs_production`)
-  - `cluster: string` — ClickHouse cluster (e.g. `eu-fsn-3`). Agent gets this from `betterstack_list_sources` or `betterstack_get_source`.
 - **Safety:** Reject queries that don't start with `SELECT` or `DESCRIBE` (case-insensitive, after trimming).
-- **Implementation:** Look up credentials for `cluster` from `getConnections()`. Execute via `bsQuery(sql, cluster, ctx)`. Append `LIMIT 500` if no LIMIT clause is present to prevent unbounded result sets.
-- **Error:** If no credentials exist for the requested cluster, return a clear error listing which clusters are configured.
+- **Implementation:** Execute via `bsQuery`. Append `LIMIT 500` if no LIMIT clause is present to prevent unbounded result sets.
 
 ---
 
@@ -222,20 +204,8 @@ Users add these GitHub Actions secrets:
 | Secret | Source |
 |---|---|
 | `BETTERSTACK_API_TOKEN` | BetterStack → API tokens → Telemetry API tokens |
-| `BETTERSTACK_QUERY_CONNECTIONS` | JSON object — see below |
+| `BETTERSTACK_QUERY_ENDPOINT` | BetterStack → Integrations → ClickHouse HTTP → host (e.g. `https://eu-fsn-3-connect.betterstackdata.com`) |
+| `BETTERSTACK_QUERY_USERNAME` | Same form → username |
+| `BETTERSTACK_QUERY_PASSWORD` | Same form → password (**save immediately**, shown once) |
 
-To build `BETTERSTACK_QUERY_CONNECTIONS`:
-
-1. Go to BetterStack → Integrations → Connect ClickHouse HTTP client
-2. Create a connection for each cluster your sources use (check source settings for cluster)
-3. **Save the password immediately** — BetterStack only shows it once
-4. Build the JSON:
-   ```json
-   {
-     "eu-fsn-3": { "username": "u_abc123", "password": "..." },
-     "eu-nbg-2": { "username": "u_def456", "password": "..." }
-   }
-   ```
-5. Store as a single GitHub Actions secret (`BETTERSTACK_QUERY_CONNECTIONS`)
-
-If all sources are on one cluster, only that cluster's entry is needed. Leave IP allowlist empty for GitHub Actions (runners have dynamic IPs).
+Setup: BetterStack → Integrations → Connect ClickHouse HTTP client → select your cluster → create connection. Each connection is scoped to one cluster. Leave IP allowlist empty for GitHub Actions (runners have dynamic IPs).

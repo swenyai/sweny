@@ -11,13 +11,14 @@ import { linear } from "./linear.js";
 import { slack } from "./slack.js";
 import { sentry } from "./sentry.js";
 import { datadog } from "./datadog.js";
+import { betterstack } from "./betterstack.js";
 import { notification } from "./notification.js";
 
 // ─── Built-in skill catalog ─────────────────────────────────────
 
-export const builtinSkills: Skill[] = [github, linear, slack, sentry, datadog, notification];
+export const builtinSkills: Skill[] = [github, linear, slack, sentry, datadog, betterstack, notification];
 
-export { github, linear, slack, sentry, datadog, notification };
+export { github, linear, slack, sentry, datadog, betterstack, notification };
 
 // ─── Registry helpers ───────────────────────────────────────────
 

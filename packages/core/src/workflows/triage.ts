@@ -49,7 +49,7 @@ If there are no URLs to fetch, just pass through — this step is a no-op.`,
 3. **Issue tracker**: Search for similar past issues or known problems.
 
 Be thorough — the investigation step depends on complete context. Use every tool available to you.`,
-      skills: ["github", "sentry", "datadog", "linear"],
+      skills: ["github", "sentry", "datadog", "betterstack", "linear"],
     },
 
     investigate: {
