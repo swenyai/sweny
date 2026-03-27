@@ -37294,6 +37294,8 @@ const triageWorkflow = {
 2. **Source control**: Check recent commits, pull requests, and deploys that might be related.
 3. **Issue tracker**: Search for similar past issues or known problems.
 
+If input.betterstackSourceId or input.betterstackTableName is provided, use those to scope your BetterStack log queries to the correct source.
+
 Be thorough — the investigation step depends on complete context. Use every tool available to you.`,
             skills: ["github", "sentry", "datadog", "linear"],
         },
@@ -37993,6 +37995,8 @@ function populateEnv(config) {
             break;
         case "betterstack":
             set("BETTERSTACK_API_TOKEN", obs.apiToken);
+            set("BETTERSTACK_SOURCE_ID", obs.sourceId);
+            set("BETTERSTACK_TABLE_NAME", obs.tableName);
             break;
     }
     // Coding agent
@@ -38028,6 +38032,13 @@ function buildWorkflowInput(config) {
         issueTrackerName: config.issueTrackerProvider,
         projectId: config.linearTeamId,
         issueIdentifier: config.linearIssue,
+        observabilityProvider: config.observabilityProvider,
+        ...(config.observabilityCredentials.sourceId && {
+            betterstackSourceId: config.observabilityCredentials.sourceId,
+        }),
+        ...(config.observabilityCredentials.tableName && {
+            betterstackTableName: config.observabilityCredentials.tableName,
+        }),
     };
 }
 /** Handle execution events — map to GitHub Actions log groups with full streaming detail */
