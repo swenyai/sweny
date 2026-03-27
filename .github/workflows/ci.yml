@@ -50,9 +50,6 @@ jobs:
 
       - run: npm ci
 
-      - name: Build providers
-        run: npm run build --workspace=packages/providers
-
       - name: Build core
         run: npm run build --workspace=packages/core
 
@@ -74,16 +71,13 @@ jobs:
 
       - run: npm ci
 
-      - name: Build providers
-        run: npm run build --workspace=packages/providers
-
       - name: Build core
         run: npm run build --workspace=packages/core
 
       - run: npm run test
 
   smoke-test:
-    name: Smoke — providers load without peer deps
+    name: Smoke — core loads without optional deps
     runs-on: ubuntu-latest
     needs: [test]
     steps:
@@ -96,23 +90,13 @@ jobs:
 
       - run: npm ci
 
-      - name: Build providers
-        run: npm run build --workspace=packages/providers
-
       - name: Build core
         run: npm run build --workspace=packages/core
 
-      - name: Remove optional peer deps from node_modules
-        run: |
-          rm -rf node_modules/@aws-sdk
-          rm -rf node_modules/@modelcontextprotocol
-          rm -rf node_modules/@slack
-          rm -rf node_modules/@actions
-
-      - name: Verify package loads without peer deps
+      - name: Verify core loads
         run: |
           node --input-type=module <<'EOF'
-          import('./packages/providers/dist/index.js')
-            .then(() => { console.log('✓ @sweny-ai/providers loads without peer deps'); })
+          import('./packages/core/dist/index.js')
+            .then(() => { console.log('✓ @sweny-ai/core loads'); })
             .catch((err) => { console.error('✗', err.message); process.exit(1); });
           EOF

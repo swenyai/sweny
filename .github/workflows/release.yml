@@ -20,8 +20,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          # Use a PAT so the version-bump commit triggers CI on re-push.
-          # Falls back to GITHUB_TOKEN (version-bump won't re-trigger CI, but publish still works).
           token: ${{ secrets.GH_PAT || github.token }}
 
       - uses: actions/setup-node@v6
@@ -32,11 +30,10 @@ jobs:
 
       - run: npm ci
 
-      - name: Build packages
+      - name: Build
         run: |
-          npm run build --workspace=packages/providers
-          npm run build --workspace=packages/engine
-          npm run build --workspace=packages/cli
+          npm run build --workspace=packages/core
+          npm run build:lib --workspace=packages/studio
 
       - name: Test
         run: npm run test
@@ -46,50 +43,74 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Consume changesets — bump versions
-        id: version
-        run: |
-          if ls .changeset/*.md 2>/dev/null | grep -qv README; then
-            npx changeset version
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Commit and push version bumps
-        if: steps.version.outputs.changed == 'true'
-        run: |
-          git add -A
-          git commit -m "chore: release packages [skip ci]"
-          git push
-
-      - name: Publish to npm
-        run: npx changeset publish
+      - name: Detect changes and publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 --match 'release-*' 2>/dev/null || echo "")
+          DIFF_BASE=${LAST_TAG:-$(git rev-list --max-parents=0 HEAD)}
 
-      - name: Rebuild action dist and update v3 tag
+          CHANGED_CORE=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/core/ | head -1)
+          CHANGED_STUDIO=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/studio/ | head -1)
+
+          PUBLISHED=false
+
+          if [ -n "$CHANGED_CORE" ]; then
+            cd packages/core
+            LOCAL_VER=$(node -p "require('./package.json').version")
+            NPM_VER=$(npm view @sweny-ai/core version 2>/dev/null || echo "0.0.0")
+
+            if [ "$LOCAL_VER" = "$NPM_VER" ]; then
+              NEXT=$(echo "$LOCAL_VER" | awk -F. '{$NF=$NF+1; print}' OFS=.)
+              npm version "$NEXT" --no-git-tag-version
+            fi
+
+            npm publish
+            PUBLISHED=true
+            echo "Published @sweny-ai/core@$(node -p "require('./package.json').version")"
+            cd ../..
+          fi
+
+          if [ -n "$CHANGED_STUDIO" ]; then
+            cd packages/studio
+            LOCAL_VER=$(node -p "require('./package.json').version")
+            NPM_VER=$(npm view @sweny-ai/studio version 2>/dev/null || echo "0.0.0")
+
+            if [ "$LOCAL_VER" = "$NPM_VER" ]; then
+              NEXT=$(echo "$LOCAL_VER" | awk -F. '{$NF=$NF+1; print}' OFS=.)
+              npm version "$NEXT" --no-git-tag-version
+            fi
+
+            npm publish
+            PUBLISHED=true
+            echo "Published @sweny-ai/studio@$(node -p "require('./package.json').version")"
+            cd ../..
+          fi
+
+          if [ "$PUBLISHED" = true ]; then
+            git add -A
+            git commit -m "chore: release packages [skip ci]"
+            git push
+          fi
+
+      - name: Rebuild action dist and tag
         run: |
           npm run package --workspace=packages/action
           git add dist/
-          if git diff --cached --quiet; then
-            echo "dist unchanged, skipping commit"
-          else
+          if ! git diff --cached --quiet; then
             git commit -m "chore: rebuild action dist [skip ci]"
             git push
           fi
-          # Keep the v3 floating tag pointing at the latest main commit
+
           git tag -f v3
           git push origin v3 --force
-          # Push an immutable versioned tag (e.g. v3.10.0) derived from @sweny-ai/engine
-          # so consumers can pin to an exact release instead of the floating v3.
-          # Skips silently if the tag already exists (no version bump this run).
-          ENGINE_VERSION=$(node -p "require('./packages/engine/package.json').version")
-          VERSIONED_TAG="v3.${ENGINE_VERSION}"
+
+          CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
+          VERSIONED_TAG="v3.${CORE_VERSION}"
           if git tag "$VERSIONED_TAG" 2>/dev/null; then
             git push origin "$VERSIONED_TAG"
             echo "Pushed $VERSIONED_TAG"
-          else
-            echo "$VERSIONED_TAG already exists, skipping"
           fi
+
+          git tag -f "release-latest"
+          git push origin "release-latest" --force
