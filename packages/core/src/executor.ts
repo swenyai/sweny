@@ -223,11 +223,12 @@ function validate(workflow: Workflow, skills: Map<string, Skill>): void {
     if (!workflow.nodes[edge.to]) throw new Error(`Edge references unknown node: "${edge.to}"`);
   }
 
-  // Warn about missing skills (non-fatal — skills might be registered later)
-  const allSkillIds = new Set(Object.values(workflow.nodes).flatMap((n) => n.skills));
-  for (const id of allSkillIds) {
-    if (!skills.has(id)) {
-      consoleLogger.warn(`Workflow references unregistered skill: "${id}"`);
+  // Check that each node has at least one available skill (if it lists any)
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    if (node.skills.length === 0) continue;
+    const available = node.skills.filter((id) => skills.has(id));
+    if (available.length === 0) {
+      consoleLogger.warn(`Node "${nodeId}" has no available skills (needs one of: ${node.skills.join(", ")})`);
     }
   }
 }
