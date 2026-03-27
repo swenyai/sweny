@@ -130,6 +130,19 @@ export class ClaudeClient implements Claude {
             const clean = ts.summary.replace(/\n/g, " ").trim();
             onProgress?.(clean.length > 80 ? clean.slice(0, 79) + "\u2026" : clean);
           }
+        } else if (message.type === "assistant") {
+          // Extract tool_use blocks from assistant messages (MCP tool calls)
+          const am = message as any;
+          if (am.message?.content && Array.isArray(am.message.content)) {
+            for (const block of am.message.content) {
+              if (block.type === "tool_use") {
+                toolCalls.push({
+                  tool: stripMcpPrefix(block.name ?? ""),
+                  input: block.input,
+                });
+              }
+            }
+          }
         } else if (message.type === "result") {
           const resultMsg = message as SDKResultMessage;
           if (resultMsg.subtype === "success" && "result" in resultMsg) {

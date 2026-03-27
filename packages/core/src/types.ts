@@ -93,7 +93,7 @@ export interface NodeResult {
 export interface ToolCall {
   tool: string;
   input: unknown;
-  output: unknown;
+  output?: unknown;
 }
 
 export type ExecutionEvent =
