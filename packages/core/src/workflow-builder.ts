@@ -119,6 +119,7 @@ export async function buildWorkflow(description: string, options: BuildWorkflowO
     instruction,
     context: { description },
     tools: [],
+    outputSchema: workflowJsonSchema as Record<string, unknown>,
   });
 
   if (result.status === "failed") {
@@ -149,6 +150,7 @@ export async function refineWorkflow(
     instruction: systemPrompt,
     context: { instruction },
     tools: [],
+    outputSchema: workflowJsonSchema as Record<string, unknown>,
   });
 
   if (result.status === "failed") {
