@@ -30924,11 +30924,8 @@ async function execute(workflow, input, options) {
                 return output;
             },
         }));
-        // Prepend additional context to instruction if provided
-        const additionalContext = typeof input?.additionalContext === "string" ? input.additionalContext : "";
-        const instruction = additionalContext
-            ? `## Additional Context & Rules\n\n${additionalContext}\n\n---\n\n${node.instruction}`
-            : node.instruction;
+        // Prepend rules and context to instruction if provided
+        const instruction = buildNodeInstruction(node.instruction, input);
         // Run Claude on this node
         const result = await claude.run({
             instruction,
@@ -30952,6 +30949,36 @@ async function execute(workflow, input, options) {
     return results;
 }
 // ─── Internals ───────────────────────────────────────────────────
+/**
+ * Build the full instruction for a node by prepending rules and context.
+ * Rules get "You MUST follow" framing; context gets "Background" framing.
+ * Falls back to legacy `additionalContext` if rules/context aren't set.
+ */
+function buildNodeInstruction(baseInstruction, input) {
+    const inp = input;
+    if (!inp)
+        return baseInstruction;
+    const sections = [];
+    // New structured format
+    const rules = typeof inp.rules === "string" && inp.rules ? inp.rules : "";
+    const context = typeof inp.context === "string" && inp.context ? inp.context : "";
+    if (rules) {
+        sections.push(`## Rules — You MUST Follow These\n\n${rules}`);
+    }
+    if (context) {
+        sections.push(`## Background Context\n\n${context}`);
+    }
+    // Legacy fallback
+    if (sections.length === 0) {
+        const legacy = typeof inp.additionalContext === "string" ? inp.additionalContext : "";
+        if (legacy) {
+            sections.push(`## Additional Context & Rules\n\n${legacy}`);
+        }
+    }
+    if (sections.length === 0)
+        return baseInstruction;
+    return `${sections.join("\n\n")}\n\n---\n\n${baseInstruction}`;
+}
 /** Call observer without letting exceptions crash the workflow */
 function safeObserve(observer, event, logger) {
     if (!observer)
@@ -35412,6 +35439,18 @@ class ClaudeClient {
         this.defaultContext = opts.defaultContext ?? { config: {}, logger: this.logger };
         this.mcpServers = opts.mcpServers ?? {};
     }
+    /**
+     * Build env for the Claude Code subprocess.
+     * OAuth token takes priority over API key to prevent .env files from
+     * overriding the user's subscription-based auth.
+     */
+    buildEnv() {
+        const env = Object.fromEntries(Object.entries(process.env).filter((e) => e[1] != null));
+        if (env.CLAUDE_CODE_OAUTH_TOKEN) {
+            delete env.ANTHROPIC_API_KEY;
+        }
+        return env;
+    }
     async run(opts) {
         const { instruction, context, tools, outputSchema, onProgress } = opts;
         const toolCalls = [];
@@ -35432,8 +35471,7 @@ class ClaudeClient {
         ]
             .filter(Boolean)
             .join("\n\n");
-        // Spread process.env so Claude Code inherits PATH, HOME, auth tokens, etc.
-        const env = Object.fromEntries(Object.entries(process.env).filter((e) => e[1] != null));
+        const env = this.buildEnv();
         let response = "";
         try {
             const allMcpServers = { ...this.mcpServers };
@@ -35447,6 +35485,8 @@ class ClaudeClient {
                     cwd: this.cwd,
                     env,
                     permissionMode: "bypassPermissions",
+                    allowDangerouslySkipPermissions: true,
+                    stderr: (data) => this.logger.debug(`[claude-code] ${data}`),
                     ...(this.model ? { model: this.model } : {}),
                     ...(Object.keys(allMcpServers).length > 0 ? { mcpServers: allMcpServers } : {}),
                 },
@@ -35465,6 +35505,20 @@ class ClaudeClient {
                     if (ts.summary) {
                         const clean = ts.summary.replace(/\n/g, " ").trim();
                         onProgress?.(clean.length > 80 ? clean.slice(0, 79) + "\u2026" : clean);
+                    }
+                }
+                else if (message.type === "assistant") {
+                    // Extract tool_use blocks from assistant messages (MCP tool calls)
+                    const am = message;
+                    if (am.message?.content && Array.isArray(am.message.content)) {
+                        for (const block of am.message.content) {
+                            if (block.type === "tool_use") {
+                                toolCalls.push({
+                                    tool: stripMcpPrefix(block.name ?? ""),
+                                    input: block.input,
+                                });
+                            }
+                        }
                     }
                 }
                 else if (message.type === "result") {
@@ -35506,7 +35560,7 @@ class ClaudeClient {
             `\nChoices:\n${choiceList}`,
             `\nRespond with ONLY the choice ID, nothing else.`,
         ].join("\n");
-        const env = Object.fromEntries(Object.entries(process.env).filter((e) => e[1] != null));
+        const env = this.buildEnv();
         let response = "";
         try {
             const stream = Aa({
@@ -35516,6 +35570,8 @@ class ClaudeClient {
                     cwd: this.cwd,
                     env,
                     permissionMode: "bypassPermissions",
+                    allowDangerouslySkipPermissions: true,
+                    stderr: (data) => this.logger.debug(`[claude-code] ${data}`),
                     ...(this.model ? { model: this.model } : {}),
                 },
             });
@@ -36984,6 +37040,47 @@ function buildAutoMcpServers(config) {
     // User-supplied servers always win on key conflict.
     return { ...auto, ...(config.userMcpServers ?? {}) };
 }
+/**
+ * Build a human-readable summary of configured providers and MCP tools.
+ * Prepended to every node instruction via additionalContext so the agent
+ * knows exactly what tools are available and how to use them.
+ */
+function buildProviderContext(opts) {
+    const lines = ["## Available Providers & Tools", ""];
+    // Observability
+    if (opts.observabilityProvider) {
+        const mcpNote = opts.mcpServers.includes(opts.observabilityProvider)
+            ? ` (available via MCP — use its tools to query logs, errors, and metrics)`
+            : "";
+        lines.push(`- **Observability**: ${opts.observabilityProvider}${mcpNote}`);
+    }
+    // BetterStack as secondary (token present but not primary provider)
+    if (opts.observabilityProvider !== "betterstack" && opts.mcpServers.includes("betterstack")) {
+        lines.push(`- **Logs**: betterstack (available via MCP — use its tools to query logs)`);
+    }
+    // Issue tracker
+    if (opts.issueTrackerProvider) {
+        const mcpNote = opts.mcpServers.includes(opts.issueTrackerProvider === "github-issues" ? "github" : opts.issueTrackerProvider)
+            ? ` (available via MCP)`
+            : "";
+        lines.push(`- **Issue tracker**: ${opts.issueTrackerProvider}${mcpNote}`);
+    }
+    // Source control
+    if (opts.sourceControlProvider) {
+        const mcpNote = opts.mcpServers.includes(opts.sourceControlProvider) ? ` (available via MCP)` : "";
+        lines.push(`- **Source control**: ${opts.sourceControlProvider}${mcpNote}`);
+    }
+    // Extras (source IDs, table names, etc.)
+    if (opts.extras && Object.keys(opts.extras).length > 0) {
+        lines.push("");
+        for (const [key, value] of Object.entries(opts.extras)) {
+            lines.push(`- **${key}**: ${value}`);
+        }
+    }
+    lines.push("");
+    lines.push("Use all available MCP tools to gather data. " + "MCP tools are already connected — just call them directly.");
+    return lines.join("\n");
+}
 
 ;// CONCATENATED MODULE: ../core/dist/workflow-builder.js
 /**
@@ -37203,24 +37300,48 @@ async function resolveTemplates(config, cwd) {
     return { issueTemplate, prTemplate };
 }
 /**
- * Load additional context documents (local files or URLs).
+ * Classify a source entry as URL, file path, or inline text.
+ */
+function classifySource(source) {
+    if (source.startsWith("http://") || source.startsWith("https://"))
+        return "url";
+    if (source.startsWith("./") || source.startsWith("../") || source.startsWith("/"))
+        return "file";
+    return "inline";
+}
+/**
+ * Load additional context documents (local files, URLs, or inline text).
  * Each source is loaded and wrapped with a header.
+ * Returns { resolved, urls } — resolved text for files/inline, urls for agent to fetch.
  */
 async function loadAdditionalContext(sources, cwd = process.cwd()) {
     if (sources.length === 0)
-        return "";
+        return { resolved: "", urls: [] };
     const parts = [];
+    const urls = [];
     for (const source of sources) {
         const trimmed = source.trim();
         if (!trimmed)
             continue;
-        const label = trimmed.startsWith("http") ? trimmed : external_node_path_namespaceObject.basename(trimmed);
-        const content = await loadTemplate(trimmed, "", cwd);
-        if (content) {
-            parts.push(`### ${label}\n\n${content}`);
+        const kind = classifySource(trimmed);
+        if (kind === "url") {
+            urls.push(trimmed);
+        }
+        else if (kind === "file") {
+            const content = await loadTemplate(trimmed, "", cwd);
+            if (content) {
+                parts.push(`### ${external_node_path_namespaceObject.basename(trimmed)}\n\n${content}`);
+            }
+        }
+        else {
+            // Inline text — use as-is
+            parts.push(trimmed);
         }
     }
-    return parts.length > 0 ? parts.join("\n\n---\n\n") : "";
+    return {
+        resolved: parts.length > 0 ? parts.join("\n\n---\n\n") : "",
+        urls,
+    };
 }
 
 ;// CONCATENATED MODULE: ../core/dist/index.js
@@ -37267,8 +37388,8 @@ async function loadAdditionalContext(sources, cwd = process.cwd()) {
 /**
  * Triage Workflow
  *
- * Investigate a production alert → gather context from available
- * providers → determine root cause → create issue → notify team.
+ * Investigate a production alert → gather context → determine root cause →
+ * create/update issue → implement fix → open PR → notify team.
  *
  * Provider-agnostic: nodes list all compatible skills per category.
  * The executor uses whichever skills are configured. Pre-execution
@@ -37283,9 +37404,23 @@ async function loadAdditionalContext(sources, cwd = process.cwd()) {
 const triageWorkflow = {
     id: "triage",
     name: "Alert Triage",
-    description: "Investigate a production alert, determine root cause, create an issue, and notify the team",
-    entry: "gather",
+    description: "Investigate a production alert, determine root cause, create an issue, implement a fix, and notify the team",
+    entry: "prepare",
     nodes: {
+        prepare: {
+            name: "Load Rules & Context",
+            instruction: `You are preparing for a triage workflow. Your job is to fetch and review any knowledge documents listed in the input.
+
+1. Check input for \`rules_urls\` and \`context_urls\` arrays.
+2. For each URL, fetch its content:
+   - Linear document URLs → use the Linear MCP tools (get_document or search_documentation)
+   - Other HTTP URLs → fetch directly
+3. Summarize the key rules and context that downstream workflow nodes should follow.
+4. Output the consolidated information so it's available to all subsequent steps.
+
+If there are no URLs to fetch, just pass through — this step is a no-op.`,
+            skills: ["linear"],
+        },
         gather: {
             name: "Gather Context",
             instruction: `You are investigating a production alert. Gather all relevant context using the available tools:
@@ -37293,8 +37428,6 @@ const triageWorkflow = {
 1. **Observability**: Pull error details, stack traces, recent logs, metrics, and active incidents around the time of the alert. Use whichever observability tools are available to you.
 2. **Source control**: Check recent commits, pull requests, and deploys that might be related.
 3. **Issue tracker**: Search for similar past issues or known problems.
-
-If input.betterstackSourceId or input.betterstackTableName is provided, use those to scope your BetterStack log queries to the correct source.
 
 Be thorough — the investigation step depends on complete context. Use every tool available to you.`,
             skills: ["github", "sentry", "datadog", "linear"],
@@ -37308,6 +37441,7 @@ Be thorough — the investigation step depends on complete context. Use every to
 3. Assess severity: critical (service down), high (major feature broken), medium (degraded), low (cosmetic/minor).
 4. Determine affected services and users.
 5. Recommend a fix approach.
+6. Assess fix complexity: "simple" (a few lines, clear change), "moderate" (multiple files but well-understood), or "complex" (architectural, risky, or unclear).
 
 **Novelty check (REQUIRED — you MUST do this before finishing):**
 Search the issue tracker for existing issues (BOTH open AND closed) that cover the same root cause, error pattern, or affected service. Use github_search_issues and/or linear_search_issues with multiple keyword variations.
@@ -37329,6 +37463,7 @@ Set is_duplicate=true if ANY match is found. Set is_duplicate=false ONLY if you 
                     duplicate_of: { type: "string", description: "Issue ID/URL if duplicate" },
                     recommendation: { type: "string" },
                     fix_approach: { type: "string" },
+                    fix_complexity: { type: "string", enum: ["simple", "moderate", "complex"] },
                 },
                 required: ["root_cause", "severity", "is_duplicate", "recommendation"],
             },
@@ -37349,25 +37484,62 @@ If context.issueTemplate is provided, use it as the format for the issue body. O
 Create the issue in whichever tracker is available to you.`,
             skills: ["linear", "github"],
         },
+        skip: {
+            name: "Skip — Duplicate or Low Priority",
+            instruction: `This alert was determined to be a duplicate or low-priority.
+
+If this is a **duplicate** of an existing issue (check context for duplicate_of):
+1. Find the existing issue using the issue tracker tools.
+2. Add a comment: "+1 — SWEny triage confirmed this issue is still active (seen again at {current UTC timestamp}). Latest context: {1-2 sentence summary of what was found this run}."
+3. If the issue is closed/done, reopen it or note in the comment that the bug has recurred.
+
+If this is just **low priority**, log a brief note about why it was skipped.`,
+            skills: ["linear", "github"],
+        },
+        implement: {
+            name: "Implement Fix",
+            instruction: `Implement the fix identified during investigation:
+
+1. Create a feature branch from the base branch (check context for baseBranch, default "main").
+2. Read the relevant source files to understand the current code.
+3. Make the necessary code changes — fix the bug, nothing more.
+4. Run any existing tests if available to verify the fix doesn't break anything.
+5. Stage and commit with a clear commit message referencing the issue.
+
+Keep changes minimal and focused. Do not refactor surrounding code or add unrelated improvements.
+
+If the fix turns out to be more complex than expected, stop and explain why — do not force a bad fix.`,
+            skills: ["github"],
+        },
+        create_pr: {
+            name: "Open Pull Request",
+            instruction: `Open a pull request for the fix:
+
+1. Push the branch to the remote.
+2. Create a PR with a clear title referencing the issue (e.g. "[OFF-1020] fix: guard empty pdf_texts before access").
+3. In the PR body, include: summary of the bug, what the fix does, and a link to the issue.
+4. Add appropriate labels if available.
+
+If context.prTemplate is provided, use it as the format for the PR body. Otherwise use a clear structure with: Summary, Changes, Testing, and Related Issues.
+
+Return the PR URL and number.`,
+            skills: ["github"],
+        },
         notify: {
             name: "Notify Team",
             instruction: `Send a notification summarizing the triage result:
 
-1. Include: alert summary, severity, root cause (1-2 sentences), and a link to the created issue.
+1. Include: alert summary, severity, root cause (1-2 sentences), and links to any created issues or PRs.
 2. For critical/high severity, make the notification urgent.
 3. For medium/low, a standard notification is fine.
 
 Use whichever notification channel is available to you.`,
             skills: ["slack", "notification"],
         },
-        skip: {
-            name: "Skip — Duplicate or Low Priority",
-            instruction: `This alert was determined to be a duplicate or low-priority.
-Log a brief note about why it was skipped. No further action needed.`,
-            skills: [],
-        },
     },
     edges: [
+        // prepare → gather (always)
+        { from: "prepare", to: "gather" },
         // gather → investigate (always)
         { from: "gather", to: "investigate" },
         // investigate → create_issue (if novel and actionable)
@@ -37382,8 +37554,34 @@ Log a brief note about why it was skipped. No further action needed.`,
             to: "skip",
             when: "is_duplicate is true, OR severity is low",
         },
-        // create_issue → notify (always)
-        { from: "create_issue", to: "notify" },
+        // create_issue → implement (if fix is clear and not too complex)
+        {
+            from: "create_issue",
+            to: "implement",
+            when: "fix_complexity is simple or moderate AND fix_approach is provided AND dryRun is not true",
+        },
+        // create_issue → notify (if fix is too complex or risky, or dry run)
+        {
+            from: "create_issue",
+            to: "notify",
+            when: "fix_complexity is complex, OR no clear fix_approach, OR dryRun is true",
+        },
+        // skip → implement (duplicate exists but has a clear unfixed bug with a simple fix)
+        {
+            from: "skip",
+            to: "implement",
+            when: "is_duplicate is true AND the duplicate issue is still open/unfixed AND fix_complexity is simple or moderate AND fix_approach is provided AND dryRun is not true",
+        },
+        // skip → notify (duplicate was +1'd, no implementation needed or too complex)
+        {
+            from: "skip",
+            to: "notify",
+            when: "is_duplicate is true AND (fix_complexity is complex OR no fix_approach OR the issue already has a PR in progress OR dryRun is true), OR severity is low",
+        },
+        // implement → create_pr (always after successful implementation)
+        { from: "implement", to: "create_pr" },
+        // create_pr → notify (always)
+        { from: "create_pr", to: "notify" },
     ],
 };
 
@@ -37919,12 +38117,32 @@ async function run() {
         const workflow = config.workflow === "implement" ? implementWorkflow : triageWorkflow;
         // Load templates & additional context
         const templates = await resolveTemplates({ issueTemplate: config.issueTemplate, prTemplate: config.prTemplate }, process.cwd());
-        const additionalContext = await loadAdditionalContext(config.additionalContext, process.cwd());
+        const userContextResult = await loadAdditionalContext(config.additionalContext, process.cwd());
+        // Build dynamic provider context
+        const extras = {};
+        if (config.observabilityCredentials.sourceId) {
+            extras["BetterStack source ID"] = config.observabilityCredentials.sourceId;
+        }
+        if (config.observabilityCredentials.tableName) {
+            extras["BetterStack table name"] = config.observabilityCredentials.tableName;
+        }
+        const providerCtx = buildProviderContext({
+            observabilityProvider: config.observabilityProvider,
+            issueTrackerProvider: config.issueTrackerProvider,
+            sourceControlProvider: config.sourceControlProvider,
+            mcpServers: Object.keys(mcpServers),
+            extras: Object.keys(extras).length > 0 ? extras : undefined,
+        });
+        const contextParts = [providerCtx, userContextResult.resolved, config.additionalInstructions].filter(Boolean);
+        const context = contextParts.join("\n\n");
         // Build workflow input
         const input = {
             ...buildWorkflowInput(config),
             ...templates,
-            ...(additionalContext ? { additionalContext } : {}),
+            // Structured rules/context for executor
+            ...(context ? { context } : {}),
+            // URLs for the prepare node to fetch at runtime
+            ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
         };
         // Execute workflow
         const results = await execute(workflow, input, {
