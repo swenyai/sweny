@@ -363,6 +363,20 @@ inputs:
     required: false
     default: ".github/service-map.yml"
 
+  # Templates & context
+  issue-template:
+    description: "Path to issue template file (local path or URL). Used to format created issues."
+    required: false
+  pr-template:
+    description: "Path to PR template file (local path or URL). Used to format created PRs."
+    required: false
+  additional-context:
+    description: >-
+      Newline-separated list of files or URLs to load as additional context.
+      These documents (SDLC guides, coding standards, runbooks) are injected
+      into every workflow node so Claude follows your team's conventions.
+    required: false
+
   # GitHub tokens
   github-token:
     description: "GitHub token for API access and PR creation"

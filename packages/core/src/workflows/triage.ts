@@ -82,6 +82,8 @@ Set is_duplicate=true if ANY match is found. Set is_duplicate=false ONLY if you 
 
 **Safety check**: If during creation you notice a very similar issue already exists, add a comment to it using github_add_comment or linear_add_comment instead of creating a duplicate.
 
+If context.issueTemplate is provided, use it as the format for the issue body. Otherwise use a clear structure with: Summary, Root Cause, Impact, Steps to Reproduce, and Recommended Fix.
+
 Create the issue in whichever tracker is available to you.`,
       skills: ["linear", "github"],
     },

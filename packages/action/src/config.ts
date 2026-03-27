@@ -80,6 +80,11 @@ export interface ActionConfig {
   // Supported: slack, notion, pagerduty, monday, asana
   workspaceTools: string[];
 
+  // Templates & context
+  issueTemplate: string;
+  prTemplate: string;
+  additionalContext: string[];
+
   // Runtime context
   repository: string;
   repositoryOwner: string;
@@ -151,6 +156,13 @@ export function parseInputs(): ActionConfig {
 
     workspaceTools: (core.getInput("workspace-tools") || "")
       .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+
+    issueTemplate: core.getInput("issue-template"),
+    prTemplate: core.getInput("pr-template"),
+    additionalContext: (core.getInput("additional-context") || "")
+      .split("\n")
       .map((s) => s.trim())
       .filter(Boolean),
 

@@ -6,6 +6,8 @@ import {
   configuredSkills,
   buildAutoMcpServers,
   consoleLogger,
+  resolveTemplates,
+  loadAdditionalContext,
 } from "@sweny-ai/core";
 import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
 import type { ExecutionEvent, NodeResult } from "@sweny-ai/core";
@@ -54,8 +56,19 @@ async function run(): Promise<void> {
     // Select workflow
     const workflow = config.workflow === "implement" ? implementWorkflow : triageWorkflow;
 
+    // Load templates & additional context
+    const templates = await resolveTemplates(
+      { issueTemplate: config.issueTemplate, prTemplate: config.prTemplate },
+      process.cwd(),
+    );
+    const additionalContext = await loadAdditionalContext(config.additionalContext, process.cwd());
+
     // Build workflow input
-    const input = buildWorkflowInput(config);
+    const input = {
+      ...buildWorkflowInput(config),
+      ...templates,
+      ...(additionalContext ? { additionalContext } : {}),
+    };
 
     // Execute workflow
     const results = await execute(workflow, input, {

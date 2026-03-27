@@ -80,3 +80,7 @@ export type { McpServerConfig, McpAutoConfig } from "./types.js";
 // Workflow builder
 export { buildWorkflow, refineWorkflow } from "./workflow-builder.js";
 export type { BuildWorkflowOptions } from "./workflow-builder.js";
+
+// Templates
+export { resolveTemplates, loadAdditionalContext, loadTemplate } from "./templates.js";
+export type { Templates } from "./templates.js";

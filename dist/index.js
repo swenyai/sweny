@@ -30924,9 +30924,14 @@ async function execute(workflow, input, options) {
                 return output;
             },
         }));
+        // Prepend additional context to instruction if provided
+        const additionalContext = typeof input?.additionalContext === "string" ? input.additionalContext : "";
+        const instruction = additionalContext
+            ? `## Additional Context & Rules\n\n${additionalContext}\n\n---\n\n${node.instruction}`
+            : node.instruction;
         // Run Claude on this node
         const result = await claude.run({
-            instruction: node.instruction,
+            instruction,
             context,
             tools: trackedTools,
             outputSchema: node.output,
@@ -31044,11 +31049,13 @@ function validate(workflow, skills) {
         if (!workflow.nodes[edge.to])
             throw new Error(`Edge references unknown node: "${edge.to}"`);
     }
-    // Warn about missing skills (non-fatal — skills might be registered later)
-    const allSkillIds = new Set(Object.values(workflow.nodes).flatMap((n) => n.skills));
-    for (const id of allSkillIds) {
-        if (!skills.has(id)) {
-            consoleLogger.warn(`Workflow references unregistered skill: "${id}"`);
+    // Check that each node has at least one available skill (if it lists any)
+    for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+        if (node.skills.length === 0)
+            continue;
+        const available = node.skills.filter((id) => skills.has(id));
+        if (available.length === 0) {
+            consoleLogger.warn(`Node "${nodeId}" has no available skills (needs one of: ${node.skills.join(", ")})`);
         }
     }
 }
@@ -37215,6 +37222,122 @@ async function refineWorkflow(workflow, instruction, options) {
     return extractWorkflow(result.data);
 }
 
+;// CONCATENATED MODULE: external "node:fs"
+const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
+;// CONCATENATED MODULE: external "node:path"
+const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
+;// CONCATENATED MODULE: ../core/dist/templates.js
+/**
+ * Template loading for issues and PRs.
+ *
+ * Templates can come from:
+ *   1. Local file path (relative to repo root)
+ *   2. URL (fetched at runtime)
+ *   3. Built-in defaults
+ */
+
+
+const DEFAULT_ISSUE_TEMPLATE = `## Summary
+<!-- One-line description of the issue -->
+
+## Root Cause
+<!-- What caused this issue -->
+
+## Impact
+- **Severity**: <!-- critical / high / medium / low -->
+- **Affected Services**: <!-- list -->
+- **User Impact**: <!-- description -->
+
+## Steps to Reproduce
+1. ...
+
+## Recommended Fix
+<!-- Proposed solution -->
+
+## Related
+- Commits: <!-- relevant commits -->
+- PRs: <!-- related PRs -->
+`;
+const DEFAULT_PR_TEMPLATE = `## Summary
+<!-- What does this PR do? -->
+
+## Root Cause
+<!-- What caused the issue this fixes? -->
+
+## Changes
+<!-- Bullet list of changes -->
+
+## Testing
+- [ ] Tested locally
+- [ ] No breaking changes
+
+## Related Issues
+Fixes #
+`;
+/**
+ * Load a template from a file path or URL.
+ * Returns the default if source is empty or loading fails.
+ */
+async function loadTemplate(source, fallback, cwd = process.cwd()) {
+    if (!source || source.trim() === "")
+        return fallback;
+    const trimmed = source.trim();
+    // URL
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        try {
+            const res = await fetch(trimmed, { signal: AbortSignal.timeout(10_000) });
+            if (!res.ok) {
+                console.warn(`[templates] Failed to fetch ${trimmed} (HTTP ${res.status}), using default`);
+                return fallback;
+            }
+            return await res.text();
+        }
+        catch (err) {
+            console.warn(`[templates] Failed to fetch ${trimmed}: ${err.message}, using default`);
+            return fallback;
+        }
+    }
+    // Local file
+    const resolved = external_node_path_namespaceObject.resolve(cwd, trimmed);
+    try {
+        return external_node_fs_namespaceObject.readFileSync(resolved, "utf-8");
+    }
+    catch {
+        console.warn(`[templates] Template file not found: ${resolved}, using default`);
+        return fallback;
+    }
+}
+/**
+ * Resolve issue and PR templates from config.
+ */
+async function resolveTemplates(config, cwd) {
+    const [issueTemplate, prTemplate] = await Promise.all([
+        loadTemplate(config.issueTemplate, DEFAULT_ISSUE_TEMPLATE, cwd),
+        loadTemplate(config.prTemplate, DEFAULT_PR_TEMPLATE, cwd),
+    ]);
+    return { issueTemplate, prTemplate };
+}
+/**
+ * Load additional context documents (local files or URLs).
+ * Each source is loaded and wrapped with a header.
+ */
+async function loadAdditionalContext(sources, cwd = process.cwd()) {
+    if (sources.length === 0)
+        return "";
+    const parts = [];
+    for (const source of sources) {
+        const trimmed = source.trim();
+        if (!trimmed)
+            continue;
+        const label = trimmed.startsWith("http") ? trimmed : external_node_path_namespaceObject.basename(trimmed);
+        const content = await loadTemplate(trimmed, "", cwd);
+        if (content) {
+            parts.push(`### ${label}\n\n${content}`);
+        }
+    }
+    return parts.length > 0 ? parts.join("\n\n---\n\n") : "";
+}
+
 ;// CONCATENATED MODULE: ../core/dist/index.js
 /**
  * @sweny-ai/core — Skill library + DAG workflow orchestration
@@ -37251,6 +37374,8 @@ async function refineWorkflow(workflow, instruction, options) {
 // MCP auto-injection
 
 // Workflow builder
+
+// Templates
 
 
 ;// CONCATENATED MODULE: ../core/dist/workflows/triage.js
@@ -37297,7 +37422,15 @@ Be thorough — the investigation step depends on complete context. Use every to
 4. Determine affected services and users.
 5. Recommend a fix approach.
 
-**Novelty check (REQUIRED):** Search the issue tracker for existing open issues that cover the same root cause. Use github_search_issues and/or linear_search_issues with relevant keywords. If you find an existing issue that matches, set is_duplicate=true and duplicate_of to the issue identifier (e.g. "#42" or "ENG-123").`,
+**Novelty check (REQUIRED — you MUST do this before finishing):**
+Search the issue tracker for existing issues (BOTH open AND closed) that cover the same root cause, error pattern, or affected service. Use github_search_issues and/or linear_search_issues with multiple keyword variations.
+
+A match means ANY of:
+- An issue about the same root cause (even if closed/fixed)
+- An issue about the same error message or pattern in the same service
+- An issue that a human would consider "the same bug"
+
+Set is_duplicate=true if ANY match is found. Set is_duplicate=false ONLY if you searched and found zero matches. You MUST always set this field.`,
             skills: ["github", "linear"],
             output: {
                 type: "object",
@@ -37306,26 +37439,27 @@ Be thorough — the investigation step depends on complete context. Use every to
                     severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
                     affected_services: { type: "array", items: { type: "string" } },
                     is_duplicate: { type: "boolean" },
-                    duplicate_of: { type: "string", description: "Issue ID if duplicate" },
+                    duplicate_of: { type: "string", description: "Issue ID/URL if duplicate" },
                     recommendation: { type: "string" },
                     fix_approach: { type: "string" },
                 },
-                required: ["root_cause", "severity", "recommendation"],
+                required: ["root_cause", "severity", "is_duplicate", "recommendation"],
             },
         },
         create_issue: {
-            name: "Create or Update Issue",
-            instruction: `Before creating anything, check whether this root cause is already tracked:
+            name: "Create Issue",
+            instruction: `Create an issue documenting the investigation findings:
 
-1. Search for existing open issues using github_search_issues and/or linear_search_issues with keywords from the root cause, affected service, and error message.
-2. **If a matching issue exists**: Add a comment to it (using github_add_comment or linear_add_comment) noting this re-occurrence with the current timestamp and any new context. Do NOT create a new issue. Return the existing issue's identifier and URL.
-3. **If no matching issue exists**: Create a new issue with:
-   - A clear, actionable title
-   - Root cause, severity, affected services, reproduction steps, and recommended fix
-   - Appropriate labels (bug, severity level, affected service)
-   - Links to relevant commits, PRs, or existing issues
+1. Use a clear, actionable title.
+2. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
+3. Add appropriate labels (bug, severity level, affected service).
+4. Link to relevant commits, PRs, or existing issues.
 
-Use whichever tracker is available to you.`,
+**Safety check**: If during creation you notice a very similar issue already exists, add a comment to it using github_add_comment or linear_add_comment instead of creating a duplicate.
+
+If context.issueTemplate is provided, use it as the format for the issue body. Otherwise use a clear structure with: Summary, Root Cause, Impact, Steps to Reproduce, and Recommended Fix.
+
+Create the issue in whichever tracker is available to you.`,
             skills: ["linear", "github"],
         },
         notify: {
@@ -37353,13 +37487,13 @@ Log a brief note about why it was skipped. No further action needed.`,
         {
             from: "investigate",
             to: "create_issue",
-            when: "The issue is novel (not a duplicate) and severity is medium or higher",
+            when: "is_duplicate is false AND severity is medium or higher",
         },
         // investigate → skip (if duplicate or low priority)
         {
             from: "investigate",
             to: "skip",
-            when: "The issue is a duplicate of an existing ticket, or severity is low",
+            when: "is_duplicate is true, OR severity is low",
         },
         // create_issue → notify (always)
         { from: "create_issue", to: "notify" },
@@ -37424,6 +37558,8 @@ If the fix is too risky or complex, explain why and skip.`,
 2. Create a PR with a clear title and description.
 3. Reference the original issue in the PR body.
 4. Add appropriate reviewers or labels if possible.
+
+If context.prTemplate is provided, use it as the format for the PR body. Otherwise use a clear structure with: Summary, Changes, Testing, and Related Issues.
 
 Return the PR URL.`,
             skills: ["github"],
@@ -37509,6 +37645,12 @@ function parseInputs() {
         mcpServers: parseMcpServers(getInput("mcp-servers")),
         workspaceTools: (getInput("workspace-tools") || "")
             .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        issueTemplate: getInput("issue-template"),
+        prTemplate: getInput("pr-template"),
+        additionalContext: (getInput("additional-context") || "")
+            .split("\n")
             .map((s) => s.trim())
             .filter(Boolean),
         repository: process.env.GITHUB_REPOSITORY || "",
@@ -37888,8 +38030,15 @@ async function run() {
         });
         // Select workflow
         const workflow = config.workflow === "implement" ? implementWorkflow : triageWorkflow;
+        // Load templates & additional context
+        const templates = await resolveTemplates({ issueTemplate: config.issueTemplate, prTemplate: config.prTemplate }, process.cwd());
+        const additionalContext = await loadAdditionalContext(config.additionalContext, process.cwd());
         // Build workflow input
-        const input = buildWorkflowInput(config);
+        const input = {
+            ...buildWorkflowInput(config),
+            ...templates,
+            ...(additionalContext ? { additionalContext } : {}),
+        };
         // Execute workflow
         const results = await execute(workflow, input, {
             skills,

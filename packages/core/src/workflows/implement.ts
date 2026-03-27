@@ -62,6 +62,8 @@ If the fix is too risky or complex, explain why and skip.`,
 3. Reference the original issue in the PR body.
 4. Add appropriate reviewers or labels if possible.
 
+If context.prTemplate is provided, use it as the format for the PR body. Otherwise use a clear structure with: Summary, Changes, Testing, and Related Issues.
+
 Return the PR URL.`,
       skills: ["github"],
     },

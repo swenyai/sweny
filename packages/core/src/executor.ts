@@ -74,9 +74,16 @@ export async function execute(
       },
     }));
 
+    // Prepend additional context to instruction if provided
+    const additionalContext =
+      typeof (input as any)?.additionalContext === "string" ? (input as any).additionalContext : "";
+    const instruction = additionalContext
+      ? `## Additional Context & Rules\n\n${additionalContext}\n\n---\n\n${node.instruction}`
+      : node.instruction;
+
     // Run Claude on this node
     const result = await claude.run({
-      instruction: node.instruction,
+      instruction,
       context,
       tools: trackedTools,
       outputSchema: node.output,
