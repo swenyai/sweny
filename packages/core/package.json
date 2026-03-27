@@ -2,6 +2,9 @@
   "name": "@sweny-ai/core",
   "version": "0.1.0",
   "type": "module",
+  "bin": {
+    "sweny": "./dist/cli/main.js"
+  },
   "description": "Skill library + DAG workflow orchestration powered by Claude",
   "license": "MIT",
   "exports": {
@@ -46,6 +49,9 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.84",
+    "chalk": "^5",
+    "commander": "^13",
+    "yaml": "^2",
     "zod": "^4.0.0"
   },
   "devDependencies": {
