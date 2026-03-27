@@ -48,6 +48,21 @@ export class ClaudeClient implements Claude {
     this.mcpServers = opts.mcpServers ?? {};
   }
 
+  /**
+   * Build env for the Claude Code subprocess.
+   * OAuth token takes priority over API key to prevent .env files from
+   * overriding the user's subscription-based auth.
+   */
+  private buildEnv(): Record<string, string> {
+    const env: Record<string, string> = Object.fromEntries(
+      Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
+    );
+    if (env.CLAUDE_CODE_OAUTH_TOKEN) {
+      delete env.ANTHROPIC_API_KEY;
+    }
+    return env;
+  }
+
   async run(opts: {
     instruction: string;
     context: Record<string, unknown>;
@@ -78,10 +93,7 @@ export class ClaudeClient implements Claude {
       .filter(Boolean)
       .join("\n\n");
 
-    // Spread process.env so Claude Code inherits PATH, HOME, auth tokens, etc.
-    const env: Record<string, string> = Object.fromEntries(
-      Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
-    );
+    const env = this.buildEnv();
 
     let response = "";
 
@@ -97,6 +109,8 @@ export class ClaudeClient implements Claude {
           cwd: this.cwd,
           env,
           permissionMode: "bypassPermissions",
+          allowDangerouslySkipPermissions: true,
+          stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
           ...(this.model ? { model: this.model } : {}),
           ...(Object.keys(allMcpServers).length > 0 ? { mcpServers: allMcpServers } : {}),
         },
@@ -161,9 +175,7 @@ export class ClaudeClient implements Claude {
       `\nRespond with ONLY the choice ID, nothing else.`,
     ].join("\n");
 
-    const env: Record<string, string> = Object.fromEntries(
-      Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
-    );
+    const env = this.buildEnv();
 
     let response = "";
 
@@ -175,6 +187,8 @@ export class ClaudeClient implements Claude {
           cwd: this.cwd,
           env,
           permissionMode: "bypassPermissions",
+          allowDangerouslySkipPermissions: true,
+          stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
           ...(this.model ? { model: this.model } : {}),
         },
       });

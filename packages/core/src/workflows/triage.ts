@@ -1,8 +1,8 @@
 /**
  * Triage Workflow
  *
- * Investigate a production alert → gather context from available
- * providers → determine root cause → create issue → notify team.
+ * Investigate a production alert → gather context → determine root cause →
+ * create/update issue → implement fix → open PR → notify team.
  *
  * Provider-agnostic: nodes list all compatible skills per category.
  * The executor uses whichever skills are configured. Pre-execution
@@ -20,7 +20,8 @@ import type { Workflow } from "../types.js";
 export const triageWorkflow: Workflow = {
   id: "triage",
   name: "Alert Triage",
-  description: "Investigate a production alert, determine root cause, create an issue, and notify the team",
+  description:
+    "Investigate a production alert, determine root cause, create an issue, implement a fix, and notify the team",
   entry: "gather",
 
   nodes: {
@@ -31,8 +32,6 @@ export const triageWorkflow: Workflow = {
 1. **Observability**: Pull error details, stack traces, recent logs, metrics, and active incidents around the time of the alert. Use whichever observability tools are available to you.
 2. **Source control**: Check recent commits, pull requests, and deploys that might be related.
 3. **Issue tracker**: Search for similar past issues or known problems.
-
-If input.betterstackSourceId or input.betterstackTableName is provided, use those to scope your BetterStack log queries to the correct source.
 
 Be thorough — the investigation step depends on complete context. Use every tool available to you.`,
       skills: ["github", "sentry", "datadog", "linear"],
@@ -47,6 +46,7 @@ Be thorough — the investigation step depends on complete context. Use every to
 3. Assess severity: critical (service down), high (major feature broken), medium (degraded), low (cosmetic/minor).
 4. Determine affected services and users.
 5. Recommend a fix approach.
+6. Assess fix complexity: "simple" (a few lines, clear change), "moderate" (multiple files but well-understood), or "complex" (architectural, risky, or unclear).
 
 **Novelty check (REQUIRED — you MUST do this before finishing):**
 Search the issue tracker for existing issues (BOTH open AND closed) that cover the same root cause, error pattern, or affected service. Use github_search_issues and/or linear_search_issues with multiple keyword variations.
@@ -68,6 +68,7 @@ Set is_duplicate=true if ANY match is found. Set is_duplicate=false ONLY if you 
           duplicate_of: { type: "string", description: "Issue ID/URL if duplicate" },
           recommendation: { type: "string" },
           fix_approach: { type: "string" },
+          fix_complexity: { type: "string", enum: ["simple", "moderate", "complex"] },
         },
         required: ["root_cause", "severity", "is_duplicate", "recommendation"],
       },
@@ -90,23 +91,60 @@ Create the issue in whichever tracker is available to you.`,
       skills: ["linear", "github"],
     },
 
+    skip: {
+      name: "Skip — Duplicate or Low Priority",
+      instruction: `This alert was determined to be a duplicate or low-priority.
+
+If this is a **duplicate** of an existing issue (check context for duplicate_of):
+1. Find the existing issue using the issue tracker tools.
+2. Add a comment: "+1 — SWEny triage confirmed this issue is still active (seen again at {current UTC timestamp}). Latest context: {1-2 sentence summary of what was found this run}."
+3. If the issue is closed/done, reopen it or note in the comment that the bug has recurred.
+
+If this is just **low priority**, log a brief note about why it was skipped.`,
+      skills: ["linear", "github"],
+    },
+
+    implement: {
+      name: "Implement Fix",
+      instruction: `Implement the fix identified during investigation:
+
+1. Create a feature branch from the base branch (check context for baseBranch, default "main").
+2. Read the relevant source files to understand the current code.
+3. Make the necessary code changes — fix the bug, nothing more.
+4. Run any existing tests if available to verify the fix doesn't break anything.
+5. Stage and commit with a clear commit message referencing the issue.
+
+Keep changes minimal and focused. Do not refactor surrounding code or add unrelated improvements.
+
+If the fix turns out to be more complex than expected, stop and explain why — do not force a bad fix.`,
+      skills: ["github"],
+    },
+
+    create_pr: {
+      name: "Open Pull Request",
+      instruction: `Open a pull request for the fix:
+
+1. Push the branch to the remote.
+2. Create a PR with a clear title referencing the issue (e.g. "[OFF-1020] fix: guard empty pdf_texts before access").
+3. In the PR body, include: summary of the bug, what the fix does, and a link to the issue.
+4. Add appropriate labels if available.
+
+If context.prTemplate is provided, use it as the format for the PR body. Otherwise use a clear structure with: Summary, Changes, Testing, and Related Issues.
+
+Return the PR URL and number.`,
+      skills: ["github"],
+    },
+
     notify: {
       name: "Notify Team",
       instruction: `Send a notification summarizing the triage result:
 
-1. Include: alert summary, severity, root cause (1-2 sentences), and a link to the created issue.
+1. Include: alert summary, severity, root cause (1-2 sentences), and links to any created issues or PRs.
 2. For critical/high severity, make the notification urgent.
 3. For medium/low, a standard notification is fine.
 
 Use whichever notification channel is available to you.`,
       skills: ["slack", "notification"],
-    },
-
-    skip: {
-      name: "Skip — Duplicate or Low Priority",
-      instruction: `This alert was determined to be a duplicate or low-priority.
-Log a brief note about why it was skipped. No further action needed.`,
-      skills: [],
     },
   },
 
@@ -128,7 +166,38 @@ Log a brief note about why it was skipped. No further action needed.`,
       when: "is_duplicate is true, OR severity is low",
     },
 
-    // create_issue → notify (always)
-    { from: "create_issue", to: "notify" },
+    // create_issue → implement (if fix is clear and not too complex)
+    {
+      from: "create_issue",
+      to: "implement",
+      when: "fix_complexity is simple or moderate AND fix_approach is provided AND dryRun is not true",
+    },
+
+    // create_issue → notify (if fix is too complex or risky, or dry run)
+    {
+      from: "create_issue",
+      to: "notify",
+      when: "fix_complexity is complex, OR no clear fix_approach, OR dryRun is true",
+    },
+
+    // skip → implement (duplicate exists but has a clear unfixed bug with a simple fix)
+    {
+      from: "skip",
+      to: "implement",
+      when: "is_duplicate is true AND the duplicate issue is still open/unfixed AND fix_complexity is simple or moderate AND fix_approach is provided AND dryRun is not true",
+    },
+
+    // skip → notify (duplicate was +1'd, no implementation needed or too complex)
+    {
+      from: "skip",
+      to: "notify",
+      when: "is_duplicate is true AND (fix_complexity is complex OR no fix_approach OR the issue already has a PR in progress OR dryRun is true), OR severity is low",
+    },
+
+    // implement → create_pr (always after successful implementation)
+    { from: "implement", to: "create_pr" },
+
+    // create_pr → notify (always)
+    { from: "create_pr", to: "notify" },
   ],
 };

@@ -16,7 +16,7 @@ import type { ExecutionEvent, NodeResult, Workflow, McpServerConfig, Observer } 
 import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
 import { createSkillMap, configuredSkills } from "../skills/index.js";
-import { buildAutoMcpServers } from "../mcp.js";
+import { buildAutoMcpServers, buildProviderContext } from "../mcp.js";
 import type { McpAutoConfig } from "../types.js";
 import { validateWorkflow as validateWorkflowSchema } from "../schema.js";
 import { parseWorkflow } from "../schema.js";
@@ -169,6 +169,33 @@ function buildMcpAutoConfig(config: CliConfig): McpAutoConfig {
   };
 }
 
+/**
+ * Combine provider context + user instructions into a single additionalContext string.
+ */
+function buildAdditionalContext(config: CliConfig, mcpServers: Record<string, unknown>): string {
+  const extras: Record<string, string> = {};
+  if (config.observabilityCredentials.sourceId) {
+    extras["BetterStack source ID"] = config.observabilityCredentials.sourceId;
+  }
+  if (config.observabilityCredentials.tableName) {
+    extras["BetterStack table name"] = config.observabilityCredentials.tableName;
+  }
+
+  const providerCtx = buildProviderContext({
+    observabilityProvider: config.observabilityProvider,
+    issueTrackerProvider: config.issueTrackerProvider,
+    sourceControlProvider: config.sourceControlProvider,
+    mcpServers: Object.keys(mcpServers),
+    extras: Object.keys(extras).length > 0 ? extras : undefined,
+  });
+
+  const parts = [providerCtx];
+  if (config.additionalInstructions) {
+    parts.push(config.additionalInstructions);
+  }
+  return parts.join("\n\n");
+}
+
 // ── sweny triage ──────────────────────────────────────────────────────
 const triageCmd = registerTriageCommand(program);
 
@@ -194,12 +221,15 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     console.log(formatBanner(config, version));
   }
 
-  // ── Build skill map + Claude client ──────────────────────
+  // ── Build skill map + MCP servers + Claude client ──────────
   const skills = createSkillMap(configuredSkills());
+  const mcpAutoConfig = buildMcpAutoConfig(config);
+  const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: consoleLogger,
+    mcpServers,
   });
 
   // ── Progress display state ─────────────────────────────────
@@ -355,6 +385,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     ...(config.observabilityCredentials.tableName && {
       betterstackTableName: config.observabilityCredentials.tableName,
     }),
+    additionalContext: buildAdditionalContext(config, mcpServers),
   };
 
   try {
@@ -416,10 +447,13 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   };
 
   const skills = createSkillMap(configuredSkills());
+  const mcpAutoConfig = buildMcpAutoConfig(config);
+  const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({
     maxTurns: config.maxImplementTurns || 40,
     cwd: process.cwd(),
     logger: consoleLogger,
+    mcpServers,
   });
 
   console.log(chalk.cyan(`\n  sweny implement ${issueId}\n`));
@@ -555,10 +589,13 @@ export async function workflowRunAction(
   const isTTY = !isJson && (process.stderr.isTTY ?? false);
 
   const skills = createSkillMap(configuredSkills());
+  const mcpAutoConfig = buildMcpAutoConfig(config);
+  const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: consoleLogger,
+    mcpServers,
   });
 
   // Track per-node entry time to compute elapsed on exit
@@ -617,6 +654,7 @@ export async function workflowRunAction(
     ...(config.observabilityCredentials.tableName && {
       betterstackTableName: config.observabilityCredentials.tableName,
     }),
+    additionalContext: buildAdditionalContext(config, mcpServers),
   };
 
   try {

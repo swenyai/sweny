@@ -5,6 +5,7 @@ import {
   createSkillMap,
   configuredSkills,
   buildAutoMcpServers,
+  buildProviderContext,
   consoleLogger,
   resolveTemplates,
   loadAdditionalContext,
@@ -61,7 +62,25 @@ async function run(): Promise<void> {
       { issueTemplate: config.issueTemplate, prTemplate: config.prTemplate },
       process.cwd(),
     );
-    const additionalContext = await loadAdditionalContext(config.additionalContext, process.cwd());
+    const userContext = await loadAdditionalContext(config.additionalContext, process.cwd());
+
+    // Build dynamic provider context
+    const extras: Record<string, string> = {};
+    if (config.observabilityCredentials.sourceId) {
+      extras["BetterStack source ID"] = config.observabilityCredentials.sourceId;
+    }
+    if (config.observabilityCredentials.tableName) {
+      extras["BetterStack table name"] = config.observabilityCredentials.tableName;
+    }
+    const providerCtx = buildProviderContext({
+      observabilityProvider: config.observabilityProvider,
+      issueTrackerProvider: config.issueTrackerProvider,
+      sourceControlProvider: config.sourceControlProvider,
+      mcpServers: Object.keys(mcpServers),
+      extras: Object.keys(extras).length > 0 ? extras : undefined,
+    });
+
+    const additionalContext = [providerCtx, userContext, config.additionalInstructions].filter(Boolean).join("\n\n");
 
     // Build workflow input
     const input = {

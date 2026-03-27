@@ -50,6 +50,7 @@ async function loadMain() {
     createSkillMap: mockCreateSkillMap,
     configuredSkills: mockConfiguredSkills,
     buildAutoMcpServers: mockBuildAutoMcpServers,
+    buildProviderContext: vi.fn().mockReturnValue(""),
     consoleLogger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
     resolveTemplates: mockResolveTemplates,
     loadAdditionalContext: mockLoadAdditionalContext,

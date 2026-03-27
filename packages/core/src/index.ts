@@ -73,7 +73,8 @@ export { workflowZ, nodeZ, edgeZ, skillZ, parseWorkflow, validateWorkflow, workf
 export type { WorkflowError } from "./schema.js";
 
 // MCP auto-injection
-export { buildAutoMcpServers } from "./mcp.js";
+export { buildAutoMcpServers, buildProviderContext } from "./mcp.js";
+export type { ProviderContextOptions } from "./mcp.js";
 export type { McpServerConfig, McpAutoConfig } from "./types.js";
 
 // Workflow builder

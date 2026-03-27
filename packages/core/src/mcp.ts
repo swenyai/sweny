@@ -200,3 +200,68 @@ export function buildAutoMcpServers(config: McpAutoConfig): Record<string, McpSe
   // User-supplied servers always win on key conflict.
   return { ...auto, ...(config.userMcpServers ?? {}) };
 }
+
+// ── Provider context for dynamic instruction injection ─────────────
+
+export interface ProviderContextOptions {
+  observabilityProvider?: string;
+  issueTrackerProvider?: string;
+  sourceControlProvider?: string;
+  /** Which MCP servers were actually injected (keys from buildAutoMcpServers) */
+  mcpServers: string[];
+  /** Extra details to include (e.g. betterstack source ID) */
+  extras?: Record<string, string>;
+}
+
+/**
+ * Build a human-readable summary of configured providers and MCP tools.
+ * Prepended to every node instruction via additionalContext so the agent
+ * knows exactly what tools are available and how to use them.
+ */
+export function buildProviderContext(opts: ProviderContextOptions): string {
+  const lines: string[] = ["## Available Providers & Tools", ""];
+
+  // Observability
+  if (opts.observabilityProvider) {
+    const mcpNote = opts.mcpServers.includes(opts.observabilityProvider)
+      ? ` (available via MCP — use its tools to query logs, errors, and metrics)`
+      : "";
+    lines.push(`- **Observability**: ${opts.observabilityProvider}${mcpNote}`);
+  }
+
+  // BetterStack as secondary (token present but not primary provider)
+  if (opts.observabilityProvider !== "betterstack" && opts.mcpServers.includes("betterstack")) {
+    lines.push(`- **Logs**: betterstack (available via MCP — use its tools to query logs)`);
+  }
+
+  // Issue tracker
+  if (opts.issueTrackerProvider) {
+    const mcpNote = opts.mcpServers.includes(
+      opts.issueTrackerProvider === "github-issues" ? "github" : opts.issueTrackerProvider,
+    )
+      ? ` (available via MCP)`
+      : "";
+    lines.push(`- **Issue tracker**: ${opts.issueTrackerProvider}${mcpNote}`);
+  }
+
+  // Source control
+  if (opts.sourceControlProvider) {
+    const mcpNote = opts.mcpServers.includes(opts.sourceControlProvider) ? ` (available via MCP)` : "";
+    lines.push(`- **Source control**: ${opts.sourceControlProvider}${mcpNote}`);
+  }
+
+  // Extras (source IDs, table names, etc.)
+  if (opts.extras && Object.keys(opts.extras).length > 0) {
+    lines.push("");
+    for (const [key, value] of Object.entries(opts.extras)) {
+      lines.push(`- **${key}**: ${value}`);
+    }
+  }
+
+  lines.push("");
+  lines.push(
+    "Use all available MCP tools to gather data. " + "MCP tools are already connected — just call them directly.",
+  );
+
+  return lines.join("\n");
+}
