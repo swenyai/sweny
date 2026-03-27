@@ -11,6 +11,8 @@ import { DropOverlay } from "./components/DropOverlay.js";
 import { SimulationPanel } from "./components/SimulationPanel.js";
 import { LiveConnectPanel } from "./components/LiveConnectPanel.js";
 import { readPermalinkFromHash, encodeWorkflow } from "./lib/permalink.js";
+import { WorkflowPromptBar } from "./components/WorkflowPromptBar.js";
+import { getStoredApiKey } from "./lib/generate-instruction.js";
 
 const PRESET_WORKFLOWS: Array<{ id: string; name: string; workflow: Workflow }> = [
   { id: "triage", name: "triage", workflow: triageWorkflow },
@@ -26,6 +28,7 @@ export function App() {
   const [showImport, setShowImport] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [forkToast, setForkToast] = useState<string | null>(null);
+  const [aiGenerated, setAiGenerated] = useState(false);
   const validationErrors = useMemo(() => validateWorkflow(workflow), [workflow]);
 
   const isBuiltinWorkflow = PRESET_WORKFLOWS.some((p) => p.id === activeId);
@@ -78,6 +81,16 @@ export function App() {
     (wf: Workflow) => {
       useEditorStore.temporal.getState().clear();
       setWorkflow(wf);
+    },
+    [setWorkflow],
+  );
+
+  const handleAiGenerated = useCallback(
+    (wf: Workflow) => {
+      useEditorStore.temporal.getState().clear();
+      setWorkflow(wf);
+      setActiveId("custom");
+      setAiGenerated(true);
     },
     [setWorkflow],
   );
@@ -160,6 +173,13 @@ export function App() {
             </button>
           ))}
         </div>
+      )}
+      {mode === "design" && getStoredApiKey() && (
+        <WorkflowPromptBar
+          onWorkflowGenerated={handleAiGenerated}
+          currentWorkflow={workflow}
+          hasGenerated={aiGenerated}
+        />
       )}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         {mode === "design" && <NodeToolbox />}
