@@ -57,9 +57,9 @@ export type { WorkflowError } from "./schema.js";
 export { workflowToFlow, flowToWorkflow, applyExecutionEvent, exportAsTypescript, getSkillCatalog } from "./studio.js";
 export type { FlowNode, SkillNodeData, FlowEdge } from "./studio.js";
 
-// Workflow builder (browser-safe, uses fetch)
-export { buildWorkflow, refineWorkflow } from "./workflow-builder.js";
-export type { BuildWorkflowOptions } from "./workflow-builder.js";
+// Workflow builder — NOT included in browser entry.
+// buildWorkflow/refineWorkflow depend on the Claude interface (Node-only).
+// Import from "@sweny-ai/core" in Node environments.
 
 // Testing utilities — NOT included in browser entry.
 // MockClaude and createFileSkill depend on node:fs.

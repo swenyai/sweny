@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { buildWorkflow, refineWorkflow } from "@sweny-ai/core";
 import { getSkillCatalog } from "@sweny-ai/core/studio";
+import { buildWorkflowBrowser, refineWorkflowBrowser } from "../lib/workflow-builder-browser.js";
 import { getStoredApiKey } from "../lib/generate-instruction.js";
 
 const catalog = getSkillCatalog();
@@ -45,8 +45,8 @@ export function WorkflowPromptBar({ onWorkflowGenerated, currentWorkflow, hasGen
     setError(null);
     try {
       const workflow = hasGenerated
-        ? await refineWorkflow(currentWorkflow, trimmed, { apiKey, skills })
-        : await buildWorkflow(trimmed, { apiKey, skills });
+        ? await refineWorkflowBrowser(currentWorkflow, trimmed, { apiKey, skills })
+        : await buildWorkflowBrowser(trimmed, { apiKey, skills });
       onWorkflowGenerated(workflow);
       setPrompt("");
     } catch (err) {
