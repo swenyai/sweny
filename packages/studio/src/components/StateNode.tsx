@@ -180,16 +180,32 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
         </span>
       )}
 
-      {/* Handles */}
+      {/* Handles — visible connection points */}
       <Handle
         type="target"
         position={Position.Top}
-        style={{ top: -4, background: "#1e293b", border: "2px solid #334155", width: 8, height: 8 }}
+        style={{
+          top: -5,
+          background: "#334155",
+          border: "2px solid #64748b",
+          width: 10,
+          height: 10,
+          borderRadius: "50%",
+          cursor: "crosshair",
+        }}
       />
       <Handle
         type="source"
         position={Position.Bottom}
-        style={{ bottom: -4, background: "#1e293b", border: "2px solid #334155", width: 8, height: 8 }}
+        style={{
+          bottom: -5,
+          background: "#334155",
+          border: "2px solid #64748b",
+          width: 10,
+          height: 10,
+          borderRadius: "50%",
+          cursor: "crosshair",
+        }}
       />
     </div>
   );
