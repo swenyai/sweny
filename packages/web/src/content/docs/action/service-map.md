@@ -73,7 +73,7 @@ The result is faster, more focused triage. Instead of searching the entire codeb
 The `service-filter` input works with the service map to limit which services SWEny investigates:
 
 ```yaml
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -130,7 +130,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -176,7 +176,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           observability-provider: sentry
@@ -191,7 +191,7 @@ Each repo triages its own services independently. The API gateway repo investiga
 When SWEny finds an error in a service that lives in a different repository, it can dispatch the fix workflow to the correct repo. This requires a `bot-token` with `repo` and `actions` scopes for all target repositories:
 
 ```yaml
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -206,7 +206,7 @@ The bot token must have access to create `repository_dispatch` events on the tar
 By default, SWEny looks for the service map at `.github/service-map.yml`. To use a different path:
 
 ```yaml
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}

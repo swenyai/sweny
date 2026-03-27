@@ -334,7 +334,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         id: sweny
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

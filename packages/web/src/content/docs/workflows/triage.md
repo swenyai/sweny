@@ -192,7 +192,7 @@ sweny triage                      # full run: investigate + create issues + noti
 **From GitHub Actions:**
 
 ```yaml
-- uses: swenyai/sweny@v3
+- uses: swenyai/sweny@v4
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     dd-api-key: ${{ secrets.DD_API_KEY }}

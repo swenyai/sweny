@@ -32,7 +32,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -52,7 +52,7 @@ on:
 With `time-range: 6h` to match:
 
 ```yaml
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -127,7 +127,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -166,7 +166,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           workflow: implement
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -199,7 +199,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           workflow: implement
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -245,7 +245,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -277,7 +277,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           workflow: implement
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

@@ -45,7 +45,7 @@ These servers require explicit opt-in via the `workspace-tools` action input (or
 Enable workspace tools in the GitHub Action:
 
 ```yaml
-- uses: swenyai/sweny@v3
+- uses: swenyai/sweny@v4
   with:
     workspace-tools: "slack,notion"
     # ... other inputs
@@ -67,7 +67,7 @@ For services without built-in support, pass custom MCP servers via the `mcp-serv
 ### Action input
 
 ```yaml
-- uses: swenyai/sweny@v3
+- uses: swenyai/sweny@v4
   with:
     mcp-servers: |
       {

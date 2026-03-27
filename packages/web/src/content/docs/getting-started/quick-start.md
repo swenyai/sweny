@@ -36,7 +36,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           observability-provider: sentry
@@ -65,7 +65,7 @@ Also set the `sentry-org` and `sentry-project` values in the workflow file to ma
 Replace the Sentry inputs with Datadog credentials:
 
 ```yaml
-- uses: swenyai/sweny@v3
+- uses: swenyai/sweny@v4
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     observability-provider: datadog
@@ -110,7 +110,7 @@ Each node ran Claude with a focused instruction and only the tools it needed. Th
 Set `issue-tracker-provider` and add the relevant credentials:
 
 ```yaml
-- uses: swenyai/sweny@v3
+- uses: swenyai/sweny@v4
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     observability-provider: sentry
@@ -129,7 +129,7 @@ See [Action Inputs](/action/inputs/) for Jira configuration.
 Add a webhook URL to get triage summaries in Slack:
 
 ```yaml
-- uses: swenyai/sweny@v3
+- uses: swenyai/sweny@v4
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     observability-provider: sentry

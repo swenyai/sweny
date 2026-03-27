@@ -38,7 +38,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           observability-provider: sentry
@@ -88,7 +88,7 @@ For read-only analysis (dry run), `contents: read` and `issues: write` are suffi
 For your first run, consider adding `dry-run: true` to analyze without creating any issues or PRs:
 
 ```yaml
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           observability-provider: sentry
@@ -105,7 +105,7 @@ Review the output, then remove `dry-run` and put it on a [schedule](/action/sche
 The example above uses Sentry. To use Datadog instead:
 
 ```yaml
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           observability-provider: datadog
@@ -120,7 +120,7 @@ SWEny supports 21 observability providers including CloudWatch, Splunk, Elastic,
 Set `issue-tracker-provider` and add the relevant credentials:
 
 ```yaml
-      - uses: swenyai/sweny@v3
+      - uses: swenyai/sweny@v4
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}

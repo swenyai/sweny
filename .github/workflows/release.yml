@@ -102,11 +102,11 @@ jobs:
             git push
           fi
 
-          git tag -f v3
-          git push origin v3 --force
+          git tag -f v4
+          git push origin v4 --force
 
           CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
-          VERSIONED_TAG="v3.${CORE_VERSION}"
+          VERSIONED_TAG="v4.${CORE_VERSION}"
           if git tag "$VERSIONED_TAG" 2>/dev/null; then
             git push origin "$VERSIONED_TAG"
             echo "Pushed $VERSIONED_TAG"
