@@ -1,10 +1,26 @@
-import type { Workflow, Skill } from "./types.js";
+/**
+ * Workflow Builder
+ *
+ * Generates and refines SWEny workflow definitions using the Claude
+ * interface (headless Claude Code). Accepts a natural language
+ * description and available skills, and returns a validated Workflow.
+ */
+
+import type { Workflow, Skill, Claude, Logger } from "./types.js";
 import { workflowZ, validateWorkflow, workflowJsonSchema } from "./schema.js";
 
+// ─── Public interface ─────────────────────────────────────────────
+
 export interface BuildWorkflowOptions {
-  apiKey: string;
-  skills: { id: string; name: string; description: string }[];
+  /** Claude client (headless Claude Code) */
+  claude: Claude;
+  /** Skills available for use in the workflow */
+  skills: Skill[];
+  /** Optional logger */
+  logger?: Logger;
 }
+
+// ─── Instruction quality guidance ────────────────────────────────
 
 const INSTRUCTION_GUIDANCE = `Each node's \`instruction\` field is a detailed prompt that Claude will execute autonomously.
 Write instructions as if briefing a skilled engineer who has access to the node's tools
@@ -21,7 +37,14 @@ Good: "Query Sentry for unresolved errors from the last 24 hours. Group by issue
        seen timestamps, and stack trace summary. Prioritize by frequency × recency.
        If no errors found, report that explicitly so downstream nodes can skip."`;
 
-function buildSystemPrompt(skills: BuildWorkflowOptions["skills"], existingWorkflow?: Workflow): string {
+// ─── Helpers ─────────────────────────────────────────────────────
+
+/**
+ * Build the system prompt sent to Claude as the instruction.
+ * Includes the JSON schema, available skills, instruction quality
+ * guidance, rules, and optionally an existing workflow to refine.
+ */
+export function buildSystemPrompt(skills: Skill[], existingWorkflow?: Workflow): string {
   const skillList = skills.map((s) => `- ${s.id}: ${s.description}`).join("\n");
 
   const parts = [
@@ -33,7 +56,7 @@ function buildSystemPrompt(skills: BuildWorkflowOptions["skills"], existingWorkf
     "```",
     "",
     "## Available Skills",
-    skillList,
+    skillList || "(none)",
     "",
     "## Instruction Quality",
     INSTRUCTION_GUIDANCE,
@@ -44,7 +67,7 @@ function buildSystemPrompt(skills: BuildWorkflowOptions["skills"], existingWorkf
     "- Only reference skill IDs from the list above in node `skills` arrays",
     "- Use natural language for edge `when` conditions",
     "- Every node must be reachable from the entry node",
-    "- Return ONLY valid JSON — no markdown fences, no explanation",
+    "- Return ONLY the workflow JSON object — no markdown fences, no explanation",
   ];
 
   if (existingWorkflow) {
@@ -54,70 +77,83 @@ function buildSystemPrompt(skills: BuildWorkflowOptions["skills"], existingWorkf
   return parts.join("\n");
 }
 
-async function callApi(apiKey: string, system: string, userMessage: string): Promise<Workflow> {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 4096,
-      system,
-      messages: [{ role: "user", content: userMessage }],
-    }),
-  });
+/**
+ * Extract and validate a Workflow from the raw data returned by
+ * claude.run(). The ClaudeClient spreads parsed JSON into data and
+ * adds a `summary` key from the text response. We strip `summary`
+ * and any other non-workflow keys before parsing.
+ */
+export function extractWorkflow(data: Record<string, unknown>): Workflow {
+  // Remove keys added by ClaudeClient that aren't part of the workflow schema
+  const { summary: _summary, ...rest } = data as { summary?: unknown } & Record<string, unknown>;
 
-  if (!response.ok) {
-    const body = await response.text();
-    if (response.status === 401) throw new Error("Invalid API key");
-    if (response.status === 429) throw new Error("Rate limited — try again in a moment");
-    throw new Error(`API error ${response.status}: ${body.slice(0, 200)}`);
-  }
+  // workflowZ.parse throws a ZodError on invalid input
+  const parsed = workflowZ.parse(rest);
 
-  const data = (await response.json()) as { content: { type: string; text: string }[] };
-  const text = data.content.find((c) => c.type === "text")?.text;
-  if (!text) throw new Error("No text in API response");
-
-  // Extract JSON from response (may be wrapped in markdown fences)
-  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [null, text];
-  const jsonStr = (jsonMatch[1] ?? text).trim();
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonStr);
-  } catch {
-    throw new Error("Failed to parse workflow JSON from API response");
-  }
-
-  const workflow = workflowZ.parse(parsed);
-  const errors = validateWorkflow(workflow);
+  const errors = validateWorkflow(parsed);
   if (errors.length > 0) {
     throw new Error(`Generated workflow has validation errors: ${errors.map((e) => e.message).join("; ")}`);
   }
 
-  return workflow;
+  return parsed;
 }
+
+// ─── Public API ───────────────────────────────────────────────────
 
 /**
  * Generate a complete workflow from a natural language description.
+ *
+ * Builds a system prompt with the workflow JSON schema, available
+ * skills, instruction quality guidance, and rules. Calls claude.run()
+ * with no tools (pure generation task). Parses and validates the
+ * returned JSON as a Workflow.
  */
 export async function buildWorkflow(description: string, options: BuildWorkflowOptions): Promise<Workflow> {
-  const system = buildSystemPrompt(options.skills);
-  return callApi(options.apiKey, system, description);
+  const { claude, skills, logger } = options;
+
+  const instruction = buildSystemPrompt(skills);
+
+  logger?.debug("buildWorkflow: calling claude.run", { description });
+
+  const result = await claude.run({
+    instruction,
+    context: { description },
+    tools: [],
+  });
+
+  if (result.status === "failed") {
+    throw new Error(`Claude failed to generate workflow: ${result.data.error ?? "unknown error"}`);
+  }
+
+  return extractWorkflow(result.data);
 }
 
 /**
  * Refine an existing workflow based on a natural language instruction.
+ *
+ * Same as buildWorkflow but includes the current workflow in the
+ * prompt as context so Claude can modify it.
  */
 export async function refineWorkflow(
   workflow: Workflow,
   instruction: string,
   options: BuildWorkflowOptions,
 ): Promise<Workflow> {
-  const system = buildSystemPrompt(options.skills, workflow);
-  return callApi(options.apiKey, system, `Modify the workflow: ${instruction}`);
+  const { claude, skills, logger } = options;
+
+  const systemPrompt = buildSystemPrompt(skills, workflow);
+
+  logger?.debug("refineWorkflow: calling claude.run", { instruction });
+
+  const result = await claude.run({
+    instruction: systemPrompt,
+    context: { instruction },
+    tools: [],
+  });
+
+  if (result.status === "failed") {
+    throw new Error(`Claude failed to refine workflow: ${result.data.error ?? "unknown error"}`);
+  }
+
+  return extractWorkflow(result.data);
 }
