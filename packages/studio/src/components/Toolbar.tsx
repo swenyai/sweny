@@ -9,6 +9,7 @@ import { exportWorkflowYaml } from "../lib/export-yaml.js";
 import { exportAsTypescript } from "../lib/export-typescript.js";
 import { exportAsGitHubActions } from "../lib/export-github-actions.js";
 import { buildPermalinkUrl } from "../lib/permalink.js";
+import { getStoredApiKey, setStoredApiKey } from "../lib/generate-instruction.js";
 
 interface ToolbarProps {
   onWorkflowChange(id: string): void;
@@ -45,6 +46,8 @@ export function Toolbar({
 
   const [copied, setCopied] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKey, setApiKey] = useState(() => getStoredApiKey());
 
   function switchMode(newMode: StudioMode) {
     if (newMode !== mode) {
@@ -216,6 +219,54 @@ export function Toolbar({
       <button onClick={handleCopyLink} className="px-2.5 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600">
         {copied ? "Copied!" : "Share"}
       </button>
+
+      {/* Settings (API key) */}
+      <div className="relative">
+        <button
+          onClick={() => setShowSettings((v) => !v)}
+          title="Settings"
+          className={`px-2 py-1 rounded text-xs ${apiKey ? "bg-gray-700 hover:bg-gray-600 text-green-400" : "bg-gray-700 hover:bg-gray-600 text-gray-300"}`}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 10a2 2 0 100-4 2 2 0 000 4zM6.5 1.2l-.3 1.7a5.5 5.5 0 00-1.4.8L3.2 3 1.8 5.4l1.3 1.1a5.6 5.6 0 000 1.6l-1.3 1.1 1.4 2.4 1.6-.7c.4.3.9.6 1.4.8l.3 1.7h2.9l.3-1.7c.5-.2 1-.5 1.4-.8l1.6.7 1.4-2.4-1.3-1.1a5.6 5.6 0 000-1.6l1.3-1.1-1.4-2.4-1.6.7a5.5 5.5 0 00-1.4-.8L9.4 1.2H6.5z" />
+          </svg>
+        </button>
+        {showSettings && (
+          <div className="absolute top-full right-0 mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-lg p-3 min-w-[260px] z-50">
+            <label className="block text-[10px] font-medium text-gray-400 mb-1">Anthropic API Key</label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="sk-ant-..."
+              className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-indigo-400"
+            />
+            <div className="flex gap-1.5 mt-2">
+              <button
+                onClick={() => {
+                  setStoredApiKey(apiKey);
+                  setShowSettings(false);
+                }}
+                className="px-3 py-1 bg-indigo-600 text-white rounded text-xs hover:bg-indigo-500"
+              >
+                Save
+              </button>
+              <button
+                onClick={() => {
+                  setApiKey("");
+                  setStoredApiKey("");
+                }}
+                className="px-3 py-1 bg-gray-700 text-gray-300 rounded text-xs hover:bg-gray-600"
+              >
+                Clear
+              </button>
+            </div>
+            <p className="text-[9px] text-gray-500 mt-2 leading-snug">
+              Used for AI-assisted features. Stored locally, sent only to api.anthropic.com.
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* Help */}
       <button

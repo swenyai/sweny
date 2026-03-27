@@ -5,6 +5,7 @@ import { getSkillCatalog } from "@sweny-ai/core/studio";
 import { useEditorStore } from "../store/editor-store.js";
 import { SkillIcon } from "./SkillIcon.js";
 import { InstructionEditor } from "./InstructionEditor.js";
+import { generateInstruction, getStoredApiKey } from "../lib/generate-instruction.js";
 
 const skillCatalog = getSkillCatalog();
 
@@ -197,6 +198,8 @@ function NodePanel({
   const [name, setNodeName] = useState(node.name);
   const [instruction, setInstruction] = useState(node.instruction);
   const [showExpanded, setShowExpanded] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   return (
     <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
@@ -278,6 +281,50 @@ function NodePanel({
           onBlur={() => updateNode(id, { instruction })}
           placeholder="What should Claude do at this node?"
         />
+        {!readOnly && (
+          <div className="mt-1.5 flex items-center gap-2">
+            <button
+              disabled={aiLoading}
+              onClick={async () => {
+                const apiKey = getStoredApiKey();
+                if (!apiKey) {
+                  setAiError("Set your Anthropic API key in Settings (gear icon) to use AI assist");
+                  return;
+                }
+                setAiLoading(true);
+                setAiError(null);
+                try {
+                  const { workflow } = useEditorStore.getState();
+                  const text = await generateInstruction({
+                    apiKey,
+                    nodeName: name,
+                    nodeId: id,
+                    skills: node.skills,
+                    existingInstruction: instruction,
+                    workflowContext: {
+                      workflowName: workflow.name,
+                      workflowDescription: workflow.description,
+                      nodeNames: Object.keys(workflow.nodes),
+                    },
+                  });
+                  setInstruction(text);
+                  updateNode(id, { instruction: text });
+                } catch (err) {
+                  setAiError(err instanceof Error ? err.message : "Generation failed");
+                } finally {
+                  setAiLoading(false);
+                }
+              }}
+              className="text-[10px] text-indigo-500 hover:text-indigo-600 disabled:opacity-50 flex items-center gap-1"
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1l1.5 4.5L14 7l-4.5 1.5L8 13l-1.5-4.5L2 7l4.5-1.5z" />
+              </svg>
+              {aiLoading ? "Generating..." : instruction.trim() ? "Improve with AI" : "Generate with AI"}
+            </button>
+            {aiError && <span className="text-[9px] text-red-500">{aiError}</span>}
+          </div>
+        )}
       </div>
 
       {showExpanded && (
