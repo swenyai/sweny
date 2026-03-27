@@ -8,6 +8,7 @@
     "rootDir": "src"
   },
   "include": [
+    "src/vite-env.d.ts",
     "src/lib-viewer.ts",
     "src/lib-editor.ts",
     "src/components/**/*.ts",
