@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { Workflow } from "@sweny-ai/core";
+import { getSkillCatalog } from "@sweny-ai/core/studio";
 import { buildWorkflowBrowser, refineWorkflowBrowser } from "../lib/workflow-builder-browser.js";
+import { SkillIcon } from "./SkillIcon.js";
 
 interface Message {
   id: string;
@@ -13,6 +15,8 @@ interface AiChatProps {
   currentWorkflow: Workflow;
   hasGenerated: boolean;
 }
+
+const skillCatalog = getSkillCatalog();
 
 let nextId = 0;
 function msgId() {
@@ -28,16 +32,23 @@ function workflowSummary(wf: Workflow): string {
   return `**${wf.name}** — ${nodeCount} node${nodeCount !== 1 ? "s" : ""}, ${edgeCount} edge${edgeCount !== 1 ? "s" : ""}\n${nodeNames}`;
 }
 
+function buildPromptWithSkills(userText: string, selectedSkills: Set<string>): string {
+  if (selectedSkills.size === 0) return userText;
+  const names = [...selectedSkills].join(", ");
+  return `${userText}\n\nUse these skills/tools: ${names}`;
+}
+
 export function AiChat({ onWorkflowGenerated, currentWorkflow, hasGenerated }: AiChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: msgId(),
       role: "assistant",
-      text: "Describe the workflow you want to build. I'll generate the nodes, edges, skills, and instructions.",
+      text: "Describe the workflow you want to build. Toggle skills below to include specific tools.",
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -60,19 +71,35 @@ export function AiChat({ onWorkflowGenerated, currentWorkflow, hasGenerated }: A
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  function toggleSkill(id: string) {
+    setSelectedSkills((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
   const handleSubmit = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed || loading) return;
 
-    const userMsg: Message = { id: msgId(), role: "user", text: trimmed };
+    const prompt = buildPromptWithSkills(trimmed, selectedSkills);
+
+    // Show user message (just their text, not the injected skills)
+    const skillSuffix = selectedSkills.size > 0 ? `\n_with ${[...selectedSkills].join(", ")}_` : "";
+    const userMsg: Message = { id: msgId(), role: "user", text: trimmed + skillSuffix };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setLoading(true);
 
     try {
       const workflow = hasGenerated
-        ? await refineWorkflowBrowser(currentWorkflow, trimmed)
-        : await buildWorkflowBrowser(trimmed);
+        ? await refineWorkflowBrowser(currentWorkflow, prompt)
+        : await buildWorkflowBrowser(prompt);
 
       onWorkflowGenerated(workflow);
 
@@ -83,7 +110,7 @@ export function AiChat({ onWorkflowGenerated, currentWorkflow, hasGenerated }: A
           id: msgId(),
           role: "assistant",
           text: hasGenerated
-            ? `Updated the workflow.\n\n${summary}\n\nDescribe further changes, or edit nodes directly on the canvas.`
+            ? `Updated the workflow.\n\n${summary}\n\nDescribe further changes, or click nodes to edit details.`
             : `Created your workflow.\n\n${summary}\n\nDescribe changes to refine it, or click nodes to edit details.`,
         },
       ]);
@@ -98,10 +125,9 @@ export function AiChat({ onWorkflowGenerated, currentWorkflow, hasGenerated }: A
       ]);
     } finally {
       setLoading(false);
-      // Re-focus input after response
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [input, loading, hasGenerated, currentWorkflow, onWorkflowGenerated]);
+  }, [input, loading, hasGenerated, currentWorkflow, onWorkflowGenerated, selectedSkills]);
 
   return (
     <div className="w-72 flex flex-col bg-gray-900 border-r border-gray-700 flex-shrink-0">
@@ -138,6 +164,30 @@ export function AiChat({ onWorkflowGenerated, currentWorkflow, hasGenerated }: A
             Generating...
           </div>
         )}
+      </div>
+
+      {/* Skill pills */}
+      <div className="px-2 py-1.5 border-t border-gray-800">
+        <div className="flex flex-wrap gap-1">
+          {skillCatalog.map((skill) => {
+            const active = selectedSkills.has(skill.id);
+            return (
+              <button
+                key={skill.id}
+                onClick={() => toggleSkill(skill.id)}
+                title={skill.description}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${
+                  active
+                    ? "bg-indigo-600/30 text-indigo-300 ring-1 ring-indigo-500/50"
+                    : "bg-gray-800 text-gray-500 hover:text-gray-300 hover:bg-gray-700"
+                }`}
+              >
+                <SkillIcon skillId={skill.id} size={11} />
+                {skill.name}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Input */}
