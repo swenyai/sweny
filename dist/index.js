@@ -36012,6 +36012,41 @@ const linear = {
             handler: async (input, ctx) => linearGql(`mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id body } } }`, { input: { issueId: input.issueId, body: input.body } }, ctx),
         },
         {
+            name: "linear_get_issue",
+            description: "Get a Linear issue by ID or identifier (e.g. 'OFF-1020')",
+            input_schema: {
+                type: "object",
+                properties: {
+                    id: { type: "string", description: "Linear issue ID (UUID) or identifier (e.g. 'OFF-1020')" },
+                },
+                required: ["id"],
+            },
+            handler: async (input, ctx) => linearGql(`query($id: String!) {
+            issue(id: $id) {
+              id identifier title url description
+              state { name type }
+              priority priorityLabel
+              assignee { name email }
+              labels { nodes { name } }
+              team { key name }
+              createdAt updatedAt
+            }
+          }`, { id: input.id }, ctx),
+        },
+        {
+            name: "linear_list_teams",
+            description: "List Linear teams (needed for teamId when creating issues)",
+            input_schema: {
+                type: "object",
+                properties: {},
+            },
+            handler: async (_input, ctx) => linearGql(`query {
+            teams {
+              nodes { id key name description }
+            }
+          }`, {}, ctx),
+        },
+        {
             name: "linear_update_issue",
             description: "Update an existing Linear issue",
             input_schema: {
@@ -36366,6 +36401,159 @@ const datadog = {
     ],
 };
 
+;// CONCATENATED MODULE: ../core/dist/skills/betterstack.js
+/**
+ * BetterStack Skill
+ *
+ * Telemetry REST API for source management + ClickHouse HTTP for log queries.
+ * CI-native alternative to the BetterStack MCP server.
+ */
+// ─── REST API (source management) ──────────────────────────────
+async function bsApi(path, ctx) {
+    const res = await fetch(`https://telemetry.betterstack.com/api/v1${path}`, {
+        headers: { Authorization: `Bearer ${ctx.config.BETTERSTACK_API_TOKEN}` },
+        signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok)
+        throw new Error(`[BetterStack] API request failed (HTTP ${res.status}): ${await res.text()}`);
+    return res.json();
+}
+// ─── ClickHouse HTTP (log queries) ─────────────────────────────
+async function bsQuery(sql, ctx) {
+    const endpoint = ctx.config.BETTERSTACK_QUERY_ENDPOINT.replace(/\/+$/, "");
+    const res = await fetch(`${endpoint}?output_format_pretty_row_numbers=0`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "text/plain",
+            Authorization: `Basic ${btoa(`${ctx.config.BETTERSTACK_QUERY_USERNAME}:${ctx.config.BETTERSTACK_QUERY_PASSWORD}`)}`,
+        },
+        body: `${sql} FORMAT JSONEachRow`,
+        signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok)
+        throw new Error(`[BetterStack] ClickHouse query failed (HTTP ${res.status}): ${await res.text()}`);
+    // JSONEachRow returns one JSON object per line (NDJSON)
+    const text = await res.text();
+    if (!text.trim())
+        return [];
+    return text
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+}
+// ─── Skill definition ──────────────────────────────────────────
+const betterstack = {
+    id: "betterstack",
+    name: "BetterStack",
+    description: "Query logs and manage telemetry sources in BetterStack",
+    category: "observability",
+    config: {
+        BETTERSTACK_API_TOKEN: {
+            description: "BetterStack Telemetry API token (team-scoped)",
+            required: true,
+            env: "BETTERSTACK_API_TOKEN",
+        },
+        BETTERSTACK_QUERY_ENDPOINT: {
+            description: "ClickHouse HTTP endpoint (e.g. https://eu-fsn-3-connect.betterstackdata.com)",
+            required: true,
+            env: "BETTERSTACK_QUERY_ENDPOINT",
+        },
+        BETTERSTACK_QUERY_USERNAME: {
+            description: "ClickHouse connection username",
+            required: true,
+            env: "BETTERSTACK_QUERY_USERNAME",
+        },
+        BETTERSTACK_QUERY_PASSWORD: {
+            description: "ClickHouse connection password",
+            required: true,
+            env: "BETTERSTACK_QUERY_PASSWORD",
+        },
+    },
+    tools: [
+        {
+            name: "betterstack_list_sources",
+            description: "List available telemetry sources (id, name, table_name, platform)",
+            input_schema: {
+                type: "object",
+                properties: {
+                    name: { type: "string", description: "Filter by name (partial match)" },
+                },
+            },
+            handler: async (input, ctx) => {
+                const params = new URLSearchParams({ per_page: "50" });
+                if (input.name)
+                    params.set("name", input.name);
+                const data = await bsApi(`/sources?${params}`, ctx);
+                return data.data.map((s) => ({
+                    id: s.id,
+                    name: s.attributes.name,
+                    table_name: s.attributes.table_name,
+                    platform: s.attributes.platform,
+                }));
+            },
+        },
+        {
+            name: "betterstack_get_source",
+            description: "Get full details for a telemetry source (table name, retention, config)",
+            input_schema: {
+                type: "object",
+                properties: {
+                    id: { type: "number", description: "Source ID" },
+                },
+                required: ["id"],
+            },
+            handler: async (input, ctx) => {
+                const data = await bsApi(`/sources/${input.id}`, ctx);
+                return { id: data.data.id, ...data.data.attributes };
+            },
+        },
+        {
+            name: "betterstack_get_source_fields",
+            description: "Get queryable fields for a source table (column names and types)",
+            input_schema: {
+                type: "object",
+                properties: {
+                    table: { type: "string", description: "Table name (e.g. t273774_offload_ecs_production)" },
+                },
+                required: ["table"],
+            },
+            handler: async (input, ctx) => {
+                return bsQuery(`DESCRIBE TABLE remote(${input.table}_logs)`, ctx);
+            },
+        },
+        {
+            name: "betterstack_query",
+            description: `Execute a read-only ClickHouse SQL query against a telemetry source.
+Tables: remote(TABLE_logs) for recent logs, s3Cluster(primary, TABLE_s3) for historical (add WHERE _row_type = 1).
+Key fields: dt (timestamp), raw (JSON blob with all log fields).
+Extract nested fields: JSONExtract(raw, 'field_name', 'Nullable(String)').
+Use betterstack_get_source_fields to discover available columns.`,
+            input_schema: {
+                type: "object",
+                properties: {
+                    query: { type: "string", description: "ClickHouse SQL query (SELECT only)" },
+                    source_id: { type: "number", description: "Source ID (for context)" },
+                    table: { type: "string", description: "Table name (e.g. t273774_offload_ecs_production)" },
+                },
+                required: ["query", "source_id", "table"],
+            },
+            handler: async (input, ctx) => {
+                const trimmed = input.query.trim();
+                const upper = trimmed.toUpperCase();
+                if (!upper.startsWith("SELECT") && !upper.startsWith("DESCRIBE")) {
+                    throw new Error("[BetterStack] Only SELECT and DESCRIBE queries are allowed");
+                }
+                // Append LIMIT if none present to prevent unbounded result sets
+                let sql = trimmed;
+                if (!upper.includes("LIMIT")) {
+                    sql = `${sql} LIMIT 500`;
+                }
+                return bsQuery(sql, ctx);
+            },
+        },
+    ],
+};
+
 ;// CONCATENATED MODULE: ../core/dist/skills/notification.js
 /**
  * Notification Skill — generic webhook / multi-channel
@@ -36522,8 +36710,9 @@ const notification = {
 
 
 
+
 // ─── Built-in skill catalog ─────────────────────────────────────
-const builtinSkills = [github, linear, slack, sentry, datadog, notification];
+const builtinSkills = [github, linear, slack, sentry, datadog, betterstack, notification];
 
 // ─── Registry helpers ───────────────────────────────────────────
 /**
@@ -37430,7 +37619,7 @@ If there are no URLs to fetch, just pass through — this step is a no-op.`,
 3. **Issue tracker**: Search for similar past issues or known problems.
 
 Be thorough — the investigation step depends on complete context. Use every tool available to you.`,
-            skills: ["github", "sentry", "datadog", "linear"],
+            skills: ["github", "sentry", "datadog", "betterstack", "linear"],
         },
         investigate: {
             name: "Root Cause Analysis",
