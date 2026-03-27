@@ -71,7 +71,7 @@ sweny triage [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude`, `codex`, `gemini` | `claude` |
+| `--agent <provider>` | Coding agent: `claude`, `codex`, `gemini` (alias: `--coding-agent-provider`) | `claude` |
 | `--observability-provider <provider>` | Observability platform | `datadog` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `github-issues`, `linear`, `jira`, `file` | `github-issues` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
@@ -113,6 +113,7 @@ sweny triage [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--json` | Output results as JSON to stdout; suppress progress rendering | `false` |
+| `--stream` | Stream NDJSON `ExecutionEvent` objects to stdout (for Studio / automation) | `false` |
 | `--bell` | Ring terminal bell on completion | `false` |
 
 ### Cache options
@@ -168,7 +169,7 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude`, `codex`, `gemini` | `claude` |
+| `--agent <provider>` | Coding agent: `claude`, `codex`, `gemini` (alias: `--coding-agent-provider`) | `claude` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `linear`, `jira`, `github-issues`, `file` | `linear` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
 | `--dry-run` | Skip creating PR -- report only | `false` |
@@ -177,6 +178,7 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 | `--repository <owner/repo>` | Repository (auto-detected from git remote) | -- |
 | `--review-mode <mode>` | PR merge: `auto` or `review` | `review` |
 | `--additional-instructions <text>` | Extra instructions for the coding agent | -- |
+| `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |
 | `--linear-team-id <id>` | Linear team ID | -- |
 | `--linear-state-in-progress <name>` | Linear in-progress state name | -- |
 | `--linear-state-peer-review <name>` | Linear peer-review state name | -- |
@@ -223,6 +225,7 @@ sweny workflow run <file> [options]
 |--------|-------------|---------|
 | `--dry-run` | Validate the workflow and print its node list without running | `false` |
 | `--json` | Output result as JSON to stdout; suppress progress rendering | `false` |
+| `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |
 
 Loads the workflow definition, validates its schema, then executes it with the same DAG renderer and skill infrastructure as the built-in `triage` and `implement` commands. Provider settings from `.sweny.yml` and `.env` apply.
 

@@ -13,10 +13,11 @@ The event flow:
 
 1. `workflow:start` -- resets all nodes to pending, sets execution status to running
 2. `node:enter` -- marks the entered node as current (blue pulsing glow)
-3. `tool:call` / `tool:result` -- intermediate events for tool-level tracking
-4. `node:exit` -- marks the node as success (green) or failed (red) based on the result
-5. `route` -- logs the routing decision (which edge was taken and why)
-6. `workflow:end` -- marks execution as completed or failed based on overall results
+3. `node:progress` -- status messages while the agent works (e.g. "Calling sentry.list_issues")
+4. `tool:call` / `tool:result` -- intermediate events for tool-level tracking
+5. `node:exit` -- marks the node as success (green) or failed (red) based on the result
+6. `route` -- logs the routing decision (which edge was taken and why)
+7. `workflow:end` -- marks execution as completed or failed based on overall results
 
 ## ExecutionEvent types
 
@@ -27,6 +28,7 @@ type ExecutionEvent =
   | { type: "tool:call"; node: string; tool: string; input: unknown }
   | { type: "tool:result"; node: string; tool: string; output: unknown }
   | { type: "node:exit"; node: string; result: NodeResult }
+  | { type: "node:progress"; node: string; message: string }
   | { type: "route"; from: string; to: string; reason: string }
   | { type: "workflow:end"; results: Record<string, NodeResult> };
 ```

@@ -59,29 +59,38 @@ sweny triage --dry-run
 
 SWEny reads `.sweny.yml`, loads secrets from `.env`, analyzes your logs, and writes results to `.sweny/output/` without creating any real issues or PRs.
 
-## Live DAG rendering
+## Live progress display
 
-When running on an interactive terminal, the CLI renders a live DAG showing workflow progress:
+When running on an interactive terminal, the CLI renders a live progress display that updates in place as each node executes:
 
 ```
-  Triage
-
-  ┌──────────────────────────┐
-  │ ● Fetch errors   12s     │
-  └────────────┬─────────────┘
-               │
-  ┌────────────▼─────────────┐
-  │ ◉ Investigate   2m 14s   │
-  └────────────┬─────────────┘
-               │
-  ┌────────────▼─────────────┐
-  │ ○ Create issues          │
-  └──────────────────────────┘
-
-  ● completed   ◉ running   ○ pending   ✕ failed
+  ⠹ [2/5] Investigate errors  1m 42s
+    ↳ Calling sentry.list_issues
+    ↳ Calling github.search_code
+    ↳ Analyzing stack traces
 ```
 
-Status icons update in place as each node completes. Non-TTY environments (CI, pipes) get simple line-by-line output instead.
+The progress block shows a spinner, step counter, node name, and elapsed time. Below it, the last few activity messages stream in as the agent works. When a node finishes, the block is replaced with a completion line:
+
+```
+  ✓ [1/5] Fetch errors  12s
+    ↳ Found 3 unresolved issues
+  ✓ [2/5] Investigate errors  2m 14s
+    ↳ Root cause identified in webhook handler
+  ⠹ [3/5] Create issues  4s
+```
+
+Non-TTY environments (CI, pipes) get simple periodic status lines instead of animated output.
+
+### NDJSON streaming
+
+Pass `--stream` to emit raw `ExecutionEvent` objects as newline-delimited JSON to stdout. This is how Studio's Live Mode connects to a running workflow:
+
+```bash
+sweny triage --stream | studio-consumer
+```
+
+`--stream` can be combined with the normal progress display — structured events go to stdout while the spinner renders to stderr.
 
 ## Config priority
 
@@ -158,7 +167,7 @@ Verify credentials before running a full workflow:
 sweny check
 ```
 
-See [Observability Providers](/providers/observability/) for all supported platforms.
+See the [Commands Reference](/cli/commands/) for all supported providers and their options.
 
 ## What's next?
 

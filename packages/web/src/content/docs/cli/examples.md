@@ -180,7 +180,7 @@ sweny triage --json | jq 'to_entries[] | select(.value.status == "success") | .k
 ```
 
 :::note[Output routing]
-With `--json`, structured results go to stdout while progress output is suppressed. Without `--json`, the live DAG renders to stderr so stdout stays clean for redirection.
+With `--json`, structured results go to stdout while progress output is suppressed. Without `--json`, progress rendering goes to stderr so stdout stays clean for redirection.
 :::
 
 ## Run a custom workflow
@@ -309,6 +309,26 @@ With JSON output for programmatic checks:
 ```bash
 sweny workflow validate my-workflow.yml --json
 # {"valid": true, "errors": []}
+```
+
+## Stream events for Studio Live Mode
+
+Use `--stream` to emit NDJSON `ExecutionEvent` objects to stdout. This is how Studio connects to a running workflow:
+
+```bash
+sweny triage --stream 2>/dev/null | ws-broadcast
+```
+
+`--stream` works alongside the normal progress display — events go to stdout, the spinner goes to stderr:
+
+```bash
+sweny workflow run my-workflow.yml --stream > events.jsonl
+```
+
+You can also combine `--stream` with `--json` to get both the event stream during execution and the final results:
+
+```bash
+sweny implement ENG-123 --stream > events.jsonl
 ```
 
 ## Bell notification on completion
