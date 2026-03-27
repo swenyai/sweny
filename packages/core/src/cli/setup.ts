@@ -158,6 +158,7 @@ async function createLinearLabel(
         color: `#${def.color}`,
         description: def.description,
         ...(parentId ? { parentId } : {}),
+        ...(def === AGENT_PARENT ? { isGroup: true } : {}),
       },
     },
   );
