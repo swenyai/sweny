@@ -53,134 +53,143 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
   return (
     <div
       style={{
-        display: "flex",
-        alignItems: "stretch",
-        borderRadius: 8,
-        overflow: "hidden",
         width: 280,
         minHeight: 84,
-        background: exec.bg,
-        boxShadow: exec.shadow,
-        border: `1px ${borderStyle} ${borderColor}`,
-        fontFamily: "inherit",
         position: "relative",
         cursor: "pointer",
       }}
     >
-      {/* Accent bar */}
-      <div
-        style={{ width: 4, flexShrink: 0, background: accentColor, opacity: execStatus === "skipped" ? 0.3 : 0.95 }}
-      />
-
-      {/* Content */}
+      {/* Inner wrapper — clips accent bar corners but not handles */}
       <div
         style={{
-          flex: 1,
           display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          padding: "8px 10px 8px 10px",
-          minWidth: 0,
-          gap: 4,
+          alignItems: "stretch",
+          borderRadius: 8,
+          overflow: "hidden",
+          width: "100%",
+          height: "100%",
+          minHeight: 84,
+          background: exec.bg,
+          boxShadow: exec.shadow,
+          border: `1px ${borderStyle} ${borderColor}`,
+          fontFamily: "inherit",
         }}
       >
-        {/* Row 1: node name + entry badge */}
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-          <span
-            style={{
-              fontFamily: "ui-monospace, 'Cascadia Code', monospace",
-              fontSize: 12,
-              fontWeight: 700,
-              lineHeight: 1.3,
-              color: "#dde5f0",
-              flex: 1,
-              opacity: textOpacity,
-            }}
-          >
-            {node.name || nodeId}
-          </span>
+        {/* Accent bar */}
+        <div
+          style={{ width: 4, flexShrink: 0, background: accentColor, opacity: execStatus === "skipped" ? 0.3 : 0.95 }}
+        />
 
-          {/* Entry badge */}
-          {isEntry && (
+        {/* Content */}
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            padding: "8px 10px 8px 10px",
+            minWidth: 0,
+            gap: 4,
+          }}
+        >
+          {/* Row 1: node name + entry badge */}
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
             <span
               style={{
-                fontSize: 7.5,
-                fontWeight: 800,
-                letterSpacing: "0.07em",
-                textTransform: "uppercase",
-                padding: "2px 5px",
-                borderRadius: 3,
-                background: "rgba(59,130,246,0.16)",
-                color: "#93c5fd",
-                flexShrink: 0,
-                marginTop: 1,
+                fontFamily: "ui-monospace, 'Cascadia Code', monospace",
+                fontSize: 12,
+                fontWeight: 700,
+                lineHeight: 1.3,
+                color: "#dde5f0",
+                flex: 1,
                 opacity: textOpacity,
               }}
             >
-              entry
+              {node.name || nodeId}
             </span>
+
+            {/* Entry badge */}
+            {isEntry && (
+              <span
+                style={{
+                  fontSize: 7.5,
+                  fontWeight: 800,
+                  letterSpacing: "0.07em",
+                  textTransform: "uppercase",
+                  padding: "2px 5px",
+                  borderRadius: 3,
+                  background: "rgba(59,130,246,0.16)",
+                  color: "#93c5fd",
+                  flexShrink: 0,
+                  marginTop: 1,
+                  opacity: textOpacity,
+                }}
+              >
+                entry
+              </span>
+            )}
+          </div>
+
+          {/* Row 2: node ID */}
+          <span
+            style={{
+              fontFamily: "ui-monospace, 'Cascadia Code', monospace",
+              fontSize: 9,
+              color: "#64748b",
+              opacity: textOpacity,
+            }}
+          >
+            {nodeId}
+          </span>
+
+          {/* Row 3: skill badges */}
+          {skills.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 1 }}>
+              {skills.map((skill) => (
+                <span
+                  key={skill.id}
+                  style={{
+                    fontSize: 8.5,
+                    fontWeight: 600,
+                    padding: "1px 5px",
+                    borderRadius: 3,
+                    background: `${skillColors[skill.id] ?? "#6366f1"}20`,
+                    color: skillColors[skill.id] ?? "#6366f1",
+                    flexShrink: 0,
+                    opacity: textOpacity,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 3,
+                  }}
+                >
+                  <SkillIcon skillId={skill.id} size={10} />
+                  {skill.name}
+                </span>
+              ))}
+            </div>
           )}
         </div>
 
-        {/* Row 2: node ID */}
-        <span
-          style={{
-            fontFamily: "ui-monospace, 'Cascadia Code', monospace",
-            fontSize: 9,
-            color: "#64748b",
-            opacity: textOpacity,
-          }}
-        >
-          {nodeId}
-        </span>
-
-        {/* Row 3: skill badges */}
-        {skills.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 1 }}>
-            {skills.map((skill) => (
-              <span
-                key={skill.id}
-                style={{
-                  fontSize: 8.5,
-                  fontWeight: 600,
-                  padding: "1px 5px",
-                  borderRadius: 3,
-                  background: `${skillColors[skill.id] ?? "#6366f1"}20`,
-                  color: skillColors[skill.id] ?? "#6366f1",
-                  flexShrink: 0,
-                  opacity: textOpacity,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 3,
-                }}
-              >
-                <SkillIcon skillId={skill.id} size={10} />
-                {skill.name}
-              </span>
-            ))}
-          </div>
+        {/* Unreachable warning badge */}
+        {showUnreachable && (
+          <span
+            style={{
+              position: "absolute",
+              top: 3,
+              right: 5,
+              fontSize: 9,
+              color: "#f97316",
+              lineHeight: 1,
+              pointerEvents: "none",
+            }}
+            title="This node is unreachable from the entry node"
+          >
+            ⚠
+          </span>
         )}
       </div>
 
-      {/* Unreachable warning badge */}
-      {showUnreachable && (
-        <span
-          style={{
-            position: "absolute",
-            top: 3,
-            right: 5,
-            fontSize: 9,
-            color: "#f97316",
-            lineHeight: 1,
-            pointerEvents: "none",
-          }}
-          title="This node is unreachable from the entry node"
-        >
-          ⚠
-        </span>
-      )}
-
-      {/* Handles — visible connection points */}
+      {/* Handles — outside overflow:hidden so they're visible and draggable */}
       <Handle
         type="target"
         position={Position.Top}
