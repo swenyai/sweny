@@ -57,7 +57,7 @@
   },
   "dependencies": {
     "@xyflow/react": "^12.0.0",
-    "elkjs": "^0.9.0",
+    "elkjs": "^0.11.1",
     "immer": "^11.1.4",
     "yaml": "^2.0.0",
     "zundo": "^2.3.0",
