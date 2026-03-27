@@ -63,6 +63,28 @@ export function App() {
     [setWorkflow],
   );
 
+  const handleNew = useCallback(() => {
+    const { clear } = useEditorStore.temporal.getState();
+    clear();
+    const blank: Workflow = {
+      id: "my-workflow",
+      name: "My Workflow",
+      description: "Describe what this workflow does",
+      entry: "start",
+      nodes: {
+        start: {
+          name: "Start",
+          instruction: "",
+          skills: [],
+        },
+      },
+      edges: [],
+    };
+    setWorkflow(blank);
+    setActiveId("custom");
+    setAiGenerated(false);
+  }, [setWorkflow]);
+
   const handleFork = useCallback(() => {
     const { clear } = useEditorStore.temporal.getState();
     clear();
@@ -113,6 +135,11 @@ export function App() {
         setShowHelp(true);
         return;
       }
+      if (meta && e.key === "n") {
+        e.preventDefault();
+        handleNew();
+        return;
+      }
       if (meta && e.key === "o") {
         e.preventDefault();
         setShowImport(true);
@@ -154,6 +181,7 @@ export function App() {
         onShowHelpChange={setShowHelp}
         isBuiltinWorkflow={isBuiltinWorkflow}
         onFork={handleFork}
+        onNew={handleNew}
       />
       {forkToast && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-amber-700 text-white text-xs px-4 py-2 rounded shadow-xl z-50">

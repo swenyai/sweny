@@ -19,6 +19,7 @@ interface ToolbarProps {
   showHelp: boolean;
   onShowHelpChange(open: boolean): void;
   onFork?(): void;
+  onNew?(): void;
   isBuiltinWorkflow?: boolean;
 }
 
@@ -31,6 +32,7 @@ export function Toolbar({
   showHelp,
   onShowHelpChange,
   onFork,
+  onNew,
   isBuiltinWorkflow,
 }: ToolbarProps) {
   const temporalStore = useTemporalStore();
@@ -131,6 +133,15 @@ export function Toolbar({
             className="px-2.5 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs text-amber-300"
           >
             fork
+          </button>
+        )}
+        {onNew && (
+          <button
+            onClick={onNew}
+            title="Create a blank workflow (Cmd+N)"
+            className="px-2.5 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs text-green-400"
+          >
+            + new
           </button>
         )}
       </div>
