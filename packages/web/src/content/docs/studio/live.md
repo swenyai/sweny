@@ -27,7 +27,6 @@ type ExecutionEvent =
   | { type: "tool:call"; node: string; tool: string; input: unknown }
   | { type: "tool:result"; node: string; tool: string; output: unknown }
   | { type: "node:exit"; node: string; result: NodeResult }
-  | { type: "node:progress"; node: string; message: string }
   | { type: "route"; from: string; to: string; reason: string }
   | { type: "workflow:end"; results: Record<string, NodeResult> };
 ```

@@ -97,9 +97,13 @@ The right panel shows properties for the selected element, or workflow metadata 
 - **ID** -- the machine identifier (editable; must be unique, alphanumeric with hyphens and underscores)
 - **Name** -- human-readable node name displayed on the canvas
 - **Instruction** -- what Claude should accomplish at this step. This is the exact text Claude receives, so write it as a direct instruction. Click the expand button for a full-screen editor.
-- **Skills** -- toggle which skills are available at this node. Each skill shows its name, icon, and tool count. Enabled skills provide their tools to Claude during execution.
+- **Skills** -- toggle which skills are available at this node. Enabled skills provide their tools to Claude during execution.
 - **Set as entry** -- make this node the workflow entry point
 - **Delete node** -- remove the node and all connected edges
+
+:::note[Output schemas]
+Structured output schemas are supported in the workflow YAML and TypeScript API, but the visual editor does not yet have a UI for editing them. To add an output schema, export as YAML, add the `output` field manually, and re-import.
+:::
 
 :::note[Instruction tips]
 Write instructions as direct commands to Claude: "Search for recent errors in Sentry and Datadog. Focus on the last 24 hours. Summarize severity, affected services, and frequency." The instruction is exactly what Claude reads at runtime.
@@ -130,9 +134,13 @@ Click **Export** in the toolbar to choose a format:
 | **YAML** | Check into version control, use with `sweny run` CLI |
 | **JSON** | Programmatic consumption, API payloads |
 | **TypeScript** | Import as a typed `Workflow` constant in your codebase |
-| **GitHub Actions** | Ready-to-use `.github/workflows/` file with secrets auto-detected |
+| **GitHub Actions** | Ready-to-use `.github/workflows/` file with CLI install and secrets auto-detected |
 
-All exports produce a file download. The GitHub Actions export inspects which skills the workflow uses and adds the corresponding environment variables (`GITHUB_TOKEN`, `LINEAR_API_KEY`, `SENTRY_AUTH_TOKEN`, `DD_API_KEY`, `SLACK_BOT_TOKEN`, etc.) to the job's env block automatically.
+All exports produce a file download. The GitHub Actions export generates a workflow that installs the SWEny CLI and runs `sweny workflow run`. It inspects which skills the workflow uses and adds the corresponding environment variables (`GITHUB_TOKEN`, `LINEAR_API_KEY`, `SENTRY_AUTH_TOKEN`, `DD_API_KEY`, `SLACK_BOT_TOKEN`, `NOTIFICATION_WEBHOOK_URL`) to the job's env block automatically.
+
+:::note[BetterStack in GitHub Actions export]
+The GitHub Actions export does not yet auto-detect BetterStack credentials. If your workflow uses the BetterStack skill, manually add `BETTERSTACK_API_TOKEN: ${{ secrets.BETTERSTACK_API_TOKEN }}` to the env block.
+:::
 
 ## Import
 
@@ -157,8 +165,7 @@ Unreachable nodes display with a dashed orange border and an orange warning badg
 |----------|--------|
 | `Cmd+Z` | Undo |
 | `Cmd+Shift+Z` | Redo |
-| `Cmd+N` | New blank workflow |
-| `?` | Toggle help panel |
+| `D` | Duplicate selected node |
 | `Delete` / `Backspace` | Delete selected node or edge |
 | Scroll wheel | Zoom |
 | Click + drag (background) | Pan |

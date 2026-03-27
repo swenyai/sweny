@@ -248,7 +248,7 @@ applyEvent({ type: "node:exit", node: "gather", result: { status: "success", dat
 resetExecution();
 ```
 
-The `applyEvent` method handles all `ExecutionEvent` types: `workflow:start`, `node:enter`, `node:exit`, `tool:call`, `tool:result`, `node:progress`, `route`, and `workflow:end`. See [Live Mode](/studio/live/) for a complete integration example.
+The `applyEvent` method handles the key `ExecutionEvent` types: `workflow:start`, `node:enter`, `node:exit`, and `workflow:end`. Other events (`tool:call`, `tool:result`, `route`) are available for logging but don't affect the visual state. See [Live Mode](/studio/live/) for a complete integration example.
 
 ### StandaloneViewer
 

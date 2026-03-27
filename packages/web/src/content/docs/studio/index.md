@@ -27,7 +27,7 @@ The default mode. Build and edit the workflow graph directly:
 
 ### Simulate
 
-Run the workflow in the browser using a mock Claude backend to watch execution flow without connecting to real services or spending API credits. Nodes highlight as they execute: blue pulsing ring for the current node, green border for success, red border for failure, dimmed for skipped, and dark for pending.
+Run the workflow in the browser using a mock Claude backend to watch execution flow without connecting to real services or spending API credits. Nodes highlight as they execute: blue pulsing glow for the current node, green border for success, red border for failure, dimmed for skipped, and dark for pending.
 
 ### Live
 
@@ -66,7 +66,7 @@ Conditional edges render in indigo with a label pill showing the condition text.
 
 **Export TypeScript** generates the workflow as a typed `Workflow` constant with the `@sweny-ai/core` import, ready to use with `execute()`.
 
-**Export GitHub Actions** generates a complete `.github/workflows/sweny-<id>.yml` pinned to `swenyai/sweny@v3`. It auto-detects which skills the workflow uses and adds the corresponding secrets (`SENTRY_AUTH_TOKEN`, `DD_API_KEY`, `SLACK_BOT_TOKEN`, etc.) to the env block.
+**Export GitHub Actions** generates a complete `.github/workflows/sweny-<id>.yml` that installs the SWEny CLI and runs the workflow. It auto-detects which skills the workflow uses and adds the corresponding secrets (`GITHUB_TOKEN`, `SENTRY_AUTH_TOKEN`, `DD_API_KEY`, `LINEAR_API_KEY`, `SLACK_BOT_TOKEN`, etc.) to the env block.
 
 ## Permalink
 
