@@ -5,6 +5,8 @@
  * Claude Code. No API key needed in the browser.
  */
 
+import { post } from "./api-client.js";
+
 export interface GenerateInstructionOptions {
   nodeName: string;
   nodeId: string;
@@ -18,17 +20,6 @@ export interface GenerateInstructionOptions {
 }
 
 export async function generateInstruction(opts: GenerateInstructionOptions): Promise<string> {
-  const res = await fetch("/api/generate-instruction", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(opts),
-  });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data.error ?? `Server error ${res.status}`);
-  }
-
-  return data.instruction;
+  const { instruction } = await post<{ instruction: string }>("/api/generate-instruction", opts);
+  return instruction;
 }

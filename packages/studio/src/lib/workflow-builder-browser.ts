@@ -7,22 +7,7 @@
  */
 
 import type { Workflow } from "@sweny-ai/core";
-
-async function post<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data.error ?? `Server error ${res.status}`);
-  }
-
-  return data as T;
-}
+import { post } from "./api-client.js";
 
 /**
  * Generate a complete workflow from a natural language description.

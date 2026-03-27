@@ -58,6 +58,7 @@ export function App() {
       clear();
       setWorkflow(preset.workflow);
       setActiveId(id);
+      setAiGenerated(false);
     },
     [setWorkflow],
   );
@@ -72,6 +73,7 @@ export function App() {
     };
     setWorkflow(forked);
     setActiveId("custom");
+    setAiGenerated(false);
     setForkToast(`Forked! Customize your workflow then export.`);
     setTimeout(() => setForkToast(null), 4000);
   }, [workflow, setWorkflow]);
@@ -80,6 +82,7 @@ export function App() {
     (wf: Workflow) => {
       useEditorStore.temporal.getState().clear();
       setWorkflow(wf);
+      setAiGenerated(false);
     },
     [setWorkflow],
   );
@@ -173,7 +176,7 @@ export function App() {
           ))}
         </div>
       )}
-      {mode === "design" && (
+      {mode === "design" && import.meta.env.DEV && (
         <WorkflowPromptBar
           onWorkflowGenerated={handleAiGenerated}
           currentWorkflow={workflow}
