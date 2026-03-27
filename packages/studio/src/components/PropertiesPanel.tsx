@@ -4,6 +4,7 @@ import { validateWorkflow } from "@sweny-ai/core/schema";
 import { getSkillCatalog } from "@sweny-ai/core/studio";
 import { useEditorStore } from "../store/editor-store.js";
 import { SkillIcon } from "./SkillIcon.js";
+import { InstructionEditor } from "./InstructionEditor.js";
 
 const skillCatalog = getSkillCatalog();
 
@@ -195,6 +196,7 @@ function NodePanel({
   const [idError, setIdError] = useState<string | null>(null);
   const [name, setNodeName] = useState(node.name);
   const [instruction, setInstruction] = useState(node.instruction);
+  const [showExpanded, setShowExpanded] = useState(false);
 
   return (
     <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
@@ -247,7 +249,26 @@ function NodePanel({
       </div>
 
       <div className="mb-3 flex-1 flex flex-col min-h-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Instruction</label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="text-xs font-medium text-gray-600">Instruction</label>
+          {!readOnly && (
+            <button
+              onClick={() => setShowExpanded(true)}
+              className="text-gray-400 hover:text-indigo-500 transition-colors"
+              title="Expand editor"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M2 10v4h4M14 6V2h-4M2 14L6.5 9.5M14 2L9.5 6.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
         <textarea
           className={`w-full border border-gray-300 rounded px-2 py-1 text-sm resize-y font-mono flex-1 ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
           rows={14}
@@ -258,6 +279,19 @@ function NodePanel({
           placeholder="What should Claude do at this node?"
         />
       </div>
+
+      {showExpanded && (
+        <InstructionEditor
+          nodeId={id}
+          nodeName={name}
+          instruction={instruction}
+          onSave={(text) => {
+            setInstruction(text);
+            updateNode(id, { instruction: text });
+          }}
+          onClose={() => setShowExpanded(false)}
+        />
+      )}
 
       {/* Skills toggle list */}
       <div className="mb-3">
