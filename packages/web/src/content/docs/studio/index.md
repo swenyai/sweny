@@ -1,54 +1,76 @@
 ---
 title: Studio
-description: Visual editor and execution monitor for SWEny workflows — design, simulate, and observe workflow DAGs in real time.
+description: Visual editor and execution monitor for SWEny workflows -- design, simulate, and observe workflow DAGs in real time.
 ---
 
-Studio is the visual editor and execution monitor for SWEny workflows. It renders any `Workflow` as an interactive DAG — nodes show their skills as colored badges, edges display natural-language conditions, and execution state is overlaid in real time.
+Studio is the visual workflow editor and real-time execution monitor for SWEny. It renders any `Workflow` as an interactive directed acyclic graph (DAG) where nodes represent steps, edges represent transitions, and execution state is overlaid live as events stream in.
 
-Studio is available as part of [SWEny Cloud](https://cloud.sweny.ai). See the [Live Workflow Explorer](/studio/explorer/) to interact with the built-in workflows directly in these docs.
+Studio is available in three forms:
+
+- **Standalone app** -- run `npm run dev:studio` to launch the full editor locally
+- **Embeddable viewer** -- `@sweny-ai/studio/viewer` exports a read-only `WorkflowViewer` React component for dashboards and docs
+- **Embeddable editor** -- `@sweny-ai/studio/editor` exports the full editor store (`useEditorStore`) for building custom tooling
+
+Built on [@xyflow/react](https://reactflow.dev/) v12 with [ELK](https://www.eclipse.org/elk/) for automatic layered layout, [Zustand](https://zustand-demo.pmnd.rs/) for state management, and [zundo](https://github.com/charkour/zundo) for undo/redo history.
 
 ## Three modes
 
 ### Design
 
-The default mode. Edit the workflow graph directly:
+The default mode. Build and edit the workflow graph directly:
 
-- **Add nodes** — click the + button in the toolbar, enter an id
-- **Add edges** — drag from the handle on a node to another node; optionally add a `when` condition for conditional routing
-- **Edit properties** — select any node to edit its instruction, skills, and output schema; select an edge to edit its condition
-- **Undo / redo** — `Cmd+Z` / `Cmd+Shift+Z`; history is scoped to the workflow (selection and layout changes are excluded)
-- **Import / Export** — load any JSON or YAML `Workflow`; export the current graph as JSON, YAML, GitHub Actions workflow, or TypeScript
+- **Add nodes** -- drag templates from the left toolbox onto the canvas, or click **+ new** in the toolbar
+- **Connect nodes** -- drag from a node's bottom handle to another node's top handle to create an edge
+- **Edit properties** -- select any node to edit its name, instruction, skills, and output schema in the right panel; select an edge to edit its `when` condition
+- **Undo / redo** -- `Cmd+Z` / `Cmd+Shift+Z` (history tracks only structural workflow changes, not selection or layout)
+- **Import / export** -- load JSON or YAML workflows; export as YAML, JSON, TypeScript, or GitHub Actions
 
 ### Simulate
 
-Run the workflow in the browser using `MockClaude` to watch execution flow without connecting to real services or using API credits. Nodes highlight as they execute: blue ring = current, green = success, red = failed, grey = pending.
+Run the workflow in the browser using a mock Claude backend to watch execution flow without connecting to real services or spending API credits. Nodes highlight as they execute: blue pulsing ring for the current node, green border for success, red border for failure, dimmed for skipped, and dark for pending.
 
 ### Live
 
-Connect to a running executor instance over WebSocket or SSE and stream real `ExecutionEvent` objects. The graph overlays execution state as events arrive — useful for monitoring long-running workflows in staging or production.
+Connect to a running executor instance and stream real `ExecutionEvent` objects. The graph overlays execution state as events arrive -- useful for monitoring long-running workflows in staging or production. See [Live Mode](/studio/live/) for setup details.
+
+## Node anatomy
+
+Each node on the canvas displays:
+
+1. **Name** -- the human-readable label (falls back to the node ID if no name is set)
+2. **Node ID** -- the machine identifier in monospace below the name
+3. **Skill badges** -- colored pills showing which skills are available at this node (e.g., `github`, `sentry`, `slack`)
+4. **Entry badge** -- a small "entry" tag on the workflow's entry node
+5. **Accent bar** -- a left-side color bar derived from the node's primary skill
+
+Terminal nodes (no outgoing edges) display with a dashed border. Unreachable nodes show a dashed orange border with a warning badge.
 
 ## Edge conditions
 
-Edges can be unconditional (always taken) or conditional (Claude evaluates a natural-language `when` clause). When a node has multiple outbound edges:
+Edges can be unconditional (always taken) or conditional (Claude evaluates a natural-language `when` clause at runtime). When a node has multiple outbound edges:
 
 1. Claude evaluates all `when` conditions against the node's output
 2. The best matching conditional edge is taken
 3. If no conditional edge matches, an unconditional edge is taken as fallback
 4. If nothing matches, the workflow terminates at that node
 
+Conditional edges render in indigo with a label pill showing the condition text. Unconditional edges render in a muted blue.
+
 ## Import and export
 
 **Import** accepts any valid JSON or YAML `Workflow`. Drag-and-drop a file onto the canvas or click **Import** in the toolbar.
 
-**Export JSON / YAML** writes the workflow definition — paste directly into your config or check it into version control.
+**Export YAML** writes the workflow definition with a header comment and link to the schema docs -- paste directly into your config or check it into version control.
 
-**Export TypeScript** generates the workflow as a typed constant, ready to use with `execute()`.
+**Export JSON** writes the raw `Workflow` object.
 
-**Export GitHub Actions** generates a complete `.github/workflows/sweny.yml` pinned to `swenyai/sweny@v3`, with all required secrets documented.
+**Export TypeScript** generates the workflow as a typed `Workflow` constant with the `@sweny-ai/core` import, ready to use with `execute()`.
+
+**Export GitHub Actions** generates a complete `.github/workflows/sweny-<id>.yml` pinned to `swenyai/sweny@v3`. It auto-detects which skills the workflow uses and adds the corresponding secrets (`SENTRY_AUTH_TOKEN`, `DD_API_KEY`, `SLACK_BOT_TOKEN`, etc.) to the env block.
 
 ## Permalink
 
-The toolbar's share button encodes the current `Workflow` into the URL as a base64 query parameter. Share the link and the recipient opens the same workflow without any server involved — useful for code review or async collaboration.
+The toolbar's **Share** button encodes the current `Workflow` into the URL as a base64 query parameter. Share the link and the recipient opens the same workflow without any server involved -- useful for code review or async collaboration.
 
 ## Validation overlay
 
@@ -60,33 +82,10 @@ Studio validates the workflow continuously and shows inline errors on nodes and 
 - Unreachable nodes (no inbound edges and not `entry`)
 - Unknown skill ids
 
-Unreachable nodes are highlighted with a dashed orange border and a warning badge. Clicking a validation error in the banner selects the affected node.
+Unreachable nodes are highlighted with a dashed orange border and a warning badge. Clicking a validation error in the banner selects the affected node or edge.
 
-## Embedding the viewer
+## What is next
 
-The `WorkflowViewer` component is available as `@sweny-ai/studio/viewer` for embedding read-only graphs in dashboards or documentation:
-
-```tsx
-import { WorkflowViewer } from "@sweny-ai/studio/viewer";
-import "@sweny-ai/studio/style.css";
-
-<WorkflowViewer
-  workflow={myWorkflow}
-  executionState={{ "gather": "success", "investigate": "running" }}
-  height={480}
-/>
-```
-
-Peer dependencies: `react`, `react-dom`, `@sweny-ai/core`. See the [Live Workflow Explorer](/studio/explorer/) for an interactive demo.
-
-## Embedding the editor store
-
-The full editor store is available as `@sweny-ai/studio/editor` for building custom tooling on top of the same state management Studio uses:
-
-```ts
-import { useEditorStore } from "@sweny-ai/studio/editor";
-
-const { workflow, setWorkflow, currentNodeId, completedNodes } = useEditorStore();
-```
-
-See [Workflow Authoring](/studio/recipe-authoring/) for the complete `execute()` API.
+- [Editor Guide](/studio/editor/) -- walkthrough of the toolbox, canvas, and properties panel
+- [Embedding Studio](/studio/embedding/) -- use `WorkflowViewer` and `useEditorStore` in your own React app
+- [Live Mode](/studio/live/) -- connect Studio to a running workflow execution

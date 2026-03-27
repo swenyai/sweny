@@ -1,6 +1,217 @@
 ---
 title: Live Mode
-description: Watch workflow execution in real-time.
+description: Connect Studio to a running workflow execution and watch nodes light up in real time.
 ---
 
-Content coming soon.
+Live Mode connects Studio to a running workflow executor and overlays execution state on the graph as events stream in. Nodes transition through visual states as the workflow progresses: pending (dark), current (blue pulsing glow), success (green border), failed (red border), and skipped (dimmed).
+
+## How it works
+
+The SWEny executor emits `ExecutionEvent` objects as a workflow runs. Each event describes a state change: a node starting execution, a tool being called, a node completing, a routing decision, or the workflow finishing. Studio's editor store has an `applyEvent()` method that processes these events and updates the canvas in real time.
+
+The event flow:
+
+1. `workflow:start` -- resets all nodes to pending, sets execution status to running
+2. `node:enter` -- marks the entered node as current (blue pulsing glow)
+3. `tool:call` / `tool:result` -- intermediate events for tool-level tracking
+4. `node:exit` -- marks the node as success (green) or failed (red) based on the result
+5. `route` -- logs the routing decision (which edge was taken and why)
+6. `workflow:end` -- marks execution as completed or failed based on overall results
+
+## ExecutionEvent types
+
+```ts
+type ExecutionEvent =
+  | { type: "workflow:start"; workflow: string }
+  | { type: "node:enter"; node: string; instruction: string }
+  | { type: "tool:call"; node: string; tool: string; input: unknown }
+  | { type: "tool:result"; node: string; tool: string; output: unknown }
+  | { type: "node:exit"; node: string; result: NodeResult }
+  | { type: "node:progress"; node: string; message: string }
+  | { type: "route"; from: string; to: string; reason: string }
+  | { type: "workflow:end"; results: Record<string, NodeResult> };
+```
+
+## Using the observer callback
+
+The simplest integration is passing an observer callback to the executor's `execute()` function. The observer receives every `ExecutionEvent` and forwards it to the editor store.
+
+```ts
+import { execute } from "@sweny-ai/core";
+import { useEditorStore } from "@sweny-ai/studio/editor";
+
+const { workflow, applyEvent, setMode, resetExecution } = useEditorStore.getState();
+
+// Switch to live mode and reset previous state
+setMode("live");
+resetExecution();
+
+// Run the workflow with a live observer
+await execute(workflow, {
+  observer: (event) => {
+    applyEvent(event);
+  },
+});
+```
+
+Each call to `applyEvent()` updates the store, which triggers a React re-render of the canvas. The currently executing node gets a blue pulsing glow animation, completed nodes turn green or red, and the properties panel shows execution results when you click a completed node.
+
+## Connecting via WebSocket
+
+For remote execution monitoring, connect to a WebSocket endpoint that streams `ExecutionEvent` objects as JSON:
+
+```tsx
+import { useEffect } from "react";
+import { useEditorStore } from "@sweny-ai/studio/editor";
+import type { ExecutionEvent } from "@sweny-ai/core";
+
+function useLiveConnection(url: string) {
+  const applyEvent = useEditorStore((s) => s.applyEvent);
+  const setMode = useEditorStore((s) => s.setMode);
+  const resetExecution = useEditorStore((s) => s.resetExecution);
+  const setLiveConnection = useEditorStore((s) => s.setLiveConnection);
+
+  useEffect(() => {
+    setMode("live");
+    resetExecution();
+    setLiveConnection({ url, transport: "websocket", status: "connecting" });
+
+    const ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      setLiveConnection({ url, transport: "websocket", status: "connected" });
+    };
+
+    ws.onmessage = (msg) => {
+      const event: ExecutionEvent = JSON.parse(msg.data);
+      applyEvent(event);
+    };
+
+    ws.onerror = () => {
+      setLiveConnection({ url, transport: "websocket", status: "error", error: "Connection failed" });
+    };
+
+    ws.onclose = () => {
+      setLiveConnection({ url, transport: "websocket", status: "disconnected" });
+    };
+
+    return () => ws.close();
+  }, [url, applyEvent, setMode, resetExecution, setLiveConnection]);
+}
+```
+
+The `liveConnection` state on the store tracks connection status (`disconnected`, `connecting`, `connected`, `error`) so your UI can show connection indicators.
+
+## Connecting via Server-Sent Events (SSE)
+
+For HTTP-based streaming, use an SSE endpoint:
+
+```tsx
+import { useEffect } from "react";
+import { useEditorStore } from "@sweny-ai/studio/editor";
+import type { ExecutionEvent } from "@sweny-ai/core";
+
+function useLiveSSE(url: string) {
+  const applyEvent = useEditorStore((s) => s.applyEvent);
+  const setMode = useEditorStore((s) => s.setMode);
+  const resetExecution = useEditorStore((s) => s.resetExecution);
+  const setLiveConnection = useEditorStore((s) => s.setLiveConnection);
+
+  useEffect(() => {
+    setMode("live");
+    resetExecution();
+    setLiveConnection({ url, transport: "sse", status: "connecting" });
+
+    const source = new EventSource(url);
+
+    source.onopen = () => {
+      setLiveConnection({ url, transport: "sse", status: "connected" });
+    };
+
+    source.onmessage = (msg) => {
+      const event: ExecutionEvent = JSON.parse(msg.data);
+      applyEvent(event);
+    };
+
+    source.onerror = () => {
+      setLiveConnection({ url, transport: "sse", status: "error", error: "Connection lost" });
+    };
+
+    return () => source.close();
+  }, [url, applyEvent, setMode, resetExecution, setLiveConnection]);
+}
+```
+
+## Read-only during execution
+
+When the mode is `simulate` or `live`, the properties panel becomes read-only. Node names, instructions, skills, and edge conditions cannot be edited while execution is in progress. This prevents accidental modifications to the workflow while it is running.
+
+The properties panel shows execution results for completed nodes: status (success, failed, or skipped), tool call count, and expandable output data.
+
+## Execution state in the store
+
+The editor store exposes several execution-related fields:
+
+```ts
+interface ExecutionSlice {
+  mode: "design" | "simulate" | "live";
+  currentNodeId: string | null;
+  completedNodes: Record<string, NodeResult>;
+  executionStatus: "idle" | "running" | "completed" | "failed" | "partial";
+  liveConnection: {
+    url: string;
+    transport: "websocket" | "sse";
+    status: "disconnected" | "connecting" | "connected" | "error";
+    error?: string;
+  } | null;
+
+  setMode(mode: StudioMode): void;
+  applyEvent(event: ExecutionEvent): void;
+  resetExecution(): void;
+  setLiveConnection(conn: /* ... */): void;
+}
+```
+
+Use `resetExecution()` to clear all execution state (current node, completed nodes, status, and live connection) before starting a new run.
+
+## Using WorkflowViewer for live dashboards
+
+If you only need a read-only live view without the full editor, use the `WorkflowViewer` component with an `executionState` map. This is lighter than the full editor store.
+
+```tsx
+import { useState, useEffect } from "react";
+import { WorkflowViewer } from "@sweny-ai/studio/viewer";
+import "@sweny-ai/studio/style.css";
+import type { ExecutionEvent, Workflow } from "@sweny-ai/core";
+
+type NodeExecStatus = "current" | "success" | "failed" | "skipped" | "pending";
+
+function LiveDashboard({ workflow, eventsUrl }: { workflow: Workflow; eventsUrl: string }) {
+  const [execState, setExecState] = useState<Record<string, NodeExecStatus>>({});
+
+  useEffect(() => {
+    const source = new EventSource(eventsUrl);
+    source.onmessage = (msg) => {
+      const event: ExecutionEvent = JSON.parse(msg.data);
+
+      if (event.type === "workflow:start") {
+        setExecState({});
+      }
+      if (event.type === "node:enter") {
+        setExecState((prev) => ({ ...prev, [event.node]: "current" }));
+      }
+      if (event.type === "node:exit") {
+        const status: NodeExecStatus = event.result.status === "success" ? "success" : "failed";
+        setExecState((prev) => ({ ...prev, [event.node]: status }));
+      }
+    };
+    return () => source.close();
+  }, [eventsUrl]);
+
+  return <WorkflowViewer workflow={workflow} executionState={execState} height="600px" />;
+}
+```
+
+:::note[Viewer vs editor for live mode]
+Use `WorkflowViewer` from `@sweny-ai/studio/viewer` when you only need to display execution progress. Use `useEditorStore` from `@sweny-ai/studio/editor` when you need the full state management (mode switching, tool call tracking, connection status, node result inspection).
+:::
