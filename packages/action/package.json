@@ -18,8 +18,7 @@
     "@actions/exec": "^3.0",
     "@actions/github": "^9",
     "@actions/io": "^3.0",
-    "@sweny-ai/engine": "*",
-    "@sweny-ai/providers": "*"
+    "@sweny-ai/core": "*"
   },
   "devDependencies": {
     "@types/node": "^25",

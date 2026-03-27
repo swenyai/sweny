@@ -51,6 +51,10 @@ export interface EditorState extends ExecutionSlice {
   updateNode(id: string, patch: Partial<Node>): void;
   /** Rename a node ID and cascade all references. Returns an error string on failure, null on success. */
   renameNode(oldId: string, newId: string): string | null;
+  /** Clone a node with a unique ID suffix. Returns the new node's ID. */
+  duplicateNode(id: string): string | null;
+  /** Remove all edges connected to a node (both incoming and outgoing). */
+  disconnectNode(id: string): void;
 
   // Edge mutations
   addEdge(from: string, to: string, when?: string): void;
@@ -156,6 +160,7 @@ export const useEditorStore = create<EditorState>()(
         set(
           produce((s: EditorState) => {
             s.workflow.entry = id;
+            s.isLayoutStale = true;
           }),
         ),
 
@@ -200,6 +205,41 @@ export const useEditorStore = create<EditorState>()(
             if (patch.instruction !== undefined) node.instruction = patch.instruction;
             if (patch.skills !== undefined) node.skills = patch.skills;
             if (patch.output !== undefined) node.output = patch.output;
+          }),
+        ),
+
+      duplicateNode: (id: string): string | null => {
+        const state = get();
+        const node = state.workflow.nodes[id];
+        if (!node) return null;
+        const existing = new Set(Object.keys(state.workflow.nodes));
+        let newId = `${id}_copy`;
+        let counter = 1;
+        while (existing.has(newId)) {
+          newId = `${id}_copy_${counter++}`;
+        }
+        set(
+          produce((s: EditorState) => {
+            s.workflow.nodes[newId] = {
+              name: `${node.name} (copy)`,
+              instruction: node.instruction,
+              skills: [...node.skills],
+              ...(node.output ? { output: structuredClone(node.output) } : {}),
+            };
+            s.isLayoutStale = true;
+          }),
+        );
+        return newId;
+      },
+
+      disconnectNode: (id: string) =>
+        set(
+          produce((s: EditorState) => {
+            const before = s.workflow.edges.length;
+            s.workflow.edges = s.workflow.edges.filter((e) => e.from !== id && e.to !== id);
+            if (s.workflow.edges.length !== before) {
+              s.isLayoutStale = true;
+            }
           }),
         ),
 

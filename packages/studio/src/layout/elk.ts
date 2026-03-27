@@ -7,8 +7,8 @@ import type { TransitionEdgeData } from "../components/TransitionEdge.js";
 
 const elk = new ELK();
 
-const NODE_WIDTH = 200;
-const NODE_HEIGHT = 52;
+const NODE_WIDTH = 280;
+const NODE_HEIGHT = 84;
 
 export async function layoutWorkflow(workflow: Workflow): Promise<{
   nodes: StateNodeType[];
@@ -21,8 +21,8 @@ export async function layoutWorkflow(workflow: Workflow): Promise<{
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "DOWN",
-      "elk.spacing.nodeNode": "40",
-      "elk.layered.spacing.edgeNodeBetweenLayers": "36",
+      "elk.spacing.nodeNode": "60",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "50",
       "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
     },
     children: flowNodes.map(

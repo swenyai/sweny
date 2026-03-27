@@ -32,6 +32,11 @@ export function TransitionEdge({
     targetPosition,
   });
 
+  // Shift conditional labels 40% toward their target to prevent overlap
+  // when multiple edges leave the same source node
+  const shiftedLabelX = isConditional ? labelX + (targetX - labelX) * 0.4 : labelX;
+  const shiftedLabelY = isConditional ? labelY + (targetY - labelY) * 0.4 : labelY;
+
   const strokeColor = isError ? "#ef4444" : isConditional ? "#6366f1" : "#4d7aaa";
   const displayLabel = isError && when ? `⚠ ${when}` : when;
 
@@ -54,9 +59,9 @@ export function TransitionEdge({
           <div
             style={{
               position: "absolute",
-              transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+              transform: `translate(-50%, -50%) translate(${shiftedLabelX}px,${shiftedLabelY}px)`,
               pointerEvents: "all",
-              maxWidth: 160,
+              maxWidth: 220,
             }}
             className="nodrag nopan"
           >
@@ -64,15 +69,14 @@ export function TransitionEdge({
               style={{
                 fontSize: 9,
                 fontWeight: 600,
-                padding: "2px 7px",
+                padding: "3px 8px",
                 borderRadius: 5,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
                 display: "block",
-                color: isError ? "#fca5a5" : "#a5b4fc",
-                background: isError ? "rgba(239,68,68,0.15)" : "rgba(99,102,241,0.13)",
-                border: isError ? "1px solid rgba(239,68,68,0.4)" : "1px solid rgba(99,102,241,0.42)",
+                lineHeight: 1.4,
+                color: isError ? "#dc2626" : "#4338ca",
+                background: isError ? "#fef2f2" : "#eef0ff",
+                border: isError ? "1px solid #fecaca" : "1px solid #c7d2fe",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
               }}
             >
               {displayLabel}

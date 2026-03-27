@@ -32,8 +32,10 @@ const skillColors: Record<string, string> = {
   linear: "#818cf8",
   sentry: "#f472b6",
   datadog: "#a78bfa",
+  betterstack: "#22d3ee",
   slack: "#34d399",
   notification: "#fb923c",
+  filesystem: "#94a3b8",
 };
 
 export function StateNode({ data }: NodeProps<StateNodeType>) {
@@ -52,10 +54,10 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
       style={{
         display: "flex",
         alignItems: "stretch",
-        borderRadius: 7,
+        borderRadius: 8,
         overflow: "hidden",
-        width: 200,
-        height: 52,
+        width: 280,
+        minHeight: 84,
         background: exec.bg,
         boxShadow: exec.shadow,
         border: `1px ${borderStyle} ${borderColor}`,
@@ -76,22 +78,21 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
-          padding: "0 9px 0 8px",
+          padding: "8px 10px 8px 10px",
           minWidth: 0,
+          gap: 4,
         }}
       >
-        {/* Top row: node name + badges */}
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        {/* Row 1: node name + entry badge */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
           <span
             style={{
               fontFamily: "ui-monospace, 'Cascadia Code', monospace",
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: 700,
+              lineHeight: 1.3,
               color: "#dde5f0",
               flex: 1,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
               opacity: textOpacity,
             }}
           >
@@ -111,6 +112,7 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
                 background: "rgba(59,130,246,0.16)",
                 color: "#93c5fd",
                 flexShrink: 0,
+                marginTop: 1,
                 opacity: textOpacity,
               }}
             >
@@ -119,16 +121,28 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
           )}
         </div>
 
-        {/* Skill badges */}
+        {/* Row 2: node ID */}
+        <span
+          style={{
+            fontFamily: "ui-monospace, 'Cascadia Code', monospace",
+            fontSize: 9,
+            color: "#64748b",
+            opacity: textOpacity,
+          }}
+        >
+          {nodeId}
+        </span>
+
+        {/* Row 3: skill badges */}
         {skills.length > 0 && (
-          <div style={{ display: "flex", gap: 3, marginTop: 2, overflow: "hidden" }}>
-            {skills.slice(0, 3).map((skill) => (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 1 }}>
+            {skills.map((skill) => (
               <span
                 key={skill.id}
                 style={{
-                  fontSize: 8,
+                  fontSize: 8.5,
                   fontWeight: 600,
-                  padding: "1px 4px",
+                  padding: "1px 5px",
                   borderRadius: 3,
                   background: `${skillColors[skill.id] ?? "#6366f1"}20`,
                   color: skillColors[skill.id] ?? "#6366f1",
@@ -139,9 +153,6 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
                 {skill.name}
               </span>
             ))}
-            {skills.length > 3 && (
-              <span style={{ fontSize: 8, color: "#64748b", opacity: textOpacity }}>+{skills.length - 3}</span>
-            )}
           </div>
         )}
       </div>

@@ -103,7 +103,7 @@ function WorkflowMetaPanel() {
   const nodeIds = Object.keys(workflow.nodes);
 
   return (
-    <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
+    <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
       <h2 className="font-semibold text-gray-800 mb-3 text-sm">Workflow</h2>
 
       <div className="mb-3">
@@ -196,7 +196,7 @@ function NodePanel({
   const [instruction, setInstruction] = useState(node.instruction);
 
   return (
-    <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
+    <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
       <h2 className="font-semibold text-gray-800 mb-3 text-sm">Node</h2>
 
       {/* Unreachable warning */}
@@ -245,11 +245,11 @@ function NodePanel({
         />
       </div>
 
-      <div className="mb-3">
+      <div className="mb-3 flex-1 flex flex-col min-h-0">
         <label className="block text-xs font-medium text-gray-600 mb-1">Instruction</label>
         <textarea
-          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm resize-none font-mono ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
-          rows={6}
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm resize-y font-mono flex-1 ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
+          rows={14}
           value={instruction}
           disabled={readOnly}
           onChange={(e) => setInstruction(e.target.value)}
@@ -387,7 +387,7 @@ function EdgePanel({ edgeId, from, to, when, nodeIds, readOnly, updateEdge, dele
   const [editWhen, setEditWhen] = useState(when);
 
   return (
-    <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
+    <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
       <h2 className="font-semibold text-gray-800 mb-3 text-sm">Edge</h2>
 
       <div className="mb-3">
@@ -445,7 +445,7 @@ function EdgePanel({ edgeId, from, to, when, nodeIds, readOnly, updateEdge, dele
 
 function EmptyPanel() {
   return (
-    <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
+    <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
       <p className="text-xs text-gray-400">Node not found.</p>
     </div>
   );

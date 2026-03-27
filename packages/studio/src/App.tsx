@@ -6,6 +6,7 @@ import { useEditorStore, useTemporalStore } from "./store/editor-store.js";
 import { WorkflowViewer } from "./WorkflowViewer.js";
 import { PropertiesPanel } from "./components/PropertiesPanel.js";
 import { Toolbar } from "./components/Toolbar.js";
+import { NodeToolbox } from "./components/NodeToolbox.js";
 import { DropOverlay } from "./components/DropOverlay.js";
 import { SimulationPanel } from "./components/SimulationPanel.js";
 import { LiveConnectPanel } from "./components/LiveConnectPanel.js";
@@ -161,6 +162,7 @@ export function App() {
         </div>
       )}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {mode === "design" && <NodeToolbox />}
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <div style={{ flex: 1 }}>
             <WorkflowViewer />

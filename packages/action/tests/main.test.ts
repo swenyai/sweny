@@ -11,9 +11,13 @@ const mockEndGroup = vi.fn();
 const mockInfo = vi.fn();
 const mockParseInputs = vi.fn();
 const mockValidateInputs = vi.fn();
-const mockCreateProviders = vi.fn();
-const mockRunRecipe = vi.fn();
-const mockGetAgentEnv = vi.fn<[], Record<string, string>>().mockReturnValue({});
+const mockExecute = vi.fn();
+const mockCreateSkillMap = vi.fn().mockReturnValue(new Map());
+const mockConfiguredSkills = vi.fn().mockReturnValue([]);
+const mockBuildAutoMcpServers = vi.fn().mockReturnValue({});
+
+/** Track ClaudeClient constructor calls */
+let claudeClientArgs: unknown[] = [];
 
 // ---------------------------------------------------------------------------
 // Helper: re-register all doMocks and dynamically import main.ts fresh
@@ -21,6 +25,7 @@ const mockGetAgentEnv = vi.fn<[], Record<string, string>>().mockReturnValue({});
 
 async function loadMain() {
   vi.resetModules();
+  claudeClientArgs = [];
   vi.doMock("@actions/core", () => ({
     getInput: vi.fn().mockReturnValue(""),
     getBooleanInput: vi.fn().mockReturnValue(false),
@@ -33,17 +38,25 @@ async function loadMain() {
     warning: vi.fn(),
     error: vi.fn(),
   }));
-  vi.doMock("@sweny-ai/engine", () => ({
-    runWorkflow: mockRunRecipe,
-    triageWorkflow: { name: "triage", start: "verify-access", definition: { steps: {} } },
-    implementWorkflow: { name: "implement", start: "verify-access", definition: { steps: {} } },
+  vi.doMock("@sweny-ai/core", () => ({
+    execute: mockExecute,
+    ClaudeClient: class MockClaudeClient {
+      constructor(...args: unknown[]) {
+        claudeClientArgs = args;
+      }
+    },
+    createSkillMap: mockCreateSkillMap,
+    configuredSkills: mockConfiguredSkills,
+    buildAutoMcpServers: mockBuildAutoMcpServers,
+    consoleLogger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  }));
+  vi.doMock("@sweny-ai/core/workflows", () => ({
+    triageWorkflow: { id: "triage", name: "triage", entry: "investigate", nodes: {}, edges: [] },
+    implementWorkflow: { id: "implement", name: "implement", entry: "implement", nodes: {}, edges: [] },
   }));
   vi.doMock("../src/config.js", () => ({
     parseInputs: mockParseInputs,
     validateInputs: mockValidateInputs,
-  }));
-  vi.doMock("../src/providers/index.js", () => ({
-    createProviders: mockCreateProviders,
   }));
   await import("../src/main.js");
 }
@@ -101,9 +114,10 @@ const DEFAULT_CONFIG = {
   geminiApiKey: "",
   logFilePath: "",
   mcpServers: {},
+  workspaceTools: [],
+  reviewMode: "review",
+  outputDir: ".github/sweny-output",
 };
-
-const DEFAULT_PROVIDERS = new Map([["observability", { getAgentEnv: mockGetAgentEnv }]]);
 
 // ---------------------------------------------------------------------------
 // Shared beforeEach: reset all mocks and set up happy-path defaults
@@ -111,11 +125,12 @@ const DEFAULT_PROVIDERS = new Map([["observability", { getAgentEnv: mockGetAgent
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockGetAgentEnv.mockReturnValue({});
   mockParseInputs.mockReturnValue(DEFAULT_CONFIG);
   mockValidateInputs.mockReturnValue([]);
-  mockCreateProviders.mockReturnValue(DEFAULT_PROVIDERS);
-  mockRunRecipe.mockResolvedValue({ steps: [] });
+  mockExecute.mockResolvedValue(new Map());
+  mockCreateSkillMap.mockReturnValue(new Map());
+  mockConfiguredSkills.mockReturnValue([]);
+  mockBuildAutoMcpServers.mockReturnValue({});
 });
 
 // ---------------------------------------------------------------------------
@@ -123,7 +138,7 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("run() orchestration", () => {
-  it("calls parseInputs, validateInputs, createProviders, and runWorkflow in sequence", async () => {
+  it("calls parseInputs, validateInputs, and execute in sequence", async () => {
     const callOrder: string[] = [];
     mockParseInputs.mockImplementation(() => {
       callOrder.push("parseInputs");
@@ -133,112 +148,64 @@ describe("run() orchestration", () => {
       callOrder.push("validateInputs");
       return [];
     });
-    mockCreateProviders.mockImplementation(() => {
-      callOrder.push("createProviders");
-      return DEFAULT_PROVIDERS;
-    });
-    mockRunRecipe.mockImplementation(async () => {
-      callOrder.push("runWorkflow");
-      return { steps: [] };
+    mockExecute.mockImplementation(async () => {
+      callOrder.push("execute");
+      return new Map();
     });
 
     await loadMain();
 
-    expect(callOrder).toEqual(["parseInputs", "validateInputs", "createProviders", "runWorkflow"]);
+    expect(callOrder).toEqual(["parseInputs", "validateInputs", "execute"]);
   });
 
-  it("calls core.setFailed with joined validation errors and skips runWorkflow", async () => {
+  it("calls core.setFailed with joined validation errors and skips execute", async () => {
     mockValidateInputs.mockReturnValue(["Error 1", "Error 2"]);
 
     await loadMain();
 
     expect(mockSetFailed).toHaveBeenCalledWith("Error 1\nError 2");
-    expect(mockRunRecipe).not.toHaveBeenCalled();
+    expect(mockExecute).not.toHaveBeenCalled();
   });
 
-  it("passes triageWorkflow as first arg and providers as third arg to runWorkflow", async () => {
-    const fakeProviders = new Map([
-      ["obs", {}],
-      ["observability", { getAgentEnv: vi.fn().mockReturnValue({}) }],
-    ]);
-    mockCreateProviders.mockReturnValue(fakeProviders);
-
+  it("passes triageWorkflow to execute when workflow is triage", async () => {
     await loadMain();
 
-    const [firstArg, , thirdArg] = mockRunRecipe.mock.calls[0];
-    expect(firstArg).toMatchObject({ name: "triage" });
-    expect(thirdArg).toBe(fakeProviders);
+    const [workflow] = mockExecute.mock.calls[0];
+    expect(workflow).toMatchObject({ id: "triage" });
   });
 
-  it("routes to implementWorkflow when config.workflow is 'implement'", async () => {
+  it("passes implementWorkflow to execute when workflow is implement", async () => {
     mockParseInputs.mockReturnValue({ ...DEFAULT_CONFIG, workflow: "implement" as const });
 
     await loadMain();
 
-    const [firstArg] = mockRunRecipe.mock.calls[0];
-    expect(firstArg).toMatchObject({ name: "implement" });
+    const [workflow] = mockExecute.mock.calls[0];
+    expect(workflow).toMatchObject({ id: "implement" });
   });
 
-  it("bridges observability getAgentEnv into process.env before runWorkflow", async () => {
-    mockGetAgentEnv.mockReturnValue({
-      SUPABASE_MANAGEMENT_KEY: "mgmt-key-123",
-      SUPABASE_PROJECT_REF: "proj-ref-abc",
-    });
-
-    await loadMain();
-
-    expect(process.env.SUPABASE_MANAGEMENT_KEY).toBe("mgmt-key-123");
-    expect(process.env.SUPABASE_PROJECT_REF).toBe("proj-ref-abc");
-  });
-
-  it("calls core.setFailed with error.message when runWorkflow throws Error", async () => {
-    mockRunRecipe.mockRejectedValue(new Error("workflow exploded"));
+  it("calls core.setFailed with error.message when execute throws Error", async () => {
+    mockExecute.mockRejectedValue(new Error("workflow exploded"));
 
     await loadMain();
 
     expect(mockSetFailed).toHaveBeenCalledWith("workflow exploded");
   });
 
-  it("calls core.setFailed with generic message when runWorkflow throws non-Error", async () => {
-    mockRunRecipe.mockRejectedValue("plain string error");
+  it("calls core.setFailed with generic message when execute throws non-Error", async () => {
+    mockExecute.mockRejectedValue("plain string error");
 
     await loadMain();
 
     expect(mockSetFailed).toHaveBeenCalledWith("An unexpected error occurred");
   });
-});
 
-// ---------------------------------------------------------------------------
-// describe: beforeStep / afterStep hooks
-// ---------------------------------------------------------------------------
+  it("passes buildAutoMcpServers result to ClaudeClient", async () => {
+    const fakeMcpServers = { github: { type: "stdio", command: "npx" } };
+    mockBuildAutoMcpServers.mockReturnValue(fakeMcpServers);
 
-describe("beforeStep / afterStep hooks", () => {
-  it("beforeStep calls core.startGroup with phase and step name", async () => {
     await loadMain();
 
-    const options = mockRunRecipe.mock.calls[0][3];
-    await options.beforeStep({ phase: "investigate", id: "fetch-logs" });
-
-    expect(mockStartGroup).toHaveBeenCalledWith("investigate: fetch-logs");
-  });
-
-  it("afterStep calls core.info with step name and status, then core.endGroup", async () => {
-    await loadMain();
-
-    const options = mockRunRecipe.mock.calls[0][3];
-    await options.afterStep({ phase: "investigate", id: "fetch-logs" }, { status: "success" });
-
-    expect(mockInfo).toHaveBeenCalledWith("fetch-logs: success");
-    expect(mockEndGroup).toHaveBeenCalled();
-  });
-
-  it("afterStep includes reason in log message when stepResult.reason is set", async () => {
-    await loadMain();
-
-    const options = mockRunRecipe.mock.calls[0][3];
-    await options.afterStep({ phase: "investigate", id: "fetch-logs" }, { status: "skipped", reason: "no logs found" });
-
-    expect(mockInfo).toHaveBeenCalledWith("fetch-logs: skipped — no logs found");
+    expect(claudeClientArgs[0]).toMatchObject({ mcpServers: fakeMcpServers });
   });
 });
 
@@ -247,16 +214,11 @@ describe("beforeStep / afterStep hooks", () => {
 // ---------------------------------------------------------------------------
 
 describe("setGitHubOutputs", () => {
-  it("sets issues-found and recommendation from investigate step", async () => {
-    mockRunRecipe.mockResolvedValue({
-      steps: [
-        {
-          name: "investigate",
-          phase: "investigate",
-          result: { status: "success", data: { issuesFound: true, recommendation: "implement" } },
-        },
-      ],
-    });
+  it("sets issues-found and recommendation from investigate node", async () => {
+    const results = new Map([
+      ["investigate", { status: "success", data: { issuesFound: true, recommendation: "implement" }, toolCalls: [] }],
+    ]);
+    mockExecute.mockResolvedValue(results);
 
     await loadMain();
 
@@ -264,24 +226,23 @@ describe("setGitHubOutputs", () => {
     expect(mockSetOutput).toHaveBeenCalledWith("recommendation", "implement");
   });
 
-  it("sets pr outputs from create-pr step", async () => {
-    mockRunRecipe.mockResolvedValue({
-      steps: [
+  it("sets pr outputs from create_pr node", async () => {
+    const results = new Map([
+      [
+        "create_pr",
         {
-          name: "create-pr",
-          phase: "implement",
-          result: {
-            status: "success",
-            data: {
-              issueIdentifier: "ENG-42",
-              issueUrl: "https://linear.app/ENG-42",
-              prUrl: "https://github.com/org/repo/pull/7",
-              prNumber: 7,
-            },
+          status: "success",
+          data: {
+            issueIdentifier: "ENG-42",
+            issueUrl: "https://linear.app/ENG-42",
+            prUrl: "https://github.com/org/repo/pull/7",
+            prNumber: 7,
           },
+          toolCalls: [],
         },
       ],
-    });
+    ]);
+    mockExecute.mockResolvedValue(results);
 
     await loadMain();
 
@@ -291,22 +252,21 @@ describe("setGitHubOutputs", () => {
     expect(mockSetOutput).toHaveBeenCalledWith("pr-number", "7");
   });
 
-  it("sets issue-only outputs from create-issue step when no create-pr", async () => {
-    mockRunRecipe.mockResolvedValue({
-      steps: [
+  it("sets issue-only outputs from create_issue node when no create_pr", async () => {
+    const results = new Map([
+      [
+        "create_issue",
         {
-          name: "create-issue",
-          phase: "implement",
-          result: {
-            status: "success",
-            data: {
-              issueIdentifier: "ENG-99",
-              issueUrl: "https://linear.app/ENG-99",
-            },
+          status: "success",
+          data: {
+            issueIdentifier: "ENG-99",
+            issueUrl: "https://linear.app/ENG-99",
           },
+          toolCalls: [],
         },
       ],
-    });
+    ]);
+    mockExecute.mockResolvedValue(results);
 
     await loadMain();
 
@@ -316,16 +276,11 @@ describe("setGitHubOutputs", () => {
     expect(mockSetOutput).not.toHaveBeenCalledWith("pr-number", expect.anything());
   });
 
-  it("does not set pr outputs when no create-pr step exists", async () => {
-    mockRunRecipe.mockResolvedValue({
-      steps: [
-        {
-          name: "investigate",
-          phase: "investigate",
-          result: { status: "success", data: { issuesFound: false, recommendation: "skip" } },
-        },
-      ],
-    });
+  it("does not set pr outputs when no create_pr node exists", async () => {
+    const results = new Map([
+      ["investigate", { status: "success", data: { issuesFound: false, recommendation: "skip" }, toolCalls: [] }],
+    ]);
+    mockExecute.mockResolvedValue(results);
 
     await loadMain();
 
@@ -333,24 +288,23 @@ describe("setGitHubOutputs", () => {
     expect(mockSetOutput).not.toHaveBeenCalledWith("pr-number", expect.anything());
   });
 
-  it("does not crash when investigate step is absent", async () => {
-    mockRunRecipe.mockResolvedValue({
-      steps: [
+  it("does not crash when investigate node is absent", async () => {
+    const results = new Map([
+      [
+        "create_pr",
         {
-          name: "create-pr",
-          phase: "implement",
-          result: {
-            status: "success",
-            data: {
-              issueIdentifier: "ENG-1",
-              issueUrl: "https://linear.app/ENG-1",
-              prUrl: "https://github.com/org/repo/pull/1",
-              prNumber: 1,
-            },
+          status: "success",
+          data: {
+            issueIdentifier: "ENG-1",
+            issueUrl: "https://linear.app/ENG-1",
+            prUrl: "https://github.com/org/repo/pull/1",
+            prNumber: 1,
           },
+          toolCalls: [],
         },
       ],
-    });
+    ]);
+    mockExecute.mockResolvedValue(results);
 
     await loadMain();
 

@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import type { MCPServerConfig } from "@sweny-ai/providers";
+import type { McpServerConfig } from "@sweny-ai/core";
 
 export interface ActionConfig {
   // Workflow selection
@@ -74,7 +74,7 @@ export interface ActionConfig {
   outputDir: string;
 
   // MCP servers for agent tool access
-  mcpServers: Record<string, MCPServerConfig>;
+  mcpServers: Record<string, McpServerConfig>;
 
   // Workspace tool integrations — explicit opt-in for Category B MCP servers.
   // Supported: slack, notion, pagerduty, monday, asana
@@ -167,13 +167,13 @@ export function parseInputs(): ActionConfig {
  * Example action.yml usage:
  *   mcp-servers: '{"datadog":{"type":"http","url":"https://...","headers":{"DD_API_KEY":"${{ secrets.DD_API_KEY }}"}}}'
  */
-function parseMcpServers(json: string): Record<string, MCPServerConfig> {
+function parseMcpServers(json: string): Record<string, McpServerConfig> {
   if (!json.trim()) return {};
   try {
-    return JSON.parse(json) as Record<string, MCPServerConfig>;
+    return JSON.parse(json) as Record<string, McpServerConfig>;
   } catch {
     throw new Error(
-      `Invalid mcp-servers input: expected a JSON object mapping server names to MCPServerConfig.\n  Got: ${json.slice(0, 120)}`,
+      `Invalid mcp-servers input: expected a JSON object mapping server names to McpServerConfig.\n  Got: ${json.slice(0, 120)}`,
     );
   }
 }

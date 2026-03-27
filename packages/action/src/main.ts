@@ -1,12 +1,22 @@
 import * as core from "@actions/core";
-import { runWorkflow, triageWorkflow, implementWorkflow } from "@sweny-ai/engine";
-import type { TriageConfig, ImplementConfig, WorkflowResult } from "@sweny-ai/engine";
+import {
+  execute,
+  ClaudeClient,
+  createSkillMap,
+  configuredSkills,
+  buildAutoMcpServers,
+  consoleLogger,
+} from "@sweny-ai/core";
+import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
+import type { ExecutionEvent, NodeResult } from "@sweny-ai/core";
 import { parseInputs, validateInputs, ActionConfig } from "./config.js";
-import { createProviders } from "./providers/index.js";
-import type { MCPServerConfig } from "@sweny-ai/providers";
-import type { ObservabilityProvider } from "@sweny-ai/providers/observability";
 
-const actionsLogger = { info: core.info, debug: core.debug, warn: core.warning, error: core.error };
+const actionsLogger = {
+  info: core.info,
+  debug: core.debug,
+  warn: core.warning,
+  error: core.error,
+};
 
 async function run(): Promise<void> {
   try {
@@ -17,48 +27,45 @@ async function run(): Promise<void> {
       return;
     }
 
-    // The engine's preflight check reads required env vars from process.env.
-    // Populate them from action inputs so the check passes without requiring
-    // callers to redundantly set environment variables.
-    if (config.githubToken || config.botToken) {
-      process.env.GITHUB_TOKEN = config.githubToken || config.botToken;
-    }
-    if (config.linearApiKey) process.env.LINEAR_API_KEY = config.linearApiKey;
-    if (config.linearTeamId) process.env.LINEAR_TEAM_ID = config.linearTeamId;
-    if (config.anthropicApiKey) process.env.ANTHROPIC_API_KEY = config.anthropicApiKey;
-    if (config.claudeOauthToken) process.env.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
+    // Populate process.env from action inputs so skills can resolve config via env vars
+    populateEnv(config);
 
-    const providers = createProviders(config);
+    // Build auto-injected MCP servers from provider config
+    const mcpServers = buildAutoMcpServers({
+      sourceControlProvider: config.sourceControlProvider,
+      issueTrackerProvider: config.issueTrackerProvider,
+      observabilityProvider: config.observabilityProvider,
+      credentials: Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] != null)),
+      workspaceTools: config.workspaceTools,
+      userMcpServers: config.mcpServers,
+    });
 
-    // Bridge observability credentials into process.env so the engine's preflight
-    // env-var check passes. Credentials were already validated by validateInputs;
-    // this just makes them visible to runner-recipe's configSchema check.
-    const obsEnv = providers.get<ObservabilityProvider>("observability").getAgentEnv();
-    for (const [k, v] of Object.entries(obsEnv)) {
-      if (v) process.env[k] = v;
-    }
+    // Build skill map from configured skills
+    const skills = createSkillMap(configuredSkills());
 
-    const runOptions = {
+    // Create Claude client with external MCP servers
+    const claude = new ClaudeClient({
+      maxTurns: config.workflow === "implement" ? config.maxImplementTurns : config.maxInvestigateTurns,
+      cwd: process.cwd(),
       logger: actionsLogger,
-      beforeStep: async (step: { id: string; phase: string }) => {
-        core.startGroup(`${step.phase}: ${step.id}`);
-      },
-      afterStep: async (step: { id: string }, stepResult: { status: string; reason?: string }) => {
-        core.info(`${step.id}: ${stepResult.status}${stepResult.reason ? ` — ${stepResult.reason}` : ""}`);
-        core.endGroup();
-      },
-    };
+      mcpServers,
+    });
 
-    let result: WorkflowResult;
-    if (config.workflow === "implement") {
-      const implementConfig = mapToImplementConfig(config);
-      result = await runWorkflow(implementWorkflow, implementConfig, providers, runOptions);
-    } else {
-      const triageConfig = mapToTriageConfig(config);
-      result = await runWorkflow(triageWorkflow, triageConfig, providers, runOptions);
-    }
+    // Select workflow
+    const workflow = config.workflow === "implement" ? implementWorkflow : triageWorkflow;
 
-    setGitHubOutputs(result);
+    // Build workflow input
+    const input = buildWorkflowInput(config);
+
+    // Execute workflow
+    const results = await execute(workflow, input, {
+      skills,
+      claude,
+      observer: (event: ExecutionEvent) => handleEvent(event),
+      logger: actionsLogger,
+    });
+
+    setGitHubOutputs(results);
   } catch (error) {
     if (error instanceof Error) {
       core.setFailed(error.message);
@@ -68,338 +75,136 @@ async function run(): Promise<void> {
   }
 }
 
-export function mapToImplementConfig(config: ActionConfig): ImplementConfig {
-  const agentEnv: Record<string, string> = {};
-  if (config.anthropicApiKey) agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
-  if (config.claudeOauthToken) agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
-  if (config.openaiApiKey) agentEnv.OPENAI_API_KEY = config.openaiApiKey;
-  if (config.geminiApiKey) agentEnv.GEMINI_API_KEY = config.geminiApiKey;
-  if (config.githubToken) agentEnv.GITHUB_TOKEN = config.githubToken;
-  if (config.linearApiKey) agentEnv.LINEAR_API_KEY = config.linearApiKey;
-  if (config.linearTeamId) agentEnv.LINEAR_TEAM_ID = config.linearTeamId;
-
-  return {
-    issueIdentifier: config.linearIssue,
-    repository: config.repository,
-    dryRun: config.dryRun,
-    reviewMode: config.reviewMode,
-    maxImplementTurns: config.maxImplementTurns,
-    baseBranch: config.baseBranch,
-    prLabels: config.prLabels,
-    projectId: config.linearTeamId,
-    stateInProgress: config.linearStateInProgress,
-    statePeerReview: config.linearStatePeerReview,
-    issueTrackerName: config.issueTrackerProvider,
-    agentEnv,
-    mcpServers: buildAutoMcpServers(config),
+/** Populate process.env from action inputs so skills can resolve config via env vars */
+function populateEnv(config: ActionConfig): void {
+  const set = (key: string, value: string | undefined) => {
+    if (value) process.env[key] = value;
   };
-}
 
-export function mapToTriageConfig(config: ActionConfig): TriageConfig {
-  // Build agent env vars for coding agent auth
-  const agentEnv: Record<string, string> = {};
-  if (config.anthropicApiKey) agentEnv.ANTHROPIC_API_KEY = config.anthropicApiKey;
-  if (config.claudeOauthToken) agentEnv.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOauthToken;
-  if (config.openaiApiKey) agentEnv.OPENAI_API_KEY = config.openaiApiKey;
-  if (config.geminiApiKey) agentEnv.GEMINI_API_KEY = config.geminiApiKey;
+  // Auth
+  set("ANTHROPIC_API_KEY", config.anthropicApiKey);
+  set("CLAUDE_CODE_OAUTH_TOKEN", config.claudeOauthToken);
+  set("GITHUB_TOKEN", config.githubToken || config.botToken);
 
-  // Issue tracker env vars (only set when relevant)
-  if (config.linearApiKey) agentEnv.LINEAR_API_KEY = config.linearApiKey;
-  if (config.linearTeamId) agentEnv.LINEAR_TEAM_ID = config.linearTeamId;
-  if (config.linearBugLabelId) agentEnv.LINEAR_BUG_LABEL_ID = config.linearBugLabelId;
+  // Issue tracker
+  set("LINEAR_API_KEY", config.linearApiKey);
+  set("LINEAR_TEAM_ID", config.linearTeamId);
+  set("LINEAR_BUG_LABEL_ID", config.linearBugLabelId);
 
-  // Add observability env vars
-  const obsCreds = config.observabilityCredentials;
+  // Observability — map from structured credentials to flat env vars
+  const obs = config.observabilityCredentials;
   switch (config.observabilityProvider) {
     case "datadog":
-      if (obsCreds.apiKey) agentEnv.DD_API_KEY = obsCreds.apiKey;
-      if (obsCreds.appKey) agentEnv.DD_APP_KEY = obsCreds.appKey;
-      if (obsCreds.site) agentEnv.DD_SITE = obsCreds.site;
+      set("DD_API_KEY", obs.apiKey);
+      set("DD_APP_KEY", obs.appKey);
+      set("DD_SITE", obs.site);
       break;
     case "sentry":
-      if (obsCreds.authToken) agentEnv.SENTRY_AUTH_TOKEN = obsCreds.authToken;
-      if (obsCreds.organization) agentEnv.SENTRY_ORG = obsCreds.organization;
-      if (obsCreds.project) agentEnv.SENTRY_PROJECT = obsCreds.project;
+      set("SENTRY_AUTH_TOKEN", obs.authToken);
+      set("SENTRY_ORG", obs.organization);
+      set("SENTRY_PROJECT", obs.project);
       break;
     case "cloudwatch":
-      if (obsCreds.region) agentEnv.AWS_REGION = obsCreds.region;
-      if (obsCreds.logGroupPrefix) agentEnv.CLOUDWATCH_LOG_GROUP_PREFIX = obsCreds.logGroupPrefix;
+      set("AWS_REGION", obs.region);
+      set("CLOUDWATCH_LOG_GROUP_PREFIX", obs.logGroupPrefix);
       break;
     case "splunk":
-      if (obsCreds.baseUrl) agentEnv.SPLUNK_URL = obsCreds.baseUrl;
-      if (obsCreds.token) agentEnv.SPLUNK_TOKEN = obsCreds.token;
+      set("SPLUNK_URL", obs.baseUrl);
+      set("SPLUNK_TOKEN", obs.token);
       break;
     case "elastic":
-      if (obsCreds.baseUrl) agentEnv.ELASTIC_URL = obsCreds.baseUrl;
-      if (obsCreds.apiKey) agentEnv.ELASTIC_API_KEY = obsCreds.apiKey;
+      set("ELASTIC_URL", obs.baseUrl);
+      set("ELASTIC_API_KEY", obs.apiKey);
       break;
     case "newrelic":
-      if (obsCreds.apiKey) agentEnv.NR_API_KEY = obsCreds.apiKey;
-      if (obsCreds.accountId) agentEnv.NR_ACCOUNT_ID = obsCreds.accountId;
+      set("NR_API_KEY", obs.apiKey);
+      set("NR_ACCOUNT_ID", obs.accountId);
+      set("NR_REGION", obs.region);
       break;
     case "loki":
-      if (obsCreds.baseUrl) agentEnv.LOKI_URL = obsCreds.baseUrl;
-      if (obsCreds.apiKey) agentEnv.LOKI_API_KEY = obsCreds.apiKey;
-      if (obsCreds.orgId) agentEnv.LOKI_ORG_ID = obsCreds.orgId;
+      set("LOKI_URL", obs.baseUrl);
+      set("LOKI_API_KEY", obs.apiKey);
+      set("LOKI_ORG_ID", obs.orgId);
+      break;
+    case "betterstack":
+      set("BETTERSTACK_API_TOKEN", obs.apiToken);
       break;
   }
 
+  // Coding agent
+  set("OPENAI_API_KEY", config.openaiApiKey);
+  set("GEMINI_API_KEY", config.geminiApiKey);
+
+  // Source control
+  set("GITLAB_TOKEN", config.gitlabToken);
+  set("GITLAB_URL", config.gitlabBaseUrl);
+
+  // Jira
+  set("JIRA_URL", config.jiraBaseUrl);
+  set("JIRA_EMAIL", config.jiraEmail);
+  set("JIRA_API_TOKEN", config.jiraApiToken);
+
+  // Notification
+  set("SLACK_WEBHOOK_URL", config.notificationWebhookUrl);
+  set("SENDGRID_API_KEY", config.sendgridApiKey);
+}
+
+/** Build workflow input from action config */
+function buildWorkflowInput(config: ActionConfig): Record<string, unknown> {
   return {
     timeRange: config.timeRange,
     severityFocus: config.severityFocus,
     serviceFilter: config.serviceFilter,
     investigationDepth: config.investigationDepth,
-    maxInvestigateTurns: config.maxInvestigateTurns,
-    maxImplementTurns: config.maxImplementTurns,
-    serviceMapPath: config.serviceMapPath,
-
-    projectId: config.linearTeamId,
-    bugLabelId: config.linearBugLabelId,
-    triageLabelId: config.linearTriageLabelId,
-    stateBacklog: config.linearStateBacklog,
-    stateInProgress: config.linearStateInProgress,
-    statePeerReview: config.linearStatePeerReview,
-
-    repository: config.repository,
-
-    baseBranch: config.baseBranch,
-    prLabels: config.prLabels,
-
     dryRun: config.dryRun,
     reviewMode: config.reviewMode,
     noveltyMode: config.noveltyMode,
+    repository: config.repository,
+    baseBranch: config.baseBranch,
+    prLabels: config.prLabels,
     issueOverride: config.linearIssue,
     additionalInstructions: config.additionalInstructions,
+    serviceMapPath: config.serviceMapPath,
     issueTrackerName: config.issueTrackerProvider,
-
-    agentEnv,
-    mcpServers: buildAutoMcpServers(config),
+    projectId: config.linearTeamId,
+    issueIdentifier: config.linearIssue,
   };
 }
 
-/**
- * Auto-inject well-known MCP servers for providers the user already configured.
- *
- * Design rules:
- * - HTTP transport preferred for cloud-hosted services (no local install, vendor-managed).
- * - stdio (npx) used when no stable HTTP endpoint exists; the agent handles process spawning.
- * - Category A: injected from structured provider config (sourceControlProvider, etc.)
- * - Category B: injected when specific env vars are present — zero new action inputs required.
- *   Users set these as workflow env vars: `env: { SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }} }`
- * - User-supplied mcpServers always win on key conflict (explicit > auto).
- */
-function buildAutoMcpServers(config: ActionConfig): Record<string, MCPServerConfig> | undefined {
-  const auto: Record<string, MCPServerConfig> = {};
-  const obsCreds = config.observabilityCredentials;
-
-  // ── Category A: Provider-config triggered ─────────────────────────────────
-
-  // GitHub MCP — inject when using GitHub source control OR GitHub Issues tracker.
-  // @modelcontextprotocol/server-github requires GITHUB_PERSONAL_ACCESS_TOKEN (not GITHUB_TOKEN).
-  const githubToken = config.githubToken || config.botToken;
-  if ((config.sourceControlProvider === "github" || config.issueTrackerProvider === "github-issues") && githubToken) {
-    auto["github"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-github@latest"],
-      env: { GITHUB_PERSONAL_ACCESS_TOKEN: githubToken },
-    };
+/** Handle execution events — map to GitHub Actions log groups */
+function handleEvent(event: ExecutionEvent): void {
+  switch (event.type) {
+    case "node:enter":
+      core.startGroup(`${event.node}: ${event.instruction.slice(0, 80)}`);
+      break;
+    case "node:exit":
+      core.info(`${event.node}: ${event.result.status}`);
+      core.endGroup();
+      break;
+    case "tool:call":
+      core.info(`  → ${event.tool}`);
+      break;
   }
-
-  // GitLab MCP — inject when source control provider is gitlab.
-  if (config.sourceControlProvider === "gitlab" && config.gitlabToken) {
-    const gitlabEnv: Record<string, string> = { GITLAB_PERSONAL_ACCESS_TOKEN: config.gitlabToken };
-    // For self-hosted GitLab, point to the instance API
-    const baseUrl = config.gitlabBaseUrl || "https://gitlab.com";
-    if (baseUrl !== "https://gitlab.com") gitlabEnv.GITLAB_API_URL = `${baseUrl}/api/v4`;
-    auto["gitlab"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-gitlab@latest"],
-      env: gitlabEnv,
-    };
-  }
-
-  // Linear MCP — official HTTP remote MCP endpoint (https://linear.app/changelog/2025-04-09-mcp)
-  if (config.issueTrackerProvider === "linear" && config.linearApiKey) {
-    auto["linear"] = {
-      type: "http",
-      url: "https://mcp.linear.app/mcp",
-      headers: { Authorization: `Bearer ${config.linearApiKey}` },
-    };
-  }
-
-  // Jira / Confluence (Atlassian) MCP — inject when issue tracker is jira.
-  // Uses @sooperset/mcp-atlassian which supports API token auth (email + token).
-  // Env vars: JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN.
-  if (config.issueTrackerProvider === "jira" && config.jiraBaseUrl && config.jiraEmail && config.jiraApiToken) {
-    auto["jira"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@sooperset/mcp-atlassian@latest"],
-      env: {
-        JIRA_URL: config.jiraBaseUrl,
-        JIRA_EMAIL: config.jiraEmail,
-        JIRA_API_TOKEN: config.jiraApiToken,
-      },
-    };
-  }
-
-  // Datadog MCP — HTTP transport (/unstable is the current versioned path for this endpoint)
-  const ddKey = obsCreds.apiKey;
-  const ddAppKey = obsCreds.appKey;
-  if (config.observabilityProvider === "datadog" && ddKey && ddAppKey) {
-    auto["datadog"] = {
-      type: "http",
-      url: "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
-      headers: { DD_API_KEY: ddKey, DD_APPLICATION_KEY: ddAppKey },
-    };
-  }
-
-  // Sentry MCP — inject when observability provider is sentry with auth token present.
-  // Note: @sentry/mcp-server reads SENTRY_ACCESS_TOKEN (not SENTRY_AUTH_TOKEN).
-  if (config.observabilityProvider === "sentry" && obsCreds.authToken) {
-    const sentryEnv: Record<string, string> = { SENTRY_ACCESS_TOKEN: obsCreds.authToken };
-    // For self-hosted Sentry, override the host (hostname only, no protocol)
-    if (obsCreds.baseUrl && obsCreds.baseUrl !== "https://sentry.io") {
-      try {
-        sentryEnv.SENTRY_HOST = new URL(obsCreds.baseUrl).hostname;
-      } catch {
-        // malformed URL — leave SENTRY_HOST unset, server defaults to sentry.io
-      }
-    }
-    auto["sentry"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@sentry/mcp-server@latest"],
-      env: sentryEnv,
-    };
-  }
-
-  // New Relic MCP — HTTP transport; region-aware endpoint.
-  // Header key is `Api-Key` (not `Authorization`), unique to New Relic's MCP.
-  // Trailing slash is intentional — New Relic's MCP spec requires it.
-  const nrApiKey = obsCreds.apiKey;
-  if (config.observabilityProvider === "newrelic" && nrApiKey) {
-    const nrEndpoint = obsCreds.region === "eu" ? "https://mcp.eu.newrelic.com/mcp/" : "https://mcp.newrelic.com/mcp/";
-    auto["newrelic"] = {
-      type: "http",
-      url: nrEndpoint,
-      headers: { "Api-Key": nrApiKey },
-    };
-  }
-
-  // Better Stack MCP — HTTP remote MCP; supports Bearer token auth (no OAuth required).
-  // Exposes ClickHouse SQL query tools for logs, metrics, spans, and error tracking.
-  if (config.observabilityProvider === "betterstack" && obsCreds.apiToken) {
-    auto["betterstack"] = {
-      type: "http",
-      url: "https://mcp.betterstack.com",
-      headers: { Authorization: `Bearer ${obsCreds.apiToken}` },
-    };
-  }
-
-  // ── Category B: Workspace tools (explicit opt-in via workspace-tools input) ─
-  // Both the tool name must appear in workspaceTools AND the credential env var must be set.
-  // Users set credentials as workflow env vars: `env: { SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }} }`
-
-  const tools = new Set(config.workspaceTools);
-
-  // Slack MCP — requires workspace-tools includes "slack" AND SLACK_BOT_TOKEN is set.
-  // Note: @modelcontextprotocol/server-slack is deprecated upstream; users can override
-  // with their own `mcp-servers` entry once Slack publishes a stable replacement package.
-  // Bot token provides full bidirectional API access; separate from notification webhook.
-  if (tools.has("slack")) {
-    const slackBotToken = process.env.SLACK_BOT_TOKEN;
-    if (slackBotToken) {
-      const slackEnv: Record<string, string> = { SLACK_BOT_TOKEN: slackBotToken };
-      if (process.env.SLACK_TEAM_ID) slackEnv.SLACK_TEAM_ID = process.env.SLACK_TEAM_ID;
-      auto["slack"] = {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-slack@latest"],
-        env: slackEnv,
-      };
-    }
-  }
-
-  // Notion MCP — requires workspace-tools includes "notion" AND NOTION_TOKEN is set.
-  // @notionhq/notion-mcp-server reads NOTION_TOKEN; NOTION_API_KEY accepted as fallback.
-  if (tools.has("notion")) {
-    const notionToken = process.env.NOTION_TOKEN || process.env.NOTION_API_KEY;
-    if (notionToken) {
-      auto["notion"] = {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@notionhq/notion-mcp-server@latest"],
-        env: { NOTION_TOKEN: notionToken },
-      };
-    }
-  }
-
-  // PagerDuty MCP — requires workspace-tools includes "pagerduty" AND PAGERDUTY_API_TOKEN is set.
-  // HTTP remote endpoint; auth uses "Token token=<key>" (not "Bearer").
-  if (tools.has("pagerduty")) {
-    const pagerdutyToken = process.env.PAGERDUTY_API_TOKEN;
-    if (pagerdutyToken) {
-      auto["pagerduty"] = {
-        type: "http",
-        url: "https://mcp.pagerduty.com/mcp",
-        headers: { Authorization: `Token token=${pagerdutyToken}` },
-      };
-    }
-  }
-
-  // Monday.com MCP — requires workspace-tools includes "monday" AND MONDAY_TOKEN is set.
-  if (tools.has("monday")) {
-    const mondayToken = process.env.MONDAY_TOKEN;
-    if (mondayToken) {
-      auto["monday"] = {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@mondaydotcomorg/monday-api-mcp@latest"],
-        env: { MONDAY_TOKEN: mondayToken },
-      };
-    }
-  }
-
-  // Asana MCP — requires workspace-tools includes "asana" AND ASANA_ACCESS_TOKEN is set.
-  // Personal Access Tokens from Settings > Apps > Developer apps in Asana.
-  if (tools.has("asana")) {
-    const asanaToken = process.env.ASANA_ACCESS_TOKEN;
-    if (asanaToken) {
-      auto["asana"] = {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "asana-mcp@latest"],
-        env: { ASANA_ACCESS_TOKEN: asanaToken },
-      };
-    }
-  }
-
-  const merged = { ...auto, ...config.mcpServers };
-  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
-function setGitHubOutputs(result: WorkflowResult): void {
-  // Investigation results
-  const investigateData = result.steps.find((s) => s.name === "investigate")?.result.data;
-  if (investigateData) {
-    core.setOutput("issues-found", String(investigateData.issuesFound ?? false));
-    core.setOutput("recommendation", String(investigateData.recommendation ?? "skip"));
+/** Set GitHub Action outputs from execution results */
+function setGitHubOutputs(results: Map<string, NodeResult>): void {
+  const investigateResult = results.get("investigate");
+  if (investigateResult) {
+    core.setOutput("issues-found", String(investigateResult.data.issuesFound ?? false));
+    core.setOutput("recommendation", String(investigateResult.data.recommendation ?? "skip"));
   }
 
-  // PR results
-  const prData = result.steps.find((s) => s.name === "create-pr")?.result.data;
-  const issueData = result.steps.find((s) => s.name === "create-issue")?.result.data;
-  if (prData) {
-    core.setOutput("issue-identifier", String(prData.issueIdentifier ?? ""));
-    core.setOutput("issue-url", String(prData.issueUrl ?? ""));
-    core.setOutput("pr-url", String(prData.prUrl ?? ""));
-    core.setOutput("pr-number", String(prData.prNumber ?? ""));
-  } else if (issueData) {
-    core.setOutput("issue-identifier", String(issueData.issueIdentifier ?? ""));
-    core.setOutput("issue-url", String(issueData.issueUrl ?? ""));
+  const prResult = results.get("create_pr") ?? results.get("implement");
+  const issueResult = results.get("create_issue") ?? results.get("create-issue");
+  if (prResult) {
+    core.setOutput("issue-identifier", String(prResult.data.issueIdentifier ?? ""));
+    core.setOutput("issue-url", String(prResult.data.issueUrl ?? ""));
+    core.setOutput("pr-url", String(prResult.data.prUrl ?? ""));
+    core.setOutput("pr-number", String(prResult.data.prNumber ?? ""));
+  } else if (issueResult) {
+    core.setOutput("issue-identifier", String(issueResult.data.issueIdentifier ?? ""));
+    core.setOutput("issue-url", String(issueResult.data.issueUrl ?? ""));
   }
 }
 

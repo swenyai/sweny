@@ -11,7 +11,7 @@
 
 import { query, createSdkMcpServer, tool as sdkTool, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import type { Claude, Tool, ToolContext, NodeResult, ToolCall, JSONSchema, Logger } from "./types.js";
+import type { Claude, Tool, ToolContext, NodeResult, ToolCall, JSONSchema, Logger, McpServerConfig } from "./types.js";
 import { consoleLogger } from "./types.js";
 
 const SYSTEM_PROMPT = `You are a step in an automated workflow. Execute the instruction precisely using the tools available to you. Be thorough but concise. When you're done, summarize your findings and results.`;
@@ -27,6 +27,8 @@ export interface ClaudeClientOptions {
   logger?: Logger;
   /** Default tool context for standalone usage (not via executor) */
   defaultContext?: ToolContext;
+  /** External MCP servers (GitHub, Linear, Sentry, etc.) — merged with core skill tools */
+  mcpServers?: Record<string, McpServerConfig>;
 }
 
 export class ClaudeClient implements Claude {
@@ -35,6 +37,7 @@ export class ClaudeClient implements Claude {
   private cwd: string;
   private logger: Logger;
   private defaultContext: ToolContext;
+  private mcpServers: Record<string, McpServerConfig>;
 
   constructor(opts: ClaudeClientOptions = {}) {
     this.model = opts.model;
@@ -42,6 +45,7 @@ export class ClaudeClient implements Claude {
     this.cwd = opts.cwd ?? process.cwd();
     this.logger = opts.logger ?? consoleLogger;
     this.defaultContext = opts.defaultContext ?? { config: {}, logger: this.logger };
+    this.mcpServers = opts.mcpServers ?? {};
   }
 
   async run(opts: {
@@ -81,6 +85,9 @@ export class ClaudeClient implements Claude {
     let response = "";
 
     try {
+      const allMcpServers: Record<string, any> = { ...this.mcpServers };
+      if (sdkTools.length > 0) allMcpServers["sweny-core"] = mcpServer;
+
       const stream = query({
         prompt,
         options: {
@@ -90,7 +97,7 @@ export class ClaudeClient implements Claude {
           env,
           permissionMode: "bypassPermissions",
           ...(this.model ? { model: this.model } : {}),
-          ...(sdkTools.length > 0 ? { mcpServers: { "sweny-core": mcpServer } } : {}),
+          ...(Object.keys(allMcpServers).length > 0 ? { mcpServers: allMcpServers } : {}),
         },
       });
 
