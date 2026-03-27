@@ -1,4 +1,4 @@
-import { type DragEvent } from "react";
+import { type DragEvent, useState, useMemo } from "react";
 import { SkillIcon, skillColors } from "./SkillIcon.js";
 
 interface NodeTemplate {
@@ -186,58 +186,124 @@ function onDragStart(event: DragEvent, template: NodeTemplate) {
 }
 
 export function NodeToolbox() {
+  const [search, setSearch] = useState("");
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    if (!q) return TEMPLATES;
+    return TEMPLATES.map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          t.description.toLowerCase().includes(q) ||
+          t.skills.some((s) => s.toLowerCase().includes(q)),
+      ),
+    })).filter((group) => group.items.length > 0);
+  }, [search]);
+
+  const isSearching = search.trim().length > 0;
+
   return (
     <div className="w-56 bg-gray-50 border-r border-gray-200 overflow-y-auto flex-shrink-0 flex flex-col">
-      <div className="px-3 pt-3 pb-2">
-        <h2 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Drag to canvas</h2>
+      {/* Header + search */}
+      <div className="px-3 pt-3 pb-1 sticky top-0 bg-gray-50 z-10">
+        <h2 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Drag to canvas</h2>
+        <div className="relative mb-1">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search nodes..."
+            className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-xs bg-white placeholder-gray-300 focus:outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 text-xs leading-none"
+            >
+              x
+            </button>
+          )}
+        </div>
       </div>
 
-      {TEMPLATES.map((group) => (
-        <div key={group.category} className="px-2 pb-2">
-          <h3 className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider px-1 mb-1.5">
-            {group.category}
-          </h3>
-          <div className="flex flex-col gap-1.5">
-            {group.items.map((template) => (
-              <div
-                key={template.defaultId}
-                draggable
-                onDragStart={(e) => onDragStart(e, template)}
-                className="bg-white border border-gray-200 rounded-md px-2.5 py-2 cursor-grab active:cursor-grabbing hover:border-indigo-300 hover:shadow-sm transition-all select-none"
-              >
-                <div className="flex items-center gap-1.5">
-                  <span
-                    className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                    style={{
-                      background:
-                        template.skills.length > 0 ? (skillColors[template.skills[0]] ?? "#6366f1") : "#94a3b8",
-                    }}
-                  />
-                  <span className="text-xs font-semibold text-gray-700">{template.name}</span>
-                </div>
-                <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">{template.description}</p>
-                {template.skills.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {template.skills.map((sid) => (
-                      <span
-                        key={sid}
-                        className="text-[8px] font-medium px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"
-                        style={{
-                          background: `${skillColors[sid] ?? "#6366f1"}15`,
-                          color: skillColors[sid] ?? "#6366f1",
-                        }}
-                      >
-                        <SkillIcon skillId={sid} size={10} />
-                        {sid}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+      {filtered.length === 0 && (
+        <div className="px-3 py-6 text-center">
+          <p className="text-[10px] text-gray-400">No templates match your search</p>
         </div>
-      ))}
+      )}
+
+      {filtered.map((group) => {
+        const isCollapsed = !isSearching && collapsed[group.category];
+        return (
+          <div key={group.category} className="px-2 pb-1">
+            <button
+              onClick={() => setCollapsed((prev) => ({ ...prev, [group.category]: !prev[group.category] }))}
+              className="flex items-center gap-1 w-full text-left px-1 py-1 rounded hover:bg-gray-100 transition-colors"
+            >
+              <svg
+                width="8"
+                height="8"
+                viewBox="0 0 8 8"
+                className={`text-gray-400 transition-transform ${isCollapsed ? "" : "rotate-90"}`}
+              >
+                <path d="M2 1l4 3-4 3z" fill="currentColor" />
+              </svg>
+              <span className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider">{group.category}</span>
+              <span className="text-[8px] text-gray-300 ml-auto">{group.items.length}</span>
+            </button>
+            <div
+              style={{
+                maxHeight: isCollapsed ? 0 : 1000,
+                overflow: "hidden",
+                transition: "max-height 0.2s ease",
+              }}
+            >
+              <div className="flex flex-col gap-1.5 pb-1">
+                {group.items.map((template) => (
+                  <div
+                    key={template.defaultId}
+                    draggable
+                    onDragStart={(e) => onDragStart(e, template)}
+                    className="bg-white border border-gray-200 rounded-md px-2.5 py-2 cursor-grab active:cursor-grabbing hover:border-indigo-300 hover:shadow-sm transition-all select-none"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                        style={{
+                          background:
+                            template.skills.length > 0 ? (skillColors[template.skills[0]] ?? "#6366f1") : "#94a3b8",
+                        }}
+                      />
+                      <span className="text-xs font-semibold text-gray-700">{template.name}</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">{template.description}</p>
+                    {template.skills.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {template.skills.map((sid) => (
+                          <span
+                            key={sid}
+                            className="text-[8px] font-medium px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"
+                            style={{
+                              background: `${skillColors[sid] ?? "#6366f1"}15`,
+                              color: skillColors[sid] ?? "#6366f1",
+                            }}
+                          >
+                            <SkillIcon skillId={sid} size={10} />
+                            {sid}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
