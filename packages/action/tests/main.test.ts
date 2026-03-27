@@ -15,6 +15,8 @@ const mockExecute = vi.fn();
 const mockCreateSkillMap = vi.fn().mockReturnValue(new Map());
 const mockConfiguredSkills = vi.fn().mockReturnValue([]);
 const mockBuildAutoMcpServers = vi.fn().mockReturnValue({});
+const mockResolveTemplates = vi.fn().mockResolvedValue({ issueTemplate: "", prTemplate: "" });
+const mockLoadAdditionalContext = vi.fn().mockResolvedValue("");
 
 /** Track ClaudeClient constructor calls */
 let claudeClientArgs: unknown[] = [];
@@ -49,6 +51,8 @@ async function loadMain() {
     configuredSkills: mockConfiguredSkills,
     buildAutoMcpServers: mockBuildAutoMcpServers,
     consoleLogger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    resolveTemplates: mockResolveTemplates,
+    loadAdditionalContext: mockLoadAdditionalContext,
   }));
   vi.doMock("@sweny-ai/core/workflows", () => ({
     triageWorkflow: { id: "triage", name: "triage", entry: "investigate", nodes: {}, edges: [] },
@@ -117,6 +121,9 @@ const DEFAULT_CONFIG = {
   workspaceTools: [],
   reviewMode: "review",
   outputDir: ".github/sweny-output",
+  issueTemplate: "",
+  prTemplate: "",
+  additionalContext: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -131,6 +138,8 @@ beforeEach(() => {
   mockCreateSkillMap.mockReturnValue(new Map());
   mockConfiguredSkills.mockReturnValue([]);
   mockBuildAutoMcpServers.mockReturnValue({});
+  mockResolveTemplates.mockResolvedValue({ issueTemplate: "", prTemplate: "" });
+  mockLoadAdditionalContext.mockResolvedValue("");
 });
 
 // ---------------------------------------------------------------------------
