@@ -58,7 +58,6 @@ export {
   slack,
   sentry,
   datadog,
-  betterstack,
   notification,
   builtinSkills,
   createSkillMap,

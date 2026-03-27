@@ -235,6 +235,22 @@ describe("buildAutoMcpServers", () => {
     });
   });
 
+  it("injects Better Stack MCP even when primary provider is not betterstack", () => {
+    const result = buildAutoMcpServers(
+      cfg({
+        observabilityProvider: "sentry",
+        credentials: { BETTERSTACK_API_TOKEN: "bst_xyz", SENTRY_AUTH_TOKEN: "sntrx_test" },
+      }),
+    );
+    expect(result["betterstack"]).toEqual({
+      type: "http",
+      url: "https://mcp.betterstack.com",
+      headers: { Authorization: "Bearer bst_xyz" },
+    });
+    // Sentry should also be present
+    expect(result["sentry"]).toBeDefined();
+  });
+
   // ── Jira MCP ────────────────────────────────────────────────────
 
   it("injects Jira MCP when all 3 credentials present", () => {

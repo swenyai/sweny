@@ -33,7 +33,7 @@ export const triageWorkflow: Workflow = {
 3. **Issue tracker**: Search for similar past issues or known problems.
 
 Be thorough — the investigation step depends on complete context. Use every tool available to you.`,
-      skills: ["github", "sentry", "datadog", "betterstack", "linear"],
+      skills: ["github", "sentry", "datadog", "linear"],
     },
 
     investigate: {

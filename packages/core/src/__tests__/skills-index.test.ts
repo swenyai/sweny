@@ -5,7 +5,6 @@ import {
   slack,
   sentry,
   datadog,
-  betterstack,
   notification,
   builtinSkills,
   createSkillMap,
@@ -16,14 +15,13 @@ import {
 
 describe("skills registry", () => {
   it("exports all builtin skills", () => {
-    expect(builtinSkills.length).toBeGreaterThanOrEqual(7);
+    expect(builtinSkills.length).toBeGreaterThanOrEqual(6);
     const ids = builtinSkills.map((s) => s.id);
     expect(ids).toContain("github");
     expect(ids).toContain("linear");
     expect(ids).toContain("slack");
     expect(ids).toContain("sentry");
     expect(ids).toContain("datadog");
-    expect(ids).toContain("betterstack");
     expect(ids).toContain("notification");
   });
 
@@ -33,7 +31,6 @@ describe("skills registry", () => {
     expect(builtinSkills).toContain(slack);
     expect(builtinSkills).toContain(sentry);
     expect(builtinSkills).toContain(datadog);
-    expect(builtinSkills).toContain(betterstack);
     expect(builtinSkills).toContain(notification);
   });
 
@@ -101,7 +98,7 @@ describe("skills registry", () => {
   it("validateWorkflowSkills detects missing providers", () => {
     const workflow = {
       nodes: {
-        gather: { skills: ["github", "sentry", "betterstack"] },
+        gather: { skills: ["github", "sentry"] },
         notify: { skills: ["slack"] },
       },
     };
@@ -112,7 +109,6 @@ describe("skills registry", () => {
     expect(result.configured).toHaveLength(1);
     expect(result.configured[0].id).toBe("github");
     expect(result.missing.some((m) => m.id === "sentry")).toBe(true);
-    expect(result.missing.some((m) => m.id === "betterstack")).toBe(true);
     // gather node has github (git) but no observability → error
     expect(result.errors.length).toBeGreaterThan(0);
     // notify node has no notification → warning (not error)

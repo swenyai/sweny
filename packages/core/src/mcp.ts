@@ -116,8 +116,10 @@ export function buildAutoMcpServers(config: McpAutoConfig): Record<string, McpSe
   }
 
   // Better Stack MCP — HTTP remote MCP; Bearer token auth.
+  // Injected whenever the token is present (not just when it's the primary provider)
+  // because BetterStack logs complement any primary observability provider.
   const bsApiToken = creds.BETTERSTACK_API_TOKEN;
-  if (config.observabilityProvider === "betterstack" && bsApiToken) {
+  if (bsApiToken) {
     auto["betterstack"] = {
       type: "http",
       url: "https://mcp.betterstack.com",
