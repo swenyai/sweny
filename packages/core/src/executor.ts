@@ -74,12 +74,8 @@ export async function execute(
       },
     }));
 
-    // Prepend additional context to instruction if provided
-    const additionalContext =
-      typeof (input as any)?.additionalContext === "string" ? (input as any).additionalContext : "";
-    const instruction = additionalContext
-      ? `## Additional Context & Rules\n\n${additionalContext}\n\n---\n\n${node.instruction}`
-      : node.instruction;
+    // Prepend rules and context to instruction if provided
+    const instruction = buildNodeInstruction(node.instruction, input);
 
     // Run Claude on this node
     const result = await claude.run({
@@ -113,6 +109,40 @@ export async function execute(
 }
 
 // ─── Internals ───────────────────────────────────────────────────
+
+/**
+ * Build the full instruction for a node by prepending rules and context.
+ * Rules get "You MUST follow" framing; context gets "Background" framing.
+ * Falls back to legacy `additionalContext` if rules/context aren't set.
+ */
+function buildNodeInstruction(baseInstruction: string, input: unknown): string {
+  const inp = input as Record<string, unknown> | null;
+  if (!inp) return baseInstruction;
+
+  const sections: string[] = [];
+
+  // New structured format
+  const rules = typeof inp.rules === "string" && inp.rules ? inp.rules : "";
+  const context = typeof inp.context === "string" && inp.context ? inp.context : "";
+
+  if (rules) {
+    sections.push(`## Rules — You MUST Follow These\n\n${rules}`);
+  }
+  if (context) {
+    sections.push(`## Background Context\n\n${context}`);
+  }
+
+  // Legacy fallback
+  if (sections.length === 0) {
+    const legacy = typeof inp.additionalContext === "string" ? inp.additionalContext : "";
+    if (legacy) {
+      sections.push(`## Additional Context & Rules\n\n${legacy}`);
+    }
+  }
+
+  if (sections.length === 0) return baseInstruction;
+  return `${sections.join("\n\n")}\n\n---\n\n${baseInstruction}`;
+}
 
 /** Call observer without letting exceptions crash the workflow */
 function safeObserve(observer: Observer | undefined, event: any, logger?: Logger): void {

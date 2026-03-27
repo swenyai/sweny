@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { parse as parseYaml } from "yaml";
 
 /**
  * Auto-load a `.env` file from the given directory.
@@ -35,11 +36,15 @@ export function loadDotenv(cwd: string = process.cwd()): void {
   }
 }
 
+/** Parsed config file — flat strings for scalar fields, arrays for list fields. */
+export type FileConfig = Record<string, string | string[]>;
+
 /**
- * Search upward from `cwd` for `.sweny.yml` and parse it into flat key-value pairs.
+ * Search upward from `cwd` for `.sweny.yml` and parse it.
+ * Scalar values are strings, list values (rules, context) are string arrays.
  * Returns empty object if no config file is found.
  */
-export function loadConfigFile(cwd: string = process.cwd()): Record<string, string> {
+export function loadConfigFile(cwd: string = process.cwd()): FileConfig {
   const filePath = findConfigFile(cwd);
   if (!filePath) return {};
 
@@ -50,25 +55,21 @@ export function loadConfigFile(cwd: string = process.cwd()): Record<string, stri
     return {};
   }
 
-  const config: Record<string, string> = {};
+  let raw: unknown;
+  try {
+    raw = parseYaml(content);
+  } catch {
+    return {};
+  }
 
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
+  if (!raw || typeof raw !== "object") return {};
 
-    const colonIndex = trimmed.indexOf(":");
-    if (colonIndex === -1) continue;
-
-    const key = trimmed.slice(0, colonIndex).trim();
-    let value = trimmed.slice(colonIndex + 1).trim();
-
-    // Strip surrounding quotes
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-
-    if (key && value !== "") {
-      config[key] = value;
+  const config: FileConfig = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (Array.isArray(value)) {
+      config[key] = value.map(String);
+    } else if (value != null && value !== "") {
+      config[key] = String(value);
     }
   }
 

@@ -62,7 +62,7 @@ async function run(): Promise<void> {
       { issueTemplate: config.issueTemplate, prTemplate: config.prTemplate },
       process.cwd(),
     );
-    const userContext = await loadAdditionalContext(config.additionalContext, process.cwd());
+    const userContextResult = await loadAdditionalContext(config.additionalContext, process.cwd());
 
     // Build dynamic provider context
     const extras: Record<string, string> = {};
@@ -80,13 +80,17 @@ async function run(): Promise<void> {
       extras: Object.keys(extras).length > 0 ? extras : undefined,
     });
 
-    const additionalContext = [providerCtx, userContext, config.additionalInstructions].filter(Boolean).join("\n\n");
+    const contextParts = [providerCtx, userContextResult.resolved, config.additionalInstructions].filter(Boolean);
+    const context = contextParts.join("\n\n");
 
     // Build workflow input
     const input = {
       ...buildWorkflowInput(config),
       ...templates,
-      ...(additionalContext ? { additionalContext } : {}),
+      // Structured rules/context for executor
+      ...(context ? { context } : {}),
+      // URLs for the prepare node to fetch at runtime
+      ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
     };
 
     // Execute workflow

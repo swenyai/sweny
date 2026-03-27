@@ -16,7 +16,7 @@ const mockCreateSkillMap = vi.fn().mockReturnValue(new Map());
 const mockConfiguredSkills = vi.fn().mockReturnValue([]);
 const mockBuildAutoMcpServers = vi.fn().mockReturnValue({});
 const mockResolveTemplates = vi.fn().mockResolvedValue({ issueTemplate: "", prTemplate: "" });
-const mockLoadAdditionalContext = vi.fn().mockResolvedValue("");
+const mockLoadAdditionalContext = vi.fn().mockResolvedValue({ resolved: "", urls: [] });
 
 /** Track ClaudeClient constructor calls */
 let claudeClientArgs: unknown[] = [];
@@ -140,7 +140,7 @@ beforeEach(() => {
   mockConfiguredSkills.mockReturnValue([]);
   mockBuildAutoMcpServers.mockReturnValue({});
   mockResolveTemplates.mockResolvedValue({ issueTemplate: "", prTemplate: "" });
-  mockLoadAdditionalContext.mockResolvedValue("");
+  mockLoadAdditionalContext.mockResolvedValue({ resolved: "", urls: [] });
 });
 
 // ---------------------------------------------------------------------------

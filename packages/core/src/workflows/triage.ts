@@ -22,9 +22,24 @@ export const triageWorkflow: Workflow = {
   name: "Alert Triage",
   description:
     "Investigate a production alert, determine root cause, create an issue, implement a fix, and notify the team",
-  entry: "gather",
+  entry: "prepare",
 
   nodes: {
+    prepare: {
+      name: "Load Rules & Context",
+      instruction: `You are preparing for a triage workflow. Your job is to fetch and review any knowledge documents listed in the input.
+
+1. Check input for \`rules_urls\` and \`context_urls\` arrays.
+2. For each URL, fetch its content:
+   - Linear document URLs → use the Linear MCP tools (get_document or search_documentation)
+   - Other HTTP URLs → fetch directly
+3. Summarize the key rules and context that downstream workflow nodes should follow.
+4. Output the consolidated information so it's available to all subsequent steps.
+
+If there are no URLs to fetch, just pass through — this step is a no-op.`,
+      skills: ["linear"],
+    },
+
     gather: {
       name: "Gather Context",
       instruction: `You are investigating a production alert. Gather all relevant context using the available tools:
@@ -149,6 +164,9 @@ Use whichever notification channel is available to you.`,
   },
 
   edges: [
+    // prepare → gather (always)
+    { from: "prepare", to: "gather" },
+
     // gather → investigate (always)
     { from: "gather", to: "investigate" },
 

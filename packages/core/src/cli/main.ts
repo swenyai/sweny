@@ -17,6 +17,7 @@ import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
 import { createSkillMap, configuredSkills } from "../skills/index.js";
 import { buildAutoMcpServers, buildProviderContext } from "../mcp.js";
+import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
 import { validateWorkflow as validateWorkflowSchema } from "../schema.js";
 import { parseWorkflow } from "../schema.js";
@@ -170,9 +171,9 @@ function buildMcpAutoConfig(config: CliConfig): McpAutoConfig {
 }
 
 /**
- * Combine provider context + user instructions into a single additionalContext string.
+ * Build provider context string (available tools/providers).
  */
-function buildAdditionalContext(config: CliConfig, mcpServers: Record<string, unknown>): string {
+function buildProviderCtx(config: CliConfig, mcpServers: Record<string, unknown>): string {
   const extras: Record<string, string> = {};
   if (config.observabilityCredentials.sourceId) {
     extras["BetterStack source ID"] = config.observabilityCredentials.sourceId;
@@ -181,19 +182,36 @@ function buildAdditionalContext(config: CliConfig, mcpServers: Record<string, un
     extras["BetterStack table name"] = config.observabilityCredentials.tableName;
   }
 
-  const providerCtx = buildProviderContext({
+  return buildProviderContext({
     observabilityProvider: config.observabilityProvider,
     issueTrackerProvider: config.issueTrackerProvider,
     sourceControlProvider: config.sourceControlProvider,
     mcpServers: Object.keys(mcpServers),
     extras: Object.keys(extras).length > 0 ? extras : undefined,
   });
+}
 
-  const parts = [providerCtx];
-  if (config.additionalInstructions) {
-    parts.push(config.additionalInstructions);
-  }
-  return parts.join("\n\n");
+/**
+ * Resolve rules and context from config into structured workflow input fields.
+ * Local files + inline text are resolved now; URLs are passed to the prepare node.
+ */
+async function resolveRulesAndContext(config: CliConfig): Promise<{
+  rules: string;
+  context: string;
+  rulesUrls: string[];
+  contextUrls: string[];
+}> {
+  const [rulesResult, contextResult] = await Promise.all([
+    loadAdditionalContext(config.rules),
+    loadAdditionalContext(config.context),
+  ]);
+
+  return {
+    rules: rulesResult.resolved,
+    context: contextResult.resolved,
+    rulesUrls: rulesResult.urls,
+    contextUrls: contextResult.urls,
+  };
 }
 
 // ── sweny triage ──────────────────────────────────────────────────────
@@ -361,9 +379,14 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   const observer = composeObservers(progressObserver, config.stream ? createStreamObserver() : undefined);
 
   // ── Build workflow input from config ──────────────────────
-  // TODO: The triage workflow input structure may need further refinement
-  // once the workflow nodes have stabilized. For now, pass config fields
-  // that the workflow instructions can reference via the `input` context.
+  const providerCtx = buildProviderCtx(config, mcpServers);
+  const { rules, context, rulesUrls, contextUrls } = await resolveRulesAndContext(config);
+
+  // Combine provider context + additional instructions into the context field
+  const contextParts = [providerCtx];
+  if (config.additionalInstructions) contextParts.push(config.additionalInstructions);
+  const fullContext = [contextParts.join("\n\n"), context].filter(Boolean).join("\n\n---\n\n");
+
   const workflowInput = {
     timeRange: config.timeRange,
     severityFocus: config.severityFocus,
@@ -385,7 +408,12 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     ...(config.observabilityCredentials.tableName && {
       betterstackTableName: config.observabilityCredentials.tableName,
     }),
-    additionalContext: buildAdditionalContext(config, mcpServers),
+    // Structured rules/context for executor
+    rules,
+    context: fullContext,
+    // URLs for the prepare node to fetch at runtime
+    rulesUrls,
+    contextUrls,
   };
 
   try {
@@ -434,16 +462,24 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   const config: CliConfig = {
     ...parseCliInputs(options, fileConfig),
     // Override specific fields that differ for implement
-    issueTrackerProvider: (options.issueTrackerProvider as string) || fileConfig["issue-tracker-provider"] || "linear",
+    issueTrackerProvider:
+      (options.issueTrackerProvider as string) || (fileConfig["issue-tracker-provider"] as string) || "linear",
     sourceControlProvider:
-      (options.sourceControlProvider as string) || fileConfig["source-control-provider"] || "github",
-    codingAgentProvider: (options.codingAgentProvider as string) || fileConfig["coding-agent-provider"] || "claude",
+      (options.sourceControlProvider as string) || (fileConfig["source-control-provider"] as string) || "github",
+    codingAgentProvider:
+      (options.codingAgentProvider as string) || (fileConfig["coding-agent-provider"] as string) || "claude",
     dryRun: Boolean(options.dryRun),
-    maxImplementTurns: parseInt(String(options.maxImplementTurns || fileConfig["max-implement-turns"] || "40"), 10),
-    baseBranch: (options.baseBranch as string) || fileConfig["base-branch"] || "main",
+    maxImplementTurns: parseInt(
+      String(options.maxImplementTurns || (fileConfig["max-implement-turns"] as string) || "40"),
+      10,
+    ),
+    baseBranch: (options.baseBranch as string) || (fileConfig["base-branch"] as string) || "main",
     repository: (options.repository as string) || process.env.GITHUB_REPOSITORY || "",
     outputDir:
-      (options.outputDir as string) || process.env.SWENY_OUTPUT_DIR || fileConfig["output-dir"] || ".sweny/output",
+      (options.outputDir as string) ||
+      process.env.SWENY_OUTPUT_DIR ||
+      (fileConfig["output-dir"] as string) ||
+      ".sweny/output",
   };
 
   const skills = createSkillMap(configuredSkills());
@@ -654,7 +690,7 @@ export async function workflowRunAction(
     ...(config.observabilityCredentials.tableName && {
       betterstackTableName: config.observabilityCredentials.tableName,
     }),
-    additionalContext: buildAdditionalContext(config, mcpServers),
+    context: buildProviderCtx(config, mcpServers),
   };
 
   try {

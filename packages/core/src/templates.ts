@@ -107,23 +107,48 @@ export async function resolveTemplates(
 }
 
 /**
- * Load additional context documents (local files or URLs).
- * Each source is loaded and wrapped with a header.
+ * Classify a source entry as URL, file path, or inline text.
  */
-export async function loadAdditionalContext(sources: string[], cwd: string = process.cwd()): Promise<string> {
-  if (sources.length === 0) return "";
+function classifySource(source: string): "url" | "file" | "inline" {
+  if (source.startsWith("http://") || source.startsWith("https://")) return "url";
+  if (source.startsWith("./") || source.startsWith("../") || source.startsWith("/")) return "file";
+  return "inline";
+}
+
+/**
+ * Load additional context documents (local files, URLs, or inline text).
+ * Each source is loaded and wrapped with a header.
+ * Returns { resolved, urls } — resolved text for files/inline, urls for agent to fetch.
+ */
+export async function loadAdditionalContext(
+  sources: string[],
+  cwd: string = process.cwd(),
+): Promise<{ resolved: string; urls: string[] }> {
+  if (sources.length === 0) return { resolved: "", urls: [] };
 
   const parts: string[] = [];
+  const urls: string[] = [];
+
   for (const source of sources) {
     const trimmed = source.trim();
     if (!trimmed) continue;
 
-    const label = trimmed.startsWith("http") ? trimmed : path.basename(trimmed);
-    const content = await loadTemplate(trimmed, "", cwd);
-    if (content) {
-      parts.push(`### ${label}\n\n${content}`);
+    const kind = classifySource(trimmed);
+    if (kind === "url") {
+      urls.push(trimmed);
+    } else if (kind === "file") {
+      const content = await loadTemplate(trimmed, "", cwd);
+      if (content) {
+        parts.push(`### ${path.basename(trimmed)}\n\n${content}`);
+      }
+    } else {
+      // Inline text — use as-is
+      parts.push(trimmed);
     }
   }
 
-  return parts.length > 0 ? parts.join("\n\n---\n\n") : "";
+  return {
+    resolved: parts.length > 0 ? parts.join("\n\n---\n\n") : "",
+    urls,
+  };
 }

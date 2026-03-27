@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import type { Command } from "commander";
 import type { McpServerConfig } from "../types.js";
+import type { FileConfig } from "./config-file.js";
 
 export interface CliConfig {
   // Coding agent
@@ -94,6 +95,11 @@ export interface CliConfig {
   // Credential env vars must also be present for injection to occur.
   // Supported: slack, notion, pagerduty, monday
   workspaceTools: string[];
+
+  // Knowledge documents — fetched at workflow start
+  // Each entry: URL (http/https), file path (./ or /), or inline text
+  rules: string[];
+  context: string[];
 }
 
 export function registerTriageCommand(program: Command): Command {
@@ -170,10 +176,26 @@ export function registerTriageCommand(program: Command): Command {
     );
 }
 
-export function parseCliInputs(options: Record<string, unknown>, fileConfig: Record<string, string> = {}): CliConfig {
+export function parseCliInputs(options: Record<string, unknown>, fileConfig: FileConfig = {}): CliConfig {
   const env = process.env;
-  // Config file lookup helper: CLI flag > env var > file > default
-  const f = (key: string): string | undefined => fileConfig[key] || undefined;
+  // Config file lookup helper: CLI flag > env var > file > default (scalar only)
+  const f = (key: string): string | undefined => {
+    const v = fileConfig[key];
+    return typeof v === "string" && v ? v : undefined;
+  };
+  // Array helper: CLI flag (comma-separated) > file > default
+  const fa = (key: string, cliKey?: string): string[] => {
+    const cliVal = options[cliKey ?? key] as string | undefined;
+    if (cliVal)
+      return cliVal
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const fileVal = fileConfig[key];
+    if (Array.isArray(fileVal)) return fileVal;
+    if (typeof fileVal === "string" && fileVal) return [fileVal];
+    return [];
+  };
 
   const obsProvider = (options.observabilityProvider as string) || f("observability-provider") || "datadog";
 
@@ -271,6 +293,9 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Rec
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
+
+    rules: fa("rules"),
+    context: fa("context"),
   };
 }
 
@@ -563,10 +588,13 @@ export function validateWarnings(config: Pick<CliConfig, "serviceMapPath">): str
 function parseObservabilityCredentials(
   provider: string,
   options: Record<string, unknown>,
-  fileConfig: Record<string, string> = {},
+  fileConfig: FileConfig = {},
 ): Record<string, string> {
   const env = process.env;
-  const f = (key: string): string | undefined => fileConfig[key] || undefined;
+  const f = (key: string): string | undefined => {
+    const v = fileConfig[key];
+    return typeof v === "string" && v ? v : undefined;
+  };
 
   switch (provider) {
     case "datadog":
