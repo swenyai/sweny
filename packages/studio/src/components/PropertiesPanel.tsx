@@ -282,7 +282,7 @@ function NodePanel({
           placeholder="What should Claude do at this node?"
         />
         {!readOnly && import.meta.env.DEV && (
-          <div className="mt-1.5 flex items-center gap-2">
+          <div className="mt-2 flex items-center gap-2">
             <button
               disabled={aiLoading}
               onClick={async () => {
@@ -309,7 +309,7 @@ function NodePanel({
                   setAiLoading(false);
                 }
               }}
-              className="text-[10px] text-indigo-500 hover:text-indigo-600 disabled:opacity-50 flex items-center gap-1"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200 disabled:opacity-40 transition-colors"
             >
               <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1l1.5 4.5L14 7l-4.5 1.5L8 13l-1.5-4.5L2 7l4.5-1.5z" />
@@ -326,6 +326,7 @@ function NodePanel({
           nodeId={id}
           nodeName={name}
           instruction={instruction}
+          skills={node.skills}
           onSave={(text) => {
             setInstruction(text);
             updateNode(id, { instruction: text });
