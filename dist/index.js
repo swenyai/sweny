@@ -35788,6 +35788,23 @@ const github = {
             }),
         },
         {
+            name: "github_add_comment",
+            description: "Add a comment to a GitHub issue or pull request",
+            input_schema: {
+                type: "object",
+                properties: {
+                    repo: { type: "string", description: "owner/repo" },
+                    issue_number: { type: "number", description: "Issue or PR number" },
+                    body: { type: "string", description: "Comment body (markdown)" },
+                },
+                required: ["repo", "issue_number", "body"],
+            },
+            handler: async (input, ctx) => gh(`/repos/${input.repo}/issues/${input.issue_number}/comments`, ctx, {
+                method: "POST",
+                body: JSON.stringify({ body: input.body }),
+            }),
+        },
+        {
             name: "github_create_pr",
             description: "Create a pull request",
             input_schema: {
@@ -35917,6 +35934,19 @@ const linear = {
               nodes { id identifier title state { name } priority url }
             }
           }`, { query: input.query, first: input.limit ?? 10 }, ctx),
+        },
+        {
+            name: "linear_add_comment",
+            description: "Add a comment to a Linear issue",
+            input_schema: {
+                type: "object",
+                properties: {
+                    issueId: { type: "string", description: "Linear issue ID" },
+                    body: { type: "string", description: "Comment body (markdown)" },
+                },
+                required: ["issueId", "body"],
+            },
+            handler: async (input, ctx) => linearGql(`mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id body } } }`, { input: { issueId: input.issueId, body: input.body } }, ctx),
         },
         {
             name: "linear_update_issue",
@@ -37267,8 +37297,8 @@ Be thorough — the investigation step depends on complete context. Use every to
 4. Determine affected services and users.
 5. Recommend a fix approach.
 
-If this is a known issue that already has a ticket, mark it as duplicate.`,
-            skills: ["github"],
+**Novelty check (REQUIRED):** Search the issue tracker for existing open issues that cover the same root cause. Use github_search_issues and/or linear_search_issues with relevant keywords. If you find an existing issue that matches, set is_duplicate=true and duplicate_of to the issue identifier (e.g. "#42" or "ENG-123").`,
+            skills: ["github", "linear"],
             output: {
                 type: "object",
                 properties: {
@@ -37284,15 +37314,18 @@ If this is a known issue that already has a ticket, mark it as duplicate.`,
             },
         },
         create_issue: {
-            name: "Create Issue",
-            instruction: `Create an issue documenting the investigation findings:
+            name: "Create or Update Issue",
+            instruction: `Before creating anything, check whether this root cause is already tracked:
 
-1. Use a clear, actionable title.
-2. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
-3. Add appropriate labels (bug, severity level, affected service).
-4. Link to relevant commits, PRs, or existing issues.
+1. Search for existing open issues using github_search_issues and/or linear_search_issues with keywords from the root cause, affected service, and error message.
+2. **If a matching issue exists**: Add a comment to it (using github_add_comment or linear_add_comment) noting this re-occurrence with the current timestamp and any new context. Do NOT create a new issue. Return the existing issue's identifier and URL.
+3. **If no matching issue exists**: Create a new issue with:
+   - A clear, actionable title
+   - Root cause, severity, affected services, reproduction steps, and recommended fix
+   - Appropriate labels (bug, severity level, affected service)
+   - Links to relevant commits, PRs, or existing issues
 
-Create the issue in whichever tracker is available to you.`,
+Use whichever tracker is available to you.`,
             skills: ["linear", "github"],
         },
         notify: {

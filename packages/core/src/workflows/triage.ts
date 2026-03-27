@@ -46,8 +46,8 @@ Be thorough — the investigation step depends on complete context. Use every to
 4. Determine affected services and users.
 5. Recommend a fix approach.
 
-If this is a known issue that already has a ticket, mark it as duplicate.`,
-      skills: ["github"],
+**Novelty check (REQUIRED):** Search the issue tracker for existing open issues that cover the same root cause. Use github_search_issues and/or linear_search_issues with relevant keywords. If you find an existing issue that matches, set is_duplicate=true and duplicate_of to the issue identifier (e.g. "#42" or "ENG-123").`,
+      skills: ["github", "linear"],
       output: {
         type: "object",
         properties: {
@@ -64,15 +64,18 @@ If this is a known issue that already has a ticket, mark it as duplicate.`,
     },
 
     create_issue: {
-      name: "Create Issue",
-      instruction: `Create an issue documenting the investigation findings:
+      name: "Create or Update Issue",
+      instruction: `Before creating anything, check whether this root cause is already tracked:
 
-1. Use a clear, actionable title.
-2. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
-3. Add appropriate labels (bug, severity level, affected service).
-4. Link to relevant commits, PRs, or existing issues.
+1. Search for existing open issues using github_search_issues and/or linear_search_issues with keywords from the root cause, affected service, and error message.
+2. **If a matching issue exists**: Add a comment to it (using github_add_comment or linear_add_comment) noting this re-occurrence with the current timestamp and any new context. Do NOT create a new issue. Return the existing issue's identifier and URL.
+3. **If no matching issue exists**: Create a new issue with:
+   - A clear, actionable title
+   - Root cause, severity, affected services, reproduction steps, and recommended fix
+   - Appropriate labels (bug, severity level, affected service)
+   - Links to relevant commits, PRs, or existing issues
 
-Create the issue in whichever tracker is available to you.`,
+Use whichever tracker is available to you.`,
       skills: ["linear", "github"],
     },
 

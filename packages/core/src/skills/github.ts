@@ -99,6 +99,24 @@ export const github: Skill = {
         }),
     },
     {
+      name: "github_add_comment",
+      description: "Add a comment to a GitHub issue or pull request",
+      input_schema: {
+        type: "object",
+        properties: {
+          repo: { type: "string", description: "owner/repo" },
+          issue_number: { type: "number", description: "Issue or PR number" },
+          body: { type: "string", description: "Comment body (markdown)" },
+        },
+        required: ["repo", "issue_number", "body"],
+      },
+      handler: async (input: { repo: string; issue_number: number; body: string }, ctx) =>
+        gh(`/repos/${input.repo}/issues/${input.issue_number}/comments`, ctx, {
+          method: "POST",
+          body: JSON.stringify({ body: input.body }),
+        }),
+    },
+    {
       name: "github_create_pr",
       description: "Create a pull request",
       input_schema: {

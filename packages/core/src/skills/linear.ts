@@ -79,6 +79,24 @@ export const linear: Skill = {
         ),
     },
     {
+      name: "linear_add_comment",
+      description: "Add a comment to a Linear issue",
+      input_schema: {
+        type: "object",
+        properties: {
+          issueId: { type: "string", description: "Linear issue ID" },
+          body: { type: "string", description: "Comment body (markdown)" },
+        },
+        required: ["issueId", "body"],
+      },
+      handler: async (input: { issueId: string; body: string }, ctx) =>
+        linearGql(
+          `mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id body } } }`,
+          { input: { issueId: input.issueId, body: input.body } },
+          ctx,
+        ),
+    },
+    {
       name: "linear_update_issue",
       description: "Update an existing Linear issue",
       input_schema: {
