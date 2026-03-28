@@ -3,7 +3,13 @@ title: Live Mode
 description: Connect Studio to a running workflow execution and watch nodes light up in real time.
 ---
 
+import { LiveModeDemo } from "../../../components/LiveModeDemo";
+
 Live Mode connects Studio to a running workflow executor and overlays execution state on the graph as events stream in. Nodes transition through visual states as the workflow progresses: pending (dark), current (blue pulsing glow), success (green border), failed (red border), and skipped (dimmed).
+
+<LiveModeDemo client:load />
+
+_The triage workflow, animated. In production, events stream from the executor in real time._
 
 ## How it works
 
