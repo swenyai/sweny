@@ -52,6 +52,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
             actions: read
+          use_sticky_comment: "true"
           claude_args: "--allowedTools 'Bash(gh pr comment:*)' --allowedTools 'Bash(gh pr review:*)' --allowedTools 'Bash(gh api:*)'"
           prompt: |
             Review this pull request. Provide a concise code review covering
