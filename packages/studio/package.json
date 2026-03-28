@@ -28,12 +28,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@sweny-ai/engine": "*",
+    "@sweny-ai/core": "*",
     "@xyflow/react": "^12.0.0",
     "elkjs": "^0.9.0",
     "immer": "^11.1.4",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
     "zundo": "^2.3.0"
   },
   "devDependencies": {
