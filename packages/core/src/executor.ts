@@ -92,6 +92,20 @@ export async function execute(
     safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
     logger.info(`  ✓ ${result.status}`, { node: currentId, toolCalls: result.toolCalls.length });
 
+    // Dry run hard gate — stop at the first conditional routing decision.
+    // Unconditional edges are analysis flow (prepare→gather→investigate);
+    // conditional edges are action decisions (investigate→create_issue/skip).
+    // Enforced in the executor so it cannot be bypassed by LLM evaluation.
+    const isDryRun = input && typeof input === "object" && (input as Record<string, unknown>).dryRun === true;
+    if (isDryRun) {
+      const outEdges = workflow.edges.filter((e) => e.from === currentId);
+      if (outEdges.some((e) => e.when)) {
+        safeObserve(observer, { type: "route", from: currentId!, to: "(end)", reason: "dry run" }, logger);
+        currentId = null;
+        continue;
+      }
+    }
+
     // Resolve next node via edge conditions
     currentId = await resolveNext(workflow, currentId, results, input, claude, observer);
   }

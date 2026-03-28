@@ -186,25 +186,18 @@ Use whichever notification channel is available to you.`,
     // gather → investigate (always)
     { from: "gather", to: "investigate" },
 
-    // investigate → notify (dry run — report findings, no side effects)
-    {
-      from: "investigate",
-      to: "notify",
-      when: "dryRun is true",
-    },
-
-    // investigate → create_issue (novel findings worth acting on, not dry run)
+    // investigate → create_issue (novel findings worth acting on)
     {
       from: "investigate",
       to: "create_issue",
-      when: "dryRun is not true AND novel_count is greater than 0 AND highest_severity is medium or higher",
+      when: "novel_count is greater than 0 AND highest_severity is medium or higher",
     },
 
     // investigate → skip (everything is a duplicate or low priority)
     {
       from: "investigate",
       to: "skip",
-      when: "dryRun is not true AND (novel_count is 0, OR highest_severity is low)",
+      when: "novel_count is 0, OR highest_severity is low",
     },
 
     // create_issue → implement (novel findings have a clear, feasible fix)
