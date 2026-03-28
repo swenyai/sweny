@@ -186,32 +186,39 @@ Use whichever notification channel is available to you.`,
     // gather → investigate (always)
     { from: "gather", to: "investigate" },
 
-    // investigate → create_issue (any novel findings worth acting on)
+    // investigate → notify (dry run — report findings, no side effects)
+    {
+      from: "investigate",
+      to: "notify",
+      when: "dryRun is true",
+    },
+
+    // investigate → create_issue (novel findings worth acting on, not dry run)
     {
       from: "investigate",
       to: "create_issue",
-      when: "novel_count is greater than 0 AND highest_severity is medium or higher",
+      when: "dryRun is not true AND novel_count is greater than 0 AND highest_severity is medium or higher",
     },
 
     // investigate → skip (everything is a duplicate or low priority)
     {
       from: "investigate",
       to: "skip",
-      when: "novel_count is 0, OR highest_severity is low",
+      when: "dryRun is not true AND (novel_count is 0, OR highest_severity is low)",
     },
 
     // create_issue → implement (novel findings have a clear, feasible fix)
     {
       from: "create_issue",
       to: "implement",
-      when: "at least one novel finding has fix_complexity simple or moderate AND fix_approach is provided AND dryRun is not true",
+      when: "at least one novel finding has fix_complexity simple or moderate AND fix_approach is provided",
     },
 
-    // create_issue → notify (fixes too complex or dry run)
+    // create_issue → notify (fixes too complex)
     {
       from: "create_issue",
       to: "notify",
-      when: "all novel findings have fix_complexity complex, OR no clear fix_approach, OR dryRun is true",
+      when: "all novel findings have fix_complexity complex, OR no clear fix_approach",
     },
 
     // skip → notify (nothing to implement — all duplicates +1'd or low priority)

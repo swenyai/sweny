@@ -93,7 +93,7 @@ export async function execute(
     logger.info(`  ✓ ${result.status}`, { node: currentId, toolCalls: result.toolCalls.length });
 
     // Resolve next node via edge conditions
-    currentId = await resolveNext(workflow, currentId, results, claude, observer);
+    currentId = await resolveNext(workflow, currentId, results, input, claude, observer);
   }
 
   safeObserve(
@@ -198,6 +198,7 @@ async function resolveNext(
   workflow: Workflow,
   current: string,
   results: Map<string, NodeResult>,
+  input: unknown,
   claude: Claude,
   observer?: Observer,
 ): Promise<string | null> {
@@ -215,8 +216,12 @@ async function resolveNext(
   const defaultEdge = outEdges.find((e) => !e.when);
   const conditionalEdges = outEdges.filter((e) => e.when);
 
-  // Claude evaluates which condition matches
-  const context = Object.fromEntries([...results.entries()].map(([k, v]) => [k, v.data]));
+  // Claude evaluates which condition matches — include input so conditions
+  // can reference workflow-level flags like dryRun
+  const context: Record<string, unknown> = {
+    input,
+    ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, v.data])),
+  };
 
   const choices = conditionalEdges.map((e) => ({
     id: e.to,

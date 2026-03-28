@@ -216,6 +216,17 @@ export function formatDagResultHuman(results: Map<string, NodeResult>, durationM
     return formatDagSuccessResult(results, duration);
   }
 
+  // Dry run — show findings summary, no side effects taken
+  if (config?.dryRun) {
+    return formatDagDryRunResult(results, duration);
+  }
+
+  // Issues created but no PR (fix too complex)
+  const createIssueResult = results.get("create_issue");
+  if (createIssueResult && createIssueResult.status === "success") {
+    return formatDagIssuesCreatedResult(results, duration);
+  }
+
   // No action / skip
   return formatDagNoActionResult(results, duration, config);
 }
@@ -244,6 +255,66 @@ function formatDagSuccessResult(results: Map<string, NodeResult>, duration: stri
   return ["", boxTop(), ...boxSection(header), boxDivider(), ...boxSection(body), boxBottom(), ""].join("\n");
 }
 
+function formatDagIssuesCreatedResult(results: Map<string, NodeResult>, duration: string): string {
+  const title = `${c.ok("\u2713")} ${chalk.bold("Issues Created")}`;
+  const titlePad = BOX_WIDTH - 4 - visLen(title) - visLen(duration);
+  const header = [title + " ".repeat(Math.max(1, titlePad)) + c.subtle(duration)];
+
+  const body: string[] = [];
+  const issueData = results.get("create_issue")?.data;
+
+  if (issueData?.issueIdentifier) {
+    body.push(`${c.subtle("Issue")}${" ".repeat(5)}${chalk.bold(String(issueData.issueIdentifier))}`);
+    if (issueData.issueTitle) body.push(`${" ".repeat(10)}${String(issueData.issueTitle)}`);
+    if (issueData.issueUrl) body.push(`${" ".repeat(10)}${c.link(String(issueData.issueUrl))}`);
+    body.push("");
+  }
+
+  const investigateData = results.get("investigate")?.data;
+  const rec = investigateData?.recommendation;
+  if (rec) {
+    body.push(`${c.subtle("Next")}${" ".repeat(6)}${String(rec)}`);
+  }
+
+  return ["", boxTop(), ...boxSection(header), boxDivider(), ...boxSection(body), boxBottom(), ""].join("\n");
+}
+
+function formatDagDryRunResult(results: Map<string, NodeResult>, duration: string): string {
+  const title = `${c.ok("\u2713")} ${chalk.bold("Triage Complete (Dry Run)")}`;
+  const titlePad = BOX_WIDTH - 4 - visLen(title) - visLen(duration);
+  const header = [title + " ".repeat(Math.max(1, titlePad)) + c.subtle(duration)];
+
+  const body: string[] = [];
+  const investigateData = results.get("investigate")?.data;
+  const findings = investigateData?.findings as Array<Record<string, unknown>> | undefined;
+  const novelCount = investigateData?.novel_count as number | undefined;
+  const severity = investigateData?.highest_severity as string | undefined;
+
+  if (findings && findings.length > 0) {
+    body.push(
+      `${c.subtle("Findings")}${" ".repeat(2)}${chalk.bold(String(findings.length))} total, ${chalk.bold(String(novelCount ?? 0))} novel`,
+    );
+    if (severity) body.push(`${c.subtle("Severity")}${" ".repeat(2)}${chalk.bold(severity)}`);
+    body.push("");
+    for (const f of findings.slice(0, 5)) {
+      const dup = f.is_duplicate ? c.subtle(" (dup)") : "";
+      body.push(
+        `  ${f.severity === "critical" || f.severity === "high" ? c.fail("\u25CF") : c.subtle("\u25CB")} ${String(f.title)}${dup}`,
+      );
+    }
+    if (findings.length > 5) body.push(c.subtle(`  ... and ${findings.length - 5} more`));
+    body.push("");
+  }
+
+  const rec = investigateData?.recommendation;
+  if (rec) body.push(`${c.subtle("Next")}${" ".repeat(6)}${String(rec)}`);
+
+  body.push("");
+  body.push(c.subtle("No side effects — dry run mode"));
+
+  return ["", boxTop(), ...boxSection(header), boxDivider(), ...boxSection(body), boxBottom(), ""].join("\n");
+}
+
 function formatDagFailureResult(nodeId: string, result: NodeResult, duration: string): string {
   const title = `${c.fail("\u2717")} ${chalk.bold("Workflow Failed")}`;
   const titlePad = BOX_WIDTH - 4 - visLen(title) - visLen(duration);
@@ -267,11 +338,9 @@ function formatDagNoActionResult(results: Map<string, NodeResult>, duration: str
   const body: string[] = [];
   const investigateData = results.get("investigate")?.data;
 
-  if (investigateData?.is_duplicate) {
-    body.push("Issue identified as a duplicate of an existing ticket.");
-    if (investigateData.duplicate_of) {
-      body.push(`${" ".repeat(2)}${c.link(String(investigateData.duplicate_of))}`);
-    }
+  const novelCount = investigateData?.novel_count;
+  if (novelCount === 0) {
+    body.push("All findings were duplicates of existing issues.");
   } else {
     const rec = investigateData?.recommendation;
     if (rec) body.push(`Recommendation: ${String(rec)}`);
