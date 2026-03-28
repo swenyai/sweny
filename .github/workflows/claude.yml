@@ -52,8 +52,8 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
             actions: read
+          use_sticky_comment: "true"
           prompt: |
-            Review this pull request. Provide a concise code review as a PR comment
-            covering correctness, potential bugs, and suggestions for improvement.
+            Review this pull request. Provide a concise code review covering
+            correctness, potential bugs, and suggestions for improvement.
             If CI checks failed, investigate the logs and explain what went wrong.
-            Post your review as a comment on the PR using the GitHub MCP tools.
