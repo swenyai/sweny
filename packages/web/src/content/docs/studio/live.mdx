@@ -5,15 +5,15 @@ description: Connect Studio to a running workflow execution and watch nodes ligh
 
 import { LiveModeDemo } from "../../../components/LiveModeDemo";
 
-Live Mode connects Studio to a running workflow executor and overlays execution state on the graph as events stream in. Nodes transition through visual states as the workflow progresses: pending (dark), current (blue pulsing glow), success (green border), failed (red border), and skipped (dimmed).
-
 <LiveModeDemo client:load />
 
-_The triage workflow, animated. In production, events stream from the executor in real time._
+Live Mode connects Studio to a running workflow and overlays execution state on the graph in real time. Each node transitions through visual states as events stream in: **pending** (dark), **current** (blue pulse), **success** (green), **failed** (red), and **skipped** (dimmed).
+
+The demo above shows the triage workflow animating through the happy path. In production, events come from the executor as each node completes.
 
 ## How it works
 
-The SWEny executor emits `ExecutionEvent` objects as a workflow runs. Each event describes a state change: a node starting execution, a tool being called, a node completing, a routing decision, or the workflow finishing. Studio's editor store has an `applyEvent()` method that processes these events and updates the canvas in real time.
+The executor emits `ExecutionEvent` objects as a workflow runs. Each event describes a state change: a node starting, a tool being called, a node completing, a routing decision, or the workflow finishing. Studio's editor store has an `applyEvent()` method that processes these events and updates the canvas in real time.
 
 The event flow:
 

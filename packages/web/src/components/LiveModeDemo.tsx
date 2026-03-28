@@ -86,7 +86,7 @@ export function LiveModeDemo() {
           border: "1px solid var(--sl-color-gray-5, #333)",
         }}
       >
-        <WorkflowViewer workflow={triageWorkflow} executionState={execState} height="460px" />
+        <WorkflowViewer workflow={triageWorkflow} executionState={execState} height="min(75vh, 680px)" />
       </div>
       <div
         style={{

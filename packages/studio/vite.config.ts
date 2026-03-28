@@ -49,10 +49,9 @@ export default defineConfig({
             // Don't bundle peer dependencies — consumer provides them
             external: ["react", "react-dom", "@xyflow/react", "elkjs"],
             output: {
-              // Preserve directory structure in dist/lib/
-              assetFileNames: "lib/[name][extname]",
-              chunkFileNames: "lib/chunks/[name]-[hash].js",
-              entryFileNames: "lib/[name].js",
+              assetFileNames: "[name][extname]",
+              chunkFileNames: "chunks/[name]-[hash].js",
+              entryFileNames: "[name].js",
             },
           },
           outDir: "dist/lib",
