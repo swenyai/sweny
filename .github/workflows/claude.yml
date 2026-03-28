@@ -9,7 +9,11 @@ on:
     types: [opened, synchronize]
 
 jobs:
-  claude:
+  # Interactive: responds to @claude mentions in PR/issue comments
+  respond:
+    if: >
+      github.event_name == 'issue_comment' ||
+      github.event_name == 'pull_request_review_comment'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -17,7 +21,6 @@ jobs:
       issues: write
       actions: read
       id-token: write
-
     steps:
       - uses: actions/checkout@v6
         with:
@@ -28,3 +31,29 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
             actions: read
+
+  # Auto-review: runs on every PR open and push
+  review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          prompt: |
+            Review this pull request. Provide a concise code review as a PR comment
+            covering correctness, potential bugs, and suggestions for improvement.
+            If CI checks failed, investigate the logs and explain what went wrong.
+            Post your review as a comment on the PR using the GitHub MCP tools.

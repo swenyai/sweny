@@ -1,77 +1,50 @@
 {
   "name": "@sweny-ai/studio",
-  "version": "8.0.4",
-  "description": "React component library for visualizing and editing SWEny workflow DAGs — embeddable viewer and editor",
+  "version": "0.1.0",
+  "private": true,
   "type": "module",
-  "keywords": [
-    "workflow",
-    "dag",
-    "react",
-    "visualization",
-    "editor",
-    "react-flow",
-    "sweny"
+  "files": [
+    "dist/lib"
   ],
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "homepage": "https://sweny.ai",
-  "bugs": {
-    "url": "https://github.com/swenyai/sweny/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/swenyai/sweny.git",
-    "directory": "packages/studio"
-  },
-  "license": "MIT",
   "exports": {
-    "./viewer": {
-      "import": "./dist-lib/viewer.js",
-      "types": "./dist-lib/types/lib-viewer.d.ts"
+    ".": {
+      "import": "./dist/lib/viewer.js",
+      "types": "./dist/lib/types/lib-viewer.d.ts"
     },
     "./editor": {
-      "import": "./dist-lib/editor.js",
-      "types": "./dist-lib/types/lib-editor.d.ts"
-    },
-    "./style.css": "./dist-lib/style.css"
+      "import": "./dist/lib/editor.js",
+      "types": "./dist/lib/types/lib-editor.d.ts"
+    }
   },
-  "files": [
-    "dist-lib",
-    "README.md"
-  ],
-  "sideEffects": [
-    "dist-lib/style.css"
-  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
-  },
-  "peerDependencies": {
-    "@sweny-ai/core": "*",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0"
+    "build:lib": "tsc --project tsconfig.lib.json && BUILD_MODE=lib vite build",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sweny-ai/engine": "*",
     "@xyflow/react": "^12.0.0",
     "elkjs": "^0.9.0",
     "immer": "^11.1.4",
-    "yaml": "^2.0.0",
-    "zundo": "^2.3.0",
-    "zustand": "^4.3.0"
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "zundo": "^2.3.0"
   },
   "devDependencies": {
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^4.7.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.0.0",
     "autoprefixer": "^10.4.0",
-    "postcss": "^8.5.8",
+    "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.5.0",
-    "vite": "^5.0.0",
-    "vitest": "^4.1.2"
+    "vite": "^5.0.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "@xyflow/react": "^12.0.0",
+    "elkjs": "^0.9.0"
   }
 }

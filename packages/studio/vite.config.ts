@@ -6,6 +6,7 @@ import { aiMiddlewarePlugin } from "./src/server/ai-middleware.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const isLib = process.env.BUILD_MODE === "lib";
 
 export default defineConfig({
   plugins: [react(), aiMiddlewarePlugin()],
@@ -33,4 +34,44 @@ export default defineConfig({
       },
     },
   },
+  ...(isLib
+    ? {
+        // Library build
+        build: {
+          lib: {
+            entry: {
+              viewer: resolve(__dirname, "src/lib-viewer.ts"),
+              editor: resolve(__dirname, "src/lib-editor.ts"),
+            },
+            formats: ["es"],
+          },
+          rollupOptions: {
+            // Don't bundle peer dependencies — consumer provides them
+            external: ["react", "react-dom", "@xyflow/react", "elkjs"],
+            output: {
+              // Preserve directory structure in dist/lib/
+              assetFileNames: "lib/[name][extname]",
+              chunkFileNames: "lib/chunks/[name]-[hash].js",
+              entryFileNames: "lib/[name].js",
+            },
+          },
+          outDir: "dist/lib",
+          emptyOutDir: true,
+        },
+      }
+    : {
+        // App build (existing)
+        build: {
+          rollupOptions: {
+            output: {
+              manualChunks: {
+                react: ["react", "react-dom"],
+                xyflow: ["@xyflow/react"],
+                elk: ["elkjs"],
+                zustand: ["zustand", "immer", "zundo"],
+              },
+            },
+          },
+        },
+      }),
 });
