@@ -116,9 +116,12 @@ export function buildAutoMcpServers(config: McpAutoConfig): Record<string, McpSe
   }
 
   // Better Stack MCP — HTTP remote MCP; Bearer token auth.
-  // Injected whenever the token is present (not just when it's the primary provider)
+  // BetterStack uses separate tokens for Uptime vs Telemetry APIs.
+  // The MCP server accepts the telemetry token for log/metric queries.
+  // Accept: BETTERSTACK_API_TOKEN (legacy), BETTERSTACK_TELEMETRY_TOKEN, or BETTERSTACK_UPTIME_TOKEN.
+  // Injected whenever any token is present (not just when it's the primary provider)
   // because BetterStack logs complement any primary observability provider.
-  const bsApiToken = creds.BETTERSTACK_API_TOKEN;
+  const bsApiToken = creds.BETTERSTACK_API_TOKEN || creds.BETTERSTACK_TELEMETRY_TOKEN || creds.BETTERSTACK_UPTIME_TOKEN;
   if (bsApiToken) {
     auto["betterstack"] = {
       type: "http",

@@ -416,7 +416,9 @@ export function validateInputs(config: CliConfig): string[] {
       break;
     case "betterstack":
       if (!config.observabilityCredentials.apiToken)
-        errors.push("Missing: BETTERSTACK_API_TOKEN is required for betterstack provider");
+        errors.push(
+          "Missing: BETTERSTACK_API_TOKEN, BETTERSTACK_TELEMETRY_TOKEN, or BETTERSTACK_UPTIME_TOKEN is required for betterstack provider",
+        );
       if (!config.observabilityCredentials.sourceId && !config.observabilityCredentials.tableName)
         errors.push(
           "Missing: either BETTERSTACK_SOURCE_ID (--betterstack-source-id) or BETTERSTACK_TABLE_NAME (--betterstack-table-name) is required for betterstack provider",
@@ -680,7 +682,7 @@ function parseObservabilityCredentials(
       };
     case "betterstack":
       return {
-        apiToken: env.BETTERSTACK_API_TOKEN || "",
+        apiToken: env.BETTERSTACK_API_TOKEN || env.BETTERSTACK_TELEMETRY_TOKEN || env.BETTERSTACK_UPTIME_TOKEN || "",
         sourceId:
           (options.betterstackSourceId as string) || env.BETTERSTACK_SOURCE_ID || f("betterstack-source-id") || "",
         tableName:

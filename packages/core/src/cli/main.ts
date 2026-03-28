@@ -141,6 +141,8 @@ function buildCredentialMap(): Record<string, string> {
     "NR_API_KEY",
     "NR_REGION",
     "BETTERSTACK_API_TOKEN",
+    "BETTERSTACK_TELEMETRY_TOKEN",
+    "BETTERSTACK_UPTIME_TOKEN",
     "BETTERSTACK_SOURCE_ID",
     "BETTERSTACK_TABLE_NAME",
     "SLACK_BOT_TOKEN",
