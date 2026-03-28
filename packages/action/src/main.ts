@@ -102,6 +102,7 @@ async function run(): Promise<void> {
     });
 
     setGitHubOutputs(results);
+    await writeJobSummary(results, config);
   } catch (error) {
     if (error instanceof Error) {
       core.setFailed(error.message);
@@ -306,6 +307,126 @@ function setGitHubOutputs(results: Map<string, NodeResult>): void {
     core.setOutput("issue-identifier", String(issueResult.data.issueIdentifier ?? ""));
     core.setOutput("issue-url", String(issueResult.data.issueUrl ?? ""));
   }
+}
+
+/** Write a GitHub Actions job summary with structured triage results */
+async function writeJobSummary(results: Map<string, NodeResult>, config: ActionConfig): Promise<void> {
+  const lines: string[] = [];
+  const isDryRun = config.dryRun;
+
+  // ── Header ────────────────────────────────────────────────────
+  lines.push(`## ${isDryRun ? "🔍" : "▲"} SWEny Triage ${isDryRun ? "(Dry Run)" : "Report"}`);
+  lines.push("");
+
+  // ── Config table ──────────────────────────────────────────────
+  lines.push("| Setting | Value |");
+  lines.push("|---------|-------|");
+  if (config.repository) lines.push(`| Repository | \`${config.repository}\` |`);
+  lines.push(`| Observability | ${config.observabilityProvider} |`);
+  lines.push(`| Issue Tracker | ${config.issueTrackerProvider} |`);
+  lines.push(`| Time Range | ${config.timeRange} |`);
+  lines.push(`| Mode | ${isDryRun ? "dry run" : "live"} |`);
+  if (config.serviceFilter) lines.push(`| Service Filter | \`${config.serviceFilter}\` |`);
+  lines.push("");
+
+  // ── Workflow path ─────────────────────────────────────────────
+  const nodeNames = [...results.keys()];
+  lines.push(`**Workflow path:** ${nodeNames.map((n) => `\`${n}\``).join(" → ")}`);
+  lines.push("");
+
+  // ── Findings ──────────────────────────────────────────────────
+  const investigateData = results.get("investigate")?.data;
+  const findings = investigateData?.findings as Array<Record<string, unknown>> | undefined;
+  const novelCount = (investigateData?.novel_count as number) ?? 0;
+  const severity = investigateData?.highest_severity as string | undefined;
+
+  if (findings && findings.length > 0) {
+    lines.push("### Findings");
+    lines.push("");
+    lines.push(
+      `**${findings.length}** finding(s), **${novelCount}** novel, highest severity: **${severity ?? "unknown"}**`,
+    );
+    lines.push("");
+    lines.push("| # | Title | Severity | Complexity | Status |");
+    lines.push("|---|-------|----------|------------|--------|");
+    for (let i = 0; i < findings.length; i++) {
+      const f = findings[i];
+      const status = f.is_duplicate ? `dup of ${f.duplicate_of ?? "existing"}` : "novel";
+      lines.push(`| ${i + 1} | ${f.title ?? "—"} | ${f.severity ?? "—"} | ${f.fix_complexity ?? "—"} | ${status} |`);
+    }
+    lines.push("");
+  } else if (investigateData) {
+    lines.push("### Findings");
+    lines.push("");
+    lines.push("No actionable findings detected.");
+    lines.push("");
+  }
+
+  // ── Actions taken ─────────────────────────────────────────────
+  const issueData = results.get("create_issue")?.data;
+  const prData = results.get("create_pr")?.data;
+  const skipData = results.get("skip")?.data;
+
+  if (issueData || prData) {
+    lines.push("### Actions Taken");
+    lines.push("");
+    if (issueData?.issueIdentifier) {
+      const url = issueData.issueUrl as string | undefined;
+      const title = issueData.issueTitle as string | undefined;
+      const link = url ? `[${issueData.issueIdentifier}](${url})` : String(issueData.issueIdentifier);
+      lines.push(`- **Issue created:** ${link}${title ? ` — ${title}` : ""}`);
+    }
+    if (prData?.prUrl) {
+      const link = `[#${prData.prNumber ?? ""}](${prData.prUrl})`;
+      lines.push(`- **PR opened:** ${link}`);
+    }
+    lines.push("");
+  } else if (skipData) {
+    lines.push("### Result");
+    lines.push("");
+    lines.push("No action taken — all findings were duplicates or low priority.");
+    lines.push("");
+  }
+
+  // ── Dry run notice ────────────────────────────────────────────
+  if (isDryRun) {
+    lines.push("> **Dry run mode** — no issues, PRs, or notifications were created.");
+    lines.push("");
+  }
+
+  // ── Recommendation ────────────────────────────────────────────
+  const rec = investigateData?.recommendation;
+  if (rec) {
+    lines.push(`**Recommendation:** ${rec}`);
+    lines.push("");
+  }
+
+  // ── Node details (collapsible) ────────────────────────────────
+  lines.push("<details><summary>Node execution details</summary>");
+  lines.push("");
+  for (const [nodeId, result] of results) {
+    const status = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "—";
+    lines.push(`#### ${status} \`${nodeId}\` (${result.toolCalls.length} tool calls)`);
+    lines.push("");
+    if (result.toolCalls.length > 0) {
+      lines.push("| Tool | Input (truncated) |");
+      lines.push("|------|-------------------|");
+      for (const tc of result.toolCalls.slice(0, 20)) {
+        const input = summarizeInput(tc.input);
+        lines.push(`| \`${tc.tool}\` | ${input.slice(0, 100) || "—"} |`);
+      }
+      if (result.toolCalls.length > 20) {
+        lines.push(`| ... | ${result.toolCalls.length - 20} more tool calls |`);
+      }
+      lines.push("");
+    }
+  }
+  lines.push("</details>");
+  lines.push("");
+
+  // Write to GITHUB_STEP_SUMMARY
+  const md = lines.join("\n");
+  await core.summary.addRaw(md).write();
 }
 
 run();

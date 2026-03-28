@@ -112,9 +112,10 @@ Downstream nodes will act ONLY on novel findings. Duplicates will be +1'd automa
 4. Link to relevant commits, PRs, or existing issues.
 
 **For each DUPLICATE finding** (is_duplicate = true):
-1. Find the existing issue using the issue tracker (check duplicate_of field).
-2. Add a comment: "+1 — SWEny triage confirmed this issue is still active (seen again at {current UTC timestamp}). Latest context: {1-2 sentence summary}."
-3. If the existing issue is closed/done, reopen it or note in the comment that the bug has recurred.
+1. Find the existing issue (check duplicate_of field).
+2. Check the issue's comments — if the most recent comment is already from SWEny (contains "+1") within the last 24 hours, skip adding another comment.
+3. Otherwise add a SHORT comment: "+1 — seen again {UTC timestamp}. {one sentence of new context}." (Keep it under 2 lines. No markdown headers, no emoji, no formatting.)
+4. If the existing issue is closed/done, reopen it.
 
 If context.issueTemplate is provided, use it as the format for new issue bodies. Otherwise use a clear structure with: Summary, Root Cause, Impact, Steps to Reproduce, and Recommended Fix.
 
@@ -127,9 +128,10 @@ Use whichever issue tracker is available to you. Output the created/updated issu
       instruction: `Every finding from the investigation was either a duplicate or low-priority. No new issues need to be created.
 
 For each **duplicate** finding (check the findings array for items where is_duplicate = true):
-1. Find the existing issue using the issue tracker (check duplicate_of field).
-2. Add a comment: "+1 — SWEny triage confirmed this issue is still active (seen again at {current UTC timestamp}). Latest context: {1-2 sentence summary of what was found this run}."
-3. If the issue is closed/done, reopen it or note in the comment that the bug has recurred.
+1. Find the existing issue (check duplicate_of field).
+2. Check the issue's comments — if the most recent comment is already from SWEny (contains "+1") within the last 24 hours, skip adding another comment.
+3. Otherwise add a SHORT comment: "+1 — seen again {UTC timestamp}. {one sentence of new context}." (Keep it under 2 lines. No markdown headers, no emoji, no formatting.)
+4. If the issue is closed/done, reopen it.
 
 For **low priority** findings, log a brief note about why they were skipped.`,
       skills: ["linear", "github"],
