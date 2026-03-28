@@ -25,7 +25,7 @@ SWEny workflows are **DAGs of AI-powered nodes**. Each node gives Claude an inst
 2. **Take action** — Claude creates issues, writes fixes, and opens PRs using the tools available at each node
 3. **Report results** — Claude sends summaries through Slack, Discord, Teams, email, or webhooks
 
-Triage is the first built-in workflow. It runs on a schedule, finds novel production errors, and fixes them without waking anyone up. See [Core & Workflows](/getting-started/engine/) to learn how the executor works and how to build your own workflows.
+Triage is the first built-in workflow. It runs on a schedule, finds novel production errors, and fixes them without waking anyone up. See [How Workflows Work](/workflows/) to learn how the executor works and how to build your own workflows.
 
 ## See it in action
 
@@ -38,8 +38,8 @@ Want to understand the full flow? Read the [end-to-end walkthrough](/getting-sta
     Search code, read files, create issues, open pull requests, list commits. The most-used skill across all workflows.
   </Card>
   <Card title="Observability" icon="magnifier">
-    **Sentry** and **Datadog** skills — query errors, search logs, list monitors, and pull metrics from your existing
-    monitoring stack.
+    **Sentry**, **Datadog**, and **BetterStack** skills — query errors, search logs, list monitors, and pull metrics
+    from your existing monitoring stack.
   </Card>
   <Card title="Issue Tracking" icon="list-format">
     **Linear** and **GitHub Issues** — create tickets, search for duplicates, update status, and link PRs automatically.
@@ -49,13 +49,15 @@ Want to understand the full flow? Read the [end-to-end walkthrough](/getting-sta
   </Card>
 </CardGrid>
 
-## Two deployment modes
+## Three entry points
 
-Both modes are powered by SWEny's DAG executor, which manages skill resolution, node orchestration, and edge routing.
+All entry points are powered by the same DAG executor, which manages skill resolution, node orchestration, and edge routing.
 
-**GitHub Action** — runs on a cron schedule in your CI. No servers, no infrastructure. This is the primary deployment.
+**[GitHub Action](/action/)** — runs on a cron schedule in your CI. No servers, no infrastructure. This is the primary deployment for production monitoring.
 
-**Interactive Agent** — a bot your team can chat with. Ask it to investigate errors, query logs, or write fixes interactively. Currently supports Slack, with more channels planned. Deploy as a container or run locally as a CLI.
+**[CLI](/cli/)** — run `sweny triage` from your terminal. Ideal for testing, debugging, and local development. Supports dry-run, streaming output, and all the same providers as the Action.
+
+**[Studio](/studio/)** — visual DAG editor and live execution monitor. Design workflows by dragging nodes, simulate runs, and watch live executions in real time.
 
 ## Quick install
 

@@ -111,6 +111,18 @@ investigate:
 
 This is how the triage workflow's conditional routing works: the `investigate` node outputs structured data with `severity` and `is_duplicate` fields, and the edge conditions reference those values.
 
+## Dry run
+
+Pass `dryRun: true` (CLI: `--dry-run`, Action: `dry-run: true`) to run a workflow in analysis-only mode. The executor processes nodes normally — Claude queries logs, searches code, analyzes errors — but **stops before any action that requires a routing decision**.
+
+Specifically: after each node completes, the executor checks outgoing edges. If any edge has a `when` condition (a conditional branch), execution stops and returns the results so far. Unconditional edges are followed normally because they represent analysis flow, not action decisions.
+
+**This is a hard gate enforced by the executor, not a prompt instruction.** Claude cannot bypass it. The routing check is in the executor code itself — if `dryRun` is true and a conditional edge exists, the executor halts regardless of what Claude returns.
+
+In practice:
+- **Triage workflow:** runs `prepare` → `gather` → `investigate`, then stops. You get the full investigation report but no issues are created, no PRs opened, no notifications sent.
+- **Implement workflow:** runs `analyze`, then stops. You get the analysis and fix plan but no code changes are made.
+
 ## Execution events
 
 The executor emits events at every stage. Pass an `observer` function to receive them in real-time:
@@ -119,6 +131,7 @@ The executor emits events at every stage. Pass an `observer` function to receive
 type ExecutionEvent =
   | { type: "workflow:start"; workflow: string }
   | { type: "node:enter"; node: string; instruction: string }
+  | { type: "node:progress"; node: string; message: string }
   | { type: "tool:call"; node: string; tool: string; input: unknown }
   | { type: "tool:result"; node: string; tool: string; output: unknown }
   | { type: "node:exit"; node: string; result: NodeResult }

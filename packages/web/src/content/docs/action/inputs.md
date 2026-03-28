@@ -263,7 +263,7 @@ If you run triage on a daily cron, set `time-range: 24h`. If you run every 6 hou
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `dry-run` | Analyze only -- do not create issues or PRs | `false` |
+| `dry-run` | Analyze only -- the executor stops at the first conditional edge, guaranteeing zero side effects. Enforced by the executor, not by prompt. | `false` |
 | `review-mode` | PR merge behavior: `auto` (enable GitHub auto-merge when CI passes, automatically suppressed for high-risk changes like migrations, auth, lockfiles, or >20 files) or `review` (open PR and wait for human approval) | `review` |
 | `novelty-mode` | Only report novel issues not already tracked in your issue tracker | `true` |
 | `linear-issue` | Existing issue identifier to work on (e.g., `ENG-123`). Required for the `implement` workflow. Equivalent to `--issue-override` in the CLI | -- |

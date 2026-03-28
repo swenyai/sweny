@@ -90,7 +90,7 @@ SWEny will:
 Open the completed workflow run. The **Summary** tab shows a structured report: which errors were found, what the root cause is, which issues were created, and which errors were skipped (duplicates or low priority).
 
 :::note[Try dry-run first]
-If you want to review what SWEny finds before it creates any issues, add `dry-run: true` to the Action inputs. SWEny will investigate but skip creating tickets, PRs, or notifications. Remove it once you are satisfied with the results.
+Add `dry-run: true` to review what SWEny finds before it takes any action. In dry-run mode, the executor runs the investigation nodes normally but stops at the first conditional routing decision — before any issues, PRs, or notifications are created. This is a hard gate enforced by the executor (not a prompt instruction), so there is zero risk of side effects. Remove `dry-run` once you are satisfied with the results.
 :::
 
 ## What just happened?

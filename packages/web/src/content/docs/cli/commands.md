@@ -102,7 +102,7 @@ sweny triage [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--dry-run` | Analyze only -- do not create issues or PRs | `false` |
+| `--dry-run` | Analyze only -- the executor stops at the first conditional edge, guaranteeing zero side effects (no issues created, no PRs opened, no notifications sent). This is enforced by the executor, not by prompt instructions. | `false` |
 | `--no-novelty-mode` | Allow +1 on existing issues instead of skipping duplicates | -- |
 | `--issue-override <issue>` | Work on a specific existing issue instead of scanning for new ones | -- |
 | `--additional-instructions <text>` | Extra instructions passed to the coding agent | -- |
