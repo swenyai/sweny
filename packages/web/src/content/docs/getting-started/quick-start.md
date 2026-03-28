@@ -95,13 +95,16 @@ Add `dry-run: true` to review what SWEny finds before it takes any action. In dr
 
 ## What just happened?
 
-SWEny ran the **Triage** workflow — a 5-node DAG:
+SWEny ran the **Triage** workflow — an 8-node DAG:
 
-1. **Gather Context** — queried Sentry for unresolved errors and searched your GitHub repo for recent commits and related issues.
-2. **Root Cause Analysis** — correlated errors with code changes, assessed severity, and identified whether each issue was novel or a duplicate.
-3. **Routing** — Claude evaluated edge conditions: novel issues with severity medium or higher route to Create Issue; duplicates and low-severity issues route to Skip.
-4. **Create Issue** — filed a GitHub Issue with the root cause, severity, affected services, and recommended fix.
-5. **Notify Team** — posted a summary to the GitHub Actions run (the default notification provider).
+1. **Prepare** — fetched any configured rules or context documents.
+2. **Gather Context** — queried Sentry for unresolved errors and searched your GitHub repo for recent commits and related issues.
+3. **Root Cause Analysis** — classified each issue as novel or duplicate, assessed severity and fix complexity, and produced a findings array.
+4. **Routing** — Claude evaluated edge conditions: novel issues with severity medium or higher route to Create Issue; all duplicates or low-severity route to Skip.
+5. **Create Issue** — filed GitHub Issues for novel findings and +1'd existing tickets for duplicates.
+6. **Implement** — wrote a fix if the issue had a feasible fix approach (skipped for complex fixes).
+7. **Open PR** — pushed a branch and opened a pull request.
+8. **Notify Team** — posted a summary to the GitHub Actions run (the default notification provider).
 
 Each node ran Claude with a focused instruction and only the tools it needed. The executor handled all routing, context passing, and event emission.
 

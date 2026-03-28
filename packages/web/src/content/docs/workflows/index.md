@@ -94,22 +94,28 @@ Nodes can declare an `output` schema (JSON Schema). When present, Claude's respo
 ```yaml
 investigate:
   name: Root Cause Analysis
-  instruction: "Analyze the gathered context and determine root cause..."
-  skills: [github]
+  instruction: "Classify every distinct issue as novel or duplicate..."
+  skills: [github, linear]
   output:
     type: object
     properties:
-      root_cause:
-        type: string
-      severity:
-        type: string
-        enum: [critical, high, medium, low]
-      is_duplicate:
-        type: boolean
-    required: [root_cause, severity]
+      findings:
+        type: array
+        items:
+          type: object
+          properties:
+            title: { type: string }
+            root_cause: { type: string }
+            severity: { type: string, enum: [critical, high, medium, low] }
+            is_duplicate: { type: boolean }
+            fix_complexity: { type: string, enum: [simple, moderate, complex] }
+          required: [title, root_cause, severity, is_duplicate]
+      novel_count: { type: number }
+      highest_severity: { type: string, enum: [critical, high, medium, low] }
+    required: [findings, novel_count, highest_severity]
 ```
 
-This is how the triage workflow's conditional routing works: the `investigate` node outputs structured data with `severity` and `is_duplicate` fields, and the edge conditions reference those values.
+This is how the triage workflow's conditional routing works: the `investigate` node outputs a `findings` array where each item is classified as novel or duplicate. The `novel_count` and `highest_severity` fields drive edge conditions.
 
 ## Dry run
 

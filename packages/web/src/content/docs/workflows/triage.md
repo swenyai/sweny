@@ -3,23 +3,28 @@ title: Triage Workflow
 description: The built-in workflow for investigating production alerts.
 ---
 
-The triage workflow is SWEny's built-in pipeline for investigating production alerts. It follows a **gather context, analyze root cause, create issue, notify team** pattern with conditional routing to skip duplicates and low-priority alerts.
+The triage workflow is SWEny's built-in pipeline for investigating production alerts. It follows a **prepare, gather context, analyze root cause, create issues, implement fix, open PR, notify team** pattern with conditional routing based on novelty and severity.
 
 ## Overview
 
 ```
-gather --> investigate --[novel + medium+]--> create_issue --> notify
-                       \
-                        --[duplicate or low]--> skip
+prepare --> gather --> investigate --[novel + medium+]--> create_issue --[feasible fix]--> implement --> create_pr --> notify
+                                  \                      \
+                                   \                      --[complex fix]--> notify
+                                    \
+                                     --[all duplicates or low]--> skip --> notify
 ```
 
-Five nodes, one conditional branch:
+Eight nodes, three conditional branches:
 
-1. **gather** -- pull error details, recent commits, and past issues from all available tools
-2. **investigate** -- correlate findings and determine root cause, severity, and whether the issue is a duplicate
-3. **create_issue** -- file a ticket with the full analysis (only if the issue is novel and medium+ severity)
-4. **notify** -- send a summary to the team's notification channel
-5. **skip** -- log a note and stop (for duplicates or low-priority alerts)
+1. **prepare** -- fetch rules and context documents from configured URLs
+2. **gather** -- pull error details, recent commits, and past issues from all available tools
+3. **investigate** -- classify each issue as novel or duplicate; assess severity and fix complexity
+4. **create_issue** -- file new tickets for novel findings, +1 existing tickets for duplicates (only if novel issues exist at medium+ severity)
+5. **skip** -- +1 duplicate tickets and log low-priority findings (when no novel issues worth acting on)
+6. **implement** -- write the fix (only if at least one finding has a feasible fix approach)
+7. **create_pr** -- push branch and open a pull request
+8. **notify** -- send a summary to the team's notification channel
 
 ## Workflow definition
 
@@ -32,104 +37,104 @@ export const triageWorkflow: Workflow = {
   id: "triage",
   name: "Alert Triage",
   description:
-    "Investigate a production alert, determine root cause, create an issue, and notify the team",
-  entry: "gather",
+    "Investigate a production alert, determine root cause, create an issue, implement a fix, and notify the team",
+  entry: "prepare",
 
   nodes: {
+    prepare: {
+      name: "Load Rules & Context",
+      instruction: `Fetch and review any knowledge documents listed in the input.
+Check input for rules_urls and context_urls arrays. Fetch each URL
+(Linear docs via MCP, HTTP URLs directly). Summarize the key rules
+and context for downstream nodes. No-op if no URLs are provided.`,
+      skills: ["linear"],
+    },
+
     gather: {
       name: "Gather Context",
-      instruction: `You are investigating a production alert. Gather all relevant context using the available tools:
-
-1. **Observability**: Pull error details, stack traces, recent logs, metrics, and active incidents around the time of the alert. Use whichever observability tools are available to you.
-2. **Source control**: Check recent commits, pull requests, and deploys that might be related.
-3. **Issue tracker**: Search for similar past issues or known problems.
-
-Be thorough — the investigation step depends on complete context. Use every tool available to you.`,
+      instruction: `Gather all relevant context:
+1. Observability: error details, stack traces, logs, metrics, incidents.
+2. Source control: recent commits, PRs, deploys.
+3. Issue tracker: similar past issues or known problems.
+Be thorough — the investigation step depends on complete context.`,
       skills: ["github", "sentry", "datadog", "betterstack", "linear"],
     },
 
     investigate: {
       name: "Root Cause Analysis",
-      instruction: `Based on the gathered context, perform a root cause analysis:
-
-1. Correlate the error with recent code changes, deploys, or config changes.
-2. Identify the most likely root cause.
-3. Assess severity: critical (service down), high (major feature broken), medium (degraded), low (cosmetic/minor).
-4. Determine affected services and users.
-5. Recommend a fix approach.
-
-If this is a known issue that already has a ticket, mark it as duplicate.`,
-      skills: ["github"],
+      instruction: `Classify every distinct issue as novel or duplicate.
+For each: identify root cause, assess severity and fix complexity,
+search BOTH open AND closed issues for duplicates.
+Output a findings array with novel_count and highest_severity.`,
+      skills: ["github", "linear"],
       output: {
-        type: "object",
-        properties: {
-          root_cause: { type: "string" },
-          severity: {
-            type: "string",
-            enum: ["critical", "high", "medium", "low"],
-          },
-          affected_services: {
-            type: "array",
-            items: { type: "string" },
-          },
-          is_duplicate: { type: "boolean" },
-          duplicate_of: {
-            type: "string",
-            description: "Issue ID if duplicate",
-          },
-          recommendation: { type: "string" },
-          fix_approach: { type: "string" },
-        },
-        required: ["root_cause", "severity", "recommendation"],
+        // see "The investigate output schema" below
       },
     },
 
     create_issue: {
-      name: "Create Issue",
-      instruction: `Create an issue documenting the investigation findings:
-
-1. Use a clear, actionable title.
-2. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
-3. Add appropriate labels (bug, severity level, affected service).
-4. Link to relevant commits, PRs, or existing issues.
-
-Create the issue in whichever tracker is available to you.`,
+      name: "Create Issues & Triage Duplicates",
+      instruction: `For each NOVEL finding: create a new issue with root cause,
+severity, and fix approach. For each DUPLICATE: +1 the existing issue
+with a confirmation comment.`,
       skills: ["linear", "github"],
+    },
+
+    skip: {
+      name: "Skip — All Duplicates or Low Priority",
+      instruction: `All findings are duplicates or low priority.
++1 each duplicate's existing ticket. Log why low-priority items were skipped.`,
+      skills: ["linear", "github"],
+    },
+
+    implement: {
+      name: "Implement Fix",
+      instruction: `Create a feature branch, make minimal code changes to fix
+the identified bug, run tests if available, and commit.`,
+      skills: ["github"],
+    },
+
+    create_pr: {
+      name: "Open Pull Request",
+      instruction: `Push the branch and open a PR with a clear title,
+summary, and link to the issue.`,
+      skills: ["github"],
     },
 
     notify: {
       name: "Notify Team",
-      instruction: `Send a notification summarizing the triage result:
-
-1. Include: alert summary, severity, root cause (1-2 sentences), and a link to the created issue.
-2. For critical/high severity, make the notification urgent.
-3. For medium/low, a standard notification is fine.
-
-Use whichever notification channel is available to you.`,
+      instruction: `Send a notification summarizing the triage result.
+Include: severity, root cause, and links to created issues or PRs.`,
       skills: ["slack", "notification"],
-    },
-
-    skip: {
-      name: "Skip — Duplicate or Low Priority",
-      instruction: `This alert was determined to be a duplicate or low-priority.
-Log a brief note about why it was skipped. No further action needed.`,
-      skills: [],
     },
   },
 
   edges: [
+    { from: "prepare", to: "gather" },
     { from: "gather", to: "investigate" },
     {
       from: "investigate",
       to: "create_issue",
-      when: "The issue is novel (not a duplicate) and severity is medium or higher",
+      when: "novel_count is greater than 0 AND highest_severity is medium or higher",
     },
     {
       from: "investigate",
       to: "skip",
-      when: "The issue is a duplicate of an existing ticket, or severity is low",
+      when: "novel_count is 0, OR highest_severity is low",
     },
-    { from: "create_issue", to: "notify" },
+    {
+      from: "create_issue",
+      to: "implement",
+      when: "at least one novel finding has fix_complexity simple or moderate AND fix_approach is provided",
+    },
+    {
+      from: "create_issue",
+      to: "notify",
+      when: "all novel findings have fix_complexity complex, OR no clear fix_approach",
+    },
+    { from: "skip", to: "notify" },
+    { from: "implement", to: "create_pr" },
+    { from: "create_pr", to: "notify" },
   ],
 };
 ```
@@ -138,40 +143,90 @@ Log a brief note about why it was skipped. No further action needed.`,
 
 | Node | Name | Skills | Structured output? |
 |------|------|--------|--------------------|
+| `prepare` | Load Rules & Context | `linear` | No |
 | `gather` | Gather Context | `github`, `sentry`, `datadog`, `betterstack`, `linear` | No |
-| `investigate` | Root Cause Analysis | `github` | Yes |
-| `create_issue` | Create Issue | `linear`, `github` | No |
+| `investigate` | Root Cause Analysis | `github`, `linear` | Yes |
+| `create_issue` | Create Issues & Triage Duplicates | `linear`, `github` | No |
+| `skip` | Skip — All Duplicates or Low Priority | `linear`, `github` | No |
+| `implement` | Implement Fix | `github` | No |
+| `create_pr` | Open Pull Request | `github` | No |
 | `notify` | Notify Team | `slack`, `notification` | No |
-| `skip` | Skip -- Duplicate or Low Priority | (none) | No |
 
 ## The `investigate` output schema
 
-The `investigate` node is the only node with a structured output schema. This is what makes conditional routing work -- Claude's analysis is forced into a predictable shape:
+The `investigate` node produces a **findings array** — one entry per distinct issue found. Each finding is independently classified as novel or duplicate. The `novel_count` and `highest_severity` fields drive routing.
+
+```json
+{
+  "findings": [
+    {
+      "title": "NullPointerException in PaymentService.processRefund",
+      "root_cause": "Missing null check on refund.metadata after API v2 migration",
+      "severity": "high",
+      "affected_services": ["payment-api"],
+      "is_duplicate": false,
+      "duplicate_of": null,
+      "fix_approach": "Add null guard in processRefund() before accessing metadata.refundId",
+      "fix_complexity": "simple"
+    },
+    {
+      "title": "Slow query timeout on /api/orders endpoint",
+      "root_cause": "Missing index on orders.created_at after schema migration",
+      "severity": "medium",
+      "is_duplicate": true,
+      "duplicate_of": "ENG-456",
+      "fix_approach": "Add composite index on (user_id, created_at)",
+      "fix_complexity": "simple"
+    }
+  ],
+  "novel_count": 1,
+  "highest_severity": "high",
+  "recommendation": "Create issue for the payment bug, +1 the orders query issue"
+}
+```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `root_cause` | string | Yes | What caused the alert |
-| `severity` | enum: `critical`, `high`, `medium`, `low` | Yes | Impact level |
-| `affected_services` | string[] | No | Which services are impacted |
-| `is_duplicate` | boolean | No | Whether this matches an existing ticket |
-| `duplicate_of` | string | No | Issue ID if duplicate |
-| `recommendation` | string | Yes | What to do about it |
-| `fix_approach` | string | No | How to fix the root cause |
+| `findings` | array | Yes | All issues found (novel and duplicate) |
+| `findings[].title` | string | Yes | Short description |
+| `findings[].root_cause` | string | Yes | What caused it |
+| `findings[].severity` | `critical` \| `high` \| `medium` \| `low` | Yes | Impact level |
+| `findings[].affected_services` | string[] | No | Impacted services |
+| `findings[].is_duplicate` | boolean | Yes | Whether this matches an existing ticket |
+| `findings[].duplicate_of` | string | No | Existing issue ID/URL if duplicate |
+| `findings[].fix_approach` | string | No | How to fix it |
+| `findings[].fix_complexity` | `simple` \| `moderate` \| `complex` | No | Estimated fix effort |
+| `novel_count` | number | Yes | Count of non-duplicate findings |
+| `highest_severity` | `critical` \| `high` \| `medium` \| `low` | Yes | Highest severity across all findings |
+| `recommendation` | string | Yes | What should happen next |
 
 ## Conditional routing
 
-After `investigate` completes, the executor asks Claude to evaluate two conditions against the structured output:
+The workflow has three conditional branch points:
 
-- **To `create_issue`**: "The issue is novel (not a duplicate) and severity is medium or higher"
-- **To `skip`**: "The issue is a duplicate of an existing ticket, or severity is low"
+### After `investigate`
 
-Because `investigate` produces structured data with `severity`, `is_duplicate`, and `recommendation` fields, Claude has concrete values to evaluate the conditions against. A `severity: "low"` result routes to `skip`. A `severity: "high"` with `is_duplicate: false` routes to `create_issue`.
+| Target | Condition |
+|--------|-----------|
+| `create_issue` | `novel_count > 0` AND `highest_severity` is medium or higher |
+| `skip` | `novel_count == 0` OR `highest_severity` is low |
+
+### After `create_issue`
+
+| Target | Condition |
+|--------|-----------|
+| `implement` | At least one novel finding has `fix_complexity` simple or moderate AND a `fix_approach` |
+| `notify` | All novel findings are complex, or no clear fix approach |
+
+The `skip` node always routes to `notify` (unconditional).
+
+### Duplicate detection
+
+The novelty check is a critical part of the `investigate` node. Claude must search **both open and closed issues** in the issue tracker using multiple keyword variations. A finding is a duplicate if an existing issue covers the same root cause, error pattern, or affected service. This prevents SWEny from filing the same ticket repeatedly.
 
 ## Provider-agnostic design
 
 The triage workflow lists **all compatible skills per category** in each node. At runtime, only the skills that are actually configured (with valid credentials) are available. This means the same workflow works whether you use Datadog or Sentry for observability, Linear or GitHub Issues for tracking, and Slack or Discord for notifications.
-
-Skill categories used by the triage workflow:
 
 | Category | Skills | Purpose |
 |----------|--------|---------|
