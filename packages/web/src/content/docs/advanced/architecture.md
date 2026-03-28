@@ -28,7 +28,7 @@ This means you can see exactly which node ran, what tools were called, and how l
 
 At each node, Claude operates as a full agent. It receives an instruction (what to accomplish), a set of tools (from the node's skills), and context (results from prior nodes). Claude reasons, calls tools, and produces a result. The executor treats this as a black box — it only cares about the output.
 
-Claude runs via headless [Claude Code](https://docs.anthropic.com/en/docs/claude-code) through the `@anthropic-ai/claude-agent-sdk`. This is the only supported LLM backend. It gives Claude access to the file system, terminal, and any MCP servers you configure — not just API tool calls.
+By default, Claude runs via headless [Claude Code](https://docs.anthropic.com/en/docs/claude-code) through the `@anthropic-ai/claude-agent-sdk`. This gives Claude access to the file system, terminal, and any MCP servers you configure — not just API tool calls. Alternative coding agents (OpenAI Codex, Google Gemini) can be selected via `coding-agent-provider` for the implementation phase, but Claude remains the default and most-tested backend.
 
 ## Why this matters
 

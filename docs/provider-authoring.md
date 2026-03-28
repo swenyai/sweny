@@ -1,16 +1,27 @@
-# Provider Authoring Guide
+# Provider Authoring Guide (DEPRECATED — see Skills)
 
-> **Read `docs/architecture.md` before writing a new provider.**
-> Most new integrations should be MCP server configs, not custom providers.
-> Only write a provider when the recipe needs a typed return value from the operation.
+> **This document is outdated.** Providers have been replaced by **skills** in `@sweny-ai/core`.
+>
+> For current documentation, see:
+> - **[Skills Overview](https://docs.sweny.ai/skills/)** — How skills work and the built-in catalog
+> - **[MCP Servers](https://docs.sweny.ai/advanced/mcp-servers/)** — Auto-injection and custom MCP configuration
+> - **[Architecture](https://docs.sweny.ai/advanced/architecture/)** — Skills vs. providers design decision
+>
+> The conceptual guidance below (Provider vs. MCP server decision tree) is still valid — just substitute "skill" for "provider" and "node" for "step."
 
 ---
 
-## Should This Be a Provider or an MCP Server?
+> **Read `docs/architecture.md` before writing a new skill.**
+> Most new integrations should be MCP server configs, not custom skills.
+> Only write a skill when a workflow node needs a typed return value from the operation.
 
-**Write a provider when:**
-- A recipe step calls the operation and needs the response (e.g., `createIssue` returns an issue ID the next step uses)
-- The operation is deterministic and must succeed before the recipe continues
+---
+
+## Should This Be a Skill or an MCP Server?
+
+**Write a skill when:**
+- A workflow node calls the operation and needs the response (e.g., `create_issue` returns an issue ID the next node uses)
+- The operation is deterministic and must succeed before the workflow continues
 - You need to validate the result, not just hope the agent did it
 
 **Configure an MCP server when:**

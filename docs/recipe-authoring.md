@@ -1,4 +1,15 @@
-# Recipe Authoring Guide
+# Recipe Authoring Guide (DEPRECATED)
+
+> **This document is outdated.** The recipe/state/provider model has been replaced by the workflow/node/edge/skill model in `@sweny-ai/core`.
+>
+> For current documentation, see:
+> - **[Custom Workflows](https://docs.sweny.ai/workflows/custom/)** — Build workflows in YAML or Studio
+> - **[YAML Reference](https://docs.sweny.ai/workflows/yaml-reference/)** — Full workflow schema
+> - **[How Workflows Work](https://docs.sweny.ai/workflows/)** — Execution model and concepts
+>
+> The content below is preserved for historical reference only.
+
+---
 
 A **recipe** is a named, typed DAG of states. The engine walks the graph, executing each state in turn, and uses explicit `on:` transitions (or a `next` default) to decide what runs next.
 

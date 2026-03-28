@@ -1,12 +1,14 @@
 # SWEny Studio
 
-Studio is the visual editor and execution monitor for SWEny recipes. It lets you inspect, edit, simulate, and monitor recipe DAGs in a browser — with no backend required for design and simulation.
+> **Current documentation lives at [docs.sweny.ai/studio/](https://docs.sweny.ai/studio/).** This file is kept for developer reference but the docs site is the canonical source.
+
+Studio is the visual editor and execution monitor for SWEny workflows. It lets you inspect, edit, simulate, and monitor workflow DAGs in a browser — with no backend required for design and simulation.
 
 ---
 
 ## Overview
 
-Studio consumes `RecipeDefinition` (the same pure-data type the engine executes) and renders it as an interactive graph. Nodes are color-coded by phase, edges show transition outcomes, and execution state is overlaid in real time.
+Studio consumes `Workflow` (the same pure-data type the executor runs) and renders it as an interactive graph. Nodes show their skills and status, edges show routing conditions, and execution state is overlaid in real time.
 
 Three modes:
 

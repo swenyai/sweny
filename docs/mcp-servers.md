@@ -1,7 +1,9 @@
 # MCP Server Catalog
 
+> **Current documentation lives at [docs.sweny.ai/advanced/mcp-servers/](https://docs.sweny.ai/advanced/mcp-servers/).** This file is kept for developer reference but the docs site is the canonical source.
+
 MCP (Model Context Protocol) servers extend the coding agent with additional tools — letting it query
-GitHub, read log files, or reach internal APIs without you writing any provider code.
+GitHub, read log files, or reach internal APIs without you writing any skill code.
 
 Pass servers via the `mcp-servers` action input or the `SWENY_MCP_SERVERS` environment variable (CLI).
 The value is a JSON object where each key is a name you choose and each value is an

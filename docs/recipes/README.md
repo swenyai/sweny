@@ -1,12 +1,12 @@
-# SWEny Recipe Library
+# SWEny Configuration Library
 
 Ready-to-use stack configurations — copy, paste, and go.
 
-Each recipe includes a `.sweny.yml` snippet, the required environment variables, and a GitHub Actions workflow you can drop into your repo.
+Each example includes a `.sweny.yml` snippet, the required environment variables, and a GitHub Actions workflow you can drop into your repo.
 
-## Recipes
+## Examples
 
-| Recipe | App | Observability | Issue Tracker |
+| Configuration | App | Observability | Issue Tracker |
 |--------|-----|---------------|---------------|
 | [Rails + Sentry + GitHub Issues](./rails-sentry-github.md) | Ruby on Rails | Sentry | GitHub Issues |
 | [Next.js + Datadog + Linear](./nextjs-datadog-linear.md) | Next.js / Node | Datadog | Linear |
@@ -16,7 +16,7 @@ Each recipe includes a `.sweny.yml` snippet, the required environment variables,
 
 ## Quick orientation
 
-Every recipe follows the same three-step flow:
+Every configuration follows the same three-step flow:
 
 1. Add `.sweny.yml` to your repo root — sets providers and investigation parameters.
 2. Add secrets to your CI environment (or a local `.env` file you never commit).
@@ -24,7 +24,7 @@ Every recipe follows the same three-step flow:
 
 SWEny triages errors, opens GitHub Issues or Linear tickets, and (when `review-mode: auto`) opens a fix PR automatically.
 
-## Choosing a recipe
+## Choosing a configuration
 
 - **Small team, GitHub-native** — [Rails + Sentry](./rails-sentry-github.md) or [Node.js + Loki](./node-loki-github.md) keep everything inside GitHub.
 - **Datadog shop** — [Next.js + Datadog + Linear](./nextjs-datadog-linear.md) is the simplest starting point; the [monorepo variant](./monorepo-datadog-linear.md) adds a service map for multi-service scoping.

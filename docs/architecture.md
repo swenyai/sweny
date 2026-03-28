@@ -22,22 +22,22 @@ Neither replaces the other. A fully agentic system with MCP tools is powerful bu
 
 ```
 ┌─ ORCHESTRATION LAYER (sweny workflow DAG) ──────────────────────────┐
-│  Deterministic execution, structured data handoffs, step validation  │
+│  Deterministic execution, structured data handoffs, node validation   │
 │                                                                       │
-│  dedup-check → verify-access → build-context → investigate           │
-│  → novelty-gate → create-issue → cross-repo-check                    │
-│  → implement-fix → create-pr → notify                                │
+│  prepare → gather → investigate → create_issue → implement           │
+│  → create_pr → notify                                                │
+│  (with conditional routing: investigate → skip, create_issue → notify)│
 │                                                                       │
-│  Steps that need structured returns (Issue ID, PR URL) use           │
-│  thin native providers. Steps that need reasoning use agents.         │
+│  Each node gives Claude an instruction + skills (tools).             │
+│  The executor routes between nodes via conditional edges.             │
 └──────────────────────────────────────────────────────────────────────┘
 
-┌─ AGENT LAYER (inside investigate / implement-fix steps) ────────────┐
-│  LLM reasoning + MCP tool access                                     │
+┌─ AGENT LAYER (inside each node) ────────────────────────────────────┐
+│  LLM reasoning + tool access (skills + MCP servers)                  │
 │                                                                       │
 │  Agent (Claude / Codex / Gemini) receives:                           │
-│  - A focused prompt describing the task                              │
-│  - MCP servers injected as available tools                           │
+│  - A focused instruction describing the task                         │
+│  - Skill tools + MCP servers injected as available tools             │
 │                                                                       │
 │  Agent can use Datadog MCP, Linear MCP, GitHub MCP, etc.            │
 │  directly — WE DO NOT CALL THESE APIS. THE AGENT DOES.              │
@@ -50,7 +50,7 @@ Neither replaces the other. A fully agentic system with MCP tools is powerful bu
 
 ### The Right Pattern
 
-MCP servers are **configuration passed to the agent**, not backends called by recipe steps.
+MCP servers are **configuration passed to the agent**, not backends called by workflow nodes.
 
 ```yaml
 # .sweny.yml — user configures which MCP servers the agent gets access to
@@ -127,14 +127,14 @@ workspace-tools: slack,notion,pagerduty
 ### The Wrong Pattern (Do Not Rebuild)
 
 ```typescript
-// ❌ WRONG — calling MCP from recipe steps
+// ❌ WRONG — calling MCP from workflow nodes
 const raw = await mcpClient.call("search_issues", { query: "TypeError" });
 const issues = parseResponse(raw);
 
-// ❌ WRONG — npx in MCPClient (when SWEny itself acts as MCP client from recipe steps)
+// ❌ WRONG — npx in MCPClient (when SWEny itself acts as MCP client)
 new StdioClientTransport({ command: "npx", args: ["-y", "@linear/mcp"] })
 // npx -y has no lockfile, no security audit, slow cold start
-// For the coding agent's mcpServers config, npx is acceptable since the agent handles spawning
+// For the coding agent's MCP config, npx is acceptable since the agent handles spawning
 
 // ❌ WRONG — custom observability providers for data the agent can get via MCP
 registry.set("observability", datadog({ apiKey, appKey }));
@@ -149,14 +149,14 @@ Not all providers are equal. Two fundamentally different kinds:
 
 ### Type A: Thin Orchestration Providers (Keep These)
 
-These are called by **workflow steps**, return **structured data** that subsequent steps depend on, and cannot be replaced by agent reasoning because the workflow needs typed return values.
+These are called by **workflow nodes**, return **structured data** that subsequent nodes depend on, and cannot be replaced by agent reasoning because the workflow needs typed return values.
 
-| Provider | Operation | Why It Must Be Deterministic |
+| Skill | Operation | Why It Must Be Deterministic |
 |---|---|---|
-| `issueTracker` | `createIssue()` | Returns `{ identifier, url }` used by implement-fix |
-| `issueTracker` | `updateIssue()` | State mutation with known outcome |
-| `sourceControl` | `createPullRequest()` | Returns `{ prUrl, prNumber }` used by notify |
-| `notification` | `send()` | Final output step, must succeed reliably |
+| `linear` / `github` | `create_issue` | Returns `{ identifier, url }` used by implement node |
+| `linear` / `github` | `update_issue` | State mutation with known outcome |
+| `github` | `create_pr` | Returns `{ prUrl, prNumber }` used by notify node |
+| `slack` / `notification` | `send` | Final output node, must succeed reliably |
 
 These providers are **thin** — 20–50 lines. They are not feature-complete API clients. They implement exactly what the workflow needs and nothing more.
 
@@ -164,7 +164,7 @@ All Type A providers expose a `configSchema: ProviderConfigSchema` field declari
 
 ### Type B: Agent Tool Access (Use MCP, Not Providers)
 
-These are accessed by **the agent during reasoning** to gather information, not by workflow steps that need structured returns. The agent calls them as MCP tools.
+These are accessed by **the agent during reasoning** to gather information, not by workflow nodes that need structured returns. The agent calls them as MCP tools.
 
 | Category | Examples | Correct Approach |
 |---|---|---|
@@ -195,18 +195,18 @@ interface ProviderConfigSchema {
 }
 ```
 
-`runWorkflow()` reads `uses: string[]` from each `StepDefinition`, looks up the registered provider, and collects all required fields. Before step 1 executes it throws `WorkflowConfigError` listing **all** missing env vars grouped by step — never one at a time.
+The executor reads `skills: string[]` from each node definition, looks up the registered skill, and collects all required config fields. Before the first node executes it throws listing **all** missing env vars grouped by node — never one at a time.
 
 ```
-WorkflowConfigError: Missing required configuration for workflow "triage":
-  step "build-context" (Datadog):  DD_API_KEY, DD_APPLICATION_KEY
-  step "create-issue" (Linear):    LINEAR_API_KEY
-  step "create-pr" (GitHub):       GITHUB_TOKEN
+Missing required configuration for workflow "triage":
+  node "gather" (Datadog):    DD_API_KEY, DD_APP_KEY
+  node "create_issue" (Linear): LINEAR_API_KEY
+  node "create_pr" (GitHub):  GITHUB_TOKEN
 ```
 
 **Rules:**
-- Validate ALL steps upfront (even conditionally-reached ones) — you want to know about missing config before the 45-minute investigation step, not after
-- Steps without `uses` are skipped in pre-flight
+- Validate ALL nodes upfront (even conditionally-reached ones) — you want to know about missing config before the 45-minute investigation node, not after
+- Nodes without skills are skipped in pre-flight
 - Providers without `configSchema` are skipped (validation is additive/opt-in)
 - `required: false` fields are never validated (they have defaults)
 
