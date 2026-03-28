@@ -54,68 +54,84 @@ Be thorough — the investigation step depends on complete context. Use every to
 
     investigate: {
       name: "Root Cause Analysis",
-      instruction: `Based on the gathered context, perform a root cause analysis:
+      instruction: `Based on the gathered context, classify every distinct issue you found into one of two buckets: **novel** or **duplicate**.
 
-1. Correlate the error with recent code changes, deploys, or config changes.
-2. Identify the most likely root cause.
-3. Assess severity: critical (service down), high (major feature broken), medium (degraded), low (cosmetic/minor).
-4. Determine affected services and users.
-5. Recommend a fix approach.
-6. Assess fix complexity: "simple" (a few lines, clear change), "moderate" (multiple files but well-understood), or "complex" (architectural, risky, or unclear).
+For EACH issue found:
+1. Identify the root cause and affected code/service.
+2. Assess severity: critical (service down), high (major feature broken), medium (degraded), low (cosmetic/minor).
+3. Assess fix complexity: "simple" (a few lines, clear change), "moderate" (multiple files but well-understood), or "complex" (architectural, risky, or unclear).
+4. **Novelty check (REQUIRED):** Search the issue tracker for existing issues (BOTH open AND closed) that cover the same root cause, error pattern, or affected service. Use github_search_issues and/or linear_search_issues with multiple keyword variations.
+   - A match = same root cause, same error message/pattern, or a human would call it "the same bug."
+   - If matched → it's a **duplicate**. Record the existing issue ID.
+   - If no match → it's **novel**.
 
-**Novelty check (REQUIRED — you MUST do this before finishing):**
-Search the issue tracker for existing issues (BOTH open AND closed) that cover the same root cause, error pattern, or affected service. Use github_search_issues and/or linear_search_issues with multiple keyword variations.
+**Output rules:**
+- \`findings\`: array of ALL issues found (both novel and duplicate).
+- \`novel_count\`: how many findings are novel (not duplicates).
+- \`highest_severity\`: the highest severity across ALL findings.
+- \`recommendation\`: what should happen next.
 
-A match means ANY of:
-- An issue about the same root cause (even if closed/fixed)
-- An issue about the same error message or pattern in the same service
-- An issue that a human would consider "the same bug"
-
-Set is_duplicate=true if ANY match is found. Set is_duplicate=false ONLY if you searched and found zero matches. You MUST always set this field.`,
+Downstream nodes will act ONLY on novel findings. Duplicates will be +1'd automatically.`,
       skills: ["github", "linear"],
       output: {
         type: "object",
         properties: {
-          root_cause: { type: "string" },
-          severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
-          affected_services: { type: "array", items: { type: "string" } },
-          is_duplicate: { type: "boolean" },
-          duplicate_of: { type: "string", description: "Issue ID/URL if duplicate" },
+          findings: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Short description of the issue" },
+                root_cause: { type: "string" },
+                severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
+                affected_services: { type: "array", items: { type: "string" } },
+                is_duplicate: { type: "boolean" },
+                duplicate_of: { type: "string", description: "Existing issue ID/URL if duplicate" },
+                fix_approach: { type: "string" },
+                fix_complexity: { type: "string", enum: ["simple", "moderate", "complex"] },
+              },
+              required: ["title", "root_cause", "severity", "is_duplicate"],
+            },
+          },
+          novel_count: { type: "number", description: "Count of novel (non-duplicate) findings" },
+          highest_severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
           recommendation: { type: "string" },
-          fix_approach: { type: "string" },
-          fix_complexity: { type: "string", enum: ["simple", "moderate", "complex"] },
         },
-        required: ["root_cause", "severity", "is_duplicate", "recommendation"],
+        required: ["findings", "novel_count", "highest_severity", "recommendation"],
       },
     },
 
     create_issue: {
-      name: "Create Issue",
-      instruction: `Create an issue documenting the investigation findings:
+      name: "Create Issues & Triage Duplicates",
+      instruction: `Process ALL findings from the investigation. The findings array contains both novel and duplicate issues.
 
-1. Use a clear, actionable title.
+**For each NOVEL finding** (is_duplicate = false):
+1. Create a new issue with a clear, actionable title.
 2. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
 3. Add appropriate labels (bug, severity level, affected service).
 4. Link to relevant commits, PRs, or existing issues.
 
-**Safety check**: If during creation you notice a very similar issue already exists, add a comment to it using github_add_comment or linear_add_comment instead of creating a duplicate.
+**For each DUPLICATE finding** (is_duplicate = true):
+1. Find the existing issue using the issue tracker (check duplicate_of field).
+2. Add a comment: "+1 — SWEny triage confirmed this issue is still active (seen again at {current UTC timestamp}). Latest context: {1-2 sentence summary}."
+3. If the existing issue is closed/done, reopen it or note in the comment that the bug has recurred.
 
-If context.issueTemplate is provided, use it as the format for the issue body. Otherwise use a clear structure with: Summary, Root Cause, Impact, Steps to Reproduce, and Recommended Fix.
+If context.issueTemplate is provided, use it as the format for new issue bodies. Otherwise use a clear structure with: Summary, Root Cause, Impact, Steps to Reproduce, and Recommended Fix.
 
-Create the issue in whichever tracker is available to you.`,
+Use whichever issue tracker is available to you. Output the created/updated issue identifiers.`,
       skills: ["linear", "github"],
     },
 
     skip: {
-      name: "Skip — Duplicate or Low Priority",
-      instruction: `This alert was determined to be a duplicate or low-priority.
+      name: "Skip — All Duplicates or Low Priority",
+      instruction: `Every finding from the investigation was either a duplicate or low-priority. No new issues need to be created.
 
-If this is a **duplicate** of an existing issue (check context for duplicate_of):
-1. Find the existing issue using the issue tracker tools.
+For each **duplicate** finding (check the findings array for items where is_duplicate = true):
+1. Find the existing issue using the issue tracker (check duplicate_of field).
 2. Add a comment: "+1 — SWEny triage confirmed this issue is still active (seen again at {current UTC timestamp}). Latest context: {1-2 sentence summary of what was found this run}."
 3. If the issue is closed/done, reopen it or note in the comment that the bug has recurred.
 
-If this is just **low priority**, log a brief note about why it was skipped.`,
+For **low priority** findings, log a brief note about why they were skipped.`,
       skills: ["linear", "github"],
     },
 
@@ -170,47 +186,36 @@ Use whichever notification channel is available to you.`,
     // gather → investigate (always)
     { from: "gather", to: "investigate" },
 
-    // investigate → create_issue (if novel and actionable)
+    // investigate → create_issue (any novel findings worth acting on)
     {
       from: "investigate",
       to: "create_issue",
-      when: "is_duplicate is false AND severity is medium or higher",
+      when: "novel_count is greater than 0 AND highest_severity is medium or higher",
     },
 
-    // investigate → skip (if duplicate or low priority)
+    // investigate → skip (everything is a duplicate or low priority)
     {
       from: "investigate",
       to: "skip",
-      when: "is_duplicate is true, OR severity is low",
+      when: "novel_count is 0, OR highest_severity is low",
     },
 
-    // create_issue → implement (if fix is clear and not too complex)
+    // create_issue → implement (novel findings have a clear, feasible fix)
     {
       from: "create_issue",
       to: "implement",
-      when: "fix_complexity is simple or moderate AND fix_approach is provided AND dryRun is not true",
+      when: "at least one novel finding has fix_complexity simple or moderate AND fix_approach is provided AND dryRun is not true",
     },
 
-    // create_issue → notify (if fix is too complex or risky, or dry run)
+    // create_issue → notify (fixes too complex or dry run)
     {
       from: "create_issue",
       to: "notify",
-      when: "fix_complexity is complex, OR no clear fix_approach, OR dryRun is true",
+      when: "all novel findings have fix_complexity complex, OR no clear fix_approach, OR dryRun is true",
     },
 
-    // skip → implement (duplicate exists but has a clear unfixed bug with a simple fix)
-    {
-      from: "skip",
-      to: "implement",
-      when: "is_duplicate is true AND the duplicate issue is still open/unfixed AND fix_complexity is simple or moderate AND fix_approach is provided AND dryRun is not true",
-    },
-
-    // skip → notify (duplicate was +1'd, no implementation needed or too complex)
-    {
-      from: "skip",
-      to: "notify",
-      when: "is_duplicate is true AND (fix_complexity is complex OR no fix_approach OR the issue already has a PR in progress OR dryRun is true), OR severity is low",
-    },
+    // skip → notify (nothing to implement — all duplicates +1'd or low priority)
+    { from: "skip", to: "notify" },
 
     // implement → create_pr (always after successful implementation)
     { from: "implement", to: "create_pr" },
