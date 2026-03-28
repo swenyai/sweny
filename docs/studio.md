@@ -14,9 +14,9 @@ Three modes:
 
 | Mode | Description |
 |------|-------------|
-| **Design** | Edit the recipe graph — add/remove states, configure transitions and properties |
-| **Simulate** | Run the recipe locally in the browser with mock providers |
-| **Live** | Connect to a running engine instance and watch execution in real time |
+| **Design** | Edit the workflow graph — add/remove nodes, configure edges and properties |
+| **Simulate** | Run the workflow locally in the browser with mock skills |
+| **Live** | Connect to a running executor instance and watch execution in real time |
 
 ---
 

@@ -112,7 +112,8 @@ investigate:
           required: [title, root_cause, severity, is_duplicate]
       novel_count: { type: number }
       highest_severity: { type: string, enum: [critical, high, medium, low] }
-    required: [findings, novel_count, highest_severity]
+      recommendation: { type: string }
+    required: [findings, novel_count, highest_severity, recommendation]
 ```
 
 This is how the triage workflow's conditional routing works: the `investigate` node outputs a `findings` array where each item is classified as novel or duplicate. The `novel_count` and `highest_severity` fields drive edge conditions.

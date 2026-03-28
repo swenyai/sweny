@@ -175,11 +175,7 @@ sweny triage --no-cache       # Disable cache for this run
 rm -rf .sweny/cache           # Clear the cache entirely
 ```
 
-You can also reduce the TTL in `.sweny.yml`:
-
-```yaml
-cache-ttl: 0  # Cache never expires (useful for development)
-```
+The default cache TTL is 24 hours (`86400` seconds). For iterative development where you want fresh results every run, use `--no-cache`.
 
 ## Claude produces unexpected results
 

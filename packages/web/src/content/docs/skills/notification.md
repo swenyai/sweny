@@ -11,7 +11,7 @@ The Notification skill handles non-Slack notification channels. It supports gene
 |-------|-------|
 | **ID** | `notification` |
 | **Category** | `notification` |
-| **Required env vars** | At least one of: `NOTIFICATION_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL` |
+| **Required env vars** | At least one of: `NOTIFICATION_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL` (skill also declares `SMTP_URL` for future email support) |
 
 ### Configuration
 

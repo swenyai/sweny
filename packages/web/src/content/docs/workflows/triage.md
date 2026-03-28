@@ -28,7 +28,7 @@ Eight nodes, three conditional branches:
 
 ## Workflow definition
 
-This is the actual definition from `@sweny-ai/core`:
+This is a simplified version of the definition from `@sweny-ai/core` (full instructions are longer in the source):
 
 ```typescript
 import type { Workflow } from "../types.js";
