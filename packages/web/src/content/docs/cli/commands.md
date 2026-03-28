@@ -118,12 +118,16 @@ sweny triage [options]
 
 ### Cache options
 
+The executor caches each completed node's result. If a workflow crashes mid-execution and is restarted, previously completed nodes are loaded from cache instead of re-executed. This saves time and API costs during development and crash recovery.
+
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--cache-dir <path>` | Step cache directory | `.sweny/cache` |
 | `--cache-ttl <seconds>` | Cache TTL in seconds (0 = infinite) | `86400` |
 | `--no-cache` | Disable step cache entirely | -- |
 | `--output-dir <path>` | Output directory for file providers | `.sweny/output` |
+
+Disable caching with `--no-cache` when debugging or when input data has changed but the workflow definition hasn't.
 
 ### Provider-specific options
 

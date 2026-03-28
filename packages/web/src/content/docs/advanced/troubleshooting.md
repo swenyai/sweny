@@ -162,6 +162,25 @@ sweny check
 
 This lists every built-in skill and shows which ones have their credentials configured. Set the missing environment variables for the skills your workflow needs.
 
+## Stale results after code changes
+
+**Symptom:** You changed your workflow or code, but SWEny produces the same results as before.
+
+**Cause:** The executor caches completed node results. If the workflow definition or input hasn't changed enough to invalidate the cache, previous results are reused.
+
+**Fix:**
+
+```bash
+sweny triage --no-cache       # Disable cache for this run
+rm -rf .sweny/cache           # Clear the cache entirely
+```
+
+You can also reduce the TTL in `.sweny.yml`:
+
+```yaml
+cache-ttl: 0  # Cache never expires (useful for development)
+```
+
 ## Claude produces unexpected results
 
 **Symptom:** The investigation is shallow, the implementation misses the point, or the PR changes the wrong files.

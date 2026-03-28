@@ -171,6 +171,60 @@ SWEny Studio is a visual DAG editor. Build workflows by dragging nodes, connecti
 
 See the [Studio docs](/studio/) for details.
 
+## Knowledge injection: rules, context, and templates
+
+You can inject additional knowledge into every node without modifying the workflow definition. The executor prepends this content to each node's instruction before Claude sees it.
+
+### Rules
+
+Rules are engineering standards, incident protocols, or coding guidelines that Claude **must** follow. They are injected with a "You MUST follow these" framing.
+
+**CLI config (`.sweny.yml`):**
+
+```yaml
+rules:
+  - https://company.com/engineering-standards.md
+  - .github/triage-rules.md
+  - "Always create issues in the Backend project"
+```
+
+Rules can be URLs (fetched at runtime), local file paths, or inline text. Multiple entries are concatenated.
+
+### Context
+
+Context is background information — architecture docs, service documentation, deployment guides. Injected with a "Background context" framing.
+
+```yaml
+context:
+  - https://docs.company.com/architecture.md
+  - docs/service-overview.md
+```
+
+### Templates
+
+Templates control how issues and PRs are formatted:
+
+```yaml
+issue-template: .github/ISSUE_TEMPLATE/bug_report.md
+pr-template: .github/pull_request_template.md
+```
+
+When set, Claude uses the template as the format for new issue bodies or PR descriptions. Can be a file path or inline text.
+
+### Injection order
+
+The executor builds each node's instruction in this order:
+
+1. **Rules** — prepended first with `## Rules — You MUST Follow These`
+2. **Context** — prepended second with `## Background Context`
+3. **Node instruction** — the base instruction from the workflow definition
+
+If neither rules nor context is set, the legacy `additional-instructions` field is used as a fallback.
+
+**GitHub Action inputs:** `additional-context` (newline-separated URLs/paths/text), `issue-template`, `pr-template`.
+
+**CLI flag:** `--additional-instructions` for inline text.
+
 ## Running custom workflows
 
 **Validate without running:**
