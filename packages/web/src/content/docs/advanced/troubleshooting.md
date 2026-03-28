@@ -17,14 +17,14 @@ description: Common issues and how to resolve them.
 
 1. Verify the token is set in your environment (GitHub Actions secrets or `.env` for CLI)
 2. Check that the token has the required permissions:
-   - **GitHub** — `repo`, `issues`, `pull-requests` scopes
+   - **GitHub** — Fine-grained PAT (recommended): Contents read/write, Issues read/write, Pull requests read/write. Classic token: `repo` scope
    - **Linear** — API key with write access
    - **Sentry** — auth token with `project:read`, `event:read`, `issue:read` scopes
    - **Datadog** — both `DD_API_KEY` and `DD_APP_KEY` are required (they are different keys)
 3. Regenerate the token if it has expired
 
 :::note[Claude authentication]
-SWEny requires either `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`. The OAuth token uses your Claude Max subscription (predictable monthly cost). The API key uses per-token billing. Set one, not both.
+SWEny requires either `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`. The OAuth token uses your Claude Max subscription (predictable monthly cost). The API key uses per-token billing. If both are set, `CLAUDE_CODE_OAUTH_TOKEN` takes precedence — this prevents a local `.env` from overriding CI-provided credentials.
 :::
 
 ## "Missing required config" error

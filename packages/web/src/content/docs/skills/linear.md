@@ -34,7 +34,12 @@ export LINEAR_API_KEY="lin_api_..."
 The key needs access to the teams and projects SWEny will interact with. Organization-wide keys work, but you can also scope to specific teams if your Linear plan supports it.
 
 :::note[Team ID]
-The `linear_create_issue` tool requires a `teamId` parameter. Claude will use the team ID from the workflow context or prompt. If you are using the GitHub Action, set the `linear-team-id` input so the agent knows which team to file issues under.
+The `linear_create_issue` tool requires a `teamId` parameter — it will not auto-discover your team. Provide it explicitly:
+
+- **GitHub Action:** set the `linear-team-id` input
+- **CLI:** set `--linear-team-id <id>` or `linear-team-id` in `.sweny.yml`
+
+You can find your team ID in **Linear > Settings > Team > General**. Claude also has access to `linear_list_teams`, which it may call to look up the correct ID if you provide a team name in your additional instructions.
 :::
 
 ## Workflow usage

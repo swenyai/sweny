@@ -1,9 +1,9 @@
 ---
 title: Notification
-description: Send notifications via webhook, Discord, Teams, or email.
+description: Send notifications via webhook, Discord, or Teams.
 ---
 
-The Notification skill handles non-Slack notification channels. It supports generic webhooks, Discord, Microsoft Teams, and email — configure whichever channels your team uses. For Slack, use the dedicated [Slack skill](/skills/slack/) instead.
+The Notification skill handles non-Slack notification channels. It supports generic webhooks, Discord, and Microsoft Teams — configure whichever channels your team uses. For Slack, use the dedicated [Slack skill](/skills/slack/) instead.
 
 ## Metadata
 
@@ -11,7 +11,7 @@ The Notification skill handles non-Slack notification channels. It supports gene
 |-------|-------|
 | **ID** | `notification` |
 | **Category** | `notification` |
-| **Required env vars** | None required; configure whichever channels you use |
+| **Required env vars** | At least one of: `NOTIFICATION_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL` |
 
 ### Configuration
 
@@ -22,10 +22,10 @@ All config fields are optional. Set the ones for the channels you want to use.
 | `NOTIFICATION_WEBHOOK_URL` | Generic webhook URL — receives a JSON POST |
 | `DISCORD_WEBHOOK_URL` | Discord webhook URL |
 | `TEAMS_WEBHOOK_URL` | Microsoft Teams webhook URL |
-| `SMTP_URL` | SMTP connection URL for email notifications |
+The skill activates when at least one of the above is set. If none are set, the skill will not appear in the available tool set.
 
-:::note[At least one required]
-While no single env var is marked as required, the skill is only considered configured if at least one of the above is set. If none are set, the skill will not appear in the available tool set.
+:::note[Email notifications]
+Email notifications are available via the GitHub Action's `notification-provider: email` setting with SendGrid (`sendgrid-api-key`, `email-from`, `email-to` inputs). Email is not exposed as a Claude tool — it's handled by the action's notification layer.
 :::
 
 ## Tools

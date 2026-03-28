@@ -16,7 +16,7 @@ Claude, via headless [Claude Code](https://docs.anthropic.com/en/docs/claude-cod
 
 ## What observability tools are supported?
 
-**Built-in skills:** Sentry, Datadog, BetterStack. These have native skill integrations with purpose-built tools.
+**Built-in skills:** Sentry, Datadog, and BetterStack (observability), GitHub (git), Linear (issue tracking), Slack and Notification (notifications). These have native skill integrations with purpose-built tools.
 
 **Via Action inputs:** CloudWatch, Splunk, Elasticsearch, New Relic, Grafana Loki, Honeycomb, Axiom, Prometheus, PagerDuty, OpsGenie, Vercel, Supabase, Netlify, Fly.io, Render, Heroku. Set `observability-provider` to the one you use and add the relevant credentials.
 
@@ -36,8 +36,8 @@ Claude, via headless [Claude Code](https://docs.anthropic.com/en/docs/claude-cod
 
 Yes. Workflows are pure data — YAML or JSON — so you can write them by hand or use Studio's visual editor.
 
-- Write a YAML workflow file and run it with the CLI: `npx @sweny-ai/cli workflow run my-workflow.yml`
-- Export a built-in workflow as a starting point: `npx @sweny-ai/cli workflow export triage`
+- Write a YAML workflow file and run it with the CLI: `sweny workflow run my-workflow.yml`
+- Export a built-in workflow as a starting point: `sweny workflow export triage`
 - Use [Studio](/studio/) to visually build and edit workflows in the browser
 
 See [Custom Workflows](/workflows/custom/) and [YAML Reference](/workflows/yaml-reference/) for the full guide.
