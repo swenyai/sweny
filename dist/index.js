@@ -29313,7 +29313,7 @@ const _summary = new Summary();
  * @deprecated use `core.summary`
  */
 const markdownSummary = (/* unused pure expression or super */ null && (_summary));
-const summary = (/* unused pure expression or super */ null && (_summary));
+const summary = _summary;
 //# sourceMappingURL=summary.js.map
 ;// CONCATENATED MODULE: ../../node_modules/@actions/core/lib/path-utils.js
 
@@ -37700,9 +37700,10 @@ Downstream nodes will act ONLY on novel findings. Duplicates will be +1'd automa
 4. Link to relevant commits, PRs, or existing issues.
 
 **For each DUPLICATE finding** (is_duplicate = true):
-1. Find the existing issue using the issue tracker (check duplicate_of field).
-2. Add a comment: "+1 — SWEny triage confirmed this issue is still active (seen again at {current UTC timestamp}). Latest context: {1-2 sentence summary}."
-3. If the existing issue is closed/done, reopen it or note in the comment that the bug has recurred.
+1. Find the existing issue (check duplicate_of field).
+2. Check the issue's comments — if the most recent comment is already from SWEny (contains "+1") within the last 24 hours, skip adding another comment.
+3. Otherwise add a SHORT comment: "+1 — seen again {UTC timestamp}. {one sentence of new context}." (Keep it under 2 lines. No markdown headers, no emoji, no formatting.)
+4. If the existing issue is closed/done, reopen it.
 
 If context.issueTemplate is provided, use it as the format for new issue bodies. Otherwise use a clear structure with: Summary, Root Cause, Impact, Steps to Reproduce, and Recommended Fix.
 
@@ -37714,9 +37715,10 @@ Use whichever issue tracker is available to you. Output the created/updated issu
             instruction: `Every finding from the investigation was either a duplicate or low-priority. No new issues need to be created.
 
 For each **duplicate** finding (check the findings array for items where is_duplicate = true):
-1. Find the existing issue using the issue tracker (check duplicate_of field).
-2. Add a comment: "+1 — SWEny triage confirmed this issue is still active (seen again at {current UTC timestamp}). Latest context: {1-2 sentence summary of what was found this run}."
-3. If the issue is closed/done, reopen it or note in the comment that the bug has recurred.
+1. Find the existing issue (check duplicate_of field).
+2. Check the issue's comments — if the most recent comment is already from SWEny (contains "+1") within the last 24 hours, skip adding another comment.
+3. Otherwise add a SHORT comment: "+1 — seen again {UTC timestamp}. {one sentence of new context}." (Keep it under 2 lines. No markdown headers, no emoji, no formatting.)
+4. If the issue is closed/done, reopen it.
 
 For **low priority** findings, log a brief note about why they were skipped.`,
             skills: ["linear", "github"],
@@ -38367,6 +38369,7 @@ async function run() {
             logger: actionsLogger,
         });
         setGitHubOutputs(results);
+        await writeJobSummary(results, config);
     }
     catch (error) {
         if (error instanceof Error) {
@@ -38560,6 +38563,116 @@ function setGitHubOutputs(results) {
         setOutput("issue-identifier", String(issueResult.data.issueIdentifier ?? ""));
         setOutput("issue-url", String(issueResult.data.issueUrl ?? ""));
     }
+}
+/** Write a GitHub Actions job summary with structured triage results */
+async function writeJobSummary(results, config) {
+    const lines = [];
+    const isDryRun = config.dryRun;
+    // ── Header ────────────────────────────────────────────────────
+    lines.push(`## ${isDryRun ? "🔍" : "▲"} SWEny Triage ${isDryRun ? "(Dry Run)" : "Report"}`);
+    lines.push("");
+    // ── Config table ──────────────────────────────────────────────
+    lines.push("| Setting | Value |");
+    lines.push("|---------|-------|");
+    if (config.repository)
+        lines.push(`| Repository | \`${config.repository}\` |`);
+    lines.push(`| Observability | ${config.observabilityProvider} |`);
+    lines.push(`| Issue Tracker | ${config.issueTrackerProvider} |`);
+    lines.push(`| Time Range | ${config.timeRange} |`);
+    lines.push(`| Mode | ${isDryRun ? "dry run" : "live"} |`);
+    if (config.serviceFilter)
+        lines.push(`| Service Filter | \`${config.serviceFilter}\` |`);
+    lines.push("");
+    // ── Workflow path ─────────────────────────────────────────────
+    const nodeNames = [...results.keys()];
+    lines.push(`**Workflow path:** ${nodeNames.map((n) => `\`${n}\``).join(" → ")}`);
+    lines.push("");
+    // ── Findings ──────────────────────────────────────────────────
+    const investigateData = results.get("investigate")?.data;
+    const findings = investigateData?.findings;
+    const novelCount = investigateData?.novel_count ?? 0;
+    const severity = investigateData?.highest_severity;
+    if (findings && findings.length > 0) {
+        lines.push("### Findings");
+        lines.push("");
+        lines.push(`**${findings.length}** finding(s), **${novelCount}** novel, highest severity: **${severity ?? "unknown"}**`);
+        lines.push("");
+        lines.push("| # | Title | Severity | Complexity | Status |");
+        lines.push("|---|-------|----------|------------|--------|");
+        for (let i = 0; i < findings.length; i++) {
+            const f = findings[i];
+            const status = f.is_duplicate ? `dup of ${f.duplicate_of ?? "existing"}` : "novel";
+            lines.push(`| ${i + 1} | ${f.title ?? "—"} | ${f.severity ?? "—"} | ${f.fix_complexity ?? "—"} | ${status} |`);
+        }
+        lines.push("");
+    }
+    else if (investigateData) {
+        lines.push("### Findings");
+        lines.push("");
+        lines.push("No actionable findings detected.");
+        lines.push("");
+    }
+    // ── Actions taken ─────────────────────────────────────────────
+    const issueData = results.get("create_issue")?.data;
+    const prData = results.get("create_pr")?.data;
+    const skipData = results.get("skip")?.data;
+    if (issueData || prData) {
+        lines.push("### Actions Taken");
+        lines.push("");
+        if (issueData?.issueIdentifier) {
+            const url = issueData.issueUrl;
+            const title = issueData.issueTitle;
+            const link = url ? `[${issueData.issueIdentifier}](${url})` : String(issueData.issueIdentifier);
+            lines.push(`- **Issue created:** ${link}${title ? ` — ${title}` : ""}`);
+        }
+        if (prData?.prUrl) {
+            const link = `[#${prData.prNumber ?? ""}](${prData.prUrl})`;
+            lines.push(`- **PR opened:** ${link}`);
+        }
+        lines.push("");
+    }
+    else if (skipData) {
+        lines.push("### Result");
+        lines.push("");
+        lines.push("No action taken — all findings were duplicates or low priority.");
+        lines.push("");
+    }
+    // ── Dry run notice ────────────────────────────────────────────
+    if (isDryRun) {
+        lines.push("> **Dry run mode** — no issues, PRs, or notifications were created.");
+        lines.push("");
+    }
+    // ── Recommendation ────────────────────────────────────────────
+    const rec = investigateData?.recommendation;
+    if (rec) {
+        lines.push(`**Recommendation:** ${rec}`);
+        lines.push("");
+    }
+    // ── Node details (collapsible) ────────────────────────────────
+    lines.push("<details><summary>Node execution details</summary>");
+    lines.push("");
+    for (const [nodeId, result] of results) {
+        const status = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "—";
+        lines.push(`#### ${status} \`${nodeId}\` (${result.toolCalls.length} tool calls)`);
+        lines.push("");
+        if (result.toolCalls.length > 0) {
+            lines.push("| Tool | Input (truncated) |");
+            lines.push("|------|-------------------|");
+            for (const tc of result.toolCalls.slice(0, 20)) {
+                const input = summarizeInput(tc.input);
+                lines.push(`| \`${tc.tool}\` | ${input.slice(0, 100) || "—"} |`);
+            }
+            if (result.toolCalls.length > 20) {
+                lines.push(`| ... | ${result.toolCalls.length - 20} more tool calls |`);
+            }
+            lines.push("");
+        }
+    }
+    lines.push("</details>");
+    lines.push("");
+    // Write to GITHUB_STEP_SUMMARY
+    const md = lines.join("\n");
+    await summary.addRaw(md).write();
 }
 run();
 
