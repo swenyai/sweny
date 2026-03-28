@@ -26,6 +26,8 @@ export interface WorkflowViewerProps {
   height?: string | number;
   /** Called when the user clicks a node. */
   onNodeClick?: (nodeId: string) => void;
+  /** Show the minimap overlay. Defaults to true. */
+  showMiniMap?: boolean;
 }
 
 function AutoFitView({ nodeCount }: { nodeCount: number }) {
@@ -51,6 +53,7 @@ export function WorkflowViewer({
   executionState = EMPTY_EXECUTION_STATE,
   height = "100%",
   onNodeClick,
+  showMiniMap = true,
 }: WorkflowViewerProps) {
   const [nodes, setNodes] = useState<StateNodeType[]>([]);
   const [edges, setEdges] = useState<Edge<TransitionEdgeData>[]>([]);
@@ -184,16 +187,18 @@ export function WorkflowViewer({
           showInteractive={false}
           style={{ background: "#0d1827", border: "1px solid #1e3050", borderRadius: 8 }}
         />
-        <MiniMap
-          style={{ background: "#080f1e", border: "1px solid #1e293b", borderRadius: 8 }}
-          maskColor="rgba(8,14,30,0.8)"
-          nodeColor={(node) => {
-            const d = node.data as StateNodeData;
-            if (d?.isEntry) return "#3b82f6";
-            if (d?.isTerminal) return "#10b981";
-            return "#334155";
-          }}
-        />
+        {showMiniMap && (
+          <MiniMap
+            style={{ background: "#080f1e", border: "1px solid #1e293b", borderRadius: 8 }}
+            maskColor="rgba(8,14,30,0.8)"
+            nodeColor={(node) => {
+              const d = node.data as StateNodeData;
+              if (d?.isEntry) return "#3b82f6";
+              if (d?.isTerminal) return "#10b981";
+              return "#334155";
+            }}
+          />
+        )}
       </ReactFlow>
     </div>
   );

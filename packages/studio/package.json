@@ -11,10 +11,15 @@
       "import": "./dist/lib/viewer.js",
       "types": "./dist/lib/types/lib-viewer.d.ts"
     },
+    "./viewer": {
+      "import": "./dist/lib/viewer.js",
+      "types": "./dist/lib/types/lib-viewer.d.ts"
+    },
     "./editor": {
       "import": "./dist/lib/editor.js",
       "types": "./dist/lib/types/lib-editor.d.ts"
-    }
+    },
+    "./style.css": "./dist/lib/style.css"
   },
   "scripts": {
     "dev": "vite",

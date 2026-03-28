@@ -79,7 +79,13 @@ export function LiveModeDemo() {
 
   return (
     <div style={{ position: "relative" }}>
+      {/* Hide minimap and controls — too noisy for a docs demo */}
+      <style>{`
+        .live-mode-demo .react-flow__minimap,
+        .live-mode-demo .react-flow__controls { display: none !important; }
+      `}</style>
       <div
+        className="live-mode-demo"
         style={{
           borderRadius: "8px",
           overflow: "hidden",
