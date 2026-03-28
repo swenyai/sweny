@@ -18,8 +18,8 @@ export const DEFAULT_ISSUE_TEMPLATE = `## Summary
 
 ## Impact
 - **Severity**: <!-- critical / high / medium / low -->
-- **Affected Services**: <!-- list -->
-- **User Impact**: <!-- description -->
+- **Affected Services**: <!-- list affected services or components -->
+- **User Impact**: <!-- description of how users are affected -->
 
 ## Steps to Reproduce
 1. ...
