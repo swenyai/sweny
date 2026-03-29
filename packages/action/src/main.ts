@@ -13,6 +13,7 @@ import {
 import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
 import type { ExecutionEvent, NodeResult } from "@sweny-ai/core";
 import { parseInputs, validateInputs, ActionConfig } from "./config.js";
+import { createCloudStreamReporter } from "./cloud-stream.js";
 
 const actionsLogger = {
   info: core.info,
@@ -94,20 +95,39 @@ async function run(): Promise<void> {
       ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
     };
 
+    // Set up cloud streaming for live DAG visualization
+    const [owner, repo] = (config.repository || process.env.GITHUB_REPOSITORY || "").split("/");
+    const canStream = !!(config.projectToken || process.env.GITHUB_APP_INSTALLATION_ID);
+    const cloudStream = canStream
+      ? createCloudStreamReporter({
+          cloudUrl: "https://cloud.sweny.ai",
+          projectToken: config.projectToken,
+          installationId: process.env.GITHUB_APP_INSTALLATION_ID,
+          owner,
+          repo,
+        })
+      : null;
+
     // Execute workflow
     const results = await execute(workflow, input, {
       skills,
       claude,
-      observer: (event: ExecutionEvent) => handleEvent(event),
+      observer: (event: ExecutionEvent) => {
+        handleEvent(event);
+        cloudStream?.onEvent(event);
+      },
       logger: actionsLogger,
     });
+
+    // Wait for any in-flight streaming events
+    await cloudStream?.flush();
 
     setGitHubOutputs(results);
     await writeJobSummary(results, config);
 
     // Report to SWEny Cloud if project token or GitHub App installation is available
-    if (config.projectToken || process.env.GITHUB_APP_INSTALLATION_ID) {
-      await reportToCloud(config, results, startTime);
+    if (canStream) {
+      await reportToCloud(config, results, startTime, cloudStream?.getRunId() ?? undefined);
     }
   } catch (error) {
     if (error instanceof Error) {
@@ -443,7 +463,12 @@ function getPrNumber(): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
-async function reportToCloud(config: ActionConfig, results: Map<string, NodeResult>, startTime: number): Promise<void> {
+async function reportToCloud(
+  config: ActionConfig,
+  results: Map<string, NodeResult>,
+  startTime: number,
+  streamRunId?: string,
+): Promise<void> {
   const cloudUrl = "https://cloud.sweny.ai";
   const investigateResult = results.get("investigate");
   const prResult = results.get("create_pr");
@@ -452,10 +477,12 @@ async function reportToCloud(config: ActionConfig, results: Map<string, NodeResu
 
   const [owner, repo] = (config.repository || process.env.GITHUB_REPOSITORY || "").split("/");
 
-  const body = {
+  const body: Record<string, unknown> = {
     // Repo identification (for installation auth)
     owner,
     repo,
+    // If we have a run_id from streaming, update instead of insert
+    ...(streamRunId ? { run_id: streamRunId } : {}),
     // Run data
     status: [...results.values()].some((r) => r.status === "failed") ? "failed" : "completed",
     workflow: config.workflow,
