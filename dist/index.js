@@ -37700,10 +37700,9 @@ Downstream nodes will act ONLY on novel findings. Duplicates will be +1'd automa
 4. Link to relevant commits, PRs, or existing issues.
 
 **For each DUPLICATE finding** (is_duplicate = true):
-1. Find the existing issue (check duplicate_of field).
-2. Check the issue's comments — if the most recent comment is already from SWEny (contains "+1") within the last 24 hours, skip adding another comment.
-3. Otherwise add a SHORT comment: "+1 — seen again {UTC timestamp}. {one sentence of new context}." (Keep it under 2 lines. No markdown headers, no emoji, no formatting.)
-4. If the existing issue is closed/done, reopen it.
+1. Find the existing issue using the issue tracker (check duplicate_of field).
+2. Add a comment: "+1 — SWEny triage confirmed this issue is still active (seen again at {current UTC timestamp}). Latest context: {1-2 sentence summary}."
+3. If the existing issue is closed/done, reopen it or note in the comment that the bug has recurred.
 
 If context.issueTemplate is provided, use it as the format for new issue bodies. Otherwise use a clear structure with: Summary, Root Cause, Impact, Steps to Reproduce, and Recommended Fix.
 
@@ -37715,10 +37714,9 @@ Use whichever issue tracker is available to you. Output the created/updated issu
             instruction: `Every finding from the investigation was either a duplicate or low-priority. No new issues need to be created.
 
 For each **duplicate** finding (check the findings array for items where is_duplicate = true):
-1. Find the existing issue (check duplicate_of field).
-2. Check the issue's comments — if the most recent comment is already from SWEny (contains "+1") within the last 24 hours, skip adding another comment.
-3. Otherwise add a SHORT comment: "+1 — seen again {UTC timestamp}. {one sentence of new context}." (Keep it under 2 lines. No markdown headers, no emoji, no formatting.)
-4. If the issue is closed/done, reopen it.
+1. Find the existing issue using the issue tracker (check duplicate_of field).
+2. Add a comment: "+1 — SWEny triage confirmed this issue is still active (seen again at {current UTC timestamp}). Latest context: {1-2 sentence summary of what was found this run}."
+3. If the issue is closed/done, reopen it or note in the comment that the bug has recurred.
 
 For **low priority** findings, log a brief note about why they were skipped.`,
             skills: ["linear", "github"],
@@ -37930,6 +37928,7 @@ function parseInputs() {
         serviceMapPath: getInput("service-map-path") || ".github/service-map.yml",
         githubToken: getInput("github-token"),
         botToken: getInput("bot-token"),
+        projectToken: getInput("project-token"),
         sourceControlProvider: getInput("source-control-provider") || "github",
         jiraBaseUrl: getInput("jira-base-url"),
         jiraEmail: getInput("jira-email"),
@@ -38303,6 +38302,7 @@ const actionsLogger = {
     error: error,
 };
 async function run() {
+    const startTime = Date.now();
     try {
         const config = parseInputs();
         const validationErrors = validateInputs(config);
@@ -38370,6 +38370,10 @@ async function run() {
         });
         setGitHubOutputs(results);
         await writeJobSummary(results, config);
+        // Report to SWEny Cloud if project token is configured
+        if (config.projectToken) {
+            await reportToCloud(config, results, startTime);
+        }
     }
     catch (error) {
         if (error instanceof Error) {
@@ -38673,6 +38677,109 @@ async function writeJobSummary(results, config) {
     // Write to GITHUB_STEP_SUMMARY
     const md = lines.join("\n");
     await summary.addRaw(md).write();
+}
+// ─── Cloud Reporting ────────────────────────────────────────────
+function getPrNumber() {
+    if (process.env.GITHUB_EVENT_NAME !== "pull_request")
+        return undefined;
+    const match = process.env.GITHUB_REF?.match(/refs\/pull\/(\d+)/);
+    return match ? Number(match[1]) : undefined;
+}
+async function reportToCloud(config, results, startTime) {
+    const cloudUrl = "https://cloud.sweny.ai";
+    const investigateResult = results.get("investigate");
+    const prResult = results.get("create_pr");
+    const issueResult = results.get("create_issue");
+    const prNumber = getPrNumber();
+    const body = {
+        status: [...results.values()].some((r) => r.status === "failed") ? "failed" : "completed",
+        workflow: config.workflow,
+        trigger: process.env.GITHUB_EVENT_NAME ?? "manual",
+        pr_number: prNumber,
+        branch: process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME,
+        commit_sha: process.env.GITHUB_SHA,
+        duration_ms: Date.now() - startTime,
+        issues_found: investigateResult?.data?.issuesFound ?? false,
+        recommendation: investigateResult?.data?.recommendation ?? "skip",
+        issue_url: (issueResult?.data?.issueUrl ?? prResult?.data?.issueUrl),
+        pr_url: prResult?.data?.prUrl,
+        issue_identifier: (issueResult?.data?.issueIdentifier ?? prResult?.data?.issueIdentifier),
+        nodes: [...results.entries()].map(([id, r]) => ({
+            id,
+            name: id,
+            status: r.status,
+            durationMs: 0,
+        })),
+        action_version: "4",
+        runner_os: process.env.RUNNER_OS,
+    };
+    try {
+        const res = await fetch(`${cloudUrl}/api/report`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${config.projectToken}`,
+            },
+            body: JSON.stringify(body),
+        });
+        if (res.ok) {
+            const data = (await res.json());
+            info(`\u2601 Reported to SWEny Cloud: ${data.run_url ?? "ok"}`);
+            // Post PR comment if we got one back and this is a PR run
+            if (data.comment && prNumber) {
+                await postPrComment(config, prNumber, data.comment);
+            }
+        }
+        else {
+            warning(`\u2601 Cloud reporting failed: ${res.status}`);
+        }
+    }
+    catch (err) {
+        warning(`\u2601 Cloud reporting failed: ${err}`);
+    }
+}
+async function postPrComment(config, prNumber, body) {
+    const token = config.botToken || config.githubToken;
+    if (!token)
+        return;
+    const repo = config.repository || process.env.GITHUB_REPOSITORY;
+    if (!repo)
+        return;
+    const apiBase = `https://api.github.com/repos/${repo}`;
+    const headers = {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+    };
+    try {
+        // Check for existing SWEny comment to update (avoid duplicates)
+        const listRes = await fetch(`${apiBase}/issues/${prNumber}/comments?per_page=50`, { headers });
+        if (!listRes.ok) {
+            warning("\u2601 Failed to list PR comments");
+            return;
+        }
+        const comments = (await listRes.json());
+        const existing = comments.find((c) => c.body.includes("SWEny Triage Report"));
+        if (existing) {
+            await fetch(`${apiBase}/issues/comments/${existing.id}`, {
+                method: "PATCH",
+                headers,
+                body: JSON.stringify({ body }),
+            });
+            info(`\u2601 Updated SWEny comment on PR #${prNumber}`);
+        }
+        else {
+            await fetch(`${apiBase}/issues/${prNumber}/comments`, {
+                method: "POST",
+                headers,
+                body: JSON.stringify({ body }),
+            });
+            info(`\u2601 Posted SWEny comment on PR #${prNumber}`);
+        }
+    }
+    catch {
+        warning("\u2601 Failed to post PR comment");
+    }
 }
 run();
 
