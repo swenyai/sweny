@@ -1,4 +1,6 @@
-<h1 align="center">SWEny</h1>
+<p align="center">
+  <img src="assets/logo-lockup-dark.svg" alt="SWEny" width="280" />
+</p>
 
 <p align="center">
   <strong>Workflow orchestration for AI-powered engineering.</strong>
