@@ -45,15 +45,16 @@ A SWEny workflow looks like this:
 
 This is the built-in **Triage** workflow. At each node, Claude receives the instruction, the tools from the node's skills, and context from prior nodes. After a node completes, the executor evaluates edge conditions — written in natural language — to decide which node runs next.
 
-## Three ways to run
+## Four ways to run
 
 | Method | Best for | Setup time |
 |--------|----------|------------|
 | **GitHub Action** (recommended) | Scheduled automation in CI | 5 minutes |
 | **CLI** | Local development and testing | 2 minutes |
 | **Studio** | Visual workflow editing and live execution | Browser-based |
+| **[SWEny Cloud](https://app.sweny.ai)** | Teams — dashboard, shared credentials, analytics | 5 minutes |
 
-The GitHub Action is the primary deployment target. It runs on a cron schedule, triggers from `workflow_dispatch`, and writes results to the GitHub Actions summary. The CLI is useful for iterating locally. Studio provides a visual DAG editor built on React Flow.
+The GitHub Action is the primary deployment target. It runs on a cron schedule, triggers from `workflow_dispatch`, and writes results to the GitHub Actions summary. The CLI is useful for iterating locally. Studio provides a visual DAG editor built on React Flow. [SWEny Cloud](https://app.sweny.ai) wraps everything in a managed platform with job history, team credential management, scheduled runs, and cross-repo analytics.
 
 ## Built-in workflows
 
@@ -70,3 +71,4 @@ You can also [build custom workflows](/workflows/custom/) in YAML or with the St
 - **[Core Concepts](/getting-started/concepts/)** — understand workflows, nodes, edges, and skills in depth
 - **[Quick Start](/getting-started/quick-start/)** — get SWEny running in your repo in 5 minutes
 - **[End-to-End Walkthrough](/getting-started/walkthrough/)** — follow a real triage run from error spike to fix PR
+- **[SWEny Cloud](https://app.sweny.ai)** — managed platform with dashboard, team credentials, and analytics

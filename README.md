@@ -10,6 +10,7 @@
   <a href="https://github.com/swenyai/sweny/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/swenyai/sweny?style=flat-square" /></a>
   <a href="https://docs.sweny.ai"><img alt="Docs" src="https://img.shields.io/badge/docs-docs.sweny.ai-blue?style=flat-square" /></a>
   <a href="https://github.com/marketplace/actions/sweny-ai"><img alt="Marketplace" src="https://img.shields.io/badge/GitHub%20Marketplace-SWEny%20AI-orange?style=flat-square&logo=github" /></a>
+  <a href="https://app.sweny.ai"><img alt="SWEny Cloud" src="https://img.shields.io/badge/SWEny%20Cloud-app.sweny.ai-blueviolet?style=flat-square" /></a>
 </p>
 
 ---
@@ -46,13 +47,14 @@ jobs:
 
 Three secrets. SWEny monitors your logs, investigates the highest-impact issue, creates a ticket, implements a fix, and opens a PR.
 
-## Three entry points
+## Four entry points
 
 | Entry point | Use case |
 |-------------|----------|
 | **[GitHub Action](https://docs.sweny.ai/action/)** | Primary. Runs on schedule or dispatch in CI. |
 | **[CLI](https://docs.sweny.ai/cli/)** | Local development. `sweny triage --dry-run` from your terminal. |
 | **[Studio](https://docs.sweny.ai/studio/)** | Visual DAG editor and live execution monitor. |
+| **[SWEny Cloud](https://app.sweny.ai)** | Teams. Trigger jobs from a dashboard, manage credentials, view cross-repo analytics. |
 
 ## Built-in skills
 
@@ -88,6 +90,17 @@ The executor uses headless [Claude Code](https://docs.anthropic.com/en/docs/clau
 | ~~`@sweny-ai/engine`~~ | `packages/engine` | deprecated | Replaced by `@sweny-ai/core` |
 | ~~`@sweny-ai/providers`~~ | `packages/providers` | deprecated | Replaced by `@sweny-ai/core` skills |
 | ~~`@sweny-ai/agent`~~ | `packages/agent` | deprecated | Migrating to `@sweny-ai/core` |
+
+## SWEny Cloud
+
+**[app.sweny.ai](https://app.sweny.ai)** — the managed platform built on top of the open-source core.
+
+- **Dashboard** — view job history, logs, and results across all your repos in one place.
+- **Team credentials** — securely store API keys and tokens so every repo can use them without per-repo secrets.
+- **Schedules & webhooks** — set up recurring triage and auto-implement without managing GitHub cron.
+- **Analytics** — track triage volume, fix rates, and mean-time-to-fix across your organization.
+
+The Action and CLI are free and always will be. SWEny Cloud adds the operational layer for teams running SWEny at scale. [See pricing](https://app.sweny.ai/#/pricing).
 
 ## Documentation
 

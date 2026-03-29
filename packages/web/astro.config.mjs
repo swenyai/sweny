@@ -12,7 +12,10 @@ export default defineConfig({
       title: "SWEny",
       description: "Autonomous engineering tools powered by Claude AI",
       lastUpdated: true,
-      social: [{ icon: "github", label: "GitHub", href: "https://github.com/swenyai/sweny" }],
+      social: [
+        { icon: "external", label: "SWEny Cloud", href: "https://app.sweny.ai" },
+        { icon: "github", label: "GitHub", href: "https://github.com/swenyai/sweny" },
+      ],
       editLink: {
         baseUrl: "https://github.com/swenyai/sweny/edit/main/packages/web/",
       },

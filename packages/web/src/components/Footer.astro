@@ -1,26 +1,66 @@
 ---
-// Shows the deployed git commit SHA in the site footer.
+// Shows footer links and the deployed git commit SHA.
 // VITE_GIT_COMMIT_SHA is injected by the CI build step.
 const sha = import.meta.env.VITE_GIT_COMMIT_SHA as string | undefined;
 const repoUrl = "https://github.com/swenyai/sweny";
 ---
 
-{
-  sha && (
-    <div class="deploy-sha">
-      <a href={`${repoUrl}/commit/${sha}`} rel="noopener noreferrer">
-        {sha}
-      </a>
-    </div>
-  )
-}
+<footer class="site-footer">
+  <nav class="footer-links">
+    <a href="https://app.sweny.ai">SWEny Cloud</a>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <a href="https://app.sweny.ai/#/pricing">Pricing</a>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <a href={repoUrl}>GitHub</a>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <a href="mailto:hello@sweny.ai">Contact</a>
+  </nav>
+  {
+    sha && (
+      <div class="deploy-sha">
+        <a href={`${repoUrl}/commit/${sha}`} rel="noopener noreferrer">
+          {sha}
+        </a>
+      </div>
+    )
+  }
+</footer>
 
 <style>
+  .site-footer {
+    text-align: center;
+    padding-block: 1rem 0.5rem;
+    border-top: 1px solid var(--sl-color-gray-6);
+  }
+
+  .footer-links {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    font-size: var(--sl-text-sm);
+    padding-block-end: 0.5rem;
+  }
+
+  .footer-links a {
+    color: var(--sl-color-gray-3);
+    text-decoration: none;
+  }
+
+  .footer-links a:hover {
+    color: var(--sl-color-text-accent);
+    text-decoration: underline;
+  }
+
+  .footer-sep {
+    color: var(--sl-color-gray-5);
+  }
+
   .deploy-sha {
     font-size: var(--sl-text-xs);
     color: var(--sl-color-gray-4);
-    text-align: center;
-    padding-block: 0.5rem;
+    padding-block: 0.25rem;
   }
 
   .deploy-sha a {

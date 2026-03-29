@@ -5,10 +5,12 @@ description: Frequently asked questions about SWEny — cost, AI model, integrat
 
 ## How much does SWEny cost?
 
-SWEny is free and open source. You pay for Claude usage only.
+The **GitHub Action and CLI are free and open source**. You pay for Claude usage only.
 
 - **Claude Max/Pro subscription** (`claude-oauth-token`) — triage runs are included in your existing subscription. No per-run charge.
 - **Anthropic API key** (`anthropic-api-key`) — pay-per-use. A typical triage run costs roughly $0.10-$0.50 depending on log volume and investigation depth.
+
+**[SWEny Cloud](https://app.sweny.ai)** is an optional managed platform for teams that adds a centralized dashboard, shared credential storage, scheduled runs, auto-implement, and cross-repo analytics. It has a free tier (5 jobs/month) and paid plans starting at $149/month. [See pricing](https://app.sweny.ai/#/pricing).
 
 ## What AI model does SWEny use?
 
@@ -52,12 +54,14 @@ See [Skills Overview](/skills/) for the full catalog and configuration details.
 
 ## Is my code or data sent anywhere?
 
-SWEny runs entirely within your infrastructure:
+When using the **GitHub Action or CLI**, SWEny runs entirely within your infrastructure:
 
 - **GitHub Action** — runs on GitHub Actions runners. Your code stays in the runner. API calls go only to your configured providers (Sentry, Datadog, Linear, etc.) and to Anthropic (for Claude).
 - **CLI** — runs on your local machine. Same boundaries apply.
 
-Nothing is persisted on SWEny servers. There are no SWEny servers — the project is a GitHub Action and npm packages.
+The Action and CLI are standalone open-source tools with no phone-home behavior. Nothing is sent to SWEny servers.
+
+When using **[SWEny Cloud](https://app.sweny.ai)**, jobs run on managed infrastructure. Your credentials are encrypted at rest and in transit. Job metadata (status, duration, results) is stored for your dashboard — source code is not persisted after a job completes.
 
 ## Can I use a different LLM?
 
@@ -120,3 +124,5 @@ Yes. Set `source-control-provider: gitlab` and add `gitlab-token` and `gitlab-pr
 - [Troubleshooting](/advanced/troubleshooting/) — common issues and solutions
 - [GitHub Issues](https://github.com/swenyai/sweny/issues) — report bugs and request features
 - [GitHub Discussions](https://github.com/swenyai/sweny/discussions) — ask questions and share workflows
+- [SWEny Cloud](https://app.sweny.ai) — Pro and Team plans include email and Slack support
+- [Contact us](mailto:hello@sweny.ai) — enterprise inquiries and partnership questions

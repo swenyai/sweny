@@ -152,3 +152,4 @@ Discord and Teams webhooks work the same way — set `notification-provider` to 
 - **[Studio](/studio/)** — visual workflow editor
 - **[Action Inputs](/action/inputs/)** — time ranges, severity filters, investigation depth, and all other configuration
 - **[Examples](/action/examples/)** — service filtering, specific issues, cross-repo dispatch
+- **[SWEny Cloud](https://app.sweny.ai)** — managed dashboard with job history, team credentials, and analytics

@@ -15,10 +15,10 @@
   Customers can audit and verify exactly what runs on their data, and optionally
   run the worker in their own VPC (BYO Worker tier).
 
-## Closed (cloud repo — sweny.ai platform)
+## Closed ([SWEny Cloud](https://app.sweny.ai) — sweny.ai platform)
 
 - **API** — multi-tenant orchestration, billing, auth, org management
-- **UI** — dashboard, settings, job history
+- **UI** — dashboard, settings, job history, analytics
 - **Infrastructure** — deployment, scaling, monitoring
 
 ## Why this split?
@@ -28,7 +28,7 @@ The value is in: managed execution, team collaboration, result history, integrat
 UI, compliance features (BYOK, TEE), and operational reliability.
 
 You can run the engine yourself for free. You pay us to manage it at scale,
-keep it running, and give your team visibility.
+keep it running, and give your team visibility. See [pricing](https://app.sweny.ai/#/pricing).
 
 ## Job Execution Flow
 

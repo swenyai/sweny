@@ -190,3 +190,9 @@ The default cache TTL is 24 hours (`86400` seconds). For iterative development w
 - Use `investigation-depth: thorough` for deeper analysis
 - Check that the correct skills are available at the relevant node — Claude can only use tools from the node's declared skills
 - Review the execution events in the GitHub Actions log or Studio to see what tools Claude called and what data it received
+
+## Still stuck?
+
+- [GitHub Issues](https://github.com/swenyai/sweny/issues) — report bugs and request features
+- [GitHub Discussions](https://github.com/swenyai/sweny/discussions) — ask questions and share workflows
+- [SWEny Cloud](https://app.sweny.ai) — Pro and Team plans include email and Slack support
