@@ -407,6 +407,12 @@ inputs:
     required: false
     default: ""
 
+  # SWEny Cloud
+  project-token:
+    description: "SWEny Cloud project token — enables run reporting to cloud.sweny.ai and PR comments with dashboard links"
+    required: false
+    default: ""
+
   # MCP servers
   mcp-servers:
     description: >-

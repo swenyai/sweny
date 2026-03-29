@@ -22,6 +22,7 @@ const actionsLogger = {
 };
 
 async function run(): Promise<void> {
+  const startTime = Date.now();
   try {
     const config = parseInputs();
     const validationErrors = validateInputs(config);
@@ -103,6 +104,11 @@ async function run(): Promise<void> {
 
     setGitHubOutputs(results);
     await writeJobSummary(results, config);
+
+    // Report to SWEny Cloud if project token is configured
+    if (config.projectToken) {
+      await reportToCloud(config, results, startTime);
+    }
   } catch (error) {
     if (error instanceof Error) {
       core.setFailed(error.message);
@@ -427,6 +433,114 @@ async function writeJobSummary(results: Map<string, NodeResult>, config: ActionC
   // Write to GITHUB_STEP_SUMMARY
   const md = lines.join("\n");
   await core.summary.addRaw(md).write();
+}
+
+// ─── Cloud Reporting ────────────────────────────────────────────
+
+function getPrNumber(): number | undefined {
+  if (process.env.GITHUB_EVENT_NAME !== "pull_request") return undefined;
+  const match = process.env.GITHUB_REF?.match(/refs\/pull\/(\d+)/);
+  return match ? Number(match[1]) : undefined;
+}
+
+async function reportToCloud(config: ActionConfig, results: Map<string, NodeResult>, startTime: number): Promise<void> {
+  const cloudUrl = "https://cloud.sweny.ai";
+  const investigateResult = results.get("investigate");
+  const prResult = results.get("create_pr");
+  const issueResult = results.get("create_issue");
+  const prNumber = getPrNumber();
+
+  const body = {
+    status: [...results.values()].some((r) => r.status === "failed") ? "failed" : "completed",
+    workflow: config.workflow,
+    trigger: process.env.GITHUB_EVENT_NAME ?? "manual",
+    pr_number: prNumber,
+    branch: process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME,
+    commit_sha: process.env.GITHUB_SHA,
+    duration_ms: Date.now() - startTime,
+    issues_found: (investigateResult?.data?.issuesFound as boolean) ?? false,
+    recommendation: (investigateResult?.data?.recommendation as string) ?? "skip",
+    issue_url: (issueResult?.data?.issueUrl ?? prResult?.data?.issueUrl) as string | undefined,
+    pr_url: prResult?.data?.prUrl as string | undefined,
+    issue_identifier: (issueResult?.data?.issueIdentifier ?? prResult?.data?.issueIdentifier) as string | undefined,
+    nodes: [...results.entries()].map(([id, r]) => ({
+      id,
+      name: id,
+      status: r.status,
+      durationMs: 0,
+    })),
+    action_version: "4",
+    runner_os: process.env.RUNNER_OS,
+  };
+
+  try {
+    const res = await fetch(`${cloudUrl}/api/report`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.projectToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as { run_url?: string; comment?: string };
+      core.info(`\u2601 Reported to SWEny Cloud: ${data.run_url ?? "ok"}`);
+
+      // Post PR comment if we got one back and this is a PR run
+      if (data.comment && prNumber) {
+        await postPrComment(config, prNumber, data.comment);
+      }
+    } else {
+      core.warning(`\u2601 Cloud reporting failed: ${res.status}`);
+    }
+  } catch (err) {
+    core.warning(`\u2601 Cloud reporting failed: ${err}`);
+  }
+}
+
+async function postPrComment(config: ActionConfig, prNumber: number, body: string): Promise<void> {
+  const token = config.botToken || config.githubToken;
+  if (!token) return;
+
+  const repo = config.repository || process.env.GITHUB_REPOSITORY;
+  if (!repo) return;
+
+  const apiBase = `https://api.github.com/repos/${repo}`;
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+  };
+
+  try {
+    // Check for existing SWEny comment to update (avoid duplicates)
+    const listRes = await fetch(`${apiBase}/issues/${prNumber}/comments?per_page=50`, { headers });
+    if (!listRes.ok) {
+      core.warning("\u2601 Failed to list PR comments");
+      return;
+    }
+    const comments = (await listRes.json()) as Array<{ id: number; body: string }>;
+    const existing = comments.find((c) => c.body.includes("SWEny Triage Report"));
+
+    if (existing) {
+      await fetch(`${apiBase}/issues/comments/${existing.id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ body }),
+      });
+      core.info(`\u2601 Updated SWEny comment on PR #${prNumber}`);
+    } else {
+      await fetch(`${apiBase}/issues/${prNumber}/comments`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ body }),
+      });
+      core.info(`\u2601 Posted SWEny comment on PR #${prNumber}`);
+    }
+  } catch {
+    core.warning("\u2601 Failed to post PR comment");
+  }
 }
 
 run();

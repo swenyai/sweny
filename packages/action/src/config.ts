@@ -49,6 +49,7 @@ export interface ActionConfig {
   serviceMapPath: string;
   githubToken: string;
   botToken: string;
+  projectToken: string;
 
   // Source control
   sourceControlProvider: string;
@@ -132,6 +133,7 @@ export function parseInputs(): ActionConfig {
     serviceMapPath: core.getInput("service-map-path") || ".github/service-map.yml",
     githubToken: core.getInput("github-token"),
     botToken: core.getInput("bot-token"),
+    projectToken: core.getInput("project-token"),
 
     sourceControlProvider: core.getInput("source-control-provider") || "github",
 
