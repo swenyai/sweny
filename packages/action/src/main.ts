@@ -105,8 +105,8 @@ async function run(): Promise<void> {
     setGitHubOutputs(results);
     await writeJobSummary(results, config);
 
-    // Report to SWEny Cloud if project token is configured
-    if (config.projectToken) {
+    // Report to SWEny Cloud if project token or GitHub App installation is available
+    if (config.projectToken || process.env.GITHUB_APP_INSTALLATION_ID) {
       await reportToCloud(config, results, startTime);
     }
   } catch (error) {
@@ -450,7 +450,13 @@ async function reportToCloud(config: ActionConfig, results: Map<string, NodeResu
   const issueResult = results.get("create_issue");
   const prNumber = getPrNumber();
 
+  const [owner, repo] = (config.repository || process.env.GITHUB_REPOSITORY || "").split("/");
+
   const body = {
+    // Repo identification (for installation auth)
+    owner,
+    repo,
+    // Run data
     status: [...results.values()].some((r) => r.status === "failed") ? "failed" : "completed",
     workflow: config.workflow,
     trigger: process.env.GITHUB_EVENT_NAME ?? "manual",
@@ -473,13 +479,23 @@ async function reportToCloud(config: ActionConfig, results: Map<string, NodeResu
     runner_os: process.env.RUNNER_OS,
   };
 
+  // Build auth headers — prefer project token, fall back to installation ID
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (config.projectToken) {
+    headers.Authorization = `Bearer ${config.projectToken}`;
+  } else {
+    // When the SWEny GitHub App is installed, GITHUB_APP_INSTALLATION_ID may be available
+    // Also check the token permissions context for app installation
+    const installId = process.env.GITHUB_APP_INSTALLATION_ID;
+    if (installId) {
+      headers["X-GitHub-Installation-Id"] = installId;
+    }
+  }
+
   try {
     const res = await fetch(`${cloudUrl}/api/report`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.projectToken}`,
-      },
+      headers,
       body: JSON.stringify(body),
     });
 
