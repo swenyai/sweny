@@ -11,6 +11,16 @@ export default defineConfig({
       customCss: ["./src/styles/explorer-overrides.css"],
       title: "SWEny",
       description: "Autonomous engineering tools powered by Claude AI",
+      favicon: "/favicon.svg",
+      head: [
+        { tag: "link", attrs: { rel: "apple-touch-icon", href: "/apple-touch-icon.png" } },
+        { tag: "meta", attrs: { property: "og:type", content: "website" } },
+        { tag: "meta", attrs: { property: "og:image", content: "https://docs.sweny.ai/og-image.png" } },
+        { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
+        { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
+        { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
+        { tag: "meta", attrs: { name: "twitter:image", content: "https://docs.sweny.ai/twitter-card.png" } },
+      ],
       lastUpdated: true,
       social: [
         { icon: "external", label: "SWEny Cloud", href: "https://app.sweny.ai" },

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 100" width="80" height="100">
+  <!-- Edges (solid) -->
+  <line x1="40" y1="18" x2="20" y2="38" stroke="#334155" stroke-width="2"/>
+  <line x1="40" y1="18" x2="60" y2="38" stroke="#334155" stroke-width="2"/>
+  <line x1="20" y1="54" x2="40" y2="82" stroke="#334155" stroke-width="2"/>
+  <line x1="60" y1="54" x2="40" y2="82" stroke="#334155" stroke-width="2"/>
+  <!-- Active path (dashed blue overlay on left branch) -->
+  <line x1="40" y1="18" x2="20" y2="38" stroke="#3b82f6" stroke-width="2" stroke-dasharray="5 7" opacity="0.6"/>
+  <line x1="20" y1="54" x2="40" y2="82" stroke="#3b82f6" stroke-width="2" stroke-dasharray="5 7" opacity="0.6"/>
+  <!-- Start node (circle + play icon) -->
+  <circle cx="40" cy="10" r="8" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2"/>
+  <path d="M 37 7 L 44 10 L 37 13" fill="#60a5fa"/>
+  <!-- Left task node (active) -->
+  <rect x="12" y="38" width="16" height="16" rx="4" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2"/>
+  <!-- Right task node (inactive) -->
+  <rect x="52" y="38" width="16" height="16" rx="4" fill="#1e3a5f" stroke="#475569" stroke-width="2"/>
+  <!-- Done node (circle + checkmark) -->
+  <circle cx="40" cy="90" r="8" fill="#2563eb" stroke="#60a5fa" stroke-width="2"/>
+  <path d="M 36 90 L 39 93 L 45 85" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 52" width="420" height="52">
+  <!-- DAG icon (scaled to fit text height) -->
+  <circle cx="14" cy="6" r="5.5" fill="#1e3a5f" stroke="#3b82f6" stroke-width="1.5"/>
+  <rect x="3" y="17" width="10" height="10" rx="3" fill="#1e3a5f" stroke="#3b82f6" stroke-width="1.5"/>
+  <rect x="19" y="17" width="10" height="10" rx="3" fill="#1e3a5f" stroke="#475569" stroke-width="1.5"/>
+  <circle cx="14" cy="40" r="5.5" fill="#2563eb" stroke="#60a5fa" stroke-width="1.5"/>
+  <line x1="14" y1="12" x2="8" y2="17" stroke="#334155" stroke-width="1.5"/>
+  <line x1="14" y1="12" x2="24" y2="17" stroke="#334155" stroke-width="1.5"/>
+  <line x1="8" y1="27" x2="14" y2="34" stroke="#334155" stroke-width="1.5"/>
+  <line x1="24" y1="27" x2="14" y2="34" stroke="#334155" stroke-width="1.5"/>
+  <line x1="14" y1="12" x2="8" y2="17" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.5"/>
+  <line x1="8" y1="27" x2="14" y2="34" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.5"/>
+  <!-- Wordmark -->
+  <text x="42" y="40" font-family="system-ui, -apple-system, 'Helvetica Neue', sans-serif" font-size="46" font-weight="800" letter-spacing="-1.5" fill="#f1f5f9">SWE<tspan fill="#3b82f6">ny</tspan></text>
+</svg>
