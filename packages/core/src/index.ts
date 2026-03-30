@@ -59,6 +59,7 @@ export {
   sentry,
   datadog,
   notification,
+  supabase,
   builtinSkills,
   createSkillMap,
   allSkills,
