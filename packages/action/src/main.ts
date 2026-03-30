@@ -496,6 +496,10 @@ async function reportToCloud(
     issue_url: (issueResult?.data?.issueUrl ?? prResult?.data?.issueUrl) as string | undefined,
     pr_url: prResult?.data?.prUrl as string | undefined,
     issue_identifier: (issueResult?.data?.issueIdentifier ?? prResult?.data?.issueIdentifier) as string | undefined,
+    // Rich findings data from the investigate node
+    findings: investigateResult?.data?.findings ?? [],
+    highest_severity: (investigateResult?.data?.highest_severity as string) ?? null,
+    novel_count: (investigateResult?.data?.novel_count as number) ?? 0,
     nodes: [...results.entries()].map(([id, r]) => ({
       id,
       name: id,
