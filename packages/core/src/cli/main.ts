@@ -12,6 +12,7 @@ import { execute } from "../executor.js";
 import type { ExecuteOptions } from "../executor.js";
 import { triageWorkflow } from "../workflows/triage.js";
 import { implementWorkflow } from "../workflows/implement.js";
+import { seedContentWorkflow } from "../workflows/seed-content.js";
 import type { ExecutionEvent, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
@@ -675,25 +676,37 @@ export async function workflowRunAction(
 
   const observer = composeObservers(wfProgressObserver, options.stream ? createStreamObserver() : undefined);
 
-  // Build workflow input from config
-  const workflowInput = {
-    timeRange: config.timeRange,
-    severityFocus: config.severityFocus,
-    serviceFilter: config.serviceFilter,
-    repository: config.repository,
-    dryRun: config.dryRun,
-    baseBranch: config.baseBranch,
-    prLabels: config.prLabels,
-    additionalInstructions: config.additionalInstructions,
-    observabilityProvider: config.observabilityProvider,
-    ...(config.observabilityCredentials.sourceId && {
-      betterstackSourceId: config.observabilityCredentials.sourceId,
-    }),
-    ...(config.observabilityCredentials.tableName && {
-      betterstackTableName: config.observabilityCredentials.tableName,
-    }),
-    context: buildProviderCtx(config, mcpServers),
-  };
+  // Build workflow input — prefer --input JSON if provided, else fall back to config-derived input
+  let workflowInput: Record<string, unknown>;
+
+  if (options.input && typeof options.input === "string") {
+    try {
+      workflowInput = JSON.parse(options.input as string);
+    } catch {
+      console.error(chalk.red("  --input must be valid JSON"));
+      process.exit(1);
+      return;
+    }
+  } else {
+    workflowInput = {
+      timeRange: config.timeRange,
+      severityFocus: config.severityFocus,
+      serviceFilter: config.serviceFilter,
+      repository: config.repository,
+      dryRun: config.dryRun,
+      baseBranch: config.baseBranch,
+      prLabels: config.prLabels,
+      additionalInstructions: config.additionalInstructions,
+      observabilityProvider: config.observabilityProvider,
+      ...(config.observabilityCredentials.sourceId && {
+        betterstackSourceId: config.observabilityCredentials.sourceId,
+      }),
+      ...(config.observabilityCredentials.tableName && {
+        betterstackTableName: config.observabilityCredentials.tableName,
+      }),
+      context: buildProviderCtx(config, mcpServers),
+    };
+  }
 
   try {
     const results = await execute(workflow, workflowInput, {
@@ -730,8 +743,10 @@ export function workflowExportAction(name: string): void {
     workflow = triageWorkflow;
   } else if (name === "implement") {
     workflow = implementWorkflow;
+  } else if (name === "seed-content") {
+    workflow = seedContentWorkflow;
   } else {
-    console.error(chalk.red(`  Unknown workflow "${name}". Available: triage, implement`));
+    console.error(chalk.red(`  Unknown workflow "${name}". Available: triage, implement, seed-content`));
     process.exit(1);
     return;
   }
@@ -794,6 +809,7 @@ workflowCmd
   .option("--dry-run", "Validate workflow without running")
   .option("--json", "Output result as JSON on stdout; suppress progress output")
   .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)")
+  .option("--input <json>", "JSON string of input data to pass to the workflow")
   .action(workflowRunAction);
 
 workflowCmd
