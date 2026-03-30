@@ -1,0 +1,47 @@
+---
+title: SWEny Cloud
+description: The data and intelligence layer for your codebase
+---
+
+SWEny Cloud is the analytics and intelligence dashboard for your automated triage workflows. The GitHub Action does the work — it's free, always. The cloud collects every signal from your repos, synthesizes it, and shows you what matters.
+
+## How it works
+
+```
+GitHub Action (runs in your CI)
+    ↓ Reports results
+GitHub App (webhook events)
+    ↓ Issues, PRs, pushes, reviews
+SWEny Cloud (cloud.sweny.ai)
+    ↓ Dashboard, charts, AI insights
+You see what matters
+```
+
+**Three data sources feed the dashboard:**
+
+1. **Action reports** — every triage run sends structured results (status, recommendations, node outcomes)
+2. **GitHub webhooks** — the GitHub App captures issues, PRs, pushes, reviews, and more in real-time
+3. **GitHub API** — on-demand queries for current repo state via installation token
+
+## Key features
+
+- **Live DAG visualization** — watch workflows execute in real-time with node-level updates
+- **Activity feed** — see issues opened, PRs merged, pushes landed across all repos
+- **Trend charts** — issue velocity, recommendation breakdown, push frequency over time
+- **AI insights** — Claude-powered weekly summaries of engineering activity
+- **Team dashboard** — shared view across all repos with contributor activity
+- **Email digest** — weekly summary delivered to your inbox
+- **MCP server** — AI agents can query your project health via the MCP protocol
+- **README badge** — live status badge for your README
+- **1-click enable** — push the SWEny Action workflow to any repo with one button
+
+## Your code stays in GitHub
+
+SWEny Cloud stores **metadata only** — events, metrics, outcomes, trends. We never store source code, diffs, logs, or raw agent output. Customer content stays in GitHub.
+
+## Next steps
+
+- [Getting started](/cloud/getting-started) — install the GitHub App and connect your repos
+- [Dashboard guide](/cloud/dashboard) — explore the dashboard features
+- [Pricing](/cloud/pricing) — plans and what's included
+- [API reference](/cloud/api) — endpoints for reporting and querying

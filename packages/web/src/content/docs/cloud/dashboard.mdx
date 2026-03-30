@@ -1,0 +1,57 @@
+---
+title: Dashboard Guide
+description: Explore the SWEny Cloud dashboard features
+---
+
+## Overview page
+
+The dashboard overview shows a high-level summary of all your repos:
+
+- **Stats cards** — total runs, issues found, auto-implemented
+- **Trend chart** — run activity over time (Individual+ plans)
+- **Recommendation chart** — implement vs skip vs escalate breakdown
+- **GitHub activity widgets** — issue velocity, PR merge rate, push frequency, contributors
+- **AI insights** — Claude-powered weekly summary of engineering activity
+- **Activity feed** — real-time stream of GitHub events and Action runs
+
+## Projects page
+
+Shows all repos accessible to your GitHub App installation:
+
+- **Grouped by owner** — repos organized by org/user
+- **Status indicators** — green (healthy), red (last run failed), gray (no runs)
+- **Run counts** — how many Action runs each repo has
+- **Enable SWEny** — one-click button to add the Action workflow to repos
+
+Click any repo with runs to see its detail page.
+
+## Project detail
+
+Deep dive into a single repo:
+
+- **GitHub App status** — whether SWEny is installed
+- **README badge** — copy the markdown snippet
+- **Run stats** — total runs, issues found, implemented, avg duration
+- **GitHub stats** — open issues, PRs merged, pushes, contributors (from events)
+- **Live DAG viewer** — watch running workflows in real-time with node-level updates
+- **Run history** — every Action run with status, recommendation, trigger, branch
+- **Activity feed** — project-scoped GitHub events
+
+## Settings
+
+- **Billing** — view current plan, upgrade to Individual or Team
+- **Team members** — invite by GitHub username (Team plan), manage roles
+
+## Plan features
+
+| Feature       | Free            | Individual | Team      |
+| ------------- | --------------- | ---------- | --------- |
+| Public repos  | Unlimited       | Unlimited  | Unlimited |
+| Private repos | 1               | Unlimited  | Unlimited |
+| Run history   | 30 days         | Unlimited  | Unlimited |
+| Trend charts  | Blurred preview | Full       | Full      |
+| Activity feed | Blurred preview | Full       | Full      |
+| AI insights   | -               | Full       | Full      |
+| Email digest  | -               | Weekly     | Weekly    |
+| Team members  | -               | -          | Unlimited |
+| MCP access    | -               | -          | Full      |

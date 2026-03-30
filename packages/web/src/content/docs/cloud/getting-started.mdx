@@ -1,0 +1,64 @@
+---
+title: Getting Started with Cloud
+description: Set up SWEny Cloud in under 5 minutes
+---
+
+## 1. Install the GitHub App
+
+Click the button below to install SWEny AI on your GitHub organization or personal account:
+
+[Install SWEny AI](https://github.com/apps/sweny-ai/installations/new)
+
+The app requests read access to your repos, issues, PRs, and checks. It also requests write access to workflow files so it can auto-configure the SWEny Action on your repos.
+
+## 2. Sign in to Cloud
+
+Go to [cloud.sweny.ai](https://cloud.sweny.ai) and sign in with GitHub. Your organization and repos are automatically synced from the GitHub App installation.
+
+## 3. Enable SWEny on a repo
+
+On the **Projects** page, you'll see all repos accessible to the GitHub App. Click **Enable SWEny** on any repo to push a workflow file that runs automated triage.
+
+After enabling, you need to add one secret to the repo:
+
+1. Go to your repo's **Settings > Secrets and variables > Actions**
+2. Add a new secret: `ANTHROPIC_API_KEY` with your Anthropic API key
+
+## 4. See results
+
+Once the Action runs (on schedule or manual dispatch), results appear in the dashboard automatically:
+
+- **Run history** with node-level DAG visualization
+- **Stats** — issues found, recommendations, duration
+- **Activity feed** — real-time GitHub events
+
+## What the Action does
+
+The default SWEny workflow:
+
+```yaml
+name: SWEny Triage
+on:
+  schedule:
+    - cron: "0 6 * * 1-5" # Weekdays at 6am UTC
+  workflow_dispatch:
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swenyai/sweny@v4
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+This runs automated triage on weekday mornings. It reads your codebase, investigates potential issues, and reports findings to the cloud dashboard.
+
+## Troubleshooting
+
+**"No repos found"** — Make sure the GitHub App has access to your repos. Go to your org settings > Installed GitHub Apps > SWEny AI > Configure > Repository access.
+
+**"Enable SWEny failed"** — The app needs write access to workflows. Check that the Workflows permission was granted when installing.
+
+**No data in dashboard** — The Action needs to run at least once. Go to your repo's Actions tab and trigger the SWEny Triage workflow manually.

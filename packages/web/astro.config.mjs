@@ -94,6 +94,16 @@ export default defineConfig({
           ],
         },
         {
+          label: "Cloud Dashboard",
+          items: [
+            { label: "Overview", slug: "cloud" },
+            { label: "Getting Started", slug: "cloud/getting-started" },
+            { label: "Dashboard Guide", slug: "cloud/dashboard" },
+            { label: "Pricing", slug: "cloud/pricing" },
+            { label: "API Reference", slug: "cloud/api" },
+          ],
+        },
+        {
           label: "Advanced",
           collapsed: true,
           items: [
