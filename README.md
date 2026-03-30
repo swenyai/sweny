@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Workflow orchestration for AI-powered engineering.</strong>
+  <strong>Turn natural language into reliable AI workflows.</strong>
 </p>
 
 <p align="center">
@@ -17,46 +17,56 @@
 
 ---
 
-Define a workflow as a DAG. Claude executes each node using the tools you configure. Get reliable, observable results — every node, every tool call, every routing decision is tracked.
+Describe what you want done. SWEny builds a DAG, wires up the right tools, and runs it. Every node, every tool call, every routing decision is tracked.
 
-```yaml
-# .github/workflows/sweny-triage.yml
-name: SWEny Triage
-on:
-  schedule:
-    - cron: '0 6 * * 1,4'
-  workflow_dispatch:
+```bash
+$ sweny workflow create "audit our GitHub repo for security issues, \
+    scan dependencies for vulnerabilities, and create Linear tickets \
+    for anything critical"
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+  GitHub Security Audit
 
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: swenyai/sweny@v4
-        with:
-          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          dd-api-key: ${{ secrets.DD_API_KEY }}
-          dd-app-key: ${{ secrets.DD_APP_KEY }}
+  ┌──────────────────────────────────────────────────┐
+  │ ○ Scan Recent Commits for Exposed Secrets        │
+  └─────────────────────────┬────────────────────────┘
+                            │
+                          ┌─┴─────────────────────────────────────────────────┐
+                          │                                                   │
+┌─────────────────────────▼────────────────────────┐ ┌────────────────────────▼────────────────────────┐
+│ ○ Review Open PRs for Security-Sensitive Changes │ │ ○ Scan Dependency Files for Vulnerable Packages │
+└─────────────────────────┬────────────────────────┘ └────────────────────────┬────────────────────────┘
+                          │
+  ┌───────────────────────▼──────────────────────────┐
+  │ ○ Compile Security Posture Report                │
+  └───────────────────────┬──────────────────────────┘
+                            │
+  ┌─────────────────────────▼────────────────────────┐
+  │ ○ Create Linear Tickets for Critical Findings    │
+  └──────────────────────────────────────────────────┘
+
+  Save to .sweny/workflows/github_security_audit.yml? [Y/n/refine]
 ```
 
-Three secrets. SWEny monitors your logs, investigates the highest-impact issue, creates a ticket, implements a fix, and opens a PR.
+That's it. One sentence in, a full workflow out — with structured output schemas, conditional routing, and the right skills wired up at each node. Refine it with natural language, run it, or publish it to GitHub Actions.
 
-## Four entry points
+## Get started
 
-| Entry point | Use case |
-|-------------|----------|
-| **[GitHub Action](https://docs.sweny.ai/action/)** | Primary. Runs on schedule or dispatch in CI. |
-| **[CLI](https://docs.sweny.ai/cli/)** | Local development. `sweny triage --dry-run` from your terminal. |
-| **[Studio](https://docs.sweny.ai/studio/)** | Visual DAG editor and live execution monitor. |
-| **[SWEny Cloud](https://app.sweny.ai)** | Teams. Trigger jobs from a dashboard, manage credentials, view cross-repo analytics. |
+```bash
+npm install -g @sweny-ai/core
+sweny workflow create "your task description here"
+sweny workflow run .sweny/workflows/your-workflow.yml
+```
+
+## How you use it
+
+| Approach | What it does |
+|----------|--------------|
+| **[CLI](https://docs.sweny.ai/cli/)** | Build and run workflows from your terminal. Describe a task, get a DAG, run it. |
+| **[GitHub Action](https://docs.sweny.ai/action/)** | Publish workflows to CI. Runs on cron schedules or dispatch. |
+| **[Studio](https://docs.sweny.ai/studio/)** | Visual DAG editor and live execution monitor. Watch workflows run in real time. |
+| **[SWEny Cloud](https://app.sweny.ai)** | Teams. Dashboard, shared credentials, scheduling, cross-repo analytics. |
+
+The CLI is how you build workflows and get things done. GitHub Actions is where you deploy them for automation. Studio lets you visualize and monitor. Cloud wraps it all for teams.
 
 ## Built-in skills
 
@@ -74,12 +84,25 @@ Skills are groups of tools that connect Claude to external services. Each skill 
 
 ## How it works
 
-SWEny workflows have two layers:
+SWEny splits complex tasks into discrete nodes in a DAG. Each node gets a focused instruction, scoped tools, and structured output — so instead of one giant prompt that works sometimes, you get a reliable pipeline that works every time.
 
-- **Orchestration** — A deterministic DAG executor walks nodes in order, resolves conditional edges, and tracks results.
-- **Agency** — At each node, Claude runs as a full agent with access to the node's tools, the file system, terminal, and any configured MCP servers.
+- **Build** — `sweny workflow create` turns a natural language description into a full workflow YAML with nodes, edges, skills, and output schemas.
+- **Refine** — `sweny workflow edit` modifies workflows with natural language. Add quality gates, loop-back conditions, notification steps — all without touching YAML.
+- **Run** — The DAG executor walks nodes in order, resolves conditional edges, and tracks every tool call. Claude runs as a full agent at each node with access to the node's tools, the file system, terminal, and any configured MCP servers.
+- **Deploy** — Run one-off from the CLI, schedule via GitHub Actions, or manage at scale with SWEny Cloud.
 
 The executor uses headless [Claude Code](https://docs.anthropic.com/en/docs/claude-code) via `@anthropic-ai/claude-agent-sdk` as the LLM backend. MCP servers for GitHub, Linear, Sentry, Datadog, and others are [auto-injected](https://docs.sweny.ai/advanced/mcp-servers/) based on your provider configuration.
+
+## Real-world examples
+
+These workflows were generated from a single sentence with `sweny workflow create`:
+
+- **Content generation pipeline** — "Generate SEO-optimized blog posts for each topic, run them through an LLM quality judge, and publish passing content to the CMS" — used to generate content for [kidmath.ai](https://kidmath.ai) with automated quality gates.
+- **Security audit** — "Scan recent commits for exposed secrets, review open PRs for security-sensitive changes, check dependencies for vulnerabilities, compile a report, and create Linear tickets for critical findings."
+- **Competitive analysis** — "Research the top 5 competitors, gather pricing and features for each, synthesize a comparison matrix, and produce an executive brief with strategic recommendations."
+- **Product launch planning** — "Research recent launches, draft launch copy with a quality gate that rejects vague messaging, create a Linear checklist, and compile a launch brief."
+
+None of these are code-only tasks. SWEny works for anything you can describe as a sequence of steps with clear inputs and outputs.
 
 ## Packages
 

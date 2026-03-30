@@ -1,155 +1,93 @@
 ---
 title: Quick Start
-description: Get SWEny running in your repo in 5 minutes with the GitHub Action.
+description: Install SWEny and choose how to run it — CLI, GitHub Action, Studio, or Cloud.
 ---
 
-This guide sets up the **Triage** workflow as a GitHub Action. By the end, SWEny will automatically monitor your observability platform for errors, investigate root causes, create issues, and notify your team.
+SWEny is one tool with multiple surfaces. Install it once, then pick the way that fits your workflow.
 
-## Prerequisites
+## Install
 
-- A GitHub repository
-- An observability platform (Sentry, Datadog, BetterStack, CloudWatch, Splunk, Elasticsearch, New Relic, or Grafana Loki)
-- A [Claude Max](https://claude.ai/) subscription (recommended) or an [Anthropic API key](https://console.anthropic.com/)
-
-## Step 1: Create the workflow file
-
-Add `.github/workflows/sweny-triage.yml` to your repository:
-
-```yaml
-name: SWEny Triage
-on:
-  workflow_dispatch:  # manual trigger for testing
-  schedule:
-    - cron: '0 9 * * 1-5'  # weekdays at 9 AM UTC
-
-permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: swenyai/sweny@v4
-        with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          observability-provider: sentry
-          sentry-auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          sentry-org: your-org
-          sentry-project: your-project
+```bash
+npm install -g @sweny-ai/core
 ```
 
-:::note[Claude Max instead of API key]
-If you have a Claude Max subscription, replace `anthropic-api-key` with `claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}`. This gives you predictable monthly cost with no per-token billing.
-:::
+You can also run it directly with `npx @sweny-ai/core`.
 
-## Step 2: Add secrets
+## Add your API key
 
-In your repository, go to **Settings > Secrets and variables > Actions** and add:
-
-| Secret | Where to get it |
-|--------|----------------|
-| `ANTHROPIC_API_KEY` | [Anthropic Console](https://console.anthropic.com/) > API Keys |
-| `SENTRY_AUTH_TOKEN` | Sentry > Settings > Auth Tokens |
-
-Also set the `sentry-org` and `sentry-project` values in the workflow file to match your Sentry organization and project slugs.
-
-### Using Datadog instead?
-
-Replace the Sentry inputs with Datadog credentials:
-
-```yaml
-- uses: swenyai/sweny@v4
-  with:
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-    observability-provider: datadog
-    dd-api-key: ${{ secrets.DD_API_KEY }}
-    dd-app-key: ${{ secrets.DD_APP_KEY }}
+```bash
+# .env (gitignored)
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-See [Action Inputs](/action/inputs/) for all supported observability providers and their required credentials.
+Or use a Claude Max subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) for predictable monthly cost. The CLI auto-loads `.env` at startup.
 
-## Step 3: Run it
+## Choose your surface
 
-Go to the **Actions** tab in your repository, select "SWEny Triage", and click **Run workflow**.
+### CLI — build and run workflows from your terminal
 
-SWEny will:
-1. Query your observability platform for recent errors
-2. Investigate root causes using your codebase
-3. Create GitHub Issues for novel, actionable problems
-4. Post a summary to the GitHub Actions run
+The fastest way to get things done. Describe a task, get a workflow, run it.
 
-## Step 4: Check results
+```bash
+# Create a workflow from a description
+sweny workflow create "scan the codebase for security anti-patterns \
+  and create tickets for critical findings"
 
-Open the completed workflow run. The **Summary** tab shows a structured report: which errors were found, what the root cause is, which issues were created, and which errors were skipped (duplicates or low priority).
+# Refine it
+sweny workflow edit .sweny/workflows/security_scan.yml \
+  "add a quality gate that rejects vague findings"
 
-:::note[Try dry-run first]
-Add `dry-run: true` to review what SWEny finds before it takes any action. In dry-run mode, the executor runs the investigation nodes normally but stops at the first conditional routing decision — before any issues, PRs, or notifications are created. This is a hard gate enforced by the executor (not a prompt instruction), so there is zero risk of side effects. Remove `dry-run` once you are satisfied with the results.
-:::
+# Run it
+sweny workflow run .sweny/workflows/security_scan.yml
+```
 
-## What just happened?
+You can also run the built-in workflows directly:
 
-SWEny ran the **Triage** workflow — an 8-node DAG:
+```bash
+sweny triage --dry-run          # investigate production errors
+sweny implement ENG-123         # fix a tracked issue and open a PR
+```
 
-1. **Prepare** — fetched any configured rules or context documents.
-2. **Gather Context** — queried Sentry for unresolved errors and searched your GitHub repo for recent commits and related issues.
-3. **Root Cause Analysis** — classified each issue as novel or duplicate, assessed severity and fix complexity, and produced a findings array.
-4. **Routing** — Claude evaluated edge conditions: novel issues with severity medium or higher route to Create Issue; all duplicates or low-severity route to Skip.
-5. **Create Issue** — filed GitHub Issues for novel findings and +1'd existing tickets for duplicates.
-6. **Implement** — wrote a fix if the issue had a feasible fix approach (skipped for complex fixes).
-7. **Open PR** — pushed a branch and opened a pull request.
-8. **Notify Team** — posted a summary to the GitHub Actions run (the default notification provider).
+**[Full CLI guide](/cli/)** — commands, configuration, and real-world examples.
 
-Each node ran Claude with a focused instruction and only the tools it needed. The executor handled all routing, context passing, and event emission.
+### GitHub Action — deploy workflows to CI
 
-## Using Linear or Jira instead of GitHub Issues?
-
-Set `issue-tracker-provider` and add the relevant credentials:
+Put workflows on a schedule. SWEny monitors your observability platform, triages errors, and opens fix PRs — automatically.
 
 ```yaml
+# .github/workflows/sweny-triage.yml
 - uses: swenyai/sweny@v4
   with:
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     observability-provider: sentry
     sentry-auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
-    sentry-org: your-org
-    sentry-project: your-project
-    issue-tracker-provider: linear
-    linear-api-key: ${{ secrets.LINEAR_API_KEY }}
-    linear-team-id: ${{ vars.LINEAR_TEAM_ID }}
+    sentry-org: my-org
+    sentry-project: my-project
 ```
 
-See [Action Inputs](/action/inputs/) for Jira configuration.
+Three secrets. Push the file, trigger it from the Actions tab, and check the summary.
 
-## Adding Slack notifications
+**[Full Action guide](/action/)** — setup, inputs, scheduling, and service maps.
 
-Add a webhook URL to get triage summaries in Slack:
+### Studio — visualize and monitor workflows
 
-```yaml
-- uses: swenyai/sweny@v4
-  with:
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-    observability-provider: sentry
-    sentry-auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
-    sentry-org: your-org
-    sentry-project: your-project
-    notification-provider: slack
-    notification-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+A visual DAG editor and live execution monitor built on React Flow. Design workflows by dragging nodes, or watch running workflows execute node-by-node in real time.
+
+```bash
+# Stream a CLI run to Studio
+sweny triage --stream
 ```
 
-Discord and Teams webhooks work the same way — set `notification-provider` to `discord` or `teams`.
+**[Full Studio guide](/studio/)** — editor, embedding, and live mode.
+
+### SWEny Cloud — the team layer
+
+Dashboard, shared credentials, scheduling, and cross-repo analytics for teams running SWEny at scale.
+
+**[app.sweny.ai](https://app.sweny.ai)** — get started in minutes. [See pricing](https://app.sweny.ai/#/pricing).
 
 ## What's next?
 
+- **[Core Concepts](/getting-started/concepts/)** — understand workflows, nodes, edges, and skills
+- **[CLI Examples](/cli/examples/)** — real-world workflows from one-liners to complex pipelines
 - **[End-to-End Walkthrough](/getting-started/walkthrough/)** — follow a real triage run from error spike to fix PR
-- **[CLI Quick Start](/cli/)** — run SWEny locally from your terminal
-- **[Studio](/studio/)** — visual workflow editor
-- **[Action Inputs](/action/inputs/)** — time ranges, severity filters, investigation depth, and all other configuration
-- **[Examples](/action/examples/)** — service filtering, specific issues, cross-repo dispatch
-- **[SWEny Cloud](https://app.sweny.ai)** — managed dashboard with job history, team credentials, and analytics

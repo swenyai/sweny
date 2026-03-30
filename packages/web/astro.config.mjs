@@ -10,7 +10,7 @@ export default defineConfig({
     starlight({
       customCss: ["./src/styles/explorer-overrides.css"],
       title: "SWEny",
-      description: "Autonomous engineering tools powered by Claude AI",
+      description: "Turn natural language into reliable AI workflows",
       favicon: "/favicon.svg",
       head: [
         { tag: "link", attrs: { rel: "apple-touch-icon", href: "/apple-touch-icon.png" } },
@@ -44,12 +44,20 @@ export default defineConfig({
           ],
         },
         {
+          label: "CLI",
+          items: [
+            { label: "Quick Start", slug: "cli" },
+            { label: "Commands", slug: "cli/commands" },
+            { label: "Examples", slug: "cli/examples" },
+          ],
+        },
+        {
           label: "Workflows",
           items: [
             { label: "How Workflows Work", slug: "workflows" },
+            { label: "Custom Workflows", slug: "workflows/custom" },
             { label: "Triage", slug: "workflows/triage" },
             { label: "Implement", slug: "workflows/implement" },
-            { label: "Custom Workflows", slug: "workflows/custom" },
             { label: "YAML Reference", slug: "workflows/yaml-reference" },
           ],
         },
@@ -61,14 +69,6 @@ export default defineConfig({
             { label: "Cron & Dispatch", slug: "action/scheduling" },
             { label: "Service Map", slug: "action/service-map" },
             { label: "Examples", slug: "action/examples" },
-          ],
-        },
-        {
-          label: "CLI",
-          items: [
-            { label: "Quick Start", slug: "cli" },
-            { label: "Commands", slug: "cli/commands" },
-            { label: "Examples", slug: "cli/examples" },
           ],
         },
         {

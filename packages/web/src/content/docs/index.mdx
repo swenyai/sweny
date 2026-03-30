@@ -1,11 +1,11 @@
 ---
 title: SWEny
-description: An AI-powered engineering platform that builds workflows from skills, executes them as DAGs, and reports results
+description: Turn natural language into reliable AI workflows — build, run, visualize, and deploy from your terminal
 template: splash
 hero:
-  tagline: "SWEny is a platform for building AI-powered engineering workflows. Define what Claude should do at each step, give it the right tools (skills), and let the DAG executor handle the rest. Triage is the first built-in workflow — it monitors your production alerts, investigates errors, and opens fix PRs automatically."
+  tagline: "Describe what you want done. SWEny builds a workflow, wires up the right tools, and runs it. One sentence in, reliable results out. Use it from the CLI for one-off tasks, publish to GitHub Actions for automation, or watch it live in Studio."
   actions:
-    - text: Get Started in 5 Minutes
+    - text: Get Started
       link: /getting-started/
       icon: right-arrow
       variant: primary
@@ -21,19 +21,55 @@ hero:
 
 import { Card, CardGrid } from "@astrojs/starlight/components";
 
-## What it does
+## One sentence in, a workflow out
 
-SWEny workflows are **DAGs of AI-powered nodes**. Each node gives Claude an instruction and a set of skills (tools). Claude does the work — queries logs, searches code, creates issues, opens PRs — and the executor routes to the next node based on natural-language edge conditions.
+```bash
+sweny workflow create "scan our repo for security issues, check dependencies \
+  for vulnerabilities, and create Linear tickets for anything critical"
+```
 
-1. **Gather context** — Claude uses observability and code search skills to understand what happened
-2. **Take action** — Claude creates issues, writes fixes, and opens PRs using the tools available at each node
-3. **Report results** — Claude sends summaries through Slack, Discord, Teams, email, or webhooks
+SWEny generates a full DAG — with nodes, conditional routing, structured output schemas, and the right skills wired up at each step. Refine it with natural language, run it immediately, or save it for later.
 
-Triage is the first built-in workflow. It runs on a schedule, finds novel production errors, and fixes them without waking anyone up. See [How Workflows Work](/workflows/) to learn how the executor works and how to build your own workflows.
+```
+  ┌────────────────────────────────────────┐
+  │ ○ Scan Commits for Exposed Secrets     │
+  └───────────────────┬────────────────────┘
+                      │
+         ┌────────────┴────────────────────────────┐
+         │                                         │
+  ┌──────▼─────────────────────┐  ┌────────────────▼───────────────────┐
+  │ ○ Review PRs for Security  │  │ ○ Scan Dependencies for Vulns     │
+  └──────┬─────────────────────┘  └────────────────┬───────────────────┘
+         │
+  ┌──────▼─────────────────────────┐
+  │ ○ Compile Security Report      │
+  └──────┬─────────────────────────┘
+         │
+  ┌──────▼─────────────────────────┐
+  │ ○ Create Linear Tickets        │
+  └────────────────────────────────┘
+```
 
-## See it in action
+This isn't a template. It was generated from that one sentence, with detailed instructions, output schemas, and conditional edges at every node.
 
-Want to understand the full flow? Read the [end-to-end walkthrough](/getting-started/walkthrough/) — a real error spike from Datadog through to a merged PR.
+## Build, refine, run
+
+1. **`sweny workflow create "..."`** — describe your task in plain English, get a complete workflow
+2. **`sweny workflow edit my-workflow.yml "add a quality gate"`** — modify workflows with natural language
+3. **`sweny workflow run my-workflow.yml`** — execute it with live progress, streaming events, and full observability
+
+No YAML to write by hand. No boilerplate to configure. Describe what you want, refine until it's right, and run it.
+
+## Not just code tasks
+
+SWEny works for anything you can describe as steps with clear inputs and outputs:
+
+- **Content pipelines** — generate blog posts, run them through LLM quality judges, publish passing content
+- **Competitive analysis** — research competitors, gather pricing/features, synthesize a comparison matrix, produce an executive brief
+- **Product launch planning** — research recent launches, draft copy with quality gates, create a Linear checklist
+- **Security audits** — scan commits, review PRs, check dependencies, file tickets for findings
+
+These are real workflows generated from a single `sweny workflow create` command.
 
 ## Skills — connect to your stack
 
@@ -53,28 +89,22 @@ Want to understand the full flow? Read the [end-to-end walkthrough](/getting-sta
   </Card>
 </CardGrid>
 
-## Four entry points
+## How you use it
 
-All entry points are powered by the same DAG executor, which manages skill resolution, node orchestration, and edge routing.
+**[CLI](/cli/)** — build and run workflows from your terminal. This is the primary way to create workflows and get things done. Supports live progress, dry-run, streaming output, and all configured providers.
 
-**[GitHub Action](/action/)** — runs on a cron schedule in your CI. No servers, no infrastructure. This is the primary deployment for production monitoring.
+**[GitHub Action](/action/)** — deploy workflows to CI. Run on cron schedules, dispatch events, or webhook triggers. The built-in triage workflow monitors production errors and opens fix PRs automatically.
 
-**[CLI](/cli/)** — run `sweny triage` from your terminal. Ideal for testing, debugging, and local development. Supports dry-run, streaming output, and all the same providers as the Action.
+**[Studio](/studio/)** — visual DAG editor and live execution monitor. Watch workflows run node-by-node in real time, or build them visually by dragging nodes and connecting edges.
 
-**[Studio](/studio/)** — visual DAG editor and live execution monitor. Design workflows by dragging nodes, simulate runs, and watch live executions in real time.
-
-**[SWEny Cloud](https://app.sweny.ai)** — the managed platform for teams. Trigger jobs from a dashboard or webhooks, store credentials centrally, schedule recurring runs, and track results across all your repos. [See pricing](https://app.sweny.ai/#/pricing).
+**[SWEny Cloud](https://app.sweny.ai)** — the managed platform for teams. Dashboard, shared credentials, scheduling, and cross-repo analytics. [See pricing](https://app.sweny.ai/#/pricing).
 
 ## Quick install
 
-```yaml
-# .github/workflows/sweny-triage.yml
-- uses: swenyai/sweny@v4
-  with:
-    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-    dd-api-key: ${{ secrets.DD_API_KEY }}
-    dd-app-key: ${{ secrets.DD_APP_KEY }}
-    dry-run: true # Remove when ready to create PRs
+```bash
+npm install -g @sweny-ai/core
+sweny workflow create "your task description here"
+sweny workflow run .sweny/workflows/your-workflow.yml
 ```
 
-3 secrets. GitHub Issues by default. [Full setup guide →](/getting-started/)
+[Full setup guide](/getting-started/) — get running in under a minute.

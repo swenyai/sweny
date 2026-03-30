@@ -1,11 +1,60 @@
 ---
 title: Custom Workflows
-description: Build your own workflows with YAML or Studio.
+description: Build your own workflows from natural language, YAML, or Studio.
 ---
 
-SWEny workflows are YAML files that define a DAG of nodes. You can write them by hand, generate them with AI, or build them visually in Studio. This page covers all three approaches.
+The fastest way to build a workflow is to describe it:
 
-## A minimal workflow
+```bash
+sweny workflow create "your task description here"
+```
+
+SWEny generates a full DAG with nodes, conditional routing, structured output schemas, and the right skills at each step. Refine it with `sweny workflow edit`, run it with `sweny workflow run`, or hand-edit the YAML.
+
+This page covers all three approaches: natural language generation, writing YAML by hand, and the Studio visual editor.
+
+## Generate a workflow from natural language
+
+```bash
+sweny workflow create "investigate slow API endpoints, group by service, \
+  and create optimization tickets for anything over 2s p99"
+```
+
+SWEny renders an ASCII DAG preview and prompts you to save, refine, or discard:
+
+```
+  Save to .sweny/workflows/api-perf-audit.yml? [Y/n/refine]
+```
+
+Type a refinement instruction to iterate on the design — add quality gates, notification steps, loop-back conditions, or restructure the DAG. When it looks right, press `Y`.
+
+For non-interactive use (CI, scripting), pass `--json`:
+
+```bash
+sweny workflow create "audit dependencies for vulnerabilities" --json > audit.yml
+```
+
+## Edit workflows with natural language
+
+Modify an existing workflow without hand-editing YAML:
+
+```bash
+sweny workflow edit my-workflow.yml "add a Slack notification after creating tickets"
+```
+
+Or start an interactive session:
+
+```bash
+sweny workflow edit my-workflow.yml
+```
+
+The updated DAG is displayed with the same save/refine/discard flow.
+
+## Writing YAML by hand
+
+If you prefer to write workflows manually, here's the structure.
+
+### A minimal workflow
 
 Start with the simplest possible workflow -- two nodes, one edge:
 
@@ -118,47 +167,6 @@ edges:
 ```
 
 The `output` field accepts any valid JSON Schema. Claude's response is validated against it before the node completes.
-
-## Generating workflows with AI
-
-Use `sweny workflow create` to generate a workflow from a natural-language description:
-
-```bash
-sweny workflow create "investigate slow API endpoints and create optimization tickets"
-```
-
-SWEny generates a complete workflow YAML, renders a DAG preview, and prompts you to save, discard, or refine:
-
-```
-  Save to .sweny/workflows/api-perf-audit.yml? [Y/n/refine]
-```
-
-Type `refine` (or just describe what you want to change) to iterate:
-
-```
-  What would you like to change? Add a notification step at the end that posts to Slack
-```
-
-For non-interactive use (CI, scripting), use `--json`:
-
-```bash
-sweny workflow create "audit dependencies for vulnerabilities" --json > audit.yml
-```
-
-## Editing workflows with AI
-
-Edit an existing workflow file with natural-language instructions:
-
-```bash
-sweny workflow edit my-workflow.yml "add a notification step at the end"
-```
-
-SWEny loads the workflow, applies the requested changes, and prompts you to review. You can also provide the instruction interactively:
-
-```bash
-sweny workflow edit my-workflow.yml
-# What would you like to change? Split the investigate node into two steps: one for logs and one for code
-```
 
 ## Building workflows in Studio
 

@@ -185,7 +185,7 @@ sweny workflow export implement > my-implement.yml
 
 ## What's next?
 
+- [Custom Workflows](/workflows/custom/) -- build workflows from natural language, YAML, or Studio
 - [Triage Workflow](/workflows/triage/) -- the built-in alert investigation workflow
 - [Implement Workflow](/workflows/implement/) -- the built-in issue-to-PR workflow
-- [Custom Workflows](/workflows/custom/) -- write your own workflows in YAML
 - [YAML Reference](/workflows/yaml-reference/) -- full schema reference

@@ -36,10 +36,17 @@ Claude, via headless [Claude Code](https://docs.anthropic.com/en/docs/claude-cod
 
 ## Can I create custom workflows?
 
-Yes. Workflows are pure data — YAML or JSON — so you can write them by hand or use Studio's visual editor.
+Yes. The fastest way is to describe what you want:
 
-- Write a YAML workflow file and run it with the CLI: `sweny workflow run my-workflow.yml`
+```bash
+sweny workflow create "your task description here"
+```
+
+SWEny generates a full workflow DAG from natural language — with nodes, conditional routing, structured output schemas, and the right skills at each step. Refine it with `sweny workflow edit`, or hand-edit the YAML.
+
+You can also:
 - Export a built-in workflow as a starting point: `sweny workflow export triage`
+- Write YAML by hand and run it: `sweny workflow run my-workflow.yml`
 - Use [Studio](/studio/) to visually build and edit workflows in the browser
 
 See [Custom Workflows](/workflows/custom/) and [YAML Reference](/workflows/yaml-reference/) for the full guide.

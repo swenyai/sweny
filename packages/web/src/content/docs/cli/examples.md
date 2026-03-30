@@ -1,11 +1,84 @@
 ---
 title: CLI Examples
-description: Common SWEny CLI configurations and real-world recipes.
+description: Real-world workflows and configurations — from one-liners to complex pipelines.
+---
+
+## Create workflows from natural language
+
+The fastest way to get things done. Describe your task and SWEny builds a complete workflow:
+
+### Content generation with quality gates
+
+```bash
+sweny workflow create "generate SEO blog posts for each topic in our \
+  content calendar, run each through an LLM quality judge that checks \
+  readability, accuracy, and keyword density, loop back for rewrites \
+  if quality fails, then publish passing content"
+```
+
+### Security audit
+
+```bash
+sweny workflow create "scan recent commits for exposed secrets, review \
+  open PRs for security-sensitive changes, check dependency files for \
+  known vulnerabilities, compile a security posture report, and create \
+  Linear tickets for any critical findings"
+```
+
+### Competitive analysis
+
+```bash
+sweny workflow create "research the top 5 competitors in our space, \
+  gather pricing models, key features, and target audience for each, \
+  synthesize a competitive analysis comparing them across dimensions, \
+  and produce an executive brief with strategic recommendations"
+```
+
+### Product launch planning
+
+```bash
+sweny workflow create "research recent product launches for lessons \
+  learned, draft launch copy with a tagline, 3 value props, and a tweet, \
+  create a launch checklist as Linear issues, and compile a launch brief"
+```
+
+### Refine any workflow with natural language
+
+```bash
+# Add a quality gate with loop-back logic
+sweny workflow edit .sweny/workflows/launch_planner.yml \
+  "add a quality gate after drafting copy that rejects taglines over \
+  10 words or vague value props — loop back to redraft if rejected"
+
+# Add notification steps
+sweny workflow edit .sweny/workflows/security_audit.yml \
+  "add a Slack notification after creating tickets"
+```
+
+## Run and manage workflows
+
+```bash
+# Run a workflow
+sweny workflow run .sweny/workflows/my-workflow.yml
+
+# Dry run (validate structure, don't execute)
+sweny workflow run .sweny/workflows/my-workflow.yml --dry-run
+
+# Validate without running
+sweny workflow validate .sweny/workflows/my-workflow.yml
+
+# Export a built-in workflow for customization
+sweny workflow export triage > my-triage.yml
+
+# List available skills
+sweny workflow list
+```
+
 ---
 
 ## Local-only mode (no external services)
 
-The fastest way to try SWEny. Point it at a local log file and run entirely offline:
+The fastest way to try the built-in triage workflow. Point it at a local log file and run entirely offline:
 
 ```yaml
 # .sweny.yml

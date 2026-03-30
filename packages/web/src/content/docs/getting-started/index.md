@@ -3,11 +3,18 @@ title: Introduction
 description: What SWEny is, how it works, and why the DAG matters.
 ---
 
-SWEny is a **workflow orchestration layer** for AI-powered engineering tasks. You define a directed acyclic graph (DAG) of nodes — each with a natural-language instruction and a set of skills (tools) — and SWEny's executor walks the graph, running Claude at every step. The result is reliable, observable, repeatable automation.
+SWEny turns natural language into reliable AI workflows. Describe what you want done, and SWEny builds a DAG — a directed acyclic graph of nodes, each with a focused instruction, scoped tools, and structured output. Then it runs it, tracking every node, tool call, and routing decision.
+
+```bash
+sweny workflow create "research competitors, gather pricing and features, \
+  synthesize a comparison, and produce an executive brief"
+```
+
+One sentence in, a full workflow out. Refine it with natural language, run it immediately, or deploy it to GitHub Actions.
 
 ## Why a DAG?
 
-Ad-hoc prompting is brittle. A single prompt that says "investigate errors, create a ticket, open a PR" works sometimes and fails unpredictably. SWEny splits that work into discrete nodes with explicit control flow:
+A single prompt that says "research competitors and write a report" works sometimes and fails unpredictably. SWEny splits that work into discrete nodes with explicit control flow:
 
 - **Reliable** — each node has a focused instruction and scoped tools. If a node fails, you know exactly where and why.
 - **Observable** — the executor emits structured events (`node:enter`, `tool:call`, `node:exit`, `route`) so you can log, trace, and audit every step.
@@ -15,46 +22,56 @@ Ad-hoc prompting is brittle. A single prompt that says "investigate errors, crea
 
 ## How it works
 
-A SWEny workflow looks like this:
+You don't need to write YAML. `sweny workflow create` generates workflows from plain English, and `sweny workflow edit` modifies them. But here's what's happening under the hood:
 
 ```
   ┌─────────────┐
-  │   Gather     │  ← entry node
-  │   Context    │    skills: github, sentry
+  │  Research    │  ← entry node
+  │  Competitors │    skills: github
   └──────┬───────┘
          │
   ┌──────▼───────┐
-  │  Root Cause  │    skills: github
-  │  Analysis    │
+  │  Gather      │    skills: github
+  │  Data        │
+  └──────┬───────┘
+         │
+  ┌──────▼───────┐
+  │  Synthesize  │    (no external tools needed)
   └──┬───────┬───┘
      │       │
   when:    when:
-  novel    duplicate
-  & med+   or low
+  data     zero
+  found    results
      │       │
-  ┌──▼────┐  ┌▼──────┐
-  │Create │  │ Skip  │
-  │ Issue │  └───────┘
-  └──┬────┘
-     │
-  ┌──▼────┐
-  │Notify │  skills: slack, notification
-  │ Team  │
-  └───────┘
+  ┌──▼──────┐ ┌▼──────────┐
+  │ Write   │ │ Flag Data  │
+  │ Brief   │ │ Gap        │
+  └─────────┘ └────────────┘
 ```
 
-This is the built-in **Triage** workflow. At each node, Claude receives the instruction, the tools from the node's skills, and context from prior nodes. After a node completes, the executor evaluates edge conditions — written in natural language — to decide which node runs next.
+At each node, Claude receives the instruction, the tools from the node's skills, and context from all prior nodes. After a node completes, the executor evaluates edge conditions — written in natural language — to decide which node runs next.
 
-## Four ways to run
+The executor uses headless [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as the LLM backend. MCP servers for GitHub, Linear, Sentry, Datadog, and others are auto-injected based on your configuration.
 
-| Method | Best for | Setup time |
-|--------|----------|------------|
-| **GitHub Action** (recommended) | Scheduled automation in CI | 5 minutes |
-| **CLI** | Local development and testing | 2 minutes |
-| **Studio** | Visual workflow editing and live execution | Browser-based |
-| **[SWEny Cloud](https://app.sweny.ai)** | Teams — dashboard, shared credentials, analytics | 5 minutes |
+## Three ways to use it
 
-The GitHub Action is the primary deployment target. It runs on a cron schedule, triggers from `workflow_dispatch`, and writes results to the GitHub Actions summary. The CLI is useful for iterating locally. Studio provides a visual DAG editor built on React Flow. [SWEny Cloud](https://app.sweny.ai) wraps everything in a managed platform with job history, team credential management, scheduled runs, and cross-repo analytics.
+| Method | What it does |
+|--------|--------------|
+| **CLI** | Build and run workflows from your terminal. The primary way to create workflows and get things done. |
+| **GitHub Action** | Deploy workflows to CI for scheduled automation. Built-in triage monitors production errors. |
+| **Studio** | Visual DAG editor and live execution monitor. Watch workflows run node-by-node. |
+
+**[SWEny Cloud](https://app.sweny.ai)** adds the team layer — dashboard, shared credentials, scheduling, and cross-repo analytics.
+
+## What people build with it
+
+SWEny works for anything you can describe as a sequence of steps:
+
+- **Content generation** — generate blog posts, run them through LLM quality judges, publish passing content (used for [kidmath.ai](https://kidmath.ai))
+- **Security audits** — scan commits for secrets, review PRs, check dependencies, file tickets for findings
+- **Competitive analysis** — research competitors, gather data, synthesize reports, create action items
+- **Production triage** — monitor errors, investigate root causes, create issues, open fix PRs (built-in workflow)
+- **Product launch prep** — research launches, draft copy with quality gates, create checklists
 
 ## Built-in workflows
 
@@ -64,11 +81,11 @@ SWEny ships two production-ready workflows:
 
 **[Implement](/workflows/implement/)** — takes an existing issue, analyzes the code, writes a fix, opens a PR, and notifies. Triggered manually or chained from Triage.
 
-You can also [build custom workflows](/workflows/custom/) in YAML or with the Studio visual editor.
+You can also [build custom workflows](/workflows/custom/) from natural language, YAML, or with the Studio visual editor.
 
 ## Next steps
 
+- **[Quick Start](/getting-started/quick-start/)** — install and create your first workflow in under a minute
 - **[Core Concepts](/getting-started/concepts/)** — understand workflows, nodes, edges, and skills in depth
-- **[Quick Start](/getting-started/quick-start/)** — get SWEny running in your repo in 5 minutes
+- **[CLI Examples](/cli/examples/)** — real-world workflow examples from one-liners to complex pipelines
 - **[End-to-End Walkthrough](/getting-started/walkthrough/)** — follow a real triage run from error spike to fix PR
-- **[SWEny Cloud](https://app.sweny.ai)** — managed platform with dashboard, team credentials, and analytics

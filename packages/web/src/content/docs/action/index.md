@@ -3,9 +3,9 @@ title: GitHub Action Setup
 description: Install and configure SWEny as a GitHub Action for autonomous triage and fix PRs.
 ---
 
-The SWEny GitHub Action is the most powerful way to run SWEny. Set up a cron schedule, forget about it, and wake up to triaged issues with fix PRs ready for review. Install it across multiple repos with service maps and it handles an entire team's worth of triage automatically.
+The GitHub Action is how you deploy SWEny workflows to CI. Set up a cron schedule, forget about it, and wake up to triaged issues with fix PRs ready for review. Install it across multiple repos with service maps and it handles an entire team's worth of triage automatically.
 
-The Action runs SWEny workflows (triage or implement) inside GitHub Actions. It connects to your observability platform, investigates errors, creates issue tickets, writes fixes, and opens pull requests -- all without human intervention.
+Use the [CLI](/cli/) to build and test workflows locally, then deploy them here for automated, recurring runs. The Action connects to your observability platform, investigates errors, creates issue tickets, writes fixes, and opens pull requests -- all without human intervention.
 
 ## Prerequisites
 

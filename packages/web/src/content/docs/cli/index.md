@@ -1,9 +1,9 @@
 ---
 title: CLI Quick Start
-description: Install the SWEny CLI and run your first workflow in under a minute.
+description: Install the SWEny CLI and build your first workflow in under a minute.
 ---
 
-The SWEny CLI runs autonomous engineering workflows from your terminal. Use it to triage production errors, implement fixes for tracked issues, and build custom workflows -- no CI pipeline required.
+The SWEny CLI is how you build, run, and iterate on AI workflows from your terminal. Describe what you want done in plain English, and SWEny generates a full DAG with the right tools wired up at each step.
 
 ## Install
 
@@ -21,9 +21,50 @@ npx @sweny-ai/core --help
 You need a Claude Max subscription (`CLAUDE_CODE_OAUTH_TOKEN`) or an Anthropic API key (`ANTHROPIC_API_KEY`). If both are set, the OAuth token takes precedence — this prevents a local `.env` from overriding CI-provided credentials. The coding agent (Claude Code) is installed automatically at runtime.
 :::
 
-## Try it in 60 seconds
+## Build your first workflow
 
-No external services needed -- just an API key and a log file.
+**1. Add your API key to `.env`:**
+
+```bash
+# .env (gitignored)
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+The CLI auto-loads `.env` at startup -- no external dotenv tooling required.
+
+**2. Create a workflow from a description:**
+
+```bash
+sweny workflow create "analyze our codebase for common security \
+  anti-patterns, compile a report, and create tickets for critical findings"
+```
+
+SWEny generates a full workflow with nodes, conditional routing, and structured output schemas. It renders an ASCII DAG and prompts you to save, refine, or discard:
+
+```
+  Save to .sweny/workflows/security_audit.yml? [Y/n/refine]
+```
+
+Type a refinement instruction to iterate on the design, or press `Y` to save.
+
+**3. Run it:**
+
+```bash
+sweny workflow run .sweny/workflows/security_audit.yml
+```
+
+**4. Refine it later:**
+
+```bash
+sweny workflow edit .sweny/workflows/security_audit.yml \
+  "add a quality gate that rejects vague findings"
+```
+
+That's it. No YAML to write by hand, no boilerplate to configure.
+
+## Try the built-in triage workflow
+
+SWEny also ships production-ready workflows for SRE triage. No external services needed for a quick test -- just an API key and a log file.
 
 **1. Create a config file:**
 
@@ -42,16 +83,7 @@ source-control-provider: file
 notification-provider: file
 ```
 
-**2. Add your API key to `.env`:**
-
-```bash
-# .env (gitignored)
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-The CLI auto-loads `.env` at startup -- no external dotenv tooling required.
-
-**3. Run a dry-run triage:**
+**2. Run a dry-run triage:**
 
 ```bash
 sweny triage --dry-run
