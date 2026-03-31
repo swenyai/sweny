@@ -41,6 +41,9 @@
     "fast-xml-parser": "^5.5.6"
   },
   "devDependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "zod": "^3.25.76",
     "fast-xml-parser": "^5.5.6",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
