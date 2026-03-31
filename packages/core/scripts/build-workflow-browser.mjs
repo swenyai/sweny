@@ -2,7 +2,7 @@
  * Generate a browser-safe JS module that exports built-in workflows
  * as static objects (parsed from YAML at build time, not runtime).
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
@@ -10,6 +10,8 @@ import { parse } from "yaml";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workflowDir = join(__dirname, "..", "src", "workflows");
 const outFile = join(__dirname, "..", "dist", "workflows", "browser.js");
+
+mkdirSync(dirname(outFile), { recursive: true });
 
 const workflows = ["triage", "implement", "seed-content"];
 const lines = [];

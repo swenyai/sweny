@@ -22,18 +22,6 @@ export default defineConfig({
       "@sweny-ai/core": resolve(__dirname, "../../packages/core/dist/browser.js"),
     },
   },
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          react: ["react", "react-dom"],
-          xyflow: ["@xyflow/react"],
-          elk: ["elkjs"],
-          zustand: ["zustand", "immer", "zundo"],
-        },
-      },
-    },
-  },
   ...(isLib
     ? {
         // Library build
