@@ -10,7 +10,7 @@ nodes:
       input.
 
 
-      1. Check input for `rules_urls` and `context_urls` arrays.
+      1. Check input for `rulesUrls`, `contextUrls`, `rules_urls`, and `context_urls` arrays (any of these may be present).
 
       2. For each URL, fetch its content:
          - Linear document URLs → use the Linear MCP tools (get_document or search_documentation)
@@ -175,7 +175,8 @@ nodes:
       with: Summary, Root Cause, Impact, Steps to Reproduce, and Recommended Fix.
 
 
-      Use whichever issue tracker is available to you. Output the created/updated issue identifiers.
+      Use the issue tracker specified in context (e.g. Linear, Jira, or GitHub Issues) — do NOT fall back to a
+      different tracker. Output the created/updated issue identifiers.
     skills:
       - linear
       - github

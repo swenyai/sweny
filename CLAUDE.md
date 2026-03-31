@@ -1,65 +1,21 @@
 # SWEny Monorepo — Claude Instructions
 
-## Changesets (REQUIRED)
+## Deployment
 
-This project uses [Changesets](https://github.com/changesets/changesets) for automated SemVer versioning and npm publishing.
+Push to `main` auto-deploys everything:
+1. `.github/workflows/release.yml` rebuilds `dist/`, bumps versions, publishes to npm, and updates the `v4` action tag
+2. GitHub Action consumers (`swenyai/sweny@v4`) pick up changes on their next run — no manual release step
 
-**Any time you modify source files in a published package, you MUST create a changeset file before committing.**
-
-Published packages:
-- `packages/core` → `@sweny-ai/core` (v3 — skills + DAG executor)
-- `packages/studio` → `@sweny-ai/studio`
-- `packages/cli` → `@sweny-ai/cli`
-- `packages/engine` → `@sweny-ai/engine` (deprecated — use `@sweny-ai/core`)
-- `packages/providers` → `@sweny-ai/providers` (deprecated — use `@sweny-ai/core` skills)
-- `packages/agent` → `@sweny-ai/agent` (deprecated — migrating to `@sweny-ai/core`)
-
-### How to create a changeset
-
-Create a file at `.changeset/<descriptive-slug>.md`:
-
-```md
----
-"@sweny-ai/engine": minor
-"@sweny-ai/cli": patch
----
-
-Brief description of what changed and why — written for package consumers.
-```
-
-Bump level rules:
-- `major` — breaking API change (removed export, changed signature, renamed type)
-- `minor` — new feature, new export, new option (backwards compatible)
-- `patch` — bug fix, internal refactor, performance improvement, docs only
-
-You may omit a changeset for:
-- Changes to `packages/web`, `packages/action` (private, not published)
-- CI/workflow-only changes (`.github/`, `scripts/`)
-- Root-level doc/config changes that don't affect package consumers
-- Commits that already have a changeset in the same batch
-
-### CI backstop
-
-`scripts/auto-changeset.mjs` runs in CI on every push to main and auto-generates a changeset for any published package that has unreleased commits but no pending changeset. This is a fallback — prefer creating changesets explicitly with the correct bump level and a meaningful description.
-
-## Release flow
-
-1. Merge feature work to `main` (with changeset files included)
-2. `.github/workflows/release.yml` runs automatically — bumps versions, commits, and publishes to npm in one step
-3. No intermediate PR — publishing is fully automatic on every push to `main` that has pending changesets
+Changesets are handled by a CI backstop (`scripts/auto-changeset.mjs`) that auto-generates one for any published package with unreleased commits. You can also create one explicitly at `.changeset/<slug>.md` with the correct bump level if you want a meaningful description.
 
 ## Package structure
 
-| Package | Dir | Published |
-|---------|-----|-----------|
-| `@sweny-ai/core` | `packages/core` | yes |
-| `@sweny-ai/studio` | `packages/studio` | yes |
-| `@sweny-ai/cli` | `packages/cli` | yes |
-| `@sweny-ai/engine` | `packages/engine` | yes (deprecated) |
-| `@sweny-ai/providers` | `packages/providers` | yes (deprecated) |
-| `@sweny-ai/agent` | `packages/agent` | yes (deprecated) |
-| `@sweny-ai/action` | `packages/action` | no (private) |
-| `@sweny-ai/web` | `packages/web` | no (private) |
+| Package | Dir | Published | Notes |
+|---------|-----|-----------|-------|
+| `@sweny-ai/core` | `packages/core` | npm | v4 — skills + DAG executor |
+| `@sweny-ai/studio` | `packages/studio` | npm | Visual workflow viewer/editor |
+| `@sweny-ai/action` | `packages/action` | no (private) | GitHub Action entrypoint — bundled into root `dist/` |
+| `@sweny-ai/web` | `packages/web` | no (private) | Docs site |
 
 ## Test framework
 
