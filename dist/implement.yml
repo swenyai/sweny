@@ -99,5 +99,7 @@ edges:
     when: Fix is too complex, risky, or unclear
   - from: implement
     to: create_pr
+  - from: skip
+    to: notify
   - from: create_pr
     to: notify
