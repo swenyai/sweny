@@ -9,8 +9,7 @@ import type { Workflow, ExecutionEvent } from "./types.js";
 import { MockClaude, createFileSkill } from "./testing.js";
 import { createSkillMap } from "./skills/index.js";
 import { validateWorkflow, parseWorkflow } from "./schema.js";
-import { triageWorkflow } from "./workflows/triage.js";
-import { implementWorkflow } from "./workflows/implement.js";
+import { triageWorkflow, implementWorkflow } from "./workflows/index.js";
 
 // ─── Test fixtures ───────────────────────────────────────────────
 

@@ -2,9 +2,17 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import react from "@astrojs/react";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   site: "https://docs.sweny.ai",
+  vite: {
+    resolve: {
+      alias: {
+        "@sweny-ai/core/workflows": fileURLToPath(new URL("../core/dist/workflows/browser.js", import.meta.url)),
+      },
+    },
+  },
   integrations: [
     react(),
     starlight({

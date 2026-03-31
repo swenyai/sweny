@@ -17,7 +17,7 @@ export default defineConfig({
       // Redirect @sweny-ai/core subpath imports to the built dist
       "@sweny-ai/core/studio": resolve(__dirname, "../../packages/core/dist/studio.js"),
       "@sweny-ai/core/schema": resolve(__dirname, "../../packages/core/dist/schema.js"),
-      "@sweny-ai/core/workflows": resolve(__dirname, "../../packages/core/dist/workflows/index.js"),
+      "@sweny-ai/core/workflows": resolve(__dirname, "../../packages/core/dist/workflows/browser.js"),
       "@sweny-ai/core/testing": resolve(__dirname, "../../packages/core/dist/testing.js"),
       "@sweny-ai/core": resolve(__dirname, "../../packages/core/dist/browser.js"),
     },

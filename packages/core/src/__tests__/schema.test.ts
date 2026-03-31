@@ -10,8 +10,7 @@ import {
   workflowJsonSchema,
 } from "../schema.js";
 import type { Workflow } from "../types.js";
-import { triageWorkflow } from "../workflows/triage.js";
-import { implementWorkflow } from "../workflows/implement.js";
+import { triageWorkflow, implementWorkflow } from "../workflows/index.js";
 
 // ─── Test fixtures ───────────────────────────────────────────────
 

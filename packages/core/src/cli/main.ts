@@ -10,9 +10,7 @@ import chalk from "chalk";
 
 import { execute } from "../executor.js";
 import type { ExecuteOptions } from "../executor.js";
-import { triageWorkflow } from "../workflows/triage.js";
-import { implementWorkflow } from "../workflows/implement.js";
-import { seedContentWorkflow } from "../workflows/seed-content.js";
+import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workflows/index.js";
 import type { ExecutionEvent, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
