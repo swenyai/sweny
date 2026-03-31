@@ -47,7 +47,18 @@ export default defineConfig({
           },
           rollupOptions: {
             // Don't bundle peer dependencies — consumer provides them
-            external: ["react", "react-dom", "@xyflow/react", "elkjs"],
+            external: [
+              "react",
+              "react-dom",
+              "react/jsx-runtime",
+              "@xyflow/react",
+              "elkjs",
+              "@sweny-ai/core",
+              "@sweny-ai/core/studio",
+              "@sweny-ai/core/schema",
+              "@sweny-ai/core/workflows",
+              "@sweny-ai/core/testing",
+            ],
             output: {
               assetFileNames: "[name][extname]",
               chunkFileNames: "chunks/[name]-[hash].js",
