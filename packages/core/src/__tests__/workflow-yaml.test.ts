@@ -196,16 +196,42 @@ describe("browser bundle", () => {
     expect(fs.existsSync(browserPath)).toBe(true);
   });
 
-  it("exports match the YAML-loaded workflows", async () => {
+  it("triage workflow is deeply equal", async () => {
     const browser = await import(browserPath);
-    expect(browser.triageWorkflow.id).toBe(triageWorkflow.id);
-    expect(browser.triageWorkflow.entry).toBe(triageWorkflow.entry);
-    expect(Object.keys(browser.triageWorkflow.nodes)).toEqual(Object.keys(triageWorkflow.nodes));
-    expect(browser.triageWorkflow.edges.length).toBe(triageWorkflow.edges.length);
+    expect(browser.triageWorkflow).toEqual(JSON.parse(JSON.stringify(triageWorkflow)));
+  });
 
-    expect(browser.implementWorkflow.id).toBe(implementWorkflow.id);
-    expect(Object.keys(browser.implementWorkflow.nodes)).toEqual(Object.keys(implementWorkflow.nodes));
+  it("implement workflow is deeply equal", async () => {
+    const browser = await import(browserPath);
+    expect(browser.implementWorkflow).toEqual(JSON.parse(JSON.stringify(implementWorkflow)));
+  });
 
-    expect(browser.seedContentWorkflow.id).toBe(seedContentWorkflow.id);
+  it("seed-content workflow is deeply equal", async () => {
+    const browser = await import(browserPath);
+    expect(browser.seedContentWorkflow).toEqual(JSON.parse(JSON.stringify(seedContentWorkflow)));
+  });
+
+  it("exports exactly the expected workflow names", async () => {
+    const browser = await import(browserPath);
+    const exportedKeys = Object.keys(browser).sort();
+    expect(exportedKeys).toEqual(["implementWorkflow", "seedContentWorkflow", "triageWorkflow"]);
+  });
+});
+
+// ─── Zod runtime validation ─────────────────────────────────────
+
+describe("runtime Zod validation in loader", () => {
+  it("workflows are Zod-validated at load time (not just cast)", () => {
+    // The loader uses workflowZ.parse(), so invalid YAML would throw at import.
+    // If we got here, all 3 workflows passed Zod validation at module load.
+    // Verify by checking the parsed output has Zod's default-applied fields.
+    expect(triageWorkflow.description).toBeDefined();
+    expect(implementWorkflow.description).toBeDefined();
+    expect(seedContentWorkflow.description).toBeDefined();
+
+    // Zod applies .default([]) to skills arrays — verify it works
+    for (const node of Object.values(triageWorkflow.nodes)) {
+      expect(Array.isArray(node.skills)).toBe(true);
+    }
   });
 });

@@ -2,13 +2,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { workflowZ } from "../schema.js";
 import type { Workflow } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function loadBuiltinWorkflow(filename: string): Workflow {
   const filePath = path.join(__dirname, filename);
-  return parseYaml(fs.readFileSync(filePath, "utf-8")) as Workflow;
+  const raw = parseYaml(fs.readFileSync(filePath, "utf-8"));
+  return workflowZ.parse(raw);
 }
 
 export const triageWorkflow: Workflow = loadBuiltinWorkflow("triage.yml");
