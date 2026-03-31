@@ -529,6 +529,13 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     Boolean(options.stream) ? createStreamObserver() : undefined,
   )!;
 
+  // Resolve rules/context from .sweny.yml (same as triage path)
+  const providerCtx = buildProviderCtx(config, mcpServers);
+  const { rules, context, rulesUrls, contextUrls } = await resolveRulesAndContext(config);
+  const implContextParts = [providerCtx];
+  if (config.additionalInstructions) implContextParts.push(config.additionalInstructions);
+  const fullImplContext = [implContextParts.join("\n\n"), context].filter(Boolean).join("\n\n---\n\n");
+
   // Build workflow input for implement
   const workflowInput = {
     issueIdentifier: issueId,
@@ -538,6 +545,11 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     prLabels: config.prLabels,
     reviewMode: config.reviewMode,
     additionalInstructions: config.additionalInstructions,
+    // Structured rules/context for executor
+    rules,
+    context: fullImplContext,
+    rulesUrls,
+    contextUrls,
   };
 
   try {

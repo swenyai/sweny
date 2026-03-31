@@ -85,3 +85,7 @@ export type { BuildWorkflowOptions } from "./workflow-builder.js";
 // Templates
 export { resolveTemplates, loadAdditionalContext, loadTemplate } from "./templates.js";
 export type { Templates } from "./templates.js";
+
+// Config file
+export { loadConfigFile } from "./cli/config-file.js";
+export type { FileConfig } from "./cli/config-file.js";

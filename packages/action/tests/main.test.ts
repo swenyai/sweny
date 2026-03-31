@@ -17,6 +17,7 @@ const mockConfiguredSkills = vi.fn().mockReturnValue([]);
 const mockBuildAutoMcpServers = vi.fn().mockReturnValue({});
 const mockResolveTemplates = vi.fn().mockResolvedValue({ issueTemplate: "", prTemplate: "" });
 const mockLoadAdditionalContext = vi.fn().mockResolvedValue({ resolved: "", urls: [] });
+const mockLoadConfigFile = vi.fn().mockReturnValue({});
 
 /** Track ClaudeClient constructor calls */
 let claudeClientArgs: unknown[] = [];
@@ -28,18 +29,22 @@ let claudeClientArgs: unknown[] = [];
 async function loadMain() {
   vi.resetModules();
   claudeClientArgs = [];
-  vi.doMock("@actions/core", () => ({
-    getInput: vi.fn().mockReturnValue(""),
-    getBooleanInput: vi.fn().mockReturnValue(false),
-    setFailed: mockSetFailed,
-    setOutput: mockSetOutput,
-    startGroup: mockStartGroup,
-    endGroup: mockEndGroup,
-    info: mockInfo,
-    debug: vi.fn(),
-    warning: vi.fn(),
-    error: vi.fn(),
-  }));
+  vi.doMock("@actions/core", () => {
+    const summaryObj = { addRaw: vi.fn().mockReturnThis(), write: vi.fn().mockResolvedValue(undefined) };
+    return {
+      getInput: vi.fn().mockReturnValue(""),
+      getBooleanInput: vi.fn().mockReturnValue(false),
+      setFailed: mockSetFailed,
+      setOutput: mockSetOutput,
+      startGroup: mockStartGroup,
+      endGroup: mockEndGroup,
+      info: mockInfo,
+      debug: vi.fn(),
+      warning: vi.fn(),
+      error: vi.fn(),
+      summary: summaryObj,
+    };
+  });
   vi.doMock("@sweny-ai/core", () => ({
     execute: mockExecute,
     ClaudeClient: class MockClaudeClient {
@@ -54,6 +59,7 @@ async function loadMain() {
     consoleLogger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
     resolveTemplates: mockResolveTemplates,
     loadAdditionalContext: mockLoadAdditionalContext,
+    loadConfigFile: mockLoadConfigFile,
   }));
   vi.doMock("@sweny-ai/core/workflows", () => ({
     triageWorkflow: { id: "triage", name: "triage", entry: "investigate", nodes: {}, edges: [] },
@@ -141,6 +147,7 @@ beforeEach(() => {
   mockBuildAutoMcpServers.mockReturnValue({});
   mockResolveTemplates.mockResolvedValue({ issueTemplate: "", prTemplate: "" });
   mockLoadAdditionalContext.mockResolvedValue({ resolved: "", urls: [] });
+  mockLoadConfigFile.mockReturnValue({});
 });
 
 // ---------------------------------------------------------------------------
@@ -468,5 +475,109 @@ describe("handleEvent observer", () => {
     const logs = await fireEvents([{ type: "route", from: "investigate", to: "create_issue", reason: "issues found" }]);
 
     expect(logs).toContain("⤳ investigate → create_issue (issues found)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// describe: .sweny.yml rules/context integration
+// ---------------------------------------------------------------------------
+
+describe(".sweny.yml rules/context integration", () => {
+  it("calls loadConfigFile with process.cwd()", async () => {
+    await loadMain();
+
+    expect(mockLoadConfigFile).toHaveBeenCalledWith(process.cwd());
+  });
+
+  it("passes rules from .sweny.yml as input.rules to execute", async () => {
+    mockLoadConfigFile.mockReturnValue({
+      rules: ["Never use var", "Always add tests"],
+    });
+    mockLoadAdditionalContext.mockResolvedValue({ resolved: "Never use var\n\n---\n\nAlways add tests", urls: [] });
+
+    await loadMain();
+
+    const [, input] = mockExecute.mock.calls[0];
+    expect(input.rules).toBe("Never use var\n\n---\n\nAlways add tests");
+  });
+
+  it("passes rule URLs as rulesUrls to execute", async () => {
+    mockLoadConfigFile.mockReturnValue({
+      rules: ["https://example.com/coding-standards.md"],
+    });
+    mockLoadAdditionalContext.mockResolvedValue({ resolved: "", urls: ["https://example.com/coding-standards.md"] });
+
+    await loadMain();
+
+    const [, input] = mockExecute.mock.calls[0];
+    expect(input.rulesUrls).toEqual(["https://example.com/coding-standards.md"]);
+  });
+
+  it("merges .sweny.yml context with action additional-context", async () => {
+    mockParseInputs.mockReturnValue({
+      ...DEFAULT_CONFIG,
+      additionalContext: ["https://action-input.com/guide.md"],
+    });
+    mockLoadConfigFile.mockReturnValue({
+      context: ["./local-architecture.md"],
+    });
+
+    // loadAdditionalContext is called twice: once for rules (empty), once for merged context
+    mockLoadAdditionalContext
+      .mockResolvedValueOnce({ resolved: "", urls: [] }) // rules call
+      .mockResolvedValueOnce({ resolved: "", urls: ["https://action-input.com/guide.md"] }); // context call
+
+    await loadMain();
+
+    // Second call should receive both .sweny.yml context and action additional-context merged
+    const contextCall = mockLoadAdditionalContext.mock.calls[1];
+    expect(contextCall[0]).toEqual(["./local-architecture.md", "https://action-input.com/guide.md"]);
+  });
+
+  it("calls loadAdditionalContext twice: once for rules, once for context", async () => {
+    mockLoadConfigFile.mockReturnValue({
+      rules: ["rule-1"],
+      context: ["ctx-1"],
+    });
+
+    await loadMain();
+
+    expect(mockLoadAdditionalContext).toHaveBeenCalledTimes(2);
+    // First call: rules from .sweny.yml
+    expect(mockLoadAdditionalContext.mock.calls[0][0]).toEqual(["rule-1"]);
+    // Second call: .sweny.yml context merged with action additionalContext (empty in DEFAULT_CONFIG)
+    expect(mockLoadAdditionalContext.mock.calls[1][0]).toEqual(["ctx-1"]);
+  });
+
+  it("omits rules and rulesUrls from input when .sweny.yml has no rules", async () => {
+    mockLoadConfigFile.mockReturnValue({});
+
+    await loadMain();
+
+    const [, input] = mockExecute.mock.calls[0];
+    expect(input).not.toHaveProperty("rules");
+    expect(input).not.toHaveProperty("rulesUrls");
+  });
+
+  it("handles .sweny.yml with scalar rules value gracefully", async () => {
+    // loadConfigFile returns string for scalar YAML values — the action guards with Array.isArray
+    mockLoadConfigFile.mockReturnValue({ rules: "single-rule" as unknown });
+
+    await loadMain();
+
+    // Should not crash; rules array should be empty (scalar fails Array.isArray check)
+    const rulesCall = mockLoadAdditionalContext.mock.calls[0];
+    expect(rulesCall[0]).toEqual([]);
+  });
+
+  it("does not call setFailed on happy path with .sweny.yml rules", async () => {
+    mockLoadConfigFile.mockReturnValue({
+      rules: ["https://example.com/rules.md"],
+      context: ["./docs/arch.md"],
+    });
+
+    await loadMain();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
   });
 });

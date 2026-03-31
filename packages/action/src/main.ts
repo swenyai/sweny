@@ -9,6 +9,7 @@ import {
   consoleLogger,
   resolveTemplates,
   loadAdditionalContext,
+  loadConfigFile,
 } from "@sweny-ai/core";
 import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
 import type { ExecutionEvent, NodeResult } from "@sweny-ai/core";
@@ -59,12 +60,22 @@ async function run(): Promise<void> {
     // Select workflow
     const workflow = config.workflow === "implement" ? implementWorkflow : triageWorkflow;
 
+    // Load .sweny.yml from repo root — same config the CLI reads
+    const fileConfig = loadConfigFile(process.cwd());
+    const fileRules = Array.isArray(fileConfig.rules) ? fileConfig.rules : [];
+    const fileContext = Array.isArray(fileConfig.context) ? fileConfig.context : [];
+
     // Load templates & additional context
     const templates = await resolveTemplates(
       { issueTemplate: config.issueTemplate, prTemplate: config.prTemplate },
       process.cwd(),
     );
-    const userContextResult = await loadAdditionalContext(config.additionalContext, process.cwd());
+
+    // Resolve rules from .sweny.yml (separate from context — gets "MUST follow" framing)
+    const rulesResult = await loadAdditionalContext(fileRules, process.cwd());
+
+    // Resolve context: .sweny.yml context + action additional-context merged
+    const userContextResult = await loadAdditionalContext([...fileContext, ...config.additionalContext], process.cwd());
 
     // Build dynamic provider context
     const extras: Record<string, string> = {};
@@ -89,9 +100,11 @@ async function run(): Promise<void> {
     const input = {
       ...buildWorkflowInput(config),
       ...templates,
-      // Structured rules/context for executor
+      // Structured rules/context for executor (rules get "MUST follow" framing)
+      ...(rulesResult.resolved ? { rules: rulesResult.resolved } : {}),
       ...(context ? { context } : {}),
       // URLs for the prepare node to fetch at runtime
+      ...(rulesResult.urls.length > 0 ? { rulesUrls: rulesResult.urls } : {}),
       ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
     };
 
