@@ -255,9 +255,21 @@ function handleEvent(event: ExecutionEvent): void {
       core.info(`→ ${event.node}`);
       break;
 
-    case "node:progress":
-      core.info(`  ↳ ${event.message}`);
+    case "node:progress": {
+      // node:progress events carry tool activity from all sources (including
+      // external MCP servers like GitHub, Linear, BetterStack) which don't
+      // emit the narrower tool:call / tool:result events.
+      // Patterns emitted by claude.ts:
+      //   "toolName (Ns)"        — tool in progress
+      //   "summary text…"        — tool use summary
+      const toolProgressMatch = event.message.match(/^(.+?) \((\d+)s\)$/);
+      if (toolProgressMatch) {
+        core.info(`  → ${toolProgressMatch[1]} (${toolProgressMatch[2]}s)`);
+      } else {
+        core.info(`  ↳ ${event.message}`);
+      }
       break;
+    }
 
     case "tool:call":
       core.info(`  → ${event.tool}(${summarizeInput(event.input)})`);
