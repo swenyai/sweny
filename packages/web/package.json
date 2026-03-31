@@ -12,7 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@astrojs/react": "^4.4.2",
+    "@astrojs/react": "^5.0.2",
     "@astrojs/starlight": "^0.37.7",
     "@sweny-ai/core": "*",
     "@sweny-ai/studio": "^8.0.0",
