@@ -23,7 +23,7 @@
   "devDependencies": {
     "@types/node": "^25",
     "@vercel/ncc": "^0.38",
-    "typescript": "^5.6",
+    "typescript": "^6.0",
     "vitest": "^4"
   },
   "keywords": [
