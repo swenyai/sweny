@@ -67,17 +67,6 @@ sweny workflow run .sweny/workflows/github_security_audit.yml
 
 That's it. One sentence in, a full workflow out. No YAML to write, no boilerplate, no config.
 
----
-
-## Not just code
-
-SWEny works for anything you can describe as steps with clear inputs and outputs. These are real workflows generated from a single command:
-
-- **Security audits** — scan commits, review PRs, check dependencies, file tickets for findings
-- **Content pipelines** — generate blog posts, run them through LLM quality judges, publish passing content
-- **Competitive analysis** — research competitors, gather pricing/features, synthesize a comparison, produce an executive brief
-- **Production triage** — monitor errors, investigate root causes, create issues, open fix PRs
-
 Don't like the result? Edit it the same way you created it:
 
 ```bash
@@ -85,28 +74,53 @@ sweny workflow edit security_audit.yml "add a quality gate that rejects \
   vague findings, and loop back to re-scan if rejected"
 ```
 
-## Skills — connect to your stack
+---
 
-<CardGrid stagger>
-  <Card title="GitHub" icon="github">
-    Search code, read files, create issues, open pull requests. The most-used skill across all workflows.
+## Built-in workflows
+
+SWEny ships two production-ready workflows you can run immediately:
+
+<CardGrid>
+  <Card title="Triage" icon="warning">
+    Monitors your observability platform for errors, investigates root causes, creates issues, writes fixes, and opens
+    PRs — automatically. [Learn more](/workflows/triage/)
   </Card>
-  <Card title="Observability" icon="magnifier">
-    **Sentry**, **Datadog**, **BetterStack** — query errors, search logs, list monitors, pull metrics.
-  </Card>
-  <Card title="Issue Tracking" icon="list-format">
-    **Linear** and **GitHub Issues** — create tickets, search for duplicates, update status, link PRs.
-  </Card>
-  <Card title="Notification" icon="comment">
-    **Slack**, **Discord**, **Teams**, **Email**, **Webhook** — send results wherever your team works.
+  <Card title="Implement" icon="rocket">
+    Takes an existing issue, analyzes the codebase, writes a fix, opens a PR, and notifies your team. Trigger it
+    manually or chain it from Triage. [Learn more](/workflows/implement/)
   </Card>
 </CardGrid>
 
-## One tool, many surfaces
+```bash
+sweny triage --dry-run          # investigate production errors
+sweny implement ENG-123         # fix a tracked issue and open a PR
+```
 
-|                                         |                                                                                  |
-| --------------------------------------- | -------------------------------------------------------------------------------- |
-| **[CLI](/cli/)**                        | Build and run workflows from your terminal. The primary interface.               |
-| **[GitHub Action](/action/)**           | Deploy workflows to CI. Monitors production errors, opens fix PRs on a schedule. |
-| **[Studio](/studio/)**                  | Visual DAG editor and live execution monitor. Watch workflows run node-by-node.  |
-| **[SWEny Cloud](https://app.sweny.ai)** | Dashboard, shared credentials, scheduling, and analytics for teams.              |
+Or [build your own](/workflows/custom/) from a single sentence with `sweny workflow create`.
+
+## Run it on a schedule
+
+Deploy any workflow to GitHub Actions with three secrets and a cron schedule. SWEny monitors your production errors and opens fix PRs while you sleep.
+
+```yaml
+# .github/workflows/sweny-triage.yml
+- uses: swenyai/sweny@v4
+  with:
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    observability-provider: sentry
+    sentry-auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
+```
+
+[Full Action guide](/action/) — setup, scheduling, and service maps.
+
+## Connect to your stack
+
+SWEny connects to the tools you already use — GitHub, Linear, Sentry, Datadog, BetterStack, Slack, and more — through built-in [skills](/skills/) and [MCP servers](/advanced/mcp-servers/). Set an API key and the skill is ready. Bring your own MCP servers to connect anything else.
+
+## Studio
+
+[Studio](/studio/) is a visual DAG editor and live execution monitor. Design workflows by dragging nodes, or watch running workflows execute node-by-node in real time. Pass `--stream` to any CLI run to pipe events into Studio.
+
+## SWEny Cloud
+
+**[app.sweny.ai](https://app.sweny.ai)** — dashboard, shared credentials, scheduling, and cross-repo analytics for teams. The CLI and Action are free and always will be. Cloud adds the operational layer for teams running SWEny at scale.
