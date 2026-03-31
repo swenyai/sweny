@@ -325,3 +325,148 @@ describe("setGitHubOutputs", () => {
     expect(mockSetOutput).toHaveBeenCalledWith("pr-url", "https://github.com/org/repo/pull/1");
   });
 });
+
+// ---------------------------------------------------------------------------
+// describe: handleEvent — observer callback event logging
+// ---------------------------------------------------------------------------
+
+describe("handleEvent observer", () => {
+  /**
+   * Helper: loads main.ts with mockExecute configured to fire the given
+   * events via the observer callback, then returns all mockInfo call args.
+   */
+  async function fireEvents(events: Array<Record<string, unknown>>): Promise<string[]> {
+    mockExecute.mockImplementation(
+      async (_wf: unknown, _input: unknown, opts: { observer: (e: Record<string, unknown>) => void }) => {
+        for (const e of events) {
+          opts.observer(e);
+        }
+        return new Map();
+      },
+    );
+
+    await loadMain();
+
+    return mockInfo.mock.calls.map((c: unknown[]) => c[0] as string);
+  }
+
+  // -- node:progress: tool call pattern ---------------------------------
+
+  it("logs node:progress with tool pattern using → prefix", async () => {
+    const logs = await fireEvents([
+      { type: "node:progress", node: "investigate", message: "mcp__linear__create_issue (3s)" },
+    ]);
+
+    expect(logs).toContain("  → mcp__linear__create_issue (3s)");
+  });
+
+  it("logs node:progress tool pattern with large elapsed time", async () => {
+    const logs = await fireEvents([
+      { type: "node:progress", node: "investigate", message: "mcp__betterstack__telemetry_query (142s)" },
+    ]);
+
+    expect(logs).toContain("  → mcp__betterstack__telemetry_query (142s)");
+  });
+
+  // -- node:progress: generic message -----------------------------------
+
+  it("logs node:progress with generic message using ↳ prefix", async () => {
+    const logs = await fireEvents([
+      { type: "node:progress", node: "investigate", message: "Analyzing error patterns" },
+    ]);
+
+    expect(logs).toContain("  ↳ Analyzing error patterns");
+  });
+
+  // -- node:progress: edge cases that should NOT match tool pattern ------
+
+  it("does not treat parenthetical content without time suffix as tool call", async () => {
+    const logs = await fireEvents([
+      { type: "node:progress", node: "investigate", message: "Found 3 issues (high severity)" },
+    ]);
+
+    // Should use the generic ↳ prefix, not the tool → prefix
+    expect(logs).toContain("  ↳ Found 3 issues (high severity)");
+    expect(logs).not.toContain("  → Found 3 issues (3s)");
+  });
+
+  it("does not treat decimal seconds as tool call pattern", async () => {
+    const logs = await fireEvents([{ type: "node:progress", node: "investigate", message: "some_tool (3.2s)" }]);
+
+    // Regex requires integer seconds — 3.2s should not match
+    expect(logs).toContain("  ↳ some_tool (3.2s)");
+  });
+
+  it("does not treat message ending with (Ns) mid-string as tool call", async () => {
+    const logs = await fireEvents([
+      { type: "node:progress", node: "investigate", message: "Retried request (5s) and succeeded" },
+    ]);
+
+    // The pattern requires (Ns) at end-of-string — this has trailing text
+    expect(logs).toContain("  ↳ Retried request (5s) and succeeded");
+  });
+
+  // -- tool:call --------------------------------------------------------
+
+  it("logs tool:call events with → prefix and summarized input", async () => {
+    const logs = await fireEvents([
+      { type: "tool:call", node: "investigate", tool: "search_logs", input: { query: "error 500", limit: 10 } },
+    ]);
+
+    expect(logs).toContain("  → search_logs(query=error 500, limit=10)");
+  });
+
+  // -- tool:result ------------------------------------------------------
+
+  it("logs tool:result events with ✓ prefix and summarized output", async () => {
+    const logs = await fireEvents([
+      { type: "tool:result", node: "investigate", tool: "search_logs", output: "Found 5 matching entries" },
+    ]);
+
+    expect(logs).toContain("  ✓ search_logs → Found 5 matching entries");
+  });
+
+  // -- workflow:start ---------------------------------------------------
+
+  it("logs workflow:start with ▲ prefix", async () => {
+    const logs = await fireEvents([{ type: "workflow:start", workflow: "triage" }]);
+
+    expect(logs).toContain("▲ triage");
+  });
+
+  // -- node:enter -------------------------------------------------------
+
+  it("logs node:enter with → prefix and starts a group", async () => {
+    await fireEvents([
+      {
+        type: "node:enter",
+        node: "investigate",
+        instruction: "Investigate the error patterns in the observability data",
+      },
+    ]);
+
+    expect(mockStartGroup).toHaveBeenCalledWith(
+      "investigate: Investigate the error patterns in the observability data",
+    );
+    expect(mockInfo).toHaveBeenCalledWith("→ investigate");
+  });
+
+  // -- node:exit (success) ----------------------------------------------
+
+  it("logs successful node:exit with ✓ prefix and tool call count", async () => {
+    const logs = await fireEvents([
+      { type: "node:exit", node: "investigate", result: { status: "success", data: {}, toolCalls: [{}, {}, {}] } },
+    ]);
+
+    expect(logs).toContain("✓ investigate: success (3 tool calls)");
+    expect(mockEndGroup).toHaveBeenCalled();
+  });
+
+  // -- route ------------------------------------------------------------
+
+  it("logs route events with ⤳ prefix", async () => {
+    const logs = await fireEvents([{ type: "route", from: "investigate", to: "create_issue", reason: "issues found" }]);
+
+    expect(logs).toContain("⤳ investigate → create_issue (issues found)");
+  });
+});
