@@ -11,7 +11,7 @@ Use the [CLI](/cli/) to build and test workflows locally, then deploy them here 
 
 - A GitHub repository
 - An observability platform (Datadog, Sentry, CloudWatch, or [19 others](/action/inputs/#observability))
-- A [Claude Max](https://claude.ai/) subscription (recommended) or an [Anthropic API key](https://console.anthropic.com/)
+- SWEny uses [Claude](https://claude.ai/) as its AI engine — you'll need an [Anthropic API key](https://console.anthropic.com/) or a Claude OAuth token
 
 That is it. SWEny uses **GitHub Issues** by default -- no extra issue tracker setup required.
 

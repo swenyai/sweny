@@ -15,12 +15,14 @@ You can also run it directly with `npx @sweny-ai/core`.
 
 ## Add your API key
 
+SWEny uses [Claude](https://claude.ai/) as its AI engine. You'll need an Anthropic API key, OAuth token, or authenticated Claude Code instance.
+
 ```bash
 # .env (gitignored)
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Or use a Claude Max subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) for predictable monthly cost. The CLI auto-loads `.env` at startup.
+Or use a Claude subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) for flat-rate billing. The CLI auto-loads `.env` at startup.
 
 ## Choose your surface
 
