@@ -39421,12 +39421,16 @@ const consoleLogger = {
 
 ;// CONCATENATED MODULE: ../core/dist/executor.js
 /**
- * DAG Workflow Executor
+ * Workflow Executor
  *
  * Walks a workflow graph node-by-node. At each node, Claude gets
  * the node's instruction + available skill tools + context from
  * prior nodes. Claude does the work, then the executor resolves
  * which edge to follow next.
+ *
+ * Supports controlled cycles via max_iterations on edges — when
+ * an edge has been followed max_iterations times, it is excluded
+ * from routing, causing flow to fall through to alternative paths.
  *
  * This replaces ~8k lines of engine + recipe step code.
  */
@@ -39441,6 +39445,7 @@ async function execute(workflow, input, options) {
     const config = resolveConfig(skills, options.config);
     const logger = options.logger ?? consoleLogger;
     const results = new Map();
+    const edgeCounts = new Map(); // "from→to" → times followed
     validate(workflow, skills);
     safeObserve(observer, { type: "workflow:start", workflow: workflow.id }, logger);
     let currentId = workflow.entry;
@@ -39497,7 +39502,7 @@ async function execute(workflow, input, options) {
             }
         }
         // Resolve next node via edge conditions
-        currentId = await resolveNext(workflow, currentId, results, input, claude, observer);
+        currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts);
     }
     safeObserve(observer, {
         type: "workflow:end",
@@ -39582,13 +39587,30 @@ function resolveConfig(skills, overrides) {
  * - 0 out-edges → terminal (return null)
  * - 1 unconditional edge → follow it
  * - Multiple or conditional → Claude evaluates
+ *
+ * Edges with max_iterations are filtered out once exhausted.
  */
-async function resolveNext(workflow, current, results, input, claude, observer) {
-    const outEdges = workflow.edges.filter((e) => e.from === current);
+async function resolveNext(workflow, current, results, input, claude, observer, edgeCounts) {
+    // Filter out edges that have exceeded their max_iterations
+    const outEdges = workflow.edges.filter((e) => {
+        if (e.from !== current)
+            return false;
+        if (e.max_iterations && edgeCounts) {
+            const key = `${e.from}→${e.to}`;
+            const count = edgeCounts.get(key) ?? 0;
+            if (count >= e.max_iterations)
+                return false;
+        }
+        return true;
+    });
     if (outEdges.length === 0)
         return null;
     // Single unconditional edge — just follow it
     if (outEdges.length === 1 && !outEdges[0].when) {
+        if (edgeCounts) {
+            const key = `${current}→${outEdges[0].to}`;
+            edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+        }
         safeObserve(observer, { type: "route", from: current, to: outEdges[0].to, reason: "only path" });
         return outEdges[0].to;
     }
@@ -39616,6 +39638,11 @@ async function resolveNext(workflow, current, results, input, claude, observer) 
     // Validate that Claude returned a valid target
     const validTargets = new Set(outEdges.map((e) => e.to));
     const resolved = validTargets.has(chosen) ? chosen : (defaultEdge?.to ?? outEdges[0].to); // fall back to default or first edge
+    // Track edge usage for max_iterations
+    if (edgeCounts) {
+        const key = `${current}→${resolved}`;
+        edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+    }
     safeObserve(observer, {
         type: "route",
         from: current,
@@ -45778,6 +45805,7 @@ const edgeZ = objectType({
     from: stringType().min(1),
     to: stringType().min(1),
     when: stringType().optional(),
+    max_iterations: numberType().int().min(1).optional(),
 });
 const schema_workflowZ = objectType({
     id: stringType().min(1),
@@ -45828,10 +45856,10 @@ function schema_validateWorkflow(workflow, knownSkills) {
                 nodeId: edge.to,
             });
         }
-        if (edge.from === edge.to) {
+        if (edge.from === edge.to && !edge.max_iterations) {
             errors.push({
                 code: "SELF_LOOP",
-                message: `Edge from "${edge.from}" to itself`,
+                message: `Edge from "${edge.from}" to itself (add max_iterations to allow)`,
                 nodeId: edge.from,
             });
         }
@@ -45862,12 +45890,41 @@ function schema_validateWorkflow(workflow, knownSkills) {
             });
         }
     }
-    // Non-terminal nodes must have outgoing edges
-    for (const nodeId of nodeIds) {
-        const hasOutgoing = workflow.edges.some((e) => e.from === nodeId);
-        if (!hasOutgoing && visited.has(nodeId)) {
-            // Terminal node — fine, no error. This is intentional.
-            // But if it has outgoing in the graph, it's fine too.
+    // Detect unbounded cycles: the graph with max_iterations edges removed must be acyclic.
+    // If removing bounded edges still leaves a cycle, it can loop forever.
+    const unboundedEdges = workflow.edges.filter((e) => !e.max_iterations && e.from !== e.to);
+    // DFS-based cycle detection on the unbounded subgraph
+    const WHITE = 0, GRAY = 1, BLACK = 2;
+    const color = new Map();
+    for (const id of nodeIds)
+        color.set(id, WHITE);
+    function dfs(node) {
+        color.set(node, GRAY);
+        for (const e of unboundedEdges) {
+            if (e.from !== node)
+                continue;
+            const c = color.get(e.to);
+            if (c === GRAY)
+                return e.to; // back-edge found → cycle
+            if (c === WHITE) {
+                const cycle = dfs(e.to);
+                if (cycle)
+                    return cycle;
+            }
+        }
+        color.set(node, BLACK);
+        return null;
+    }
+    for (const id of nodeIds) {
+        if (color.get(id) === WHITE) {
+            const cycleNode = dfs(id);
+            if (cycleNode) {
+                errors.push({
+                    code: "UNBOUNDED_CYCLE",
+                    message: `Unbounded cycle detected involving node "${cycleNode}" — add max_iterations to at least one edge in the cycle`,
+                    nodeId: cycleNode,
+                });
+            }
         }
     }
     // Skill references
@@ -45895,7 +45952,7 @@ const schema_workflowJsonSchema = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     $id: "https://sweny.ai/schemas/workflow.json",
     title: "SWEny Workflow",
-    description: "A DAG workflow definition for skill-based orchestration",
+    description: "A workflow definition for skill-based orchestration (supports controlled cycles via max_iterations)",
     type: "object",
     required: ["id", "name", "nodes", "edges", "entry"],
     additionalProperties: false,
@@ -45935,6 +45992,11 @@ const schema_workflowJsonSchema = {
                     from: { type: "string", minLength: 1 },
                     to: { type: "string", minLength: 1 },
                     when: { type: "string", description: "Natural language condition — Claude evaluates at runtime" },
+                    max_iterations: {
+                        type: "integer",
+                        minimum: 1,
+                        description: "Max times this edge can be followed — enables controlled retry loops",
+                    },
                 },
             },
         },
