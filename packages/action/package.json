@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc",
-    "package": "ncc build src/main.ts -o ../../dist --source-map --license licenses.txt && cp ../../node_modules/@anthropic-ai/claude-agent-sdk/cli.js ../../dist/cli.js && cp ../core/src/workflows/*.yml ../../dist/",
+    "package": "ncc build src/main.ts -o ../../dist --source-map --license licenses.txt && (cp ../../node_modules/@anthropic-ai/claude-agent-sdk/cli.js ../../dist/cli.js 2>/dev/null || true) && cp ../core/src/workflows/*.yml ../../dist/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
