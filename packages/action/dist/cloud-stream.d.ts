@@ -19,3 +19,4 @@ export declare function createCloudStreamReporter(config: CloudStreamConfig): {
     flush(): Promise<void>;
 };
 export {};
+//# sourceMappingURL=cloud-stream.d.ts.map

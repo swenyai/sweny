@@ -1,4 +1,7 @@
 import * as core from "@actions/core";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { parse as parseYaml } from "yaml";
 import {
   execute,
   ClaudeClient,
@@ -10,6 +13,7 @@ import {
   resolveTemplates,
   loadAdditionalContext,
   loadConfigFile,
+  parseWorkflow,
 } from "@sweny-ai/core";
 import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
 import type { ExecutionEvent, NodeResult } from "@sweny-ai/core";
@@ -57,8 +61,21 @@ async function run(): Promise<void> {
       mcpServers,
     });
 
-    // Select workflow
-    const workflow = config.workflow === "implement" ? implementWorkflow : triageWorkflow;
+    // Select workflow — built-in or custom YAML file
+    let workflow;
+    if (config.workflow === "triage") {
+      workflow = triageWorkflow;
+    } else if (config.workflow === "implement") {
+      workflow = implementWorkflow;
+    } else {
+      const workflowPath = path.resolve(process.cwd(), config.workflow);
+      if (!fs.existsSync(workflowPath)) {
+        core.setFailed(`Custom workflow file not found: ${config.workflow}`);
+        return;
+      }
+      workflow = parseWorkflow(parseYaml(fs.readFileSync(workflowPath, "utf-8")));
+      core.info(`Loaded custom workflow: ${config.workflow}`);
+    }
 
     // Load .sweny.yml from repo root — same config the CLI reads
     const fileConfig = loadConfigFile(process.cwd());

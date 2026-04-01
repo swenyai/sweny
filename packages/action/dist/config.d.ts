@@ -1,6 +1,6 @@
 import type { McpServerConfig } from "@sweny-ai/core";
 export interface ActionConfig {
-    workflow: "triage" | "implement";
+    workflow: string;
     anthropicApiKey: string;
     claudeOauthToken: string;
     observabilityProvider: string;
@@ -60,3 +60,4 @@ export declare function parseInputs(): ActionConfig;
 /** All recognized workspace tool names. Update here when adding a new Category B MCP server. */
 export declare const SUPPORTED_WORKSPACE_TOOLS: Set<string>;
 export declare function validateInputs(config: ActionConfig): string[];
+//# sourceMappingURL=config.d.ts.map

@@ -1,5 +1,8 @@
 import * as core from "@actions/core";
-import { execute, ClaudeClient, createSkillMap, configuredSkills, buildAutoMcpServers, buildProviderContext, resolveTemplates, loadAdditionalContext, } from "@sweny-ai/core";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { parse as parseYaml } from "yaml";
+import { execute, ClaudeClient, createSkillMap, configuredSkills, buildAutoMcpServers, buildProviderContext, resolveTemplates, loadAdditionalContext, loadConfigFile, parseWorkflow, } from "@sweny-ai/core";
 import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
 import { parseInputs, validateInputs } from "./config.js";
 import { createCloudStreamReporter } from "./cloud-stream.js";
@@ -38,11 +41,33 @@ async function run() {
             logger: actionsLogger,
             mcpServers,
         });
-        // Select workflow
-        const workflow = config.workflow === "implement" ? implementWorkflow : triageWorkflow;
+        // Select workflow — built-in or custom YAML file
+        let workflow;
+        if (config.workflow === "triage") {
+            workflow = triageWorkflow;
+        }
+        else if (config.workflow === "implement") {
+            workflow = implementWorkflow;
+        }
+        else {
+            const workflowPath = path.resolve(process.cwd(), config.workflow);
+            if (!fs.existsSync(workflowPath)) {
+                core.setFailed(`Custom workflow file not found: ${config.workflow}`);
+                return;
+            }
+            workflow = parseWorkflow(parseYaml(fs.readFileSync(workflowPath, "utf-8")));
+            core.info(`Loaded custom workflow: ${config.workflow}`);
+        }
+        // Load .sweny.yml from repo root — same config the CLI reads
+        const fileConfig = loadConfigFile(process.cwd());
+        const fileRules = Array.isArray(fileConfig.rules) ? fileConfig.rules : [];
+        const fileContext = Array.isArray(fileConfig.context) ? fileConfig.context : [];
         // Load templates & additional context
         const templates = await resolveTemplates({ issueTemplate: config.issueTemplate, prTemplate: config.prTemplate }, process.cwd());
-        const userContextResult = await loadAdditionalContext(config.additionalContext, process.cwd());
+        // Resolve rules from .sweny.yml (separate from context — gets "MUST follow" framing)
+        const rulesResult = await loadAdditionalContext(fileRules, process.cwd());
+        // Resolve context: .sweny.yml context + action additional-context merged
+        const userContextResult = await loadAdditionalContext([...fileContext, ...config.additionalContext], process.cwd());
         // Build dynamic provider context
         const extras = {};
         if (config.observabilityCredentials.sourceId) {
@@ -64,9 +89,11 @@ async function run() {
         const input = {
             ...buildWorkflowInput(config),
             ...templates,
-            // Structured rules/context for executor
+            // Structured rules/context for executor (rules get "MUST follow" framing)
+            ...(rulesResult.resolved ? { rules: rulesResult.resolved } : {}),
             ...(context ? { context } : {}),
             // URLs for the prepare node to fetch at runtime
+            ...(rulesResult.urls.length > 0 ? { rulesUrls: rulesResult.urls } : {}),
             ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
         };
         // Set up cloud streaming for live DAG visualization
@@ -216,9 +243,22 @@ function handleEvent(event) {
             core.startGroup(`${event.node}: ${event.instruction.slice(0, 80)}`);
             core.info(`→ ${event.node}`);
             break;
-        case "node:progress":
-            core.info(`  ↳ ${event.message}`);
+        case "node:progress": {
+            // node:progress events carry tool activity from all sources (including
+            // external MCP servers like GitHub, Linear, BetterStack) which don't
+            // emit the narrower tool:call / tool:result events.
+            // Patterns emitted by claude.ts:
+            //   "toolName (Ns)"        — tool in progress
+            //   "summary text…"        — tool use summary
+            const toolProgressMatch = event.message.match(/^(.+?) \((\d+)s\)$/);
+            if (toolProgressMatch) {
+                core.info(`  → ${toolProgressMatch[1]} (${toolProgressMatch[2]}s)`);
+            }
+            else {
+                core.info(`  ↳ ${event.message}`);
+            }
             break;
+        }
         case "tool:call":
             core.info(`  → ${event.tool}(${summarizeInput(event.input)})`);
             break;
@@ -436,6 +476,10 @@ async function reportToCloud(config, results, startTime, streamRunId) {
         issue_url: (issueResult?.data?.issueUrl ?? prResult?.data?.issueUrl),
         pr_url: prResult?.data?.prUrl,
         issue_identifier: (issueResult?.data?.issueIdentifier ?? prResult?.data?.issueIdentifier),
+        // Rich findings data from the investigate node
+        findings: investigateResult?.data?.findings ?? [],
+        highest_severity: investigateResult?.data?.highest_severity ?? null,
+        novel_count: investigateResult?.data?.novel_count ?? 0,
         nodes: [...results.entries()].map(([id, r]) => ({
             id,
             name: id,

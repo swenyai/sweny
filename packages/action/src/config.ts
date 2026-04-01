@@ -2,8 +2,8 @@ import * as core from "@actions/core";
 import type { McpServerConfig } from "@sweny-ai/core";
 
 export interface ActionConfig {
-  // Workflow selection
-  workflow: "triage" | "implement";
+  // Workflow selection — built-in name ("triage", "implement") or path to custom YAML
+  workflow: string;
 
   // Claude authentication
   anthropicApiKey: string;
@@ -95,7 +95,7 @@ export interface ActionConfig {
 export function parseInputs(): ActionConfig {
   const workflowRaw = core.getInput("workflow") || "triage";
   return {
-    workflow: (workflowRaw === "implement" ? "implement" : "triage") as "triage" | "implement",
+    workflow: workflowRaw,
     anthropicApiKey: core.getInput("anthropic-api-key"),
     claudeOauthToken: core.getInput("claude-oauth-token"),
 

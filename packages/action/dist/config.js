@@ -2,7 +2,7 @@ import * as core from "@actions/core";
 export function parseInputs() {
     const workflowRaw = core.getInput("workflow") || "triage";
     return {
-        workflow: (workflowRaw === "implement" ? "implement" : "triage"),
+        workflow: workflowRaw,
         anthropicApiKey: core.getInput("anthropic-api-key"),
         claudeOauthToken: core.getInput("claude-oauth-token"),
         codingAgentProvider: core.getInput("coding-agent-provider") || "claude",
