@@ -83,11 +83,11 @@ describe("parseInputs", () => {
     expect(config.workflow).toBe("implement");
   });
 
-  it("defaults workflow to triage for unknown values", () => {
-    mockGetInput.mockImplementation((name: string) => (name === "workflow" ? "unknown-workflow" : ""));
+  it("passes through custom workflow file paths", () => {
+    mockGetInput.mockImplementation((name: string) => (name === "workflow" ? "workflows/my-pipeline.yml" : ""));
     mockGetBooleanInput.mockReturnValue(false);
     const config = parseInputs();
-    expect(config.workflow).toBe("triage");
+    expect(config.workflow).toBe("workflows/my-pipeline.yml");
   });
 
   it("parses maxInvestigateTurns and maxImplementTurns as integers", () => {
