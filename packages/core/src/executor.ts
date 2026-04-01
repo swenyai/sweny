@@ -1,10 +1,14 @@
 /**
- * DAG Workflow Executor
+ * Workflow Executor
  *
  * Walks a workflow graph node-by-node. At each node, Claude gets
  * the node's instruction + available skill tools + context from
  * prior nodes. Claude does the work, then the executor resolves
  * which edge to follow next.
+ *
+ * Supports controlled cycles via max_iterations on edges — when
+ * an edge has been followed max_iterations times, it is excluded
+ * from routing, causing flow to fall through to alternative paths.
  *
  * This replaces ~8k lines of engine + recipe step code.
  */
@@ -39,6 +43,7 @@ export async function execute(
   const config = resolveConfig(skills, options.config);
   const logger = options.logger ?? consoleLogger;
   const results = new Map<string, NodeResult>();
+  const edgeCounts = new Map<string, number>(); // "from→to" → times followed
 
   validate(workflow, skills);
 
@@ -107,7 +112,7 @@ export async function execute(
     }
 
     // Resolve next node via edge conditions
-    currentId = await resolveNext(workflow, currentId, results, input, claude, observer);
+    currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts);
   }
 
   safeObserve(
@@ -207,6 +212,8 @@ function resolveConfig(skills: Map<string, Skill>, overrides?: Record<string, st
  * - 0 out-edges → terminal (return null)
  * - 1 unconditional edge → follow it
  * - Multiple or conditional → Claude evaluates
+ *
+ * Edges with max_iterations are filtered out once exhausted.
  */
 async function resolveNext(
   workflow: Workflow,
@@ -215,13 +222,27 @@ async function resolveNext(
   input: unknown,
   claude: Claude,
   observer?: Observer,
+  edgeCounts?: Map<string, number>,
 ): Promise<string | null> {
-  const outEdges = workflow.edges.filter((e) => e.from === current);
+  // Filter out edges that have exceeded their max_iterations
+  const outEdges = workflow.edges.filter((e) => {
+    if (e.from !== current) return false;
+    if (e.max_iterations && edgeCounts) {
+      const key = `${e.from}→${e.to}`;
+      const count = edgeCounts.get(key) ?? 0;
+      if (count >= e.max_iterations) return false;
+    }
+    return true;
+  });
 
   if (outEdges.length === 0) return null;
 
   // Single unconditional edge — just follow it
   if (outEdges.length === 1 && !outEdges[0].when) {
+    if (edgeCounts) {
+      const key = `${current}→${outEdges[0].to}`;
+      edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+    }
     safeObserve(observer, { type: "route", from: current, to: outEdges[0].to, reason: "only path" });
     return outEdges[0].to;
   }
@@ -255,6 +276,12 @@ async function resolveNext(
   // Validate that Claude returned a valid target
   const validTargets = new Set(outEdges.map((e) => e.to));
   const resolved = validTargets.has(chosen) ? chosen : (defaultEdge?.to ?? outEdges[0].to); // fall back to default or first edge
+
+  // Track edge usage for max_iterations
+  if (edgeCounts) {
+    const key = `${current}→${resolved}`;
+    edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+  }
 
   safeObserve(observer, {
     type: "route",

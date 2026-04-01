@@ -52,6 +52,7 @@ export const edgeZ = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
   when: z.string().optional(),
+  max_iterations: z.number().int().min(1).optional(),
 });
 
 export const workflowZ = z.object({
@@ -78,6 +79,7 @@ export interface WorkflowError {
     | "UNREACHABLE_NODE"
     | "UNKNOWN_SKILL"
     | "SELF_LOOP"
+    | "UNBOUNDED_CYCLE"
     | "NO_OUTGOING_EDGE";
   message: string;
   nodeId?: string;
@@ -122,10 +124,10 @@ export function validateWorkflow(workflow: z.infer<typeof workflowZ>, knownSkill
         nodeId: edge.to,
       });
     }
-    if (edge.from === edge.to) {
+    if (edge.from === edge.to && !edge.max_iterations) {
       errors.push({
         code: "SELF_LOOP",
-        message: `Edge from "${edge.from}" to itself`,
+        message: `Edge from "${edge.from}" to itself (add max_iterations to allow)`,
         nodeId: edge.from,
       });
     }
@@ -158,12 +160,41 @@ export function validateWorkflow(workflow: z.infer<typeof workflowZ>, knownSkill
     }
   }
 
-  // Non-terminal nodes must have outgoing edges
-  for (const nodeId of nodeIds) {
-    const hasOutgoing = workflow.edges.some((e) => e.from === nodeId);
-    if (!hasOutgoing && visited.has(nodeId)) {
-      // Terminal node — fine, no error. This is intentional.
-      // But if it has outgoing in the graph, it's fine too.
+  // Detect unbounded cycles: the graph with max_iterations edges removed must be acyclic.
+  // If removing bounded edges still leaves a cycle, it can loop forever.
+  const unboundedEdges = workflow.edges.filter((e) => !e.max_iterations && e.from !== e.to);
+  // DFS-based cycle detection on the unbounded subgraph
+  const WHITE = 0,
+    GRAY = 1,
+    BLACK = 2;
+  const color = new Map<string, number>();
+  for (const id of nodeIds) color.set(id, WHITE);
+
+  function dfs(node: string): string | null {
+    color.set(node, GRAY);
+    for (const e of unboundedEdges) {
+      if (e.from !== node) continue;
+      const c = color.get(e.to);
+      if (c === GRAY) return e.to; // back-edge found → cycle
+      if (c === WHITE) {
+        const cycle = dfs(e.to);
+        if (cycle) return cycle;
+      }
+    }
+    color.set(node, BLACK);
+    return null;
+  }
+
+  for (const id of nodeIds) {
+    if (color.get(id) === WHITE) {
+      const cycleNode = dfs(id);
+      if (cycleNode) {
+        errors.push({
+          code: "UNBOUNDED_CYCLE",
+          message: `Unbounded cycle detected involving node "${cycleNode}" — add max_iterations to at least one edge in the cycle`,
+          nodeId: cycleNode,
+        });
+      }
     }
   }
 
@@ -195,7 +226,7 @@ export const workflowJsonSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://sweny.ai/schemas/workflow.json",
   title: "SWEny Workflow",
-  description: "A DAG workflow definition for skill-based orchestration",
+  description: "A workflow definition for skill-based orchestration (supports controlled cycles via max_iterations)",
   type: "object",
   required: ["id", "name", "nodes", "edges", "entry"],
   additionalProperties: false,
@@ -235,6 +266,11 @@ export const workflowJsonSchema = {
           from: { type: "string", minLength: 1 },
           to: { type: "string", minLength: 1 },
           when: { type: "string", description: "Natural language condition — Claude evaluates at runtime" },
+          max_iterations: {
+            type: "integer",
+            minimum: 1,
+            description: "Max times this edge can be followed — enables controlled retry loops",
+          },
         },
       },
     },

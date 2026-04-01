@@ -367,6 +367,99 @@ describe("executor", () => {
     expect(results.get("a")?.status).toBe("failed");
   });
 
+  it("executes a retry loop with max_iterations", async () => {
+    const retryWorkflow: Workflow = {
+      id: "retry",
+      name: "Retry",
+      description: "A→B→A (retry once)→B→C",
+      entry: "extract",
+      nodes: {
+        extract: { name: "Extract", instruction: "Extract data", skills: [] },
+        judge: { name: "Judge", instruction: "Judge quality", skills: [] },
+        done: { name: "Done", instruction: "Finish", skills: [] },
+      },
+      edges: [
+        { from: "extract", to: "judge" },
+        { from: "judge", to: "extract", when: "quality is low", max_iterations: 1 },
+        { from: "judge", to: "done", when: "quality is high or retries exhausted" },
+      ],
+    };
+
+    // Track how many times each node runs
+    let extractCount = 0;
+    let judgeCount = 0;
+
+    const mockClaude: any = {
+      async run(opts: any) {
+        if (opts.instruction.includes("Extract")) {
+          extractCount++;
+          return { status: "success", data: { extracted: true, attempt: extractCount }, toolCalls: [] };
+        }
+        if (opts.instruction.includes("Judge")) {
+          judgeCount++;
+          // First judge: low quality (triggers retry). Second judge: still low but edge exhausted.
+          return { status: "success", data: { quality: "low" }, toolCalls: [] };
+        }
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        // Always try to route to extract (retry), but max_iterations will block it on 2nd attempt
+        const retryChoice = opts.choices.find((c: any) => c.id === "extract");
+        if (retryChoice) return "extract";
+        return opts.choices[0].id;
+      },
+    };
+
+    const results = await execute(retryWorkflow, {}, { skills: createSkillMap([]), claude: mockClaude, config: {} });
+
+    // extract ran twice (initial + 1 retry), judge ran twice, done ran once
+    expect(extractCount).toBe(2);
+    expect(judgeCount).toBe(2);
+    expect(results.has("done")).toBe(true);
+    // The second extract result overwrites the first
+    expect(results.get("extract")?.data.attempt).toBe(2);
+  });
+
+  it("respects max_iterations=1 as single retry", async () => {
+    const singleRetry: Workflow = {
+      id: "single-retry",
+      name: "Single Retry",
+      description: "A↔B with max 1 loop",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Step A", skills: [] },
+        b: { name: "B", instruction: "Step B", skills: [] },
+        end: { name: "End", instruction: "End", skills: [] },
+      },
+      edges: [
+        { from: "a", to: "b" },
+        { from: "b", to: "a", when: "retry", max_iterations: 1 },
+        { from: "b", to: "end", when: "done" },
+      ],
+    };
+
+    let aCount = 0;
+
+    const mockClaude: any = {
+      async run(opts: any) {
+        if (opts.instruction.includes("Step A")) aCount++;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        // Always try to loop back
+        const retry = opts.choices.find((c: any) => c.id === "a");
+        if (retry) return "a";
+        return opts.choices[0].id;
+      },
+    };
+
+    const results = await execute(singleRetry, {}, { skills: createSkillMap([]), claude: mockClaude, config: {} });
+
+    // A runs twice (once initially, once via retry), then edge is exhausted → falls to "end"
+    expect(aCount).toBe(2);
+    expect(results.has("end")).toBe(true);
+  });
+
   it("validates route choice falls back on invalid Claude response", async () => {
     // Create a claude mock that returns an invalid route
     const badRouteClaude: any = {

@@ -43,12 +43,13 @@ export interface Skill {
   tools: Tool[];
 }
 
-// ─── DAG Workflow ────────────────────────────────────────────────
+// ─── Workflow Graph ─────────────────────────────────────────────
 //
-// A Workflow is a directed acyclic graph of nodes connected by edges.
+// A Workflow is a directed graph of nodes connected by edges.
 // Each node has an instruction (what Claude should do) and a set of
 // available skills. Edges define flow; conditional edges have a
 // natural-language `when` clause that Claude evaluates at runtime.
+// Edges with `max_iterations` enable controlled retry loops.
 
 /** A node in the workflow DAG */
 export interface Node {
@@ -68,6 +69,8 @@ export interface Edge {
   to: string;
   /** Natural language condition — Claude evaluates at runtime */
   when?: string;
+  /** Max times this edge can be followed (enables retry loops). Default: unlimited. */
+  max_iterations?: number;
 }
 
 /** A complete workflow definition — pure data, fully serializable */

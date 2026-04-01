@@ -82,6 +82,19 @@ describe("Zod schemas", () => {
     it("rejects empty to", () => {
       expect(() => edgeZ.parse({ from: "a", to: "" })).toThrow();
     });
+
+    it("parses an edge with max_iterations", () => {
+      const result = edgeZ.parse({ from: "a", to: "b", when: "needs retry", max_iterations: 3 });
+      expect(result.max_iterations).toBe(3);
+    });
+
+    it("rejects max_iterations less than 1", () => {
+      expect(() => edgeZ.parse({ from: "a", to: "b", max_iterations: 0 })).toThrow();
+    });
+
+    it("rejects non-integer max_iterations", () => {
+      expect(() => edgeZ.parse({ from: "a", to: "b", max_iterations: 1.5 })).toThrow();
+    });
   });
 
   describe("toolZ", () => {
@@ -196,7 +209,7 @@ describe("validateWorkflow", () => {
     expect(errors).toContainEqual(expect.objectContaining({ code: "UNKNOWN_EDGE_TARGET" }));
   });
 
-  it("detects self-loops", () => {
+  it("detects self-loops without max_iterations", () => {
     const loopy: Workflow = {
       ...validWorkflow,
       edges: [
@@ -207,6 +220,45 @@ describe("validateWorkflow", () => {
     };
     const errors = validateWorkflow(loopy);
     expect(errors).toContainEqual(expect.objectContaining({ code: "SELF_LOOP", nodeId: "a" }));
+  });
+
+  it("allows self-loops with max_iterations", () => {
+    const loopy: Workflow = {
+      ...validWorkflow,
+      edges: [
+        { from: "a", to: "a", when: "needs retry", max_iterations: 2 },
+        { from: "a", to: "b" },
+        { from: "b", to: "c" },
+      ],
+    };
+    const errors = validateWorkflow(loopy);
+    expect(errors).toEqual([]);
+  });
+
+  it("detects unbounded multi-node cycles", () => {
+    const cyclic: Workflow = {
+      ...validWorkflow,
+      edges: [
+        { from: "a", to: "b" },
+        { from: "b", to: "a", when: "retry" }, // cycle without max_iterations
+        { from: "b", to: "c" },
+      ],
+    };
+    const errors = validateWorkflow(cyclic);
+    expect(errors).toContainEqual(expect.objectContaining({ code: "UNBOUNDED_CYCLE" }));
+  });
+
+  it("allows multi-node cycles with max_iterations", () => {
+    const cyclic: Workflow = {
+      ...validWorkflow,
+      edges: [
+        { from: "a", to: "b" },
+        { from: "b", to: "a", when: "retry", max_iterations: 3 },
+        { from: "b", to: "c" },
+      ],
+    };
+    const errors = validateWorkflow(cyclic);
+    expect(errors).toEqual([]);
   });
 
   it("detects unreachable nodes", () => {
@@ -281,6 +333,13 @@ describe("workflowJsonSchema", () => {
   it("edge items require from and to", () => {
     expect((workflowJsonSchema.properties.edges.items as any).required).toContain("from");
     expect((workflowJsonSchema.properties.edges.items as any).required).toContain("to");
+  });
+
+  it("edge items include max_iterations", () => {
+    const edgeProps = (workflowJsonSchema.properties.edges.items as any).properties;
+    expect(edgeProps.max_iterations).toBeDefined();
+    expect(edgeProps.max_iterations.type).toBe("integer");
+    expect(edgeProps.max_iterations.minimum).toBe(1);
   });
 
   it("node items require name and instruction", () => {
