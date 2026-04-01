@@ -1,6 +1,6 @@
 import type { McpServerConfig } from "@sweny-ai/core";
 export interface ActionConfig {
-    workflow: "triage" | "implement";
+    workflow: string;
     anthropicApiKey: string;
     claudeOauthToken: string;
     observabilityProvider: string;
