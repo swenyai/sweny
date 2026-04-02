@@ -39502,7 +39502,7 @@ async function execute(workflow, input, options) {
             }
         }
         // Resolve next node via edge conditions
-        currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts);
+        currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
     }
     safeObserve(observer, {
         type: "workflow:end",
@@ -39590,7 +39590,7 @@ function resolveConfig(skills, overrides) {
  *
  * Edges with max_iterations are filtered out once exhausted.
  */
-async function resolveNext(workflow, current, results, input, claude, observer, edgeCounts) {
+async function resolveNext(workflow, current, results, input, claude, observer, edgeCounts, logger) {
     // Filter out edges that have exceeded their max_iterations
     const outEdges = workflow.edges.filter((e) => {
         if (e.from !== current)
@@ -39611,7 +39611,7 @@ async function resolveNext(workflow, current, results, input, claude, observer, 
             const key = `${current}→${outEdges[0].to}`;
             edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
         }
-        safeObserve(observer, { type: "route", from: current, to: outEdges[0].to, reason: "only path" });
+        safeObserve(observer, { type: "route", from: current, to: outEdges[0].to, reason: "only path" }, logger);
         return outEdges[0].to;
     }
     // Check for a default (unconditional) edge among conditionals
@@ -39648,7 +39648,7 @@ async function resolveNext(workflow, current, results, input, claude, observer, 
         from: current,
         to: resolved,
         reason: choices.find((c) => c.id === resolved)?.description ?? "default",
-    });
+    }, logger);
     return resolved;
 }
 /**
@@ -44469,15 +44469,29 @@ const github = {
                 },
                 required: ["repo", "title", "head"],
             },
-            handler: async (input, ctx) => gh(`/repos/${input.repo}/pulls`, ctx, {
-                method: "POST",
-                body: JSON.stringify({
-                    title: input.title,
-                    body: input.body,
-                    head: input.head,
-                    base: input.base ?? "main",
-                }),
-            }),
+            handler: async (input, ctx) => {
+                const pr = (await gh(`/repos/${input.repo}/pulls`, ctx, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        title: input.title,
+                        body: input.body,
+                        head: input.head,
+                        base: input.base ?? "main",
+                    }),
+                }));
+                try {
+                    if (pr.number) {
+                        await gh(`/repos/${input.repo}/issues/${pr.number}/labels`, ctx, {
+                            method: "POST",
+                            body: JSON.stringify({ labels: ["sweny"] }),
+                        });
+                    }
+                }
+                catch {
+                    // Label failure is non-fatal
+                }
+                return pr;
+            },
         },
         {
             name: "github_list_recent_commits",
@@ -45827,7 +45841,6 @@ function parseWorkflow(raw) {
  * - All edge sources and targets reference existing nodes
  * - No self-loops
  * - All nodes are reachable from entry
- * - All non-terminal nodes have at least one outgoing edge
  * - (optional) All referenced skills exist in the provided skill set
  */
 function schema_validateWorkflow(workflow, knownSkills) {
@@ -46907,7 +46920,7 @@ function parseInputs() {
         maxInvestigateTurns: parseInt(getInput("max-investigate-turns") || "50", 10),
         maxImplementTurns: parseInt(getInput("max-implement-turns") || "30", 10),
         baseBranch: getInput("base-branch") || "main",
-        prLabels: (getInput("pr-labels") || "agent,triage,needs-review").split(",").map((l) => l.trim()),
+        prLabels: (getInput("pr-labels") || "sweny,agent,triage,needs-review").split(",").map((l) => l.trim()),
         dryRun: getBooleanInput("dry-run"),
         noveltyMode: getBooleanInput("novelty-mode"),
         reviewMode: (getInput("review-mode") || "review"),
@@ -47465,17 +47478,6 @@ async function run() {
         });
         const contextParts = [providerCtx, userContextResult.resolved, config.additionalInstructions].filter(Boolean);
         const context = contextParts.join("\n\n");
-        // Build workflow input
-        const input = {
-            ...buildWorkflowInput(config),
-            ...templates,
-            // Structured rules/context for executor (rules get "MUST follow" framing)
-            ...(rulesResult.resolved ? { rules: rulesResult.resolved } : {}),
-            ...(context ? { context } : {}),
-            // URLs for the prepare node to fetch at runtime
-            ...(rulesResult.urls.length > 0 ? { rulesUrls: rulesResult.urls } : {}),
-            ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
-        };
         // Set up cloud streaming for live DAG visualization
         const [owner, repo] = (config.repository || process.env.GITHUB_REPOSITORY || "").split("/");
         const canStream = !!(config.projectToken || process.env.GITHUB_APP_INSTALLATION_ID);
@@ -47488,6 +47490,20 @@ async function run() {
                 repo,
             })
             : null;
+        // Build workflow input
+        const streamRunId = cloudStream?.getRunId() ?? undefined;
+        const input = {
+            ...buildWorkflowInput(config),
+            ...templates,
+            // Cloud run ID for PR body marker (available if stream pre-initialized)
+            ...(streamRunId ? { cloudRunId: streamRunId } : {}),
+            // Structured rules/context for executor (rules get "MUST follow" framing)
+            ...(rulesResult.resolved ? { rules: rulesResult.resolved } : {}),
+            ...(context ? { context } : {}),
+            // URLs for the prepare node to fetch at runtime
+            ...(rulesResult.urls.length > 0 ? { rulesUrls: rulesResult.urls } : {}),
+            ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
+        };
         // Execute workflow
         const results = await execute(workflow, input, {
             skills,
