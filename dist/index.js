@@ -47743,17 +47743,24 @@ async function writeJobSummary(results, config, workflow) {
     }
     lines.push(toMermaidBlock(workflow, { state, title: workflow.name }));
     lines.push("");
-    // ── Config table ──────────────────────────────────────────────
+    // ── Config table (only show settings relevant to this workflow) ─
+    const isTriage = workflow.id === "triage";
+    const rows = [];
+    if (config.repository)
+        rows.push(["Repository", `\`${config.repository}\``]);
+    rows.push(["Workflow", `\`${workflow.id}\``]);
+    if (isTriage) {
+        rows.push(["Observability", config.observabilityProvider]);
+        rows.push(["Issue Tracker", config.issueTrackerProvider]);
+        rows.push(["Time Range", config.timeRange]);
+        if (config.serviceFilter && config.serviceFilter !== "*")
+            rows.push(["Service Filter", `\`${config.serviceFilter}\``]);
+    }
+    rows.push(["Mode", isDryRun ? "dry run" : "live"]);
     lines.push("| Setting | Value |");
     lines.push("|---------|-------|");
-    if (config.repository)
-        lines.push(`| Repository | \`${config.repository}\` |`);
-    lines.push(`| Observability | ${config.observabilityProvider} |`);
-    lines.push(`| Issue Tracker | ${config.issueTrackerProvider} |`);
-    lines.push(`| Time Range | ${config.timeRange} |`);
-    lines.push(`| Mode | ${isDryRun ? "dry run" : "live"} |`);
-    if (config.serviceFilter)
-        lines.push(`| Service Filter | \`${config.serviceFilter}\` |`);
+    for (const [k, v] of rows)
+        lines.push(`| ${k} | ${v} |`);
     lines.push("");
     // ── Workflow path ─────────────────────────────────────────────
     const nodeNames = [...results.keys()];
