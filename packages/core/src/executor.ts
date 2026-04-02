@@ -112,7 +112,7 @@ export async function execute(
     }
 
     // Resolve next node via edge conditions
-    currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts);
+    currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
   }
 
   safeObserve(
@@ -223,6 +223,7 @@ async function resolveNext(
   claude: Claude,
   observer?: Observer,
   edgeCounts?: Map<string, number>,
+  logger?: Logger,
 ): Promise<string | null> {
   // Filter out edges that have exceeded their max_iterations
   const outEdges = workflow.edges.filter((e) => {
@@ -243,7 +244,7 @@ async function resolveNext(
       const key = `${current}→${outEdges[0].to}`;
       edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
     }
-    safeObserve(observer, { type: "route", from: current, to: outEdges[0].to, reason: "only path" });
+    safeObserve(observer, { type: "route", from: current, to: outEdges[0].to, reason: "only path" }, logger);
     return outEdges[0].to;
   }
 
@@ -283,12 +284,16 @@ async function resolveNext(
     edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
   }
 
-  safeObserve(observer, {
-    type: "route",
-    from: current,
-    to: resolved,
-    reason: choices.find((c) => c.id === resolved)?.description ?? "default",
-  });
+  safeObserve(
+    observer,
+    {
+      type: "route",
+      from: current,
+      to: resolved,
+      reason: choices.find((c) => c.id === resolved)?.description ?? "default",
+    },
+    logger,
+  );
 
   return resolved;
 }
