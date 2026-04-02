@@ -388,7 +388,7 @@ async function writeJobSummary(
   const isDryRun = config.dryRun;
 
   // ── Header ────────────────────────────────────────────────────
-  lines.push(`## ${isDryRun ? "🔍" : "▲"} SWEny Triage ${isDryRun ? "(Dry Run)" : "Report"}`);
+  lines.push(`## ${isDryRun ? "🔍" : "▲"} SWEny ${workflow.name} ${isDryRun ? "(Dry Run)" : "Report"}`);
   lines.push("");
 
   // ── Workflow diagram ──────────────────────────────────────────
@@ -396,7 +396,7 @@ async function writeJobSummary(
   for (const [nodeId, result] of results) {
     state[nodeId] = result.status === "success" ? "success" : result.status === "failed" ? "failed" : "skipped";
   }
-  lines.push(toMermaidBlock(workflow, { state }));
+  lines.push(toMermaidBlock(workflow, { state, title: workflow.name }));
   lines.push("");
 
   // ── Config table ──────────────────────────────────────────────
@@ -623,7 +623,7 @@ async function postPrComment(config: ActionConfig, prNumber: number, body: strin
       return;
     }
     const comments = (await listRes.json()) as Array<{ id: number; body: string }>;
-    const existing = comments.find((c) => c.body.includes("SWEny Triage Report"));
+    const existing = comments.find((c) => c.body.includes("## ▲ SWEny") || c.body.includes("## 🔍 SWEny"));
 
     if (existing) {
       await fetch(`${apiBase}/issues/comments/${existing.id}`, {

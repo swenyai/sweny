@@ -46492,6 +46492,119 @@ async function loadAdditionalContext(sources, cwd = process.cwd()) {
     };
 }
 
+;// CONCATENATED MODULE: ../core/dist/mermaid.js
+/**
+ * Mermaid diagram export
+ *
+ * Converts a Workflow into a Mermaid flowchart string.
+ * Renders natively in GitHub (job summaries, READMEs, issues, PRs),
+ * VS Code preview, documentation sites, and anywhere Mermaid is supported.
+ *
+ * Accepts optional execution state to color nodes by status
+ * (current/success/failed/skipped).
+ */
+/**
+ * Convert a Workflow to a Mermaid flowchart diagram string.
+ *
+ * @example
+ * ```ts
+ * import { toMermaid } from '@sweny-ai/core';
+ *
+ * const md = toMermaid(workflow, {
+ *   state: { triage: 'success', investigate: 'current' },
+ * });
+ * // Wrap in ```mermaid fence for GitHub rendering
+ * ```
+ */
+function toMermaid(workflow, options = {}) {
+    const { state = {}, direction = "TB", title } = options;
+    const lines = [];
+    if (title) {
+        lines.push("---");
+        lines.push(`title: ${title}`);
+        lines.push("---");
+    }
+    lines.push(`graph ${direction}`);
+    // Nodes
+    for (const [id, node] of Object.entries(workflow.nodes)) {
+        const label = escapeLabel(node.name);
+        const isEntry = id === workflow.entry;
+        const entryTag = isEntry ? " \\u25B6" : "";
+        // Use stadium shape ([...]) for entry, rounded ([(...)])  for others
+        if (isEntry) {
+            lines.push(`    ${sanitizeId(id)}([${label}${entryTag}])`);
+        }
+        else {
+            lines.push(`    ${sanitizeId(id)}[${label}]`);
+        }
+    }
+    lines.push("");
+    // Edges
+    for (const edge of workflow.edges) {
+        const from = sanitizeId(edge.from);
+        const to = sanitizeId(edge.to);
+        if (edge.when) {
+            const label = escapeLabel(edge.when);
+            if (edge.max_iterations) {
+                lines.push(`    ${from} -->|"${label} (max ${edge.max_iterations}x)"| ${to}`);
+            }
+            else {
+                lines.push(`    ${from} -->|"${label}"| ${to}`);
+            }
+        }
+        else if (edge.max_iterations) {
+            lines.push(`    ${from} -->|"max ${edge.max_iterations}x"| ${to}`);
+        }
+        else {
+            lines.push(`    ${from} --> ${to}`);
+        }
+    }
+    // Status styling
+    const statusNodes = groupByStatus(state);
+    if (statusNodes.size > 0) {
+        lines.push("");
+        // Define style classes
+        lines.push("    classDef current fill:#3b82f6,stroke:#2563eb,color:#fff,stroke-width:2px");
+        lines.push("    classDef success fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:2px");
+        lines.push("    classDef failed fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px");
+        lines.push("    classDef skipped fill:#6b7280,stroke:#4b5563,color:#fff,stroke-dasharray:5 5");
+        for (const [status, ids] of statusNodes) {
+            const sanitized = ids.map(sanitizeId).join(",");
+            lines.push(`    class ${sanitized} ${status}`);
+        }
+    }
+    return lines.join("\n");
+}
+/**
+ * Convenience: wrap toMermaid output in a fenced code block
+ * ready for GitHub markdown.
+ */
+function toMermaidBlock(workflow, options = {}) {
+    return "```mermaid\n" + toMermaid(workflow, options) + "\n```";
+}
+// ─── Helpers ───────────────────────────────────────────────────────
+/** Mermaid node IDs must be alphanumeric + underscores + hyphens */
+function sanitizeId(id) {
+    return id.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+/** Escape characters that break Mermaid labels */
+function escapeLabel(text) {
+    return text.replace(/"/g, "&quot;").replace(/\[/g, "&#91;").replace(/\]/g, "&#93;");
+}
+/** Group node IDs by their status */
+function groupByStatus(state) {
+    const groups = new Map();
+    for (const [id, status] of Object.entries(state)) {
+        let list = groups.get(status);
+        if (!list) {
+            list = [];
+            groups.set(status, list);
+        }
+        list.push(id);
+    }
+    return groups;
+}
+
 ;// CONCATENATED MODULE: ../core/dist/cli/config-file.js
 
 
@@ -46742,6 +46855,8 @@ const STARTER_CONFIG = (/* unused pure expression or super */ null && (`# .sweny
 // Workflow builder
 
 // Templates
+
+// Mermaid export
 
 // Config file
 
@@ -47386,7 +47501,7 @@ async function run() {
         // Wait for any in-flight streaming events
         await cloudStream?.flush();
         setGitHubOutputs(results);
-        await writeJobSummary(results, config);
+        await writeJobSummary(results, config, workflow);
         // Report to SWEny Cloud if project token or GitHub App installation is available
         if (canStream) {
             await reportToCloud(config, results, startTime, cloudStream?.getRunId() ?? undefined);
@@ -47599,11 +47714,18 @@ function setGitHubOutputs(results) {
     }
 }
 /** Write a GitHub Actions job summary with structured triage results */
-async function writeJobSummary(results, config) {
+async function writeJobSummary(results, config, workflow) {
     const lines = [];
     const isDryRun = config.dryRun;
     // ── Header ────────────────────────────────────────────────────
-    lines.push(`## ${isDryRun ? "🔍" : "▲"} SWEny Triage ${isDryRun ? "(Dry Run)" : "Report"}`);
+    lines.push(`## ${isDryRun ? "🔍" : "▲"} SWEny ${workflow.name} ${isDryRun ? "(Dry Run)" : "Report"}`);
+    lines.push("");
+    // ── Workflow diagram ──────────────────────────────────────────
+    const state = {};
+    for (const [nodeId, result] of results) {
+        state[nodeId] = result.status === "success" ? "success" : result.status === "failed" ? "failed" : "skipped";
+    }
+    lines.push(toMermaidBlock(workflow, { state, title: workflow.name }));
     lines.push("");
     // ── Config table ──────────────────────────────────────────────
     lines.push("| Setting | Value |");
@@ -47810,7 +47932,7 @@ async function postPrComment(config, prNumber, body) {
             return;
         }
         const comments = (await listRes.json());
-        const existing = comments.find((c) => c.body.includes("SWEny Triage Report"));
+        const existing = comments.find((c) => c.body.includes("## ▲ SWEny") || c.body.includes("## 🔍 SWEny"));
         if (existing) {
             await fetch(`${apiBase}/issues/comments/${existing.id}`, {
                 method: "PATCH",
