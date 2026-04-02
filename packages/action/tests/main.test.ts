@@ -45,24 +45,28 @@ async function loadMain() {
       summary: summaryObj,
     };
   });
-  vi.doMock("@sweny-ai/core", () => ({
-    execute: mockExecute,
-    ClaudeClient: class MockClaudeClient {
-      constructor(...args: unknown[]) {
-        claudeClientArgs = args;
-      }
-    },
-    createSkillMap: mockCreateSkillMap,
-    configuredSkills: mockConfiguredSkills,
-    buildAutoMcpServers: mockBuildAutoMcpServers,
-    buildProviderContext: vi.fn().mockReturnValue(""),
-    consoleLogger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    resolveTemplates: mockResolveTemplates,
-    loadAdditionalContext: mockLoadAdditionalContext,
-    loadConfigFile: mockLoadConfigFile,
-    toMermaidBlock: vi.fn().mockReturnValue("```mermaid\ngraph TD\n```"),
-    parseWorkflow: vi.fn().mockReturnValue({ id: "custom", name: "custom", entry: "start", nodes: {}, edges: [] }),
-  }));
+  vi.doMock("@sweny-ai/core", async (importOriginal) => {
+    const actual = await importOriginal<Record<string, unknown>>();
+    return {
+      ...actual,
+      execute: mockExecute,
+      ClaudeClient: class MockClaudeClient {
+        constructor(...args: unknown[]) {
+          claudeClientArgs = args;
+        }
+      },
+      createSkillMap: mockCreateSkillMap,
+      configuredSkills: mockConfiguredSkills,
+      buildAutoMcpServers: mockBuildAutoMcpServers,
+      buildProviderContext: vi.fn().mockReturnValue(""),
+      consoleLogger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      resolveTemplates: mockResolveTemplates,
+      loadAdditionalContext: mockLoadAdditionalContext,
+      loadConfigFile: mockLoadConfigFile,
+      toMermaidBlock: vi.fn().mockReturnValue("```mermaid\ngraph TD\n```"),
+      parseWorkflow: vi.fn().mockReturnValue({ id: "custom", name: "custom", entry: "start", nodes: {}, edges: [] }),
+    };
+  });
   vi.doMock("@sweny-ai/core/workflows", () => ({
     triageWorkflow: { id: "triage", name: "triage", entry: "investigate", nodes: {}, edges: [] },
     implementWorkflow: { id: "implement", name: "implement", entry: "implement", nodes: {}, edges: [] },
