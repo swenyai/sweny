@@ -92,7 +92,11 @@ export interface WorkflowError {
  * - All edge sources and targets reference existing nodes
  * - No self-loops
  * - All nodes are reachable from entry
+ * - Unbounded cycles (cycles with no max_iterations guard)
  * - (optional) All referenced skills exist in the provided skill set
+ *
+ * Note: nodes with no outgoing edges are valid terminal nodes — the executor
+ * returns null when it reaches one, ending the workflow cleanly.
  */
 export function validateWorkflow(workflow: z.infer<typeof workflowZ>, knownSkills?: Set<string>): WorkflowError[] {
   const errors: WorkflowError[] = [];

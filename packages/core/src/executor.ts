@@ -174,7 +174,12 @@ function buildNodeInstruction(baseInstruction: string, input: unknown): string {
   return `${sections.join("\n\n")}\n\n---\n\n${baseInstruction}`;
 }
 
-/** Call observer without letting exceptions crash the workflow */
+/**
+ * Call observer without letting exceptions crash the workflow.
+ *
+ * Accepts a typed ExecutionEvent so TypeScript catches mistakes in
+ * event construction at compile time rather than silently at runtime.
+ */
 function safeObserve(observer: Observer | undefined, event: ExecutionEvent, logger?: Logger): void {
   if (!observer) return;
   try {
