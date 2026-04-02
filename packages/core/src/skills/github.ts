@@ -130,8 +130,8 @@ export const github: Skill = {
         },
         required: ["repo", "title", "head"],
       },
-      handler: async (input: { repo: string; title: string; body?: string; head: string; base?: string }, ctx) =>
-        gh(`/repos/${input.repo}/pulls`, ctx, {
+      handler: async (input: { repo: string; title: string; body?: string; head: string; base?: string }, ctx) => {
+        const pr = (await gh(`/repos/${input.repo}/pulls`, ctx, {
           method: "POST",
           body: JSON.stringify({
             title: input.title,
@@ -139,7 +139,19 @@ export const github: Skill = {
             head: input.head,
             base: input.base ?? "main",
           }),
-        }),
+        })) as { number?: number };
+        try {
+          if (pr.number) {
+            await gh(`/repos/${input.repo}/issues/${pr.number}/labels`, ctx, {
+              method: "POST",
+              body: JSON.stringify({ labels: ["sweny"] }),
+            });
+          }
+        } catch {
+          // Label failure is non-fatal
+        }
+        return pr;
+      },
     },
     {
       name: "github_list_recent_commits",

@@ -455,13 +455,13 @@ describe("parseInputs", () => {
     expect(config.baseBranch).toBe("main");
   });
 
-  it("prLabels defaults to agent,triage,needs-review", () => {
+  it("prLabels defaults to sweny,agent,triage,needs-review", () => {
     mockGetInput.mockReturnValue("");
     mockGetBooleanInput.mockReturnValue(false);
 
     const config = parseInputs();
 
-    expect(config.prLabels).toEqual(["agent", "triage", "needs-review"]);
+    expect(config.prLabels).toEqual(["sweny", "agent", "triage", "needs-review"]);
   });
 
   it("parses custom prLabels from comma-separated input", () => {

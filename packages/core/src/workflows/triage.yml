@@ -239,6 +239,10 @@ nodes:
       Summary, Changes, Testing, and Related Issues.
 
 
+      If context.cloudRunId is provided, append this HTML comment to the end of the PR body: <!--
+      sweny:run_id:{context.cloudRunId} -->
+
+
       Return the PR URL and number.
     skills:
       - github

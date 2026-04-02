@@ -114,18 +114,6 @@ async function run(): Promise<void> {
     const contextParts = [providerCtx, userContextResult.resolved, config.additionalInstructions].filter(Boolean);
     const context = contextParts.join("\n\n");
 
-    // Build workflow input
-    const input = {
-      ...buildWorkflowInput(config),
-      ...templates,
-      // Structured rules/context for executor (rules get "MUST follow" framing)
-      ...(rulesResult.resolved ? { rules: rulesResult.resolved } : {}),
-      ...(context ? { context } : {}),
-      // URLs for the prepare node to fetch at runtime
-      ...(rulesResult.urls.length > 0 ? { rulesUrls: rulesResult.urls } : {}),
-      ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
-    };
-
     // Set up cloud streaming for live DAG visualization
     const [owner, repo] = (config.repository || process.env.GITHUB_REPOSITORY || "").split("/");
     const canStream = !!(config.projectToken || process.env.GITHUB_APP_INSTALLATION_ID);
@@ -138,6 +126,21 @@ async function run(): Promise<void> {
           repo,
         })
       : null;
+
+    // Build workflow input
+    const streamRunId = cloudStream?.getRunId() ?? undefined;
+    const input = {
+      ...buildWorkflowInput(config),
+      ...templates,
+      // Cloud run ID for PR body marker (available if stream pre-initialized)
+      ...(streamRunId ? { cloudRunId: streamRunId } : {}),
+      // Structured rules/context for executor (rules get "MUST follow" framing)
+      ...(rulesResult.resolved ? { rules: rulesResult.resolved } : {}),
+      ...(context ? { context } : {}),
+      // URLs for the prepare node to fetch at runtime
+      ...(rulesResult.urls.length > 0 ? { rulesUrls: rulesResult.urls } : {}),
+      ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
+    };
 
     // Execute workflow
     const results = await execute(workflow, input, {

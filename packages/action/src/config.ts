@@ -123,7 +123,7 @@ export function parseInputs(): ActionConfig {
     maxImplementTurns: parseInt(core.getInput("max-implement-turns") || "30", 10),
 
     baseBranch: core.getInput("base-branch") || "main",
-    prLabels: (core.getInput("pr-labels") || "agent,triage,needs-review").split(",").map((l) => l.trim()),
+    prLabels: (core.getInput("pr-labels") || "sweny,agent,triage,needs-review").split(",").map((l) => l.trim()),
 
     dryRun: core.getBooleanInput("dry-run"),
     noveltyMode: core.getBooleanInput("novelty-mode"),

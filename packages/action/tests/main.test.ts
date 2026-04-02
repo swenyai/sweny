@@ -60,6 +60,8 @@ async function loadMain() {
     resolveTemplates: mockResolveTemplates,
     loadAdditionalContext: mockLoadAdditionalContext,
     loadConfigFile: mockLoadConfigFile,
+    toMermaidBlock: vi.fn().mockReturnValue("```mermaid\ngraph TD\n```"),
+    parseWorkflow: vi.fn().mockReturnValue({ id: "custom", name: "custom", entry: "start", nodes: {}, edges: [] }),
   }));
   vi.doMock("@sweny-ai/core/workflows", () => ({
     triageWorkflow: { id: "triage", name: "triage", entry: "investigate", nodes: {}, edges: [] },
