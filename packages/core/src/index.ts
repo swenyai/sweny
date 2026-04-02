@@ -86,6 +86,10 @@ export type { BuildWorkflowOptions } from "./workflow-builder.js";
 export { resolveTemplates, loadAdditionalContext, loadTemplate } from "./templates.js";
 export type { Templates } from "./templates.js";
 
+// Mermaid export
+export { toMermaid, toMermaidBlock } from "./mermaid.js";
+export type { MermaidOptions, NodeStatus } from "./mermaid.js";
+
 // Config file
 export { loadConfigFile } from "./cli/config-file.js";
 export type { FileConfig } from "./cli/config-file.js";

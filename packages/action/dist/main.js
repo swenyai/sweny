@@ -2,7 +2,7 @@ import * as core from "@actions/core";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { execute, ClaudeClient, createSkillMap, configuredSkills, buildAutoMcpServers, buildProviderContext, resolveTemplates, loadAdditionalContext, loadConfigFile, parseWorkflow, } from "@sweny-ai/core";
+import { execute, ClaudeClient, createSkillMap, configuredSkills, buildAutoMcpServers, buildProviderContext, resolveTemplates, loadAdditionalContext, loadConfigFile, parseWorkflow, toMermaidBlock, } from "@sweny-ai/core";
 import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
 import { parseInputs, validateInputs } from "./config.js";
 import { createCloudStreamReporter } from "./cloud-stream.js";
@@ -121,7 +121,7 @@ async function run() {
         // Wait for any in-flight streaming events
         await cloudStream?.flush();
         setGitHubOutputs(results);
-        await writeJobSummary(results, config);
+        await writeJobSummary(results, config, workflow);
         // Report to SWEny Cloud if project token or GitHub App installation is available
         if (canStream) {
             await reportToCloud(config, results, startTime, cloudStream?.getRunId() ?? undefined);
@@ -334,11 +334,18 @@ function setGitHubOutputs(results) {
     }
 }
 /** Write a GitHub Actions job summary with structured triage results */
-async function writeJobSummary(results, config) {
+async function writeJobSummary(results, config, workflow) {
     const lines = [];
     const isDryRun = config.dryRun;
     // ── Header ────────────────────────────────────────────────────
     lines.push(`## ${isDryRun ? "🔍" : "▲"} SWEny Triage ${isDryRun ? "(Dry Run)" : "Report"}`);
+    lines.push("");
+    // ── Workflow diagram ──────────────────────────────────────────
+    const state = {};
+    for (const [nodeId, result] of results) {
+        state[nodeId] = result.status === "success" ? "success" : result.status === "failed" ? "failed" : "skipped";
+    }
+    lines.push(toMermaidBlock(workflow, { state }));
     lines.push("");
     // ── Config table ──────────────────────────────────────────────
     lines.push("| Setting | Value |");

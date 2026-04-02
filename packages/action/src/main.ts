@@ -14,9 +14,10 @@ import {
   loadAdditionalContext,
   loadConfigFile,
   parseWorkflow,
+  toMermaidBlock,
 } from "@sweny-ai/core";
 import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
-import type { ExecutionEvent, NodeResult } from "@sweny-ai/core";
+import type { ExecutionEvent, NodeResult, Workflow, NodeStatus } from "@sweny-ai/core";
 import { parseInputs, validateInputs, ActionConfig } from "./config.js";
 import { createCloudStreamReporter } from "./cloud-stream.js";
 
@@ -153,7 +154,7 @@ async function run(): Promise<void> {
     await cloudStream?.flush();
 
     setGitHubOutputs(results);
-    await writeJobSummary(results, config);
+    await writeJobSummary(results, config, workflow);
 
     // Report to SWEny Cloud if project token or GitHub App installation is available
     if (canStream) {
@@ -378,12 +379,24 @@ function setGitHubOutputs(results: Map<string, NodeResult>): void {
 }
 
 /** Write a GitHub Actions job summary with structured triage results */
-async function writeJobSummary(results: Map<string, NodeResult>, config: ActionConfig): Promise<void> {
+async function writeJobSummary(
+  results: Map<string, NodeResult>,
+  config: ActionConfig,
+  workflow: Workflow,
+): Promise<void> {
   const lines: string[] = [];
   const isDryRun = config.dryRun;
 
   // ── Header ────────────────────────────────────────────────────
   lines.push(`## ${isDryRun ? "🔍" : "▲"} SWEny Triage ${isDryRun ? "(Dry Run)" : "Report"}`);
+  lines.push("");
+
+  // ── Workflow diagram ──────────────────────────────────────────
+  const state: Record<string, NodeStatus> = {};
+  for (const [nodeId, result] of results) {
+    state[nodeId] = result.status === "success" ? "success" : result.status === "failed" ? "failed" : "skipped";
+  }
+  lines.push(toMermaidBlock(workflow, { state }));
   lines.push("");
 
   // ── Config table ──────────────────────────────────────────────
