@@ -24,6 +24,8 @@ import { parseWorkflow } from "../schema.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { buildWorkflow, refineWorkflow } from "../workflow-builder.js";
+import { toMermaid, toMermaidBlock } from "../mermaid.js";
+import type { NodeStatus } from "../mermaid.js";
 import { DagRenderer } from "./renderer.js";
 import * as readline from "node:readline";
 
@@ -611,7 +613,7 @@ export function loadWorkflowFile(filePath: string): Workflow {
 
 export async function workflowRunAction(
   file: string,
-  options: Record<string, unknown> & { json?: boolean; stream?: boolean },
+  options: Record<string, unknown> & { json?: boolean; stream?: boolean; mermaid?: boolean },
 ): Promise<void> {
   let workflow: Workflow;
   try {
@@ -733,6 +735,15 @@ export async function workflowRunAction(
       return;
     }
 
+    // Mermaid diagram with execution state
+    if (options.mermaid) {
+      const state: Record<string, NodeStatus> = {};
+      for (const [nodeId, result] of results) {
+        state[nodeId] = result.status === "success" ? "success" : result.status === "failed" ? "failed" : "skipped";
+      }
+      process.stdout.write(toMermaidBlock(workflow, { state, title: workflow.name }) + "\n");
+    }
+
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
     if (hasFailed) {
       console.error(chalk.red(`  Workflow failed\n`));
@@ -819,8 +830,42 @@ workflowCmd
   .option("--dry-run", "Validate workflow without running")
   .option("--json", "Output result as JSON on stdout; suppress progress output")
   .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)")
+  .option("--mermaid", "Output a Mermaid diagram with execution state after run")
   .option("--input <json>", "JSON string of input data to pass to the workflow")
   .action(workflowRunAction);
+
+workflowCmd
+  .command("diagram <file>")
+  .description("Render a workflow as a Mermaid diagram")
+  .option("--direction <dir>", "Graph direction: TB (top-bottom) or LR (left-right)", "TB")
+  .option("--title <title>", "Diagram title (defaults to workflow name)")
+  .option("--block", "Wrap in ```mermaid fenced code block (default)", true)
+  .option("--no-block", "Output raw Mermaid without code fence")
+  .action((file: string, options: { direction?: string; title?: string; block?: boolean }) => {
+    let workflow: Workflow;
+
+    // Support builtin workflow names
+    if (file === "triage") {
+      workflow = triageWorkflow;
+    } else if (file === "implement") {
+      workflow = implementWorkflow;
+    } else if (file === "seed-content") {
+      workflow = seedContentWorkflow;
+    } else {
+      try {
+        workflow = loadWorkflowFile(file);
+      } catch (err) {
+        console.error(chalk.red(`  Error: ${err instanceof Error ? err.message : String(err)}`));
+        process.exit(1);
+        return;
+      }
+    }
+
+    const direction = (options.direction === "LR" ? "LR" : "TB") as "TB" | "LR";
+    const title = options.title ?? workflow.name;
+    const render = options.block !== false ? toMermaidBlock : toMermaid;
+    process.stdout.write(render(workflow, { direction, title }) + "\n");
+  });
 
 workflowCmd
   .command("export <name>")

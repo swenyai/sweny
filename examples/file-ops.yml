@@ -1,0 +1,31 @@
+id: file-ops
+name: File Operations
+description: Write a file, read it back, then delete it
+entry: write
+nodes:
+  write:
+    name: Write File
+    instruction: >-
+      Create a file called "hello.txt" in the current directory with the content "Hello from SWEny!".
+      Use the available tools to write the file.
+    skills:
+      - github
+  read:
+    name: Read File
+    instruction: >-
+      Read the contents of "hello.txt" and confirm it contains "Hello from SWEny!".
+      Output the file contents.
+    skills:
+      - github
+  delete:
+    name: Delete File
+    instruction: >-
+      Delete the file "hello.txt" that was created earlier.
+      Confirm the file has been removed.
+    skills:
+      - github
+edges:
+  - from: write
+    to: read
+  - from: read
+    to: delete
