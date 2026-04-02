@@ -13,7 +13,18 @@
  * This replaces ~8k lines of engine + recipe step code.
  */
 
-import type { Workflow, Skill, Tool, Claude, Observer, NodeResult, Logger, ToolContext, ConfigField } from "./types.js";
+import type {
+  Workflow,
+  Skill,
+  Tool,
+  Claude,
+  Observer,
+  NodeResult,
+  Logger,
+  ToolContext,
+  ConfigField,
+  ExecutionEvent,
+} from "./types.js";
 import { consoleLogger } from "./types.js";
 
 export interface ExecuteOptions {
@@ -112,7 +123,7 @@ export async function execute(
     }
 
     // Resolve next node via edge conditions
-    currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts);
+    currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
   }
 
   safeObserve(
@@ -164,7 +175,7 @@ function buildNodeInstruction(baseInstruction: string, input: unknown): string {
 }
 
 /** Call observer without letting exceptions crash the workflow */
-function safeObserve(observer: Observer | undefined, event: any, logger?: Logger): void {
+function safeObserve(observer: Observer | undefined, event: ExecutionEvent, logger?: Logger): void {
   if (!observer) return;
   try {
     observer(event);
@@ -223,6 +234,7 @@ async function resolveNext(
   claude: Claude,
   observer?: Observer,
   edgeCounts?: Map<string, number>,
+  logger?: Logger,
 ): Promise<string | null> {
   // Filter out edges that have exceeded their max_iterations
   const outEdges = workflow.edges.filter((e) => {
@@ -243,7 +255,7 @@ async function resolveNext(
       const key = `${current}→${outEdges[0].to}`;
       edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
     }
-    safeObserve(observer, { type: "route", from: current, to: outEdges[0].to, reason: "only path" });
+    safeObserve(observer, { type: "route", from: current, to: outEdges[0].to, reason: "only path" }, logger);
     return outEdges[0].to;
   }
 
@@ -283,12 +295,16 @@ async function resolveNext(
     edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
   }
 
-  safeObserve(observer, {
-    type: "route",
-    from: current,
-    to: resolved,
-    reason: choices.find((c) => c.id === resolved)?.description ?? "default",
-  });
+  safeObserve(
+    observer,
+    {
+      type: "route",
+      from: current,
+      to: resolved,
+      reason: choices.find((c) => c.id === resolved)?.description ?? "default",
+    },
+    logger,
+  );
 
   return resolved;
 }
