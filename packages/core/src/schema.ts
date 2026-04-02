@@ -79,8 +79,7 @@ export interface WorkflowError {
     | "UNREACHABLE_NODE"
     | "UNKNOWN_SKILL"
     | "SELF_LOOP"
-    | "UNBOUNDED_CYCLE"
-    | "NO_OUTGOING_EDGE";
+    | "UNBOUNDED_CYCLE";
   message: string;
   nodeId?: string;
 }
@@ -93,7 +92,6 @@ export interface WorkflowError {
  * - All edge sources and targets reference existing nodes
  * - No self-loops
  * - All nodes are reachable from entry
- * - All non-terminal nodes have at least one outgoing edge
  * - (optional) All referenced skills exist in the provided skill set
  */
 export function validateWorkflow(workflow: z.infer<typeof workflowZ>, knownSkills?: Set<string>): WorkflowError[] {
