@@ -35,23 +35,23 @@ sweny workflow create "scan our repo for security issues, check dependencies \
 ```
 GitHub Security Audit
 
-┌────────────────────────────────────────────────┐
-│ ○ Scan Recent Commits for Exposed Secrets      │
-└───────────────────────┬────────────────────────┘
-                        │
-┌───────────────────────▼────────────────────────┐
-│ ○ Scan Dependencies for Vulnerable Packages    │
-└───────────────────────┬────────────────────────┘
-                        │
-┌───────────────────────▼────────────────────────┐
-│ ○ Compile Security Posture Report              │
-└───────────────────────┬────────────────────────┘
-                        │
-┌───────────────────────▼────────────────────────┐
-│ ○ Create Linear Tickets for Critical Findings  │
-└────────────────────────────────────────────────┘
+┌─────────────────────────────────┐
+│ ○ Scan Commits for Secrets      │
+└───────────────┬─────────────────┘
+                │
+┌───────────────▼─────────────────┐
+│ ○ Scan Deps for Vulnerabilities │
+└───────────────┬─────────────────┘
+                │
+┌───────────────▼─────────────────┐
+│ ○ Compile Security Report       │
+└───────────────┬─────────────────┘
+                │
+┌───────────────▼─────────────────┐
+│ ○ Create Linear Tickets         │
+└─────────────────────────────────┘
 
-Save to .sweny/workflows/github_security_audit.yml? [Y/n/refine]
+Save to security_audit.yml? [Y/n/refine]
 ```
 
 ```bash
