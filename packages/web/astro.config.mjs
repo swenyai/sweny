@@ -16,7 +16,7 @@ export default defineConfig({
   integrations: [
     react(),
     starlight({
-      customCss: ["./src/styles/explorer-overrides.css"],
+      customCss: ["./src/styles/explorer-overrides.css", "./src/styles/mobile.css"],
       title: "SWEny",
       description: "Turn natural language into reliable AI workflows",
       favicon: "/favicon.svg",

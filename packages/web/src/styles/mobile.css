@@ -1,0 +1,67 @@
+/*
+ * Mobile-responsive fixes for the docs site.
+ * Starlight's splash template doesn't constrain wide content blocks
+ * (pre, code, ASCII art) well on narrow viewports — these rules fix that.
+ */
+
+/* ── Global: prevent page-level horizontal overflow ── */
+
+.page {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+@media (max-width: 640px) {
+  /* ── Content containers ── */
+
+  .sl-container {
+    max-width: 100%;
+    overflow-x: hidden;
+    padding-inline: 1rem;
+  }
+
+  .sl-markdown-content {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /* ── Code blocks (Expressive Code) ── */
+
+  /* The figure wraps the pre — it must not exceed the viewport */
+  .expressive-code figure.frame {
+    max-width: calc(100vw - 2rem);
+  }
+
+  /* Let the pre scroll horizontally for wide content */
+  .expressive-code pre {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Shrink code font slightly on small screens for better fit */
+  .expressive-code pre code,
+  .expressive-code pre .ec-line {
+    font-size: 0.8rem;
+  }
+
+  /* ── Hero section ── */
+
+  .hero {
+    padding-inline: 1rem !important;
+  }
+
+  .hero .copy h1 {
+    font-size: var(--sl-text-h2) !important;
+  }
+
+  .hero .actions {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  /* ── Card grid: single column ── */
+
+  .card-grid {
+    grid-template-columns: 1fr !important;
+  }
+}

@@ -33,25 +33,25 @@ sweny workflow create "scan our repo for security issues, check dependencies \
 ```
 
 ```
-  GitHub Security Audit
+GitHub Security Audit
 
-  ┌──────────────────────────────────────────────────┐
-  │ ○ Scan Recent Commits for Exposed Secrets        │
-  └─────────────────────────┬────────────────────────┘
-                            │
-  ┌─────────────────────────▼────────────────────────┐
-  │ ○ Scan Dependency Files for Vulnerable Packages  │
-  └─────────────────────────┬────────────────────────┘
-                            │
-  ┌─────────────────────────▼────────────────────────┐
-  │ ○ Compile Security Posture Report                │
-  └─────────────────────────┬────────────────────────┘
-                            │
-  ┌─────────────────────────▼────────────────────────┐
-  │ ○ Create Linear Tickets for Critical Findings    │
-  └──────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│ ○ Scan Recent Commits for Exposed Secrets      │
+└───────────────────────┬────────────────────────┘
+                        │
+┌───────────────────────▼────────────────────────┐
+│ ○ Scan Dependencies for Vulnerable Packages    │
+└───────────────────────┬────────────────────────┘
+                        │
+┌───────────────────────▼────────────────────────┐
+│ ○ Compile Security Posture Report              │
+└───────────────────────┬────────────────────────┘
+                        │
+┌───────────────────────▼────────────────────────┐
+│ ○ Create Linear Tickets for Critical Findings  │
+└────────────────────────────────────────────────┘
 
-  Save to .sweny/workflows/github_security_audit.yml? [Y/n/refine]
+Save to .sweny/workflows/github_security_audit.yml? [Y/n/refine]
 ```
 
 ```bash
@@ -59,12 +59,12 @@ sweny workflow run .sweny/workflows/github_security_audit.yml
 ```
 
 ```
-  ✓ [1/4] Scan Commits for Exposed Secrets     12s
-    ↳ Searched 847 commits, 0 secrets found
-  ✓ [2/4] Scan Dependencies for Vulns          28s
-    ↳ 2 critical CVEs in transitive deps
-  ⠹ [3/4] Compile Security Report              6s
-    ↳ Analyzing findings…
+✓ [1/4] Scan Commits for Exposed Secrets   12s
+  ↳ Searched 847 commits, 0 secrets found
+✓ [2/4] Scan Dependencies for Vulns        28s
+  ↳ 2 critical CVEs in transitive deps
+⠹ [3/4] Compile Security Report            6s
+  ↳ Analyzing findings…
 ```
 
 That's it. One sentence in, a full workflow out. No YAML to write, no boilerplate, no config.
