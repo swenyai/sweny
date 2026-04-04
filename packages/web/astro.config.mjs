@@ -70,6 +70,13 @@ export default defineConfig({
           ],
         },
         {
+          label: "Use Cases",
+          items: [
+            { label: "Overview", slug: "use-cases" },
+            { label: "Data Pipelines", slug: "use-cases/data-pipelines" },
+          ],
+        },
+        {
           label: "GitHub Action",
           items: [
             { label: "Setup", slug: "action" },
