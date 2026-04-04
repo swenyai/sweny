@@ -86,11 +86,11 @@ describe("skills registry", () => {
     }
   });
 
-  it("isSkillConfigured checks env vars", () => {
+  it("isSkillConfigured checks required env vars", () => {
     expect(isSkillConfigured(github, { GITHUB_TOKEN: "ghp_xxx" })).toBe(true);
-    expect(isSkillConfigured(github, {})).toBe(false);
-    // Slack has all-optional config — needs at least one to be usable
-    expect(isSkillConfigured(slack, {})).toBe(false);
+    expect(isSkillConfigured(github, {})).toBe(false); // GITHUB_TOKEN is required
+    // Slack has all-optional config — always configured, tools validate at call time
+    expect(isSkillConfigured(slack, {})).toBe(true);
     expect(isSkillConfigured(slack, { SLACK_WEBHOOK_URL: "https://hooks.slack.com/..." })).toBe(true);
     expect(isSkillConfigured(slack, { SLACK_BOT_TOKEN: "xoxb-..." })).toBe(true);
   });

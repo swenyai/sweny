@@ -119,22 +119,15 @@ export function allSkills(): Map<string, Skill> {
 /**
  * Check if a skill is usable given the available environment.
  *
- * - All required config fields must have values.
- * - If a skill has env-backed config fields (even optional ones),
- *   at least one must be set — otherwise the skill has zero credentials.
- * - Skills with no env-backed config are always considered configured.
+ * A skill is configured when all its *required* config fields are set.
+ * Optional fields are validated by individual tool handlers at call time,
+ * so missing optional config never disqualifies the skill.
  */
 export function isSkillConfigured(skill: Skill, env: Record<string, string | undefined> = process.env): boolean {
-  const envFields = Object.values(skill.config).filter((f) => f.env);
-  if (envFields.length === 0) return true; // no env needed
-
-  // All required fields must be set
-  for (const field of envFields) {
-    if (field.required && !env[field.env!]) return false;
+  for (const field of Object.values(skill.config)) {
+    if (field.required && field.env && !env[field.env]) return false;
   }
-
-  // At least one env-backed field must be set (handles all-optional skills like slack)
-  return envFields.some((f) => env[f.env!]);
+  return true;
 }
 
 /**

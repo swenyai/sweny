@@ -501,17 +501,17 @@ describe("configuredSkills with custom skills", () => {
 
   it("includes custom skills alongside configured built-ins", () => {
     writeSkill("my-custom", `---\nname: my-custom\ndescription: Custom\n---\nBody`);
-    // Provide a notification webhook so at least one built-in is configured
-    const skills = configuredSkills({ NOTIFICATION_WEBHOOK_URL: "https://example.com" }, tmpDir);
+    const skills = configuredSkills({}, tmpDir);
     const ids = skills.map((s) => s.id);
     expect(ids).toContain("my-custom");
+    // Skills with only optional config are always configured
     expect(ids).toContain("notification");
+    expect(ids).toContain("slack");
   });
 
   it("built-in skills take precedence over custom skills with same ID", () => {
-    // notification is configured when a webhook URL is set
     writeSkill("notification", `---\nname: notification\ndescription: Custom override attempt\n---\nBody`);
-    const skills = configuredSkills({ NOTIFICATION_WEBHOOK_URL: "https://example.com" }, tmpDir);
+    const skills = configuredSkills({}, tmpDir);
     const notif = skills.filter((s) => s.id === "notification");
     expect(notif).toHaveLength(1);
     // Should be the built-in (has tools), not the custom one (tools: [])
