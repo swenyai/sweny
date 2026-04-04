@@ -85,17 +85,6 @@ async function run() {
         });
         const contextParts = [providerCtx, userContextResult.resolved, config.additionalInstructions].filter(Boolean);
         const context = contextParts.join("\n\n");
-        // Build workflow input
-        const input = {
-            ...buildWorkflowInput(config),
-            ...templates,
-            // Structured rules/context for executor (rules get "MUST follow" framing)
-            ...(rulesResult.resolved ? { rules: rulesResult.resolved } : {}),
-            ...(context ? { context } : {}),
-            // URLs for the prepare node to fetch at runtime
-            ...(rulesResult.urls.length > 0 ? { rulesUrls: rulesResult.urls } : {}),
-            ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
-        };
         // Set up cloud streaming for live DAG visualization
         const [owner, repo] = (config.repository || process.env.GITHUB_REPOSITORY || "").split("/");
         const canStream = !!(config.projectToken || process.env.GITHUB_APP_INSTALLATION_ID);
@@ -108,8 +97,22 @@ async function run() {
                 repo,
             })
             : null;
+        // Build workflow input
+        const streamRunId = cloudStream?.getRunId() ?? undefined;
+        const input = {
+            ...buildWorkflowInput(config),
+            ...templates,
+            // Cloud run ID for PR body marker (available if stream pre-initialized)
+            ...(streamRunId ? { cloudRunId: streamRunId } : {}),
+            // Structured rules/context for executor (rules get "MUST follow" framing)
+            ...(rulesResult.resolved ? { rules: rulesResult.resolved } : {}),
+            ...(context ? { context } : {}),
+            // URLs for the prepare node to fetch at runtime
+            ...(rulesResult.urls.length > 0 ? { rulesUrls: rulesResult.urls } : {}),
+            ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
+        };
         // Execute workflow
-        const results = await execute(workflow, input, {
+        const { results, trace } = await execute(workflow, input, {
             skills,
             claude,
             observer: (event) => {
@@ -121,7 +124,7 @@ async function run() {
         // Wait for any in-flight streaming events
         await cloudStream?.flush();
         setGitHubOutputs(results);
-        await writeJobSummary(results, config, workflow);
+        await writeJobSummary(results, trace, config, workflow);
         // Report to SWEny Cloud if project token or GitHub App installation is available
         if (canStream) {
             await reportToCloud(config, results, startTime, cloudStream?.getRunId() ?? undefined);
@@ -334,7 +337,7 @@ function setGitHubOutputs(results) {
     }
 }
 /** Write a GitHub Actions job summary with structured triage results */
-async function writeJobSummary(results, config, workflow) {
+async function writeJobSummary(results, trace, config, workflow) {
     const lines = [];
     const isDryRun = config.dryRun;
     // ── Header ────────────────────────────────────────────────────
@@ -345,23 +348,48 @@ async function writeJobSummary(results, config, workflow) {
     for (const [nodeId, result] of results) {
         state[nodeId] = result.status === "success" ? "success" : result.status === "failed" ? "failed" : "skipped";
     }
-    lines.push(toMermaidBlock(workflow, { state, title: workflow.name }));
+    lines.push(toMermaidBlock(workflow, { state, trace, title: workflow.name }));
     lines.push("");
-    // ── Config table ──────────────────────────────────────────────
+    // ── Config table (only show settings relevant to this workflow) ─
+    const isTriage = workflow.id === "triage";
+    const rows = [];
+    if (config.repository)
+        rows.push(["Repository", `\`${config.repository}\``]);
+    rows.push(["Workflow", `\`${workflow.id}\``]);
+    if (isTriage) {
+        rows.push(["Observability", config.observabilityProvider]);
+        rows.push(["Issue Tracker", config.issueTrackerProvider]);
+        rows.push(["Time Range", config.timeRange]);
+        if (config.serviceFilter && config.serviceFilter !== "*")
+            rows.push(["Service Filter", `\`${config.serviceFilter}\``]);
+    }
+    rows.push(["Mode", isDryRun ? "dry run" : "live"]);
     lines.push("| Setting | Value |");
     lines.push("|---------|-------|");
-    if (config.repository)
-        lines.push(`| Repository | \`${config.repository}\` |`);
-    lines.push(`| Observability | ${config.observabilityProvider} |`);
-    lines.push(`| Issue Tracker | ${config.issueTrackerProvider} |`);
-    lines.push(`| Time Range | ${config.timeRange} |`);
-    lines.push(`| Mode | ${isDryRun ? "dry run" : "live"} |`);
-    if (config.serviceFilter)
-        lines.push(`| Service Filter | \`${config.serviceFilter}\` |`);
+    for (const [k, v] of rows)
+        lines.push(`| ${k} | ${v} |`);
     lines.push("");
-    // ── Workflow path ─────────────────────────────────────────────
-    const nodeNames = [...results.keys()];
-    lines.push(`**Workflow path:** ${nodeNames.map((n) => `\`${n}\``).join(" → ")}`);
+    // ── Workflow path (actual execution sequence including loops) ──
+    const pathSteps = trace.steps.map((s) => {
+        const tag = s.iteration > 1 ? ` ×${s.iteration}` : "";
+        return `\`${s.node}${tag}\``;
+    });
+    lines.push(`**Workflow path:** ${pathSteps.join(" → ")}`);
+    // Show routing decisions if any edges were conditional
+    if (trace.edges.length > 0) {
+        const routingLines = trace.edges
+            .filter((e) => e.reason !== "only path")
+            .map((e) => `\`${e.from}\` → \`${e.to}\` *(${e.reason})*`);
+        if (routingLines.length > 0) {
+            lines.push("");
+            lines.push("<details><summary>Routing decisions</summary>");
+            lines.push("");
+            for (const r of routingLines)
+                lines.push(`- ${r}`);
+            lines.push("");
+            lines.push("</details>");
+        }
+    }
     lines.push("");
     // ── Findings ──────────────────────────────────────────────────
     const investigateData = results.get("investigate")?.data;

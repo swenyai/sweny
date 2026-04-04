@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { ToolContext } from "../types.js";
 import { github } from "../skills/github.js";
 import { linear } from "../skills/linear.js";
@@ -6,6 +9,7 @@ import { slack } from "../skills/slack.js";
 import { sentry } from "../skills/sentry.js";
 import { datadog } from "../skills/datadog.js";
 import { notification } from "../skills/notification.js";
+import { loadCustomSkills, configuredSkills, createSkillMap } from "../skills/index.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -380,5 +384,145 @@ describe("notification skill", () => {
     await tool.handler({ payload: {} }, ctx);
 
     expect(fetchMock.mock.calls[0][1].signal).toBeDefined();
+  });
+});
+
+// ─── Custom skill discovery tests ──────────────────────────────
+
+describe("loadCustomSkills", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "sweny-skills-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function writeSkill(dirName: string, content: string) {
+    const dir = join(tmpDir, ".claude", "skills", dirName);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), content);
+  }
+
+  it("returns empty array when .claude/skills/ does not exist", () => {
+    const skills = loadCustomSkills(tmpDir);
+    expect(skills).toEqual([]);
+  });
+
+  it("returns empty array when .claude/skills/ is empty", () => {
+    mkdirSync(join(tmpDir, ".claude", "skills"), { recursive: true });
+    const skills = loadCustomSkills(tmpDir);
+    expect(skills).toEqual([]);
+  });
+
+  it("discovers a valid custom skill from SKILL.md frontmatter", () => {
+    writeSkill(
+      "my-skill",
+      `---
+name: my-skill
+description: A test skill
+---
+
+Instructions for Claude go here.
+`,
+    );
+    const skills = loadCustomSkills(tmpDir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]).toMatchObject({
+      id: "my-skill",
+      name: "my-skill",
+      description: "A test skill",
+      category: "general",
+    });
+    expect(skills[0].tools).toEqual([]);
+    expect(skills[0].config).toEqual({});
+  });
+
+  it("discovers multiple skills", () => {
+    writeSkill("skill-a", `---\nname: skill-a\ndescription: First\n---\nBody`);
+    writeSkill("skill-b", `---\nname: skill-b\ndescription: Second\n---\nBody`);
+    const skills = loadCustomSkills(tmpDir);
+    expect(skills).toHaveLength(2);
+    const ids = skills.map((s) => s.id).sort();
+    expect(ids).toEqual(["skill-a", "skill-b"]);
+  });
+
+  it("skips directories without SKILL.md", () => {
+    mkdirSync(join(tmpDir, ".claude", "skills", "no-skill-file"), { recursive: true });
+    writeFileSync(join(tmpDir, ".claude", "skills", "no-skill-file", "README.md"), "not a skill");
+    const skills = loadCustomSkills(tmpDir);
+    expect(skills).toEqual([]);
+  });
+
+  it("skips SKILL.md without frontmatter", () => {
+    writeSkill("no-frontmatter", "Just plain text, no YAML frontmatter.");
+    const skills = loadCustomSkills(tmpDir);
+    expect(skills).toEqual([]);
+  });
+
+  it("skips SKILL.md with frontmatter missing name field", () => {
+    writeSkill("no-name", `---\ndescription: Missing name\n---\nBody`);
+    const skills = loadCustomSkills(tmpDir);
+    expect(skills).toEqual([]);
+  });
+
+  it("uses fallback description when description is missing", () => {
+    writeSkill("name-only", `---\nname: name-only\n---\nBody`);
+    const skills = loadCustomSkills(tmpDir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0].description).toBe("Custom skill: name-only");
+  });
+
+  it("skips malformed YAML in frontmatter", () => {
+    writeSkill("bad-yaml", `---\n: [invalid yaml\n---\nBody`);
+    const skills = loadCustomSkills(tmpDir);
+    expect(skills).toEqual([]);
+  });
+});
+
+describe("configuredSkills with custom skills", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "sweny-configured-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function writeSkill(dirName: string, content: string) {
+    const dir = join(tmpDir, ".claude", "skills", dirName);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), content);
+  }
+
+  it("includes custom skills alongside configured built-ins", () => {
+    writeSkill("my-custom", `---\nname: my-custom\ndescription: Custom\n---\nBody`);
+    // Provide a notification webhook so at least one built-in is configured
+    const skills = configuredSkills({ NOTIFICATION_WEBHOOK_URL: "https://example.com" }, tmpDir);
+    const ids = skills.map((s) => s.id);
+    expect(ids).toContain("my-custom");
+    expect(ids).toContain("notification");
+  });
+
+  it("built-in skills take precedence over custom skills with same ID", () => {
+    // notification is configured when a webhook URL is set
+    writeSkill("notification", `---\nname: notification\ndescription: Custom override attempt\n---\nBody`);
+    const skills = configuredSkills({ NOTIFICATION_WEBHOOK_URL: "https://example.com" }, tmpDir);
+    const notif = skills.filter((s) => s.id === "notification");
+    expect(notif).toHaveLength(1);
+    // Should be the built-in (has tools), not the custom one (tools: [])
+    expect(notif[0].tools.length).toBeGreaterThan(0);
+  });
+
+  it("custom skills are usable in createSkillMap", () => {
+    writeSkill("extract-colors", `---\nname: extract-colors\ndescription: Route color extraction\n---\nBody`);
+    const skills = configuredSkills({}, tmpDir);
+    const map = createSkillMap(skills);
+    expect(map.has("extract-colors")).toBe(true);
+    expect(map.get("extract-colors")!.tools).toEqual([]);
   });
 });

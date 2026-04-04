@@ -243,7 +243,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   }
 
   // ── Build skill map + MCP servers + Claude client ──────────
-  const skills = createSkillMap(configuredSkills());
+  const skills = createSkillMap(configuredSkills(process.env, process.cwd()));
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({
@@ -485,7 +485,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       ".sweny/output",
   };
 
-  const skills = createSkillMap(configuredSkills());
+  const skills = createSkillMap(configuredSkills(process.env, process.cwd()));
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({
@@ -639,7 +639,7 @@ export async function workflowRunAction(
   const isJson = Boolean(options.json);
   const isTTY = !isJson && (process.stderr.isTTY ?? false);
 
-  const skills = createSkillMap(configuredSkills());
+  const skills = createSkillMap(configuredSkills(process.env, process.cwd()));
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({
