@@ -9,7 +9,7 @@ This is the story of replacing that pipeline with a single SWEny workflow.
 
 ## The DAG
 
-The workflow is a 10-node DAG with conditional routing and three operational modes:
+The workflow is a DAG with conditional routing and three operational modes:
 
 ```
                     ┌──────────────┐

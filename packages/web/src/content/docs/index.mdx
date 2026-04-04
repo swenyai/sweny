@@ -19,7 +19,7 @@ hero:
       variant: minimal
 ---
 
-import { Card, CardGrid } from "@astrojs/starlight/components";
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
 
 ```bash
 npm install -g @sweny-ai/core
@@ -109,12 +109,14 @@ SWEny workflows aren't limited to triage and fixes. Teams use them to replace br
     Turn unstructured documents into structured data with LLM extraction, automated quality gates, and change detection.
     [Read the deep-dive](/use-cases/data-pipelines/)
   </Card>
-  <Card title="Security Reviews" icon="seti:lock">
+  <Card title="Security Reviews" icon="approve-check-circle">
     Ingest vendor questionnaires, draft answers from your security posture docs, and validate nothing is overstated.
   </Card>
-  <Card title="All Use Cases" icon="right-arrow">
-    Competitive monitoring, contract management, feedback synthesis, and more. [Browse use cases](/use-cases/)
-  </Card>
+  <LinkCard
+    title="See all use cases"
+    href="/use-cases/"
+    description="Competitive monitoring, contract management, feedback synthesis, and more."
+  />
 </CardGrid>
 
 ## Run it on a schedule
