@@ -111,6 +111,47 @@ export type ExecutionEvent =
 
 export type Observer = (event: ExecutionEvent) => void;
 
+// ─── Execution Trace ────────────────────────────────────────────
+//
+// Records the full execution path through a workflow, including
+// loop iterations and routing decisions. Unlike the results map
+// (which stores only the last result per node), the trace preserves
+// the complete ordered sequence.
+
+/** A single node execution within the trace */
+export interface TraceStep {
+  /** Node ID */
+  node: string;
+  /** Outcome of this execution */
+  status: "success" | "failed" | "skipped";
+  /** 1-based iteration count (2 = second time this node ran) */
+  iteration: number;
+}
+
+/** A routing decision between nodes */
+export interface TraceEdge {
+  from: string;
+  to: string;
+  /** Why this edge was chosen (condition text or "only path") */
+  reason: string;
+}
+
+/** Full execution trace — ordered steps + edges taken */
+export interface ExecutionTrace {
+  /** Ordered list of node executions (includes repeats from retry loops) */
+  steps: TraceStep[];
+  /** Ordered list of routing decisions */
+  edges: TraceEdge[];
+}
+
+/** Result of execute() — final node results + full execution trace */
+export interface ExecutionResult {
+  /** Final result per node (last execution if retried) */
+  results: Map<string, NodeResult>;
+  /** Full execution trace including loops and routing decisions */
+  trace: ExecutionTrace;
+}
+
 // ─── Claude Interface ────────────────────────────────────────────
 //
 // Abstract interface so the executor doesn't depend on the SDK.

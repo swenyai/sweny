@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { toMermaid, toMermaidBlock } from "./mermaid.js";
-import type { Workflow } from "./types.js";
+import type { Workflow, ExecutionTrace } from "./types.js";
 import { triageWorkflow, implementWorkflow } from "./workflows/index.js";
 
 // ─── Fixtures ──────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ describe("toMermaid", () => {
   it("renders max_iterations on edges", () => {
     const result = toMermaid(withLoop);
 
-    expect(result).toContain('a -->|"needs retry (max 3x)"| a');
+    expect(result).toContain('a -->|"needs retry · max 3x"| a');
     expect(result).toContain("a --> b");
   });
 
@@ -194,6 +194,49 @@ describe("toMermaid", () => {
 
     expect(result).toContain("class a,b success");
     expect(result).toContain("class c current");
+  });
+
+  it("highlights taken edges and dims not-taken edges with trace", () => {
+    const trace: ExecutionTrace = {
+      steps: [
+        { node: "triage", status: "success", iteration: 1 },
+        { node: "investigate", status: "success", iteration: 1 },
+        { node: "close", status: "success", iteration: 1 },
+      ],
+      edges: [
+        { from: "triage", to: "investigate", reason: "severity is high or critical" },
+        { from: "investigate", to: "close", reason: "only path" },
+      ],
+    };
+
+    const result = toMermaid(branching, { trace });
+
+    // Taken edges get green bold styling (edges 0 and 2 in the workflow)
+    expect(result).toContain("linkStyle");
+    expect(result).toContain("stroke:#22c55e,stroke-width:3px");
+    // Not-taken edges get dashed gray
+    expect(result).toContain("stroke:#6b7280,stroke-width:1px,stroke-dasharray:5 5");
+  });
+
+  it("shows iteration count on nodes and edges from trace", () => {
+    const trace: ExecutionTrace = {
+      steps: [
+        { node: "a", status: "success", iteration: 1 },
+        { node: "a", status: "success", iteration: 2 },
+        { node: "b", status: "success", iteration: 1 },
+      ],
+      edges: [
+        { from: "a", to: "a", reason: "needs retry" },
+        { from: "a", to: "b", reason: "only path" },
+      ],
+    };
+
+    const result = toMermaid(withLoop, { trace });
+
+    // Node a ran twice — should show ×2
+    expect(result).toContain("×2");
+    // Node b ran once — no iteration tag
+    expect(result).not.toContain("Done ×");
   });
 });
 

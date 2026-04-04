@@ -112,7 +112,7 @@ const observer = (event: ExecutionEvent) => {
 };
 
 try {
-  const results = await execute(workflow, input || undefined, {
+  const { results } = await execute(workflow, input || undefined, {
     skills,
     claude,
     observer,

@@ -420,7 +420,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   };
 
   try {
-    const results = await execute(triageWorkflow, workflowInput, {
+    const { results } = await execute(triageWorkflow, workflowInput, {
       skills,
       claude,
       observer,
@@ -555,7 +555,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   };
 
   try {
-    const results = await execute(implementWorkflow, workflowInput, {
+    const { results } = await execute(implementWorkflow, workflowInput, {
       skills,
       claude,
       observer,
@@ -721,7 +721,7 @@ export async function workflowRunAction(
   }
 
   try {
-    const results = await execute(workflow, workflowInput, {
+    const { results, trace } = await execute(workflow, workflowInput, {
       skills,
       claude,
       observer,
@@ -741,7 +741,7 @@ export async function workflowRunAction(
       for (const [nodeId, result] of results) {
         state[nodeId] = result.status === "success" ? "success" : result.status === "failed" ? "failed" : "skipped";
       }
-      process.stdout.write(toMermaidBlock(workflow, { state, title: workflow.name }) + "\n");
+      process.stdout.write(toMermaidBlock(workflow, { state, trace, title: workflow.name }) + "\n");
     }
 
     const hasFailed = [...results.values()].some((r) => r.status === "failed");

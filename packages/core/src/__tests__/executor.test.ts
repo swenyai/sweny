@@ -79,7 +79,7 @@ describe("executor", () => {
     });
 
     const events: ExecutionEvent[] = [];
-    const results = await execute(
+    const { results } = await execute(
       linearWorkflow,
       { alert: "test" },
       {
@@ -114,7 +114,7 @@ describe("executor", () => {
       routes: { check: "high" },
     });
 
-    const results = await execute(
+    const { results } = await execute(
       branchingWorkflow,
       { alert: "cpu" },
       {
@@ -140,7 +140,7 @@ describe("executor", () => {
       routes: { check: "low" },
     });
 
-    const results = await execute(
+    const { results } = await execute(
       branchingWorkflow,
       { alert: "minor" },
       {
@@ -198,7 +198,7 @@ describe("executor", () => {
       },
     });
 
-    const results = await execute(
+    const { results } = await execute(
       linearWorkflow,
       {},
       {
@@ -249,7 +249,7 @@ describe("executor", () => {
       responses: { only: { data: { result: "done" } } },
     });
 
-    const results = await execute(
+    const { results } = await execute(
       singleNode,
       {},
       {
@@ -332,7 +332,7 @@ describe("executor", () => {
     ).rejects.toThrow("Missing required config");
 
     // Should succeed with override
-    const results = await execute(
+    const { results } = await execute(
       linearWorkflow,
       {},
       {
@@ -353,7 +353,7 @@ describe("executor", () => {
       },
     });
 
-    const results = await execute(
+    const { results } = await execute(
       linearWorkflow,
       {},
       {
@@ -410,7 +410,11 @@ describe("executor", () => {
       },
     };
 
-    const results = await execute(retryWorkflow, {}, { skills: createSkillMap([]), claude: mockClaude, config: {} });
+    const { results, trace } = await execute(
+      retryWorkflow,
+      {},
+      { skills: createSkillMap([]), claude: mockClaude, config: {} },
+    );
 
     // extract ran twice (initial + 1 retry), judge ran twice, done ran once
     expect(extractCount).toBe(2);
@@ -418,6 +422,14 @@ describe("executor", () => {
     expect(results.has("done")).toBe(true);
     // The second extract result overwrites the first
     expect(results.get("extract")?.data.attempt).toBe(2);
+
+    // Trace captures the full execution path including loops
+    expect(trace.steps).toHaveLength(5); // extract, judge, extract(retry), judge, done
+    expect(trace.steps[0]).toEqual({ node: "extract", status: "success", iteration: 1 });
+    expect(trace.steps[2]).toEqual({ node: "extract", status: "success", iteration: 2 });
+    // Trace edges include the retry loop
+    const retryEdge = trace.edges.find((e) => e.from === "judge" && e.to === "extract");
+    expect(retryEdge).toBeDefined();
   });
 
   it("respects max_iterations=1 as single retry", async () => {
@@ -453,7 +465,7 @@ describe("executor", () => {
       },
     };
 
-    const results = await execute(singleRetry, {}, { skills: createSkillMap([]), claude: mockClaude, config: {} });
+    const { results } = await execute(singleRetry, {}, { skills: createSkillMap([]), claude: mockClaude, config: {} });
 
     // A runs twice (once initially, once via retry), then edge is exhausted → falls to "end"
     expect(aCount).toBe(2);
@@ -471,7 +483,7 @@ describe("executor", () => {
       },
     };
 
-    const results = await execute(
+    const { results } = await execute(
       branchingWorkflow,
       {},
       {

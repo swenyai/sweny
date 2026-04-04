@@ -24,6 +24,8 @@ import type {
   ToolContext,
   ConfigField,
   ExecutionEvent,
+  ExecutionTrace,
+  ExecutionResult,
 } from "./types.js";
 import { consoleLogger } from "./types.js";
 
@@ -43,18 +45,18 @@ export interface ExecuteOptions {
 /**
  * Execute a workflow from entry to completion.
  *
- * Returns a map of node ID → result for every node that ran.
+ * Returns an ExecutionResult with:
+ * - `results`: map of node ID → final result (last execution if retried)
+ * - `trace`: full ordered execution trace including loops and routing decisions
  */
-export async function execute(
-  workflow: Workflow,
-  input: unknown,
-  options: ExecuteOptions,
-): Promise<Map<string, NodeResult>> {
+export async function execute(workflow: Workflow, input: unknown, options: ExecuteOptions): Promise<ExecutionResult> {
   const { skills, claude, observer } = options;
   const config = resolveConfig(skills, options.config);
   const logger = options.logger ?? consoleLogger;
   const results = new Map<string, NodeResult>();
   const edgeCounts = new Map<string, number>(); // "from→to" → times followed
+  const nodeRunCounts = new Map<string, number>(); // node → times executed
+  const trace: ExecutionTrace = { steps: [], edges: [] };
 
   validate(workflow, skills);
 
@@ -65,6 +67,9 @@ export async function execute(
   while (currentId) {
     const node = workflow.nodes[currentId];
     if (!node) throw new Error(`Unknown node: "${currentId}"`);
+
+    const iteration = (nodeRunCounts.get(currentId) ?? 0) + 1;
+    nodeRunCounts.set(currentId, iteration);
 
     safeObserve(observer, { type: "node:enter", node: currentId, instruction: node.instruction }, logger);
     logger.info(`→ ${node.name}`, { node: currentId });
@@ -105,6 +110,7 @@ export async function execute(
     });
 
     results.set(currentId, result);
+    trace.steps.push({ node: currentId, status: result.status, iteration });
     safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
     logger.info(`  ✓ ${result.status}`, { node: currentId, toolCalls: result.toolCalls.length });
 
@@ -123,7 +129,15 @@ export async function execute(
     }
 
     // Resolve next node via edge conditions
+    const prevId = currentId;
     currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
+
+    // Record the routing decision in the trace
+    if (currentId) {
+      const edgeKey = `${prevId}→${currentId}`;
+      const reason = workflow.edges.find((e) => e.from === prevId && e.to === currentId)?.when ?? "only path";
+      trace.edges.push({ from: prevId, to: currentId, reason });
+    }
   }
 
   safeObserve(
@@ -135,7 +149,7 @@ export async function execute(
     logger,
   );
 
-  return results;
+  return { results, trace };
 }
 
 // ─── Internals ───────────────────────────────────────────────────

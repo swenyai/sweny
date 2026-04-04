@@ -39,6 +39,10 @@ export type {
   Observer,
   Claude,
   Logger,
+  TraceStep,
+  TraceEdge,
+  ExecutionTrace,
+  ExecutionResult,
 } from "./types.js";
 
 export { consoleLogger } from "./types.js";

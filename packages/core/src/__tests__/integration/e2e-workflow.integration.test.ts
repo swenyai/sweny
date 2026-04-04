@@ -54,7 +54,7 @@ describe.runIf(available.claude)("e2e workflow with real Claude", () => {
     });
 
     const events: ExecutionEvent[] = [];
-    const results = await execute(
+    const { results } = await execute(
       analysisWorkflow,
       {
         alert: "CPU usage at 98% for 15 minutes on production server web-03",

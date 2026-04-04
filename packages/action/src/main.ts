@@ -17,7 +17,15 @@ import {
   toMermaidBlock,
 } from "@sweny-ai/core";
 import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
-import type { ExecutionEvent, NodeResult, Workflow, NodeStatus } from "@sweny-ai/core";
+import type {
+  ExecutionEvent,
+  ExecutionTrace,
+  TraceStep,
+  TraceEdge,
+  NodeResult,
+  Workflow,
+  NodeStatus,
+} from "@sweny-ai/core";
 import { parseInputs, validateInputs, ActionConfig } from "./config.js";
 import { createCloudStreamReporter } from "./cloud-stream.js";
 
@@ -143,7 +151,7 @@ async function run(): Promise<void> {
     };
 
     // Execute workflow
-    const results = await execute(workflow, input, {
+    const { results, trace } = await execute(workflow, input, {
       skills,
       claude,
       observer: (event: ExecutionEvent) => {
@@ -157,7 +165,7 @@ async function run(): Promise<void> {
     await cloudStream?.flush();
 
     setGitHubOutputs(results);
-    await writeJobSummary(results, config, workflow);
+    await writeJobSummary(results, trace, config, workflow);
 
     // Report to SWEny Cloud if project token or GitHub App installation is available
     if (canStream) {
@@ -384,6 +392,7 @@ function setGitHubOutputs(results: Map<string, NodeResult>): void {
 /** Write a GitHub Actions job summary with structured triage results */
 async function writeJobSummary(
   results: Map<string, NodeResult>,
+  trace: ExecutionTrace,
   config: ActionConfig,
   workflow: Workflow,
 ): Promise<void> {
@@ -399,7 +408,7 @@ async function writeJobSummary(
   for (const [nodeId, result] of results) {
     state[nodeId] = result.status === "success" ? "success" : result.status === "failed" ? "failed" : "skipped";
   }
-  lines.push(toMermaidBlock(workflow, { state, title: workflow.name }));
+  lines.push(toMermaidBlock(workflow, { state, trace, title: workflow.name }));
   lines.push("");
 
   // ── Config table (only show settings relevant to this workflow) ─
@@ -421,9 +430,27 @@ async function writeJobSummary(
   for (const [k, v] of rows) lines.push(`| ${k} | ${v} |`);
   lines.push("");
 
-  // ── Workflow path ─────────────────────────────────────────────
-  const nodeNames = [...results.keys()];
-  lines.push(`**Workflow path:** ${nodeNames.map((n) => `\`${n}\``).join(" → ")}`);
+  // ── Workflow path (actual execution sequence including loops) ──
+  const pathSteps = trace.steps.map((s: TraceStep) => {
+    const tag = s.iteration > 1 ? ` ×${s.iteration}` : "";
+    return `\`${s.node}${tag}\``;
+  });
+  lines.push(`**Workflow path:** ${pathSteps.join(" → ")}`);
+
+  // Show routing decisions if any edges were conditional
+  if (trace.edges.length > 0) {
+    const routingLines = trace.edges
+      .filter((e: TraceEdge) => e.reason !== "only path")
+      .map((e: TraceEdge) => `\`${e.from}\` → \`${e.to}\` *(${e.reason})*`);
+    if (routingLines.length > 0) {
+      lines.push("");
+      lines.push("<details><summary>Routing decisions</summary>");
+      lines.push("");
+      for (const r of routingLines) lines.push(`- ${r}`);
+      lines.push("");
+      lines.push("</details>");
+    }
+  }
   lines.push("");
 
   // ── Findings ──────────────────────────────────────────────────

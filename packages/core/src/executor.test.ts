@@ -192,7 +192,7 @@ describe("executor", () => {
     });
 
     const events: ExecutionEvent[] = [];
-    const results = await execute(
+    const { results } = await execute(
       simpleWorkflow,
       { alert: "test" },
       {
@@ -238,7 +238,7 @@ describe("executor", () => {
       },
     });
 
-    const results = await execute(
+    const { results } = await execute(
       branchingWorkflow,
       { alert: "cpu spike" },
       {
@@ -268,7 +268,7 @@ describe("executor", () => {
       },
     });
 
-    const results = await execute(
+    const { results } = await execute(
       branchingWorkflow,
       { alert: "minor" },
       {
