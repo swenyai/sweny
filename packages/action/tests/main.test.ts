@@ -147,7 +147,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockParseInputs.mockReturnValue(DEFAULT_CONFIG);
   mockValidateInputs.mockReturnValue([]);
-  mockExecute.mockResolvedValue(new Map());
+  mockExecute.mockResolvedValue({ results: new Map(), trace: { steps: [], edges: [] } });
   mockCreateSkillMap.mockReturnValue(new Map());
   mockConfiguredSkills.mockReturnValue([]);
   mockBuildAutoMcpServers.mockReturnValue({});
@@ -241,7 +241,7 @@ describe("setGitHubOutputs", () => {
     const results = new Map([
       ["investigate", { status: "success", data: { issuesFound: true, recommendation: "implement" }, toolCalls: [] }],
     ]);
-    mockExecute.mockResolvedValue(results);
+    mockExecute.mockResolvedValue({ results, trace: { steps: [], edges: [] } });
 
     await loadMain();
 
@@ -265,7 +265,7 @@ describe("setGitHubOutputs", () => {
         },
       ],
     ]);
-    mockExecute.mockResolvedValue(results);
+    mockExecute.mockResolvedValue({ results, trace: { steps: [], edges: [] } });
 
     await loadMain();
 
@@ -289,7 +289,7 @@ describe("setGitHubOutputs", () => {
         },
       ],
     ]);
-    mockExecute.mockResolvedValue(results);
+    mockExecute.mockResolvedValue({ results, trace: { steps: [], edges: [] } });
 
     await loadMain();
 
@@ -303,7 +303,7 @@ describe("setGitHubOutputs", () => {
     const results = new Map([
       ["investigate", { status: "success", data: { issuesFound: false, recommendation: "skip" }, toolCalls: [] }],
     ]);
-    mockExecute.mockResolvedValue(results);
+    mockExecute.mockResolvedValue({ results, trace: { steps: [], edges: [] } });
 
     await loadMain();
 
@@ -327,7 +327,7 @@ describe("setGitHubOutputs", () => {
         },
       ],
     ]);
-    mockExecute.mockResolvedValue(results);
+    mockExecute.mockResolvedValue({ results, trace: { steps: [], edges: [] } });
 
     await loadMain();
 
