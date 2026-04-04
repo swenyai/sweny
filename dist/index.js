@@ -28075,19 +28075,26 @@ function composeNode(ctx, token, props, onError) {
         case 'block-map':
         case 'block-seq':
         case 'flow-collection':
-            node = composeCollection.composeCollection(CN, ctx, token, props, onError);
-            if (anchor)
-                node.anchor = anchor.source.substring(1);
+            try {
+                node = composeCollection.composeCollection(CN, ctx, token, props, onError);
+                if (anchor)
+                    node.anchor = anchor.source.substring(1);
+            }
+            catch (error) {
+                // Almost certainly here due to a stack overflow
+                const message = error instanceof Error ? error.message : String(error);
+                onError(token, 'RESOURCE_EXHAUSTION', message);
+            }
             break;
         default: {
             const message = token.type === 'error'
                 ? token.message
                 : `Unsupported token (type: ${token.type})`;
             onError(token, 'UNEXPECTED_TOKEN', message);
-            node = composeEmptyNode(ctx, token.offset, undefined, null, props, onError);
             isSrcToken = false;
         }
     }
+    node ?? (node = composeEmptyNode(ctx, token.offset, undefined, null, props, onError));
     if (anchor && node.anchor === '')
         onError(anchor, 'BAD_ALIAS', 'Anchor cannot be an empty string');
     if (atKey &&
@@ -35247,6 +35254,7 @@ function createStringifyContext(doc, options) {
         nullStr: 'null',
         simpleKeys: false,
         singleQuote: null,
+        trailingComma: false,
         trueStr: 'true',
         verifyAliasOrder: true
     }, doc.schema.toStringOptions, options);
@@ -35467,12 +35475,22 @@ function stringifyFlowCollection({ items }, ctx, { flowChars, itemIndent }) {
         if (comment)
             reqNewline = true;
         let str = stringify.stringify(item, itemCtx, () => (comment = null));
-        if (i < items.length - 1)
+        reqNewline || (reqNewline = lines.length > linesAtValue || str.includes('\n'));
+        if (i < items.length - 1) {
             str += ',';
+        }
+        else if (ctx.options.trailingComma) {
+            if (ctx.options.lineWidth > 0) {
+                reqNewline || (reqNewline = lines.reduce((sum, line) => sum + line.length + 2, 2) +
+                    (str.length + 2) >
+                    ctx.options.lineWidth);
+            }
+            if (reqNewline) {
+                str += ',';
+            }
+        }
         if (comment)
             str += stringifyComment.lineComment(str, itemIndent, commentString(comment));
-        if (!reqNewline && (lines.length > linesAtValue || str.includes('\n')))
-            reqNewline = true;
         lines.push(str);
         linesAtValue = lines.length;
     }
@@ -39438,7 +39456,9 @@ const consoleLogger = {
 /**
  * Execute a workflow from entry to completion.
  *
- * Returns a map of node ID → result for every node that ran.
+ * Returns an ExecutionResult with:
+ * - `results`: map of node ID → final result (last execution if retried)
+ * - `trace`: full ordered execution trace including loops and routing decisions
  */
 async function execute(workflow, input, options) {
     const { skills, claude, observer } = options;
@@ -39446,6 +39466,8 @@ async function execute(workflow, input, options) {
     const logger = options.logger ?? consoleLogger;
     const results = new Map();
     const edgeCounts = new Map(); // "from→to" → times followed
+    const nodeRunCounts = new Map(); // node → times executed
+    const trace = { steps: [], edges: [] };
     validate(workflow, skills);
     safeObserve(observer, { type: "workflow:start", workflow: workflow.id }, logger);
     let currentId = workflow.entry;
@@ -39453,6 +39475,8 @@ async function execute(workflow, input, options) {
         const node = workflow.nodes[currentId];
         if (!node)
             throw new Error(`Unknown node: "${currentId}"`);
+        const iteration = (nodeRunCounts.get(currentId) ?? 0) + 1;
+        nodeRunCounts.set(currentId, iteration);
         safeObserve(observer, { type: "node:enter", node: currentId, instruction: node.instruction }, logger);
         logger.info(`→ ${node.name}`, { node: currentId });
         // Gather tools from the node's skills
@@ -39486,6 +39510,7 @@ async function execute(workflow, input, options) {
             },
         });
         results.set(currentId, result);
+        trace.steps.push({ node: currentId, status: result.status, iteration });
         safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
         logger.info(`  ✓ ${result.status}`, { node: currentId, toolCalls: result.toolCalls.length });
         // Dry run hard gate — stop at the first conditional routing decision.
@@ -39502,13 +39527,20 @@ async function execute(workflow, input, options) {
             }
         }
         // Resolve next node via edge conditions
+        const prevId = currentId;
         currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
+        // Record the routing decision in the trace
+        if (currentId) {
+            const edgeKey = `${prevId}→${currentId}`;
+            const reason = workflow.edges.find((e) => e.from === prevId && e.to === currentId)?.when ?? "only path";
+            trace.edges.push({ from: prevId, to: currentId, reason });
+        }
     }
     safeObserve(observer, {
         type: "workflow:end",
         results: Object.fromEntries(results),
     }, logger);
-    return results;
+    return { results, trace };
 }
 // ─── Internals ───────────────────────────────────────────────────
 /**
@@ -39541,7 +39573,12 @@ function buildNodeInstruction(baseInstruction, input) {
         return baseInstruction;
     return `${sections.join("\n\n")}\n\n---\n\n${baseInstruction}`;
 }
-/** Call observer without letting exceptions crash the workflow */
+/**
+ * Call observer without letting exceptions crash the workflow.
+ *
+ * Accepts a typed ExecutionEvent so TypeScript catches mistakes in
+ * event construction at compile time rather than silently at runtime.
+ */
 function safeObserve(observer, event, logger) {
     if (!observer)
         return;
@@ -45841,7 +45878,11 @@ function parseWorkflow(raw) {
  * - All edge sources and targets reference existing nodes
  * - No self-loops
  * - All nodes are reachable from entry
+ * - Unbounded cycles (cycles with no max_iterations guard)
  * - (optional) All referenced skills exist in the provided skill set
+ *
+ * Note: nodes with no outgoing edges are valid terminal nodes — the executor
+ * returns null when it reaches one, ending the workflow cleanly.
  */
 function schema_validateWorkflow(workflow, knownSkills) {
     const errors = [];
@@ -46514,7 +46555,8 @@ async function loadAdditionalContext(sources, cwd = process.cwd()) {
  * VS Code preview, documentation sites, and anywhere Mermaid is supported.
  *
  * Accepts optional execution state to color nodes by status
- * (current/success/failed/skipped).
+ * (current/success/failed/skipped) and optional execution trace
+ * to highlight which edges were taken and show loop iterations.
  */
 /**
  * Convert a Workflow to a Mermaid flowchart diagram string.
@@ -46525,12 +46567,13 @@ async function loadAdditionalContext(sources, cwd = process.cwd()) {
  *
  * const md = toMermaid(workflow, {
  *   state: { triage: 'success', investigate: 'current' },
+ *   trace: executionResult.trace,
  * });
  * // Wrap in ```mermaid fence for GitHub rendering
  * ```
  */
 function toMermaid(workflow, options = {}) {
-    const { state = {}, direction = "TB", title } = options;
+    const { state = {}, trace, direction = "TB", title } = options;
     const lines = [];
     if (title) {
         lines.push("---");
@@ -46538,45 +46581,80 @@ function toMermaid(workflow, options = {}) {
         lines.push("---");
     }
     lines.push(`graph ${direction}`);
+    // Build node iteration counts from trace
+    const nodeIterations = new Map();
+    if (trace) {
+        for (const step of trace.steps) {
+            nodeIterations.set(step.node, Math.max(nodeIterations.get(step.node) ?? 0, step.iteration));
+        }
+    }
     // Nodes
     for (const [id, node] of Object.entries(workflow.nodes)) {
-        const label = escapeLabel(node.name);
+        let label = escapeLabel(node.name);
         const isEntry = id === workflow.entry;
         const entryTag = isEntry ? " \\u25B6" : "";
-        // Use stadium shape ([...]) for entry, rounded ([(...)])  for others
+        // Show iteration count for nodes that ran multiple times
+        const iterations = nodeIterations.get(id);
+        const iterTag = iterations && iterations > 1 ? ` ×${iterations}` : "";
         if (isEntry) {
-            lines.push(`    ${sanitizeId(id)}([${label}${entryTag}])`);
+            lines.push(`    ${sanitizeId(id)}([${label}${entryTag}${iterTag}])`);
         }
         else {
-            lines.push(`    ${sanitizeId(id)}[${label}]`);
+            lines.push(`    ${sanitizeId(id)}[${label}${iterTag}]`);
         }
     }
     lines.push("");
-    // Edges
+    // Build set of taken edges from trace for lookup
+    const takenEdges = new Set();
+    const edgeTakenCounts = new Map();
+    if (trace) {
+        for (const te of trace.edges) {
+            const key = `${te.from}→${te.to}`;
+            takenEdges.add(key);
+            edgeTakenCounts.set(key, (edgeTakenCounts.get(key) ?? 0) + 1);
+        }
+    }
+    // Edges — track index for linkStyle directives
+    const takenIndices = [];
+    const notTakenIndices = [];
+    let edgeIndex = 0;
     for (const edge of workflow.edges) {
         const from = sanitizeId(edge.from);
         const to = sanitizeId(edge.to);
-        if (edge.when) {
-            const label = escapeLabel(edge.when);
-            if (edge.max_iterations) {
-                lines.push(`    ${from} -->|"${label} (max ${edge.max_iterations}x)"| ${to}`);
-            }
-            else {
-                lines.push(`    ${from} -->|"${label}"| ${to}`);
-            }
-        }
-        else if (edge.max_iterations) {
-            lines.push(`    ${from} -->|"max ${edge.max_iterations}x"| ${to}`);
+        const key = `${edge.from}→${edge.to}`;
+        const taken = takenEdges.has(key);
+        const takenCount = edgeTakenCounts.get(key) ?? 0;
+        // Build label parts
+        const labelParts = [];
+        if (edge.when)
+            labelParts.push(edge.when);
+        if (edge.max_iterations)
+            labelParts.push(`max ${edge.max_iterations}x`);
+        // Show how many times this edge was actually followed
+        if (takenCount > 1)
+            labelParts.push(`taken ${takenCount}x`);
+        if (labelParts.length > 0) {
+            const label = escapeLabel(labelParts.join(" · "));
+            lines.push(`    ${from} -->|"${label}"| ${to}`);
         }
         else {
             lines.push(`    ${from} --> ${to}`);
         }
+        // Track edge indices for styling
+        if (trace) {
+            if (taken) {
+                takenIndices.push(edgeIndex);
+            }
+            else {
+                notTakenIndices.push(edgeIndex);
+            }
+        }
+        edgeIndex++;
     }
-    // Status styling
+    // Node status styling
     const statusNodes = groupByStatus(state);
     if (statusNodes.size > 0) {
         lines.push("");
-        // Define style classes
         lines.push("    classDef current fill:#3b82f6,stroke:#2563eb,color:#fff,stroke-width:2px");
         lines.push("    classDef success fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:2px");
         lines.push("    classDef failed fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px");
@@ -46584,6 +46662,16 @@ function toMermaid(workflow, options = {}) {
         for (const [status, ids] of statusNodes) {
             const sanitized = ids.map(sanitizeId).join(",");
             lines.push(`    class ${sanitized} ${status}`);
+        }
+    }
+    // Edge styling — taken edges bold green, not-taken edges dashed gray
+    if (trace) {
+        lines.push("");
+        if (takenIndices.length > 0) {
+            lines.push(`    linkStyle ${takenIndices.join(",")} stroke:#22c55e,stroke-width:3px`);
+        }
+        if (notTakenIndices.length > 0) {
+            lines.push(`    linkStyle ${notTakenIndices.join(",")} stroke:#6b7280,stroke-width:1px,stroke-dasharray:5 5`);
         }
     }
     return lines.join("\n");
@@ -47505,7 +47593,7 @@ async function run() {
             ...(userContextResult.urls.length > 0 ? { contextUrls: userContextResult.urls } : {}),
         };
         // Execute workflow
-        const results = await execute(workflow, input, {
+        const { results, trace } = await execute(workflow, input, {
             skills,
             claude,
             observer: (event) => {
@@ -47517,7 +47605,7 @@ async function run() {
         // Wait for any in-flight streaming events
         await cloudStream?.flush();
         setGitHubOutputs(results);
-        await writeJobSummary(results, config, workflow);
+        await writeJobSummary(results, trace, config, workflow);
         // Report to SWEny Cloud if project token or GitHub App installation is available
         if (canStream) {
             await reportToCloud(config, results, startTime, cloudStream?.getRunId() ?? undefined);
@@ -47730,7 +47818,7 @@ function setGitHubOutputs(results) {
     }
 }
 /** Write a GitHub Actions job summary with structured triage results */
-async function writeJobSummary(results, config, workflow) {
+async function writeJobSummary(results, trace, config, workflow) {
     const lines = [];
     const isDryRun = config.dryRun;
     // ── Header ────────────────────────────────────────────────────
@@ -47741,7 +47829,7 @@ async function writeJobSummary(results, config, workflow) {
     for (const [nodeId, result] of results) {
         state[nodeId] = result.status === "success" ? "success" : result.status === "failed" ? "failed" : "skipped";
     }
-    lines.push(toMermaidBlock(workflow, { state, title: workflow.name }));
+    lines.push(toMermaidBlock(workflow, { state, trace, title: workflow.name }));
     lines.push("");
     // ── Config table (only show settings relevant to this workflow) ─
     const isTriage = workflow.id === "triage";
@@ -47762,9 +47850,27 @@ async function writeJobSummary(results, config, workflow) {
     for (const [k, v] of rows)
         lines.push(`| ${k} | ${v} |`);
     lines.push("");
-    // ── Workflow path ─────────────────────────────────────────────
-    const nodeNames = [...results.keys()];
-    lines.push(`**Workflow path:** ${nodeNames.map((n) => `\`${n}\``).join(" → ")}`);
+    // ── Workflow path (actual execution sequence including loops) ──
+    const pathSteps = trace.steps.map((s) => {
+        const tag = s.iteration > 1 ? ` ×${s.iteration}` : "";
+        return `\`${s.node}${tag}\``;
+    });
+    lines.push(`**Workflow path:** ${pathSteps.join(" → ")}`);
+    // Show routing decisions if any edges were conditional
+    if (trace.edges.length > 0) {
+        const routingLines = trace.edges
+            .filter((e) => e.reason !== "only path")
+            .map((e) => `\`${e.from}\` → \`${e.to}\` *(${e.reason})*`);
+        if (routingLines.length > 0) {
+            lines.push("");
+            lines.push("<details><summary>Routing decisions</summary>");
+            lines.push("");
+            for (const r of routingLines)
+                lines.push(`- ${r}`);
+            lines.push("");
+            lines.push("</details>");
+        }
+    }
     lines.push("");
     // ── Findings ──────────────────────────────────────────────────
     const investigateData = results.get("investigate")?.data;
