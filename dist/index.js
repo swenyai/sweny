@@ -30490,7 +30490,6 @@ exports.prettifyError = prettifyError;
 /***/ 3483:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
-var __webpack_unused_export__;
 
 
 var composer = __nccwpck_require__(4260);
@@ -30512,35 +30511,35 @@ var visit = __nccwpck_require__(1360);
 
 
 
-__webpack_unused_export__ = composer.Composer;
-__webpack_unused_export__ = Document.Document;
-__webpack_unused_export__ = Schema.Schema;
-__webpack_unused_export__ = errors.YAMLError;
-__webpack_unused_export__ = errors.YAMLParseError;
-__webpack_unused_export__ = errors.YAMLWarning;
-__webpack_unused_export__ = Alias.Alias;
-__webpack_unused_export__ = identity.isAlias;
-__webpack_unused_export__ = identity.isCollection;
-__webpack_unused_export__ = identity.isDocument;
-__webpack_unused_export__ = identity.isMap;
-__webpack_unused_export__ = identity.isNode;
-__webpack_unused_export__ = identity.isPair;
-__webpack_unused_export__ = identity.isScalar;
-__webpack_unused_export__ = identity.isSeq;
-__webpack_unused_export__ = Pair.Pair;
-__webpack_unused_export__ = Scalar.Scalar;
-__webpack_unused_export__ = YAMLMap.YAMLMap;
-__webpack_unused_export__ = YAMLSeq.YAMLSeq;
-__webpack_unused_export__ = cst;
-__webpack_unused_export__ = lexer.Lexer;
-__webpack_unused_export__ = lineCounter.LineCounter;
-__webpack_unused_export__ = parser.Parser;
-exports.qg = publicApi.parse;
-__webpack_unused_export__ = publicApi.parseAllDocuments;
-__webpack_unused_export__ = publicApi.parseDocument;
-__webpack_unused_export__ = publicApi.stringify;
-__webpack_unused_export__ = visit.visit;
-__webpack_unused_export__ = visit.visitAsync;
+exports.Composer = composer.Composer;
+exports.Document = Document.Document;
+exports.Schema = Schema.Schema;
+exports.YAMLError = errors.YAMLError;
+exports.YAMLParseError = errors.YAMLParseError;
+exports.YAMLWarning = errors.YAMLWarning;
+exports.Alias = Alias.Alias;
+exports.isAlias = identity.isAlias;
+exports.isCollection = identity.isCollection;
+exports.isDocument = identity.isDocument;
+exports.isMap = identity.isMap;
+exports.isNode = identity.isNode;
+exports.isPair = identity.isPair;
+exports.isScalar = identity.isScalar;
+exports.isSeq = identity.isSeq;
+exports.Pair = Pair.Pair;
+exports.Scalar = Scalar.Scalar;
+exports.YAMLMap = YAMLMap.YAMLMap;
+exports.YAMLSeq = YAMLSeq.YAMLSeq;
+exports.CST = cst;
+exports.Lexer = lexer.Lexer;
+exports.LineCounter = lineCounter.LineCounter;
+exports.Parser = parser.Parser;
+exports.parse = publicApi.parse;
+exports.parseAllDocuments = publicApi.parseAllDocuments;
+exports.parseDocument = publicApi.parseDocument;
+exports.stringify = publicApi.stringify;
+exports.visit = visit.visit;
+exports.visitAsync = visit.visitAsync;
 
 
 /***/ }),
@@ -45687,9 +45686,71 @@ const supabase = {
 
 
 
+
+
+
 // ─── Built-in skill catalog ─────────────────────────────────────
 const builtinSkills = [github, linear, slack, sentry, datadog, betterstack, notification, supabase];
 
+// ─── Custom skill discovery ─────────────────────────────────────
+/**
+ * Load custom skills from a `.claude/skills/` directory.
+ *
+ * Custom skills are instruction-only (no tools or config) — they provide
+ * guidance documents that the coding agent reads from the filesystem.
+ * Registering them here ensures workflow validation recognises the skill IDs
+ * so nodes referencing them don't produce spurious warnings.
+ */
+function loadCustomSkills(cwd = process.cwd()) {
+    const skillsDir = (0,external_node_path_namespaceObject.join)(cwd, ".claude", "skills");
+    if (!(0,external_node_fs_namespaceObject.existsSync)(skillsDir))
+        return [];
+    const skills = [];
+    let entries;
+    try {
+        entries = (0,external_node_fs_namespaceObject.readdirSync)(skillsDir, { withFileTypes: true })
+            .filter((d) => d.isDirectory())
+            .map((d) => d.name);
+    }
+    catch {
+        return [];
+    }
+    for (const dirName of entries) {
+        const skillFile = (0,external_node_path_namespaceObject.join)(skillsDir, dirName, "SKILL.md");
+        if (!(0,external_node_fs_namespaceObject.existsSync)(skillFile))
+            continue;
+        try {
+            const content = (0,external_node_fs_namespaceObject.readFileSync)(skillFile, "utf-8");
+            const frontmatter = parseFrontmatter(content);
+            if (!frontmatter?.name)
+                continue;
+            skills.push({
+                id: frontmatter.name,
+                name: frontmatter.name,
+                description: frontmatter.description ?? `Custom skill: ${frontmatter.name}`,
+                category: "general",
+                config: {},
+                tools: [],
+            });
+        }
+        catch {
+            // Skip malformed skill files
+        }
+    }
+    return skills;
+}
+/** Extract YAML frontmatter from a markdown file (between --- delimiters). */
+function parseFrontmatter(content) {
+    const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
+    if (!match)
+        return null;
+    try {
+        return dist.parse(match[1]);
+    }
+    catch {
+        return null;
+    }
+}
 // ─── Registry helpers ───────────────────────────────────────────
 /**
  * Build a skill map from an array of skills.
@@ -45738,10 +45799,21 @@ function isSkillConfigured(skill, env = process.env) {
     return envFields.some((f) => env[f.env]);
 }
 /**
- * From all builtins, return only the skills that have their required env vars set.
+ * From all builtins + custom repo skills, return only the skills that are usable.
+ * Built-in skills are filtered by env vars; custom skills are always included.
  */
-function configuredSkills(env = process.env) {
-    return builtinSkills.filter((s) => isSkillConfigured(s, env));
+function configuredSkills(env = process.env, cwd) {
+    const configured = builtinSkills.filter((s) => isSkillConfigured(s, env));
+    const custom = loadCustomSkills(cwd);
+    // Deduplicate: built-in skills take precedence over custom skills with the same ID
+    const ids = new Set(configured.map((s) => s.id));
+    for (const skill of custom) {
+        if (!ids.has(skill.id)) {
+            configured.push(skill);
+            ids.add(skill.id);
+        }
+    }
+    return configured;
 }
 function validateWorkflowSkills(workflow, available) {
     const configured = [];
@@ -46759,7 +46831,7 @@ function loadConfigFile(cwd = process.cwd()) {
     }
     let raw;
     try {
-        raw = (0,dist/* parse */.qg)(content);
+        raw = (0,dist.parse)(content);
     }
     catch {
         return {};
@@ -46973,7 +47045,7 @@ var external_node_url_ = __nccwpck_require__(3136);
 const workflows_dirname = external_node_path_namespaceObject.dirname((0,external_node_url_.fileURLToPath)(import.meta.url));
 function loadBuiltinWorkflow(filename) {
     const filePath = external_node_path_namespaceObject.join(workflows_dirname, filename);
-    const raw = (0,dist/* parse */.qg)(external_node_fs_namespaceObject.readFileSync(filePath, "utf-8"));
+    const raw = (0,dist.parse)(external_node_fs_namespaceObject.readFileSync(filePath, "utf-8"));
     return schema_workflowZ.parse(raw);
 }
 const triageWorkflow = loadBuiltinWorkflow("triage.yml");
@@ -47536,7 +47608,7 @@ async function run() {
                 setFailed(`Custom workflow file not found: ${config.workflow}`);
                 return;
             }
-            workflow = parseWorkflow((0,dist/* parse */.qg)(external_node_fs_namespaceObject.readFileSync(workflowPath, "utf-8")));
+            workflow = parseWorkflow((0,dist.parse)(external_node_fs_namespaceObject.readFileSync(workflowPath, "utf-8")));
             info(`Loaded custom workflow: ${config.workflow}`);
         }
         // Load .sweny.yml from repo root — same config the CLI reads
