@@ -6,7 +6,7 @@ import { runWorkflow } from "./handlers/run-workflow.js";
 export function registerTools(server: McpServer): void {
   server.tool(
     "sweny_list_workflows",
-    "List available SWEny workflows in the current project. Returns built-in workflows (triage, implement, seed-content) and any custom workflows from .sweny/workflows/.",
+    "List available SWEny workflows in the current project. Returns built-in workflows (triage, implement, seed-content) and any custom workflows from .sweny/workflows/. Note: only triage and implement are runnable via sweny_run_workflow.",
     {
       cwd: z.string().optional().describe("Working directory to search for workflows. Defaults to process.cwd()."),
     },

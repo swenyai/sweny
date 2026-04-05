@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "description": "MCP server exposing SWEny workflows to Claude Code and Claude Desktop",
+  "license": "MIT",
   "bin": {
     "sweny-mcp": "./dist/index.js"
   },
@@ -14,15 +15,35 @@
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc",
+    "build": "rm -rf dist && tsc && chmod +x dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --exclude 'dist/**'"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "@sweny-ai/core": "*"
+    "@sweny-ai/core": "*",
+    "yaml": "^2",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5",
     "vitest": "^4.1.2"
-  }
+  },
+  "homepage": "https://sweny.ai",
+  "bugs": {
+    "url": "https://github.com/swenyai/sweny/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/swenyai/sweny.git",
+    "directory": "packages/mcp"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "workflow",
+    "sweny"
+  ]
 }
