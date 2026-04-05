@@ -34,6 +34,7 @@ jobs:
         run: |
           npm run build --workspace=packages/core
           npm run build:lib --workspace=packages/studio
+          npm run build --workspace=packages/mcp
 
       - name: Test
         run: npm run test
@@ -52,6 +53,7 @@ jobs:
 
           CHANGED_CORE=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/core/ | head -1)
           CHANGED_STUDIO=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/studio/ | head -1)
+          CHANGED_MCP=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/mcp/ | head -1)
 
           PUBLISHED=false
 
@@ -84,6 +86,22 @@ jobs:
             npm publish
             PUBLISHED=true
             echo "Published @sweny-ai/studio@$(node -p "require('./package.json').version")"
+            cd ../..
+          fi
+
+          if [ -n "$CHANGED_MCP" ]; then
+            cd packages/mcp
+            LOCAL_VER=$(node -p "require('./package.json').version")
+            NPM_VER=$(npm view @sweny-ai/mcp version 2>/dev/null || echo "0.0.0")
+
+            if [ "$LOCAL_VER" = "$NPM_VER" ]; then
+              NEXT=$(echo "$LOCAL_VER" | awk -F. '{$NF=$NF+1; print}' OFS=.)
+              npm version "$NEXT" --no-git-tag-version
+            fi
+
+            npm publish
+            PUBLISHED=true
+            echo "Published @sweny-ai/mcp@$(node -p "require('./package.json').version")"
             cd ../..
           fi
 

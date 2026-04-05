@@ -14,7 +14,7 @@ Changesets are handled by a CI backstop (`scripts/auto-changeset.mjs`) that auto
 |---------|-----|-----------|-------|
 | `@sweny-ai/core` | `packages/core` | npm | v4 — skills + DAG executor |
 | `@sweny-ai/studio` | `packages/studio` | npm | Visual workflow viewer/editor |
-| `@sweny-ai/mcp` | `packages/mcp` | no (private) | MCP server for Claude Code / Desktop |
+| `@sweny-ai/mcp` | `packages/mcp` | npm | MCP server for Claude Code / Desktop |
 | `@sweny-ai/action` | `packages/action` | no (private) | GitHub Action entrypoint — bundled into root `dist/` |
 | `@sweny-ai/web` | `packages/web` | no (private) | Docs site |
 
