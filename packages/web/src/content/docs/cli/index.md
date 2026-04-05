@@ -203,5 +203,6 @@ See the [Commands Reference](/cli/commands/) for all supported providers and the
 
 ## What's next?
 
+- [E2E Testing](/cli/e2e/) -- generate and run AI-driven browser tests
 - [Commands Reference](/cli/commands/) -- every command, flag, and option
 - [Examples](/cli/examples/) -- common configurations and real-world recipes

@@ -48,11 +48,23 @@ sweny workflow create "your task description here"
 sweny workflow run .sweny/workflows/your-workflow.yml
 ```
 
+## E2E browser testing
+
+Generate AI-driven end-to-end tests for any web app — no test scripts to write:
+
+```bash
+sweny e2e init     # wizard asks about your flows → generates workflow YAML
+sweny e2e run      # AI agent drives a real browser to test your app
+```
+
+The wizard supports registration, login, purchase, onboarding, upgrade, cancellation, and custom flows. Each generates a self-contained workflow with auto-generated test credentials and optional cleanup.
+
 ## How you use it
 
 | Approach | What it does |
 |----------|--------------|
 | **[CLI](https://docs.sweny.ai/cli/)** | Build and run workflows from your terminal. Describe a task, get a DAG, run it. |
+| **[E2E Testing](https://docs.sweny.ai/cli/e2e/)** | Generate and run AI-driven browser tests. No Playwright scripts — the agent figures out the DOM. |
 | **[GitHub Action](https://docs.sweny.ai/action/)** | Publish workflows to CI. Runs on cron schedules or dispatch. |
 | **[Studio](https://docs.sweny.ai/studio/)** | Visual DAG editor and live execution monitor. Watch workflows run in real time. |
 | **[SWEny Cloud](https://app.sweny.ai)** | Teams. Dashboard, shared credentials, scheduling, cross-repo analytics. |

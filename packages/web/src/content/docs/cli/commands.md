@@ -305,6 +305,35 @@ sweny workflow list [options]
 
 Prints each skill's ID, category, and description. Skills are the building blocks that workflow nodes reference via the `skills` field.
 
+## sweny e2e
+
+Generate and run AI-driven end-to-end browser tests. See the [E2E Testing guide](/cli/e2e/) for the full walkthrough.
+
+### sweny e2e init
+
+Interactive wizard that generates workflow YAML files for testing your web app's flows.
+
+```bash
+sweny e2e init
+```
+
+Walks you through selecting flow types (registration, login, purchase, onboarding, upgrade, cancellation, custom), configuring per-flow details (URL paths, form fields, success criteria), setting the base URL, and optionally enabling cleanup. Outputs `.sweny/e2e/<flow-name>.yml` files and appends env vars to `.env`.
+
+### sweny e2e run
+
+Execute e2e workflow files.
+
+```bash
+sweny e2e run [file] [options]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `[file]` | Run a specific workflow file | All `.sweny/e2e/*.yml` |
+| `--timeout <ms>` | Timeout per workflow in milliseconds | `900000` (15 min) |
+
+Without a file argument, runs all `.yml` files in `.sweny/e2e/` sequentially. Loads `.env`, resolves template variables (`{base_url}`, `{test_email}`, `{run_id}`, etc.), and executes each workflow. Exits `0` if all pass, `1` if any fail.
+
 ## Global options
 
 These options are available on all commands:

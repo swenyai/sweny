@@ -100,6 +100,17 @@ sweny implement ENG-123         # fix a tracked issue and open a PR
 
 Or [build your own](/workflows/custom/) from a single sentence with `sweny workflow create`.
 
+## E2E browser testing
+
+Generate AI-driven end-to-end tests for any web app — no test scripts to write:
+
+```bash
+sweny e2e init     # wizard asks about your flows → generates workflow YAML
+sweny e2e run      # AI agent drives a real browser to test your app
+```
+
+The wizard supports 7 flow types — registration, login, purchase, onboarding, upgrade, cancellation, and custom. Each generates a self-contained workflow with auto-generated test credentials and optional cleanup. [Get started with E2E testing](/cli/e2e/)
+
 ## Beyond DevOps
 
 SWEny workflows aren't limited to triage and fixes. Teams use them to replace brittle data pipelines, automate research, and build quality-gated extraction systems.

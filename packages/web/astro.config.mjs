@@ -56,6 +56,7 @@ export default defineConfig({
           items: [
             { label: "Quick Start", slug: "cli" },
             { label: "Commands", slug: "cli/commands" },
+            { label: "E2E Testing", slug: "cli/e2e" },
             { label: "Examples", slug: "cli/examples" },
           ],
         },
