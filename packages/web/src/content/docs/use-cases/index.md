@@ -3,7 +3,7 @@ title: Use Cases
 description: SWEny workflows go far beyond DevOps — replace brittle data pipelines, automate research, and build quality-gated extraction systems.
 ---
 
-SWEny ships with [triage](/workflows/triage/) and [implement](/workflows/implement/) for DevOps, but the workflow engine is general-purpose. Teams use it to replace brittle data pipelines, automate research, and build quality-gated extraction systems.
+SWEny ships with [triage](/workflows/triage/), [implement](/workflows/implement/), and [e2e browser testing](/cli/e2e/) built in, but the workflow engine is general-purpose. Teams use it to replace brittle data pipelines, automate research, and build quality-gated extraction systems.
 
 The [data pipelines deep-dive](/use-cases/data-pipelines/) walks through a full example with DAG diagrams, YAML, and reusable patterns. The use cases below show the breadth of what's possible.
 

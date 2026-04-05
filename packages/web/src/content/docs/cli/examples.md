@@ -411,3 +411,52 @@ Ring the terminal bell when a long-running workflow finishes:
 ```bash
 sweny triage --bell
 ```
+
+---
+
+## E2E browser testing
+
+Generate AI-driven end-to-end tests for any web app. No Playwright scripts — the AI agent drives a real browser.
+
+### Set up e2e tests with the wizard
+
+```bash
+sweny e2e init
+```
+
+The wizard asks which flows to test (registration, login, purchase, onboarding, upgrade, cancellation, custom), per-flow details, and whether to auto-cleanup test data. It generates workflow YAML files in `.sweny/e2e/`.
+
+### Run all e2e tests
+
+```bash
+sweny e2e run
+```
+
+Executes every `.yml` in `.sweny/e2e/` sequentially. Auto-generates test credentials (`e2e-{timestamp}@yourapp.test`), resolves template variables, and reports pass/fail per workflow.
+
+### Run a specific test
+
+```bash
+sweny e2e run registration.yml
+```
+
+### Custom timeout for slow flows
+
+```bash
+sweny e2e run --timeout 600000   # 10 minutes per workflow
+```
+
+### Test with a staging environment
+
+```bash
+# .env
+E2E_BASE_URL=https://staging.myapp.com
+E2E_EMAIL=test@example.com
+E2E_PASSWORD=secret
+```
+
+```bash
+sweny e2e run
+```
+
+**[Full E2E guide](/cli/e2e/)** — wizard details, template variables, cleanup backends, and generated workflow structure.

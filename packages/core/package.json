@@ -5,7 +5,7 @@
   "bin": {
     "sweny": "./dist/cli/main.js"
   },
-  "description": "Skill library + DAG workflow orchestration powered by Claude",
+  "description": "Skill library, DAG workflow orchestration, and E2E browser testing powered by Claude",
   "license": "MIT",
   "exports": {
     ".": "./dist/index.js",

@@ -50,7 +50,14 @@ sweny triage --dry-run          # investigate production errors
 sweny implement ENG-123         # fix a tracked issue and open a PR
 ```
 
-**[Full CLI guide](/cli/)** — commands, configuration, and real-world examples.
+Or generate AI-driven browser tests for any web app:
+
+```bash
+sweny e2e init                  # wizard generates test workflows
+sweny e2e run                   # AI agent drives a real browser
+```
+
+**[Full CLI guide](/cli/)** — commands, configuration, and real-world examples. **[E2E testing guide](/cli/e2e/)** — browser test generation and execution.
 
 ### GitHub Action — deploy workflows to CI
 
