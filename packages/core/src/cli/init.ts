@@ -7,6 +7,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as p from "@clack/prompts";
+import chalk from "chalk";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -286,4 +288,268 @@ export function buildActionWorkflow(credentials: Credential[], cronExpression: s
   lines.push("");
 
   return lines.join("\n");
+}
+
+// ── Interactive wizard ────────────────────────────────────────────────
+
+function cancel(): never {
+  p.cancel("Setup cancelled.");
+  process.exit(0);
+}
+
+/**
+ * Interactive setup wizard — prompts the user through provider selection,
+ * then generates `.sweny.yml`, `.env`, and an optional GitHub Action workflow.
+ */
+export async function runInit(): Promise<void> {
+  const cwd = process.cwd();
+
+  // ── Intro ───────────────────────────────────────────────────────────
+  p.intro("Let's set up SWEny");
+
+  const gitInfo = detectGitRemote(cwd);
+  if (gitInfo) {
+    p.log.info(`Detected git remote: ${chalk.cyan(gitInfo.remote)}`);
+  }
+
+  // ── Existing file check ─────────────────────────────────────────────
+  const configPath = path.join(cwd, ".sweny.yml");
+  if (fs.existsSync(configPath)) {
+    const overwrite = await p.confirm({
+      message: ".sweny.yml already exists. Overwrite?",
+      initialValue: false,
+    });
+    if (p.isCancel(overwrite)) cancel();
+    if (!overwrite) {
+      p.cancel("Setup cancelled — existing config preserved.");
+      process.exit(0);
+    }
+  }
+
+  // ── Screen 1: Source control ────────────────────────────────────────
+  const sourceControl = await p.select({
+    message: "Source control provider",
+    initialValue: gitInfo?.provider ?? "github",
+    options: [
+      {
+        value: "github",
+        label: "GitHub" + (gitInfo?.provider === "github" ? " (detected)" : ""),
+      },
+      {
+        value: "gitlab",
+        label: "GitLab" + (gitInfo?.provider === "gitlab" ? " (detected)" : ""),
+      },
+    ],
+  });
+  if (p.isCancel(sourceControl)) cancel();
+
+  // ── Screen 2: Observability ─────────────────────────────────────────
+  const obsRaw = await p.select({
+    message: "Observability provider",
+    options: [
+      { value: "datadog", label: "Datadog" },
+      { value: "sentry", label: "Sentry" },
+      { value: "betterstack", label: "BetterStack" },
+      { value: "newrelic", label: "New Relic" },
+      { value: "cloudwatch", label: "CloudWatch" },
+      { value: "__other", label: "Other" },
+      { value: "__none", label: "None" },
+    ],
+  });
+  if (p.isCancel(obsRaw)) cancel();
+
+  let observability: string | null;
+  if ((obsRaw as string) === "__none") {
+    observability = null;
+  } else if ((obsRaw as string) === "__other") {
+    const custom = await p.text({
+      message: "Enter your observability provider name",
+      validate: (v) => (!v || v.trim().length === 0 ? "Provider name is required" : undefined),
+    });
+    if (p.isCancel(custom)) cancel();
+    observability = (custom as string).trim().toLowerCase();
+  } else {
+    observability = obsRaw as string;
+  }
+
+  // ── Screen 3: Issue tracker ─────────────────────────────────────────
+  const issueTracker = await p.select({
+    message: "Issue tracker",
+    initialValue: (sourceControl as string) === "github" ? "github-issues" : undefined,
+    options: [
+      { value: "github-issues", label: "GitHub Issues" },
+      { value: "linear", label: "Linear" },
+      { value: "jira", label: "Jira" },
+    ],
+  });
+  if (p.isCancel(issueTracker)) cancel();
+
+  // ── Screen 4: Notification ──────────────────────────────────────────
+  const notification = await p.select({
+    message: "Notification channel",
+    initialValue: "console",
+    options: [
+      { value: "console", label: "Console (default)" },
+      { value: "slack", label: "Slack" },
+      { value: "discord", label: "Discord" },
+      { value: "teams", label: "Microsoft Teams" },
+      { value: "webhook", label: "Webhook" },
+    ],
+  });
+  if (p.isCancel(notification)) cancel();
+
+  // ── Screen 5: GitHub Action ─────────────────────────────────────────
+  const wantAction = await p.confirm({
+    message: "Set up a GitHub Action workflow?",
+    initialValue: true,
+  });
+  if (p.isCancel(wantAction)) cancel();
+
+  let cronExpression: string | null = null;
+  if (wantAction) {
+    const schedule = await p.select({
+      message: "How often should the triage run?",
+      options: [
+        { value: "0 9 * * *", label: "Daily (9 AM UTC)" },
+        { value: "0 9 * * 1", label: "Weekly (Monday 9 AM UTC)" },
+        { value: "__custom", label: "Custom cron expression" },
+      ],
+    });
+    if (p.isCancel(schedule)) cancel();
+
+    if ((schedule as string) === "__custom") {
+      const customCron = await p.text({
+        message: "Enter cron expression (e.g. 0 8 * * 1-5)",
+        validate: (v) => (!v || v.trim().length === 0 ? "Cron expression is required" : undefined),
+      });
+      if (p.isCancel(customCron)) cancel();
+      cronExpression = (customCron as string).trim();
+    } else {
+      cronExpression = schedule as string;
+    }
+  }
+
+  // ── Assemble selections ─────────────────────────────────────────────
+  const selections: InitSelections = {
+    sourceControl: sourceControl as string,
+    observability,
+    issueTracker: issueTracker as string,
+    notification: notification as string,
+    githubAction: !!wantAction,
+    cronExpression,
+  };
+
+  const credentials = collectCredentials(selections);
+
+  // ── Screen 6: Summary ───────────────────────────────────────────────
+  const files = [".sweny.yml", ".env"];
+  if (selections.githubAction) files.push(".github/workflows/sweny.yml");
+
+  p.log.message(
+    [
+      chalk.bold("Files to create:"),
+      ...files.map((f) => `  ${chalk.cyan(f)}`),
+      "",
+      chalk.bold("Providers:"),
+      `  Source control:  ${selections.sourceControl}`,
+      `  Observability:   ${selections.observability ?? "none"}`,
+      `  Issue tracker:   ${selections.issueTracker}`,
+      `  Notification:    ${selections.notification}`,
+      selections.githubAction ? `  GitHub Action:   ${selections.cronExpression}` : "  GitHub Action:   no",
+    ].join("\n"),
+  );
+
+  const confirmed = await p.confirm({
+    message: "Create these files?",
+    initialValue: true,
+  });
+  if (p.isCancel(confirmed)) cancel();
+  if (!confirmed) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+
+  // ── Screen 7: Write files ──────────────────────────────────────────
+
+  // 1. Write .sweny.yml
+  fs.writeFileSync(configPath, buildSwenyYml(selections), "utf-8");
+  p.log.success("Created .sweny.yml");
+
+  // 2. Write .env
+  const envPath = path.join(cwd, ".env");
+  if (fs.existsSync(envPath)) {
+    const existing = fs.readFileSync(envPath, "utf-8");
+    const newKeys: Credential[] = [];
+    for (const cred of credentials) {
+      if (!existing.includes(cred.key + "=")) {
+        newKeys.push(cred);
+      }
+    }
+    if (newKeys.length > 0) {
+      const appendBlock = "\n" + buildEnvTemplate(newKeys);
+      fs.appendFileSync(envPath, appendBlock, "utf-8");
+      p.log.success(`Appended ${newKeys.length} new key(s) to .env`);
+    } else {
+      p.log.info(".env already contains all required keys — skipped");
+    }
+  } else {
+    fs.writeFileSync(envPath, buildEnvTemplate(credentials), "utf-8");
+    p.log.success("Created .env");
+  }
+
+  // 3. GitHub Action workflow
+  if (selections.githubAction && selections.cronExpression) {
+    const workflowDir = path.join(cwd, ".github", "workflows");
+    const workflowPath = path.join(workflowDir, "sweny.yml");
+
+    if (fs.existsSync(workflowPath)) {
+      const overwriteWf = await p.confirm({
+        message: ".github/workflows/sweny.yml already exists. Overwrite?",
+        initialValue: false,
+      });
+      if (p.isCancel(overwriteWf)) cancel();
+      if (!overwriteWf) {
+        p.log.info("Skipped GitHub Action workflow");
+      } else {
+        fs.mkdirSync(workflowDir, { recursive: true });
+        fs.writeFileSync(workflowPath, buildActionWorkflow(credentials, selections.cronExpression), "utf-8");
+        p.log.success("Created .github/workflows/sweny.yml");
+      }
+    } else {
+      fs.mkdirSync(workflowDir, { recursive: true });
+      fs.writeFileSync(workflowPath, buildActionWorkflow(credentials, selections.cronExpression), "utf-8");
+      p.log.success("Created .github/workflows/sweny.yml");
+    }
+  }
+
+  // 4. .gitignore check
+  const gitignorePath = path.join(cwd, ".gitignore");
+  if (fs.existsSync(gitignorePath)) {
+    const gitignore = fs.readFileSync(gitignorePath, "utf-8");
+    if (!gitignore.includes(".env")) {
+      p.log.warn(chalk.yellow(".env is not in .gitignore — add it to avoid committing secrets"));
+    }
+  } else {
+    p.log.warn(chalk.yellow("No .gitignore found — make sure .env is not committed"));
+  }
+
+  // 5. Next steps
+  const docUrls = credentials.filter((c) => c.url).map((c) => `  ${c.key}: ${c.url}`);
+
+  p.note(
+    [
+      "1. Fill in your API keys in .env:",
+      ...docUrls,
+      "",
+      "2. Verify connectivity:",
+      "   sweny check",
+      "",
+      "3. Run a dry-run triage:",
+      "   sweny triage --dry-run",
+    ].join("\n"),
+    "Next steps",
+  );
+
+  // 6. Done
+  p.outro("You're all set!");
 }
