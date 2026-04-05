@@ -187,3 +187,92 @@ export function detectGitRemote(cwd: string): GitRemoteInfo | null {
 
   return null;
 }
+
+/**
+ * Generate .sweny.yml content from selections.
+ */
+export function buildSwenyYml(selections: InitSelections): string {
+  const lines: string[] = [];
+
+  lines.push("# SWEny configuration");
+  lines.push("# https://sweny.ai/docs/config");
+  lines.push("");
+
+  lines.push(`source-control: ${selections.sourceControl}`);
+
+  if (selections.observability !== null) {
+    lines.push(`observability-provider: ${selections.observability}`);
+  }
+
+  lines.push(`issue-tracker: ${selections.issueTracker}`);
+
+  // Omit notification-provider when "console" (it's the default)
+  if (selections.notification !== "console") {
+    lines.push(`notification-provider: ${selections.notification}`);
+  }
+
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+/**
+ * Generate .env template with comments for each credential.
+ */
+export function buildEnvTemplate(credentials: Credential[]): string {
+  const lines: string[] = [];
+
+  lines.push("# SWEny environment variables");
+  lines.push("# Fill in the values below and keep this file out of version control.");
+  lines.push("");
+
+  for (const cred of credentials) {
+    if (cred.url) {
+      lines.push(`# ${cred.url}`);
+    }
+    if (cred.hint) {
+      lines.push(`# ${cred.hint}`);
+    }
+    if (cred.default !== undefined) {
+      lines.push(`${cred.key}=${cred.default}`);
+    } else {
+      lines.push(`${cred.key}=`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Generate a GitHub Actions workflow YAML for SWEny.
+ * Only includes credentials WITHOUT defaults as secrets.
+ */
+export function buildActionWorkflow(credentials: Credential[], cronExpression: string): string {
+  const secretCreds = credentials.filter((c) => c.default === undefined);
+
+  const lines: string[] = [];
+
+  lines.push("name: SWEny Triage");
+  lines.push("");
+  lines.push("on:");
+  lines.push("  schedule:");
+  lines.push(`    - cron: "${cronExpression}"`);
+  lines.push("  workflow_dispatch:");
+  lines.push("");
+  lines.push("jobs:");
+  lines.push("  triage:");
+  lines.push("    runs-on: ubuntu-latest");
+  lines.push("    steps:");
+  lines.push("      - uses: actions/checkout@v4");
+  lines.push("      - uses: swenyai/sweny@v4");
+  if (secretCreds.length > 0) {
+    lines.push("        env:");
+    for (const cred of secretCreds) {
+      lines.push(`          ${cred.key}: \${{ secrets.${cred.key} }}`);
+    }
+  }
+  lines.push("");
+
+  return lines.join("\n");
+}
