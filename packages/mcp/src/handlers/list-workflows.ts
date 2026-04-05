@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { parse as parseYaml } from "yaml";
 import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "@sweny-ai/core/workflows";
 import { parseWorkflow } from "@sweny-ai/core/schema";
 
@@ -39,7 +40,8 @@ export async function listWorkflows(cwd: string): Promise<WorkflowInfo[]> {
       if (!entry.endsWith(".yml") && !entry.endsWith(".yaml")) continue;
       try {
         const content = await fs.promises.readFile(path.join(workflowDir, entry), "utf-8");
-        const workflow = parseWorkflow(content);
+        const raw = parseYaml(content);
+        const workflow = parseWorkflow(raw);
         results.push(toInfo(workflow, "custom"));
       } catch {
         // Skip invalid workflow files
