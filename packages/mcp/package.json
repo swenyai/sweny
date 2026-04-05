@@ -1,0 +1,28 @@
+{
+  "name": "@sweny-ai/mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "MCP server exposing SWEny workflows to Claude Code and Claude Desktop",
+  "bin": {
+    "sweny-mcp": "./dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@sweny-ai/core": "*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.2"
+  }
+}
