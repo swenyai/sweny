@@ -9,14 +9,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as p from "@clack/prompts";
 import chalk from "chalk";
-import { stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { execute } from "../executor.js";
 import { ClaudeClient } from "../claude.js";
 import { createSkillMap, configuredSkills } from "../skills/index.js";
 import { consoleLogger } from "../types.js";
 import type { Workflow, Node, Edge, ExecutionEvent, Observer, NodeResult } from "../types.js";
-import { loadWorkflowFile } from "./main.js";
+import { validateWorkflow } from "../schema.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -863,4 +863,173 @@ export async function runE2eInit(): Promise<void> {
   } else {
     console.log(chalk.dim(`  2. Run: ${chalk.cyan("sweny e2e run")}\n`));
   }
+}
+
+// ── Timeout helper ─────────────────────────────────────────────────────
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+    promise
+      .then(resolve)
+      .catch(reject)
+      .finally(() => clearTimeout(timer));
+  });
+}
+
+// ── E2E Run ────────────────────────────────────────────────────────────
+
+export interface E2eRunOptions {
+  file?: string;
+  timeout?: number;
+}
+
+/**
+ * Load and execute e2e workflow files from .sweny/e2e/.
+ */
+export async function runE2eRun(options: E2eRunOptions): Promise<void> {
+  const cwd = process.cwd();
+  const timeoutMs = options.timeout || 15 * 60 * 1000;
+
+  // 1. Discover workflow files
+  let files: string[];
+  if (options.file) {
+    const filePath = path.resolve(cwd, options.file);
+    if (!fs.existsSync(filePath)) {
+      console.error(chalk.red(`  File not found: ${options.file}`));
+      process.exit(1);
+    }
+    files = [filePath];
+  } else {
+    const e2eDir = path.join(cwd, ".sweny", "e2e");
+    if (!fs.existsSync(e2eDir)) {
+      console.error(chalk.red("  No .sweny/e2e/ directory found."));
+      console.error(chalk.dim("  Run 'sweny e2e init' to set up e2e testing."));
+      process.exit(1);
+    }
+    files = fs
+      .readdirSync(e2eDir)
+      .filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+      .sort()
+      .map((f) => path.join(e2eDir, f));
+    if (files.length === 0) {
+      console.error(chalk.red("  No workflow files found in .sweny/e2e/"));
+      console.error(chalk.dim("  Run 'sweny e2e init' to set up e2e testing."));
+      process.exit(1);
+    }
+  }
+
+  // 2. Build template vars
+  const vars = buildE2eVars(process.env as Record<string, string>);
+
+  // 3. Banner
+  console.log(`\n${"─".repeat(50)}`);
+  console.log("E2E Test Run");
+  console.log(`  Target:  ${vars.base_url}`);
+  console.log(`  Run ID:  ${vars.run_id}`);
+  console.log(`${"─".repeat(50)}\n`);
+
+  // 4. Execute each workflow
+  const runResults: Array<{ file: string; passed: boolean }> = [];
+
+  for (const file of files) {
+    const fileName = path.basename(file);
+    console.log(`▶ ${chalk.bold(fileName)}`);
+
+    let workflow: Workflow;
+    try {
+      const raw = parseYaml(fs.readFileSync(file, "utf-8"));
+      const errors = validateWorkflow(raw as Workflow);
+      if (errors.length > 0) {
+        throw new Error(`Invalid workflow:\n${errors.map((e) => `  ${e.message}`).join("\n")}`);
+      }
+      workflow = raw as Workflow;
+    } catch (err) {
+      console.error(chalk.red(`  Error loading ${fileName}: ${err instanceof Error ? err.message : String(err)}`));
+      runResults.push({ file: fileName, passed: false });
+      continue;
+    }
+
+    // Replace template vars in node instructions
+    for (const node of Object.values(workflow.nodes)) {
+      node.instruction = resolveTemplateVars(node.instruction, vars);
+    }
+
+    // Build skills + Claude client
+    const skills = createSkillMap(configuredSkills(process.env, cwd));
+    const claude = new ClaudeClient({
+      maxTurns: 80,
+      cwd,
+      logger: consoleLogger,
+    });
+
+    // Progress observer
+    const nodeEnterTimes = new Map<string, number>();
+    const isTTY = process.stderr.isTTY ?? false;
+
+    const observer: Observer = (event: ExecutionEvent) => {
+      switch (event.type) {
+        case "node:enter":
+          nodeEnterTimes.set(event.node, Date.now());
+          process.stderr.write(`  ${chalk.dim("○")} ${chalk.dim(event.node)}…\n`);
+          break;
+        case "node:exit": {
+          const icon =
+            event.result.status === "success"
+              ? chalk.green("✓")
+              : event.result.status === "skipped"
+                ? chalk.dim("−")
+                : chalk.red("✗");
+          const enterTime = nodeEnterTimes.get(event.node) ?? Date.now();
+          const elapsed = ((Date.now() - enterTime) / 1000).toFixed(1);
+          const status = (event.result.data?.status as string) || event.result.status;
+          if (isTTY) {
+            process.stderr.write(`\x1B[1A\x1B[2K  ${icon} ${event.node} — ${status} (${elapsed}s)\n`);
+          } else {
+            process.stderr.write(`  ${icon} ${event.node} — ${status} (${elapsed}s)\n`);
+          }
+          break;
+        }
+      }
+    };
+
+    try {
+      const { results } = await withTimeout(
+        execute(
+          workflow,
+          { run_id: vars.run_id, base_url: vars.base_url },
+          { skills, claude, observer, logger: consoleLogger },
+        ),
+        timeoutMs,
+        `Workflow ${workflow.name}`,
+      );
+
+      // Extract report
+      const report = results.get("report");
+      if (report?.data) {
+        console.log(`  ${report.data.passed}/${report.data.total} tests passed`);
+        if (report.data.summary) {
+          console.log(chalk.dim(`  ${report.data.summary}`));
+        }
+      }
+
+      const hasFailed = [...results.values()].some(
+        (r: NodeResult) => r.status === "failed" || r.data?.status === "fail",
+      );
+      runResults.push({ file: fileName, passed: !hasFailed });
+    } catch (err) {
+      console.error(chalk.red(`  Error: ${err instanceof Error ? err.message : String(err)}`));
+      runResults.push({ file: fileName, passed: false });
+    }
+
+    console.log("");
+  }
+
+  // 5. Summary
+  const passed = runResults.filter((r) => r.passed).length;
+  const total = runResults.length;
+  const summaryColor = passed === total ? chalk.green : chalk.red;
+  console.log(summaryColor(`Results: ${passed}/${total} workflows passed`));
+
+  process.exit(passed === total ? 0 : 1);
 }
