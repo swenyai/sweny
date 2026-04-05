@@ -205,9 +205,9 @@ describe("buildSwenyYml", () => {
       githubAction: true,
       cronExpression: "0 8 * * 1",
     });
-    expect(yml).toContain("source-control: github");
+    expect(yml).toContain("source-control-provider: github");
     expect(yml).toContain("observability-provider: datadog");
-    expect(yml).toContain("issue-tracker: linear");
+    expect(yml).toContain("issue-tracker-provider: linear");
     expect(yml).toContain("notification-provider: slack");
   });
 
@@ -244,7 +244,7 @@ describe("buildSwenyYml", () => {
       githubAction: false,
       cronExpression: null,
     });
-    expect(yml).toContain("# SWEny configuration");
+    expect(yml).toContain("# .sweny.yml");
   });
 });
 
@@ -261,7 +261,7 @@ describe("buildEnvTemplate", () => {
       cronExpression: null,
     });
     const template = buildEnvTemplate(creds);
-    expect(template).toContain("# https://console.anthropic.com/settings/keys");
+    expect(template).toContain("# https://console.anthropic.com/settings/api-keys");
     expect(template).toContain("# Claude API key");
     expect(template).toContain("ANTHROPIC_API_KEY=");
     expect(template).toContain("# https://github.com/settings/tokens");
@@ -285,7 +285,7 @@ describe("buildEnvTemplate", () => {
 
   it("includes header comment", () => {
     const template = buildEnvTemplate([]);
-    expect(template).toContain("# SWEny environment variables");
+    expect(template).toContain("# .env");
   });
 });
 

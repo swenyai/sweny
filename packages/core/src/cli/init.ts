@@ -1,3 +1,10 @@
+/**
+ * sweny init — Interactive setup wizard
+ *
+ * Pure functions for file generation + thin @clack/prompts interactive layer.
+ * Tests cover the pure functions; the interactive wizard is thin glue.
+ */
+
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -37,9 +44,10 @@ export const PROVIDER_CREDENTIALS: Record<string, Credential[]> = {
   gitlab: [
     {
       key: "GITLAB_TOKEN",
+      hint: "api scope",
       url: "https://gitlab.com/-/profile/personal_access_tokens",
     },
-    { key: "GITLAB_URL", default: "https://gitlab.com" },
+    { key: "GITLAB_URL", hint: "e.g. https://gitlab.com", default: "https://gitlab.com" },
   ],
   datadog: [
     {
@@ -48,7 +56,7 @@ export const PROVIDER_CREDENTIALS: Record<string, Credential[]> = {
       hint: "Organization Settings > API Keys",
     },
     { key: "DD_APP_KEY", hint: "Organization Settings > Application Keys" },
-    { key: "DD_SITE", default: "datadoghq.com" },
+    { key: "DD_SITE", hint: "datadoghq.com, datadoghq.eu, etc.", default: "datadoghq.com" },
   ],
   sentry: [
     {
@@ -65,9 +73,9 @@ export const PROVIDER_CREDENTIALS: Record<string, Credential[]> = {
   ],
   newrelic: [{ key: "NR_API_KEY", url: "https://one.newrelic.com/api-keys" }],
   cloudwatch: [
-    { key: "AWS_ACCESS_KEY_ID" },
-    { key: "AWS_SECRET_ACCESS_KEY" },
-    { key: "AWS_REGION", default: "us-east-1" },
+    { key: "AWS_ACCESS_KEY_ID", hint: "IAM user access key" },
+    { key: "AWS_SECRET_ACCESS_KEY", hint: "IAM user secret key" },
+    { key: "AWS_REGION", hint: "e.g. us-east-1", default: "us-east-1" },
   ],
   "github-issues": [],
   linear: [
@@ -81,8 +89,8 @@ export const PROVIDER_CREDENTIALS: Record<string, Credential[]> = {
     },
   ],
   jira: [
-    { key: "JIRA_BASE_URL" },
-    { key: "JIRA_EMAIL" },
+    { key: "JIRA_BASE_URL", hint: "e.g. https://your-org.atlassian.net" },
+    { key: "JIRA_EMAIL", hint: "your Atlassian account email" },
     {
       key: "JIRA_API_TOKEN",
       url: "https://id.atlassian.com/manage-profile/security/api-tokens",
@@ -90,15 +98,15 @@ export const PROVIDER_CREDENTIALS: Record<string, Credential[]> = {
   ],
   console: [],
   slack: [{ key: "SLACK_BOT_TOKEN", url: "https://api.slack.com/apps" }],
-  discord: [{ key: "DISCORD_WEBHOOK_URL" }],
-  teams: [{ key: "TEAMS_WEBHOOK_URL" }],
-  webhook: [{ key: "NOTIFICATION_WEBHOOK_URL" }],
+  discord: [{ key: "DISCORD_WEBHOOK_URL", hint: "Server Settings > Integrations > Webhooks" }],
+  teams: [{ key: "TEAMS_WEBHOOK_URL", hint: "Channel > Connectors > Incoming Webhook" }],
+  webhook: [{ key: "NOTIFICATION_WEBHOOK_URL", hint: "Your webhook endpoint URL" }],
 };
 
 const ALWAYS_CREDENTIALS: Credential[] = [
   {
     key: "ANTHROPIC_API_KEY",
-    url: "https://console.anthropic.com/settings/keys",
+    url: "https://console.anthropic.com/settings/api-keys",
     hint: "Claude API key",
   },
 ];
@@ -134,7 +142,7 @@ export function collectCredentials(selections: InitSelections): Credential[] {
     }
   }
 
-  return [...seen.values()];
+  return Array.from(seen.values());
 }
 
 /**
@@ -194,17 +202,18 @@ export function detectGitRemote(cwd: string): GitRemoteInfo | null {
 export function buildSwenyYml(selections: InitSelections): string {
   const lines: string[] = [];
 
-  lines.push("# SWEny configuration");
-  lines.push("# https://sweny.ai/docs/config");
+  lines.push("# .sweny.yml — SWEny project configuration");
+  lines.push("# Secrets (API keys, tokens) go in .env (gitignored).");
+  lines.push("# Docs: https://docs.sweny.ai/cli");
   lines.push("");
 
-  lines.push(`source-control: ${selections.sourceControl}`);
+  lines.push(`source-control-provider: ${selections.sourceControl}`);
 
   if (selections.observability !== null) {
     lines.push(`observability-provider: ${selections.observability}`);
   }
 
-  lines.push(`issue-tracker: ${selections.issueTracker}`);
+  lines.push(`issue-tracker-provider: ${selections.issueTracker}`);
 
   // Omit notification-provider when "console" (it's the default)
   if (selections.notification !== "console") {
@@ -222,8 +231,8 @@ export function buildSwenyYml(selections: InitSelections): string {
 export function buildEnvTemplate(credentials: Credential[]): string {
   const lines: string[] = [];
 
-  lines.push("# SWEny environment variables");
-  lines.push("# Fill in the values below and keep this file out of version control.");
+  lines.push("# .env — SWEny credentials (DO NOT COMMIT)");
+  lines.push("# Fill in each value, then run: sweny check");
   lines.push("");
 
   for (const cred of credentials) {
@@ -266,6 +275,8 @@ export function buildActionWorkflow(credentials: Credential[], cronExpression: s
   lines.push("    steps:");
   lines.push("      - uses: actions/checkout@v4");
   lines.push("      - uses: swenyai/sweny@v4");
+  lines.push("        with:");
+  lines.push("          workflow: triage");
   if (secretCreds.length > 0) {
     lines.push("        env:");
     for (const cred of secretCreds) {
