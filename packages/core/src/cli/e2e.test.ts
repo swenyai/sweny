@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { resolveTemplateVars, buildE2eVars, buildSetupNode, buildReportNode, buildCleanupNode } from "./e2e.js";
+import {
+  resolveTemplateVars,
+  buildE2eVars,
+  buildSetupNode,
+  buildReportNode,
+  buildCleanupNode,
+  buildFlowNodes,
+} from "./e2e.js";
+import type { FlowConfig, FlowType } from "./e2e.js";
 
 describe("resolveTemplateVars", () => {
   it("replaces known variables", () => {
@@ -157,5 +165,113 @@ describe("buildCleanupNode", () => {
   it("has no output schema", () => {
     const node = buildCleanupNode("supabase");
     expect(node.output).toBeUndefined();
+  });
+});
+
+describe("buildFlowNodes", () => {
+  describe("registration", () => {
+    it("returns a test_registration node", () => {
+      const { nodes, testNodeIds } = buildFlowNodes({
+        type: "registration",
+        path: "/signup",
+        fields: ["email", "password", "name"],
+        successRedirect: "/dashboard",
+      });
+      expect(nodes.test_registration).toBeDefined();
+      expect(nodes.test_registration.instruction).toContain("/signup");
+      expect(nodes.test_registration.instruction).toContain("{test_email}");
+      expect(nodes.test_registration.instruction).toContain("{test_password}");
+      expect(nodes.test_registration.instruction).toContain("agent-browser");
+      expect(testNodeIds).toEqual(["test_registration"]);
+    });
+
+    it("does not include a login node", () => {
+      const { nodes } = buildFlowNodes({ type: "registration", path: "/signup" });
+      expect(nodes.login).toBeUndefined();
+    });
+
+    it("includes field names in instruction", () => {
+      const { nodes } = buildFlowNodes({
+        type: "registration",
+        path: "/signup",
+        fields: ["email", "password", "name", "company"],
+      });
+      expect(nodes.test_registration.instruction).toContain("company");
+    });
+  });
+
+  describe("login", () => {
+    it("returns a test_login node", () => {
+      const { nodes, testNodeIds } = buildFlowNodes({ type: "login", path: "/login" });
+      expect(nodes.test_login).toBeDefined();
+      expect(nodes.test_login.instruction).toContain("/login");
+      expect(nodes.test_login.instruction).toContain("{email}");
+      expect(nodes.test_login.instruction).toContain("{password}");
+      expect(testNodeIds).toEqual(["test_login"]);
+    });
+  });
+
+  describe("purchase (auth-dependent)", () => {
+    it("returns both login and test_purchase nodes", () => {
+      const { nodes, testNodeIds } = buildFlowNodes({
+        type: "purchase",
+        path: "/pricing",
+        paymentProvider: "Stripe",
+      });
+      expect(nodes.login).toBeDefined();
+      expect(nodes.test_purchase).toBeDefined();
+      expect(nodes.login.instruction).toContain("{email}");
+      expect(nodes.test_purchase.instruction).toContain("/pricing");
+      expect(nodes.test_purchase.instruction).toContain("Stripe");
+      expect(testNodeIds).toEqual(["login", "test_purchase"]);
+    });
+  });
+
+  describe("custom", () => {
+    it("embeds the user description in the instruction", () => {
+      const { nodes } = buildFlowNodes({
+        type: "custom",
+        path: "/admin",
+        description: "Test the admin dashboard data export feature",
+        successCriteria: "CSV file downloads successfully",
+      });
+      expect(nodes.test_custom).toBeDefined();
+      expect(nodes.test_custom.instruction).toContain("Test the admin dashboard data export feature");
+      expect(nodes.test_custom.instruction).toContain("CSV file downloads successfully");
+    });
+  });
+
+  describe("all flow types return valid nodes", () => {
+    const flows: FlowConfig[] = [
+      { type: "registration", path: "/signup" },
+      { type: "login", path: "/login" },
+      { type: "purchase", path: "/pricing" },
+      { type: "onboarding", path: "/onboarding" },
+      { type: "upgrade", path: "/upgrade" },
+      { type: "cancellation", path: "/cancel" },
+      { type: "custom", path: "/test", description: "custom test" },
+    ];
+
+    for (const flow of flows) {
+      it(`${flow.type}: every node has non-empty name, instruction, and skills array`, () => {
+        const { nodes } = buildFlowNodes(flow);
+        for (const [id, node] of Object.entries(nodes)) {
+          expect(node.name, `${id}.name`).toBeTruthy();
+          expect(node.instruction.length, `${id}.instruction`).toBeGreaterThan(0);
+          expect(Array.isArray(node.skills), `${id}.skills`).toBe(true);
+        }
+      });
+    }
+  });
+
+  describe("auth-dependent flows include login node", () => {
+    const authFlows: FlowType[] = ["purchase", "onboarding", "upgrade", "cancellation"];
+    for (const type of authFlows) {
+      it(`${type} includes a login node`, () => {
+        const { nodes } = buildFlowNodes({ type, path: "/test" });
+        expect(nodes.login).toBeDefined();
+        expect(nodes.login.instruction).toContain("{email}");
+      });
+    }
   });
 });
