@@ -90,3 +90,141 @@ export function buildE2eVars(env: Record<string, string | undefined>): Record<st
 
   return vars;
 }
+
+// ── Shared node builders ───────────────────────────────────────────────
+
+const TEST_OUTPUT_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    status: { type: "string", enum: ["pass", "fail"] },
+    error: { type: "string" },
+  },
+  required: ["status"],
+};
+
+const REPORT_OUTPUT_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    total: { type: "number" },
+    passed: { type: "number" },
+    failed: { type: "number" },
+    summary: { type: "string" },
+  },
+  required: ["total", "passed", "failed", "summary"],
+};
+
+export function buildSetupNode(): Node {
+  return {
+    name: "Browser Setup",
+    instruction: `You need the agent-browser CLI for browser automation.
+Check if it's installed: which agent-browser
+If the command is not found, install it: npm install -g @anthropic-ai/agent-browser
+
+Start the daemon in the background: agent-browser &
+Wait for it to be ready by polling: agent-browser get url
+Retry every 2 seconds, up to 30 seconds. If it doesn't respond after 30 seconds, report status "fail".
+
+Once the daemon is ready, report status "ready".
+
+IMPORTANT: The agent-browser CLI uses an accessibility tree, not screenshots.
+After navigating to a page, run: agent-browser snapshot
+This returns element references like @e1, @e2, @e3.
+Use those refs with: agent-browser click @e5, agent-browser fill @e7 "text", etc.
+
+Available commands:
+- agent-browser open <url> — navigate to URL
+- agent-browser snapshot — get accessibility tree with @refs
+- agent-browser click <ref> — click an element
+- agent-browser fill <ref> <text> — clear input and fill with text
+- agent-browser press <key> — press keyboard key (Enter, Tab, Escape)
+- agent-browser get url — get current page URL
+- agent-browser get text <ref> — get element text content
+- agent-browser screenshot <path> — save screenshot to file
+- agent-browser scroll <direction> <pixels> — scroll page
+- agent-browser scrollintoview <ref> — scroll element into view
+- agent-browser select <ref> <value> — select dropdown option`,
+    skills: [],
+    output: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["ready", "fail"] },
+      },
+      required: ["status"],
+    },
+  };
+}
+
+export function buildReportNode(testNodeIds: string[]): Node {
+  const nodeList = testNodeIds.map((id) => `- ${id}`).join("\n");
+  return {
+    name: "Test Report",
+    instruction: `Compile results from all test nodes into a final report.
+
+Test nodes to summarize:
+${nodeList}
+
+For each test node:
+- Report the status (pass/fail)
+- Note any errors or unexpected behavior
+
+Count total passed and total failed.
+Format the summary as a single concise paragraph.`,
+    skills: [],
+    output: REPORT_OUTPUT_SCHEMA,
+  };
+}
+
+export function buildCleanupNode(backend?: string): Node {
+  let instruction: string;
+
+  switch (backend) {
+    case "supabase":
+      instruction = `Clean up test data created during this E2E run.
+
+Delete any test users matching the pattern e2e-*@yourapp.test using the Supabase Auth Admin API.
+The service role key is available in your environment as SUPABASE_SERVICE_ROLE_KEY.
+The Supabase URL is available as SUPABASE_URL.
+
+Use curl to call the Supabase Admin API:
+1. List users: GET {SUPABASE_URL}/auth/v1/admin/users (with apikey and Authorization: Bearer headers)
+2. Filter for emails starting with "e2e-" and ending with "@yourapp.test"
+3. Delete each matching user: DELETE {SUPABASE_URL}/auth/v1/admin/users/{user_id}
+
+If no test users are found, that's fine — skip gracefully.
+If the service role key is not available, skip cleanup gracefully.`;
+      break;
+
+    case "firebase":
+      instruction = `Clean up test data created during this E2E run.
+
+Delete any test users matching the pattern e2e-*@yourapp.test using the Firebase Admin SDK or REST API.
+Use the FIREBASE_SERVICE_ACCOUNT_KEY environment variable for authentication.
+
+If the service account key is not available, skip cleanup gracefully.`;
+      break;
+
+    case "postgres":
+      instruction = `Clean up test data created during this E2E run.
+
+Connect to the database using DATABASE_URL from the environment.
+Delete any test records matching the pattern e2e-{run_id} or e2e-*@yourapp.test.
+
+If DATABASE_URL is not available, skip cleanup gracefully.`;
+      break;
+
+    default:
+      instruction = `Clean up test data created during this E2E run.
+
+Delete any test data matching the pattern e2e-{run_id} or e2e-*@yourapp.test.
+Use whatever API or database tools are available in your environment.
+
+If cleanup credentials are not available, skip gracefully.`;
+      break;
+  }
+
+  return {
+    name: "Cleanup Test Data",
+    instruction,
+    skills: [],
+  };
+}

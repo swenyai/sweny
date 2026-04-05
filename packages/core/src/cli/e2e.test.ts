@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveTemplateVars, buildE2eVars } from "./e2e.js";
+import { resolveTemplateVars, buildE2eVars, buildSetupNode, buildReportNode, buildCleanupNode } from "./e2e.js";
 
 describe("resolveTemplateVars", () => {
   it("replaces known variables", () => {
@@ -83,5 +83,79 @@ describe("buildE2eVars", () => {
   it("picks up E2E_* custom vars", () => {
     const vars = buildE2eVars({ E2E_API_KEY: "abc123" });
     expect(vars.api_key).toBe("abc123");
+  });
+});
+
+describe("buildSetupNode", () => {
+  it("returns a node with agent-browser install instructions", () => {
+    const node = buildSetupNode();
+    expect(node.name).toBe("Browser Setup");
+    expect(node.instruction).toContain("agent-browser");
+    expect(node.instruction).toContain("npm install -g");
+    expect(node.skills).toEqual([]);
+    expect(node.output).toBeDefined();
+  });
+
+  it("includes daemon startup and readiness polling", () => {
+    const node = buildSetupNode();
+    expect(node.instruction).toContain("agent-browser &");
+    expect(node.instruction).toContain("agent-browser get url");
+  });
+
+  it("output schema has status enum [ready, fail]", () => {
+    const node = buildSetupNode();
+    expect(node.output).toEqual({
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["ready", "fail"] },
+      },
+      required: ["status"],
+    });
+  });
+});
+
+describe("buildReportNode", () => {
+  it("references the test node IDs in its instruction", () => {
+    const node = buildReportNode(["test_registration", "test_login"]);
+    expect(node.instruction).toContain("test_registration");
+    expect(node.instruction).toContain("test_login");
+  });
+
+  it("output schema has total, passed, failed, summary", () => {
+    const node = buildReportNode(["test_x"]);
+    expect(node.output).toEqual({
+      type: "object",
+      properties: {
+        total: { type: "number" },
+        passed: { type: "number" },
+        failed: { type: "number" },
+        summary: { type: "string" },
+      },
+      required: ["total", "passed", "failed", "summary"],
+    });
+  });
+});
+
+describe("buildCleanupNode", () => {
+  it("includes supabase-specific instructions for supabase backend", () => {
+    const node = buildCleanupNode("supabase");
+    expect(node.instruction).toContain("Supabase");
+    expect(node.instruction).toContain("e2e-");
+    expect(node.instruction).toContain("SUPABASE_SERVICE_ROLE_KEY");
+  });
+
+  it("includes firebase-specific instructions for firebase backend", () => {
+    const node = buildCleanupNode("firebase");
+    expect(node.instruction).toContain("Firebase");
+  });
+
+  it("includes generic instructions for other backends", () => {
+    const node = buildCleanupNode("other");
+    expect(node.instruction).toContain("e2e-{run_id}");
+  });
+
+  it("has no output schema", () => {
+    const node = buildCleanupNode("supabase");
+    expect(node.output).toBeUndefined();
   });
 });
