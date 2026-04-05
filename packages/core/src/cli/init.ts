@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+
 // ── Types ──────────────────────────────────────────────────────────────
 
 export interface Credential {
@@ -132,4 +135,55 @@ export function collectCredentials(selections: InitSelections): Credential[] {
   }
 
   return [...seen.values()];
+}
+
+/**
+ * Detect the git remote origin from `.git/config`.
+ * Returns provider + normalised remote (e.g. "github.com/owner/repo"), or null.
+ */
+export function detectGitRemote(cwd: string): GitRemoteInfo | null {
+  const configPath = path.join(cwd, ".git", "config");
+
+  let content: string;
+  try {
+    content = fs.readFileSync(configPath, "utf-8");
+  } catch {
+    return null;
+  }
+
+  // Find [remote "origin"] section and extract url
+  const remoteMatch = content.match(/\[remote\s+"origin"\]\s*\n(?:\s+[^\[]*?\n)*?\s*url\s*=\s*(.+)/);
+  if (!remoteMatch) return null;
+
+  const url = remoteMatch[1].trim();
+
+  // SSH: git@github.com:owner/repo.git
+  const sshMatch = url.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
+  if (sshMatch) {
+    const host = sshMatch[1];
+    const repoPath = sshMatch[2];
+    if (host === "github.com") {
+      return { provider: "github", remote: `github.com/${repoPath}` };
+    }
+    if (host === "gitlab.com") {
+      return { provider: "gitlab", remote: `gitlab.com/${repoPath}` };
+    }
+    return null;
+  }
+
+  // HTTPS: https://github.com/owner/repo.git
+  const httpsMatch = url.match(/^https?:\/\/([^/]+)\/(.+?)(?:\.git)?$/);
+  if (httpsMatch) {
+    const host = httpsMatch[1];
+    const repoPath = httpsMatch[2];
+    if (host === "github.com") {
+      return { provider: "github", remote: `github.com/${repoPath}` };
+    }
+    if (host === "gitlab.com") {
+      return { provider: "gitlab", remote: `gitlab.com/${repoPath}` };
+    }
+    return null;
+  }
+
+  return null;
 }

@@ -1,5 +1,97 @@
-import { describe, it, expect } from "vitest";
-import { collectCredentials, PROVIDER_CREDENTIALS } from "./init.js";
+import { describe, it, expect, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
+import { collectCredentials, detectGitRemote, PROVIDER_CREDENTIALS } from "./init.js";
+
+// ── detectGitRemote ────────────────────────────────────────────────────
+
+describe("detectGitRemote", () => {
+  const tmpDirs: string[] = [];
+
+  function makeTempRepo(gitConfigContent: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-init-test-"));
+    tmpDirs.push(dir);
+    const gitDir = path.join(dir, ".git");
+    fs.mkdirSync(gitDir, { recursive: true });
+    fs.writeFileSync(path.join(gitDir, "config"), gitConfigContent);
+    return dir;
+  }
+
+  afterEach(() => {
+    for (const d of tmpDirs) {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+    tmpDirs.length = 0;
+  });
+
+  it("detects GitHub HTTPS remote", () => {
+    const cwd = makeTempRepo(`
+[remote "origin"]
+\turl = https://github.com/acme/widgets.git
+\tfetch = +refs/heads/*:refs/remotes/origin/*
+`);
+    const info = detectGitRemote(cwd);
+    expect(info).toEqual({
+      provider: "github",
+      remote: "github.com/acme/widgets",
+    });
+  });
+
+  it("detects GitHub SSH remote", () => {
+    const cwd = makeTempRepo(`
+[remote "origin"]
+\turl = git@github.com:acme/widgets.git
+\tfetch = +refs/heads/*:refs/remotes/origin/*
+`);
+    const info = detectGitRemote(cwd);
+    expect(info).toEqual({
+      provider: "github",
+      remote: "github.com/acme/widgets",
+    });
+  });
+
+  it("detects GitLab HTTPS remote", () => {
+    const cwd = makeTempRepo(`
+[core]
+\tbare = false
+[remote "origin"]
+\turl = https://gitlab.com/team/project.git
+\tfetch = +refs/heads/*:refs/remotes/origin/*
+`);
+    const info = detectGitRemote(cwd);
+    expect(info).toEqual({
+      provider: "gitlab",
+      remote: "gitlab.com/team/project",
+    });
+  });
+
+  it("returns null when no .git directory exists", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-init-test-"));
+    tmpDirs.push(dir);
+    expect(detectGitRemote(dir)).toBeNull();
+  });
+
+  it("returns null for unknown host (bitbucket)", () => {
+    const cwd = makeTempRepo(`
+[remote "origin"]
+\turl = git@bitbucket.org:acme/widgets.git
+`);
+    expect(detectGitRemote(cwd)).toBeNull();
+  });
+
+  it("handles HTTPS URLs without .git suffix", () => {
+    const cwd = makeTempRepo(`
+[remote "origin"]
+\turl = https://github.com/acme/widgets
+`);
+    const info = detectGitRemote(cwd);
+    expect(info).toEqual({
+      provider: "github",
+      remote: "github.com/acme/widgets",
+    });
+  });
+});
 
 // ── collectCredentials ─────────────────────────────────────────────────
 
