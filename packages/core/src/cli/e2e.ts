@@ -509,3 +509,117 @@ export function buildFlowNodes(config: FlowConfig): FlowNodes {
 
   return { nodes, testNodeIds };
 }
+
+// ── Workflow assembler ─────────────────────────────────────────────────
+
+/**
+ * Build a complete Workflow object for a single e2e flow.
+ * Includes setup node, optional login, flow-specific test node,
+ * optional cleanup, and report node.
+ */
+export function buildFlowWorkflow(flow: FlowConfig, baseUrl: string, cleanup?: CleanupConfig): Workflow {
+  const { nodes: flowNodes, testNodeIds } = buildFlowNodes(flow);
+  const nodes: Record<string, Node> = {};
+  const edges: Edge[] = [];
+
+  // 1. Setup node (always first)
+  nodes.setup = buildSetupNode();
+
+  // 2. Flow nodes (login + test)
+  for (const [id, node] of Object.entries(flowNodes)) {
+    nodes[id] = node;
+  }
+
+  // 3. Build edges based on flow structure
+  const firstTestNode = testNodeIds[0];
+  const lastTestNode = testNodeIds[testNodeIds.length - 1];
+
+  // Setup → first test (or login) on success
+  edges.push({ from: "setup", to: firstTestNode, when: "setup status is ready" });
+  edges.push({ from: "setup", to: "report", when: "setup status is fail" });
+
+  // If there's a login node + test node, chain them
+  if (testNodeIds.length > 1) {
+    edges.push({
+      from: testNodeIds[0],
+      to: testNodeIds[1],
+      when: `${testNodeIds[0]} status is pass`,
+    });
+    edges.push({
+      from: testNodeIds[0],
+      to: "report",
+      when: `${testNodeIds[0]} status is fail`,
+    });
+  }
+
+  // 4. Cleanup node (optional)
+  if (cleanup?.enabled) {
+    nodes.cleanup = buildCleanupNode(cleanup.backend);
+    edges.push({ from: lastTestNode, to: "cleanup" });
+    edges.push({ from: "cleanup", to: "report" });
+  } else {
+    edges.push({ from: lastTestNode, to: "report" });
+  }
+
+  // 5. Report node (always last)
+  nodes.report = buildReportNode(testNodeIds);
+
+  const typeName = flow.type.charAt(0).toUpperCase() + flow.type.slice(1);
+
+  return {
+    id: `e2e-${flow.type}`,
+    name: `E2E: ${typeName}`,
+    description: `End-to-end test for ${flow.type} flow`,
+    entry: "setup",
+    nodes,
+    edges,
+  };
+}
+
+// ── Env template builder ───────────────────────────────────────────────
+
+const CLEANUP_ENV_VARS: Record<string, Array<{ key: string; hint?: string }>> = {
+  supabase: [
+    { key: "SUPABASE_URL", hint: "e.g. https://xxxx.supabase.co" },
+    { key: "SUPABASE_SERVICE_ROLE_KEY", hint: "Settings > API > service_role key" },
+  ],
+  firebase: [{ key: "FIREBASE_SERVICE_ACCOUNT_KEY", hint: "Firebase Console > Project Settings > Service Accounts" }],
+  postgres: [{ key: "DATABASE_URL", hint: "e.g. postgresql://user:pass@host:5432/db" }],
+};
+
+/**
+ * Build .env template content for e2e testing.
+ */
+export function buildE2eEnvTemplate(selections: E2eSelections): string {
+  const lines: string[] = [];
+  lines.push("# E2E Testing — SWEny");
+  lines.push("# Fill in values, then run: sweny e2e run");
+  lines.push("");
+
+  lines.push(`E2E_BASE_URL=${selections.baseUrl}`);
+  lines.push("");
+
+  // Add E2E_EMAIL/PASSWORD if any flow needs auth
+  const needsAuth = selections.flows.some((f) => AUTH_REQUIRED_FLOWS.includes(f.type) || f.type === "login");
+  if (needsAuth) {
+    lines.push("# Test account credentials (for login-dependent flows)");
+    lines.push("E2E_EMAIL=");
+    lines.push("E2E_PASSWORD=");
+    lines.push("");
+  }
+
+  // Cleanup env vars
+  if (selections.cleanup.enabled && selections.cleanup.backend) {
+    const vars = CLEANUP_ENV_VARS[selections.cleanup.backend];
+    if (vars) {
+      lines.push("# Cleanup");
+      for (const v of vars) {
+        if (v.hint) lines.push(`# ${v.hint}`);
+        lines.push(`${v.key}=`);
+      }
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n");
+}

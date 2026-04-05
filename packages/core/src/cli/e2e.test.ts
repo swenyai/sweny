@@ -6,8 +6,11 @@ import {
   buildReportNode,
   buildCleanupNode,
   buildFlowNodes,
+  buildFlowWorkflow,
+  buildE2eEnvTemplate,
 } from "./e2e.js";
-import type { FlowConfig, FlowType } from "./e2e.js";
+import type { FlowConfig, FlowType, E2eSelections } from "./e2e.js";
+import { workflowZ, validateWorkflow } from "../schema.js";
 
 describe("resolveTemplateVars", () => {
   it("replaces known variables", () => {
@@ -273,5 +276,138 @@ describe("buildFlowNodes", () => {
         expect(nodes.login.instruction).toContain("{email}");
       });
     }
+  });
+});
+
+describe("buildFlowWorkflow", () => {
+  it("returns a valid Workflow object for registration", () => {
+    const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000");
+    expect(wf.id).toBe("e2e-registration");
+    expect(wf.entry).toBe("setup");
+    expect(wf.nodes.setup).toBeDefined();
+    expect(wf.nodes.test_registration).toBeDefined();
+    expect(wf.nodes.report).toBeDefined();
+  });
+
+  it("passes Zod schema validation", () => {
+    const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000");
+    expect(() => workflowZ.parse(wf)).not.toThrow();
+  });
+
+  it("passes structural validation (no cycles, all reachable)", () => {
+    const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000");
+    const errors = validateWorkflow(wf);
+    expect(errors).toEqual([]);
+  });
+
+  it("includes login node for auth-dependent flows", () => {
+    const wf = buildFlowWorkflow({ type: "purchase", path: "/pricing" }, "http://localhost:3000");
+    expect(wf.nodes.login).toBeDefined();
+    expect(wf.edges.some((e) => e.from === "setup" && e.to === "login")).toBe(true);
+    expect(wf.edges.some((e) => e.from === "login" && e.to === "test_purchase")).toBe(true);
+  });
+
+  it("adds cleanup node when enabled", () => {
+    const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000", {
+      enabled: true,
+      backend: "supabase",
+    });
+    expect(wf.nodes.cleanup).toBeDefined();
+    expect(wf.edges.some((e) => e.to === "cleanup")).toBe(true);
+    expect(wf.edges.some((e) => e.from === "cleanup" && e.to === "report")).toBe(true);
+  });
+
+  it("skips cleanup node when not enabled", () => {
+    const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000", {
+      enabled: false,
+    });
+    expect(wf.nodes.cleanup).toBeUndefined();
+  });
+
+  it("all 7 flow types produce valid workflows", () => {
+    const types: Array<{ type: FlowType; path: string }> = [
+      { type: "registration", path: "/signup" },
+      { type: "login", path: "/login" },
+      { type: "purchase", path: "/pricing" },
+      { type: "onboarding", path: "/onboarding" },
+      { type: "upgrade", path: "/upgrade" },
+      { type: "cancellation", path: "/cancel" },
+      { type: "custom", path: "/test" },
+    ];
+
+    for (const { type, path: flowPath } of types) {
+      const wf = buildFlowWorkflow({ type, path: flowPath, description: "test custom flow" }, "http://localhost:3000");
+      expect(() => workflowZ.parse(wf), `${type}: schema`).not.toThrow();
+      const errors = validateWorkflow(wf);
+      expect(errors, `${type}: structural`).toEqual([]);
+    }
+  });
+
+  it("includes failure edge from setup to report", () => {
+    const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000");
+    expect(wf.edges.some((e) => e.from === "setup" && e.to === "report" && e.when?.includes("fail"))).toBe(true);
+  });
+
+  it("includes failure edges from login to report for auth flows", () => {
+    const wf = buildFlowWorkflow({ type: "purchase", path: "/pricing" }, "http://localhost:3000");
+    expect(wf.edges.some((e) => e.from === "login" && e.to === "report" && e.when?.includes("fail"))).toBe(true);
+  });
+});
+
+describe("buildE2eEnvTemplate", () => {
+  it("always includes E2E_BASE_URL", () => {
+    const env = buildE2eEnvTemplate({
+      flows: [{ type: "registration", path: "/signup" }],
+      baseUrl: "http://localhost:3000",
+      cleanup: { enabled: false },
+    });
+    expect(env).toContain("E2E_BASE_URL=http://localhost:3000");
+  });
+
+  it("includes E2E_EMAIL and E2E_PASSWORD for auth-dependent flows", () => {
+    const env = buildE2eEnvTemplate({
+      flows: [{ type: "purchase", path: "/pricing" }],
+      baseUrl: "http://localhost:3000",
+      cleanup: { enabled: false },
+    });
+    expect(env).toContain("E2E_EMAIL=");
+    expect(env).toContain("E2E_PASSWORD=");
+  });
+
+  it("does not include E2E_EMAIL for registration-only flows", () => {
+    const env = buildE2eEnvTemplate({
+      flows: [{ type: "registration", path: "/signup" }],
+      baseUrl: "http://localhost:3000",
+      cleanup: { enabled: false },
+    });
+    expect(env).not.toContain("E2E_EMAIL=");
+  });
+
+  it("includes SUPABASE vars when cleanup backend is supabase", () => {
+    const env = buildE2eEnvTemplate({
+      flows: [{ type: "registration", path: "/signup" }],
+      baseUrl: "http://localhost:3000",
+      cleanup: { enabled: true, backend: "supabase" },
+    });
+    expect(env).toContain("SUPABASE_URL=");
+    expect(env).toContain("SUPABASE_SERVICE_ROLE_KEY=");
+  });
+
+  it("includes FIREBASE var when cleanup backend is firebase", () => {
+    const env = buildE2eEnvTemplate({
+      flows: [{ type: "registration", path: "/signup" }],
+      baseUrl: "http://localhost:3000",
+      cleanup: { enabled: true, backend: "firebase" },
+    });
+    expect(env).toContain("FIREBASE_SERVICE_ACCOUNT_KEY=");
+  });
+
+  it("includes DATABASE_URL when cleanup backend is postgres", () => {
+    const env = buildE2eEnvTemplate({
+      flows: [{ type: "registration", path: "/signup" }],
+      baseUrl: "http://localhost:3000",
+      cleanup: { enabled: true, backend: "postgres" },
+    });
+    expect(env).toContain("DATABASE_URL=");
   });
 });
