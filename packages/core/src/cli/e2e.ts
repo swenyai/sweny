@@ -623,3 +623,244 @@ export function buildE2eEnvTemplate(selections: E2eSelections): string {
 
   return lines.join("\n");
 }
+
+// ── Flow type labels ───────────────────────────────────────────────────
+
+const FLOW_TYPE_LABELS: Record<FlowType, string> = {
+  registration: "Registration / Signup",
+  login: "Login / Auth",
+  purchase: "Purchase / Checkout",
+  onboarding: "Onboarding",
+  upgrade: "User Upgrade / Plan Change",
+  cancellation: "Cancellation",
+  custom: "Custom (describe it)",
+};
+
+// ── Cancel helper ──────────────────────────────────────────────────────
+
+function cancel(): never {
+  p.cancel("Setup cancelled.");
+  process.exit(0);
+}
+
+// ── Per-flow follow-up questions ───────────────────────────────────────
+
+async function askFlowQuestions(type: FlowType): Promise<FlowConfig> {
+  const defaultPaths: Record<FlowType, string> = {
+    registration: "/signup",
+    login: "/login",
+    purchase: "/pricing",
+    onboarding: "/onboarding",
+    upgrade: "/upgrade",
+    cancellation: "/cancel",
+    custom: "/",
+  };
+
+  const flowPath = await p.text({
+    message: `URL path for ${FLOW_TYPE_LABELS[type]}?`,
+    placeholder: defaultPaths[type],
+    validate: (v) => (!v.startsWith("/") ? "Path must start with /" : undefined),
+  });
+  if (p.isCancel(flowPath)) cancel();
+
+  const config: FlowConfig = { type, path: flowPath as string };
+
+  if (type === "registration") {
+    const fieldsRaw = await p.text({
+      message: "Required form fields (comma-separated)?",
+      placeholder: "email, password, name",
+      initialValue: "email, password, name",
+    });
+    if (p.isCancel(fieldsRaw)) cancel();
+    config.fields = (fieldsRaw as string)
+      .split(",")
+      .map((f) => f.trim())
+      .filter(Boolean);
+
+    const successRedirect = await p.text({
+      message: "Success redirect path?",
+      placeholder: "/dashboard",
+      initialValue: "/dashboard",
+    });
+    if (p.isCancel(successRedirect)) cancel();
+    config.successRedirect = successRedirect as string;
+  }
+
+  if (type === "purchase") {
+    const provider = await p.text({
+      message: "Payment provider?",
+      placeholder: "Stripe",
+      initialValue: "Stripe",
+    });
+    if (p.isCancel(provider)) cancel();
+    config.paymentProvider = provider as string;
+  }
+
+  if (type === "custom") {
+    const desc = await p.text({
+      message: "Describe the flow in a sentence or two:",
+      validate: (v) => (!v ? "Description is required" : undefined),
+    });
+    if (p.isCancel(desc)) cancel();
+    config.description = desc as string;
+  }
+
+  if (type !== "registration") {
+    const criteria = await p.text({
+      message: "What does success look like?",
+      placeholder: "Redirected to confirmation page",
+    });
+    if (p.isCancel(criteria)) cancel();
+    if (criteria) config.successCriteria = criteria as string;
+  }
+
+  return config;
+}
+
+// ── Interactive wizard ─────────────────────────────────────────────────
+
+/**
+ * Interactive E2E setup wizard — prompts through flow selection,
+ * then generates .sweny/e2e/*.yml and .env additions.
+ */
+export async function runE2eInit(): Promise<void> {
+  const cwd = process.cwd();
+
+  // ── Screen 1: Intro ──────────────────────────────────────────
+  p.intro("Let's set up end-to-end testing for your app");
+
+  // Check for existing files
+  const e2eDir = path.join(cwd, ".sweny", "e2e");
+  if (fs.existsSync(e2eDir)) {
+    const files = fs.readdirSync(e2eDir).filter((f) => f.endsWith(".yml"));
+    if (files.length > 0) {
+      const overwrite = await p.confirm({
+        message: `.sweny/e2e/ already has ${files.length} workflow file(s). Continue and overwrite?`,
+        initialValue: false,
+      });
+      if (p.isCancel(overwrite)) cancel();
+      if (!overwrite) {
+        p.cancel("Setup cancelled — existing files preserved.");
+        process.exit(0);
+      }
+    }
+  }
+
+  // ── Screen 2: Flow type selection ────────────────────────────
+  const flowTypes = await p.multiselect({
+    message: "What flows do you want to test?",
+    options: (Object.entries(FLOW_TYPE_LABELS) as Array<[FlowType, string]>).map(([value, label]) => ({
+      value,
+      label,
+    })),
+    required: true,
+  });
+  if (p.isCancel(flowTypes)) cancel();
+  const selectedTypes = flowTypes as FlowType[];
+
+  // ── Screen 3: Per-flow follow-ups ────────────────────────────
+  const flows: FlowConfig[] = [];
+  for (const type of selectedTypes) {
+    p.log.step(`Configure: ${FLOW_TYPE_LABELS[type]}`);
+    const config = await askFlowQuestions(type);
+    flows.push(config);
+  }
+
+  // ── Screen 4: Base URL ───────────────────────────────────────
+  const baseUrl = await p.text({
+    message: "App URL for testing?",
+    placeholder: "http://localhost:3000",
+    initialValue: "http://localhost:3000",
+    validate: (v) => {
+      try {
+        new URL(v);
+        return undefined;
+      } catch {
+        return "Must be a valid URL";
+      }
+    },
+  });
+  if (p.isCancel(baseUrl)) cancel();
+
+  // ── Screen 5: Cleanup ───────────────────────────────────────
+  const wantCleanup = await p.confirm({
+    message: "Auto-cleanup test data after runs?",
+    initialValue: false,
+  });
+  if (p.isCancel(wantCleanup)) cancel();
+
+  let cleanup: CleanupConfig = { enabled: false };
+
+  if (wantCleanup) {
+    const backend = await p.select({
+      message: "What's your backend?",
+      options: [
+        { value: "supabase", label: "Supabase" },
+        { value: "firebase", label: "Firebase" },
+        { value: "postgres", label: "PostgreSQL" },
+        { value: "api", label: "REST API" },
+        { value: "other", label: "Other" },
+      ],
+    });
+    if (p.isCancel(backend)) cancel();
+    cleanup = { enabled: true, backend: backend as string };
+  }
+
+  const selections: E2eSelections = {
+    flows,
+    baseUrl: baseUrl as string,
+    cleanup,
+  };
+
+  // ── Screen 6: Summary ───────────────────────────────────────
+  const fileList = flows.map((f) => `.sweny/e2e/${f.type}.yml`).join(", ");
+  p.log.info(`Will generate: ${chalk.cyan(fileList)}`);
+  if (cleanup.enabled) {
+    p.log.info(`Cleanup: ${chalk.cyan(cleanup.backend)} backend`);
+  }
+
+  const proceed = await p.confirm({
+    message: "Generate files?",
+    initialValue: true,
+  });
+  if (p.isCancel(proceed) || !proceed) cancel();
+
+  // ── Screen 7: Write files ───────────────────────────────────
+  fs.mkdirSync(e2eDir, { recursive: true });
+
+  // Generate workflow files
+  for (const flow of flows) {
+    const workflow = buildFlowWorkflow(flow, baseUrl as string, cleanup);
+    const yamlContent = stringifyYaml(workflow, { indent: 2, lineWidth: 120 });
+    const filePath = path.join(e2eDir, `${flow.type}.yml`);
+    fs.writeFileSync(filePath, yamlContent, "utf-8");
+    p.log.success(`Created ${chalk.cyan(filePath)}`);
+  }
+
+  // Append to .env
+  const envContent = buildE2eEnvTemplate(selections);
+  const envPath = path.join(cwd, ".env");
+  if (fs.existsSync(envPath)) {
+    const existing = fs.readFileSync(envPath, "utf-8");
+    if (!existing.includes("E2E_BASE_URL")) {
+      fs.appendFileSync(envPath, "\n" + envContent, "utf-8");
+      p.log.success(`Appended E2E vars to ${chalk.cyan(".env")}`);
+    } else {
+      p.log.warn(".env already has E2E vars — skipped");
+    }
+  } else {
+    fs.writeFileSync(envPath, envContent, "utf-8");
+    p.log.success(`Created ${chalk.cyan(".env")}`);
+  }
+
+  // ── Next steps ──────────────────────────────────────────────
+  p.outro("E2E setup complete!");
+  console.log(chalk.dim("\n  Next steps:\n"));
+  console.log(chalk.dim("  1. Fill in your .env values"));
+  if (selections.flows.some((f) => AUTH_REQUIRED_FLOWS.includes(f.type) || f.type === "login")) {
+    console.log(chalk.dim("  2. Set E2E_EMAIL and E2E_PASSWORD to a test account"));
+    console.log(chalk.dim(`  3. Run: ${chalk.cyan("sweny e2e run")}\n`));
+  } else {
+    console.log(chalk.dim(`  2. Run: ${chalk.cyan("sweny e2e run")}\n`));
+  }
+}
