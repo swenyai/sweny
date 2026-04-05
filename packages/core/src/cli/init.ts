@@ -181,6 +181,20 @@ export function detectGitRemote(cwd: string): GitRemoteInfo | null {
     return null;
   }
 
+  // SSH scheme: ssh://git@github.com/owner/repo.git
+  const sshSchemeMatch = url.match(/^ssh:\/\/git@([^/]+)\/(.+?)(?:\.git)?$/);
+  if (sshSchemeMatch) {
+    const host = sshSchemeMatch[1];
+    const repoPath = sshSchemeMatch[2];
+    if (host === "github.com") {
+      return { provider: "github", remote: `github.com/${repoPath}` };
+    }
+    if (host === "gitlab.com") {
+      return { provider: "gitlab", remote: `gitlab.com/${repoPath}` };
+    }
+    return null;
+  }
+
   // HTTPS: https://github.com/owner/repo.git
   const httpsMatch = url.match(/^https?:\/\/([^/]+)\/(.+?)(?:\.git)?$/);
   if (httpsMatch) {
@@ -364,7 +378,11 @@ export async function runInit(): Promise<void> {
   } else if ((obsRaw as string) === "__other") {
     const custom = await p.text({
       message: "Enter your observability provider name",
-      validate: (v) => (!v || v.trim().length === 0 ? "Provider name is required" : undefined),
+      validate: (v) => {
+        if (!v || v.trim().length === 0) return "Provider name is required";
+        if (!/^[a-z0-9-]+$/.test(v.trim())) return "Provider name must be lowercase letters, numbers, and hyphens only";
+        return undefined;
+      },
     });
     if (p.isCancel(custom)) cancel();
     observability = (custom as string).trim().toLowerCase();
@@ -420,7 +438,11 @@ export async function runInit(): Promise<void> {
     if ((schedule as string) === "__custom") {
       const customCron = await p.text({
         message: "Enter cron expression (e.g. 0 8 * * 1-5)",
-        validate: (v) => (!v || v.trim().length === 0 ? "Cron expression is required" : undefined),
+        validate: (v) => {
+          if (!v || v.trim().length === 0) return "Cron expression is required";
+          if (!/^[\d*,\/-]+(\s+[\d*,\/-]+){4}$/.test(v.trim())) return "Must be a valid 5-field cron expression";
+          return undefined;
+        },
       });
       if (p.isCancel(customCron)) cancel();
       cronExpression = (customCron as string).trim();
@@ -479,9 +501,16 @@ export async function runInit(): Promise<void> {
   const envPath = path.join(cwd, ".env");
   if (fs.existsSync(envPath)) {
     const existing = fs.readFileSync(envPath, "utf-8");
+    // Parse defined keys (ignore comment lines)
+    const definedKeys = new Set(
+      existing
+        .split("\n")
+        .filter((l) => !l.trimStart().startsWith("#") && l.includes("="))
+        .map((l) => l.split("=")[0].trim()),
+    );
     const newKeys: Credential[] = [];
     for (const cred of credentials) {
-      if (!existing.includes(cred.key + "=")) {
+      if (!definedKeys.has(cred.key)) {
         newKeys.push(cred);
       }
     }
@@ -526,7 +555,8 @@ export async function runInit(): Promise<void> {
   const gitignorePath = path.join(cwd, ".gitignore");
   if (fs.existsSync(gitignorePath)) {
     const gitignore = fs.readFileSync(gitignorePath, "utf-8");
-    if (!gitignore.includes(".env")) {
+    const envIgnored = gitignore.split("\n").some((line) => line.trim() === ".env");
+    if (!envIgnored) {
       p.log.warn(chalk.yellow(".env is not in .gitignore — add it to avoid committing secrets"));
     }
   } else {
