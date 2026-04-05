@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { stringify as stringifyYaml, parse as parseYaml } from "yaml";
 import {
   resolveTemplateVars,
   buildE2eVars,
@@ -10,6 +11,7 @@ import {
   buildE2eEnvTemplate,
 } from "./e2e.js";
 import type { FlowConfig, FlowType, E2eSelections } from "./e2e.js";
+import type { Workflow } from "../types.js";
 import { workflowZ, validateWorkflow } from "../schema.js";
 
 describe("resolveTemplateVars", () => {
@@ -409,5 +411,324 @@ describe("buildE2eEnvTemplate", () => {
       cleanup: { enabled: true, backend: "postgres" },
     });
     expect(env).toContain("DATABASE_URL=");
+  });
+
+  it("includes auth vars for login-only flows", () => {
+    const env = buildE2eEnvTemplate({
+      flows: [{ type: "login", path: "/login" }],
+      baseUrl: "http://localhost:3000",
+      cleanup: { enabled: false },
+    });
+    expect(env).toContain("E2E_EMAIL=");
+    expect(env).toContain("E2E_PASSWORD=");
+  });
+
+  it("includes auth vars for mixed flows when any need auth", () => {
+    const env = buildE2eEnvTemplate({
+      flows: [
+        { type: "registration", path: "/signup" },
+        { type: "purchase", path: "/pricing" },
+      ],
+      baseUrl: "http://localhost:3000",
+      cleanup: { enabled: false },
+    });
+    expect(env).toContain("E2E_EMAIL=");
+    expect(env).toContain("E2E_PASSWORD=");
+  });
+
+  it("does not include cleanup vars when cleanup is disabled", () => {
+    const env = buildE2eEnvTemplate({
+      flows: [{ type: "registration", path: "/signup" }],
+      baseUrl: "http://localhost:3000",
+      cleanup: { enabled: false },
+    });
+    expect(env).not.toContain("SUPABASE_URL");
+    expect(env).not.toContain("FIREBASE_SERVICE_ACCOUNT_KEY");
+    expect(env).not.toContain("DATABASE_URL");
+  });
+});
+
+// ── Additional coverage: edge cases and robustness ────────────────────
+
+describe("buildE2eVars — edge cases", () => {
+  it("does not duplicate base_url from E2E_BASE_URL custom var pickup", () => {
+    const vars = buildE2eVars({ E2E_BASE_URL: "https://myapp.com" });
+    // base_url should exist exactly once with the correct value
+    expect(vars.base_url).toBe("https://myapp.com");
+    // The E2E_BASE_URL should NOT appear as a separate key
+    expect(vars).not.toHaveProperty("base_url_extra");
+  });
+
+  it("excludes E2E_EMAIL and E2E_PASSWORD from custom var pickup", () => {
+    const vars = buildE2eVars({
+      E2E_EMAIL: "test@example.com",
+      E2E_PASSWORD: "secret",
+      E2E_API_KEY: "abc",
+    });
+    // email/password should come from the explicit handling, not custom pickup
+    expect(vars.email).toBe("test@example.com");
+    expect(vars.password).toBe("secret");
+    expect(vars.api_key).toBe("abc");
+    // Should NOT have duplicates from the E2E_* stripping logic
+    expect(Object.keys(vars).filter((k) => k === "email")).toHaveLength(1);
+    expect(Object.keys(vars).filter((k) => k === "password")).toHaveLength(1);
+  });
+
+  it("ignores E2E_* vars with empty string values", () => {
+    const vars = buildE2eVars({ E2E_EMPTY: "" });
+    expect(vars).not.toHaveProperty("empty");
+  });
+
+  it("ignores E2E_* vars with undefined values", () => {
+    const vars = buildE2eVars({ E2E_UNDEF: undefined });
+    expect(vars).not.toHaveProperty("undef");
+  });
+});
+
+describe("buildFlowNodes — login node content", () => {
+  it("login node for auth-dependent flows contains agent-browser commands", () => {
+    const { nodes } = buildFlowNodes({ type: "purchase", path: "/pricing" });
+    const instruction = nodes.login.instruction;
+    expect(instruction).toContain("agent-browser open");
+    expect(instruction).toContain("agent-browser snapshot");
+    expect(instruction).toContain("agent-browser fill");
+    expect(instruction).toContain("agent-browser click");
+  });
+
+  it("login node uses {email} and {password} (not test_email/test_password)", () => {
+    const { nodes } = buildFlowNodes({ type: "onboarding", path: "/onboarding" });
+    expect(nodes.login.instruction).toContain("{email}");
+    expect(nodes.login.instruction).toContain("{password}");
+  });
+
+  it("login node has pass/fail output schema", () => {
+    const { nodes } = buildFlowNodes({ type: "upgrade", path: "/upgrade" });
+    expect(nodes.login.output).toEqual({
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["pass", "fail"] },
+        error: { type: "string" },
+      },
+      required: ["status"],
+    });
+  });
+});
+
+describe("buildFlowNodes — custom flow defaults", () => {
+  it("uses default description when none provided", () => {
+    const { nodes } = buildFlowNodes({ type: "custom", path: "/test" });
+    expect(nodes.test_custom.instruction).toContain("Perform the custom test flow");
+  });
+
+  it("uses default success criteria when none provided", () => {
+    const { nodes } = buildFlowNodes({ type: "custom", path: "/test" });
+    expect(nodes.test_custom.instruction).toContain("expected outcome is achieved without errors");
+  });
+});
+
+describe("buildFlowNodes — all test nodes have correct output schema", () => {
+  const flows: FlowConfig[] = [
+    { type: "registration", path: "/signup" },
+    { type: "login", path: "/login" },
+    { type: "purchase", path: "/pricing" },
+    { type: "onboarding", path: "/onboarding" },
+    { type: "upgrade", path: "/upgrade" },
+    { type: "cancellation", path: "/cancel" },
+    { type: "custom", path: "/test", description: "test" },
+  ];
+
+  for (const flow of flows) {
+    it(`${flow.type}: test node has pass/fail output schema`, () => {
+      const { nodes, testNodeIds } = buildFlowNodes(flow);
+      const testNodeId = testNodeIds[testNodeIds.length - 1]; // last one is the actual test (not login)
+      const node = nodes[testNodeId];
+      expect(node.output).toEqual({
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["pass", "fail"] },
+          error: { type: "string" },
+        },
+        required: ["status"],
+      });
+    });
+  }
+});
+
+describe("buildFlowWorkflow — edge chain topology", () => {
+  it("registration: setup → test → report (3 edges)", () => {
+    const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000");
+    expect(wf.edges).toEqual([
+      { from: "setup", to: "test_registration", when: "setup status is ready" },
+      { from: "setup", to: "report", when: "setup status is fail" },
+      { from: "test_registration", to: "report" },
+    ]);
+  });
+
+  it("purchase: setup → login → test → report with failure edges", () => {
+    const wf = buildFlowWorkflow({ type: "purchase", path: "/pricing" }, "http://localhost:3000");
+    expect(wf.edges).toEqual([
+      { from: "setup", to: "login", when: "setup status is ready" },
+      { from: "setup", to: "report", when: "setup status is fail" },
+      { from: "login", to: "test_purchase", when: "login status is pass" },
+      { from: "login", to: "report", when: "login status is fail" },
+      { from: "test_purchase", to: "report" },
+    ]);
+  });
+
+  it("registration with cleanup: setup → test → cleanup → report", () => {
+    const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000", {
+      enabled: true,
+      backend: "supabase",
+    });
+    expect(wf.edges).toEqual([
+      { from: "setup", to: "test_registration", when: "setup status is ready" },
+      { from: "setup", to: "report", when: "setup status is fail" },
+      { from: "test_registration", to: "cleanup" },
+      { from: "cleanup", to: "report" },
+    ]);
+  });
+
+  it("purchase with cleanup: setup → login → test → cleanup → report", () => {
+    const wf = buildFlowWorkflow({ type: "purchase", path: "/pricing" }, "http://localhost:3000", {
+      enabled: true,
+      backend: "postgres",
+    });
+    expect(wf.edges).toEqual([
+      { from: "setup", to: "login", when: "setup status is ready" },
+      { from: "setup", to: "report", when: "setup status is fail" },
+      { from: "login", to: "test_purchase", when: "login status is pass" },
+      { from: "login", to: "report", when: "login status is fail" },
+      { from: "test_purchase", to: "cleanup" },
+      { from: "cleanup", to: "report" },
+    ]);
+  });
+});
+
+describe("YAML round-trip — generated workflows survive stringify→parse→validate", () => {
+  const flowConfigs: FlowConfig[] = [
+    { type: "registration", path: "/signup", fields: ["email", "password", "name"] },
+    { type: "login", path: "/login" },
+    { type: "purchase", path: "/pricing", paymentProvider: "Stripe" },
+    { type: "onboarding", path: "/onboarding" },
+    { type: "upgrade", path: "/upgrade" },
+    { type: "cancellation", path: "/cancel" },
+    { type: "custom", path: "/test", description: "Export user data as CSV" },
+  ];
+
+  for (const flow of flowConfigs) {
+    it(`${flow.type}: stringifyYaml → parseYaml → workflowZ.parse succeeds`, () => {
+      const wf = buildFlowWorkflow(flow, "http://localhost:3000");
+      const yaml = stringifyYaml(wf, { indent: 2, lineWidth: 120 });
+      const parsed = parseYaml(yaml) as Workflow;
+
+      // Zod schema validation
+      expect(() => workflowZ.parse(parsed)).not.toThrow();
+
+      // Structural validation (cycles, reachability)
+      const errors = validateWorkflow(parsed);
+      expect(errors).toEqual([]);
+
+      // Key fields survive round-trip
+      expect(parsed.id).toBe(wf.id);
+      expect(parsed.entry).toBe("setup");
+      expect(Object.keys(parsed.nodes)).toEqual(Object.keys(wf.nodes));
+      expect(parsed.edges).toHaveLength(wf.edges.length);
+    });
+
+    it(`${flow.type} with cleanup: round-trip with cleanup node`, () => {
+      const wf = buildFlowWorkflow(flow, "https://staging.example.com", {
+        enabled: true,
+        backend: "supabase",
+      });
+      const yaml = stringifyYaml(wf, { indent: 2, lineWidth: 120 });
+      const parsed = parseYaml(yaml) as Workflow;
+
+      expect(() => workflowZ.parse(parsed)).not.toThrow();
+      expect(validateWorkflow(parsed)).toEqual([]);
+      expect(parsed.nodes.cleanup).toBeDefined();
+    });
+  }
+});
+
+describe("template variable completeness — all {vars} in instructions are resolvable", () => {
+  const ALL_FLOW_TYPES: FlowConfig[] = [
+    { type: "registration", path: "/signup", fields: ["email", "password"] },
+    { type: "login", path: "/login" },
+    { type: "purchase", path: "/pricing", paymentProvider: "Stripe" },
+    { type: "onboarding", path: "/onboarding" },
+    { type: "upgrade", path: "/upgrade" },
+    { type: "cancellation", path: "/cancel" },
+    { type: "custom", path: "/test", description: "test flow" },
+  ];
+
+  // Build vars with a known run_id so we can predict all values
+  const vars = buildE2eVars({ RUN_ID: "12345", E2E_BASE_URL: "http://localhost:3000" });
+
+  for (const flow of ALL_FLOW_TYPES) {
+    it(`${flow.type}: all template vars in instructions resolve to values`, () => {
+      const wf = buildFlowWorkflow(flow, "http://localhost:3000");
+
+      for (const [nodeId, node] of Object.entries(wf.nodes)) {
+        const resolved = resolveTemplateVars(node.instruction, vars);
+        // After resolution, no {word} placeholders should remain
+        // (except for agent-browser refs like @<ref> which are not {vars})
+        const unresolvedVars = resolved.match(/\{(\w+)\}/g) || [];
+        // Filter out intentional placeholders that are instructions, not template vars
+        const actualUnresolved = unresolvedVars.filter(
+          (v) => !["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].some((env) => v.includes(env)),
+        );
+        expect(actualUnresolved, `${nodeId} has unresolved vars: ${actualUnresolved.join(", ")}`).toEqual([]);
+      }
+    });
+  }
+});
+
+describe("buildSetupNode — instruction quality", () => {
+  it("lists all essential agent-browser commands", () => {
+    const node = buildSetupNode();
+    const essentialCommands = [
+      "agent-browser open",
+      "agent-browser snapshot",
+      "agent-browser click",
+      "agent-browser fill",
+      "agent-browser press",
+      "agent-browser get url",
+      "agent-browser screenshot",
+    ];
+    for (const cmd of essentialCommands) {
+      expect(node.instruction, `missing: ${cmd}`).toContain(cmd);
+    }
+  });
+
+  it("includes timeout/retry instructions", () => {
+    const node = buildSetupNode();
+    expect(node.instruction).toContain("30 seconds");
+    expect(node.instruction).toContain("2 seconds");
+  });
+});
+
+describe("buildFlowWorkflow — node naming conventions", () => {
+  it("workflow id follows e2e-{type} pattern", () => {
+    const types: FlowType[] = ["registration", "login", "purchase", "onboarding", "upgrade", "cancellation", "custom"];
+    for (const type of types) {
+      const wf = buildFlowWorkflow({ type, path: "/test", description: "test" }, "http://localhost:3000");
+      expect(wf.id).toBe(`e2e-${type}`);
+    }
+  });
+
+  it("workflow name follows E2E: {Type} pattern", () => {
+    const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000");
+    expect(wf.name).toBe("E2E: Registration");
+  });
+
+  it("every node has a non-empty name", () => {
+    const wf = buildFlowWorkflow({ type: "purchase", path: "/pricing" }, "http://localhost:3000", {
+      enabled: true,
+      backend: "supabase",
+    });
+    for (const [id, node] of Object.entries(wf.nodes)) {
+      expect(node.name, `${id} has empty name`).toBeTruthy();
+      expect(node.name.length, `${id} name too short`).toBeGreaterThan(2);
+    }
   });
 });
