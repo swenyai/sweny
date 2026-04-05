@@ -28,8 +28,8 @@ Add to `.claude/settings.json` in your project:
 {
   "mcpServers": {
     "sweny": {
-      "command": "npx",
-      "args": ["-y", "sweny-mcp"]
+      "command": "node",
+      "args": ["/path/to/sweny/packages/mcp/dist/index.js"]
     }
   }
 }
@@ -43,12 +43,14 @@ Add to your `claude_desktop_config.json`:
 {
   "mcpServers": {
     "sweny": {
-      "command": "npx",
-      "args": ["-y", "sweny-mcp"]
+      "command": "node",
+      "args": ["/path/to/sweny/packages/mcp/dist/index.js"]
     }
   }
 }
 ```
+
+Replace `/path/to/sweny` with the absolute path to your clone of the repo. Run `npm run build` in `packages/mcp` first.
 
 ### Prerequisites
 

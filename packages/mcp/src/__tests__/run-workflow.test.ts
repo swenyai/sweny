@@ -129,12 +129,16 @@ describe("runWorkflow", () => {
     expect(result.error).toBe("Process exited with code 1");
   });
 
-  it("handles spawn error", async () => {
+  it("handles spawn error followed by close (realistic ENOENT sequence)", async () => {
     const proc = createMockProcess();
     mockSpawn.mockReturnValue(proc);
 
     const promise = runWorkflow({ workflow: "triage" });
+
+    // Node.js emits both error and close when spawn fails — verify
+    // the settled guard prevents double-resolve
     proc._emit("error", new Error("ENOENT"));
+    proc._emit("close", null); // always follows error in practice
 
     const result = await promise;
     expect(result.success).toBe(false);

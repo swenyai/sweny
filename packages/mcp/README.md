@@ -23,21 +23,8 @@ Add to your project's `.claude/settings.json`:
 {
   "mcpServers": {
     "sweny": {
-      "command": "npx",
-      "args": ["-y", "sweny-mcp"]
-    }
-  }
-}
-```
-
-Or if running from a local clone of this repo:
-
-```json
-{
-  "mcpServers": {
-    "sweny": {
       "command": "node",
-      "args": ["./packages/mcp/dist/index.js"]
+      "args": ["/path/to/sweny/packages/mcp/dist/index.js"]
     }
   }
 }
@@ -51,12 +38,14 @@ Add to your `claude_desktop_config.json`:
 {
   "mcpServers": {
     "sweny": {
-      "command": "npx",
-      "args": ["-y", "sweny-mcp"]
+      "command": "node",
+      "args": ["/path/to/sweny/packages/mcp/dist/index.js"]
     }
   }
 }
 ```
+
+Replace `/path/to/sweny` with the absolute path to your clone of this repo. Run `npm run build` in `packages/mcp` first.
 
 ## Prerequisites
 
@@ -100,5 +89,5 @@ Executes a SWEny workflow by spawning the `sweny` CLI. Returns structured JSON r
 ```bash
 npm run build      # Compile TypeScript + chmod +x
 npm run typecheck  # Type-check without emitting
-npm test           # Run all tests (20 tests across 3 suites)
+npm test           # Run all tests
 ```

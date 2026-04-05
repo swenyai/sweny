@@ -31,7 +31,6 @@ export function resolveSwenyBin(): string {
 }
 
 export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowResult> {
-  // C2: Validate implement requires input
   if (opts.workflow === "implement" && !opts.input) {
     return {
       success: false,
@@ -71,20 +70,26 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
       if (stderr.length < MAX_BUFFER) stderr += chunk.toString();
     });
 
-    // C3: Use flag to avoid double-resolve race condition
+    // Single settled guard prevents double-resolve from any event combination:
+    // error+close, timeout+close, or normal close.
+    let settled = false;
     let timedOut = false;
+
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
     }, TIMEOUT_MS);
 
     child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       resolve({ success: false, output: "", error: `Failed to spawn sweny CLI: ${err.message}` });
     });
 
-    // S3: code is null when killed by signal — handle explicitly
     child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       if (timedOut) {
         resolve({ success: false, output: stdout, error: "Workflow timed out after 10 minutes" });
