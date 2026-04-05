@@ -29,7 +29,8 @@ import type { NodeStatus } from "../mermaid.js";
 import { DagRenderer } from "./renderer.js";
 import * as readline from "node:readline";
 
-import { loadDotenv, loadConfigFile, STARTER_CONFIG } from "./config-file.js";
+import { loadDotenv, loadConfigFile } from "./config-file.js";
+import { runInit } from "./init.js";
 import {
   registerTriageCommand,
   registerImplementCommand,
@@ -86,16 +87,9 @@ const program = new Command()
 // ── sweny init ────────────────────────────────────────────────────────
 program
   .command("init")
-  .description("Create a starter .sweny.yml config file")
-  .action(() => {
-    const target = path.join(process.cwd(), ".sweny.yml");
-    if (fs.existsSync(target)) {
-      console.error(chalk.yellow("  .sweny.yml already exists — skipping."));
-      process.exit(1);
-    }
-    fs.writeFileSync(target, STARTER_CONFIG, "utf-8");
-    console.log(chalk.green("  Created .sweny.yml"));
-    console.log(chalk.dim("  Add your secrets to .env and run: sweny triage --dry-run"));
+  .description("Interactive setup wizard — creates .sweny.yml, .env template, and optional GitHub Action")
+  .action(async () => {
+    await runInit();
   });
 
 // ── sweny check ───────────────────────────────────────────────────────
