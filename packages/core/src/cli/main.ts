@@ -31,6 +31,7 @@ import * as readline from "node:readline";
 
 import { loadDotenv, loadConfigFile } from "./config-file.js";
 import { runInit } from "./init.js";
+import { runE2eInit, runE2eRun } from "./e2e.js";
 import {
   registerTriageCommand,
   registerImplementCommand,
@@ -90,6 +91,27 @@ program
   .description("Interactive setup wizard — creates .sweny.yml, .env template, and optional GitHub Action")
   .action(async () => {
     await runInit();
+  });
+
+// ── sweny e2e ────────────────────────────────────────────────────────
+const e2eCmd = program.command("e2e").description("End-to-end browser testing");
+
+e2eCmd
+  .command("init")
+  .description("Interactive wizard — generates .sweny/e2e/*.yml workflow files")
+  .action(async () => {
+    await runE2eInit();
+  });
+
+e2eCmd
+  .command("run [file]")
+  .description("Run e2e workflow files from .sweny/e2e/")
+  .option("--timeout <ms>", "Timeout per workflow in milliseconds (default: 900000 = 15 min)")
+  .action(async (file: string | undefined, options: { timeout?: string }) => {
+    await runE2eRun({
+      file,
+      timeout: options.timeout ? parseInt(options.timeout, 10) : undefined,
+    });
   });
 
 // ── sweny check ───────────────────────────────────────────────────────
