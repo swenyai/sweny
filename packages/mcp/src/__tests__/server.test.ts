@@ -59,9 +59,10 @@ describe("MCP server integration", () => {
     const result = await client.callTool({ name: "sweny_list_workflows", arguments: {} });
 
     expect(result.isError).toBeFalsy();
-    expect(result.content).toHaveLength(1);
+    const content = result.content as Array<{ type: string; text: string }>;
+    expect(content).toHaveLength(1);
 
-    const text = (result.content[0] as { type: string; text: string }).text;
+    const text = content[0].text;
     const workflows = JSON.parse(text);
 
     expect(Array.isArray(workflows)).toBe(true);
