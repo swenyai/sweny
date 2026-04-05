@@ -659,7 +659,7 @@ async function askFlowQuestions(type: FlowType): Promise<FlowConfig> {
   const flowPath = await p.text({
     message: `URL path for ${FLOW_TYPE_LABELS[type]}?`,
     placeholder: defaultPaths[type],
-    validate: (v) => (!v.startsWith("/") ? "Path must start with /" : undefined),
+    validate: (v) => (!v?.startsWith("/") ? "Path must start with /" : undefined),
   });
   if (p.isCancel(flowPath)) cancel();
 
@@ -773,7 +773,7 @@ export async function runE2eInit(): Promise<void> {
     initialValue: "http://localhost:3000",
     validate: (v) => {
       try {
-        new URL(v);
+        new URL(v!);
         return undefined;
       } catch {
         return "Must be a valid URL";
