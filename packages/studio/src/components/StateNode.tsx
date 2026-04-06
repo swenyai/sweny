@@ -53,8 +53,8 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
   return (
     <div
       style={{
-        width: 280,
-        minHeight: 84,
+        width: "100%",
+        minHeight: "100%",
         position: "relative",
         cursor: "pointer",
       }}
@@ -68,7 +68,7 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
           overflow: "hidden",
           width: "100%",
           height: "100%",
-          minHeight: 84,
+          minHeight: "inherit",
           background: exec.bg,
           boxShadow: exec.shadow,
           border: `1px ${borderStyle} ${borderColor}`,

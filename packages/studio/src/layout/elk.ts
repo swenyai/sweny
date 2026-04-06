@@ -7,13 +7,23 @@ import type { TransitionEdgeData } from "../components/TransitionEdge.js";
 
 const elk = new ELK();
 
-const NODE_WIDTH = 280;
-const NODE_HEIGHT = 84;
+const DEFAULT_NODE_WIDTH = 280;
+const DEFAULT_NODE_HEIGHT = 84;
 
-export async function layoutWorkflow(workflow: Workflow): Promise<{
+export interface LayoutOptions {
+  nodeWidth?: number;
+  nodeHeight?: number;
+}
+
+export async function layoutWorkflow(
+  workflow: Workflow,
+  options?: LayoutOptions,
+): Promise<{
   nodes: StateNodeType[];
   edges: Edge<TransitionEdgeData>[];
 }> {
+  const nodeWidth = options?.nodeWidth ?? DEFAULT_NODE_WIDTH;
+  const nodeHeight = options?.nodeHeight ?? DEFAULT_NODE_HEIGHT;
   const { nodes: flowNodes, edges: flowEdges } = workflowToFlow(workflow);
 
   const elkGraph = {
@@ -28,8 +38,8 @@ export async function layoutWorkflow(workflow: Workflow): Promise<{
     children: flowNodes.map(
       (node): ElkNode => ({
         id: node.id,
-        width: NODE_WIDTH,
-        height: NODE_HEIGHT,
+        width: nodeWidth,
+        height: nodeHeight,
       }),
     ),
     edges: flowEdges.map(
@@ -53,6 +63,7 @@ export async function layoutWorkflow(workflow: Workflow): Promise<{
         x: elkNode?.x ?? 0,
         y: elkNode?.y ?? 0,
       },
+      style: { width: nodeWidth, minHeight: nodeHeight },
       data: {
         nodeId: flowNode.data.nodeId,
         node: flowNode.data.node,

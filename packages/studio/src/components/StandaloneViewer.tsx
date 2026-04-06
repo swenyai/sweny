@@ -4,7 +4,7 @@ import "@xyflow/react/dist/style.css";
 import type { Workflow } from "@sweny-ai/core";
 import { StateNode } from "./StateNode.js";
 import { TransitionEdge } from "./TransitionEdge.js";
-import { layoutWorkflow } from "../layout/elk.js";
+import { layoutWorkflow, type LayoutOptions } from "../layout/elk.js";
 import type { StateNodeType, StateNodeData, NodeExecStatus } from "./StateNode.js";
 import type { Edge } from "@xyflow/react";
 import type { TransitionEdgeData } from "./TransitionEdge.js";
@@ -28,6 +28,10 @@ export interface WorkflowViewerProps {
   onNodeClick?: (nodeId: string) => void;
   /** Show the minimap overlay. Defaults to true. */
   showMiniMap?: boolean;
+  /** Node width in pixels for ELK layout. Defaults to 280. */
+  nodeWidth?: number;
+  /** Node height in pixels for ELK layout. Defaults to 84. */
+  nodeHeight?: number;
 }
 
 function AutoFitView({ nodeCount }: { nodeCount: number }) {
@@ -39,7 +43,7 @@ function AutoFitView({ nodeCount }: { nodeCount: number }) {
       prevCount.current = nodeCount;
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          fitView({ padding: 0.1, duration: 450, minZoom: 0.4 });
+          fitView({ padding: 0.15, duration: 450, minZoom: 0.15 });
         });
       });
     }
@@ -54,6 +58,8 @@ export function WorkflowViewer({
   height = "100%",
   onNodeClick,
   showMiniMap = true,
+  nodeWidth,
+  nodeHeight,
 }: WorkflowViewerProps) {
   const [nodes, setNodes] = useState<StateNodeType[]>([]);
   const [edges, setEdges] = useState<Edge<TransitionEdgeData>[]>([]);
@@ -63,7 +69,10 @@ export function WorkflowViewer({
   useEffect(() => {
     setError(null);
     setLoading(true);
-    layoutWorkflow(workflow)
+    const layoutOpts: LayoutOptions = {};
+    if (nodeWidth) layoutOpts.nodeWidth = nodeWidth;
+    if (nodeHeight) layoutOpts.nodeHeight = nodeHeight;
+    layoutWorkflow(workflow, layoutOpts)
       .then(({ nodes: n, edges: e }) => {
         setNodes(
           n.map((node) => ({
@@ -82,7 +91,7 @@ export function WorkflowViewer({
         setLoading(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workflow]);
+  }, [workflow, nodeWidth, nodeHeight]);
 
   useEffect(() => {
     setNodes((prev) =>
