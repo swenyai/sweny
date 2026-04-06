@@ -31,9 +31,10 @@ beforeEach(() => {
 });
 
 describe("resolveSwenyBin", () => {
-  it("returns an absolute path ending in sweny", () => {
-    expect(bin).toMatch(/\/node_modules\/\.bin\/sweny$/);
-    expect(bin).toMatch(/^\//); // absolute
+  it("returns a path containing sweny", () => {
+    // In the monorepo this resolves to node_modules/.bin/sweny;
+    // outside, it falls back to bare "sweny". Either way the name is present.
+    expect(bin).toContain("sweny");
   });
 });
 
@@ -254,6 +255,99 @@ describe("runWorkflow", () => {
     const result = await promise;
     expect(result.success).toBe(false);
     expect(result.error).toBe("Workflow timed out after 10 minutes");
+
+    vi.useRealTimers();
+  });
+
+  it("returns error when implement is called with whitespace-only input", async () => {
+    const result = await runWorkflow({ workflow: "implement", input: "   " });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("implement workflow requires an issue ID");
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it("trims whitespace from implement input", async () => {
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+
+    const promise = runWorkflow({ workflow: "implement", input: "  ABC-123  " });
+
+    expect(mockSpawn).toHaveBeenCalledWith(bin, ["implement", "ABC-123", "--json", "--stream"], expect.any(Object));
+
+    proc.stdout!.emit("data", Buffer.from('{"ok": true}\n'));
+    proc._emit("close", 0);
+    await promise;
+  });
+
+  it("survives a throwing onProgress callback without breaking the stream", async () => {
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+
+    let callCount = 0;
+    const promise = runWorkflow({
+      workflow: "triage",
+      onProgress: () => {
+        callCount++;
+        throw new Error("callback exploded");
+      },
+    });
+
+    proc.stdout!.emit(
+      "data",
+      Buffer.from(
+        [
+          '{"type":"node:enter","node":"a","instruction":"X"}',
+          '{"type":"node:exit","node":"a","result":{"status":"success"}}',
+          '{"a":{"status":"success"}}',
+          "",
+        ].join("\n"),
+      ),
+    );
+    proc._emit("close", 0);
+
+    const result = await promise;
+    expect(result.success).toBe(true);
+    // Both events with type field attempted delivery
+    expect(callCount).toBe(2);
+    // Final result is still captured despite callback failures
+    expect(JSON.parse(result.output)).toEqual({ a: { status: "success" } });
+  });
+
+  it("processes remaining lineBuf data on close (no trailing newline)", async () => {
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+
+    const promise = runWorkflow({ workflow: "triage" });
+
+    // Send data without trailing newline — it stays in lineBuf until close
+    proc.stdout!.emit("data", Buffer.from('{"final":"result"}'));
+    proc._emit("close", 0);
+
+    const result = await promise;
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.output)).toEqual({ final: "result" });
+  });
+
+  it("includes partial output in timed-out result", async () => {
+    vi.useFakeTimers();
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+
+    const promise = runWorkflow({ workflow: "triage" });
+
+    // Some progress arrives before timeout
+    proc.stdout!.emit("data", Buffer.from('{"type":"node:enter","node":"a","instruction":"X"}\n'));
+    proc.stdout!.emit("data", Buffer.from('{"partial":"data"}\n'));
+
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 1);
+    proc._emit("close", null);
+
+    const result = await promise;
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Workflow timed out after 10 minutes");
+    // Last JSON line before timeout is preserved
+    expect(JSON.parse(result.output)).toEqual({ partial: "data" });
 
     vi.useRealTimers();
   });

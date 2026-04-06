@@ -54,6 +54,18 @@ describe("MCP server integration", () => {
     expect(props.workflow.enum).toEqual(["triage", "implement"]);
   });
 
+  it("sweny_run_workflow returns error for implement without input", async () => {
+    const { client } = await createTestClient();
+    const result = await client.callTool({
+      name: "sweny_run_workflow",
+      arguments: { workflow: "implement" },
+    });
+
+    expect(result.isError).toBe(true);
+    const content = result.content as Array<{ type: string; text: string }>;
+    expect(content[0].text).toContain("implement workflow requires an issue ID");
+  });
+
   it("sweny_list_workflows returns built-in workflows via MCP call", async () => {
     const { client } = await createTestClient();
     const result = await client.callTool({ name: "sweny_list_workflows", arguments: {} });

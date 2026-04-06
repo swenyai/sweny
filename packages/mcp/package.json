@@ -45,6 +45,9 @@
     "workflow",
     "sweny"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "publishConfig": {
     "access": "public"
   }

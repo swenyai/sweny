@@ -107,9 +107,9 @@ Workflows run a full DAG with multiple Claude invocations under the hood. Expect
 When Claude calls `sweny_run_workflow`, the MCP server:
 
 1. **Spawns a separate `sweny` CLI process** — this avoids recursion (the MCP server runs inside Claude Code, but the workflow spawns its own Claude Code instance)
-2. **Passes `--json` for structured output** — the CLI returns machine-readable results
-3. **Streams stdout/stderr** — captures output up to 1 GB
-4. **Returns the result** — success with structured data, or failure with error details
+2. **Passes `--json --stream`** — the CLI outputs NDJSON events as the DAG executes
+3. **Streams progress in real time** — parses NDJSON events (`node:enter`, `node:progress`, `node:exit`) and forwards them to Claude via MCP logging notifications
+4. **Returns the final result** — the last JSON object from the stream, with success/failure status
 
 The MCP server itself is stateless — each tool call is independent.
 

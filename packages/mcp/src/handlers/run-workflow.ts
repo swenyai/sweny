@@ -1,3 +1,4 @@
+import { accessSync, constants } from "node:fs";
 import { spawn } from "node:child_process";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,21 +20,30 @@ export interface RunWorkflowResult {
 }
 
 const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
-const MAX_BUFFER = 1024 * 1024 * 1024; // 1 GB — agentic workflows produce verbose tool call logs
+const MAX_STDERR_BUFFER = 10 * 1024 * 1024; // 10 MB — stderr is error output, not verbose logs
 
 /**
- * Resolve the absolute path to the `sweny` CLI binary.
- * Uses the workspace-linked bin rather than npx to avoid
- * resolution overhead and version mismatch risk.
+ * Resolve the path to the `sweny` CLI binary.
+ *
+ * In the monorepo, the workspace-linked bin at node_modules/.bin/sweny is
+ * preferred for speed and version consistency. When installed standalone via
+ * npm, that path won't exist — fall back to the bare command name so the OS
+ * resolves it from PATH (which works because @sweny-ai/core declares a bin).
  */
 export function resolveSwenyBin(): string {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   // packages/mcp/dist/handlers/ → ../../../../node_modules/.bin/sweny
-  return path.resolve(__dirname, "..", "..", "..", "..", "node_modules", ".bin", "sweny");
+  const monorepo = path.resolve(__dirname, "..", "..", "..", "..", "node_modules", ".bin", "sweny");
+  try {
+    accessSync(monorepo, constants.X_OK);
+    return monorepo;
+  } catch {
+    return "sweny";
+  }
 }
 
 export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowResult> {
-  if (opts.workflow === "implement" && !opts.input) {
+  if (opts.workflow === "implement" && !opts.input?.trim()) {
     return {
       success: false,
       output: "",
@@ -44,7 +54,7 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
   const args: string[] = [];
 
   if (opts.workflow === "implement") {
-    args.push("implement", opts.input!);
+    args.push("implement", opts.input!.trim());
   } else {
     args.push("triage");
   }
@@ -78,7 +88,11 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
         try {
           const parsed = JSON.parse(trimmed);
           if (parsed.type && opts.onProgress) {
-            opts.onProgress(parsed);
+            try {
+              opts.onProgress(parsed);
+            } catch {
+              // Progress is best-effort — don't break the stream
+            }
           }
           lastJsonLine = trimmed;
         } catch {
@@ -88,7 +102,7 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
-      if (stderr.length < MAX_BUFFER) stderr += chunk.toString();
+      if (stderr.length < MAX_STDERR_BUFFER) stderr += chunk.toString();
     });
 
     // Single settled guard prevents double-resolve from any event combination:
@@ -118,7 +132,11 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
         try {
           const parsed = JSON.parse(lineBuf.trim());
           if (parsed.type && opts.onProgress) {
-            opts.onProgress(parsed);
+            try {
+              opts.onProgress(parsed);
+            } catch {
+              // Progress is best-effort
+            }
           }
           lastJsonLine = lineBuf.trim();
         } catch {
