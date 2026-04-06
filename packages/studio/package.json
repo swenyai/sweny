@@ -23,7 +23,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:lib": "tsc --project tsconfig.lib.json && BUILD_MODE=lib vite build",
+    "build:lib": "BUILD_MODE=lib vite build && tsc --project tsconfig.lib.json",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
