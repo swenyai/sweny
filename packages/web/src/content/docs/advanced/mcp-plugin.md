@@ -7,6 +7,24 @@ The `@sweny-ai/mcp` package runs SWEny as a [Model Context Protocol](https://mod
 
 Instead of switching to your terminal to run `sweny triage`, Claude can call the tool itself — delegating complex multi-step work to SWEny's DAG executor while you stay in your conversation.
 
+## Quick start — Claude Code Plugin
+
+The easiest way to use SWEny from Claude Code is to install the plugin:
+
+```
+/plugin install https://github.com/swenyai/sweny
+```
+
+This gives you:
+- **Slash commands** — `/sweny:triage`, `/sweny:implement`, `/sweny:e2e-run`, and 8 more
+- **MCP tools** — Claude can autonomously list and run workflows
+- **Startup hook** — verifies your credentials on session start
+- **Isolated agent** — long-running workflows execute in a forked context
+
+### Manual MCP setup
+
+If you prefer to configure just the MCP server without the full plugin:
+
 ## Why use SWEny as an MCP server?
 
 Claude Code runs everything in a single conversation context. For complex tasks, that context gets bloated and unfocused. SWEny's DAG executor solves this by splitting work into nodes — each node gets a focused context window with only the inputs it needs.

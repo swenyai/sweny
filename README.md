@@ -67,6 +67,7 @@ The wizard supports registration, login, purchase, onboarding, upgrade, cancella
 | **[E2E Testing](https://docs.sweny.ai/cli/e2e/)** | Generate and run AI-driven browser tests. No Playwright scripts — the agent figures out the DOM. |
 | **[GitHub Action](https://docs.sweny.ai/action/)** | Publish workflows to CI. Runs on cron schedules or dispatch. |
 | **[Studio](https://docs.sweny.ai/studio/)** | Visual DAG editor and live execution monitor. Watch workflows run in real time. |
+| **[Claude Code Plugin](https://docs.sweny.ai/advanced/mcp-plugin/)** | `/plugin install https://github.com/swenyai/sweny` — slash commands, MCP tools, hooks, isolated agent. |
 | **[MCP Server](https://docs.sweny.ai/advanced/mcp-plugin/)** | Use SWEny from Claude Code or Claude Desktop. Claude delegates complex tasks to SWEny's DAG executor. |
 | **[SWEny Cloud](https://app.sweny.ai)** | Teams. Dashboard, shared credentials, scheduling, cross-repo analytics. |
 
@@ -110,7 +111,8 @@ Not just code tasks — SWEny works for anything you can describe as steps with 
 |---------|-----------|-----------|-------------|
 | `@sweny-ai/core` | `packages/core` | npm | Skill library, DAG executor, CLI, workflows |
 | `@sweny-ai/studio` | `packages/studio` | npm | Visual DAG editor and execution monitor |
-| `@sweny-ai/mcp` | `packages/mcp` | private | MCP server for Claude Code / Desktop |
+| `@sweny-ai/mcp` | `packages/mcp` | npm | MCP server for Claude Code / Desktop |
+| — | `packages/plugin` | — | Claude Code plugin: slash commands, MCP tools, agent, hooks |
 | `@sweny-ai/action` | `packages/action` | private | GitHub Action wrapper |
 | `@sweny-ai/web` | `packages/web` | private | docs.sweny.ai website |
 
