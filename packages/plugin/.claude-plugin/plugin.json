@@ -1,0 +1,13 @@
+{
+  "name": "sweny",
+  "version": "0.1.0",
+  "description": "SWEny AI workflows for Claude Code — triage production alerts, implement fixes, run e2e tests, and create custom workflows",
+  "author": {
+    "name": "SWEny AI",
+    "url": "https://sweny.ai"
+  },
+  "homepage": "https://sweny.ai/docs/advanced/mcp-plugin",
+  "repository": "https://github.com/swenyai/sweny",
+  "license": "MIT",
+  "keywords": ["sweny", "triage", "workflow", "e2e", "alerts", "mcp"]
+}
