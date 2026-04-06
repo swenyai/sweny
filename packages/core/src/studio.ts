@@ -92,7 +92,16 @@ export function workflowToFlow(
   const skillMap = new Map(skillCatalog.map((s) => [s.id, s]));
   const terminalIds = findTerminals(workflow);
 
-  const nodes: FlowNode[] = Object.entries(workflow.nodes).map(([id, node]) => ({
+  // Defensive: streaming LLM YAML (or user-authored partial workflows)
+  // can produce nodes with missing `skills` / workflows with missing
+  // `edges`. The types say these are required, but runtime data from
+  // untrusted sources frequently violates that. Rather than crash the
+  // viewer with "Cannot read properties of undefined (reading 'map')",
+  // treat them as empty and let the caller decide what to render.
+  const workflowNodes = workflow.nodes ?? {};
+  const workflowEdges = workflow.edges ?? [];
+
+  const nodes: FlowNode[] = Object.entries(workflowNodes).map(([id, node]) => ({
     id,
     type: "skillNode" as const,
     position: { x: 0, y: 0 }, // ELK will compute real positions
@@ -101,19 +110,19 @@ export function workflowToFlow(
       node,
       isEntry: id === workflow.entry,
       isTerminal: terminalIds.has(id),
-      skills: node.skills.map((sid) => {
+      skills: (node.skills ?? []).map((sid) => {
         const skill = skillMap.get(sid);
         return {
           id: sid,
           name: skill?.name ?? sid,
-          toolCount: skill?.tools.length ?? 0,
+          toolCount: skill?.tools?.length ?? 0,
         };
       }),
       exec: { status: "pending" },
     },
   }));
 
-  const edges: FlowEdge[] = workflow.edges.map((edge) => ({
+  const edges: FlowEdge[] = workflowEdges.map((edge) => ({
     id: `${edge.from}--${edge.to}`,
     source: edge.from,
     target: edge.to,
@@ -198,8 +207,8 @@ export function flowToWorkflow(
 // ─── Helpers ─────────────────────────────────────────────────────
 
 function findTerminals(workflow: Workflow): Set<string> {
-  const hasOutgoing = new Set(workflow.edges.map((e) => e.from));
-  return new Set(Object.keys(workflow.nodes).filter((id) => !hasOutgoing.has(id)));
+  const hasOutgoing = new Set((workflow.edges ?? []).map((e) => e.from));
+  return new Set(Object.keys(workflow.nodes ?? {}).filter((id) => !hasOutgoing.has(id)));
 }
 
 /**

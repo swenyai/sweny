@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { workflowToFlow, flowToWorkflow, applyExecutionEvent, exportAsTypescript, getSkillCatalog } from "../studio.js";
-import type { Workflow, ExecutionEvent, NodeResult } from "../types.js";
+import type { Workflow, ExecutionEvent, NodeResult, Skill } from "../types.js";
 import type { SkillNodeData } from "../studio.js";
 
 const testWorkflow: Workflow = {
@@ -74,6 +74,88 @@ describe("workflowToFlow", () => {
     for (const node of nodes) {
       expect(node.data.exec.status).toBe("pending");
     }
+  });
+
+  // Defensive behavior: streaming LLM YAML (and user-authored
+  // workflows) routinely arrive with fields omitted. The viewer
+  // must not crash on these — it should render an empty state for
+  // the missing pieces.
+  describe("defensive handling of partial workflows", () => {
+    it("treats a node with undefined skills as having no skills", () => {
+      const partial = {
+        id: "partial",
+        name: "Partial",
+        description: "",
+        entry: "a",
+        nodes: {
+          // Cast to unknown→Node: we're deliberately simulating
+          // what a partial YAML parse produces at runtime.
+          a: { name: "A", instruction: "Do A" } as unknown as Workflow["nodes"][string],
+        },
+        edges: [],
+      } satisfies Workflow;
+
+      expect(() => workflowToFlow(partial)).not.toThrow();
+      const { nodes } = workflowToFlow(partial);
+      expect(nodes[0].data.skills).toEqual([]);
+    });
+
+    it("treats a workflow with undefined edges as having no edges", () => {
+      const partial = {
+        id: "partial",
+        name: "Partial",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: { name: "A", instruction: "Do A", skills: [] },
+        },
+      } as unknown as Workflow;
+
+      expect(() => workflowToFlow(partial)).not.toThrow();
+      const { nodes, edges } = workflowToFlow(partial);
+      expect(edges).toEqual([]);
+      // The sole node is still terminal because there are no outgoing edges.
+      expect(nodes[0].data.isTerminal).toBe(true);
+    });
+
+    it("treats a workflow with undefined nodes as having no nodes", () => {
+      const partial = {
+        id: "partial",
+        name: "Partial",
+        description: "",
+        entry: "a",
+        edges: [],
+      } as unknown as Workflow;
+
+      expect(() => workflowToFlow(partial)).not.toThrow();
+      const { nodes, edges } = workflowToFlow(partial);
+      expect(nodes).toEqual([]);
+      expect(edges).toEqual([]);
+    });
+
+    it("treats a skill catalog entry with missing tools as toolCount=0", () => {
+      const brokenSkill = {
+        id: "broken",
+        name: "Broken",
+        description: "No tools array",
+        category: "general" as const,
+        config: {},
+        // tools omitted on purpose
+      } as unknown as Skill;
+
+      const wf: Workflow = {
+        id: "t",
+        name: "T",
+        description: "",
+        entry: "a",
+        nodes: { a: { name: "A", instruction: "Do A", skills: ["broken"] } },
+        edges: [],
+      };
+
+      expect(() => workflowToFlow(wf, [brokenSkill])).not.toThrow();
+      const { nodes } = workflowToFlow(wf, [brokenSkill]);
+      expect(nodes[0].data.skills[0].toolCount).toBe(0);
+    });
   });
 });
 
