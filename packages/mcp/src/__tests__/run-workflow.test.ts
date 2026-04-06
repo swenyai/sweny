@@ -38,7 +38,7 @@ describe("resolveSwenyBin", () => {
 });
 
 describe("runWorkflow", () => {
-  it("builds correct CLI args for triage", async () => {
+  it("builds correct CLI args for triage with --stream", async () => {
     const proc = createMockProcess();
     mockSpawn.mockReturnValue(proc);
 
@@ -46,11 +46,11 @@ describe("runWorkflow", () => {
 
     expect(mockSpawn).toHaveBeenCalledWith(
       bin,
-      ["triage", "--json"],
+      ["triage", "--json", "--stream"],
       expect.objectContaining({ cwd: expect.any(String), stdio: ["ignore", "pipe", "pipe"] }),
     );
 
-    proc.stdout!.emit("data", Buffer.from('{"ok": true}'));
+    proc.stdout!.emit("data", Buffer.from('{"ok": true}\n'));
     proc._emit("close", 0);
 
     const result = await promise;
@@ -65,11 +65,11 @@ describe("runWorkflow", () => {
 
     expect(mockSpawn).toHaveBeenCalledWith(
       bin,
-      ["implement", "ABC-123", "--json"],
+      ["implement", "ABC-123", "--json", "--stream"],
       expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
     );
 
-    proc.stdout!.emit("data", Buffer.from('{"ok": true}'));
+    proc.stdout!.emit("data", Buffer.from('{"ok": true}\n'));
     proc._emit("close", 0);
 
     const result = await promise;
@@ -82,25 +82,91 @@ describe("runWorkflow", () => {
 
     const promise = runWorkflow({ workflow: "triage", dryRun: true });
 
-    expect(mockSpawn).toHaveBeenCalledWith(bin, ["triage", "--json", "--dry-run"], expect.any(Object));
+    expect(mockSpawn).toHaveBeenCalledWith(bin, ["triage", "--json", "--stream", "--dry-run"], expect.any(Object));
 
     proc._emit("close", 0);
     await promise;
   });
 
-  it("parses JSON output on success", async () => {
+  it("parses final JSON result from NDJSON stream", async () => {
     const proc = createMockProcess();
     mockSpawn.mockReturnValue(proc);
 
     const promise = runWorkflow({ workflow: "triage" });
 
-    const output = JSON.stringify({ prepare: { status: "success" } });
-    proc.stdout!.emit("data", Buffer.from(output));
+    // Simulate NDJSON stream: events then final result
+    proc.stdout!.emit(
+      "data",
+      Buffer.from(
+        [
+          '{"type":"workflow:start","workflow":"triage"}',
+          '{"type":"node:enter","node":"prepare","instruction":"Gather data"}',
+          '{"type":"node:exit","node":"prepare","result":{"status":"success","data":{},"toolCalls":[]}}',
+          '{"prepare":{"status":"success","data":{},"toolCalls":[]}}',
+          "",
+        ].join("\n"),
+      ),
+    );
     proc._emit("close", 0);
 
     const result = await promise;
     expect(result.success).toBe(true);
-    expect(result.output).toBe(output);
+    // The last valid JSON line is the final result
+    expect(JSON.parse(result.output)).toEqual({
+      prepare: { status: "success", data: {}, toolCalls: [] },
+    });
+  });
+
+  it("calls onProgress for stream events", async () => {
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+
+    const events: Record<string, unknown>[] = [];
+    const promise = runWorkflow({
+      workflow: "triage",
+      onProgress: (e) => events.push(e),
+    });
+
+    proc.stdout!.emit(
+      "data",
+      Buffer.from(
+        [
+          '{"type":"node:enter","node":"prepare","instruction":"Go"}',
+          '{"type":"node:progress","node":"prepare","message":"Querying logs..."}',
+          '{"type":"node:exit","node":"prepare","result":{"status":"success","data":{},"toolCalls":[]}}',
+          '{"prepare":{"status":"success"}}',
+          "",
+        ].join("\n"),
+      ),
+    );
+    proc._emit("close", 0);
+
+    await promise;
+    expect(events).toHaveLength(3); // 3 events with type field (last line has no type)
+    expect(events[0]).toEqual({ type: "node:enter", node: "prepare", instruction: "Go" });
+    expect(events[1]).toEqual({ type: "node:progress", node: "prepare", message: "Querying logs..." });
+    expect(events[2]).toMatchObject({ type: "node:exit", node: "prepare" });
+  });
+
+  it("handles chunked NDJSON across multiple data events", async () => {
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+
+    const events: Record<string, unknown>[] = [];
+    const promise = runWorkflow({
+      workflow: "triage",
+      onProgress: (e) => events.push(e),
+    });
+
+    // Simulate data arriving in chunks that split across line boundaries
+    proc.stdout!.emit("data", Buffer.from('{"type":"node:ent'));
+    proc.stdout!.emit("data", Buffer.from('er","node":"a","instruction":"X"}\n{"result":'));
+    proc.stdout!.emit("data", Buffer.from('"ok"}\n'));
+    proc._emit("close", 0);
+
+    await promise;
+    expect(events).toHaveLength(1); // only the event with type field
+    expect(events[0]).toEqual({ type: "node:enter", node: "a", instruction: "X" });
   });
 
   it("returns error on non-zero exit with stderr", async () => {
@@ -135,10 +201,8 @@ describe("runWorkflow", () => {
 
     const promise = runWorkflow({ workflow: "triage" });
 
-    // Node.js emits both error and close when spawn fails — verify
-    // the settled guard prevents double-resolve
     proc._emit("error", new Error("ENOENT"));
-    proc._emit("close", null); // always follows error in practice
+    proc._emit("close", null);
 
     const result = await promise;
     expect(result.success).toBe(false);
@@ -146,13 +210,11 @@ describe("runWorkflow", () => {
     expect(result.error).toContain("ENOENT");
   });
 
-  // C2: implement requires input
   it("returns error when implement is called without input", async () => {
     const result = await runWorkflow({ workflow: "implement" });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("implement workflow requires an issue ID");
-    // Should NOT have spawned a process
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
@@ -164,7 +226,6 @@ describe("runWorkflow", () => {
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
-  // S3: null exit code (signal kill)
   it("handles null exit code from signal kill", async () => {
     const proc = createMockProcess();
     mockSpawn.mockReturnValue(proc);
@@ -177,7 +238,6 @@ describe("runWorkflow", () => {
     expect(result.error).toContain("killed by signal");
   });
 
-  // C3: timeout triggers SIGTERM and resolves via close handler
   it("reports timeout when process is killed", async () => {
     vi.useFakeTimers();
     const proc = createMockProcess();
@@ -185,12 +245,10 @@ describe("runWorkflow", () => {
 
     const promise = runWorkflow({ workflow: "triage" });
 
-    // Advance past the 10 minute timeout
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 1);
 
     expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
 
-    // Simulate the process closing after SIGTERM
     proc._emit("close", null);
 
     const result = await promise;

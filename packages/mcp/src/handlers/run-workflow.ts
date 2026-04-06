@@ -8,6 +8,8 @@ export interface RunWorkflowInput {
   input?: string;
   cwd?: string;
   dryRun?: boolean;
+  /** Called with parsed NDJSON stream events for real-time progress. */
+  onProgress?: (event: Record<string, unknown>) => void;
 }
 
 export interface RunWorkflowResult {
@@ -47,7 +49,7 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
     args.push("triage");
   }
 
-  args.push("--json");
+  args.push("--json", "--stream");
   if (opts.dryRun) args.push("--dry-run");
 
   const cwd = opts.cwd ?? process.cwd();
@@ -60,12 +62,31 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
       // Inherit env — sweny CLI needs API keys, .env vars, PATH, etc.
     });
 
-    let stdout = "";
     let stderr = "";
+    let lineBuf = "";
+    let lastJsonLine = "";
 
+    // Parse stdout line-by-line: each line is either an NDJSON stream event
+    // or (the last valid JSON) the final --json result.
     child.stdout.on("data", (chunk: Buffer) => {
-      if (stdout.length < MAX_BUFFER) stdout += chunk.toString();
+      lineBuf += chunk.toString();
+      const parts = lineBuf.split("\n");
+      lineBuf = parts.pop()!; // keep incomplete trailing fragment
+      for (const line of parts) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed.type && opts.onProgress) {
+            opts.onProgress(parsed);
+          }
+          lastJsonLine = trimmed;
+        } catch {
+          // Non-JSON line — ignore (progress spinner output, etc.)
+        }
+      }
     });
+
     child.stderr.on("data", (chunk: Buffer) => {
       if (stderr.length < MAX_BUFFER) stderr += chunk.toString();
     });
@@ -91,14 +112,28 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+
+      // Process any remaining buffered data
+      if (lineBuf.trim()) {
+        try {
+          const parsed = JSON.parse(lineBuf.trim());
+          if (parsed.type && opts.onProgress) {
+            opts.onProgress(parsed);
+          }
+          lastJsonLine = lineBuf.trim();
+        } catch {
+          // Not JSON
+        }
+      }
+
       if (timedOut) {
-        resolve({ success: false, output: stdout, error: "Workflow timed out after 10 minutes" });
+        resolve({ success: false, output: lastJsonLine, error: "Workflow timed out after 10 minutes" });
       } else if (code === 0) {
-        resolve({ success: true, output: stdout.trim() });
+        resolve({ success: true, output: lastJsonLine });
       } else {
         resolve({
           success: false,
-          output: stdout.trim(),
+          output: lastJsonLine,
           error: stderr.trim() || `Process exited with code ${code ?? "unknown (killed by signal)"}`,
         });
       }
