@@ -2,7 +2,7 @@
 name: workflow-create
 description: Generate a new SWEny workflow from a natural language description. Saves to .sweny/workflows/.
 allowed-tools: Bash
-argument-hint: <description>
+argument-hint: "<description>"
 ---
 
 # SWEny Workflow Create

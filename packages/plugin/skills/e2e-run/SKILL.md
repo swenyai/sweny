@@ -5,7 +5,7 @@ disable-model-invocation: true
 allowed-tools: Bash
 context: fork
 agent: sweny-workflow
-argument-hint: [file] [--timeout <ms>]
+argument-hint: "[file] [--timeout <ms>]"
 ---
 
 # SWEny E2E Run

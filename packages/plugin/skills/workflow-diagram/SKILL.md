@@ -2,7 +2,7 @@
 name: workflow-diagram
 description: Render a SWEny workflow as a Mermaid diagram for visualization.
 allowed-tools: Bash
-argument-hint: <file> [--direction TB|LR]
+argument-hint: "<file> [--direction TB|LR]"
 ---
 
 # SWEny Workflow Diagram

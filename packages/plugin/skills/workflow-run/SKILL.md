@@ -5,7 +5,7 @@ disable-model-invocation: true
 allowed-tools: Bash
 context: fork
 agent: sweny-workflow
-argument-hint: <file> [--dry-run] [--input <json>]
+argument-hint: "<file> [--dry-run] [--input <json>]"
 ---
 
 # SWEny Workflow Run

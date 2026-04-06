@@ -5,7 +5,7 @@ disable-model-invocation: true
 allowed-tools: Bash
 context: fork
 agent: sweny-workflow
-argument-hint: <issue-id-or-url>
+argument-hint: "<issue-id-or-url>"
 ---
 
 # SWEny Implement
