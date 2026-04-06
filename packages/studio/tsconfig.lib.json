@@ -3,7 +3,7 @@
   "compilerOptions": {
     "noEmit": false,
     "declaration": true,
-    "declarationDir": "dist-lib/types",
+    "declarationDir": "dist/lib/types",
     "emitDeclarationOnly": true,
     "rootDir": "src"
   },
