@@ -305,6 +305,130 @@ describe("ClaudeClient", () => {
     expect(result.data.error).toContain("Too many turns");
   });
 
+  // terminal_reason was added in @anthropic-ai/claude-agent-sdk v0.2.91.
+  // When the turn budget is exhausted the SDK now emits subtype='success'
+  // alongside terminal_reason='max_turns' instead of the old error subtype,
+  // so the claude.ts handler has to look at both fields or silently accept
+  // truncated output as a success.
+  describe("terminal_reason handling (claude-agent-sdk v0.2.91+)", () => {
+    it("returns failed when terminal_reason is max_turns", async () => {
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "result",
+            subtype: "success",
+            result: "partial output",
+            terminal_reason: "max_turns",
+          },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.status).toBe("failed");
+      expect(result.data.error).toContain("max_turns");
+      expect(result.data.error).toContain("terminated early");
+    });
+
+    it("returns failed for any non-completed terminal_reason", async () => {
+      // Future SDK versions may add new terminal reasons (aborted_tools,
+      // blocking_limit, etc.) — treat anything that isn't 'completed' as a
+      // failure rather than assume it's recoverable.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "result",
+            subtype: "success",
+            result: "partial",
+            terminal_reason: "aborted_tools",
+          },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.status).toBe("failed");
+      expect(result.data.error).toContain("aborted_tools");
+    });
+
+    it("returns success when terminal_reason is 'completed'", async () => {
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "result",
+            subtype: "success",
+            result: '{"ok": true}',
+            terminal_reason: "completed",
+          },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.status).toBe("success");
+      expect(result.data.ok).toBe(true);
+    });
+
+    it("returns success when terminal_reason is absent (pre-v0.2.91 SDK)", async () => {
+      // Old SDKs never set terminal_reason. The guard must not treat an
+      // absent field as a failure or every caller would break on downgrade.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "result",
+            subtype: "success",
+            result: '{"done": true}',
+            // terminal_reason deliberately omitted
+          },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.status).toBe("success");
+      expect(result.data.done).toBe(true);
+    });
+
+    it("preserves toolCalls when failing on terminal_reason", async () => {
+      // A max_turns failure should still surface any tool calls that
+      // happened before the budget ran out, so debuggers can see what
+      // Claude was trying to do.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [
+                {
+                  type: "tool_use",
+                  name: "search_code",
+                  input: { query: "foo" },
+                },
+              ],
+            },
+          },
+          {
+            type: "result",
+            subtype: "success",
+            result: "partial",
+            terminal_reason: "max_turns",
+          },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.status).toBe("failed");
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0].tool).toBe("search_code");
+    });
+  });
+
   it("passes model option to query", async () => {
     mockQuery.mockReturnValueOnce(makeStream([{ type: "result", subtype: "success", result: "ok" }]));
 
