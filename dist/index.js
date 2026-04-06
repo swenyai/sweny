@@ -44149,6 +44149,19 @@ class ClaudeClient {
                 else if (message.type === "result") {
                     const resultMsg = message;
                     if (resultMsg.subtype === "success" && "result" in resultMsg) {
+                        // terminal_reason was added in @anthropic-ai/claude-agent-sdk v0.2.91.
+                        // When the turn budget is exhausted the SDK still emits subtype='success'
+                        // but sets terminal_reason='max_turns'. Treat anything other than
+                        // 'completed' (or absent) as a failure so callers are not silently fed
+                        // incomplete output.
+                        const terminalReason = resultMsg.terminal_reason;
+                        if (terminalReason && terminalReason !== "completed") {
+                            return {
+                                status: "failed",
+                                data: { error: `Claude query terminated early: ${terminalReason}` },
+                                toolCalls,
+                            };
+                        }
                         response = resultMsg.result;
                     }
                     else if ("errors" in resultMsg) {
