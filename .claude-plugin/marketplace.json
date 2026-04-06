@@ -1,0 +1,20 @@
+{
+  "name": "sweny-official",
+  "owner": {
+    "name": "SWEny AI",
+    "email": "hello@sweny.ai"
+  },
+  "metadata": {
+    "description": "Official SWEny AI plugins for Claude Code",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "sweny",
+      "source": "./packages/plugin",
+      "description": "SWEny AI workflows — triage alerts, implement fixes, run e2e tests, create custom workflows",
+      "version": "0.1.0",
+      "category": "productivity"
+    }
+  ]
+}
