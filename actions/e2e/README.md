@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: swenyai/sweny/actions/e2e@v5
+      - uses: swenyai/sweny/actions/e2e@v4
         with:
           workflow: .sweny/e2e/uat.yml
           base-url: https://staging.example.com

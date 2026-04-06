@@ -9,7 +9,7 @@ For built-in triage / implement workflows with all the observability and source-
 ## Usage
 
 ```yaml
-- uses: swenyai/sweny/actions/run@v5
+- uses: swenyai/sweny/actions/run@v4
   with:
     workflow: .sweny/workflows/my-workflow.yml
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -36,7 +36,7 @@ You must provide either `claude-oauth-token` or `anthropic-api-key`.
 Anything you set in the calling job's `env:` block (or step `env:`) is visible to the workflow nodes — `sweny` runs in the same shell environment. Use this to pass secrets, base URLs, feature flags, etc.
 
 ```yaml
-- uses: swenyai/sweny/actions/run@v5
+- uses: swenyai/sweny/actions/run@v4
   with:
     workflow: .sweny/workflows/release-notes.yml
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

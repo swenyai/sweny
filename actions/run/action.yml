@@ -54,7 +54,9 @@ runs:
 
     - name: Install SWEny CLI
       shell: bash
-      run: npm install -g @sweny-ai/core@${{ inputs.cli-version }}
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+      run: npm install -g "@sweny-ai/core@${CLI_VERSION}"
 
     - name: Run workflow
       shell: bash
@@ -62,4 +64,5 @@ runs:
       env:
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-oauth-token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
-      run: sweny workflow run "${{ inputs.workflow }}"
+        WORKFLOW_PATH: ${{ inputs.workflow }}
+      run: sweny workflow run "$WORKFLOW_PATH"

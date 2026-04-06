@@ -78,10 +78,13 @@ runs:
 
     - name: Install SWEny CLI and agent-browser
       shell: bash
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+        AGENT_BROWSER_VERSION: ${{ inputs.agent-browser-version }}
       run: |
         npm install -g \
-          @sweny-ai/core@${{ inputs.cli-version }} \
-          agent-browser@${{ inputs.agent-browser-version }}
+          "@sweny-ai/core@${CLI_VERSION}" \
+          "agent-browser@${AGENT_BROWSER_VERSION}"
         agent-browser install
 
     - name: Run E2E workflow
@@ -91,7 +94,8 @@ runs:
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-oauth-token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         BASE_URL: ${{ inputs.base-url }}
-      run: sweny workflow run "${{ inputs.workflow }}"
+        WORKFLOW_PATH: ${{ inputs.workflow }}
+      run: sweny workflow run "$WORKFLOW_PATH"
 
     - name: Upload screenshots
       if: always()
