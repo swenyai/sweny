@@ -7,6 +7,9 @@ node_modules/
 .github/triage-analysis/
 .DS_Store
 .claude/worktrees/
+.claude/settings.local.json
+.claude/projects/
+.superpowers/
 
 # Ignore dist for library packages (built locally)
 packages/agent/dist/
