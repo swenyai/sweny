@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sweny": {
+      "command": "npx",
+      "args": ["-y", "@sweny-ai/mcp"]
+    }
+  }
+}

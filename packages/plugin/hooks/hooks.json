@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -f .sweny.yml && sweny check 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}
