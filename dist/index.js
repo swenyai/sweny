@@ -45691,10 +45691,11 @@ const supabase = {
  * Skill Registry
  *
  * All built-in skills + helpers to build a skill map from config.
+ *
+ * This module is browser-safe — no `node:fs`, no `node:path`, no `process`.
+ * Custom skill discovery (filesystem-based) lives in `./custom-loader.js`,
+ * which is Node-only and re-exported from `@sweny-ai/core` (the Node entry).
  */
-
-
-
 
 
 
@@ -45706,65 +45707,6 @@ const supabase = {
 // ─── Built-in skill catalog ─────────────────────────────────────
 const builtinSkills = [github, linear, slack, sentry, datadog, betterstack, notification, supabase];
 
-// ─── Custom skill discovery ─────────────────────────────────────
-/**
- * Load custom skills from a `.claude/skills/` directory.
- *
- * Custom skills are instruction-only (no tools or config) — they provide
- * guidance documents that the coding agent reads from the filesystem.
- * Registering them here ensures workflow validation recognises the skill IDs
- * so nodes referencing them don't produce spurious warnings.
- */
-function loadCustomSkills(cwd = process.cwd()) {
-    const skillsDir = (0,external_node_path_namespaceObject.join)(cwd, ".claude", "skills");
-    if (!(0,external_node_fs_namespaceObject.existsSync)(skillsDir))
-        return [];
-    const skills = [];
-    let entries;
-    try {
-        entries = (0,external_node_fs_namespaceObject.readdirSync)(skillsDir, { withFileTypes: true })
-            .filter((d) => d.isDirectory())
-            .map((d) => d.name);
-    }
-    catch {
-        return [];
-    }
-    for (const dirName of entries) {
-        const skillFile = (0,external_node_path_namespaceObject.join)(skillsDir, dirName, "SKILL.md");
-        if (!(0,external_node_fs_namespaceObject.existsSync)(skillFile))
-            continue;
-        try {
-            const content = (0,external_node_fs_namespaceObject.readFileSync)(skillFile, "utf-8");
-            const frontmatter = parseFrontmatter(content);
-            if (!frontmatter?.name)
-                continue;
-            skills.push({
-                id: frontmatter.name,
-                name: frontmatter.name,
-                description: frontmatter.description ?? `Custom skill: ${frontmatter.name}`,
-                category: "general",
-                config: {},
-                tools: [],
-            });
-        }
-        catch {
-            // Skip malformed skill files
-        }
-    }
-    return skills;
-}
-/** Extract YAML frontmatter from a markdown file (between --- delimiters). */
-function parseFrontmatter(content) {
-    const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
-    if (!match)
-        return null;
-    try {
-        return dist.parse(match[1]);
-    }
-    catch {
-        return null;
-    }
-}
 // ─── Registry helpers ───────────────────────────────────────────
 /**
  * Build a skill map from an array of skills.
@@ -45799,7 +45741,7 @@ function allSkills() {
  * Optional fields are validated by individual tool handlers at call time,
  * so missing optional config never disqualifies the skill.
  */
-function isSkillConfigured(skill, env = process.env) {
+function isSkillConfigured(skill, env = {}) {
     for (const field of Object.values(skill.config)) {
         if (field.required && field.env && !env[field.env])
             return false;
@@ -45807,21 +45749,14 @@ function isSkillConfigured(skill, env = process.env) {
     return true;
 }
 /**
- * From all builtins + custom repo skills, return only the skills that are usable.
- * Built-in skills are filtered by env vars; custom skills are always included.
+ * Browser-safe variant of `configuredSkills`: returns only the *built-in* skills
+ * whose required env vars are present. Does not touch the filesystem.
+ *
+ * Node callers should use `configuredSkills` from `@sweny-ai/core`, which also
+ * loads custom skills from `.claude/skills/`.
  */
-function configuredSkills(env = process.env, cwd) {
-    const configured = builtinSkills.filter((s) => isSkillConfigured(s, env));
-    const custom = loadCustomSkills(cwd);
-    // Deduplicate: built-in skills take precedence over custom skills with the same ID
-    const ids = new Set(configured.map((s) => s.id));
-    for (const skill of custom) {
-        if (!ids.has(skill.id)) {
-            configured.push(skill);
-            ids.add(skill.id);
-        }
-    }
-    return configured;
+function configuredBuiltinSkills(env = {}) {
+    return builtinSkills.filter((s) => isSkillConfigured(s, env));
 }
 function validateWorkflowSkills(workflow, available) {
     const configured = [];
@@ -45888,6 +45823,96 @@ function validateWorkflowSkills(workflow, available) {
         }
     }
     return { configured, missing, errors, warnings };
+}
+
+;// CONCATENATED MODULE: ../core/dist/skills/custom-loader.js
+/**
+ * Custom skill discovery — Node-only.
+ *
+ * Lives outside `skills/index.ts` so the registry stays browser-safe. Anything
+ * that needs `node:fs` / `node:path` / `process.cwd()` belongs here.
+ */
+
+
+
+
+/**
+ * Load custom skills from a `.claude/skills/` directory.
+ *
+ * Custom skills are instruction-only (no tools or config) — they provide
+ * guidance documents that the coding agent reads from the filesystem.
+ * Registering them here ensures workflow validation recognises the skill IDs
+ * so nodes referencing them don't produce spurious warnings.
+ */
+function loadCustomSkills(cwd = process.cwd()) {
+    const skillsDir = (0,external_node_path_namespaceObject.join)(cwd, ".claude", "skills");
+    if (!(0,external_node_fs_namespaceObject.existsSync)(skillsDir))
+        return [];
+    const skills = [];
+    let entries;
+    try {
+        entries = (0,external_node_fs_namespaceObject.readdirSync)(skillsDir, { withFileTypes: true })
+            .filter((d) => d.isDirectory())
+            .map((d) => d.name);
+    }
+    catch {
+        return [];
+    }
+    for (const dirName of entries) {
+        const skillFile = (0,external_node_path_namespaceObject.join)(skillsDir, dirName, "SKILL.md");
+        if (!(0,external_node_fs_namespaceObject.existsSync)(skillFile))
+            continue;
+        try {
+            const content = (0,external_node_fs_namespaceObject.readFileSync)(skillFile, "utf-8");
+            const frontmatter = parseFrontmatter(content);
+            if (!frontmatter?.name)
+                continue;
+            skills.push({
+                id: frontmatter.name,
+                name: frontmatter.name,
+                description: frontmatter.description ?? `Custom skill: ${frontmatter.name}`,
+                category: "general",
+                config: {},
+                tools: [],
+            });
+        }
+        catch {
+            // Skip malformed skill files
+        }
+    }
+    return skills;
+}
+/** Extract YAML frontmatter from a markdown file (between --- delimiters). */
+function parseFrontmatter(content) {
+    const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
+    if (!match)
+        return null;
+    try {
+        return dist.parse(match[1]);
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * From all builtins + custom repo skills, return only the skills that are usable.
+ * Built-in skills are filtered by env vars; custom skills are always included.
+ *
+ * Node-only: reads `.claude/skills/` from disk. Browser code should call
+ * `configuredBuiltinSkills` from `@sweny-ai/core/browser` instead.
+ */
+function configuredSkills(env = process.env, cwd) {
+    const configured = builtinSkills.filter((s) => isSkillConfigured(s, env));
+    const custom = loadCustomSkills(cwd);
+    // Deduplicate: built-in skills take precedence over custom skills with the same ID
+    const ids = new Set(configured.map((s) => s.id));
+    for (const skill of custom) {
+        if (!ids.has(skill.id)) {
+            configured.push(skill);
+            ids.add(skill.id);
+        }
+    }
+    return configured;
 }
 
 ;// CONCATENATED MODULE: ../core/dist/schema.js
@@ -47028,6 +47053,8 @@ const STARTER_CONFIG = (/* unused pure expression or super */ null && (`# .sweny
 // Claude client
 
 // Skills
+
+// Node-only skill discovery (filesystem-based)
 
 // Schema & validation
 
