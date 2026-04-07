@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="assets/logo-lockup-dark.svg" alt="SWEny" width="280" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-lockup-light.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo-lockup-dark.svg" />
+    <img src="assets/logo-lockup-dark.svg" alt="SWEny" width="280" />
+  </picture>
 </p>
 
 <p align="center">
@@ -55,13 +59,13 @@ Or browse ready-to-run workflows at **[marketplace.sweny.ai](https://marketplace
 | Approach | What it does |
 |----------|--------------|
 | **[CLI](https://docs.sweny.ai/cli/)** | Build and run workflows from your terminal. Describe a task, get a DAG, run it. |
-| **[GitHub Action](https://docs.sweny.ai/action/)** | Run any SWEny workflow on CI — triage, implement, or your own custom YAML. See the [recipes](#recipes) below. |
+| **[GitHub Action](https://docs.sweny.ai/action/)** | Run any workflow on CI. Generic runner here, plus dedicated [triage](https://github.com/swenyai/triage) and [e2e](https://github.com/swenyai/e2e) actions. |
 | **[Studio](https://docs.sweny.ai/studio/)** | Visual DAG editor and live execution monitor. Watch workflows run in real time. |
 | **[Claude Code Plugin](https://docs.sweny.ai/advanced/mcp-plugin/)** | `/plugin install https://github.com/swenyai/sweny` — slash commands, MCP tools, hooks, isolated agent. |
 | **[MCP Server](https://docs.sweny.ai/advanced/mcp-plugin/)** | Use SWEny from Claude Code or Claude Desktop. Claude delegates complex tasks to SWEny's DAG executor. |
 | **[Marketplace](https://marketplace.sweny.ai)** | Browse community workflows. Copy one into your repo, customize the steps, run it. |
 
-## Recipes
+## Actions
 
 `swenyai/sweny@v5` is the generic engine — give it a workflow YAML and it runs. Targeted use cases (triage, e2e, implement) ship as their own focused actions in dedicated repos so each gets its own GitHub Marketplace listing.
 

@@ -178,7 +178,7 @@ sweny implement --dry-run ENG-123 # analyze without making changes
 **From GitHub Actions:**
 
 ```yaml
-- uses: swenyai/sweny@v4
+- uses: swenyai/sweny@v5
   with:
     workflow: implement
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

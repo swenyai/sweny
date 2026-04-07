@@ -290,7 +290,7 @@ export function buildActionWorkflow(credentials: Credential[], cronExpression: s
   lines.push("    runs-on: ubuntu-latest");
   lines.push("    steps:");
   lines.push("      - uses: actions/checkout@v4");
-  lines.push("      - uses: swenyai/sweny@v4");
+  lines.push("      - uses: swenyai/sweny@v5");
   lines.push("        with:");
   lines.push("          workflow: triage");
   if (secretCreds.length > 0) {

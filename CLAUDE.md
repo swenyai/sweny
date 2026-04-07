@@ -3,8 +3,8 @@
 ## Deployment
 
 Push to `main` auto-deploys everything:
-1. `.github/workflows/release.yml` rebuilds `dist/`, bumps versions, publishes to npm, and updates the `v4` action tag
-2. GitHub Action consumers (`swenyai/sweny@v4`) pick up changes on their next run — no manual release step
+1. `.github/workflows/release.yml` rebuilds `dist/`, bumps versions, publishes to npm, and updates the `v5` action tag
+2. GitHub Action consumers (`swenyai/sweny@v5`) pick up changes on their next run — no manual release step
 
 Changesets are handled by a CI backstop (`scripts/auto-changeset.mjs`) that auto-generates one for any published package with unreleased commits. You can also create one explicitly at `.changeset/<slug>.md` with the correct bump level if you want a meaningful description.
 

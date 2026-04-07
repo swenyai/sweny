@@ -61,7 +61,7 @@ jobs:
           echo "Collected $(jq length /tmp/ci-failures.json) failed runs"
 
       - name: Run SWEny
-        uses: swenyai/sweny@v4
+        uses: swenyai/sweny@v5
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 

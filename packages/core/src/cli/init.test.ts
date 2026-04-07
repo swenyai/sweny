@@ -308,7 +308,7 @@ describe("buildActionWorkflow", () => {
     expect(workflow).toContain('cron: "0 8 * * 1"');
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("actions/checkout@v4");
-    expect(workflow).toContain("swenyai/sweny@v4");
+    expect(workflow).toContain("swenyai/sweny@v5");
   });
 
   it("generates a workflow with daily cron", () => {

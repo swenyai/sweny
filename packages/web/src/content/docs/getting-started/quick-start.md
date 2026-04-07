@@ -77,7 +77,7 @@ Put workflows on a schedule. SWEny monitors your observability platform, triages
 
 ```yaml
 # .github/workflows/sweny-triage.yml
-- uses: swenyai/sweny@v4
+- uses: swenyai/sweny@v5
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     observability-provider: sentry
