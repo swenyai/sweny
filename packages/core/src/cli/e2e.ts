@@ -13,7 +13,8 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { execute } from "../executor.js";
 import { ClaudeClient } from "../claude.js";
-import { createSkillMap, configuredSkills } from "../skills/index.js";
+import { createSkillMap } from "../skills/index.js";
+import { configuredSkills } from "../skills/custom-loader.js";
 import { consoleLogger } from "../types.js";
 import type { Workflow, Node, Edge, ExecutionEvent, Observer, NodeResult } from "../types.js";
 import { validateWorkflow } from "../schema.js";

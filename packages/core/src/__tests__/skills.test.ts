@@ -9,7 +9,8 @@ import { slack } from "../skills/slack.js";
 import { sentry } from "../skills/sentry.js";
 import { datadog } from "../skills/datadog.js";
 import { notification } from "../skills/notification.js";
-import { loadCustomSkills, configuredSkills, createSkillMap } from "../skills/index.js";
+import { createSkillMap } from "../skills/index.js";
+import { loadCustomSkills, configuredSkills } from "../skills/custom-loader.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────
 

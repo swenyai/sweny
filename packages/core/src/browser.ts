@@ -31,7 +31,7 @@ export { consoleLogger } from "./types.js";
 export { execute } from "./executor.js";
 export type { ExecuteOptions } from "./executor.js";
 
-// Skills
+// Skills (browser-safe — no filesystem access, no `process.env` reads)
 export {
   github,
   linear,
@@ -43,7 +43,7 @@ export {
   createSkillMap,
   allSkills,
   isSkillConfigured,
-  configuredSkills,
+  configuredBuiltinSkills,
   validateWorkflowSkills,
 } from "./skills/index.js";
 export type { SkillValidationResult } from "./skills/index.js";

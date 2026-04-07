@@ -14,7 +14,8 @@ import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workf
 import type { ExecutionEvent, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
-import { createSkillMap, configuredSkills } from "../skills/index.js";
+import { createSkillMap } from "../skills/index.js";
+import { configuredSkills } from "../skills/custom-loader.js";
 import { buildAutoMcpServers, buildProviderContext } from "../mcp.js";
 import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";

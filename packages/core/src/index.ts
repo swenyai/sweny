@@ -68,10 +68,13 @@ export {
   createSkillMap,
   allSkills,
   isSkillConfigured,
-  configuredSkills,
+  configuredBuiltinSkills,
   validateWorkflowSkills,
 } from "./skills/index.js";
 export type { SkillValidationResult } from "./skills/index.js";
+
+// Node-only skill discovery (filesystem-based)
+export { loadCustomSkills, configuredSkills } from "./skills/custom-loader.js";
 
 // Schema & validation
 export { workflowZ, nodeZ, edgeZ, skillZ, parseWorkflow, validateWorkflow, workflowJsonSchema } from "./schema.js";
