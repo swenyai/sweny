@@ -1,5 +1,5 @@
 name: "SWEny — Run AI Workflow"
-description: "Run any SWEny workflow YAML on GitHub Actions. For triage or e2e presets, see swenyai/triage and swenyai/e2e."
+description: "Run any SWEny workflow YAML on GitHub Actions — bring your own DAG, wire your own tools."
 author: "SWEny"
 
 branding:
