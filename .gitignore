@@ -16,13 +16,6 @@ packages/agent/dist/
 packages/core/dist/
 packages/engine/dist/
 packages/providers/dist/
-packages/action/dist/
 packages/cli/dist/
 packages/studio/dist/
 packages/mcp/dist/
-
-# Root dist/ is NOT ignored — required for GitHub Action (compiled action entry point)
-# But declaration files from ncc are not needed
-dist/**/*.d.ts
-dist/**/*.d.ts.map
-dist/package.json
