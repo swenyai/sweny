@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: Install SWEny and choose how to run it — CLI, GitHub Action, Studio, or Cloud.
+description: Install SWEny and choose how to run it — Claude Code plugin, CLI, GitHub Action, Studio, or Marketplace.
 ---
 
 SWEny is one tool with multiple surfaces. Install it once, then pick the way that fits your workflow.
@@ -25,6 +25,18 @@ ANTHROPIC_API_KEY=sk-ant-...
 Or use a Claude subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) for flat-rate billing. The CLI auto-loads `.env` at startup.
 
 ## Choose your surface
+
+### Claude Code Plugin — use SWEny inside Claude Code
+
+If you use [Claude Code](https://code.claude.com), install the plugin and get 11 slash commands, MCP tools, and a startup hook:
+
+```
+/plugin install https://github.com/swenyai/sweny
+```
+
+Then use `/sweny:triage` to investigate production alerts, `/sweny:implement ENG-123` to fix an issue, `/sweny:e2e-run` to run browser tests, or `/sweny:workflow-create` to build a custom workflow — all without leaving your conversation.
+
+**[Full plugin guide](/advanced/mcp-plugin/)** — all skills, MCP tools, hooks, and agent details.
 
 ### CLI — build and run workflows from your terminal
 

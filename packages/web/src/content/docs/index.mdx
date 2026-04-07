@@ -145,6 +145,16 @@ Deploy any workflow to GitHub Actions with three secrets and a cron schedule. SW
 
 [Full Action guide](/action/) — setup, scheduling, and service maps.
 
+## Use it from Claude Code
+
+Install the [Claude Code plugin](/advanced/mcp-plugin/) and get slash commands, MCP tools, and a startup hook — without leaving your conversation:
+
+```
+/plugin install https://github.com/swenyai/sweny
+```
+
+Then type `/sweny:triage`, `/sweny:implement ENG-123`, `/sweny:e2e-run`, or any of the 11 available commands. Claude can also autonomously delegate tasks to SWEny's DAG executor via MCP tools.
+
 ## Connect to your stack
 
 SWEny connects to the tools you already use — GitHub, Linear, Sentry, Datadog, BetterStack, Slack, and more — through built-in [skills](/skills/) and [MCP servers](/advanced/mcp-servers/). Set an API key and the skill is ready. Bring your own MCP servers to connect anything else.

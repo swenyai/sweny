@@ -125,7 +125,7 @@ export default defineConfig({
           items: [
             { label: "Architecture", slug: "advanced/architecture" },
             { label: "MCP Servers", slug: "advanced/mcp-servers" },
-            { label: "MCP Server Plugin", slug: "advanced/mcp-plugin" },
+            { label: "Claude Code Plugin", slug: "advanced/mcp-plugin" },
             { label: "Troubleshooting", slug: "advanced/troubleshooting" },
           ],
         },
