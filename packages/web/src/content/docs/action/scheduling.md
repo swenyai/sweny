@@ -293,4 +293,4 @@ This creates a clean handoff: triage runs daily, finds issues, and creates ticke
 - **Always include `workflow_dispatch`** alongside `schedule` so you can trigger manually for debugging.
 - **Set `timeout-minutes: 60`** (or higher for `thorough` depth) to give the agent enough time to complete.
 - **Use `novelty-mode: true`** (the default) to skip issues that already have tickets, keeping your backlog clean.
-- **Consider [SWEny Cloud](https://app.sweny.ai)** if you want managed scheduling without GitHub cron, plus a centralized dashboard to view results across all your repos.
+- **Browse the [Marketplace](https://marketplace.sweny.ai)** if you want a starting workflow for a different scheduling pattern — competitive scans, content pipelines, weekly digests.

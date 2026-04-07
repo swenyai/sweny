@@ -10,7 +10,7 @@ The **GitHub Action and CLI are free and open source**. You pay for Claude usage
 - **Claude Max/Pro subscription** (`claude-oauth-token`) — triage runs are included in your existing subscription. No per-run charge.
 - **Anthropic API key** (`anthropic-api-key`) — pay-per-use. A typical triage run costs roughly $0.10-$0.50 depending on log volume and investigation depth.
 
-**[SWEny Cloud](https://app.sweny.ai)** is an optional managed platform for teams that adds a centralized dashboard, shared credential storage, scheduled runs, auto-implement, and cross-repo analytics. It has a free tier (5 jobs/month) and paid plans starting at $149/month. [See pricing](https://app.sweny.ai/#/pricing).
+The **[Workflow Marketplace](https://marketplace.sweny.ai)** is free to browse — copy any workflow into your repo and run it on your own infrastructure.
 
 ## What AI model does SWEny use?
 
@@ -68,7 +68,7 @@ When using the **GitHub Action or CLI**, SWEny runs entirely within your infrast
 
 The Action and CLI are standalone open-source tools with no phone-home behavior. Nothing is sent to SWEny servers.
 
-When using **[SWEny Cloud](https://app.sweny.ai)**, jobs run on managed infrastructure. Your credentials are encrypted at rest and in transit. Job metadata (status, duration, results) is stored for your dashboard — source code is not persisted after a job completes.
+SWEny does not run a managed cloud service today — everything executes inside your CI runners or your local machine.
 
 ## Can I use a different LLM?
 
@@ -131,5 +131,5 @@ Yes. Set `source-control-provider: gitlab` and add `gitlab-token` and `gitlab-pr
 - [Troubleshooting](/advanced/troubleshooting/) — common issues and solutions
 - [GitHub Issues](https://github.com/swenyai/sweny/issues) — report bugs and request features
 - [GitHub Discussions](https://github.com/swenyai/sweny/discussions) — ask questions and share workflows
-- [SWEny Cloud](https://app.sweny.ai) — Pro and Team plans include email and Slack support
+- [Marketplace](https://marketplace.sweny.ai) — browse community workflows
 - [Contact us](mailto:hello@sweny.ai) — enterprise inquiries and partnership questions

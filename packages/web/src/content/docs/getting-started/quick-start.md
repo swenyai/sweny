@@ -89,11 +89,9 @@ sweny triage --stream
 
 **[Full Studio guide](/studio/)** — editor, embedding, and live mode.
 
-### SWEny Cloud — the team layer
+### Marketplace — start from a community workflow
 
-Dashboard, shared credentials, scheduling, and cross-repo analytics for teams running SWEny at scale.
-
-**[app.sweny.ai](https://app.sweny.ai)** — get started in minutes. [See pricing](https://app.sweny.ai/#/pricing).
+Don't want to write a workflow from scratch? Browse **[marketplace.sweny.ai](https://marketplace.sweny.ai)** for ready-to-run SWEny workflows. Pick one, copy the YAML into `.sweny/workflows/`, customize the steps, and run.
 
 ## What's next?
 

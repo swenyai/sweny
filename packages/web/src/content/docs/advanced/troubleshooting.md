@@ -195,4 +195,4 @@ The default cache TTL is 24 hours (`86400` seconds). For iterative development w
 
 - [GitHub Issues](https://github.com/swenyai/sweny/issues) — report bugs and request features
 - [GitHub Discussions](https://github.com/swenyai/sweny/discussions) — ask questions and share workflows
-- [SWEny Cloud](https://app.sweny.ai) — Pro and Team plans include email and Slack support
+- [Marketplace](https://marketplace.sweny.ai) — browse community workflows for inspiration

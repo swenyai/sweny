@@ -61,7 +61,7 @@ The executor uses headless [Claude Code](https://docs.anthropic.com/en/docs/clau
 | **GitHub Action** | Deploy workflows to CI for scheduled automation. Built-in triage monitors production errors. |
 | **Studio** | Visual DAG editor and live execution monitor. Watch workflows run node-by-node. |
 
-**[SWEny Cloud](https://app.sweny.ai)** adds the team layer — dashboard, shared credentials, scheduling, and cross-repo analytics.
+Looking for inspiration? Browse the **[Workflow Marketplace](https://marketplace.sweny.ai)** for ready-to-run workflows you can copy, customize, and run.
 
 ## What people build with it
 

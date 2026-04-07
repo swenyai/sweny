@@ -31,7 +31,7 @@ export default defineConfig({
       ],
       lastUpdated: true,
       social: [
-        { icon: "external", label: "SWEny Cloud", href: "https://app.sweny.ai" },
+        { icon: "external", label: "Marketplace", href: "https://marketplace.sweny.ai" },
         { icon: "github", label: "GitHub", href: "https://github.com/swenyai/sweny" },
       ],
       editLink: {

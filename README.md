@@ -11,8 +11,8 @@
   <a href="https://www.npmjs.com/package/@sweny-ai/core"><img alt="npm" src="https://img.shields.io/npm/v/@sweny-ai/core?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/swenyai/sweny?style=flat-square" /></a>
   <a href="https://docs.sweny.ai"><img alt="Docs" src="https://img.shields.io/badge/docs-docs.sweny.ai-blue?style=flat-square" /></a>
-  <a href="https://github.com/marketplace/actions/sweny-ai"><img alt="Marketplace" src="https://img.shields.io/badge/GitHub%20Marketplace-SWEny%20AI-orange?style=flat-square&logo=github" /></a>
-  <a href="https://app.sweny.ai"><img alt="SWEny Cloud" src="https://img.shields.io/badge/SWEny%20Cloud-app.sweny.ai-blueviolet?style=flat-square" /></a>
+  <a href="https://marketplace.sweny.ai"><img alt="Workflow Marketplace" src="https://img.shields.io/badge/Workflows-marketplace.sweny.ai-blueviolet?style=flat-square" /></a>
+  <a href="https://github.com/marketplace/actions/sweny-ai"><img alt="GitHub Marketplace" src="https://img.shields.io/badge/GitHub%20Marketplace-SWEny%20AI-orange?style=flat-square&logo=github" /></a>
 </p>
 
 ---
@@ -48,32 +48,22 @@ sweny workflow create "your task description here"
 sweny workflow run .sweny/workflows/your-workflow.yml
 ```
 
-## E2E browser testing
-
-Generate AI-driven end-to-end tests for any web app — no test scripts to write:
-
-```bash
-sweny e2e init     # wizard asks about your flows → generates workflow YAML
-sweny e2e run      # AI agent drives a real browser to test your app
-```
-
-The wizard supports registration, login, purchase, onboarding, upgrade, cancellation, and custom flows. Each generates a self-contained workflow with auto-generated test credentials and optional cleanup.
+Or browse ready-to-run workflows at **[marketplace.sweny.ai](https://marketplace.sweny.ai)** — copy one into `.sweny/workflows/`, customize, run.
 
 ## How you use it
 
 | Approach | What it does |
 |----------|--------------|
 | **[CLI](https://docs.sweny.ai/cli/)** | Build and run workflows from your terminal. Describe a task, get a DAG, run it. |
-| **[E2E Testing](https://docs.sweny.ai/cli/e2e/)** | Generate and run AI-driven browser tests. No Playwright scripts — the agent figures out the DOM. |
-| **[GitHub Action](https://docs.sweny.ai/action/)** | Run any SWEny workflow on CI — triage, implement, E2E, or your own custom YAML. See the [recipes](#recipes) below. |
+| **[GitHub Action](https://docs.sweny.ai/action/)** | Run any SWEny workflow on CI — triage, implement, or your own custom YAML. See the [recipes](#recipes) below. |
 | **[Studio](https://docs.sweny.ai/studio/)** | Visual DAG editor and live execution monitor. Watch workflows run in real time. |
 | **[Claude Code Plugin](https://docs.sweny.ai/advanced/mcp-plugin/)** | `/plugin install https://github.com/swenyai/sweny` — slash commands, MCP tools, hooks, isolated agent. |
 | **[MCP Server](https://docs.sweny.ai/advanced/mcp-plugin/)** | Use SWEny from Claude Code or Claude Desktop. Claude delegates complex tasks to SWEny's DAG executor. |
-| **[SWEny Cloud](https://app.sweny.ai)** | Teams. Dashboard, shared credentials, scheduling, cross-repo analytics. |
+| **[Marketplace](https://marketplace.sweny.ai)** | Browse community workflows. Copy one into your repo, customize the steps, run it. |
 
 ## Recipes
 
-The GitHub Action ships as a single generic engine — `swenyai/sweny@v4` — that can run any SWEny workflow. The recipes below show how to wire it up for common use cases. All of them use the same underlying engine; pick the one that matches your task or assemble your own.
+The GitHub Action ships as a single generic engine — `swenyai/sweny@v4` — that runs any SWEny workflow. The recipes below show common wiring patterns; pick one or assemble your own. More are listed at [marketplace.sweny.ai](https://marketplace.sweny.ai).
 
 ### SRE triage
 
@@ -125,9 +115,9 @@ jobs:
           issue-tracker-provider: github
 ```
 
-### E2E browser testing
+### Agentic E2E browser testing
 
-Agent-driven end-to-end tests against a deployed app. Uses the [`actions/e2e`](actions/e2e) preset, which adds [`agent-browser`](https://www.npmjs.com/package/agent-browser) installation, a `BASE_URL` convention, and automatic screenshot artifact upload.
+Agent-driven end-to-end tests against a deployed app — no Playwright scripts, the agent figures out the DOM. Generate the workflow with `sweny e2e init`, then run it on CI with the [`actions/e2e`](actions/e2e) preset, which adds [`agent-browser`](https://www.npmjs.com/package/agent-browser) installation, a `BASE_URL` convention, and automatic screenshot artifact upload.
 
 ```yaml
 name: E2E UAT
@@ -209,7 +199,7 @@ SWEny splits tasks into nodes in a DAG. Each node gets a focused instruction, sc
 - **Build** — `sweny workflow create` turns a natural language description into a workflow YAML with nodes, edges, skills, and output schemas.
 - **Refine** — `sweny workflow edit` modifies workflows with natural language. Add quality gates, loop-back conditions, notification steps — no YAML editing.
 - **Run** — The DAG executor walks nodes in order, resolves conditional edges, and tracks every tool call.
-- **Deploy** — Run from the CLI, schedule via GitHub Actions, or manage at scale with SWEny Cloud.
+- **Deploy** — Run from the CLI or schedule via GitHub Actions. Browse [marketplace.sweny.ai](https://marketplace.sweny.ai) for ready-to-run workflows.
 
 ## Real-world examples
 
@@ -233,16 +223,11 @@ Not just code tasks — SWEny works for anything you can describe as steps with 
 | `@sweny-ai/action` | `packages/action` | private | GitHub Action wrapper |
 | `@sweny-ai/web` | `packages/web` | private | docs.sweny.ai website |
 
-## SWEny Cloud
+## Workflow Marketplace
 
-**[app.sweny.ai](https://app.sweny.ai)** — the managed platform built on top of the open-source core.
+**[marketplace.sweny.ai](https://marketplace.sweny.ai)** — a community catalog of ready-to-run SWEny workflows. Browse by category, copy the YAML into `.sweny/workflows/`, customize the steps, and run.
 
-- **Dashboard** — view job history, logs, and results across all your repos in one place.
-- **Team credentials** — securely store API keys and tokens so every repo can use them without per-repo secrets.
-- **Schedules & webhooks** — set up recurring triage and auto-implement without managing GitHub cron.
-- **Analytics** — track triage volume, fix rates, and mean-time-to-fix across your organization.
-
-The Action and CLI are free and always will be. SWEny Cloud adds the operational layer for teams running SWEny at scale. [See pricing](https://app.sweny.ai/#/pricing).
+Anything built with `sweny workflow create` can be shared. The CLI and Action stay free and open source.
 
 ## Documentation
 
