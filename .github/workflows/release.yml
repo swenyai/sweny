@@ -111,20 +111,17 @@ jobs:
             git push
           fi
 
-      - name: Rebuild action dist and tag
+      - name: Tag v5 moving tag and immutable v5.<core-version>
         run: |
-          npm run package --workspace=packages/action
-          git add dist/
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: rebuild action dist [skip ci]"
-            git push
-          fi
-
-          git tag -f v4
-          git push origin v4 --force
+          # The root action.yml is a composite action — no JS bundle to build.
+          # Just move the v5 tag forward so consumers pinned to swenyai/sweny@v5
+          # always get the latest engine wrapper, and cut an immutable
+          # v5.<core_version> for anyone who wants to pin precisely.
+          git tag -f v5
+          git push origin v5 --force
 
           CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
-          VERSIONED_TAG="v4.${CORE_VERSION}"
+          VERSIONED_TAG="v5.${CORE_VERSION}"
           if git tag "$VERSIONED_TAG" 2>/dev/null; then
             git push origin "$VERSIONED_TAG"
             echo "Pushed $VERSIONED_TAG"
