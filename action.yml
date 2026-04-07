@@ -1,442 +1,68 @@
-name: "SWEny — AI Workflow Engine"
-description: "Run any AI workflow as a GitHub Action. Built-in triage and implement workflows, plus first-class support for custom workflow YAMLs and targeted recipes (E2E, cron jobs, audits, …). See the README for recipes."
+name: "SWEny — Run AI Workflow"
+description: "Run any SWEny workflow YAML on GitHub Actions. Generic engine wrapper — bring your own workflow file. For preset triage / e2e behavior, see the swenyai/triage and swenyai/e2e actions."
 author: "SWEny"
 
 branding:
-  icon: "activity"
+  icon: "play"
   color: "orange"
 
 inputs:
   workflow:
-    description: "Workflow to run (triage, implement). Default: triage."
-    required: false
-    default: "triage"
+    description: "Path to the workflow YAML file to execute (relative to working-directory)."
+    required: true
 
-  anthropic-api-key:
-    description: "Anthropic API key for Claude (use this OR claude-oauth-token)"
-    required: false
   claude-oauth-token:
-    description: "Claude Code OAuth token (use this OR anthropic-api-key)"
+    description: "Claude Code OAuth token. Use this OR anthropic-api-key. OAuth tokens do not consume API credit."
+    required: false
+  anthropic-api-key:
+    description: "Anthropic API key for Claude. Use this OR claude-oauth-token."
     required: false
 
-  # Coding agent provider
-  coding-agent-provider:
-    description: "Coding agent to use for implementation (claude, codex, gemini)"
+  cli-version:
+    description: "Version of @sweny-ai/core to install (the package that ships the `sweny` CLI). Defaults to latest."
     required: false
-    default: "claude"
+    default: "latest"
 
-  # OpenAI credentials (when coding-agent-provider = codex)
-  openai-api-key:
-    description: "OpenAI API key (required when coding-agent-provider is codex)"
+  node-version:
+    description: "Node.js version to install."
     required: false
+    default: "24"
 
-  # Google credentials (when coding-agent-provider = gemini)
-  gemini-api-key:
-    description: "Google Gemini API key (required when coding-agent-provider is gemini)"
+  working-directory:
+    description: "Working directory to run the workflow from. Defaults to the repository root."
     required: false
-
-  # Observability provider
-  observability-provider:
-    description: "Observability provider to use (datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, honeycomb, axiom, heroku, opsgenie, pagerduty, prometheus, vercel, supabase, netlify, fly, render, file)"
-    required: false
-    default: "datadog"
-
-  # Datadog credentials
-  dd-api-key:
-    description: "Datadog API key"
-    required: false
-  dd-app-key:
-    description: "Datadog Application key"
-    required: false
-  dd-site:
-    description: "Datadog site (e.g., datadoghq.com, datadoghq.eu)"
-    required: false
-    default: "datadoghq.com"
-
-  # Sentry credentials
-  sentry-auth-token:
-    description: "Sentry auth token"
-    required: false
-  sentry-org:
-    description: "Sentry organization slug"
-    required: false
-  sentry-project:
-    description: "Sentry project slug"
-    required: false
-  sentry-base-url:
-    description: "Sentry base URL (default: https://sentry.io)"
-    required: false
-    default: "https://sentry.io"
-
-  # BetterStack credentials
-  betterstack-api-token:
-    description: "BetterStack API token (for both Uptime and Telemetry)"
-    required: false
-  betterstack-source-id:
-    description: "BetterStack Telemetry source ID — scopes log queries to a specific source"
-    required: false
-  betterstack-table-name:
-    description: 'BetterStack Telemetry ClickHouse table name (e.g., "t273774.my_source")'
-    required: false
-
-  # CloudWatch credentials
-  cloudwatch-region:
-    description: "AWS region for CloudWatch Logs"
-    required: false
-    default: "us-east-1"
-  cloudwatch-log-group-prefix:
-    description: "CloudWatch log group name or prefix"
-    required: false
-
-  # Splunk credentials
-  splunk-url:
-    description: "Splunk REST API base URL (e.g., https://splunk.example.com:8089)"
-    required: false
-  splunk-token:
-    description: "Splunk authentication token"
-    required: false
-  splunk-index:
-    description: "Splunk index to search"
-    required: false
-    default: "main"
-
-  # Elasticsearch credentials
-  elastic-url:
-    description: "Elasticsearch base URL (e.g., https://elastic.example.com:9200)"
-    required: false
-  elastic-api-key:
-    description: "Elasticsearch API key"
-    required: false
-  elastic-index:
-    description: "Elasticsearch index pattern"
-    required: false
-    default: "logs-*"
-
-  # New Relic credentials
-  newrelic-api-key:
-    description: "New Relic API key (NRAK-...)"
-    required: false
-  newrelic-account-id:
-    description: "New Relic account ID"
-    required: false
-  newrelic-region:
-    description: "New Relic region (us or eu)"
-    required: false
-    default: "us"
-
-  # Grafana Loki credentials
-  loki-url:
-    description: "Loki base URL (e.g., https://loki.example.com)"
-    required: false
-  loki-api-key:
-    description: "Loki API key (optional)"
-    required: false
-  loki-org-id:
-    description: "Loki tenant/org ID (optional)"
-    required: false
-
-  # File provider (when observability-provider = file)
-  log-file-path:
-    description: "Path to a local JSON log file (required when observability-provider is file)"
-    required: false
-
-  # Vercel credentials (when observability-provider = vercel)
-  vercel-token:
-    description: "Vercel personal access token"
-    required: false
-  vercel-project-id:
-    description: "Vercel project ID (prj_...)"
-    required: false
-  vercel-team-id:
-    description: "Vercel team ID (team_..., optional for team-owned projects)"
-    required: false
-
-  # Supabase credentials (when observability-provider = supabase)
-  supabase-management-key:
-    description: "Supabase management API key"
-    required: false
-  supabase-project-ref:
-    description: "Supabase project reference ID"
-    required: false
-
-  # Netlify credentials (when observability-provider = netlify)
-  netlify-token:
-    description: "Netlify personal access token"
-    required: false
-  netlify-site-id:
-    description: "Netlify site ID (find in Site Settings > General)"
-    required: false
-
-  # Fly.io credentials (when observability-provider = fly)
-  fly-token:
-    description: "Fly.io personal access token"
-    required: false
-  fly-app-name:
-    description: "Fly.io application name"
-    required: false
-
-  # Render credentials (when observability-provider = render)
-  render-api-key:
-    description: "Render API key"
-    required: false
-  render-service-id:
-    description: "Render service ID (srv-...)"
-    required: false
-
-  # Prometheus credentials (when observability-provider = prometheus)
-  prometheus-url:
-    description: "Prometheus base URL (e.g. http://prometheus.internal:9090)"
-    required: false
-  prometheus-token:
-    description: "Prometheus bearer token (optional, for secured instances)"
-    required: false
-
-  # PagerDuty credentials (when observability-provider = pagerduty)
-  pagerduty-api-key:
-    description: "PagerDuty API key"
-    required: false
-
-  # Honeycomb credentials (when observability-provider = honeycomb)
-  honeycomb-api-key:
-    description: "Honeycomb API key"
-    required: false
-  honeycomb-dataset:
-    description: "Honeycomb dataset name"
-    required: false
-
-  # Axiom credentials (when observability-provider = axiom)
-  axiom-api-token:
-    description: "Axiom API token"
-    required: false
-  axiom-dataset:
-    description: "Axiom dataset name"
-    required: false
-  axiom-org-id:
-    description: "Axiom org ID (required for multi-org accounts)"
-    required: false
-
-  # Heroku credentials (when observability-provider = heroku)
-  heroku-api-key:
-    description: "Heroku API key"
-    required: false
-  heroku-app-name:
-    description: "Heroku application name"
-    required: false
-
-  # OpsGenie credentials (when observability-provider = opsgenie)
-  opsgenie-api-key:
-    description: "OpsGenie API key"
-    required: false
-  opsgenie-region:
-    description: "OpsGenie region (us or eu, default: us)"
-    required: false
-
-  # Issue tracker provider
-  issue-tracker-provider:
-    description: "Issue tracker provider to use (github-issues, linear, jira)"
-    required: false
-    default: "github-issues"
-  linear-api-key:
-    description: "Linear API key"
-    required: false
-  linear-team-id:
-    description: "Linear team UUID"
-    required: false
-  linear-bug-label-id:
-    description: "Linear label UUID for bugs"
-    required: false
-  linear-triage-label-id:
-    description: "Linear label UUID for agent-triage issues"
-    required: false
-  linear-state-backlog:
-    description: "Linear workflow state UUID for Backlog"
-    required: false
-  linear-state-in-progress:
-    description: "Linear workflow state UUID for In Progress"
-    required: false
-  linear-state-peer-review:
-    description: "Linear workflow state UUID for Peer Review"
-    required: false
-
-  # Jira credentials (when issue-tracker-provider = jira)
-  jira-base-url:
-    description: "Jira base URL (e.g., https://myco.atlassian.net)"
-    required: false
-  jira-email:
-    description: "Jira user email for API authentication"
-    required: false
-  jira-api-token:
-    description: "Jira API token"
-    required: false
-
-  # Source control provider
-  source-control-provider:
-    description: "Source control provider to use (github, gitlab)"
-    required: false
-    default: "github"
-
-  # GitLab credentials (when source-control-provider = gitlab)
-  gitlab-token:
-    description: "GitLab personal access token"
-    required: false
-  gitlab-project-id:
-    description: "GitLab project ID or path (e.g., my-group/my-project)"
-    required: false
-  gitlab-base-url:
-    description: "GitLab instance base URL"
-    required: false
-    default: "https://gitlab.com"
-
-  # Notification provider
-  notification-provider:
-    description: "Notification provider (github-summary, slack, teams, discord, email, webhook, file)"
-    required: false
-    default: "github-summary"
-  notification-webhook-url:
-    description: "Webhook URL for Slack, Teams, Discord, or generic webhook notifications"
-    required: false
-  sendgrid-api-key:
-    description: "SendGrid API key (when notification-provider = email)"
-    required: false
-  email-from:
-    description: "Sender email address (when notification-provider = email)"
-    required: false
-  email-to:
-    description: "Recipient email addresses, comma-separated (when notification-provider = email)"
-    required: false
-  webhook-signing-secret:
-    description: "HMAC-SHA256 signing secret for generic webhook notifications"
-    required: false
-  output-dir:
-    description: "Directory for file-based provider output (dry-run / file providers)"
-    required: false
-    default: ".github/sweny-output"
-
-  # Investigation parameters
-  time-range:
-    description: "Time range to analyze (e.g., 1h, 6h, 24h, 7d)"
-    required: false
-    default: "24h"
-  severity-focus:
-    description: "Primary focus area (errors, warnings, all)"
-    required: false
-    default: "errors"
-  service-filter:
-    description: "Service filter pattern (e.g., my-service, api-*, *)"
-    required: false
-    default: "*"
-  investigation-depth:
-    description: "How deep Claude should investigate (quick, standard, thorough)"
-    required: false
-    default: "standard"
-  max-investigate-turns:
-    description: "Maximum Claude turns for investigation phase"
-    required: false
-    default: "50"
-  max-implement-turns:
-    description: "Maximum Claude turns for implementation phase"
-    required: false
-    default: "30"
-
-  # PR / branch settings
-  base-branch:
-    description: "Target branch for PRs (e.g., main, master, develop)"
-    required: false
-    default: "main"
-  pr-labels:
-    description: "Comma-separated list of labels to apply to created PRs"
-    required: false
-    default: "agent,triage,needs-review"
-
-  # Behavior
-  dry-run:
-    description: "Dry run mode — analyze only, do not create PRs"
-    required: false
-    default: "false"
-  review-mode:
-    description: "PR merge behavior: 'auto' (enable GitHub auto-merge when CI passes — automatically suppressed for high-risk changes such as migrations, auth, lockfiles, or >20 files), 'review' (open PR and wait for human approval)"
-    required: false
-    default: "review"
-  novelty-mode:
-    description: "Only report novel issues not already tracked in Linear/GitHub"
-    required: false
-    default: "true"
-  linear-issue:
-    description: "Existing Linear issue to work on (e.g., ENG-123). Skips log investigation."
-    required: false
-    default: ""
-  additional-instructions:
-    description: 'Additional instructions for Claude (e.g., "focus on the webhook handler")'
-    required: false
-    default: ""
-  service-map-path:
-    description: "Path to the service ownership map YAML file"
-    required: false
-    default: ".github/service-map.yml"
-
-  # Templates & context
-  issue-template:
-    description: "Path to issue template file (local path or URL). Used to format created issues."
-    required: false
-  pr-template:
-    description: "Path to PR template file (local path or URL). Used to format created PRs."
-    required: false
-  additional-context:
-    description: >-
-      Newline-separated list of files or URLs to load as additional context.
-      These documents (SDLC guides, coding standards, runbooks) are injected
-      into every workflow node so Claude follows your team's conventions.
-    required: false
-
-  # GitHub tokens
-  github-token:
-    description: "GitHub token for API access and PR creation"
-    required: false
-    default: "${{ github.token }}"
-  bot-token:
-    description: "Optional bot token with elevated permissions (for cross-repo dispatch, push to protected branches)"
-    required: false
-
-  # Workspace tool integrations (Category B MCP servers — explicit opt-in)
-  workspace-tools:
-    description: >-
-      Comma-separated list of workspace tool integrations to enable.
-      Each tool injects its MCP server into the coding agent when the corresponding
-      credential env var is also present. Supported values: slack, notion, pagerduty, monday, asana.
-      Example: "slack,notion"
-    required: false
-    default: ""
-
-  # SWEny Cloud
-  project-token:
-    description: "SWEny Cloud project token — enables run reporting to cloud.sweny.ai and PR comments with dashboard links"
-    required: false
-    default: ""
-
-  # MCP servers
-  mcp-servers:
-    description: >-
-      MCP servers as a JSON object passed to the coding agent. Each key is a server name;
-      each value is an MCPServerConfig (fields: type, command, args, env, url, headers).
-      Example — GitHub MCP server:
-        {"github":{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github@latest"],"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"YOUR_TOKEN_HERE"}}}
-      See https://docs.sweny.ai/providers/mcp-servers/ for a full catalog including Sentry, filesystem, and HTTP servers.
-    required: false
-
-outputs:
-  issues-found:
-    description: "Whether any issues were found during investigation (true/false)"
-  recommendation:
-    description: "Investigation recommendation (implement, +1 existing ENG-XXX, skip)"
-  issue-identifier:
-    description: "Issue identifier from the configured tracker (e.g., ENG-123 for Linear, #42 for GitHub Issues)"
-  issue-url:
-    description: "URL of the created or found issue"
-  pr-url:
-    description: "URL of the created pull request"
-  pr-number:
-    description: "Number of the created pull request"
+    default: "."
 
 runs:
-  using: "node24"
-  main: "dist/index.js"
+  using: "composite"
+  steps:
+    - name: Validate auth inputs
+      shell: bash
+      env:
+        HAS_OAUTH: ${{ inputs.claude-oauth-token != '' }}
+        HAS_API_KEY: ${{ inputs.anthropic-api-key != '' }}
+      run: |
+        if [ "$HAS_OAUTH" != "true" ] && [ "$HAS_API_KEY" != "true" ]; then
+          echo "::error::Either claude-oauth-token or anthropic-api-key must be provided"
+          exit 1
+        fi
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install SWEny CLI
+      shell: bash
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+      run: npm install -g "@sweny-ai/core@${CLI_VERSION}"
+
+    - name: Run workflow
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-oauth-token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        WORKFLOW_PATH: ${{ inputs.workflow }}
+      run: sweny workflow run "$WORKFLOW_PATH"
