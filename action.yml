@@ -1,5 +1,5 @@
-name: "SWEny AI"
-description: "Autonomous SRE triage — monitors logs, investigates issues, creates tickets, and opens fix PRs."
+name: "SWEny — AI Workflow Engine"
+description: "Run any AI workflow as a GitHub Action. Built-in triage and implement workflows, plus first-class support for custom workflow YAMLs and targeted recipes (E2E, cron jobs, audits, …). See the README for recipes."
 author: "SWEny"
 
 branding:
