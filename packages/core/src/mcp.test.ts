@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildAutoMcpServers } from "./mcp.js";
+import { buildAutoMcpServers, buildSkillMcpServers } from "./mcp.js";
 import type { McpAutoConfig } from "./types.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -446,5 +446,172 @@ describe("buildAutoMcpServers", () => {
     expect(result["linear"]).toBeDefined();
     expect(result["datadog"]).toBeDefined();
     expect(result["slack"]).toBeUndefined();
+  });
+});
+
+// ─── buildSkillMcpServers (engine-driven) ────────────────────────────
+
+describe("buildSkillMcpServers", () => {
+  it("returns empty when no skills referenced and no creds present", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(),
+      credentials: {},
+    });
+    expect(result).toEqual({});
+  });
+
+  it("does not wire MCP for a skill not referenced by the workflow", () => {
+    // Token is set, but the workflow doesn't ask for github → no MCP.
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["linear"]),
+      credentials: { GITHUB_TOKEN: "ghp_abc", LINEAR_API_KEY: "lin_abc" },
+    });
+    expect(result["github"]).toBeUndefined();
+    expect(result["linear"]).toBeDefined();
+  });
+
+  it("does not wire MCP for a referenced skill whose creds are missing", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["github", "linear"]),
+      credentials: { LINEAR_API_KEY: "lin_abc" }, // no GITHUB_TOKEN
+    });
+    expect(result["github"]).toBeUndefined();
+    expect(result["linear"]).toBeDefined();
+  });
+
+  it("wires github MCP when referenced and GITHUB_TOKEN present", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["github"]),
+      credentials: { GITHUB_TOKEN: "ghp_abc" },
+    });
+    expect(result["github"]).toEqual({
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-github@latest"],
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_abc" },
+    });
+  });
+
+  it("wires linear MCP when referenced and LINEAR_API_KEY present", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["linear"]),
+      credentials: { LINEAR_API_KEY: "lin_abc" },
+    });
+    expect(result["linear"]).toEqual({
+      type: "http",
+      url: "https://mcp.linear.app/mcp",
+      headers: { Authorization: "Bearer lin_abc" },
+    });
+  });
+
+  it("wires sentry MCP with SENTRY_HOST for self-hosted SENTRY_URL", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["sentry"]),
+      credentials: { SENTRY_AUTH_TOKEN: "sntryu_abc", SENTRY_URL: "https://sentry.mycompany.com" },
+    });
+    expect(result["sentry"]?.env).toMatchObject({
+      SENTRY_ACCESS_TOKEN: "sntryu_abc",
+      SENTRY_HOST: "sentry.mycompany.com",
+    });
+  });
+
+  it("wires datadog MCP when both keys present", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["datadog"]),
+      credentials: { DD_API_KEY: "dd_api", DD_APP_KEY: "dd_app" },
+    });
+    expect(result["datadog"]).toEqual({
+      type: "http",
+      url: "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
+      headers: { DD_API_KEY: "dd_api", DD_APPLICATION_KEY: "dd_app" },
+    });
+  });
+
+  it("does not wire datadog MCP when DD_APP_KEY is missing", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["datadog"]),
+      credentials: { DD_API_KEY: "dd_api" },
+    });
+    expect(result["datadog"]).toBeUndefined();
+  });
+
+  it("wires slack MCP without an opt-in flag — workflow reference is the opt-in", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["slack"]),
+      credentials: { SLACK_BOT_TOKEN: "xoxb-abc" },
+    });
+    expect(result["slack"]).toEqual({
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-slack@latest"],
+      env: { SLACK_BOT_TOKEN: "xoxb-abc" },
+    });
+  });
+
+  it("wires betterstack MCP only when the workflow references betterstack", () => {
+    // Token alone is not enough — must be referenced.
+    const noRef = buildSkillMcpServers({
+      referencedSkills: new Set(["sentry"]),
+      credentials: { BETTERSTACK_API_TOKEN: "bs_abc", SENTRY_AUTH_TOKEN: "sntry_x" },
+    });
+    expect(noRef["betterstack"]).toBeUndefined();
+
+    const withRef = buildSkillMcpServers({
+      referencedSkills: new Set(["betterstack"]),
+      credentials: { BETTERSTACK_API_TOKEN: "bs_abc" },
+    });
+    expect(withRef["betterstack"]).toEqual({
+      type: "http",
+      url: "https://mcp.betterstack.com",
+      headers: { Authorization: "Bearer bs_abc" },
+    });
+  });
+
+  it("user-supplied MCP servers win on key conflict", () => {
+    const custom = { type: "stdio" as const, command: "my-github", args: [] };
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["github"]),
+      credentials: { GITHUB_TOKEN: "ghp_abc" },
+      userMcpServers: { github: custom },
+    });
+    expect(result["github"]).toEqual(custom);
+  });
+
+  it("user-supplied servers can add MCPs alongside auto-wired ones", () => {
+    const my = { type: "http" as const, url: "https://my.example.com" };
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["github"]),
+      credentials: { GITHUB_TOKEN: "ghp_abc" },
+      userMcpServers: { "my-tool": my },
+    });
+    expect(result["github"]).toBeDefined();
+    expect(result["my-tool"]).toEqual(my);
+  });
+
+  it("silently skips skill IDs with no MCP catalog entry (e.g. notification)", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["notification", "supabase", "github"]),
+      credentials: { GITHUB_TOKEN: "ghp_abc" },
+    });
+    expect(result["notification"]).toBeUndefined();
+    expect(result["supabase"]).toBeUndefined();
+    expect(result["github"]).toBeDefined();
+  });
+
+  it("wires multiple skills simultaneously", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["github", "linear", "datadog", "slack"]),
+      credentials: {
+        GITHUB_TOKEN: "ghp_abc",
+        LINEAR_API_KEY: "lin_abc",
+        DD_API_KEY: "dd_api",
+        DD_APP_KEY: "dd_app",
+        SLACK_BOT_TOKEN: "xoxb-abc",
+      },
+    });
+    expect(result["github"]).toBeDefined();
+    expect(result["linear"]).toBeDefined();
+    expect(result["datadog"]).toBeDefined();
+    expect(result["slack"]).toBeDefined();
   });
 });

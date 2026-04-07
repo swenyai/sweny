@@ -14,9 +14,9 @@ import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workf
 import type { ExecutionEvent, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
-import { createSkillMap } from "../skills/index.js";
+import { createSkillMap, validateWorkflowSkills } from "../skills/index.js";
 import { configuredSkills } from "../skills/custom-loader.js";
-import { buildAutoMcpServers, buildProviderContext } from "../mcp.js";
+import { buildAutoMcpServers, buildSkillMcpServers, buildProviderContext } from "../mcp.js";
 import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
 import { validateWorkflow as validateWorkflowSchema } from "../schema.js";
@@ -657,8 +657,40 @@ export async function workflowRunAction(
   const isTTY = !isJson && (process.stderr.isTTY ?? false);
 
   const skills = createSkillMap(configuredSkills(process.env, process.cwd()));
-  const mcpAutoConfig = buildMcpAutoConfig(config);
-  const mcpServers = buildAutoMcpServers(mcpAutoConfig);
+
+  // Hard-fail at startup if the workflow references skills that aren't available.
+  // Each node lists alternatives by category (e.g. [sentry, datadog, betterstack]);
+  // we require at least one configured skill per category.
+  const validation = validateWorkflowSkills(workflow, skills);
+  if (validation.errors.length > 0) {
+    console.error(chalk.red(`\n  Workflow cannot run — missing required skills:\n`));
+    for (const err of validation.errors) console.error(chalk.red(`    \u2717 ${err}`));
+    if (validation.missing.length > 0) {
+      console.error(chalk.dim(`\n  Set the missing env vars and try again:`));
+      for (const m of validation.missing) {
+        if (m.missingEnv.length > 0) {
+          console.error(chalk.dim(`    - ${m.id}: ${m.missingEnv.join(", ")}`));
+        }
+      }
+    }
+    console.error("");
+    process.exit(1);
+    return;
+  }
+  for (const warn of validation.warnings) console.error(chalk.yellow(`  \u26A0 ${warn}`));
+
+  // Engine-driven MCP wiring: only inject MCPs for skills that the workflow
+  // actually references AND whose env vars are present.
+  const referencedSkillIds = new Set<string>();
+  for (const node of Object.values(workflow.nodes)) {
+    for (const id of node.skills) referencedSkillIds.add(id);
+  }
+  const mcpServers = buildSkillMcpServers({
+    referencedSkills: referencedSkillIds,
+    credentials: buildCredentialMap(),
+    userMcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
+  });
+
   const claude = new ClaudeClient({
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
