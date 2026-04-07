@@ -63,11 +63,44 @@ Or browse ready-to-run workflows at **[marketplace.sweny.ai](https://marketplace
 
 ## Recipes
 
-The GitHub Action ships as a single generic engine — `swenyai/sweny@v4` — that runs any SWEny workflow. The recipes below show common wiring patterns; pick one or assemble your own. More are listed at [marketplace.sweny.ai](https://marketplace.sweny.ai).
+`swenyai/sweny@v5` is the generic engine — give it a workflow YAML and it runs. Targeted use cases (triage, e2e, implement) ship as their own focused actions in dedicated repos so each gets its own GitHub Marketplace listing.
+
+| Action | Repo | Purpose |
+|---|---|---|
+| `swenyai/sweny@v5` | this repo | Run any workflow YAML — minimal engine wrapper |
+| `swenyai/triage@v1` | [swenyai/triage](https://github.com/swenyai/triage) | SRE triage preset — observability + issue tracker auto-wired |
+| `swenyai/e2e@v1` | [swenyai/e2e](https://github.com/swenyai/e2e) | Agentic E2E tests — installs agent-browser, uploads screenshots |
+
+The engine auto-wires MCP servers based on which skills your workflow nodes declare and which credentials you've passed via `env:`. No flag plumbing — list `skills: [linear]` in a node and set `LINEAR_API_KEY` and the Linear MCP comes online. List a skill whose secret isn't set and the engine hard-fails at startup with an actionable message.
+
+### Run any workflow
+
+For anything you can describe as a DAG of steps — content pipelines, audits, release notes, competitive analysis — generate the workflow with `sweny workflow create`, commit the YAML, run it on CI.
+
+```yaml
+name: Weekly competitive scan
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Mondays at 09:00 UTC
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swenyai/sweny@v5
+        with:
+          workflow: .sweny/workflows/competitive-scan.yml
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+```
 
 ### SRE triage
 
-The original built-in workflow. Watches your observability provider for new issues, investigates them, files tickets, and (optionally) opens fix PRs.
+Watches your observability provider for new issues, investigates them, files tickets, and (optionally) opens fix PRs. Uses [`swenyai/triage`](https://github.com/swenyai/triage) — its own marketplace listing with the triage-flavored input surface.
 
 ```yaml
 name: Triage
@@ -81,9 +114,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: swenyai/sweny@v4
+      - uses: swenyai/triage@v1
         with:
-          workflow: triage
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           observability-provider: datadog
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -92,32 +124,9 @@ jobs:
           linear-api-key: ${{ secrets.LINEAR_API_KEY }}
 ```
 
-### Implement from an issue
-
-Reads a Linear or GitHub issue, plans a fix, writes the code, opens a PR.
-
-```yaml
-name: Implement
-on:
-  issues:
-    types: [labeled]
-
-jobs:
-  implement:
-    if: github.event.label.name == 'sweny:implement'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: swenyai/sweny@v4
-        with:
-          workflow: implement
-          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          issue-tracker-provider: github
-```
-
 ### Agentic E2E browser testing
 
-Agent-driven end-to-end tests against a deployed app — no Playwright scripts, the agent figures out the DOM. Generate the workflow with `sweny e2e init`, then run it on CI with the [`actions/e2e`](actions/e2e) preset, which adds [`agent-browser`](https://www.npmjs.com/package/agent-browser) installation, a `BASE_URL` convention, and automatic screenshot artifact upload.
+Agent-driven end-to-end tests against a deployed app — no Playwright scripts, the agent figures out the DOM. Generate the workflow with `sweny e2e init`, then run it on CI with [`swenyai/e2e`](https://github.com/swenyai/e2e), which installs [`agent-browser`](https://www.npmjs.com/package/agent-browser), exposes `BASE_URL` to the workflow, and uploads screenshots as a build artifact.
 
 ```yaml
 name: E2E UAT
@@ -132,7 +141,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: swenyai/sweny/actions/e2e@v4
+      - uses: swenyai/e2e@v1
         with:
           workflow: .sweny/e2e/uat.yml
           base-url: https://staging.example.com
@@ -142,41 +151,6 @@ jobs:
           AUTH0_M2M_CLIENT_ID: ${{ secrets.AUTH0_M2M_CLIENT_ID }}
           AUTH0_M2M_CLIENT_SECRET: ${{ secrets.AUTH0_M2M_CLIENT_SECRET }}
 ```
-
-### Run any custom workflow
-
-For workflows that don't need extra browser tooling — content pipelines, audits, release notes, competitive analysis, anything you generate with `sweny workflow create`. Use the [`actions/run`](actions/run) preset for the minimal install footprint.
-
-```yaml
-name: Weekly competitive scan
-on:
-  schedule:
-    - cron: "0 9 * * 1" # Mondays at 09:00 UTC
-  workflow_dispatch:
-
-jobs:
-  scan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: swenyai/sweny/actions/run@v4
-        with:
-          workflow: .sweny/workflows/competitive-scan.yml
-          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        env:
-          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-```
-
-> You can also pass a custom workflow path to the root `swenyai/sweny@v4` action via `workflow: .sweny/workflows/my.yml` — the engine accepts arbitrary workflow YAML. The `actions/run` preset is just a thinner wrapper without the triage-flavored input surface.
-
-### Available presets
-
-| Preset | Use it for | What it adds |
-|---|---|---|
-| [`swenyai/sweny@v4`](.) | Triage, implement, or any custom workflow | Built-in workflows + provider context (Datadog, Sentry, Linear, GitHub, …) auto-wired from inputs |
-| [`swenyai/sweny/actions/run@v4`](actions/run) | Generic workflow execution | Minimal install footprint, env passthrough only |
-| [`swenyai/sweny/actions/e2e@v4`](actions/e2e) | Agentic E2E tests | `agent-browser` install, `BASE_URL` input, screenshot artifact upload |
 
 ## Built-in skills
 
@@ -220,7 +194,6 @@ Not just code tasks — SWEny works for anything you can describe as steps with 
 | `@sweny-ai/studio` | `packages/studio` | npm | Visual DAG editor and execution monitor |
 | `@sweny-ai/mcp` | `packages/mcp` | npm | MCP server for Claude Code / Desktop |
 | — | `packages/plugin` | — | Claude Code plugin: slash commands, MCP tools, agent, hooks |
-| `@sweny-ai/action` | `packages/action` | private | GitHub Action wrapper |
 | `@sweny-ai/web` | `packages/web` | private | docs.sweny.ai website |
 
 ## Workflow Marketplace
@@ -246,8 +219,6 @@ npm run build        # Build all packages
 npm run typecheck    # Type-check all packages
 npm test             # Run all tests
 ```
-
-> The root `dist/` directory is committed intentionally — GitHub Actions require a compiled entry point.
 
 ## License
 
