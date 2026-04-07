@@ -31,6 +31,7 @@ import { DagRenderer } from "./renderer.js";
 import * as readline from "node:readline";
 
 import { loadDotenv, loadConfigFile } from "./config-file.js";
+import { buildCredentialMap } from "./credentials.js";
 import { runInit } from "./init.js";
 import { runE2eInit, runE2eRun } from "./e2e.js";
 import {
@@ -137,44 +138,8 @@ program
 registerSetupCommand(program);
 
 // ── Credential map builder ──────────────────────────────────────────
-/**
- * Read env vars into the flat credential map expected by buildAutoMcpServers.
- */
-function buildCredentialMap(): Record<string, string> {
-  const creds: Record<string, string> = {};
-  const env = process.env;
-  const keys = [
-    "GITHUB_TOKEN",
-    "GITLAB_TOKEN",
-    "GITLAB_URL",
-    "LINEAR_API_KEY",
-    "JIRA_URL",
-    "JIRA_EMAIL",
-    "JIRA_API_TOKEN",
-    "DD_API_KEY",
-    "DD_APP_KEY",
-    "SENTRY_AUTH_TOKEN",
-    "SENTRY_ORG",
-    "SENTRY_URL",
-    "NR_API_KEY",
-    "NR_REGION",
-    "BETTERSTACK_API_TOKEN",
-    "BETTERSTACK_TELEMETRY_TOKEN",
-    "BETTERSTACK_UPTIME_TOKEN",
-    "BETTERSTACK_SOURCE_ID",
-    "BETTERSTACK_TABLE_NAME",
-    "SLACK_BOT_TOKEN",
-    "SLACK_TEAM_ID",
-    "NOTION_TOKEN",
-    "PAGERDUTY_API_TOKEN",
-    "MONDAY_TOKEN",
-    "ASANA_ACCESS_TOKEN",
-  ];
-  for (const k of keys) {
-    if (env[k]) creds[k] = env[k]!;
-  }
-  return creds;
-}
+// buildCredentialMap lives in ./credentials.ts so tests can import it
+// without triggering main.ts's top-level program.parse() side effect.
 
 /**
  * Build the McpAutoConfig from CLI config for buildAutoMcpServers.

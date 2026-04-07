@@ -614,4 +614,196 @@ describe("buildSkillMcpServers", () => {
     expect(result["datadog"]).toBeDefined();
     expect(result["slack"]).toBeDefined();
   });
+
+  // ── GitLab ─────────────────────────────────────────────────────────
+
+  it("wires gitlab MCP when referenced and GITLAB_TOKEN present", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["gitlab"]),
+      credentials: { GITLAB_TOKEN: "glpat_abc" },
+    });
+    expect(result["gitlab"]).toEqual({
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-gitlab@latest"],
+      env: { GITLAB_PERSONAL_ACCESS_TOKEN: "glpat_abc" },
+    });
+  });
+
+  it("wires gitlab MCP with self-hosted GITLAB_API_URL", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["gitlab"]),
+      credentials: { GITLAB_TOKEN: "glpat_abc", GITLAB_URL: "https://gitlab.example.com" },
+    });
+    expect(result["gitlab"]?.env).toEqual({
+      GITLAB_PERSONAL_ACCESS_TOKEN: "glpat_abc",
+      GITLAB_API_URL: "https://gitlab.example.com/api/v4",
+    });
+  });
+
+  // ── Jira ───────────────────────────────────────────────────────────
+
+  it("wires jira MCP when all 3 creds present", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["jira"]),
+      credentials: {
+        JIRA_URL: "https://acme.atlassian.net",
+        JIRA_EMAIL: "alice@acme.com",
+        JIRA_API_TOKEN: "tok_abc",
+      },
+    });
+    expect(result["jira"]).toEqual({
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@sooperset/mcp-atlassian@latest"],
+      env: {
+        JIRA_URL: "https://acme.atlassian.net",
+        JIRA_EMAIL: "alice@acme.com",
+        JIRA_API_TOKEN: "tok_abc",
+      },
+    });
+  });
+
+  it("does NOT wire jira MCP when JIRA_EMAIL is missing", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["jira"]),
+      credentials: { JIRA_URL: "https://acme.atlassian.net", JIRA_API_TOKEN: "tok_abc" },
+    });
+    expect(result["jira"]).toBeUndefined();
+  });
+
+  // ── New Relic ──────────────────────────────────────────────────────
+
+  it("wires newrelic MCP with US (default) endpoint", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["newrelic"]),
+      credentials: { NEW_RELIC_API_KEY: "NRAK-abc" },
+    });
+    expect(result["newrelic"]).toEqual({
+      type: "http",
+      url: "https://mcp.newrelic.com/mcp/",
+      headers: { "Api-Key": "NRAK-abc" },
+    });
+  });
+
+  it("wires newrelic MCP with EU endpoint when NEW_RELIC_REGION=eu", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["newrelic"]),
+      credentials: { NEW_RELIC_API_KEY: "NRAK-abc", NEW_RELIC_REGION: "eu" },
+    });
+    expect(result["newrelic"]?.url).toBe("https://mcp.eu.newrelic.com/mcp/");
+  });
+
+  it("does NOT wire newrelic MCP without NEW_RELIC_API_KEY", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["newrelic"]),
+      credentials: { NEW_RELIC_REGION: "eu" },
+    });
+    expect(result["newrelic"]).toBeUndefined();
+  });
+
+  // ── Notion (both env-var spellings) ────────────────────────────────
+
+  it("wires notion MCP with NOTION_TOKEN", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["notion"]),
+      credentials: { NOTION_TOKEN: "secret_abc" },
+    });
+    expect(result["notion"]).toEqual({
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@notionhq/notion-mcp-server@latest"],
+      env: { NOTION_TOKEN: "secret_abc" },
+    });
+  });
+
+  it("wires notion MCP with NOTION_API_KEY fallback", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["notion"]),
+      credentials: { NOTION_API_KEY: "secret_xyz" },
+    });
+    expect(result["notion"]?.env?.NOTION_TOKEN).toBe("secret_xyz");
+  });
+
+  it("prefers NOTION_TOKEN over NOTION_API_KEY when both set", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["notion"]),
+      credentials: { NOTION_TOKEN: "primary", NOTION_API_KEY: "fallback" },
+    });
+    expect(result["notion"]?.env?.NOTION_TOKEN).toBe("primary");
+  });
+
+  // ── PagerDuty / Monday / Asana ─────────────────────────────────────
+
+  it("wires pagerduty MCP with Token-token auth scheme", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["pagerduty"]),
+      credentials: { PAGERDUTY_API_TOKEN: "pd_abc" },
+    });
+    expect(result["pagerduty"]).toEqual({
+      type: "http",
+      url: "https://mcp.pagerduty.com/mcp",
+      headers: { Authorization: "Token token=pd_abc" },
+    });
+  });
+
+  it("wires monday MCP", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["monday"]),
+      credentials: { MONDAY_TOKEN: "mon_abc" },
+    });
+    expect(result["monday"]).toEqual({
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@mondaydotcomorg/monday-api-mcp@latest"],
+      env: { MONDAY_TOKEN: "mon_abc" },
+    });
+  });
+
+  it("wires asana MCP", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["asana"]),
+      credentials: { ASANA_ACCESS_TOKEN: "asana_abc" },
+    });
+    expect(result["asana"]).toEqual({
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "asana-mcp@latest"],
+      env: { ASANA_ACCESS_TOKEN: "asana_abc" },
+    });
+  });
+
+  // ── BetterStack token fallback ─────────────────────────────────────
+
+  it("wires betterstack with BETTERSTACK_TELEMETRY_TOKEN fallback", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["betterstack"]),
+      credentials: { BETTERSTACK_TELEMETRY_TOKEN: "bs_tel_abc" },
+    });
+    expect(result["betterstack"]).toEqual({
+      type: "http",
+      url: "https://mcp.betterstack.com",
+      headers: { Authorization: "Bearer bs_tel_abc" },
+    });
+  });
+
+  it("wires betterstack with BETTERSTACK_UPTIME_TOKEN fallback", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["betterstack"]),
+      credentials: { BETTERSTACK_UPTIME_TOKEN: "bs_up_abc" },
+    });
+    expect(result["betterstack"]?.headers?.Authorization).toBe("Bearer bs_up_abc");
+  });
+
+  it("prefers BETTERSTACK_API_TOKEN over telemetry/uptime fallbacks", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["betterstack"]),
+      credentials: {
+        BETTERSTACK_API_TOKEN: "primary",
+        BETTERSTACK_TELEMETRY_TOKEN: "fallback1",
+        BETTERSTACK_UPTIME_TOKEN: "fallback2",
+      },
+    });
+    expect(result["betterstack"]?.headers?.Authorization).toBe("Bearer primary");
+  });
 });
