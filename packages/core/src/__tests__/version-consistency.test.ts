@@ -221,11 +221,7 @@ describe("docs action code blocks", () => {
     "packages/web/src/content/docs/advanced/troubleshooting.md",
   ];
 
-  // NOTE: This test is currently expected to fail — the action docs
-  // still show triage-specific inputs under swenyai/sweny@v5.
-  // This is tracked as a known issue from the multi-repo split.
-  // Remove .todo once the docs are migrated to use swenyai/triage@v1.
-  it.todo("no docs code block uses swenyai/sweny@v5 with triage-only inputs", () => {
+  it("no docs code block uses swenyai/sweny@v5 with triage-only inputs", () => {
     const allIssues = ACTION_DOC_FILES.flatMap((f) => findMisusedBlocks(resolve(ROOT, f)));
     if (allIssues.length > 0) {
       expect.fail(
