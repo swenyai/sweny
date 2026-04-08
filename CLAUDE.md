@@ -12,7 +12,7 @@ Changesets are handled by a CI backstop (`scripts/auto-changeset.mjs`) that auto
 
 | Package | Dir | Published | Notes |
 |---------|-----|-----------|-------|
-| `@sweny-ai/core` | `packages/core` | npm | v4 — skills + DAG executor |
+| `@sweny-ai/core` | `packages/core` | npm | v5 — skills + DAG executor |
 | `@sweny-ai/studio` | `packages/studio` | npm | Visual workflow viewer/editor |
 | `@sweny-ai/mcp` | `packages/mcp` | npm | MCP server for Claude Code / Desktop |
 | — | `packages/plugin` | no (marketplace) | Claude Code plugin: skills, MCP tools, agent, hooks |
