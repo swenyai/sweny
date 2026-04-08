@@ -113,7 +113,10 @@ export function registerTriageCommand(program: Command): Command {
     .option("--observability-provider <provider>", "Observability provider (default: datadog)")
     .option("--issue-tracker-provider <provider>", "Issue tracker provider (default: github-issues)")
     .option("--source-control-provider <provider>", "Source control provider (default: github)")
-    .option("--notification-provider <provider>", "Notification provider (default: console)")
+    .option(
+      "--notification-provider <provider>",
+      "Notification provider: console, github-summary, slack, teams, discord, webhook, email, file (default: console)",
+    )
     .option("--time-range <range>", "Time range to analyze (default: 24h)")
     .option("--severity-focus <focus>", "Severity level focus (default: errors)")
     .option("--service-filter <filter>", "Service filter pattern (default: *)")
@@ -521,7 +524,10 @@ export function validateInputs(config: CliConfig): string[] {
   // Notification credentials by provider
   switch (config.notificationProvider) {
     case "console":
-      // No credentials needed
+    case "github-summary":
+      // No credentials needed. github-summary writes a markdown summary to the
+      // file at $GITHUB_STEP_SUMMARY when running inside GitHub Actions; outside
+      // Actions it behaves like console.
       break;
     case "slack":
     case "teams":
@@ -540,7 +546,7 @@ export function validateInputs(config: CliConfig): string[] {
       break;
     default:
       errors.push(
-        `Unknown --notification-provider "${config.notificationProvider}". Valid values: console, slack, teams, discord, webhook, email, file`,
+        `Unknown --notification-provider "${config.notificationProvider}". Valid values: console, github-summary, slack, teams, discord, webhook, email, file`,
       );
   }
 

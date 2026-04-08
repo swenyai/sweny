@@ -451,6 +451,138 @@ export function formatResultJson(results: Map<string, NodeResult>): string {
   return JSON.stringify(Object.fromEntries(results), null, 2);
 }
 
+// ── Markdown output (for GitHub Actions step summary) ───────────
+/**
+ * Format triage results as GitHub-flavored markdown for `$GITHUB_STEP_SUMMARY`.
+ *
+ * Designed to render nicely in the GitHub Actions job summary panel:
+ *   - Status line with an emoji for quick visual scanning
+ *   - Links to any created issues or PRs
+ *   - Findings table (for dry runs or no-action results)
+ *   - Error detail when a node failed
+ */
+export function formatDagResultMarkdown(
+  results: Map<string, NodeResult>,
+  durationMs: number,
+  config?: CliConfig,
+): string {
+  const duration = formatDuration(durationMs);
+  const lines: string[] = [];
+
+  // Detect failure anywhere in the DAG
+  let failedNodeId: string | undefined;
+  let failedResult: NodeResult | undefined;
+  for (const [nodeId, result] of results) {
+    if (result.status === "failed") {
+      failedNodeId = nodeId;
+      failedResult = result;
+      break;
+    }
+  }
+
+  if (failedResult) {
+    lines.push(`## ❌ SWEny Triage Failed`);
+    lines.push("");
+    lines.push(`**Failed at:** \`${failedNodeId}\`  `);
+    lines.push(`**Duration:** ${duration}`);
+    if (failedResult.data?.error) {
+      lines.push("");
+      lines.push("```");
+      lines.push(String(failedResult.data.error));
+      lines.push("```");
+    }
+    return lines.join("\n") + "\n";
+  }
+
+  const investigateData = results.get("investigate")?.data;
+  const issueData = results.get("create_issue")?.data;
+  const prData = results.get("create_pr")?.data;
+
+  const novelCount = (investigateData?.novel_count as number | undefined) ?? 0;
+  const highestSeverity = investigateData?.highest_severity as string | undefined;
+  const findings = investigateData?.findings as Array<Record<string, unknown>> | undefined;
+
+  // Header — pick the most informative title
+  if (prData?.prUrl) {
+    lines.push(`## ✅ SWEny Triage — PR opened`);
+  } else if (issueData?.issueIdentifier || issueData?.issueUrl) {
+    lines.push(`## ✅ SWEny Triage — Issue created`);
+  } else if (config?.dryRun) {
+    lines.push(`## 🔍 SWEny Triage — Dry run complete`);
+  } else if (novelCount === 0) {
+    lines.push(`## ✅ SWEny Triage — No new incidents`);
+  } else {
+    lines.push(`## ℹ️ SWEny Triage — No action taken`);
+  }
+
+  lines.push("");
+  lines.push(`**Duration:** ${duration}  `);
+  if (config?.serviceFilter && config.serviceFilter !== "*") {
+    lines.push(`**Service filter:** \`${config.serviceFilter}\`  `);
+  }
+  if (config?.timeRange) {
+    lines.push(`**Time range:** ${config.timeRange}  `);
+  }
+  if (highestSeverity) {
+    lines.push(`**Highest severity:** ${highestSeverity}  `);
+  }
+  lines.push(`**Novel findings:** ${novelCount}`);
+
+  // Issue and PR links
+  if (issueData?.issueIdentifier || issueData?.issueUrl) {
+    lines.push("");
+    lines.push("### 📋 Issue");
+    const id = issueData.issueIdentifier ? `**${String(issueData.issueIdentifier)}** — ` : "";
+    const title = issueData.issueTitle ? String(issueData.issueTitle) : "";
+    const url = issueData.issueUrl ? String(issueData.issueUrl) : "";
+    if (url) {
+      lines.push(`${id}[${title || url}](${url})`);
+    } else {
+      lines.push(`${id}${title}`);
+    }
+  }
+
+  if (prData?.prUrl) {
+    lines.push("");
+    lines.push("### 🔧 Pull request");
+    const num = prData.prNumber ? `#${String(prData.prNumber)}` : "";
+    lines.push(`[${num || String(prData.prUrl)}](${String(prData.prUrl)})`);
+  }
+
+  // Findings table — mostly useful for dry runs and no-action results
+  if (findings && findings.length > 0 && !prData?.prUrl) {
+    lines.push("");
+    lines.push("### 🔎 Findings");
+    lines.push("");
+    lines.push("| Severity | Title | Status |");
+    lines.push("| --- | --- | --- |");
+    for (const f of findings.slice(0, 10)) {
+      const sev = String(f.severity ?? "—");
+      const title = String(f.title ?? "").replace(/\|/g, "\\|");
+      const status = f.is_duplicate ? "duplicate" : "novel";
+      lines.push(`| ${sev} | ${title} | ${status} |`);
+    }
+    if (findings.length > 10) {
+      lines.push("");
+      lines.push(`_…and ${findings.length - 10} more_`);
+    }
+  }
+
+  // Recommendation / next step
+  const rec = investigateData?.recommendation;
+  if (rec) {
+    lines.push("");
+    lines.push(`**Next:** ${String(rec)}`);
+  }
+
+  if (config?.dryRun) {
+    lines.push("");
+    lines.push("_Dry run mode — no side effects were taken._");
+  }
+
+  return lines.join("\n") + "\n";
+}
+
 // ── Helpers ─────────────────────────────────────────────────────
 function formatDuration(ms: number): string {
   const s = Math.round(ms / 1000);

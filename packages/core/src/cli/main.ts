@@ -50,6 +50,7 @@ import {
   getStepDetails,
   formatStepLine,
   formatDagResultHuman,
+  formatDagResultMarkdown,
   formatResultJson,
   formatValidationErrors,
   formatCrashError,
@@ -418,6 +419,17 @@ triageCmd.action(async (options: Record<string, unknown>) => {
       console.log(formatDagResultHuman(results, durationMs, config));
     }
 
+    // GitHub Actions step summary
+    if (config.notificationProvider === "github-summary" && process.env.GITHUB_STEP_SUMMARY) {
+      try {
+        const md = formatDagResultMarkdown(results, durationMs, config);
+        fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+      } catch (err) {
+        // Don't fail the run if the summary file can't be written
+        console.error(c.subtle(`  ⚠ could not write GITHUB_STEP_SUMMARY: ${err instanceof Error ? err.message : err}`));
+      }
+    }
+
     // Terminal bell
     if (config.bell) process.stderr.write("\x07");
 
@@ -429,6 +441,16 @@ triageCmd.action(async (options: Record<string, unknown>) => {
       console.log(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }));
     } else {
       console.error(formatCrashError(error));
+    }
+
+    // Best-effort GitHub Actions step summary on crash
+    if (config.notificationProvider === "github-summary" && process.env.GITHUB_STEP_SUMMARY) {
+      try {
+        const msg = error instanceof Error ? error.message : "Unknown error";
+        fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## ❌ SWEny Triage Crashed\n\n\`\`\`\n${msg}\n\`\`\`\n`);
+      } catch {
+        // ignore
+      }
     }
 
     // Terminal bell even on crash
