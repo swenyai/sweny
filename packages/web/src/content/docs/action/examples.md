@@ -525,3 +525,37 @@ jobs:
 ```
 
 The triage job investigates and creates an issue. If it recommends implementation, the second job picks up the issue and writes a fix PR.
+
+## E2E browser tests
+
+Run agentic browser tests against a deployed app. AI drives a real browser — no test scripts needed. Uses [`swenyai/e2e@v1`](https://github.com/swenyai/e2e).
+
+```yaml
+name: E2E Browser Tests
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      base-url:
+        description: 'URL of the deployed app to test'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: swenyai/e2e@v1
+        with:
+          workflow: .sweny/workflows/e2e-smoke.yml
+          base-url: ${{ inputs.base-url || github.event.deployment_status.target_url }}
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+Secrets needed: `CLAUDE_CODE_OAUTH_TOKEN`. Screenshots are automatically uploaded as workflow artifacts.

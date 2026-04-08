@@ -16,6 +16,18 @@ The **[Workflow Marketplace](https://marketplace.sweny.ai)** is free to browse �
 
 Claude, via headless [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) — not the raw Anthropic API. Claude Code provides tool use, context management, and structured output built into the runtime. SWEny's executor sends each node's instruction and tools to Claude Code, which handles the rest.
 
+## Which GitHub Action should I use?
+
+SWEny ships three actions. Pick the one that matches your use case:
+
+| Action | Use case |
+|--------|----------|
+| [`swenyai/triage@v1`](https://github.com/swenyai/triage) | SRE triage — monitors alerts, files tickets, opens fix PRs |
+| [`swenyai/e2e@v1`](https://github.com/swenyai/e2e) | Agentic E2E browser tests — AI drives a real browser |
+| [`swenyai/sweny@v5`](https://github.com/swenyai/sweny) | Generic runner — execute any SWEny workflow YAML |
+
+Most users start with **triage**. See [Action Setup](/action/) for configuration details.
+
 ## What observability tools are supported?
 
 **Built-in skills:** Sentry, Datadog, and BetterStack (observability), GitHub (git), Linear (issue tracking), Slack and Notification (notifications). These have native skill integrations with purpose-built tools.
@@ -72,7 +84,7 @@ SWEny does not run a managed cloud service today — everything executes inside 
 
 ## Can I use a different LLM?
 
-The `coding-agent-provider` input supports three options for the **Implement** workflow:
+The `coding-agent-provider` input on [`swenyai/triage@v1`](https://github.com/swenyai/triage) supports three options for the **Implement** workflow:
 
 | Provider | Input value | Credential |
 |----------|------------|------------|
