@@ -1,17 +1,42 @@
 ---
 title: Inputs & Outputs
-description: Complete reference for all SWEny GitHub Action inputs and outputs.
+description: Complete reference for all SWEny GitHub Action inputs and outputs across all three actions.
 ---
 
-Every input listed here corresponds to an entry in [`action.yml`](https://github.com/swenyai/sweny/blob/main/action.yml). All inputs are optional -- SWEny provides sensible defaults so you only need to configure the providers you use.
+SWEny ships three GitHub Actions, each with its own input surface. This page documents all inputs for all three.
 
-## Workflow
+| Action | Use case | Docs |
+|--------|----------|------|
+| [`swenyai/triage@v1`](https://github.com/swenyai/triage) | SRE triage — monitors alerts, files tickets, opens fix PRs | [Triage inputs](#triage-action-inputs) |
+| [`swenyai/e2e@v1`](https://github.com/swenyai/e2e) | Agentic E2E browser tests | [E2E inputs](#e2e-action-inputs) |
+| [`swenyai/sweny@v5`](https://github.com/swenyai/sweny) | Generic runner — any workflow YAML | [Generic inputs](#generic-runner-inputs) |
+
+---
+
+## Generic runner inputs
+
+[`swenyai/sweny@v5`](https://github.com/swenyai/sweny) — runs any SWEny workflow YAML. Minimal input surface.
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `workflow` | Workflow to run: `triage` (scan logs, investigate, create issues and PRs) or `implement` (work on a specific issue, skip log scanning) | `triage` |
+| `workflow` | Path to the workflow YAML file to execute (relative to working-directory) | **required** |
+| `claude-oauth-token` | Claude Code OAuth token from a Max/Pro subscription | -- |
+| `anthropic-api-key` | Anthropic API key for Claude (pay-per-use billing) | -- |
+| `cli-version` | Version of `@sweny-ai/core` to install | `latest` |
+| `node-version` | Node.js version to install | `24` |
+| `working-directory` | Working directory to run from | `.` |
 
-## Authentication
+You must provide either `claude-oauth-token` or `anthropic-api-key`.
+
+Pass any additional credentials your workflow needs via `env:` on the step — the CLI auto-loads environment variables.
+
+---
+
+## Triage action inputs
+
+[`swenyai/triage@v1`](https://github.com/swenyai/triage) — the full triage preset with observability, issue tracking, notification, and investigation inputs.
+
+### Authentication
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -22,23 +47,23 @@ Every input listed here corresponds to an entry in [`action.yml`](https://github
 
 You must provide either `anthropic-api-key` or `claude-oauth-token`. The `github-token` is auto-provided by GitHub Actions.
 
-## Coding Agent
+### Coding Agent
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `coding-agent-provider` | Agent to use for implementation: `claude`, `codex`, or `gemini` | `claude` |
-| `openai-api-key` | OpenAI API key (required when `coding-agent-provider` is `codex`) | -- |
-| `gemini-api-key` | Google Gemini API key (required when `coding-agent-provider` is `gemini`) | -- |
+| `agent` | Agent to use for implementation: `claude`, `codex`, or `gemini` | `claude` |
+| `openai-api-key` | OpenAI API key (required when `agent` is `codex`) | -- |
+| `gemini-api-key` | Google Gemini API key (required when `agent` is `gemini`) | -- |
 
-## Observability
+### Observability
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `observability-provider` | Provider to query for logs, errors, and metrics | `datadog` |
 
-Supported values: `datadog`, `sentry`, `cloudwatch`, `splunk`, `elastic`, `newrelic`, `loki`, `honeycomb`, `axiom`, `heroku`, `opsgenie`, `pagerduty`, `prometheus`, `vercel`, `supabase`, `netlify`, `fly`, `render`, `file`.
+Supported values: `datadog`, `sentry`, `betterstack`, `cloudwatch`, `splunk`, `elastic`, `newrelic`, `loki`, `honeycomb`, `axiom`, `heroku`, `opsgenie`, `pagerduty`, `prometheus`, `vercel`, `supabase`, `netlify`, `fly`, `render`, `file`.
 
-### Datadog
+#### Datadog
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -46,7 +71,7 @@ Supported values: `datadog`, `sentry`, `cloudwatch`, `splunk`, `elastic`, `newre
 | `dd-app-key` | Datadog Application key | -- |
 | `dd-site` | Datadog site (e.g., `datadoghq.com`, `datadoghq.eu`) | `datadoghq.com` |
 
-### Sentry
+#### Sentry
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -55,7 +80,7 @@ Supported values: `datadog`, `sentry`, `cloudwatch`, `splunk`, `elastic`, `newre
 | `sentry-project` | Sentry project slug | -- |
 | `sentry-base-url` | Sentry base URL (for self-hosted instances) | `https://sentry.io` |
 
-### CloudWatch
+#### CloudWatch
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -66,7 +91,15 @@ Supported values: `datadog`, `sentry`, `cloudwatch`, `splunk`, `elastic`, `newre
 CloudWatch uses the standard AWS credential chain. Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` as repository secrets, or use [OIDC federation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services) for keyless auth.
 :::
 
-### Splunk
+#### BetterStack
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `betterstack-api-token` | Better Stack API token | -- |
+| `betterstack-source-id` | Better Stack Telemetry source ID | -- |
+| `betterstack-table-name` | Better Stack Telemetry ClickHouse table name | -- |
+
+#### Splunk
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -74,7 +107,7 @@ CloudWatch uses the standard AWS credential chain. Set `AWS_ACCESS_KEY_ID` and `
 | `splunk-token` | Splunk authentication token | -- |
 | `splunk-index` | Splunk index to search | `main` |
 
-### Elasticsearch
+#### Elasticsearch
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -82,7 +115,7 @@ CloudWatch uses the standard AWS credential chain. Set `AWS_ACCESS_KEY_ID` and `
 | `elastic-api-key` | Elasticsearch API key | -- |
 | `elastic-index` | Elasticsearch index pattern | `logs-*` |
 
-### New Relic
+#### New Relic
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -90,7 +123,7 @@ CloudWatch uses the standard AWS credential chain. Set `AWS_ACCESS_KEY_ID` and `
 | `newrelic-account-id` | New Relic account ID | -- |
 | `newrelic-region` | New Relic region: `us` or `eu` | `us` |
 
-### Grafana Loki
+#### Grafana Loki
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -98,14 +131,14 @@ CloudWatch uses the standard AWS credential chain. Set `AWS_ACCESS_KEY_ID` and `
 | `loki-api-key` | Loki API key (optional for unauthenticated instances) | -- |
 | `loki-org-id` | Loki tenant/org ID (optional) | -- |
 
-### Honeycomb
+#### Honeycomb
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `honeycomb-api-key` | Honeycomb API key | -- |
 | `honeycomb-dataset` | Honeycomb dataset name | -- |
 
-### Axiom
+#### Axiom
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -113,27 +146,27 @@ CloudWatch uses the standard AWS credential chain. Set `AWS_ACCESS_KEY_ID` and `
 | `axiom-dataset` | Axiom dataset name | -- |
 | `axiom-org-id` | Axiom org ID (required for multi-org accounts) | -- |
 
-### PagerDuty
+#### PagerDuty
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `pagerduty-api-key` | PagerDuty API key | -- |
 
-### OpsGenie
+#### OpsGenie
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `opsgenie-api-key` | OpsGenie API key | -- |
 | `opsgenie-region` | OpsGenie region: `us` or `eu` | `us` |
 
-### Prometheus
+#### Prometheus
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `prometheus-url` | Prometheus base URL (e.g., `http://prometheus.internal:9090`) | -- |
 | `prometheus-token` | Prometheus bearer token (optional, for secured instances) | -- |
 
-### Vercel
+#### Vercel
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -141,42 +174,42 @@ CloudWatch uses the standard AWS credential chain. Set `AWS_ACCESS_KEY_ID` and `
 | `vercel-project-id` | Vercel project ID (`prj_...`) | -- |
 | `vercel-team-id` | Vercel team ID (`team_...`, optional for team-owned projects) | -- |
 
-### Supabase
+#### Supabase
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `supabase-management-key` | Supabase management API key | -- |
 | `supabase-project-ref` | Supabase project reference ID | -- |
 
-### Netlify
+#### Netlify
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `netlify-token` | Netlify personal access token | -- |
 | `netlify-site-id` | Netlify site ID (find in Site Settings > General) | -- |
 
-### Fly.io
+#### Fly.io
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `fly-token` | Fly.io personal access token | -- |
 | `fly-app-name` | Fly.io application name | -- |
 
-### Render
+#### Render
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `render-api-key` | Render API key | -- |
 | `render-service-id` | Render service ID (`srv-...`) | -- |
 
-### Heroku
+#### Heroku
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `heroku-api-key` | Heroku API key | -- |
 | `heroku-app-name` | Heroku application name | -- |
 
-### File
+#### File
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -184,13 +217,13 @@ CloudWatch uses the standard AWS credential chain. Set `AWS_ACCESS_KEY_ID` and `
 
 Use the `file` provider for testing without connecting to an external service.
 
-## Issue Tracking
+### Issue Tracking
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `issue-tracker-provider` | Issue tracker to use: `github-issues`, `linear`, or `jira` | `github-issues` |
 
-### Linear
+#### Linear
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -204,7 +237,7 @@ Use the `file` provider for testing without connecting to an external service.
 
 Only `linear-api-key` and `linear-team-id` are required. The label and state UUIDs are optional and let you control where issues land in your workflow.
 
-### Jira
+#### Jira
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -212,11 +245,11 @@ Only `linear-api-key` and `linear-team-id` are required. The label and state UUI
 | `jira-email` | Jira user email for API authentication | -- |
 | `jira-api-token` | Jira API token | -- |
 
-### GitHub Issues
+#### GitHub Issues
 
 GitHub Issues requires no extra configuration. It uses the `github-token` input, which is auto-provided by GitHub Actions.
 
-## Source Control
+### Source Control
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -225,7 +258,7 @@ GitHub Issues requires no extra configuration. It uses the `github-token` input,
 | `gitlab-project-id` | GitLab project ID or path (e.g., `my-group/my-project`) | -- |
 | `gitlab-base-url` | GitLab instance base URL | `https://gitlab.com` |
 
-## Notification
+### Notification
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -237,7 +270,7 @@ GitHub Issues requires no extra configuration. It uses the `github-token` input,
 | `webhook-signing-secret` | HMAC-SHA256 signing secret for generic webhook notifications | -- |
 | `output-dir` | Directory for file-based provider output (dry-run and `file` provider artifacts) | `.github/sweny-output` |
 
-## Investigation
+### Investigation
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -252,24 +285,24 @@ GitHub Issues requires no extra configuration. It uses the `github-token` input,
 If you run triage on a daily cron, set `time-range: 24h`. If you run every 6 hours, use `time-range: 6h`. This avoids investigating the same errors twice.
 :::
 
-## PR Settings
+### PR Settings
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `base-branch` | Target branch for PRs (e.g., `main`, `master`, `develop`) | `main` |
 | `pr-labels` | Comma-separated list of labels to apply to created PRs | `agent,triage,needs-review` |
 
-## Behavior
+### Behavior
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `dry-run` | Analyze only -- the executor stops at the first conditional edge, guaranteeing zero side effects. Enforced by the executor, not by prompt. | `false` |
 | `review-mode` | PR merge behavior: `auto` (enable GitHub auto-merge when CI passes, automatically suppressed for high-risk changes like migrations, auth, lockfiles, or >20 files) or `review` (open PR and wait for human approval) | `review` |
 | `novelty-mode` | Only report novel issues not already tracked in your issue tracker | `true` |
-| `linear-issue` | Existing issue identifier to work on (e.g., `ENG-123`). Required for the `implement` workflow. Equivalent to `--issue-override` in the CLI | -- |
+| `issue-override` | Existing issue identifier to work on (e.g., `ENG-123`). Skips log scanning and works directly on this issue. | -- |
 | `additional-instructions` | Extra guidance for the agent (e.g., `"focus on the webhook handler"`) | -- |
 
-## Service Map
+### Service Map
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -277,7 +310,7 @@ If you run triage on a daily cron, set `time-range: 24h`. If you run every 6 hou
 
 See [Service Map](/action/service-map/) for the file format and usage guide.
 
-## Workspace Tools
+### Workspace Tools
 
 | Input | Description | Default |
 |-------|-------------|---------|
@@ -287,16 +320,16 @@ Supported values: `slack`, `notion`, `pagerduty`, `monday`, `asana`.
 
 Example: `workspace-tools: "slack,notion"`
 
-## MCP Servers
+### MCP Servers
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `mcp-servers` | Additional MCP servers as a JSON object. Each key is a server name; each value is an `MCPServerConfig` with fields: `type`, `command`, `args`, `env`, `url`, `headers` | -- |
+| `mcp-servers-json` | Additional MCP servers as a JSON object. Each key is a server name; each value is an `MCPServerConfig` with fields: `type`, `command`, `args`, `env`, `url`, `headers` | -- |
 
 Provider-based MCP servers (GitHub, Linear, Datadog) are injected automatically based on your configured providers -- you do not need to add them here.
 
 ```yaml
-mcp-servers: |
+mcp-servers-json: |
   {
     "filesystem": {
       "type": "stdio",
@@ -308,11 +341,19 @@ mcp-servers: |
 
 See [MCP Servers](/advanced/mcp-servers/) for the full server catalog.
 
+### Setup
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `cli-version` | Version of `@sweny-ai/core` to install | `latest` |
+| `node-version` | Node.js version to install | `24` |
+| `working-directory` | Working directory to run from | `.` |
+
 ---
 
-## Outputs
+## Triage outputs
 
-After the workflow completes, SWEny sets these outputs on the action step. Use them in subsequent workflow steps with `${{ steps.<step-id>.outputs.<output> }}`.
+After the triage workflow completes, SWEny sets these outputs on the action step. Use them in subsequent workflow steps with `${{ steps.<step-id>.outputs.<output> }}`.
 
 | Output | Description | Example |
 |--------|-------------|---------|
@@ -334,7 +375,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         id: sweny
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -348,3 +389,25 @@ jobs:
             -H 'Content-type: application/json' \
             -d '{"text": "SWEny found issues: ${{ steps.sweny.outputs.issue-url }}"}'
 ```
+
+---
+
+## E2E action inputs
+
+[`swenyai/e2e@v1`](https://github.com/swenyai/e2e) — runs agentic browser tests against a deployed app.
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `workflow` | Path to the E2E workflow YAML file to execute | **required** |
+| `claude-oauth-token` | Claude Code OAuth token | -- |
+| `anthropic-api-key` | Anthropic API key for Claude | -- |
+| `base-url` | Base URL of the deployed app under test (exposed as `BASE_URL`) | -- |
+| `cli-version` | Version of `@sweny-ai/core` to install | `latest` |
+| `agent-browser-version` | Version of `agent-browser` to install | `latest` |
+| `node-version` | Node.js version to install | `24` |
+| `working-directory` | Working directory to run from | `.` |
+| `screenshots-path` | Path where the workflow writes screenshots and artifacts | `results/` |
+| `artifact-name` | Name of the uploaded screenshots artifact | `e2e-screenshots` |
+| `artifact-retention-days` | How long to retain the screenshots artifact (days) | `14` |
+
+You must provide either `claude-oauth-token` or `anthropic-api-key`.
