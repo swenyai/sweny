@@ -230,4 +230,101 @@ describe("docs action code blocks", () => {
       );
     }
   });
+
+  it("every swenyai/sweny@v5 code block has a workflow: input", () => {
+    const issues: string[] = [];
+    for (const f of ACTION_DOC_FILES) {
+      const filePath = resolve(ROOT, f);
+      if (!existsSync(filePath)) continue;
+      const content = readFileSync(filePath, "utf-8");
+      const blocks = content.match(/```ya?ml[\s\S]*?```/g) || [];
+      for (const block of blocks) {
+        if (!block.includes(`swenyai/sweny@${CURRENT_ACTION_VERSION}`)) continue;
+        if (!block.includes("workflow:")) {
+          issues.push(
+            `${relative(ROOT, filePath)}: code block uses swenyai/sweny@${CURRENT_ACTION_VERSION} without workflow: input`,
+          );
+        }
+      }
+    }
+    if (issues.length > 0) {
+      expect.fail(`The generic runner requires a workflow: input.\n` + issues.map((i) => `  ${i}`).join("\n"));
+    }
+  });
+});
+
+// ─── 5. Internal doc links resolve ──────────────────────────────────
+
+describe("docs internal links", () => {
+  const DOCS_ROOT = resolve(ROOT, "packages/web/src/content/docs");
+
+  /**
+   * Extract markdown links like [text](/path/) and verify the target exists.
+   * Only checks internal absolute links (starting with /).
+   */
+  function findBrokenLinks(filePath: string): string[] {
+    if (!existsSync(filePath)) return [];
+    const content = readFileSync(filePath, "utf-8");
+    const broken: string[] = [];
+
+    // Match [text](/path/) and [text](/path/#anchor) but skip external URLs
+    const linkPattern = /\[([^\]]*)\]\(\/([^)#]*?)\/?\)/g;
+    let match;
+    while ((match = linkPattern.exec(content)) !== null) {
+      const linkPath = match[2];
+      // Map /action/ → action/index.md, /action/inputs/ → action/inputs.md
+      const candidates = [
+        resolve(DOCS_ROOT, linkPath, "index.md"),
+        resolve(DOCS_ROOT, linkPath, "index.mdx"),
+        resolve(DOCS_ROOT, `${linkPath}.md`),
+        resolve(DOCS_ROOT, `${linkPath}.mdx`),
+      ];
+      if (!candidates.some((c) => existsSync(c))) {
+        broken.push(`${relative(ROOT, filePath)}: broken link [${match[1]}](/${linkPath}/)`);
+      }
+    }
+    return broken;
+  }
+
+  const KEY_DOCS = [
+    "packages/web/src/content/docs/action/index.md",
+    "packages/web/src/content/docs/action/inputs.md",
+    "packages/web/src/content/docs/action/examples.md",
+    "packages/web/src/content/docs/action/scheduling.md",
+    "packages/web/src/content/docs/action/service-map.md",
+    "packages/web/src/content/docs/index.mdx",
+    "packages/web/src/content/docs/getting-started/quick-start.md",
+  ];
+
+  it("key action docs have no broken internal links", () => {
+    const allBroken = KEY_DOCS.flatMap((f) => findBrokenLinks(resolve(ROOT, f)));
+    if (allBroken.length > 0) {
+      expect.fail(`Found ${allBroken.length} broken link(s):\n` + allBroken.map((b) => `  ${b}`).join("\n"));
+    }
+  });
+});
+
+// ─── 6. Three-action architecture documented ────────────────────────
+
+describe("three-action architecture", () => {
+  it("action/index.md documents all three actions", () => {
+    const content = readFileSync(resolve(ROOT, "packages/web/src/content/docs/action/index.md"), "utf-8");
+    expect(content).toContain("swenyai/triage@v1");
+    expect(content).toContain("swenyai/e2e@v1");
+    expect(content).toContain(`swenyai/sweny@${CURRENT_ACTION_VERSION}`);
+  });
+
+  it("action/inputs.md has sections for all three actions", () => {
+    const content = readFileSync(resolve(ROOT, "packages/web/src/content/docs/action/inputs.md"), "utf-8");
+    expect(content).toMatch(/## Generic runner inputs/);
+    expect(content).toMatch(/## Triage action inputs/);
+    expect(content).toMatch(/## E2E action inputs/);
+  });
+
+  it("README Actions table lists all three actions", () => {
+    const readme = readFileSync(resolve(ROOT, "README.md"), "utf-8");
+    expect(readme).toContain("swenyai/triage@v1");
+    expect(readme).toContain("swenyai/e2e@v1");
+    expect(readme).toContain(`swenyai/sweny@${CURRENT_ACTION_VERSION}`);
+  });
 });
