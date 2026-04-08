@@ -1,23 +1,27 @@
 ---
 title: GitHub Action Setup
-description: Install and configure SWEny as a GitHub Action for autonomous triage and fix PRs.
+description: Deploy SWEny workflows to CI — triage, e2e tests, or any custom workflow YAML.
 ---
 
-The GitHub Action is how you deploy SWEny workflows to CI. Set up a cron schedule, forget about it, and wake up to triaged issues with fix PRs ready for review. Install it across multiple repos with service maps and it handles an entire team's worth of triage automatically.
+SWEny ships three GitHub Actions. Pick the one that matches your use case:
 
-Use the [CLI](/cli/) to build and test workflows locally, then deploy them here for automated, recurring runs. The Action connects to your observability platform, investigates errors, creates issue tickets, writes fixes, and opens pull requests -- all without human intervention.
+| Action | Use case | Repo |
+|--------|----------|------|
+| [`swenyai/triage@v1`](https://github.com/swenyai/triage) | SRE triage — monitors alerts, files tickets, opens fix PRs | [swenyai/triage](https://github.com/swenyai/triage) |
+| [`swenyai/e2e@v1`](https://github.com/swenyai/e2e) | Agentic E2E browser tests — AI drives a real browser, uploads screenshots | [swenyai/e2e](https://github.com/swenyai/e2e) |
+| [`swenyai/sweny@v5`](https://github.com/swenyai/sweny) | Generic runner — execute any SWEny workflow YAML | this repo |
+
+The **triage** and **e2e** actions are preset wrappers that auto-wire credentials, install dependencies, and expose a focused input surface. The **generic runner** takes any workflow YAML you build with `sweny workflow create`.
 
 ## Prerequisites
 
 - A GitHub repository
-- An observability platform (Datadog, Sentry, CloudWatch, or [19 others](/action/inputs/#observability))
 - SWEny uses [Claude](https://claude.ai/) as its AI engine — you'll need an [Anthropic API key](https://console.anthropic.com/) or a Claude OAuth token
+- For triage: an observability platform (Datadog, Sentry, CloudWatch, or [19 others](/action/inputs/#observability))
 
-That is it. SWEny uses **GitHub Issues** by default -- no extra issue tracker setup required.
+## Triage setup
 
-## Minimal setup
-
-Create `.github/workflows/sweny-triage.yml`:
+The most common use case. Create `.github/workflows/sweny-triage.yml`:
 
 ```yaml
 name: SWEny Triage
@@ -38,7 +42,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           observability-provider: sentry
@@ -47,7 +51,30 @@ jobs:
           sentry-project: my-project
 ```
 
-That is a complete, working workflow. Three secrets and you are running.
+Three secrets and you are running. SWEny uses **GitHub Issues** by default -- no extra issue tracker setup required.
+
+## Custom workflow setup
+
+Run any workflow YAML built with `sweny workflow create`:
+
+```yaml
+name: Weekly Competitive Scan
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: swenyai/sweny@v5
+        with:
+          workflow: .sweny/workflows/competitive-scan.yml
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
 
 ## Add secrets
 
@@ -81,14 +108,14 @@ For read-only analysis (dry run), `contents: read` and `issues: write` are suffi
 
 1. Push the workflow file to your repository
 2. Go to the **Actions** tab
-3. Select "SWEny Triage" from the sidebar
+3. Select your workflow from the sidebar
 4. Click **Run workflow**
-5. Check the Actions summary for investigation results
+5. Check the Actions summary for results
 
-For your first run, consider adding `dry-run: true` to analyze without creating any issues or PRs:
+For triage, consider adding `dry-run: true` to analyze without creating any issues or PRs:
 
 ```yaml
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           observability-provider: sentry
@@ -105,7 +132,7 @@ Review the output, then remove `dry-run` and put it on a [schedule](/action/sche
 The example above uses Sentry. To use Datadog instead:
 
 ```yaml
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           observability-provider: datadog
@@ -120,7 +147,7 @@ SWEny supports 21 observability providers including CloudWatch, Splunk, Elastic,
 Set `issue-tracker-provider` and add the relevant credentials:
 
 ```yaml
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -145,3 +172,5 @@ For Jira:
 - [Cron & Dispatch](/action/scheduling/) -- put triage on a schedule or trigger it from events
 - [Service Map](/action/service-map/) -- scope triage to specific services and teams
 - [Examples](/action/examples/) -- complete, copy-pasteable workflow files for common setups
+- [`swenyai/triage` repo](https://github.com/swenyai/triage) -- triage preset action
+- [`swenyai/e2e` repo](https://github.com/swenyai/e2e) -- E2E browser test action

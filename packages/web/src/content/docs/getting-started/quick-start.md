@@ -77,7 +77,7 @@ Put workflows on a schedule. SWEny monitors your observability platform, triages
 
 ```yaml
 # .github/workflows/sweny-triage.yml
-- uses: swenyai/sweny@v5
+- uses: swenyai/triage@v1
   with:
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     observability-provider: sentry
@@ -86,7 +86,7 @@ Put workflows on a schedule. SWEny monitors your observability platform, triages
     sentry-project: my-project
 ```
 
-Three secrets. Push the file, trigger it from the Actions tab, and check the summary.
+Three secrets. Push the file, trigger it from the Actions tab, and check the summary. Use [`swenyai/sweny@v5`](https://github.com/swenyai/sweny) to run custom workflow YAMLs, or [`swenyai/e2e@v1`](https://github.com/swenyai/e2e) for browser tests.
 
 **[Full Action guide](/action/)** — setup, inputs, scheduling, and service maps.
 

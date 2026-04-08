@@ -124,7 +124,7 @@ permissions:
 For cross-repo dispatch (when the fix belongs to a different repository), use a `bot-token` with `repo` and `actions` scopes instead of the default `GITHUB_TOKEN`:
 
 ```yaml
-- uses: swenyai/sweny@v5
+- uses: swenyai/triage@v1
   with:
     bot-token: ${{ secrets.BOT_TOKEN }}
 ```

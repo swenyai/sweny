@@ -5,6 +5,35 @@ description: Complete, copy-pasteable GitHub Actions workflow files for common S
 
 Every example below is a complete workflow file. Copy it into `.github/workflows/` in your repository, add the referenced secrets, and it works.
 
+:::note[Which action?]
+Triage and implement examples use [`swenyai/triage@v1`](https://github.com/swenyai/triage). Custom workflow examples use [`swenyai/sweny@v5`](https://github.com/swenyai/sweny). See [Action Setup](/action/) for the full breakdown.
+:::
+
+## Custom workflow (generic runner)
+
+Run any workflow YAML built with `sweny workflow create`. This is the generic `swenyai/sweny@v5` action.
+
+```yaml
+name: Weekly Competitive Scan
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: swenyai/sweny@v5
+        with:
+          workflow: .sweny/workflows/competitive-scan.yml
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+Secrets needed: `CLAUDE_CODE_OAUTH_TOKEN`.
+
 ## Minimal triage (Sentry + GitHub Issues)
 
 The simplest possible setup. Sentry for error monitoring, GitHub Issues for tracking -- no extra services needed.
@@ -30,7 +59,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           observability-provider: sentry
@@ -66,7 +95,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
@@ -122,7 +151,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           workflow: implement
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -158,7 +187,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
@@ -210,7 +239,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -266,7 +295,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -313,7 +342,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -354,7 +383,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           observability-provider: vercel
@@ -389,7 +418,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -434,7 +463,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           dd-api-key: ${{ secrets.DD_API_KEY }}
@@ -473,7 +502,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         id: sweny
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -490,7 +519,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: swenyai/sweny@v5
+      - uses: swenyai/triage@v1
         with:
           workflow: implement
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
