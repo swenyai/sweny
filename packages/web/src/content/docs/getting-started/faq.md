@@ -22,7 +22,7 @@ Claude, via headless [Claude Code](https://docs.anthropic.com/en/docs/claude-cod
 
 **Via Action inputs:** CloudWatch, Splunk, Elasticsearch, New Relic, Grafana Loki, Honeycomb, Axiom, Prometheus, PagerDuty, OpsGenie, Vercel, Supabase, Netlify, Fly.io, Render, Heroku. Set `observability-provider` to the one you use and add the relevant credentials.
 
-**Via MCP servers:** Any tool with an MCP server can be added using the `mcp-servers` Action input. See [MCP Servers](/advanced/mcp-servers/).
+**Via MCP servers:** Any tool with an MCP server can be added using the `mcp-servers-json` input on [`swenyai/triage@v1`](https://github.com/swenyai/triage). See [MCP Servers](/advanced/mcp-servers/).
 
 **For testing:** Set `observability-provider: file` and point `log-file-path` at a local JSON log file. No external API calls.
 

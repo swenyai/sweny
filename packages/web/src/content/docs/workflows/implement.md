@@ -180,8 +180,8 @@ sweny implement --dry-run ENG-123 # analyze without making changes
 ```yaml
 - uses: swenyai/triage@v1
   with:
-    workflow: implement
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    issue-override: ENG-123
     issue-tracker-provider: linear
     linear-api-key: ${{ secrets.LINEAR_API_KEY }}
 ```

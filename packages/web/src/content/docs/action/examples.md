@@ -153,10 +153,9 @@ jobs:
 
       - uses: swenyai/triage@v1
         with:
-          workflow: implement
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           linear-api-key: ${{ secrets.LINEAR_API_KEY }}
-          linear-issue: ${{ inputs.issue }}
+          issue-override: ${{ inputs.issue }}
           additional-instructions: ${{ inputs.instructions }}
 ```
 
@@ -198,7 +197,7 @@ jobs:
           sentry-project: my-project
 
           # Additional: Datadog metrics via MCP
-          mcp-servers: |
+          mcp-servers-json: |
             {
               "datadog": {
                 "type": "stdio",
@@ -245,7 +244,7 @@ jobs:
           dd-api-key: ${{ secrets.DD_API_KEY }}
           dd-app-key: ${{ secrets.DD_APP_KEY }}
 
-          mcp-servers: |
+          mcp-servers-json: |
             {
               "filesystem": {
                 "type": "stdio",
@@ -264,7 +263,7 @@ jobs:
 ```
 
 :::note[Auto-injected MCP servers]
-SWEny automatically injects MCP servers for GitHub, Linear, and Datadog based on your configured providers. You do not need to add them manually via `mcp-servers`.
+SWEny automatically injects MCP servers for GitHub, Linear, and Datadog based on your configured providers. You do not need to add them manually via `mcp-servers-json`.
 :::
 
 ## With workspace tools (Slack + Notion)
@@ -521,9 +520,8 @@ jobs:
 
       - uses: swenyai/triage@v1
         with:
-          workflow: implement
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          linear-issue: ${{ needs.triage.outputs.issue-identifier }}
+          issue-override: ${{ needs.triage.outputs.issue-identifier }}
 ```
 
 The triage job investigates and creates an issue. If it recommends implementation, the second job picks up the issue and writes a fix PR.

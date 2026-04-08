@@ -32,9 +32,10 @@ function isHistorical(filePath: string): boolean {
  * Use git grep for fast, indexed search across the repo.
  * Returns array of "file:line:content" strings.
  */
-function gitGrep(pattern: string, extraArgs: string[] = []): string[] {
+function gitGrep(pattern: string, paths: string[] = ["."]): string[] {
   try {
-    const result = execSync(`git grep -n "${pattern}" -- . ${extraArgs.map((a) => `"${a}"`).join(" ")}`, {
+    const pathArgs = paths.map((p) => `"${p}"`).join(" ");
+    const result = execSync(`git grep -n "${pattern}" -- ${pathArgs}`, {
       cwd: ROOT,
       encoding: "utf-8",
       maxBuffer: 10 * 1024 * 1024,
@@ -326,5 +327,38 @@ describe("three-action architecture", () => {
     expect(readme).toContain("swenyai/triage@v1");
     expect(readme).toContain("swenyai/e2e@v1");
     expect(readme).toContain(`swenyai/sweny@${CURRENT_ACTION_VERSION}`);
+  });
+});
+
+// ─── 7. Input naming consistency ────────────────────────────────────
+
+describe("input naming consistency", () => {
+  const DOCS_DIR = resolve(ROOT, "packages/web/src/content/docs");
+
+  it("docs use issue-override, not linear-issue", () => {
+    const matches = gitGrep("linear-issue", ["packages/web/src/content/docs/"]);
+    if (matches.length > 0) {
+      expect.fail(
+        `Found "linear-issue" in docs — the triage action input is "issue-override":\n` +
+          matches.map((m) => `  ${m.split(":").slice(0, 2).join(":")}`).join("\n"),
+      );
+    }
+  });
+
+  it("docs use mcp-servers-json, not bare mcp-servers as an input name", () => {
+    // Match `mcp-servers:` or `mcp-servers |` in YAML (the input name), but NOT
+    // `mcp-servers-json` or prose text mentioning "MCP servers" as a concept
+    const matches = gitGrep("mcp-servers[^-]", ["packages/web/src/content/docs/"]);
+    const inputRefs = matches.filter((m) => {
+      const content = m.split(":").slice(2).join(":");
+      // Only flag YAML input usage, not prose text
+      return /^\s*(mcp-servers:|mcp-servers\s*\|)/.test(content);
+    });
+    if (inputRefs.length > 0) {
+      expect.fail(
+        `Found bare "mcp-servers" as an input — the triage action input is "mcp-servers-json":\n` +
+          inputRefs.map((m) => `  ${m.split(":").slice(0, 2).join(":")}`).join("\n"),
+      );
+    }
   });
 });

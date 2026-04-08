@@ -17,7 +17,7 @@ The **triage** and **e2e** actions are preset wrappers that auto-wire credential
 
 - A GitHub repository
 - SWEny uses [Claude](https://claude.ai/) as its AI engine — you'll need an [Anthropic API key](https://console.anthropic.com/) or a Claude OAuth token
-- For triage: an observability platform (Datadog, Sentry, CloudWatch, or [19 others](/action/inputs/#observability))
+- For triage: an observability platform (Datadog, Sentry, CloudWatch, or [17 others](/action/inputs/#observability))
 
 ## Triage setup
 
@@ -140,7 +140,7 @@ The example above uses Sentry. To use Datadog instead:
           dd-app-key: ${{ secrets.DD_APP_KEY }}
 ```
 
-SWEny supports 21 observability providers including CloudWatch, Splunk, Elastic, New Relic, Loki, Vercel, Supabase, Fly.io, and more. See the full list in [Inputs & Outputs](/action/inputs/#observability).
+SWEny supports 20 observability providers including CloudWatch, Splunk, Elastic, New Relic, Loki, Vercel, Supabase, Fly.io, and more. See the full list in [Inputs & Outputs](/action/inputs/#observability).
 
 ## Using Linear or Jira instead of GitHub Issues
 

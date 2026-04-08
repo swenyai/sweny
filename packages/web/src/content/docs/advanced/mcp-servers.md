@@ -62,14 +62,14 @@ sweny triage --workspace-tools slack,notion
 
 ## Custom MCP servers
 
-For services without built-in support, pass custom MCP servers via the `mcp-servers` action input (JSON string) or CLI config.
+For services without built-in support, pass custom MCP servers via the `mcp-servers-json` action input (JSON string) or CLI config.
 
 ### Action input
 
 ```yaml
 - uses: swenyai/triage@v1
   with:
-    mcp-servers: |
+    mcp-servers-json: |
       {
         "my-database": {
           "type": "stdio",
@@ -127,7 +127,7 @@ HTTP transport is preferred over stdio when available. HTTP servers start faster
 If a custom server has the same key as an auto-injected server, **the custom server wins**. This lets you override auto-injection when you need a specific version or configuration:
 
 ```yaml
-mcp-servers: |
+mcp-servers-json: |
   {
     "github": {
       "type": "stdio",
@@ -147,7 +147,7 @@ The `buildAutoMcpServers()` function in `@sweny-ai/core` takes the current provi
 ```
 auto-injected servers (from provider config)
   + workspace tool servers (from workspace-tools input)
-    + user-supplied servers (from mcp-servers input)  ← wins on conflict
+    + user-supplied servers (from mcp-servers-json input)  ← wins on conflict
       = final MCP server map passed to Claude Code
 ```
 

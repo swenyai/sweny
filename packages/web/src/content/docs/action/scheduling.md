@@ -168,9 +168,8 @@ jobs:
 
       - uses: swenyai/triage@v1
         with:
-          workflow: implement
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          linear-issue: '#${{ github.event.issue.number }}'
+          issue-override: '#${{ github.event.issue.number }}'
 ```
 
 Label an issue `sweny-implement` and SWEny picks it up, writes a fix, and opens a PR.
@@ -201,9 +200,8 @@ jobs:
 
       - uses: swenyai/triage@v1
         with:
-          workflow: implement
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          linear-issue: ${{ github.event.client_payload.issue }}
+          issue-override: ${{ github.event.client_payload.issue }}
           additional-instructions: ${{ github.event.client_payload.instructions }}
 ```
 
@@ -279,9 +277,8 @@ jobs:
 
       - uses: swenyai/triage@v1
         with:
-          workflow: implement
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          linear-issue: '#${{ github.event.issue.number }}'
+          issue-override: '#${{ github.event.issue.number }}'
 ```
 
 This creates a clean handoff: triage runs daily, finds issues, and creates tickets. When you are ready to fix one, add the `sweny-implement` label and SWEny writes the PR.
