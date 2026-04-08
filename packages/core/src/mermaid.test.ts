@@ -63,7 +63,7 @@ describe("toMermaid", () => {
 
     expect(result).toContain("graph TB");
     // Entry node gets stadium shape
-    expect(result).toContain("a([Triage \\u25B6])");
+    expect(result).toContain("a([Triage \u25B6])");
     // Non-entry nodes get default shape
     expect(result).toContain("b[Investigate]");
     expect(result).toContain("c[Report]");

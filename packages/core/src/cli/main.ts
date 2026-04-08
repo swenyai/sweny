@@ -403,7 +403,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   };
 
   try {
-    const { results } = await execute(triageWorkflow, workflowInput, {
+    const { results, trace } = await execute(triageWorkflow, workflowInput, {
       skills,
       claude,
       observer,
@@ -422,7 +422,10 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     // GitHub Actions step summary
     if (config.notificationProvider === "github-summary" && process.env.GITHUB_STEP_SUMMARY) {
       try {
-        const md = formatDagResultMarkdown(results, durationMs, config);
+        const md = formatDagResultMarkdown(results, durationMs, config, {
+          workflow: triageWorkflow,
+          trace,
+        });
         fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
       } catch (err) {
         // Don't fail the run if the summary file can't be written

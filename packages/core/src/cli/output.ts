@@ -1,7 +1,8 @@
 import chalk from "chalk";
 import type { CliConfig } from "./config.js";
 import type { CheckResult } from "./check.js";
-import type { NodeResult, ExecutionEvent } from "../types.js";
+import type { NodeResult, ExecutionEvent, ExecutionTrace, TraceStep, TraceEdge, Workflow } from "../types.js";
+import { toMermaidBlock, type NodeStatus as MermaidNodeStatus } from "../mermaid.js";
 
 // ── Color palette ───────────────────────────────────────────────
 export const c = {
@@ -455,19 +456,35 @@ export function formatResultJson(results: Map<string, NodeResult>): string {
 /**
  * Format triage results as GitHub-flavored markdown for `$GITHUB_STEP_SUMMARY`.
  *
- * Designed to render nicely in the GitHub Actions job summary panel:
- *   - Status line with an emoji for quick visual scanning
- *   - Links to any created issues or PRs
- *   - Findings table (for dry runs or no-action results)
- *   - Error detail when a node failed
+ * Designed to render richly in the GitHub Actions job summary panel:
+ *   - Status header with an emoji
+ *   - Mermaid workflow diagram colored by node execution state (when a
+ *     workflow + trace are supplied; this is the headline feature of the
+ *     job summary view)
+ *   - Config table (repository, providers, time range, mode)
+ *   - Workflow path showing actual execution sequence including loop iterations
+ *   - Routing decisions (collapsible) when the DAG had conditional edges
+ *   - Findings table
+ *   - Actions taken (issue/PR links)
+ *   - Recommendation / next step
+ *   - Node execution details (collapsible) with tool-call summaries
  */
+export interface FormatMarkdownOptions {
+  /** Workflow definition — required for the Mermaid diagram. */
+  workflow?: Workflow;
+  /** Execution trace from `execute()` — colors the diagram and drives the path/routing sections. */
+  trace?: ExecutionTrace;
+}
+
 export function formatDagResultMarkdown(
   results: Map<string, NodeResult>,
   durationMs: number,
   config?: CliConfig,
+  options: FormatMarkdownOptions = {},
 ): string {
   const duration = formatDuration(durationMs);
   const lines: string[] = [];
+  const { workflow, trace } = options;
 
   // Detect failure anywhere in the DAG
   let failedNodeId: string | undefined;
@@ -480,20 +497,6 @@ export function formatDagResultMarkdown(
     }
   }
 
-  if (failedResult) {
-    lines.push(`## ❌ SWEny Triage Failed`);
-    lines.push("");
-    lines.push(`**Failed at:** \`${failedNodeId}\`  `);
-    lines.push(`**Duration:** ${duration}`);
-    if (failedResult.data?.error) {
-      lines.push("");
-      lines.push("```");
-      lines.push(String(failedResult.data.error));
-      lines.push("```");
-    }
-    return lines.join("\n") + "\n";
-  }
-
   const investigateData = results.get("investigate")?.data;
   const issueData = results.get("create_issue")?.data;
   const prData = results.get("create_pr")?.data;
@@ -501,86 +504,186 @@ export function formatDagResultMarkdown(
   const novelCount = (investigateData?.novel_count as number | undefined) ?? 0;
   const highestSeverity = investigateData?.highest_severity as string | undefined;
   const findings = investigateData?.findings as Array<Record<string, unknown>> | undefined;
+  const isDryRun = Boolean(config?.dryRun);
 
-  // Header — pick the most informative title
-  if (prData?.prUrl) {
+  // ── Header ────────────────────────────────────────────────────
+  if (failedResult) {
+    lines.push(`## ❌ SWEny Triage Failed`);
+  } else if (prData?.prUrl) {
     lines.push(`## ✅ SWEny Triage — PR opened`);
   } else if (issueData?.issueIdentifier || issueData?.issueUrl) {
     lines.push(`## ✅ SWEny Triage — Issue created`);
-  } else if (config?.dryRun) {
+  } else if (isDryRun) {
     lines.push(`## 🔍 SWEny Triage — Dry run complete`);
   } else if (novelCount === 0) {
     lines.push(`## ✅ SWEny Triage — No new incidents`);
   } else {
     lines.push(`## ℹ️ SWEny Triage — No action taken`);
   }
-
   lines.push("");
-  lines.push(`**Duration:** ${duration}  `);
-  if (config?.serviceFilter && config.serviceFilter !== "*") {
-    lines.push(`**Service filter:** \`${config.serviceFilter}\`  `);
-  }
-  if (config?.timeRange) {
-    lines.push(`**Time range:** ${config.timeRange}  `);
-  }
-  if (highestSeverity) {
-    lines.push(`**Highest severity:** ${highestSeverity}  `);
-  }
-  lines.push(`**Novel findings:** ${novelCount}`);
 
-  // Issue and PR links
-  if (issueData?.issueIdentifier || issueData?.issueUrl) {
-    lines.push("");
-    lines.push("### 📋 Issue");
-    const id = issueData.issueIdentifier ? `**${String(issueData.issueIdentifier)}** — ` : "";
-    const title = issueData.issueTitle ? String(issueData.issueTitle) : "";
-    const url = issueData.issueUrl ? String(issueData.issueUrl) : "";
-    if (url) {
-      lines.push(`${id}[${title || url}](${url})`);
-    } else {
-      lines.push(`${id}${title}`);
+  // ── Workflow diagram (Mermaid) ────────────────────────────────
+  // Requires a workflow definition; trace is optional but makes it much more useful.
+  if (workflow) {
+    const state: Record<string, MermaidNodeStatus> = {};
+    for (const [nodeId, result] of results) {
+      state[nodeId] = result.status === "success" ? "success" : result.status === "failed" ? "failed" : "skipped";
     }
+    lines.push(toMermaidBlock(workflow, { state, trace, title: workflow.name }));
+    lines.push("");
   }
 
-  if (prData?.prUrl) {
+  // ── Config / run metadata table ───────────────────────────────
+  const rows: Array<[string, string]> = [];
+  if (config?.repository) rows.push(["Repository", `\`${config.repository}\``]);
+  if (config?.observabilityProvider) rows.push(["Observability", config.observabilityProvider]);
+  if (config?.issueTrackerProvider) rows.push(["Issue tracker", config.issueTrackerProvider]);
+  if (config?.timeRange) rows.push(["Time range", config.timeRange]);
+  if (config?.serviceFilter && config.serviceFilter !== "*") {
+    rows.push(["Service filter", `\`${config.serviceFilter}\``]);
+  }
+  if (highestSeverity) rows.push(["Highest severity", highestSeverity]);
+  rows.push(["Novel findings", String(novelCount)]);
+  rows.push(["Duration", duration]);
+  rows.push(["Mode", isDryRun ? "dry run" : "live"]);
+
+  lines.push("| Setting | Value |");
+  lines.push("| --- | --- |");
+  for (const [k, v] of rows) lines.push(`| ${k} | ${v} |`);
+  lines.push("");
+
+  // ── Workflow path (actual execution sequence including loops) ─
+  if (trace && trace.steps.length > 0) {
+    const pathSteps = trace.steps.map((s: TraceStep) => {
+      const tag = s.iteration > 1 ? ` ×${s.iteration}` : "";
+      return `\`${s.node}${tag}\``;
+    });
+    lines.push(`**Workflow path:** ${pathSteps.join(" → ")}`);
+
+    const routingLines = trace.edges
+      .filter((e: TraceEdge) => e.reason !== "only path")
+      .map((e: TraceEdge) => `- \`${e.from}\` → \`${e.to}\` *(${e.reason})*`);
+    if (routingLines.length > 0) {
+      lines.push("");
+      lines.push("<details><summary>Routing decisions</summary>");
+      lines.push("");
+      lines.push(...routingLines);
+      lines.push("");
+      lines.push("</details>");
+    }
     lines.push("");
-    lines.push("### 🔧 Pull request");
-    const num = prData.prNumber ? `#${String(prData.prNumber)}` : "";
-    lines.push(`[${num || String(prData.prUrl)}](${String(prData.prUrl)})`);
   }
 
-  // Findings table — mostly useful for dry runs and no-action results
-  if (findings && findings.length > 0 && !prData?.prUrl) {
+  // ── Failure detail (short-circuit) ────────────────────────────
+  if (failedResult) {
+    lines.push(`**Failed at:** \`${failedNodeId}\``);
+    if (failedResult.data?.error) {
+      lines.push("");
+      lines.push("```");
+      lines.push(String(failedResult.data.error));
+      lines.push("```");
+    }
+    // Still render node details below so debugging is easy
     lines.push("");
+    appendNodeDetails(lines, results);
+    return lines.join("\n") + "\n";
+  }
+
+  // ── Findings table ────────────────────────────────────────────
+  if (findings && findings.length > 0) {
     lines.push("### 🔎 Findings");
     lines.push("");
-    lines.push("| Severity | Title | Status |");
-    lines.push("| --- | --- | --- |");
-    for (const f of findings.slice(0, 10)) {
+    lines.push("| # | Severity | Title | Complexity | Status |");
+    lines.push("| --- | --- | --- | --- | --- |");
+    for (let i = 0; i < findings.length; i++) {
+      const f = findings[i];
       const sev = String(f.severity ?? "—");
-      const title = String(f.title ?? "").replace(/\|/g, "\\|");
-      const status = f.is_duplicate ? "duplicate" : "novel";
-      lines.push(`| ${sev} | ${title} | ${status} |`);
+      const title = String(f.title ?? "—").replace(/\|/g, "\\|");
+      const complexity = String(f.fix_complexity ?? "—");
+      const status = f.is_duplicate ? `dup of ${f.duplicate_of ?? "existing"}` : "novel";
+      lines.push(`| ${i + 1} | ${sev} | ${title} | ${complexity} | ${status} |`);
     }
-    if (findings.length > 10) {
-      lines.push("");
-      lines.push(`_…and ${findings.length - 10} more_`);
-    }
+    lines.push("");
   }
 
-  // Recommendation / next step
+  // ── Actions taken ─────────────────────────────────────────────
+  if (issueData?.issueIdentifier || issueData?.issueUrl || prData?.prUrl) {
+    lines.push("### Actions taken");
+    lines.push("");
+    if (issueData?.issueIdentifier || issueData?.issueUrl) {
+      const id = issueData.issueIdentifier ? String(issueData.issueIdentifier) : "";
+      const title = issueData.issueTitle ? String(issueData.issueTitle) : "";
+      const url = issueData.issueUrl ? String(issueData.issueUrl) : "";
+      const link = url ? `[${id || url}](${url})` : id;
+      lines.push(`- **Issue created:** ${link}${title ? ` — ${title}` : ""}`);
+    }
+    if (prData?.prUrl) {
+      const num = prData.prNumber ? `#${String(prData.prNumber)}` : "";
+      const link = `[${num || String(prData.prUrl)}](${String(prData.prUrl)})`;
+      lines.push(`- **PR opened:** ${link}`);
+    }
+    lines.push("");
+  }
+
+  // ── Recommendation / next step ────────────────────────────────
   const rec = investigateData?.recommendation;
   if (rec) {
-    lines.push("");
     lines.push(`**Next:** ${String(rec)}`);
+    lines.push("");
   }
 
-  if (config?.dryRun) {
-    lines.push("");
+  if (isDryRun) {
     lines.push("_Dry run mode — no side effects were taken._");
+    lines.push("");
   }
+
+  // ── Node execution details (collapsible) ──────────────────────
+  appendNodeDetails(lines, results);
 
   return lines.join("\n") + "\n";
+}
+
+function appendNodeDetails(lines: string[], results: Map<string, NodeResult>): void {
+  if (results.size === 0) return;
+  lines.push("<details><summary>Node execution details</summary>");
+  lines.push("");
+  for (const [nodeId, result] of results) {
+    const icon = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "—";
+    const toolCount = result.toolCalls?.length ?? 0;
+    lines.push(`#### ${icon} \`${nodeId}\` — ${toolCount} tool call${toolCount === 1 ? "" : "s"}`);
+    lines.push("");
+    if (toolCount > 0 && result.toolCalls) {
+      lines.push("| Tool | Input (truncated) |");
+      lines.push("| --- | --- |");
+      for (const tc of result.toolCalls.slice(0, 20)) {
+        const name = tc.tool ?? "—";
+        const input = summarizeToolInput(tc.input).replace(/\|/g, "\\|");
+        lines.push(`| \`${name}\` | ${input || "—"} |`);
+      }
+      if (toolCount > 20) {
+        lines.push(`| … | _${toolCount - 20} more tool calls_ |`);
+      }
+      lines.push("");
+    }
+  }
+  lines.push("</details>");
+  lines.push("");
+}
+
+function summarizeToolInput(input: unknown): string {
+  if (input === undefined || input === null) return "";
+  if (typeof input === "string") return truncate(input, 100);
+  if (typeof input !== "object") return truncate(String(input), 100);
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    if (typeof v === "string") parts.push(`${k}=${truncate(v, 40)}`);
+    else if (typeof v === "number" || typeof v === "boolean") parts.push(`${k}=${v}`);
+  }
+  return truncate(parts.join(", "), 100);
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────

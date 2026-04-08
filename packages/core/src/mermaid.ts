@@ -63,7 +63,7 @@ export function toMermaid(workflow: Workflow, options: MermaidOptions = {}): str
   for (const [id, node] of Object.entries(workflow.nodes)) {
     let label = escapeLabel(node.name);
     const isEntry = id === workflow.entry;
-    const entryTag = isEntry ? " \\u25B6" : "";
+    const entryTag = isEntry ? " \u25B6" : "";
 
     // Show iteration count for nodes that ran multiple times
     const iterations = nodeIterations.get(id);
