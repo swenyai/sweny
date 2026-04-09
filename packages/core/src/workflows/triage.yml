@@ -60,12 +60,31 @@ nodes:
       3. Assess fix complexity: "simple" (a few lines, clear change), "moderate" (multiple files but well-understood),
       or "complex" (architectural, risky, or unclear).
 
-      4. **Novelty check (REQUIRED):** Search the issue tracker for existing issues (BOTH open AND closed) that cover
-      the same root cause, error pattern, or affected service. Use github_search_issues and/or linear_search_issues with
-      multiple keyword variations.
-         - A match = same root cause, same error message/pattern, or a human would call it "the same bug."
-         - If matched → it's a **duplicate**. Record the existing issue ID.
-         - If no match → it's **novel**.
+      4. **Novelty check (REQUIRED):** Filing a duplicate ticket is worse than under-reporting — the team inherits
+      sprawl that humans have to clean up later. Complete EVERY step below before classifying anything as novel.
+
+      4a. **Search broadly.** Run multiple queries against the issue tracker (BOTH open AND closed): the affected
+      file or module path, the error message or log string verbatim, the feature or service name, and the symptom
+      family (e.g. "startup crash", "data dropped silently"). Do not rely on a single keyword — a narrow search is
+      how duplicates slip through.
+
+      4b. **Read the full body of every promising candidate — do NOT match on title alone.** For each top match,
+      open the issue and read its entire description, including any "Recommended Fix", "Proposed Fix", "Action
+      Items", or "Acceptance Criteria" section. An existing open issue whose recommended fix already prescribes
+      the change you were about to propose IS a duplicate, even if the symptom you just observed is a new
+      instance of the same underlying bug.
+
+      4c. **Check for meta-issues and bug families.** If an existing ticket names a pattern that your finding is
+      another instance of (same root cause, same function/module, different input or caller), treat your finding
+      as a sibling of that family and comment on the existing ticket. Do not file a parallel ticket per instance
+      — that is the exact pattern that produces backlog sprawl.
+
+      4d. **When uncertain, comment don't file.** If you are less than ~80% confident a finding is truly novel
+      after steps 4a–4c, classify it as a duplicate and add a "+1 — another instance" comment to the closest
+      existing issue with the new context. Over-reporting duplicates is cheap; ticket sprawl is expensive.
+
+         - If matched → **duplicate**. Record the existing issue ID in `duplicate_of`.
+         - If no match after 4a–4d → **novel**.
 
       **Output rules:**
 
