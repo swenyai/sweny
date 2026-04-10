@@ -1,0 +1,16 @@
+{
+  "name": "@sweny-ai/spec",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.38.3",
+    "astro": "^6.1.3",
+    "sharp": "^0.34.2"
+  }
+}

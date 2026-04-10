@@ -1,0 +1,69 @@
+---
+title: SWEny Workflow Specification v1.0
+description: A declarative YAML format for AI agent orchestration as a directed graph with natural language routing.
+---
+
+## Abstract
+
+The SWEny Workflow Specification defines a YAML-based format for describing AI agent orchestration as a directed graph. Each node in the graph contains a natural language instruction executed by an AI model, with access to a declared set of skills (tool bundles). Edges define execution flow, with optional natural language conditions evaluated at runtime by the AI model.
+
+This specification defines the format and its execution semantics. It is independent of any particular AI model, runtime, or hosting environment.
+
+## Status
+
+**Version:** 1.0  
+**Status:** Draft  
+**License:** [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+
+## Conformance Language
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this specification are to be interpreted as described in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
+
+- **MUST / REQUIRED / SHALL** — absolute requirement.
+- **MUST NOT / SHALL NOT** — absolute prohibition.
+- **SHOULD / RECOMMENDED** — valid reasons may exist to deviate, but implications must be understood.
+- **MAY / OPTIONAL** — truly optional; implementations may or may not include the feature.
+
+## Specification
+
+| Section | Description |
+|---------|-------------|
+| [Workflow](/workflow) | Top-level document structure: `id`, `name`, `nodes`, `edges`, `entry`. |
+| [Nodes](/nodes) | The Node object: `instruction`, `skills`, `output` schema. |
+| [Edges & Routing](/edges) | The Edge object: `when` conditions, `max_iterations`, routing algorithm. |
+| [Skills & Tools](/skills) | Skill and Tool interfaces: config resolution, tool invocation contract. |
+| [Execution Model](/execution) | Context accumulation, node execution, events, trace, dry-run semantics. |
+
+## Machine-Readable Schemas
+
+Canonical JSON Schemas for use with IDE autocomplete, CI validation, and alternative implementations:
+
+- **Workflow:** [`spec.sweny.ai/schemas/workflow.json`](/schemas/workflow.json)
+- **Skill:** [`spec.sweny.ai/schemas/skill.json`](/schemas/skill.json)
+
+Reference a schema from a YAML workflow file:
+
+```yaml
+# $schema: https://spec.sweny.ai/schemas/workflow.json
+id: my-workflow
+name: My Workflow
+entry: start
+nodes:
+  start:
+    name: Start
+    instruction: Do the thing.
+edges: []
+```
+
+## Reference Implementation
+
+The reference implementation is [`@sweny-ai/core`](https://github.com/swenyai/sweny/tree/main/packages/core), published on npm. Source code, built-in workflows, and tests are available in the [SWEny monorepo](https://github.com/swenyai/sweny).
+
+## Versioning
+
+This specification follows semantic versioning:
+
+- **Non-breaking additions** (new optional fields, new event types) are additive to the current version.
+- **Breaking changes** (field removals, semantic changes) require a new major version.
+
+The current version lives at the root (`spec.sweny.ai/`). When v2 ships, v1 will move to `spec.sweny.ai/v1/`.

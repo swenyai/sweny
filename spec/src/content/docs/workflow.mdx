@@ -1,0 +1,147 @@
+---
+title: Workflow Object
+description: The top-level document structure for a SWEny Workflow.
+---
+
+A Workflow is the top-level document. It defines a directed graph of [Nodes](/nodes) connected by [Edges](/edges), with a designated entry point.
+
+## Fields
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `id` | string | REQUIRED | — | Unique identifier for this workflow. MUST be non-empty. |
+| `name` | string | REQUIRED | — | Human-readable name. MUST be non-empty. |
+| `description` | string | OPTIONAL | `""` | Purpose of the workflow. |
+| `entry` | string | REQUIRED | — | Node ID where execution begins. MUST reference a key in `nodes`. |
+| `nodes` | Record&lt;string, [Node](/nodes)&gt; | REQUIRED | — | Map of node ID to Node definition. Keys are referenced by `entry` and edge `from`/`to` fields. |
+| `edges` | [Edge](/edges)[] | REQUIRED | — | Directed edges defining execution flow and routing conditions. |
+
+## Structural Validation
+
+A conforming validator MUST enforce the following rules:
+
+1. **Entry exists.** The `entry` value MUST reference an existing key in `nodes`.
+2. **Edge references.** Every edge `from` and `to` value MUST reference an existing key in `nodes`.
+3. **Reachability.** All nodes MUST be reachable from `entry` via edges (BFS traversal from entry, following all outgoing edges regardless of conditions).
+4. **Self-loops.** An edge where `from` equals `to` MUST have `max_iterations` set. A self-loop without `max_iterations` is invalid.
+5. **Unbounded cycles.** A cycle in the graph where no edge in the cycle has `max_iterations` is invalid. A conforming validator MUST detect and reject unbounded cycles. The detection algorithm: remove all edges that have `max_iterations` (and all self-loops), then check the remaining subgraph for cycles using DFS.
+6. **Skill references.** All skill IDs referenced in node `skills` arrays SHOULD exist in the executor's skill registry. Unknown skills are warnings, not errors.
+
+## Error Codes
+
+| Code | Description |
+|------|-------------|
+| `MISSING_ENTRY` | `entry` does not reference an existing node. |
+| `UNKNOWN_EDGE_SOURCE` | An edge `from` references a non-existent node. |
+| `UNKNOWN_EDGE_TARGET` | An edge `to` references a non-existent node. |
+| `UNREACHABLE_NODE` | A node is not reachable from `entry`. |
+| `SELF_LOOP` | A self-loop edge lacks `max_iterations`. |
+| `UNBOUNDED_CYCLE` | A cycle exists with no `max_iterations` guard. |
+| `UNKNOWN_SKILL` | A node references a skill not in the registry. |
+
+## Minimal Example
+
+The smallest valid workflow: one node, no edges, no routing.
+
+```yaml
+id: hello
+name: Hello World
+entry: greet
+nodes:
+  greet:
+    name: Greet
+    instruction: Say hello to the user.
+edges: []
+```
+
+## Full Example
+
+A workflow with conditional routing, multiple skills, and structured output.
+
+```yaml
+id: triage
+name: Alert Triage
+description: Investigate a production alert and take action based on findings.
+entry: gather
+
+nodes:
+  gather:
+    name: Gather Context
+    instruction: >-
+      Investigate the production alert. Pull error details, stack traces,
+      recent logs, and metrics. Check recent commits and deploys.
+    skills:
+      - github
+      - sentry
+      - datadog
+
+  investigate:
+    name: Root Cause Analysis
+    instruction: >-
+      Classify each issue found as novel or duplicate. Assess severity
+      and fix complexity. Output structured findings.
+    skills:
+      - github
+      - linear
+    output:
+      type: object
+      properties:
+        findings:
+          type: array
+          items:
+            type: object
+            properties:
+              title: { type: string }
+              severity: { type: string, enum: [critical, high, medium, low] }
+              is_duplicate: { type: boolean }
+            required: [title, severity, is_duplicate]
+        novel_count: { type: number }
+        highest_severity: { type: string }
+      required: [findings, novel_count, highest_severity]
+
+  create_issue:
+    name: Create Issues
+    instruction: Create issues for novel findings. Comment on duplicates.
+    skills:
+      - linear
+      - github
+
+  skip:
+    name: Skip
+    instruction: All findings were duplicates or low priority. Log and move on.
+    skills:
+      - linear
+
+  notify:
+    name: Notify Team
+    instruction: Send a notification summarizing the triage result.
+    skills:
+      - slack
+
+edges:
+  - from: gather
+    to: investigate
+  - from: investigate
+    to: create_issue
+    when: novel_count is greater than 0 AND highest_severity is medium or higher
+  - from: investigate
+    to: skip
+    when: novel_count is 0, OR highest_severity is low
+  - from: create_issue
+    to: notify
+  - from: skip
+    to: notify
+```
+
+## JSON Schema
+
+The canonical JSON Schema for validating Workflow documents is available at [`spec.sweny.ai/schemas/workflow.json`](/schemas/workflow.json).
+
+Reference it from a YAML file:
+
+```yaml
+# $schema: https://spec.sweny.ai/schemas/workflow.json
+id: my-workflow
+name: My Workflow
+# ...
+```

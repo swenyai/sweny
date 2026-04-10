@@ -19,3 +19,7 @@ packages/providers/dist/
 packages/cli/dist/
 packages/studio/dist/
 packages/mcp/dist/
+
+# Spec site build artifacts
+spec/dist/
+spec/.astro/
