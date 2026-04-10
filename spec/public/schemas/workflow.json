@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.sweny.ai/schemas/workflow.json",
+  "title": "SWEny Workflow",
+  "description": "A declarative AI agent orchestration workflow.",
+  "type": "object",
+  "required": ["id", "name", "nodes", "edges", "entry"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique identifier for this workflow."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable name."
+    },
+    "description": {
+      "type": "string",
+      "default": "",
+      "description": "Optional description of the workflow's purpose."
+    },
+    "entry": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Node ID where execution begins. MUST reference a key in 'nodes'."
+    },
+    "nodes": {
+      "type": "object",
+      "description": "Map of node ID to Node definition. Keys are referenced by 'entry' and edge 'from'/'to' fields.",
+      "additionalProperties": {
+        "$ref": "#/$defs/Node"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "description": "Directed edges connecting nodes. Define execution flow and routing conditions.",
+      "items": {
+        "$ref": "#/$defs/Edge"
+      }
+    }
+  },
+  "$defs": {
+    "Node": {
+      "type": "object",
+      "required": ["name", "instruction"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display name for this node."
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Natural language instruction for the AI model. This is the primary directive for this step."
+        },
+        "skills": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Skill IDs available to this node. Determines which tools the AI model can invoke."
+        },
+        "output": {
+          "type": "object",
+          "description": "Optional JSON Schema for structured output. When present, the executor MUST request output conforming to this schema."
+        }
+      }
+    },
+    "Edge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Source node ID. MUST reference a key in 'nodes'."
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Target node ID. MUST reference a key in 'nodes'."
+        },
+        "when": {
+          "type": "string",
+          "description": "Natural language condition. Evaluated by the AI model against accumulated context to determine routing."
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum times this edge can be followed. Enables bounded retry loops. REQUIRED for self-loops (from === to)."
+        }
+      }
+    }
+  }
+}

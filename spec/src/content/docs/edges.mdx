@@ -1,0 +1,158 @@
+---
+title: Edges & Routing
+description: The Edge object and routing semantics for workflow execution flow.
+---
+
+Edges define the execution flow between [Nodes](/nodes) in a [Workflow](/workflow). Each edge connects a source node to a target node, with an optional natural language condition that determines whether the edge is followed.
+
+## Fields
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `from` | string | REQUIRED | — | Source node ID. MUST reference a key in `nodes`. |
+| `to` | string | REQUIRED | — | Target node ID. MUST reference a key in `nodes`. |
+| `when` | string | OPTIONAL | — | Natural language routing condition. |
+| `max_iterations` | integer (&ge; 1) | OPTIONAL | unlimited | Maximum times this edge can be followed. |
+
+## Routing Algorithm
+
+After a node completes, a conforming executor MUST resolve the next node using the following algorithm:
+
+1. **Collect** all outgoing edges from the completed node (`from` equals the current node ID).
+2. **Exclude** edges that have exhausted their `max_iterations` count (i.e., the edge has been followed `max_iterations` times already).
+3. **If zero edges remain:** execution is complete. The current node is a **terminal node**.
+4. **If exactly one edge remains and it has no `when` clause:** follow it unconditionally. The executor MUST NOT invoke the AI model.
+5. **Otherwise:** present all remaining edge conditions to the AI model. The model evaluates each `when` clause against the accumulated context (workflow input + all prior node results) and selects one edge. The executor follows the selected edge.
+
+## Unconditional Edges
+
+An edge without a `when` clause is **unconditional**.
+
+If a node has exactly one unconditional outgoing edge and no conditional edges (after filtering exhausted edges), the executor MUST follow it without invoking the AI model. This is a deterministic transition — no evaluation required.
+
+```yaml
+edges:
+  - from: gather
+    to: investigate
+```
+
+## Conditional Edges
+
+An edge with a `when` clause is **conditional**. The `when` field contains a natural language condition.
+
+```yaml
+edges:
+  - from: investigate
+    to: create_issue
+    when: novel_count is greater than 0 AND highest_severity is medium or higher
+  - from: investigate
+    to: skip
+    when: novel_count is 0, OR highest_severity is low
+```
+
+A conforming executor:
+
+- **MUST** evaluate conditions by providing the AI model with the accumulated context (workflow input + all prior node results) and the list of conditions as choices.
+- **MUST NOT** evaluate conditions programmatically. The AI model is the evaluator.
+- **MUST** follow the edge selected by the AI model.
+
+When a node has a mix of conditional and unconditional outgoing edges, the unconditional edge serves as a **default path**. The executor presents the conditional edges as choices, with the unconditional edge as a "none of the above" fallback.
+
+## Terminal Nodes
+
+A node with zero outgoing edges (after filtering exhausted edges) is a **terminal node**. Execution ends when a terminal node completes.
+
+A workflow MUST have at least one reachable terminal node (otherwise it would loop forever or have an unbounded cycle, which is [structurally invalid](/workflow#structural-validation)).
+
+## Bounded Cycles
+
+The `max_iterations` field limits how many times an edge can be followed, enabling controlled retry loops.
+
+```yaml
+edges:
+  - from: review
+    to: fix
+    when: review found issues that need fixing
+    max_iterations: 3
+  - from: review
+    to: done
+    when: review passed, no issues found
+  - from: fix
+    to: review
+```
+
+A conforming executor:
+
+- **MUST** track how many times each edge has been followed (keyed by `from`/`to` pair).
+- **MUST** exclude an edge from routing once it has been followed `max_iterations` times.
+- If excluding an exhausted edge leaves zero remaining edges, the node becomes terminal.
+
+### Self-Loops
+
+A self-loop is an edge where `from` equals `to`. Self-loops MUST have `max_iterations` set. A workflow containing a self-loop without `max_iterations` is [structurally invalid](/workflow#structural-validation).
+
+```yaml
+edges:
+  - from: retry
+    to: retry
+    when: operation failed and retries remaining
+    max_iterations: 3
+  - from: retry
+    to: done
+    when: operation succeeded
+```
+
+## Unbounded Cycles
+
+A cycle in the graph where **no edge in the cycle** has `max_iterations` is invalid. A conforming validator MUST detect and reject unbounded cycles.
+
+The detection algorithm: remove all edges that have `max_iterations` set (and all self-loops), then check the remaining subgraph for cycles using depth-first search. If a back-edge is found, the cycle is unbounded.
+
+## Examples
+
+### Linear Flow
+
+```yaml
+edges:
+  - from: gather
+    to: investigate
+  - from: investigate
+    to: notify
+```
+
+Execution: `gather` &rarr; `investigate` &rarr; `notify` (terminal).
+
+### Conditional Branching
+
+```yaml
+edges:
+  - from: investigate
+    to: create_issue
+    when: novel_count is greater than 0 AND highest_severity is medium or higher
+  - from: investigate
+    to: skip
+    when: novel_count is 0, OR highest_severity is low
+  - from: create_issue
+    to: notify
+  - from: skip
+    to: notify
+```
+
+After `investigate` completes, the AI model evaluates both conditions against the investigation results and selects the matching branch. Both branches converge at `notify`.
+
+### Bounded Retry Loop
+
+```yaml
+edges:
+  - from: implement
+    to: test
+  - from: test
+    to: implement
+    when: tests failed
+    max_iterations: 3
+  - from: test
+    to: done
+    when: all tests passed
+```
+
+The `test` &rarr; `implement` edge can be followed at most 3 times. After 3 retries, the edge is excluded. If `all tests passed` also doesn't match, the node becomes terminal.

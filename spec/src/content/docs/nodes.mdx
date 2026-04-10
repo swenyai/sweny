@@ -1,0 +1,119 @@
+---
+title: Nodes
+description: The Node object and its execution semantics.
+---
+
+A Node represents a single step in a [Workflow](/workflow). Each node contains a natural language instruction that an AI model executes, with access to tools from declared [Skills](/skills).
+
+## Fields
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | string | REQUIRED | — | Display name for this node. MUST be non-empty. |
+| `instruction` | string | REQUIRED | — | Natural language instruction for the AI model. MUST be non-empty. |
+| `skills` | string[] | OPTIONAL | `[]` | Skill IDs this node has access to. |
+| `output` | JSON Schema object | OPTIONAL | — | Structured output schema for this node's result. |
+
+## Instruction Semantics
+
+The `instruction` field is the primary directive for the AI model at this step.
+
+A conforming executor:
+
+- **MUST** pass the instruction to the AI model as the primary directive.
+- **MUST NOT** alter, summarize, or truncate the instruction.
+- **MAY** augment the instruction with context from prior nodes (see [Execution Model](/execution)).
+
+### Input Augmentation
+
+If the workflow input contains a `rules` field (string), a conforming executor MUST prepend it to the instruction with the heading:
+
+```
+## Rules — You MUST Follow These
+
+{rules}
+```
+
+If the workflow input contains a `context` field (string), a conforming executor MUST prepend it with the heading:
+
+```
+## Background Context
+
+{context}
+```
+
+When both are present, rules appear first, then context, then the node's base instruction, separated by `---`.
+
+## Skills Semantics
+
+The `skills` array declares which [Skills](/skills) the node can access during execution.
+
+A conforming executor:
+
+- **MUST** resolve tools from the listed skill IDs and make them available to the AI model during node execution.
+- **MUST NOT** make tools available from skills not listed in the node's `skills` array.
+- **SHOULD** silently skip skills that are not configured (missing required config values) rather than failing the workflow. The node executes with whatever tools are available from the remaining skills.
+
+## Output Schema Semantics
+
+The `output` field declares a JSON Schema that the node's result data MUST conform to.
+
+A conforming executor:
+
+- **MUST** request structured output from the AI model conforming to this schema when `output` is present.
+- The structured output becomes the node's result data, available to downstream nodes via [context accumulation](/execution#context-accumulation).
+- When `output` is absent, the node's result data is implementation-defined.
+
+## Examples
+
+### Minimal Node
+
+```yaml
+gather:
+  name: Gather Context
+  instruction: Pull error details, logs, and recent commits related to the alert.
+  skills:
+    - github
+    - sentry
+```
+
+### Node with Structured Output
+
+```yaml
+investigate:
+  name: Root Cause Analysis
+  instruction: >-
+    Classify each issue as novel or duplicate. Assess severity and
+    fix complexity for each finding.
+  skills:
+    - github
+    - linear
+  output:
+    type: object
+    properties:
+      findings:
+        type: array
+        items:
+          type: object
+          properties:
+            title: { type: string }
+            severity: { type: string, enum: [critical, high, medium, low] }
+            is_duplicate: { type: boolean }
+            fix_complexity: { type: string, enum: [simple, moderate, complex] }
+          required: [title, severity, is_duplicate]
+      novel_count: { type: number }
+      highest_severity: { type: string }
+    required: [findings, novel_count, highest_severity]
+```
+
+### Node with No Skills
+
+A node with no skills has no tools. The AI model executes the instruction using only its training and the accumulated context.
+
+```yaml
+summarize:
+  name: Summarize Findings
+  instruction: >-
+    Produce a concise summary of all findings for the notification.
+    Include severity, root cause, and links to created issues.
+```

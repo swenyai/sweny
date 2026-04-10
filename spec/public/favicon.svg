@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Light mode (dark icon) -->
+  <g class="light">
+    <line x1="64" y1="28" x2="36" y2="52" stroke="#94a3b8" stroke-width="3"/>
+    <line x1="64" y1="28" x2="92" y2="52" stroke="#94a3b8" stroke-width="3"/>
+    <line x1="36" y1="76" x2="64" y2="100" stroke="#94a3b8" stroke-width="3"/>
+    <line x1="92" y1="76" x2="64" y2="100" stroke="#94a3b8" stroke-width="3"/>
+    <line x1="64" y1="28" x2="36" y2="52" stroke="#2563eb" stroke-width="3" stroke-dasharray="7 9" opacity="0.6"/>
+    <line x1="36" y1="76" x2="64" y2="100" stroke="#2563eb" stroke-width="3" stroke-dasharray="7 9" opacity="0.6"/>
+    <circle cx="64" cy="18" r="12" fill="#dbeafe" stroke="#2563eb" stroke-width="3"/>
+    <rect x="22" y="50" width="28" height="28" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="3"/>
+    <rect x="78" y="50" width="28" height="28" rx="6" fill="#dbeafe" stroke="#94a3b8" stroke-width="3"/>
+    <circle cx="64" cy="110" r="12" fill="#2563eb" stroke="#1e40af" stroke-width="3"/>
+    <path d="M 57 110 L 62 115 L 72 105" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <!-- Dark mode (light icon) -->
+  <g class="dark" style="display:none">
+    <line x1="64" y1="28" x2="36" y2="52" stroke="#334155" stroke-width="3"/>
+    <line x1="64" y1="28" x2="92" y2="52" stroke="#334155" stroke-width="3"/>
+    <line x1="36" y1="76" x2="64" y2="100" stroke="#334155" stroke-width="3"/>
+    <line x1="92" y1="76" x2="64" y2="100" stroke="#334155" stroke-width="3"/>
+    <line x1="64" y1="28" x2="36" y2="52" stroke="#3b82f6" stroke-width="3" stroke-dasharray="7 9" opacity="0.6"/>
+    <line x1="36" y1="76" x2="64" y2="100" stroke="#3b82f6" stroke-width="3" stroke-dasharray="7 9" opacity="0.6"/>
+    <circle cx="64" cy="18" r="12" fill="#1e3a5f" stroke="#3b82f6" stroke-width="3"/>
+    <rect x="22" y="50" width="28" height="28" rx="6" fill="#1e3a5f" stroke="#3b82f6" stroke-width="3"/>
+    <rect x="78" y="50" width="28" height="28" rx="6" fill="#1e3a5f" stroke="#475569" stroke-width="3"/>
+    <circle cx="64" cy="110" r="12" fill="#2563eb" stroke="#60a5fa" stroke-width="3"/>
+    <path d="M 57 110 L 62 115 L 72 105" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <style>
+    @media (prefers-color-scheme: dark) {
+      .light { display: none }
+      .dark { display: inline !important }
+    }
+  </style>
+</svg>
