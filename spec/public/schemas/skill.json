@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.sweny.ai/schemas/skill.json",
+  "title": "SWEny Skill",
+  "description": "A composable tool bundle that provides capabilities to workflow nodes.",
+  "type": "object",
+  "required": ["id", "name", "description", "category", "config", "tools"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique skill identifier. Referenced by nodes' 'skills' arrays."
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable skill name."
+    },
+    "description": {
+      "type": "string",
+      "description": "What this skill provides."
+    },
+    "category": {
+      "type": "string",
+      "enum": ["git", "observability", "tasks", "notification", "general"],
+      "description": "Functional category for grouping and validation."
+    },
+    "config": {
+      "type": "object",
+      "description": "Configuration fields required by this skill.",
+      "additionalProperties": {
+        "$ref": "#/$defs/ConfigField"
+      }
+    },
+    "tools": {
+      "type": "array",
+      "description": "Tools this skill provides to nodes.",
+      "items": {
+        "$ref": "#/$defs/Tool"
+      }
+    }
+  },
+  "$defs": {
+    "ConfigField": {
+      "type": "object",
+      "required": ["description"],
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of this config field."
+        },
+        "required": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this field must be provided for the skill to function."
+        },
+        "env": {
+          "type": "string",
+          "description": "Default environment variable to read this value from."
+        }
+      }
+    },
+    "Tool": {
+      "type": "object",
+      "required": ["name", "description", "input_schema"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Tool name. Must be unique within the skill."
+        },
+        "description": {
+          "type": "string",
+          "description": "What this tool does. Provided to the AI model for tool selection."
+        },
+        "input_schema": {
+          "type": "object",
+          "description": "JSON Schema defining the tool's input parameters."
+        }
+      }
+    }
+  }
+}

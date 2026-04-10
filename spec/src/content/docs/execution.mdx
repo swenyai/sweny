@@ -1,0 +1,158 @@
+---
+title: Execution Model
+description: The behavioral specification for workflow execution, including context accumulation, events, trace, and dry-run semantics.
+---
+
+This section defines the behavioral semantics of executing a [Workflow](/workflow). It specifies how context flows between [Nodes](/nodes), how [routing decisions](/edges) are made, and what observable events and traces a conforming executor MUST produce.
+
+## Context Accumulation
+
+At each node, a conforming executor MUST provide a **context object** containing:
+
+- `input` — the original workflow input passed to the executor.
+- One key per previously completed node, where the key is the node ID and the value is that node's result data.
+
+```
+context = {
+  input: <original workflow input>,
+  nodeA: <nodeA result data>,
+  nodeB: <nodeB result data>,
+  ...
+}
+```
+
+This context is available to the node's instruction execution and to [edge condition evaluation](/edges#conditional-edges).
+
+Context is **append-only**: each completed node adds its result to the context. If a node executes multiple times (via a [bounded cycle](/edges#bounded-cycles)), the context contains the **most recent** result for that node ID.
+
+## Node Execution Sequence
+
+For each node, a conforming executor MUST perform the following steps in order:
+
+1. **Resolve tools** from the node's `skills` list (see [Skills](/skills)).
+2. **Build context** — the accumulated context object (input + all prior node results).
+3. **Build instruction** — the node's base instruction, optionally augmented with input `rules` and `context` fields (see [Nodes — Input Augmentation](/nodes#input-augmentation)).
+4. **Invoke the AI model** with: instruction, context, tools, and output schema (if present).
+5. **Capture the result** as a `NodeResult`.
+6. **Emit execution events** (see [Execution Events](#execution-events) below).
+7. **Resolve the next node** via [edge routing](/edges#routing-algorithm).
+
+## NodeResult
+
+The result of executing a single node.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | `"success"` \| `"skipped"` \| `"failed"` | Outcome of this node's execution. |
+| `data` | Record&lt;string, unknown&gt; | Output data. When the node has an `output` schema, this conforms to it. Available to downstream nodes via context. |
+| `toolCalls` | [ToolCall](#toolcall)[] | Record of tools invoked during execution. |
+
+### ToolCall
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tool` | string | Tool name. |
+| `input` | unknown | Input passed to the tool. |
+| `output` | unknown | Output returned by the tool. Absent on error. |
+
+## Dry-Run Semantics
+
+When the workflow input contains `dryRun: true`, a conforming executor MUST:
+
+1. Execute nodes normally through unconditional edges.
+2. **Stop** at the first node that has conditional outgoing edges (edges with `when` clauses).
+3. Return the execution result with all nodes completed up to that point.
+
+This enables "analysis without action" — a workflow runs through gathering and analysis nodes but stops before making action decisions that require conditional routing.
+
+Unconditional edges are deterministic transitions (e.g., `gather` &rarr; `investigate`). Conditional edges represent decision points (e.g., `investigate` &rarr; `create_issue` vs `skip`). Dry-run halts at decisions.
+
+## Execution Events
+
+A conforming executor MUST emit the following events during execution. Events are delivered to an observer callback. If the observer throws, the executor MUST NOT crash — observer errors are silently swallowed.
+
+| Event Type | Payload | Emitted When |
+|------------|---------|--------------|
+| `workflow:start` | `{ workflow: string }` | Before the first node executes. |
+| `node:enter` | `{ node: string, instruction: string }` | Before a node begins execution. |
+| `tool:call` | `{ node: string, tool: string, input: unknown }` | Before a tool is invoked. |
+| `tool:result` | `{ node: string, tool: string, output: unknown }` | After a tool returns. |
+| `node:progress` | `{ node: string, message: string }` | During node execution (streaming status). |
+| `node:exit` | `{ node: string, result: NodeResult }` | After a node completes. |
+| `route` | `{ from: string, to: string, reason: string }` | After an edge is selected for routing. |
+| `workflow:end` | `{ results: Record<string, NodeResult> }` | After all execution is complete. |
+
+### Event Ordering
+
+For each node, events MUST be emitted in this order:
+
+1. `node:enter`
+2. Zero or more `tool:call` / `tool:result` pairs and `node:progress` events (interleaved).
+3. `node:exit`
+4. `route` (if a next node exists)
+
+The first event of any execution is `workflow:start`. The last is `workflow:end`.
+
+## Execution Trace
+
+A conforming executor MUST produce an `ExecutionTrace` after execution completes. The trace records the complete ordered path through the workflow, including loop iterations.
+
+### TraceStep
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `node` | string | Node ID. |
+| `status` | `"success"` \| `"failed"` \| `"skipped"` | Outcome. |
+| `iteration` | number | 1-based iteration count. `2` means this node executed a second time (via bounded cycle). |
+
+### TraceEdge
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `from` | string | Source node ID. |
+| `to` | string | Target node ID. |
+| `reason` | string | Why this edge was followed — the `when` condition text, or `"only path"` for unconditional edges. |
+
+### ExecutionResult
+
+The return value of a workflow execution.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `results` | Map&lt;string, NodeResult&gt; | Final result per node. If a node executed multiple times (bounded cycle), this contains the **last** result. |
+| `trace` | ExecutionTrace | Ordered record of all steps and routing decisions. |
+
+## Error Handling
+
+- A node that fails MUST produce a `NodeResult` with `status: "failed"`.
+- Whether the executor continues to subsequent nodes or terminates is **implementation-defined**.
+- The trace MUST record the failure.
+- Tool handler errors are surfaced to the AI model as tool results; they do not terminate execution.
+
+## AI Model Interface (Informative)
+
+This section is **informative**, not normative. It describes the abstract interface the reference implementation uses. Alternative implementations MAY use different interfaces as long as observable behavior (context accumulation, routing, events, trace) conforms to this specification.
+
+The reference implementation defines two AI model operations:
+
+### `run`
+
+Execute a node. Takes:
+
+- `instruction` — the built instruction string.
+- `context` — the accumulated context object.
+- `tools` — resolved tool list from the node's skills.
+- `outputSchema` — optional JSON Schema for structured output.
+- `onProgress` — optional callback for streaming status messages.
+
+Returns a `NodeResult`.
+
+### `evaluate`
+
+Route at a conditional edge. Takes:
+
+- `question` — a routing prompt (e.g., "Based on the results so far, which condition is true?").
+- `context` — the accumulated context object.
+- `choices` — an array of `{ id: string, description: string }` where `id` is the target node ID and `description` is the `when` clause text.
+
+Returns the selected choice `id` (target node ID).
