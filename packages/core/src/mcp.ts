@@ -18,6 +18,8 @@ export interface SkillMcpOptions {
   credentials: Record<string, string>;
   /** User-supplied MCP servers — always win on key conflict. */
   userMcpServers?: Record<string, McpServerConfig>;
+  /** MCP servers declared by custom skills. Only wired when the skill is referenced. */
+  skillMcpServers?: Record<string, McpServerConfig>;
 }
 
 /**
@@ -186,6 +188,15 @@ export function buildSkillMcpServers(opts: SkillMcpOptions): Record<string, McpS
       args: ["-y", "asana-mcp@latest"],
       env: { ASANA_ACCESS_TOKEN: creds.ASANA_ACCESS_TOKEN },
     };
+  }
+
+  // Skill-declared MCP servers — only include for referenced skills.
+  if (opts.skillMcpServers) {
+    for (const [skillId, mcpConfig] of Object.entries(opts.skillMcpServers)) {
+      if (refs.has(skillId) && !auto[skillId]) {
+        auto[skillId] = mcpConfig;
+      }
+    }
   }
 
   // User-supplied servers always win on key conflict.

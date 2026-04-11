@@ -92,8 +92,8 @@ export {
 export type { WorkflowError } from "./schema.js";
 
 // MCP auto-injection
-export { buildAutoMcpServers, buildProviderContext } from "./mcp.js";
-export type { ProviderContextOptions } from "./mcp.js";
+export { buildAutoMcpServers, buildSkillMcpServers, buildProviderContext } from "./mcp.js";
+export type { ProviderContextOptions, SkillMcpOptions } from "./mcp.js";
 export type { McpServerConfig, McpAutoConfig } from "./types.js";
 
 // Workflow builder

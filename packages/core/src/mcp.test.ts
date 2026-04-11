@@ -806,4 +806,76 @@ describe("buildSkillMcpServers", () => {
     });
     expect(result["betterstack"]?.headers?.Authorization).toBe("Bearer primary");
   });
+
+  // ── Skill-declared MCP servers ──────────────────────────────────────
+
+  it("includes skill-declared MCP servers", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["our-crm"]),
+      credentials: {},
+      skillMcpServers: {
+        "our-crm": {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@company/crm-server"],
+          env: { API_KEY: "test-key" },
+        },
+      },
+    });
+    expect(result["our-crm"]).toBeDefined();
+    expect(result["our-crm"].command).toBe("npx");
+  });
+
+  it("skill-declared MCP is only included when skill is referenced", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["github"]),
+      credentials: { GITHUB_TOKEN: "ghp_test" },
+      skillMcpServers: {
+        "our-crm": {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@company/crm-server"],
+        },
+      },
+    });
+    expect(result["github"]).toBeDefined();
+    expect(result["our-crm"]).toBeUndefined();
+  });
+
+  it("user-supplied servers win over skill-declared", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["our-crm"]),
+      credentials: {},
+      skillMcpServers: {
+        "our-crm": {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@company/crm-server"],
+        },
+      },
+      userMcpServers: {
+        "our-crm": {
+          type: "http",
+          url: "https://override.example.com",
+        },
+      },
+    });
+    expect(result["our-crm"].url).toBe("https://override.example.com");
+  });
+
+  it("skill-declared and auto-wired MCPs coexist", () => {
+    const result = buildSkillMcpServers({
+      referencedSkills: new Set(["github", "our-crm"]),
+      credentials: { GITHUB_TOKEN: "ghp_test" },
+      skillMcpServers: {
+        "our-crm": {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@company/crm-server"],
+        },
+      },
+    });
+    expect(result["github"]).toBeDefined();
+    expect(result["our-crm"]).toBeDefined();
+  });
 });
