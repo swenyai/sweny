@@ -7,14 +7,18 @@ A Skill is a composable bundle of tools that provides capabilities to [Nodes](/n
 
 ## Skill Object
 
-| Field         | Type                                                      | Required | Description                                                               |
-| ------------- | --------------------------------------------------------- | -------- | ------------------------------------------------------------------------- |
-| `id`          | string                                                    | REQUIRED | Unique identifier. Referenced by node `skills` arrays. MUST be non-empty. |
-| `name`        | string                                                    | REQUIRED | Human-readable name.                                                      |
-| `description` | string                                                    | REQUIRED | What this skill provides.                                                 |
-| `category`    | [SkillCategory](#skill-categories)                        | REQUIRED | Functional category.                                                      |
-| `config`      | Record&lt;string, [ConfigField](#config-field-object)&gt; | REQUIRED | Configuration fields required by this skill.                              |
-| `tools`       | [Tool](#tool-object)[]                                    | REQUIRED | Tools this skill provides to nodes.                                       |
+| Field         | Type                                                      | Required | Description                                                                             |
+| ------------- | --------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `id`          | string                                                    | REQUIRED | Unique identifier. Referenced by node `skills` arrays. MUST be non-empty.               |
+| `name`        | string                                                    | REQUIRED | Human-readable name.                                                                    |
+| `description` | string                                                    | REQUIRED | What this skill provides.                                                               |
+| `category`    | [SkillCategory](#skill-categories)                        | REQUIRED | Functional category.                                                                    |
+| `config`      | Record&lt;string, [ConfigField](#config-field-object)&gt; | REQUIRED | Configuration fields required by this skill.                                            |
+| `tools`       | [Tool](#tool-object)[]                                    | REQUIRED | Tools this skill provides to nodes.                                                     |
+| `instruction` | string                                                    | OPTIONAL | Natural language expertise injected into the node prompt when this skill is referenced. |
+| `mcp`         | [McpServerConfig](#mcpserverconfig-object)                | OPTIONAL | External MCP server definition wired for nodes referencing this skill.                  |
+
+A valid Skill MUST provide at least one of `tools`, `instruction`, or `mcp`.
 
 ## Skill Categories
 
@@ -46,6 +50,25 @@ A conforming executor MUST resolve config values using the following precedence:
 2. **Environment variables** — if an `env` field is set, read from `process.env[env]`.
 
 If a required config field cannot be resolved from either source, the skill MUST be treated as unavailable. The executor SHOULD NOT fail the workflow — the skill is silently excluded, and any node that listed it will execute without that skill's tools.
+
+## McpServerConfig Object
+
+Declares an external MCP (Model Context Protocol) server that provides tools to the AI model at runtime.
+
+| Field     | Type                         | Required    | Description                                                                                                                                                 |
+| --------- | ---------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`    | `"stdio"` \| `"http"`        | OPTIONAL    | Transport type. Inferred from presence of `command` (stdio) or `url` (http) when omitted.                                                                   |
+| `command` | string                       | CONDITIONAL | Spawn command (stdio transport). Required if `url` absent.                                                                                                  |
+| `args`    | string[]                     | OPTIONAL    | Arguments for the command.                                                                                                                                  |
+| `url`     | string                       | CONDITIONAL | HTTP endpoint (HTTP transport). Required if `command` absent.                                                                                               |
+| `headers` | Record&lt;string, string&gt; | OPTIONAL    | HTTP headers (HTTP transport only).                                                                                                                         |
+| `env`     | Record&lt;string, string&gt; | OPTIONAL    | Environment variable names the server needs. Values are human-readable descriptions, not secrets. Actual values are resolved from `process.env` at runtime. |
+
+A conforming executor:
+
+- **MUST** wire the MCP server only for nodes that reference the skill declaring it (node-scoped, not global).
+- **MUST** resolve `env` values from `process.env` at runtime (the declared values are descriptions, not secrets).
+- **SHOULD** prefer user-supplied MCP server configs over skill-declared ones when both exist for the same key.
 
 ## Tool Object
 
@@ -79,6 +102,46 @@ The specification defines the following well-known skill IDs. Implementations SH
 | `betterstack`  | observability | `BETTERSTACK_API_TOKEN`                     | BetterStack incident management.           |
 | `notification` | notification  | varies                                      | Multi-channel notifications.               |
 | `supabase`     | general       | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Supabase database operations.              |
+
+## Custom Skills
+
+Custom skills are authored as directories containing a `SKILL.md` file. The format follows the [Agent Skills Open Standard](https://agentskills.io).
+
+### SKILL.md Format
+
+A skill directory contains a `SKILL.md` file with YAML frontmatter and a markdown body:
+
+```markdown
+---
+name: code-standards
+description: Team coding conventions for TypeScript projects
+mcp:
+  command: npx
+  args: ["-y", "@company/tool-server"]
+  env:
+    API_KEY: Company API key
+---
+
+When writing TypeScript code, follow these standards:
+
+- Use camelCase for variables and functions
+- Use PascalCase for types and interfaces
+```
+
+The markdown body becomes the skill's `instruction` — injected into the node prompt when the skill is referenced. The `mcp` frontmatter field is a SWEny-specific extension for declaring an MCP server.
+
+### Multi-Harness Discovery
+
+A conforming executor SHOULD discover custom skills from the following directories, in priority order (highest first):
+
+| Priority | Directory                        | Convention                              |
+| -------- | -------------------------------- | --------------------------------------- |
+| 1        | `.sweny/skills/<name>/SKILL.md`  | SWEny-native                            |
+| 2        | `.claude/skills/<name>/SKILL.md` | Claude Code                             |
+| 3        | `.agents/skills/<name>/SKILL.md` | Universal (Codex, Gemini CLI, OpenCode) |
+| 4        | `.gemini/skills/<name>/SKILL.md` | Gemini CLI                              |
+
+On ID collision, the higher-priority directory wins. When a custom skill overrides a well-known skill ID, the custom skill's instruction is injected AND the well-known skill's tools remain available.
 
 ## Example
 
