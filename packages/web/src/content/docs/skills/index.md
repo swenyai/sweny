@@ -81,6 +81,11 @@ const skills = createSkillMap(configuredSkills());
 await execute(workflow, input, { skills, claude });
 ```
 
-## Custom skills
+## Custom Skills
 
-Custom skill definitions are not yet supported. If you need to connect a service that SWEny does not have a built-in skill for, use [MCP servers](/advanced/mcp-servers/) to provide custom tool integrations. Custom skill authoring is on the roadmap.
+In addition to built-in skills, you can create custom instruction skills and MCP-backed skills. See the [Custom Skills guide](/skills/custom/) for details on:
+
+- Creating `SKILL.md` files with instruction content
+- Declaring MCP server integrations
+- Inline workflow skill definitions
+- Multi-harness skill discovery
