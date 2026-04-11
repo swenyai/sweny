@@ -26,6 +26,7 @@
 export type {
   Skill,
   SkillCategory,
+  SkillDefinition,
   Tool,
   ToolContext,
   ConfigField,

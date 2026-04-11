@@ -41,6 +41,10 @@ export interface Skill {
   category: SkillCategory;
   config: Record<string, ConfigField>;
   tools: Tool[];
+  /** Natural language expertise injected into the node prompt when this skill is referenced. */
+  instruction?: string;
+  /** External MCP server definition wired for nodes referencing this skill. */
+  mcp?: McpServerConfig;
 }
 
 // ─── Workflow Graph ─────────────────────────────────────────────
@@ -81,6 +85,20 @@ export interface Workflow {
   nodes: Record<string, Node>;
   edges: Edge[];
   entry: string;
+  skills?: Record<string, SkillDefinition>;
+}
+
+/**
+ * Inline skill definition in a workflow's `skills` block.
+ * Must provide at least `instruction` or `mcp`.
+ */
+export interface SkillDefinition {
+  name?: string;
+  description?: string;
+  /** Natural language expertise injected into the node prompt. */
+  instruction?: string;
+  /** External MCP server. */
+  mcp?: McpServerConfig;
 }
 
 // ─── Execution ───────────────────────────────────────────────────
