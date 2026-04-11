@@ -7,14 +7,15 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 
 ## Fields
 
-| Field         | Type                                 | Required | Default | Description                                                                                    |
-| ------------- | ------------------------------------ | -------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `id`          | string                               | REQUIRED | —       | Unique identifier for this workflow. MUST be non-empty.                                        |
-| `name`        | string                               | REQUIRED | —       | Human-readable name. MUST be non-empty.                                                        |
-| `description` | string                               | OPTIONAL | `""`    | Purpose of the workflow.                                                                       |
-| `entry`       | string                               | REQUIRED | —       | Node ID where execution begins. MUST reference a key in `nodes`.                               |
-| `nodes`       | Record&lt;string, [Node](/nodes)&gt; | REQUIRED | —       | Map of node ID to Node definition. Keys are referenced by `entry` and edge `from`/`to` fields. |
-| `edges`       | [Edge](/edges)[]                     | REQUIRED | —       | Directed edges defining execution flow and routing conditions.                                 |
+| Field         | Type                                                             | Required | Default | Description                                                                                    |
+| ------------- | ---------------------------------------------------------------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `id`          | string                                                           | REQUIRED | —       | Unique identifier for this workflow. MUST be non-empty.                                        |
+| `name`        | string                                                           | REQUIRED | —       | Human-readable name. MUST be non-empty.                                                        |
+| `description` | string                                                           | OPTIONAL | `""`    | Purpose of the workflow.                                                                       |
+| `entry`       | string                                                           | REQUIRED | —       | Node ID where execution begins. MUST reference a key in `nodes`.                               |
+| `nodes`       | Record&lt;string, [Node](/nodes)&gt;                             | REQUIRED | —       | Map of node ID to Node definition. Keys are referenced by `entry` and edge `from`/`to` fields. |
+| `edges`       | [Edge](/edges)[]                                                 | REQUIRED | —       | Directed edges defining execution flow and routing conditions.                                 |
+| `skills`      | Record&lt;string, [SkillDefinition](#skilldefinition-object)&gt; | OPTIONAL | `{}`    | Inline skill definitions scoped to this workflow.                                              |
 
 ## Structural Validation
 
@@ -26,18 +27,49 @@ A conforming validator MUST enforce the following rules:
 4. **Self-loops.** An edge where `from` equals `to` MUST have `max_iterations` set. A self-loop without `max_iterations` is invalid.
 5. **Unbounded cycles.** A cycle in the graph where no edge in the cycle has `max_iterations` is invalid. A conforming validator MUST detect and reject unbounded cycles. The detection algorithm: remove all edges that have `max_iterations` (and all self-loops), then check the remaining subgraph for cycles using DFS.
 6. **Skill references.** All skill IDs referenced in node `skills` arrays SHOULD exist in the executor's skill registry. Unknown skills are warnings, not errors.
+7. **Inline skill constraint.** Every entry in `skills` MUST provide at least one of `instruction` or `mcp`. An inline skill with neither is invalid.
 
 ## Error Codes
 
-| Code                  | Description                                    |
-| --------------------- | ---------------------------------------------- |
-| `MISSING_ENTRY`       | `entry` does not reference an existing node.   |
-| `UNKNOWN_EDGE_SOURCE` | An edge `from` references a non-existent node. |
-| `UNKNOWN_EDGE_TARGET` | An edge `to` references a non-existent node.   |
-| `UNREACHABLE_NODE`    | A node is not reachable from `entry`.          |
-| `SELF_LOOP`           | A self-loop edge lacks `max_iterations`.       |
-| `UNBOUNDED_CYCLE`     | A cycle exists with no `max_iterations` guard. |
-| `UNKNOWN_SKILL`       | A node references a skill not in the registry. |
+| Code                   | Description                                               |
+| ---------------------- | --------------------------------------------------------- |
+| `MISSING_ENTRY`        | `entry` does not reference an existing node.              |
+| `UNKNOWN_EDGE_SOURCE`  | An edge `from` references a non-existent node.            |
+| `UNKNOWN_EDGE_TARGET`  | An edge `to` references a non-existent node.              |
+| `UNREACHABLE_NODE`     | A node is not reachable from `entry`.                     |
+| `SELF_LOOP`            | A self-loop edge lacks `max_iterations`.                  |
+| `UNBOUNDED_CYCLE`      | A cycle exists with no `max_iterations` guard.            |
+| `UNKNOWN_SKILL`        | A node references a skill not in the registry.            |
+| `INVALID_INLINE_SKILL` | An inline skill provides neither `instruction` nor `mcp`. |
+
+## SkillDefinition Object
+
+Inline skill definitions declared in the workflow's `skills` block. These are scoped to the workflow and available to any node that references them by key.
+
+| Field         | Type                                              | Required | Description                                               |
+| ------------- | ------------------------------------------------- | -------- | --------------------------------------------------------- |
+| `name`        | string                                            | OPTIONAL | Display name. Defaults to the map key.                    |
+| `description` | string                                            | OPTIONAL | What this skill provides.                                 |
+| `instruction` | string                                            | OPTIONAL | Natural language expertise injected into the node prompt. |
+| `mcp`         | [McpServerConfig](/skills#mcpserverconfig-object) | OPTIONAL | External MCP server definition.                           |
+
+A valid SkillDefinition MUST provide at least one of `instruction` or `mcp`.
+
+Inline skills cannot define `tools` (those require runtime code). They provide instruction-based expertise and/or external MCP server connections.
+
+### Example
+
+```yaml
+skills:
+  sre-rubric:
+    name: SRE Postmortem Rubric
+    instruction: |
+      Score each postmortem dimension 1-5:
+      - Completeness: Can you reconstruct the incident?
+      - Root Cause Depth: "Database was slow" = 1, specific PR + mechanism = 5
+      - Blamelessness: No individual names as responsible parties
+      - Action Items: Specific, assignable, measurable
+```
 
 ## Minimal Example
 
@@ -63,6 +95,12 @@ id: triage
 name: Alert Triage
 description: Investigate a production alert and take action based on findings.
 entry: gather
+skills:
+  triage-rubric:
+    name: Triage Severity Rubric
+    instruction: |
+      When assessing severity: critical = customer-facing outage,
+      high = degraded service, medium = internal impact, low = cosmetic.
 
 nodes:
   gather:
@@ -83,6 +121,7 @@ nodes:
     skills:
       - github
       - linear
+      - triage-rubric
     output:
       type: object
       properties:
