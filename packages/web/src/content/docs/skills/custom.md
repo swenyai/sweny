@@ -36,7 +36,7 @@ When writing or reviewing TypeScript code:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Skill ID. Lowercase letters, numbers, hyphens. Must match directory name. |
-| `description` | Yes | What this skill provides. |
+| `description` | No | What this skill provides. Falls back to "Custom skill: {name}" if omitted. |
 | `mcp` | No | MCP server config (see below). |
 
 ## Instruction Skills
@@ -94,8 +94,10 @@ mcp:
 mcp:
   url: https://mcp.example.com/mcp
   headers:
-    Authorization: Bearer ${API_KEY}
+    Authorization: Bearer your-token-here
 ```
+
+Note: Header values are passed as-is (no variable interpolation). Use literal values or configure them via your environment.
 
 ## Inline Workflow Skills
 

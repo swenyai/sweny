@@ -558,4 +558,110 @@ describe("skill instruction injection", () => {
     );
     expect(results.get("judge")?.status).toBe("success");
   });
+
+  it("wires inline workflow.skills into the executor automatically", async () => {
+    const workflow: Workflow = {
+      id: "test-inline",
+      name: "Inline Skills",
+      description: "",
+      entry: "review",
+      nodes: {
+        review: {
+          name: "Review",
+          instruction: "Review the code.",
+          skills: ["my-rubric"],
+        },
+      },
+      edges: [],
+      skills: {
+        "my-rubric": {
+          name: "My Rubric",
+          instruction: "Check for security issues first, then correctness.",
+        },
+      },
+    };
+
+    let capturedInstruction = "";
+    const claude: Claude = {
+      async run(opts) {
+        capturedInstruction = opts.instruction;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate() {
+        return "";
+      },
+    };
+
+    // No "my-rubric" in the skill map — executor must pull it from workflow.skills
+    const { results } = await execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        config: {},
+      },
+    );
+
+    expect(results.get("review")?.status).toBe("success");
+    expect(capturedInstruction).toContain("## Skill: My Rubric");
+    expect(capturedInstruction).toContain("Check for security issues first");
+  });
+
+  it("caller-provided skills take precedence over inline workflow.skills", async () => {
+    const callerSkill: Skill = {
+      id: "shared",
+      name: "Caller Version",
+      description: "From caller",
+      category: "general",
+      config: {},
+      tools: [],
+      instruction: "Caller instruction wins.",
+    };
+
+    const workflow: Workflow = {
+      id: "test-precedence",
+      name: "Precedence",
+      description: "",
+      entry: "step",
+      nodes: {
+        step: {
+          name: "Step",
+          instruction: "Do work.",
+          skills: ["shared"],
+        },
+      },
+      edges: [],
+      skills: {
+        shared: {
+          name: "Inline Version",
+          instruction: "Inline instruction should NOT appear.",
+        },
+      },
+    };
+
+    let capturedInstruction = "";
+    const claude: Claude = {
+      async run(opts) {
+        capturedInstruction = opts.instruction;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate() {
+        return "";
+      },
+    };
+
+    await execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([callerSkill]),
+        claude,
+        config: {},
+      },
+    );
+
+    expect(capturedInstruction).toContain("Caller instruction wins.");
+    expect(capturedInstruction).not.toContain("Inline instruction should NOT appear.");
+  });
 });

@@ -111,7 +111,8 @@ export interface WorkflowError {
     | "UNREACHABLE_NODE"
     | "UNKNOWN_SKILL"
     | "SELF_LOOP"
-    | "UNBOUNDED_CYCLE";
+    | "UNBOUNDED_CYCLE"
+    | "INVALID_INLINE_SKILL";
   message: string;
   nodeId?: string;
 }
@@ -232,6 +233,16 @@ export function validateWorkflow(
           nodeId: cycleNode,
         });
       }
+    }
+  }
+
+  // Inline skill definitions must have instruction or mcp
+  for (const [skillId, def] of Object.entries(workflow.skills ?? {})) {
+    if (!def.instruction && !def.mcp) {
+      errors.push({
+        code: "INVALID_INLINE_SKILL",
+        message: `Inline skill "${skillId}" must provide at least instruction or mcp`,
+      });
     }
   }
 

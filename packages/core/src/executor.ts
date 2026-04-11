@@ -16,6 +16,7 @@
 import type {
   Workflow,
   Skill,
+  SkillDefinition,
   Tool,
   Claude,
   Observer,
@@ -50,7 +51,13 @@ export interface ExecuteOptions {
  * - `trace`: full ordered execution trace including loops and routing decisions
  */
 export async function execute(workflow: Workflow, input: unknown, options: ExecuteOptions): Promise<ExecutionResult> {
-  const { skills, claude, observer } = options;
+  const { claude, observer } = options;
+
+  // Merge inline workflow skills into the skill map so they resolve at runtime.
+  // Inline skills (instruction/mcp only) become Skill objects with empty tools/config.
+  // The caller's skill map takes precedence — inline skills only fill gaps.
+  const skills = mergeInlineSkills(options.skills, workflow.skills);
+
   const config = resolveConfig(skills, options.config);
   const logger = options.logger ?? consoleLogger;
   const results = new Map<string, NodeResult>();
@@ -224,6 +231,34 @@ function safeObserve(observer: Observer | undefined, event: ExecutionEvent, logg
   } catch (err: any) {
     (logger ?? consoleLogger).warn(`Observer error (non-fatal): ${err.message}`);
   }
+}
+
+/**
+ * Merge inline workflow skill definitions into the skill map.
+ * Inline skills (from workflow.skills) become Skill objects with empty tools/config.
+ * The caller's skill map takes precedence — inline skills only fill gaps.
+ */
+function mergeInlineSkills(
+  skills: Map<string, Skill>,
+  inlineSkills?: Record<string, SkillDefinition>,
+): Map<string, Skill> {
+  if (!inlineSkills || Object.keys(inlineSkills).length === 0) return skills;
+
+  const merged = new Map(skills);
+  for (const [id, def] of Object.entries(inlineSkills)) {
+    if (merged.has(id)) continue; // caller-provided skill takes precedence
+    merged.set(id, {
+      id,
+      name: def.name ?? id,
+      description: def.description ?? `Inline skill: ${id}`,
+      category: "general",
+      config: {},
+      tools: [],
+      instruction: def.instruction,
+      mcp: def.mcp,
+    });
+  }
+  return merged;
 }
 
 function resolveTools(skillIds: string[], skills: Map<string, Skill>): Tool[] {

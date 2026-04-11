@@ -19,6 +19,9 @@ import { builtinSkills, isSkillConfigured } from "./index.js";
 /** Directories to scan, in ascending priority order. Last match wins. */
 const SKILL_DIRS = [".gemini/skills", ".agents/skills", ".claude/skills", ".sweny/skills"];
 
+/** Valid skill ID: lowercase alphanumeric + hyphens, no leading/trailing/consecutive hyphens, max 64 chars. */
+const VALID_SKILL_ID = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
 /**
  * Discover custom skills from all known harness directories.
  */
@@ -61,14 +64,20 @@ export function discoverSkills(cwd: string = process.cwd()): Skill[] {
  * Parse a SKILL.md file into a Skill object.
  */
 function parseSkillMd(content: string): Skill | null {
-  const frontmatter = parseFrontmatter(content);
-  if (!frontmatter?.name) return null;
+  const raw = parseFrontmatter(content);
+  if (!raw?.name) return null;
+
+  // Narrow the loosely-typed YAML output into the fields we expect
+  const fm = raw as { name: string; description?: string; mcp?: Record<string, unknown> };
+
+  const id = String(fm.name);
+  if (!VALID_SKILL_ID.test(id) || id.includes("--") || id.length > 64) return null;
 
   const instruction = extractBody(content);
 
   let mcp: McpServerConfig | undefined;
-  if (frontmatter.mcp && typeof frontmatter.mcp === "object") {
-    const m = frontmatter.mcp;
+  if (fm.mcp && typeof fm.mcp === "object") {
+    const m = fm.mcp as Record<string, any>;
     if (m.command || m.url) {
       mcp = {
         type: m.type ?? (m.command ? "stdio" : "http"),
@@ -82,9 +91,9 @@ function parseSkillMd(content: string): Skill | null {
   }
 
   return {
-    id: frontmatter.name,
-    name: frontmatter.name,
-    description: frontmatter.description ?? `Custom skill: ${frontmatter.name}`,
+    id,
+    name: id,
+    description: typeof fm.description === "string" ? fm.description : `Custom skill: ${id}`,
     category: "general" as SkillCategory,
     config: {},
     tools: [],
@@ -94,7 +103,7 @@ function parseSkillMd(content: string): Skill | null {
 }
 
 /** Extract YAML frontmatter from a markdown file (between --- delimiters). */
-function parseFrontmatter(content: string): Record<string, any> | null {
+function parseFrontmatter(content: string): Record<string, unknown> | null {
   const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
   if (!match) return null;
   try {

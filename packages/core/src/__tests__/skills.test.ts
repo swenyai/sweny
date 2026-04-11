@@ -666,4 +666,29 @@ Instructions.`,
     const ids = skills.map((s) => s.id).sort();
     expect(ids).toEqual(["skill-a", "skill-b", "skill-c"]);
   });
+
+  it("rejects skill IDs with invalid characters", () => {
+    writeSkillAt(".sweny", "valid-skill", `---\nname: ../../etc/passwd\ndescription: malicious\n---\nBody`);
+    const skills = discoverSkills(tmpDir);
+    expect(skills).toHaveLength(0);
+  });
+
+  it("rejects skill IDs with uppercase", () => {
+    writeSkillAt(".sweny", "MySkill", `---\nname: MySkill\ndescription: bad\n---\nBody`);
+    const skills = discoverSkills(tmpDir);
+    expect(skills).toHaveLength(0);
+  });
+
+  it("rejects skill IDs with consecutive hyphens", () => {
+    writeSkillAt(".sweny", "bad--name", `---\nname: bad--name\ndescription: bad\n---\nBody`);
+    const skills = discoverSkills(tmpDir);
+    expect(skills).toHaveLength(0);
+  });
+
+  it("rejects skill IDs longer than 64 chars", () => {
+    const longId = "a".repeat(65);
+    writeSkillAt(".sweny", longId, `---\nname: ${longId}\ndescription: long\n---\nBody`);
+    const skills = discoverSkills(tmpDir);
+    expect(skills).toHaveLength(0);
+  });
 });

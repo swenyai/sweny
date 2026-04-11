@@ -445,6 +445,33 @@ describe("validateWorkflow", () => {
     const errors = validateWorkflow(wf, new Set(["github"]));
     expect(errors.filter((e) => e.code === "UNKNOWN_SKILL")).toEqual([]);
   });
+
+  it("rejects inline skills with neither instruction nor mcp", () => {
+    const wf = {
+      ...validWorkflow,
+      skills: { "bad-skill": { name: "Bad" } },
+    };
+    const errors = validateWorkflow(wf);
+    expect(errors).toContainEqual(expect.objectContaining({ code: "INVALID_INLINE_SKILL" }));
+  });
+
+  it("accepts inline skills with instruction only", () => {
+    const wf = {
+      ...validWorkflow,
+      skills: { "ok-skill": { instruction: "Do something" } },
+    };
+    const errors = validateWorkflow(wf);
+    expect(errors.filter((e) => e.code === "INVALID_INLINE_SKILL")).toEqual([]);
+  });
+
+  it("accepts inline skills with mcp only", () => {
+    const wf = {
+      ...validWorkflow,
+      skills: { "mcp-skill": { mcp: { command: "npx", args: ["-y", "server"] } } },
+    };
+    const errors = validateWorkflow(wf);
+    expect(errors.filter((e) => e.code === "INVALID_INLINE_SKILL")).toEqual([]);
+  });
 });
 
 // ─── JSON Schema shape tests ─────────────────────────────────────
