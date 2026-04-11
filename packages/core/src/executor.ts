@@ -77,6 +77,17 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // Gather tools from the node's skills
     const tools = resolveTools(node.skills, skills);
 
+    // Runtime guard: if this node declares skills but none resolved, the node
+    // cannot do its job (e.g. "create a Linear issue" with no linear skill).
+    // The startup validate() warns about this possibility, but only throw when
+    // the node is actually reached — unreachable nodes with missing skills are fine.
+    if (node.skills.length > 0 && tools.length === 0) {
+      throw new Error(
+        `Node "${currentId}" requires skills [${node.skills.join(", ")}] but none are configured. ` +
+          `Set the required environment variables and try again.`,
+      );
+    }
+
     // Build context: input + all prior node results
     const context: Record<string, unknown> = {
       input,

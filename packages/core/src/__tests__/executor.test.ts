@@ -35,6 +35,18 @@ const linearWorkflow: Workflow = {
   ],
 };
 
+/** Same shape as linearWorkflow but with no skill requirements — for tests that
+ *  don't exercise tool usage and just need a 3-node DAG. */
+const skilllessWorkflow: Workflow = {
+  ...linearWorkflow,
+  id: "linear-no-skills",
+  nodes: {
+    a: { name: "A", instruction: "Do A", skills: [] },
+    b: { name: "B", instruction: "Do B", skills: [] },
+    c: { name: "C", instruction: "Do C", skills: [] },
+  },
+};
+
 const branchingWorkflow: Workflow = {
   id: "branching",
   name: "Branching",
@@ -199,7 +211,7 @@ describe("executor", () => {
     });
 
     const { results } = await execute(
-      linearWorkflow,
+      skilllessWorkflow,
       {},
       {
         skills: createSkillMap([]),
@@ -319,10 +331,10 @@ describe("executor", () => {
       responses: { a: { data: {} }, b: { data: {} }, c: { data: {} } },
     });
 
-    // Should throw without config
+    // Should throw without config (uses skilllessWorkflow — no skill requirements on nodes)
     await expect(
       execute(
-        linearWorkflow,
+        skilllessWorkflow,
         {},
         {
           skills: createSkillMap([skillWithConfig]),
@@ -333,7 +345,7 @@ describe("executor", () => {
 
     // Should succeed with override
     const { results } = await execute(
-      linearWorkflow,
+      skilllessWorkflow,
       {},
       {
         skills: createSkillMap([skillWithConfig]),
@@ -354,7 +366,7 @@ describe("executor", () => {
     });
 
     const { results } = await execute(
-      linearWorkflow,
+      skilllessWorkflow,
       {},
       {
         skills: createSkillMap([]),
@@ -470,6 +482,64 @@ describe("executor", () => {
     // A runs twice (once initially, once via retry), then edge is exhausted → falls to "end"
     expect(aCount).toBe(2);
     expect(results.has("end")).toBe(true);
+  });
+
+  it("throws when a node with required skills is reached but none are configured", async () => {
+    const workflowWithSkills: Workflow = {
+      id: "needs-linear",
+      name: "Needs Linear",
+      description: "A→B where B needs linear skill",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Do A", skills: [] },
+        b: { name: "B", instruction: "Create a Linear issue", skills: ["linear"] },
+      },
+      edges: [{ from: "a", to: "b" }],
+    };
+
+    const claude = new MockClaude({
+      responses: {
+        a: { data: { done: true } },
+        b: { data: {} },
+      },
+    });
+
+    // No linear skill in the map — should throw when node B is reached
+    await expect(execute(workflowWithSkills, {}, { skills: createSkillMap([]), claude, config: {} })).rejects.toThrow(
+      'Node "b" requires skills [linear] but none are configured',
+    );
+  });
+
+  it("does not throw for unreachable nodes with missing skills", async () => {
+    const workflowWithUnreachable: Workflow = {
+      id: "unreachable-skill",
+      name: "Unreachable Skill",
+      description: "A→C, B needs linear but is never reached",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Do A", skills: [] },
+        b: { name: "B", instruction: "Create issue", skills: ["linear"] },
+        c: { name: "C", instruction: "Do C", skills: [] },
+      },
+      edges: [
+        { from: "a", to: "c" },
+        { from: "a", to: "b", when: "needs escalation" },
+      ],
+    };
+
+    const claude = new MockClaude({
+      responses: {
+        a: { data: {} },
+        c: { data: {} },
+      },
+      routes: { a: "c" },
+    });
+
+    // Node B is never reached, so missing linear skill should not cause a throw
+    const { results } = await execute(workflowWithUnreachable, {}, { skills: createSkillMap([]), claude, config: {} });
+    expect(results.has("a")).toBe(true);
+    expect(results.has("c")).toBe(true);
+    expect(results.has("b")).toBe(false);
   });
 
   it("validates route choice falls back on invalid Claude response", async () => {
