@@ -239,10 +239,8 @@ export function validateWorkflow(
   if (knownSkills) {
     // Merge workflow inline skills into known set
     const allKnown = new Set(knownSkills);
-    if ((workflow as any).skills) {
-      for (const id of Object.keys((workflow as any).skills)) {
-        allKnown.add(id);
-      }
+    for (const id of Object.keys(workflow.skills ?? {})) {
+      allKnown.add(id);
     }
     for (const [nodeId, node] of Object.entries(workflow.nodes)) {
       for (const skillId of node.skills) {
