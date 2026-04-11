@@ -19,6 +19,12 @@ const lines = [];
 for (const name of workflows) {
   const yaml = readFileSync(join(workflowDir, `${name}.yml`), "utf-8");
   const data = parse(yaml);
+  // Apply schema defaults that workflowZ.parse() would add at runtime
+  if (!data.description) data.description = "";
+  if (!data.skills) data.skills = {};
+  for (const node of Object.values(data.nodes ?? {})) {
+    if (!node.skills) node.skills = [];
+  }
   const varName = name.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) + "Workflow";
   lines.push(`export const ${varName} = ${JSON.stringify(data)};`);
 }

@@ -197,7 +197,7 @@ export interface Claude {
 // ─── MCP Auto-injection ──────────────────────────────────────────
 
 export interface McpServerConfig {
-  type: "stdio" | "http";
+  type?: "stdio" | "http";
   command?: string;
   args?: string[];
   url?: string;

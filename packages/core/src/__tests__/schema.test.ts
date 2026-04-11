@@ -5,6 +5,8 @@ import {
   edgeZ,
   skillZ,
   toolZ,
+  mcpServerConfigZ,
+  skillDefinitionZ,
   parseWorkflow,
   validateWorkflow,
   workflowJsonSchema,
@@ -126,6 +128,138 @@ describe("Zod schemas", () => {
       });
       expect(result.id).toBe("test");
       expect(result.tools).toHaveLength(1);
+    });
+  });
+
+  describe("mcpServerConfigZ", () => {
+    it("accepts stdio config", () => {
+      const result = mcpServerConfigZ.parse({ command: "npx", args: ["-y", "@company/tool-server"] });
+      expect(result.command).toBe("npx");
+    });
+    it("accepts http config", () => {
+      const result = mcpServerConfigZ.parse({
+        url: "https://mcp.example.com",
+        headers: { Authorization: "Bearer token" },
+      });
+      expect(result.url).toBe("https://mcp.example.com");
+    });
+    it("accepts explicit type", () => {
+      const result = mcpServerConfigZ.parse({ type: "stdio", command: "node", args: ["server.js"] });
+      expect(result.type).toBe("stdio");
+    });
+    it("accepts env field", () => {
+      const result = mcpServerConfigZ.parse({
+        command: "npx",
+        args: ["-y", "server"],
+        env: { API_KEY: "Company API key" },
+      });
+      expect(result.env).toEqual({ API_KEY: "Company API key" });
+    });
+    it("rejects config with neither command nor url", () => {
+      expect(() => mcpServerConfigZ.parse({ args: ["foo"] })).toThrow(
+        "MCP server must have either command (stdio) or url (HTTP)",
+      );
+    });
+  });
+
+  describe("skillDefinitionZ", () => {
+    it("accepts instruction-only skill", () => {
+      const result = skillDefinitionZ.parse({
+        name: "Code Standards",
+        instruction: "Follow our coding conventions...",
+      });
+      expect(result.instruction).toBe("Follow our coding conventions...");
+    });
+    it("accepts mcp-only skill", () => {
+      const result = skillDefinitionZ.parse({ mcp: { command: "npx", args: ["-y", "server"] } });
+      expect(result.mcp?.command).toBe("npx");
+    });
+    it("accepts both instruction and mcp", () => {
+      const result = skillDefinitionZ.parse({
+        instruction: "Use this server for...",
+        mcp: { url: "https://mcp.example.com" },
+      });
+      expect(result.instruction).toBeDefined();
+      expect(result.mcp).toBeDefined();
+    });
+    it("rejects skill with neither instruction nor mcp", () => {
+      expect(() => skillDefinitionZ.parse({ name: "Empty" })).toThrow(
+        "Inline skill must provide instruction, mcp, or both",
+      );
+    });
+  });
+
+  describe("skillZ with new fields", () => {
+    it("accepts skill with instruction and no tools", () => {
+      const result = skillZ.parse({
+        id: "code-standards",
+        name: "Code Standards",
+        description: "Team coding conventions",
+        category: "general",
+        instruction: "Follow camelCase naming...",
+      });
+      expect(result.tools).toEqual([]);
+      expect(result.instruction).toBe("Follow camelCase naming...");
+    });
+    it("accepts skill with mcp and no tools", () => {
+      const result = skillZ.parse({
+        id: "our-crm",
+        name: "Our CRM",
+        description: "CRM integration",
+        category: "general",
+        mcp: { url: "https://crm.example.com/mcp" },
+      });
+      expect(result.tools).toEqual([]);
+      expect(result.mcp?.url).toBe("https://crm.example.com/mcp");
+    });
+    it("rejects skill with no tools, no instruction, no mcp", () => {
+      expect(() => skillZ.parse({ id: "empty", name: "Empty", description: "Nothing", category: "general" })).toThrow(
+        "Skill must provide at least one of: tools, instruction, or mcp",
+      );
+    });
+    it("defaults tools to empty array", () => {
+      const result = skillZ.parse({
+        id: "x",
+        name: "X",
+        description: "X",
+        category: "general",
+        instruction: "do stuff",
+      });
+      expect(result.tools).toEqual([]);
+    });
+    it("defaults config to empty object", () => {
+      const result = skillZ.parse({
+        id: "x",
+        name: "X",
+        description: "X",
+        category: "general",
+        instruction: "do stuff",
+      });
+      expect(result.config).toEqual({});
+    });
+  });
+
+  describe("workflowZ with skills", () => {
+    it("parses workflow with inline skills", () => {
+      const result = workflowZ.parse({
+        id: "test",
+        name: "Test",
+        entry: "a",
+        nodes: { a: { name: "A", instruction: "Do A", skills: ["my-skill"] } },
+        edges: [],
+        skills: { "my-skill": { name: "My Skill", instruction: "Custom guidance here" } },
+      });
+      expect(result.skills?.["my-skill"]?.instruction).toBe("Custom guidance here");
+    });
+    it("defaults skills to empty object", () => {
+      const result = workflowZ.parse({
+        id: "x",
+        name: "X",
+        entry: "a",
+        nodes: { a: { name: "A", instruction: "Do A" } },
+        edges: [],
+      });
+      expect(result.skills).toEqual({});
     });
   });
 
@@ -300,6 +434,16 @@ describe("validateWorkflow", () => {
     };
     const errors = validateWorkflow(empty);
     expect(errors).toContainEqual(expect.objectContaining({ code: "MISSING_ENTRY" }));
+  });
+
+  it("recognizes inline workflow skills as known", () => {
+    const wf = {
+      ...validWorkflow,
+      nodes: { ...validWorkflow.nodes, a: { ...validWorkflow.nodes.a, skills: ["custom-rubric"] } },
+      skills: { "custom-rubric": { instruction: "Score things 1-5" } },
+    };
+    const errors = validateWorkflow(wf, new Set(["github"]));
+    expect(errors.filter((e) => e.code === "UNKNOWN_SKILL")).toEqual([]);
   });
 });
 

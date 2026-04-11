@@ -78,7 +78,17 @@ export type { SkillValidationResult } from "./skills/index.js";
 export { loadCustomSkills, configuredSkills } from "./skills/custom-loader.js";
 
 // Schema & validation
-export { workflowZ, nodeZ, edgeZ, skillZ, parseWorkflow, validateWorkflow, workflowJsonSchema } from "./schema.js";
+export {
+  workflowZ,
+  nodeZ,
+  edgeZ,
+  skillZ,
+  mcpServerConfigZ,
+  skillDefinitionZ,
+  parseWorkflow,
+  validateWorkflow,
+  workflowJsonSchema,
+} from "./schema.js";
 export type { WorkflowError } from "./schema.js";
 
 // MCP auto-injection

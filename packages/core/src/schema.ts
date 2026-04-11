@@ -8,6 +8,7 @@
  */
 
 import { z } from "zod";
+import type { Workflow } from "./types.js";
 
 // ─── Zod Schemas ─────────────────────────────────────────────────
 
@@ -32,14 +33,44 @@ export const toolZ = z.object({
 
 export const skillCategoryZ = z.enum(["git", "observability", "tasks", "notification", "general"]);
 
-export const skillZ = z.object({
-  id: z.string().min(1),
-  name: z.string(),
-  description: z.string(),
-  category: skillCategoryZ,
-  config: z.record(configFieldZ),
-  tools: z.array(toolZ),
-});
+export const mcpServerConfigZ = z
+  .object({
+    type: z.enum(["stdio", "http"]).optional(),
+    command: z.string().optional(),
+    args: z.array(z.string()).optional(),
+    url: z.string().optional(),
+    headers: z.record(z.string()).optional(),
+    env: z.record(z.string()).optional(),
+  })
+  .refine((c) => c.command || c.url, {
+    message: "MCP server must have either command (stdio) or url (HTTP)",
+  });
+
+export const skillDefinitionZ = z
+  .object({
+    name: z.string().optional(),
+    description: z.string().optional(),
+    instruction: z.string().optional(),
+    mcp: mcpServerConfigZ.optional(),
+  })
+  .refine((s) => s.instruction || s.mcp, {
+    message: "Inline skill must provide instruction, mcp, or both",
+  });
+
+export const skillZ = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    description: z.string(),
+    category: skillCategoryZ,
+    config: z.record(configFieldZ).default({}),
+    tools: z.array(toolZ).default([]),
+    instruction: z.string().optional(),
+    mcp: mcpServerConfigZ.optional(),
+  })
+  .refine((s) => s.tools.length > 0 || s.instruction || s.mcp, {
+    message: "Skill must provide at least one of: tools, instruction, or mcp",
+  });
 
 export const nodeZ = z.object({
   name: z.string().min(1),
@@ -62,6 +93,7 @@ export const workflowZ = z.object({
   nodes: z.record(nodeZ),
   edges: z.array(edgeZ),
   entry: z.string().min(1),
+  skills: z.record(skillDefinitionZ).default({}),
 });
 
 /** Parse + validate a raw object as a Workflow. Throws on invalid input. */
@@ -98,7 +130,10 @@ export interface WorkflowError {
  * Note: nodes with no outgoing edges are valid terminal nodes — the executor
  * returns null when it reaches one, ending the workflow cleanly.
  */
-export function validateWorkflow(workflow: z.infer<typeof workflowZ>, knownSkills?: Set<string>): WorkflowError[] {
+export function validateWorkflow(
+  workflow: Workflow | z.infer<typeof workflowZ>,
+  knownSkills?: Set<string>,
+): WorkflowError[] {
   const errors: WorkflowError[] = [];
   const nodeIds = new Set(Object.keys(workflow.nodes));
 
@@ -202,9 +237,16 @@ export function validateWorkflow(workflow: z.infer<typeof workflowZ>, knownSkill
 
   // Skill references
   if (knownSkills) {
+    // Merge workflow inline skills into known set
+    const allKnown = new Set(knownSkills);
+    if ((workflow as any).skills) {
+      for (const id of Object.keys((workflow as any).skills)) {
+        allKnown.add(id);
+      }
+    }
     for (const [nodeId, node] of Object.entries(workflow.nodes)) {
       for (const skillId of node.skills) {
-        if (!knownSkills.has(skillId)) {
+        if (!allKnown.has(skillId)) {
           errors.push({
             code: "UNKNOWN_SKILL",
             message: `Node "${nodeId}" references unknown skill "${skillId}"`,
@@ -272,6 +314,30 @@ export const workflowJsonSchema = {
             type: "integer",
             minimum: 1,
             description: "Max times this edge can be followed — enables controlled retry loops",
+          },
+        },
+      },
+    },
+    skills: {
+      type: "object",
+      description: "Inline skill definitions scoped to this workflow",
+      additionalProperties: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          instruction: { type: "string", description: "Natural language expertise injected into the node prompt" },
+          mcp: {
+            type: "object",
+            description: "External MCP server definition",
+            properties: {
+              type: { type: "string", enum: ["stdio", "http"] },
+              command: { type: "string" },
+              args: { type: "array", items: { type: "string" } },
+              url: { type: "string" },
+              headers: { type: "object", additionalProperties: { type: "string" } },
+              env: { type: "object", additionalProperties: { type: "string" } },
+            },
           },
         },
       },
