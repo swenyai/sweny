@@ -42,7 +42,17 @@ If the workflow input contains a `context` field (string), a conforming executor
 {context}
 ```
 
-When both are present, rules appear first, then context, then the node's base instruction, separated by `---`.
+### Skill Instruction Injection
+
+If any skill referenced by the node has an `instruction` field, a conforming executor MUST inject each skill's instruction into the prompt, in the order the skills appear in the node's `skills` array:
+
+```
+## Skill: {skill.name}
+
+{skill.instruction}
+```
+
+When rules, context, and skill instructions are all present, the assembly order is: rules first, then context, then skill instructions, then the node's base instruction, separated by `---`.
 
 ## Skills Semantics
 

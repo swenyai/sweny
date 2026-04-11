@@ -29,13 +29,15 @@ Context is **append-only**: each completed node adds its result to the context. 
 
 For each node, a conforming executor MUST perform the following steps in order:
 
-1. **Resolve tools** from the node's `skills` list (see [Skills](/skills)).
-2. **Build context** — the accumulated context object (input + all prior node results).
-3. **Build instruction** — the node's base instruction, optionally augmented with input `rules` and `context` fields (see [Nodes — Input Augmentation](/nodes#input-augmentation)).
-4. **Invoke the AI model** with: instruction, context, tools, and output schema (if present).
-5. **Capture the result** as a `NodeResult`.
-6. **Emit execution events** (see [Execution Events](#execution-events) below).
-7. **Resolve the next node** via [edge routing](/edges#routing-algorithm).
+1. **Resolve skills** from the node's `skills` list (see [Skills](/skills)).
+2. **Collect tools** from resolved skills that have `tools`.
+3. **Collect MCP servers** from resolved skills that have `mcp`. Wire them for this node's execution session only (node-scoped, not global).
+4. **Build context** — the accumulated context object (input + all prior node results).
+5. **Build instruction** — the node's base instruction, augmented with input `rules` and `context` fields (see [Nodes — Input Augmentation](/nodes#input-augmentation)), then **skill instructions** from resolved skills that have `instruction`.
+6. **Invoke the AI model** with: instruction, context, tools (from step 2 + MCP tools from step 3), and output schema (if present).
+7. **Capture the result** as a `NodeResult`.
+8. **Emit execution events** (see [Execution Events](#execution-events) below).
+9. **Resolve the next node** via [edge routing](/edges#routing-algorithm).
 
 ## NodeResult
 
