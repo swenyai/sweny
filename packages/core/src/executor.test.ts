@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { tmpdir } from "node:os";
 
 import { execute } from "./executor.js";
-import type { Workflow, ExecutionEvent } from "./types.js";
+import type { Workflow, ExecutionEvent, Skill, Claude } from "./types.js";
 import { MockClaude, createFileSkill } from "./testing.js";
 import { createSkillMap } from "./skills/index.js";
 import { validateWorkflow, parseWorkflow } from "./schema.js";
@@ -384,5 +384,178 @@ describe("file skill", () => {
     await write.handler({ path: "deep/nested/file.json", data: { ok: true } }, ctx);
 
     expect(existsSync(path.join(outputDir, "deep/nested/file.json"))).toBe(true);
+  });
+});
+
+// ─── Skill instruction injection tests ──────────────────────────
+
+describe("skill instruction injection", () => {
+  let outputDir: string;
+
+  beforeEach(() => {
+    outputDir = freshDir("skill-inject");
+  });
+
+  it("injects skill instructions into the prompt", async () => {
+    const instructionSkill: Skill = {
+      id: "code-standards",
+      name: "Code Standards",
+      description: "Team conventions",
+      category: "general",
+      config: {},
+      tools: [],
+      instruction: "Always use camelCase for variable names.",
+    };
+
+    const workflow: Workflow = {
+      id: "test-inject",
+      name: "Inject Test",
+      description: "",
+      entry: "step",
+      nodes: {
+        step: {
+          name: "Do Work",
+          instruction: "Write some code.",
+          skills: ["code-standards"],
+        },
+      },
+      edges: [],
+    };
+
+    let capturedInstruction = "";
+    const claude: Claude = {
+      async run(opts) {
+        capturedInstruction = opts.instruction;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate() {
+        return "";
+      },
+    };
+
+    await execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([instructionSkill]),
+        claude,
+        config: {},
+      },
+    );
+
+    expect(capturedInstruction).toContain("## Skill: Code Standards");
+    expect(capturedInstruction).toContain("Always use camelCase for variable names.");
+    expect(capturedInstruction).toContain("Write some code.");
+  });
+
+  it("injects multiple skill instructions in array order", async () => {
+    const skillA: Skill = {
+      id: "skill-a",
+      name: "Skill A",
+      description: "First",
+      category: "general",
+      config: {},
+      tools: [],
+      instruction: "AAA instruction",
+    };
+    const skillB: Skill = {
+      id: "skill-b",
+      name: "Skill B",
+      description: "Second",
+      category: "general",
+      config: {},
+      tools: [],
+      instruction: "BBB instruction",
+    };
+
+    const workflow: Workflow = {
+      id: "test-multi",
+      name: "Multi Inject",
+      description: "",
+      entry: "step",
+      nodes: {
+        step: {
+          name: "Work",
+          instruction: "Do the work.",
+          skills: ["skill-a", "skill-b"],
+        },
+      },
+      edges: [],
+    };
+
+    let capturedInstruction = "";
+    const claude: Claude = {
+      async run(opts) {
+        capturedInstruction = opts.instruction;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate() {
+        return "";
+      },
+    };
+
+    await execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([skillA, skillB]),
+        claude,
+        config: {},
+      },
+    );
+
+    const posA = capturedInstruction.indexOf("AAA instruction");
+    const posB = capturedInstruction.indexOf("BBB instruction");
+    const posBase = capturedInstruction.indexOf("Do the work.");
+    expect(posA).toBeLessThan(posB);
+    expect(posB).toBeLessThan(posBase);
+  });
+
+  it("allows instruction-only nodes (no tools, no error)", async () => {
+    const instructionSkill: Skill = {
+      id: "rubric",
+      name: "Evaluation Rubric",
+      description: "Scoring criteria",
+      category: "general",
+      config: {},
+      tools: [],
+      instruction: "Score quality 1-5.",
+    };
+
+    const workflow: Workflow = {
+      id: "test-notools",
+      name: "No Tools",
+      description: "",
+      entry: "judge",
+      nodes: {
+        judge: {
+          name: "Judge",
+          instruction: "Evaluate the output.",
+          skills: ["rubric"],
+        },
+      },
+      edges: [],
+    };
+
+    const claude: Claude = {
+      async run() {
+        return { status: "success", data: { score: 4 }, toolCalls: [] };
+      },
+      async evaluate() {
+        return "";
+      },
+    };
+
+    // Should NOT throw "none are configured"
+    const { results } = await execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([instructionSkill]),
+        claude,
+        config: {},
+      },
+    );
+    expect(results.get("judge")?.status).toBe("success");
   });
 });

@@ -76,12 +76,14 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
 
     // Gather tools from the node's skills
     const tools = resolveTools(node.skills, skills);
+    const skillInstructions = resolveSkillInstructions(node.skills, skills);
 
     // Runtime guard: if this node declares skills but none resolved, the node
     // cannot do its job (e.g. "create a Linear issue" with no linear skill).
     // The startup validate() warns about this possibility, but only throw when
     // the node is actually reached — unreachable nodes with missing skills are fine.
-    if (node.skills.length > 0 && tools.length === 0) {
+    // Instruction-only skills (no tools) are valid — they inject context into the prompt.
+    if (node.skills.length > 0 && tools.length === 0 && skillInstructions.length === 0) {
       throw new Error(
         `Node "${currentId}" requires skills [${node.skills.join(", ")}] but none are configured. ` +
           `Set the required environment variables and try again.`,
@@ -107,7 +109,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     }));
 
     // Prepend rules and context to instruction if provided
-    const instruction = buildNodeInstruction(node.instruction, input);
+    const instruction = buildNodeInstruction(node.instruction, input, skillInstructions);
 
     // Run Claude on this node
     const result = await claude.run({
@@ -170,33 +172,43 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
  * Rules get "You MUST follow" framing; context gets "Background" framing.
  * Falls back to legacy `additionalContext` if rules/context aren't set.
  */
-function buildNodeInstruction(baseInstruction: string, input: unknown): string {
+function buildNodeInstruction(
+  baseInstruction: string,
+  input: unknown,
+  skillInstructions?: { name: string; instruction: string }[],
+): string {
   const inp = input as Record<string, unknown> | null;
-  if (!inp) return baseInstruction;
-
   const sections: string[] = [];
 
-  // New structured format
-  const rules = typeof inp.rules === "string" && inp.rules ? inp.rules : "";
-  const context = typeof inp.context === "string" && inp.context ? inp.context : "";
+  if (inp) {
+    const rules = typeof inp.rules === "string" && inp.rules ? inp.rules : "";
+    const context = typeof inp.context === "string" && inp.context ? inp.context : "";
 
-  if (rules) {
-    sections.push(`## Rules — You MUST Follow These\n\n${rules}`);
-  }
-  if (context) {
-    sections.push(`## Background Context\n\n${context}`);
+    if (rules) {
+      sections.push(`## Rules — You MUST Follow These\n\n${rules}`);
+    }
+    if (context) {
+      sections.push(`## Background Context\n\n${context}`);
+    }
+
+    // Legacy fallback
+    if (sections.length === 0) {
+      const legacy = typeof inp.additionalContext === "string" ? inp.additionalContext : "";
+      if (legacy) {
+        sections.push(`## Additional Context & Rules\n\n${legacy}`);
+      }
+    }
   }
 
-  // Legacy fallback
-  if (sections.length === 0) {
-    const legacy = typeof inp.additionalContext === "string" ? inp.additionalContext : "";
-    if (legacy) {
-      sections.push(`## Additional Context & Rules\n\n${legacy}`);
+  // Skill instructions — injected between context and base instruction
+  if (skillInstructions && skillInstructions.length > 0) {
+    for (const { name, instruction } of skillInstructions) {
+      sections.push(`## Skill: ${name}\n\n${instruction}`);
     }
   }
 
   if (sections.length === 0) return baseInstruction;
-  return `${sections.join("\n\n")}\n\n---\n\n${baseInstruction}`;
+  return `${sections.join("\n\n---\n\n")}\n\n---\n\n${baseInstruction}`;
 }
 
 /**
@@ -219,6 +231,17 @@ function resolveTools(skillIds: string[], skills: Map<string, Skill>): Tool[] {
     .map((id) => skills.get(id))
     .filter((s): s is Skill => s != null)
     .flatMap((s) => s.tools);
+}
+
+/** Collect instruction strings from skills that have them, in array order. */
+function resolveSkillInstructions(
+  skillIds: string[],
+  skills: Map<string, Skill>,
+): { name: string; instruction: string }[] {
+  return skillIds
+    .map((id) => skills.get(id))
+    .filter((s): s is Skill => s != null && s.instruction != null)
+    .map((s) => ({ name: s.name, instruction: s.instruction! }));
 }
 
 /**
