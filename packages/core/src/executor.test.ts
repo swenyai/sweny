@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { rmSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
 
@@ -15,8 +16,9 @@ import { triageWorkflow, implementWorkflow } from "./workflows/index.js";
 
 const tmpBase = path.join(tmpdir(), "sweny-core-test");
 
+let dirCounter = 0;
 function freshDir(name: string): string {
-  const dir = path.join(tmpBase, `${name}-${Date.now()}`);
+  const dir = path.join(tmpBase, `${name}-${Date.now()}-${++dirCounter}-${randomBytes(4).toString("hex")}`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   return dir;
