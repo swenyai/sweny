@@ -7,6 +7,7 @@ node_modules/
 .github/triage-analysis/
 .DS_Store
 .claude/worktrees/
+.worktrees/
 .claude/settings.local.json
 .claude/projects/
 .superpowers/
