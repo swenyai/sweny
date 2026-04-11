@@ -75,7 +75,7 @@ export {
 export type { SkillValidationResult } from "./skills/index.js";
 
 // Node-only skill discovery (filesystem-based)
-export { loadCustomSkills, configuredSkills } from "./skills/custom-loader.js";
+export { loadCustomSkills, discoverSkills, configuredSkills } from "./skills/custom-loader.js";
 
 // Schema & validation
 export {

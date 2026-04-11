@@ -10,7 +10,7 @@ import { sentry } from "../skills/sentry.js";
 import { datadog } from "../skills/datadog.js";
 import { notification } from "../skills/notification.js";
 import { createSkillMap } from "../skills/index.js";
-import { loadCustomSkills, configuredSkills } from "../skills/custom-loader.js";
+import { loadCustomSkills, discoverSkills, configuredSkills } from "../skills/custom-loader.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -510,13 +510,18 @@ describe("configuredSkills with custom skills", () => {
     expect(ids).toContain("slack");
   });
 
-  it("built-in skills take precedence over custom skills with same ID", () => {
-    writeSkill("notification", `---\nname: notification\ndescription: Custom override attempt\n---\nBody`);
+  it("custom skills override built-in ID but merge tools", () => {
+    writeSkill(
+      "notification",
+      `---\nname: notification\ndescription: Custom override\n---\nCustom notification guidance.`,
+    );
     const skills = configuredSkills({}, tmpDir);
     const notif = skills.filter((s) => s.id === "notification");
     expect(notif).toHaveLength(1);
-    // Should be the built-in (has tools), not the custom one (tools: [])
+    // Built-in tools are preserved
     expect(notif[0].tools.length).toBeGreaterThan(0);
+    // Custom instruction is added
+    expect(notif[0].instruction).toBe("Custom notification guidance.");
   });
 
   it("custom skills are usable in createSkillMap", () => {
@@ -525,5 +530,140 @@ describe("configuredSkills with custom skills", () => {
     const map = createSkillMap(skills);
     expect(map.has("extract-colors")).toBe(true);
     expect(map.get("extract-colors")!.tools).toEqual([]);
+  });
+});
+
+// ─── Multi-directory discovery tests ─────────────────────────────
+
+describe("discoverSkills (multi-directory)", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "sweny-discover-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function writeSkillAt(base: string, dirName: string, content: string) {
+    const dir = join(tmpDir, base, "skills", dirName);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), content);
+  }
+
+  it("discovers skills from .sweny/skills/", () => {
+    writeSkillAt(".sweny", "my-skill", `---\nname: my-skill\ndescription: A skill\n---\nDo things well.`);
+    const skills = discoverSkills(tmpDir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0].id).toBe("my-skill");
+  });
+
+  it("discovers skills from .claude/skills/", () => {
+    writeSkillAt(".claude", "claude-skill", `---\nname: claude-skill\ndescription: Claude\n---\nInstructions.`);
+    const skills = discoverSkills(tmpDir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0].id).toBe("claude-skill");
+  });
+
+  it("discovers skills from .agents/skills/", () => {
+    writeSkillAt(".agents", "agent-skill", `---\nname: agent-skill\ndescription: Agent\n---\nBody.`);
+    const skills = discoverSkills(tmpDir);
+    expect(skills).toHaveLength(1);
+  });
+
+  it("discovers skills from .gemini/skills/", () => {
+    writeSkillAt(".gemini", "gemini-skill", `---\nname: gemini-skill\ndescription: Gemini\n---\nBody.`);
+    const skills = discoverSkills(tmpDir);
+    expect(skills).toHaveLength(1);
+  });
+
+  it("higher-priority directory wins on ID collision", () => {
+    writeSkillAt(".sweny", "shared", `---\nname: shared\ndescription: From sweny\n---\nSweny instructions.`);
+    writeSkillAt(".claude", "shared", `---\nname: shared\ndescription: From claude\n---\nClaude instructions.`);
+    const skills = discoverSkills(tmpDir);
+    const shared = skills.find((s) => s.id === "shared")!;
+    expect(shared.description).toBe("From sweny");
+    expect(shared.instruction).toBe("Sweny instructions.");
+  });
+
+  it("captures markdown body as instruction", () => {
+    writeSkillAt(
+      ".sweny",
+      "code-standards",
+      `---
+name: code-standards
+description: Coding conventions
+---
+
+When writing TypeScript:
+- Use camelCase for variables
+- Use PascalCase for types`,
+    );
+    const skills = discoverSkills(tmpDir);
+    expect(skills[0].instruction).toContain("Use camelCase for variables");
+    expect(skills[0].instruction).toContain("Use PascalCase for types");
+  });
+
+  it("parses mcp from frontmatter", () => {
+    writeSkillAt(
+      ".sweny",
+      "our-crm",
+      `---
+name: our-crm
+description: CRM integration
+mcp:
+  command: npx
+  args:
+    - -y
+    - "@company/crm-server"
+  env:
+    API_KEY: CRM API key
+---
+
+Use the CRM tools to look up customer data.`,
+    );
+    const skills = discoverSkills(tmpDir);
+    expect(skills[0].mcp).toEqual({
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@company/crm-server"],
+      env: { API_KEY: "CRM API key" },
+    });
+    expect(skills[0].instruction).toContain("Use the CRM tools");
+  });
+
+  it("parses mcp with url (HTTP transport)", () => {
+    writeSkillAt(
+      ".sweny",
+      "http-tool",
+      `---
+name: http-tool
+description: HTTP MCP
+mcp:
+  url: https://mcp.example.com
+  headers:
+    Authorization: Bearer token
+---
+
+Instructions.`,
+    );
+    const skills = discoverSkills(tmpDir);
+    expect(skills[0].mcp?.url).toBe("https://mcp.example.com");
+  });
+
+  it("returns empty array when no skill directories exist", () => {
+    const skills = discoverSkills(tmpDir);
+    expect(skills).toEqual([]);
+  });
+
+  it("merges skills from all directories", () => {
+    writeSkillAt(".sweny", "skill-a", `---\nname: skill-a\ndescription: A\n---\nA.`);
+    writeSkillAt(".claude", "skill-b", `---\nname: skill-b\ndescription: B\n---\nB.`);
+    writeSkillAt(".agents", "skill-c", `---\nname: skill-c\ndescription: C\n---\nC.`);
+    const skills = discoverSkills(tmpDir);
+    expect(skills).toHaveLength(3);
+    const ids = skills.map((s) => s.id).sort();
+    expect(ids).toEqual(["skill-a", "skill-b", "skill-c"]);
   });
 });
