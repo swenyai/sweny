@@ -5,10 +5,15 @@
  *   1. Local file path (relative to repo root)
  *   2. URL (fetched at runtime)
  *   3. Built-in defaults
+ *
+ * Delegates to sources.ts for actual resolution; this module provides
+ * backwards-compatible wrappers with fallback semantics.
  */
 
-import * as fs from "node:fs";
 import * as path from "node:path";
+
+import { resolveSource, classifySource, type SourceResolutionContext } from "./sources.js";
+import { consoleLogger } from "./types.js";
 
 export const DEFAULT_ISSUE_TEMPLATE = `## Summary
 <!-- One-line description of the issue -->
@@ -54,6 +59,17 @@ export interface Templates {
   prTemplate: string;
 }
 
+/** Default resolution context used by template helpers. */
+function defaultCtx(cwd: string): SourceResolutionContext {
+  return {
+    cwd,
+    env: process.env,
+    authConfig: {},
+    offline: false,
+    logger: consoleLogger,
+  };
+}
+
 /**
  * Load a template from a file path or URL.
  * Returns the default if source is empty or loading fails.
@@ -65,29 +81,11 @@ export async function loadTemplate(
 ): Promise<string> {
   if (!source || source.trim() === "") return fallback;
 
-  const trimmed = source.trim();
-
-  // URL
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    try {
-      const res = await fetch(trimmed, { signal: AbortSignal.timeout(10_000) });
-      if (!res.ok) {
-        console.warn(`[templates] Failed to fetch ${trimmed} (HTTP ${res.status}), using default`);
-        return fallback;
-      }
-      return await res.text();
-    } catch (err: any) {
-      console.warn(`[templates] Failed to fetch ${trimmed}: ${err.message}, using default`);
-      return fallback;
-    }
-  }
-
-  // Local file
-  const resolved = path.resolve(cwd, trimmed);
   try {
-    return fs.readFileSync(resolved, "utf-8");
-  } catch {
-    console.warn(`[templates] Template file not found: ${resolved}, using default`);
+    const resolved = await resolveSource(source.trim(), "template", defaultCtx(cwd));
+    return resolved.content;
+  } catch (err: any) {
+    console.warn(`[templates] Failed to load template: ${err.message}, using default`);
     return fallback;
   }
 }
@@ -107,15 +105,6 @@ export async function resolveTemplates(
 }
 
 /**
- * Classify a source entry as URL, file path, or inline text.
- */
-function classifySource(source: string): "url" | "file" | "inline" {
-  if (source.startsWith("http://") || source.startsWith("https://")) return "url";
-  if (source.startsWith("./") || source.startsWith("../") || source.startsWith("/")) return "file";
-  return "inline";
-}
-
-/**
  * Load additional context documents (local files, URLs, or inline text).
  * Each source is loaded and wrapped with a header.
  * Returns { resolved, urls } — resolved text for files/inline, urls for agent to fetch.
@@ -128,6 +117,7 @@ export async function loadAdditionalContext(
 
   const parts: string[] = [];
   const urls: string[] = [];
+  const ctx = defaultCtx(cwd);
 
   for (const source of sources) {
     const trimmed = source.trim();
@@ -135,11 +125,16 @@ export async function loadAdditionalContext(
 
     const kind = classifySource(trimmed);
     if (kind === "url") {
+      // URLs are collected for backwards compat — the prepare node / executor resolves them
       urls.push(trimmed);
     } else if (kind === "file") {
-      const content = await loadTemplate(trimmed, "", cwd);
-      if (content) {
-        parts.push(`### ${path.basename(trimmed)}\n\n${content}`);
+      try {
+        const resolved = await resolveSource(trimmed, "context", ctx);
+        if (resolved.content) {
+          parts.push(`### ${path.basename(trimmed)}\n\n${resolved.content}`);
+        }
+      } catch (err: any) {
+        console.warn(`[templates] Failed to load context file: ${err.message}`);
       }
     } else {
       // Inline text — use as-is
