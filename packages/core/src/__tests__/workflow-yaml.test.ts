@@ -139,12 +139,12 @@ describe("loaded workflow objects", () => {
 // ─── Triage workflow specifics ──────────────────────────────────
 
 describe("triage workflow specifics", () => {
-  it("has 8 nodes", () => {
-    expect(Object.keys(triageWorkflow.nodes).length).toBe(8);
+  it("has 7 nodes", () => {
+    expect(Object.keys(triageWorkflow.nodes).length).toBe(7);
   });
 
-  it("starts at prepare", () => {
-    expect(triageWorkflow.entry).toBe("prepare");
+  it("starts at gather", () => {
+    expect(triageWorkflow.entry).toBe("gather");
   });
 
   it("has conditional edges from investigate", () => {
