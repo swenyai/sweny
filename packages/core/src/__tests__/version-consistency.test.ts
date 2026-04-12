@@ -10,7 +10,7 @@ import { execSync } from "node:child_process";
  * These tests validate that:
  * 1. No stale v4 action references remain in source or docs
  * 2. The README uses dark-mode-safe logo rendering
- * 3. The CLI init wizard generates the correct action version
+ * 3. The CLI new wizard generates the correct action version
  * 4. Docs code blocks don't mix the generic action with triage-only inputs
  */
 
@@ -82,10 +82,10 @@ describe("action version consistency", () => {
     expect(claude).toMatch(new RegExp(`@sweny-ai/core.*${CURRENT_ACTION_VERSION}`));
   });
 
-  it("CLI init generates workflows with the current action version", () => {
-    const initSrc = readFileSync(resolve(ROOT, "packages/core/src/cli/init.ts"), "utf-8");
-    expect(initSrc).toContain(`swenyai/sweny@${CURRENT_ACTION_VERSION}`);
-    expect(initSrc).not.toContain(`swenyai/sweny@${PREV_VERSION}`);
+  it("CLI new wizard generates workflows with the current action version", () => {
+    const newSrc = readFileSync(resolve(ROOT, "packages/core/src/cli/new.ts"), "utf-8");
+    expect(newSrc).toContain(`swenyai/sweny@${CURRENT_ACTION_VERSION}`);
+    expect(newSrc).not.toContain(`swenyai/sweny@${PREV_VERSION}`);
   });
 });
 

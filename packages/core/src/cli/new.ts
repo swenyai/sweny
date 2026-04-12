@@ -1,5 +1,5 @@
 /**
- * sweny init — Interactive setup wizard
+ * sweny new — Interactive workflow creation wizard
  *
  * Workflow-first: pick a template or describe what you want, then SWEny
  * infers which skills are needed and only asks for those credentials.
@@ -387,15 +387,15 @@ function cancel(): never {
 }
 
 /**
- * Interactive setup wizard — workflow-first approach.
+ * Interactive workflow creation wizard — workflow-first approach.
  *
  * 1. Detect git remote (infer source control)
- * 2. Pick a workflow template
+ * 2. Pick a workflow template (or describe your own, or e2e)
  * 3. Infer providers from workflow skills
  * 4. Collect only the credentials those skills need
- * 5. Generate files
+ * 5. Generate files (non-destructive if .sweny.yml already exists)
  */
-export async function runInit(): Promise<void> {
+export async function runNew(): Promise<void> {
   const cwd = process.cwd();
 
   // ── Intro ───────────────────────────────────────────────────────────
@@ -553,3 +553,9 @@ export async function runInit(): Promise<void> {
 
   p.outro("You're all set!");
 }
+
+/**
+ * @deprecated Use `runNew` instead. Kept as a named re-export so external
+ * callers (e.g. create-sweny, plugin skills) don't break during the migration.
+ */
+export const runInit = runNew;
