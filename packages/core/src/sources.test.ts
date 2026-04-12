@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+
+import { describe, it, expect, beforeEach } from "vitest";
 import { classifySource, sourceZ, hashContent, resolveSource } from "./sources.js";
+
+const fileTmp = path.join(tmpdir(), "sweny-sources-file-test");
 
 const baseCtx = () => ({
   cwd: "/tmp",
@@ -104,5 +110,50 @@ describe("resolveSource (inline)", () => {
     expect(resolved.content).toBe("Tagged body");
     expect(resolved.kind).toBe("inline");
     expect(resolved.resolver).toBe("inline");
+  });
+});
+
+describe("resolveSource (file)", () => {
+  beforeEach(() => {
+    rmSync(fileTmp, { recursive: true, force: true });
+    mkdirSync(fileTmp, { recursive: true });
+  });
+
+  it("reads a file by relative path (cwd-based)", async () => {
+    writeFileSync(path.join(fileTmp, "rules.md"), "# Rules\n\nBe kind.");
+    const resolved = await resolveSource("./rules.md", "rules[0]", {
+      ...baseCtx(),
+      cwd: fileTmp,
+    });
+    expect(resolved.content).toBe("# Rules\n\nBe kind.");
+    expect(resolved.kind).toBe("file");
+    expect(resolved.resolver).toBe("file");
+    expect(resolved.sourcePath).toBe(path.resolve(fileTmp, "rules.md"));
+  });
+
+  it("reads a file via tagged {file} form", async () => {
+    writeFileSync(path.join(fileTmp, "a.txt"), "alpha");
+    const resolved = await resolveSource({ file: "./a.txt" }, "x", {
+      ...baseCtx(),
+      cwd: fileTmp,
+    });
+    expect(resolved.content).toBe("alpha");
+    expect(resolved.origin).toEqual({ file: "./a.txt" });
+  });
+
+  it("reads an absolute path", async () => {
+    const abs = path.join(fileTmp, "abs.md");
+    writeFileSync(abs, "absolute body");
+    const resolved = await resolveSource(abs, "x", baseCtx());
+    expect(resolved.content).toBe("absolute body");
+  });
+
+  it("throws SOURCE_FILE_NOT_FOUND with field path on missing file", async () => {
+    await expect(
+      resolveSource("./missing.md", "nodes.investigate.instruction", {
+        ...baseCtx(),
+        cwd: fileTmp,
+      }),
+    ).rejects.toThrow(/SOURCE_FILE_NOT_FOUND.*nodes\.investigate\.instruction/);
   });
 });

@@ -7,6 +7,8 @@
  */
 
 import { createHash } from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
 import { z } from "zod";
 
@@ -88,6 +90,28 @@ export async function resolveSource(
       origin: source,
       resolver: "inline",
       hash: hashContent(value),
+    };
+  }
+
+  if (kind === "file") {
+    const absolute = path.isAbsolute(value) ? value : path.resolve(ctx.cwd, value);
+    let content: string;
+    try {
+      content = await fs.readFile(absolute, "utf-8");
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === "ENOENT") {
+        throw new Error(`SOURCE_FILE_NOT_FOUND: file not found: ${absolute} (referenced by ${fieldPath})`);
+      }
+      throw new Error(`SOURCE_FILE_READ_FAILED: could not read ${absolute} (referenced by ${fieldPath}): ${e.message}`);
+    }
+    return {
+      content,
+      kind: "file",
+      origin: source,
+      resolver: "file",
+      hash: hashContent(content),
+      sourcePath: absolute,
     };
   }
 
