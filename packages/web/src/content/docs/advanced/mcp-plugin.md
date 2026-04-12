@@ -94,7 +94,7 @@ Add to your `claude_desktop_config.json`:
 
 ### Prerequisites
 
-- A `.sweny.yml` config file in the working directory (run `sweny init` to create one)
+- A `.sweny.yml` config file in the working directory (run `sweny new` to create one)
 - Credentials for your configured providers set via environment variables or `.env`
 - `@sweny-ai/core` installed (provides the `sweny` CLI binary)
 

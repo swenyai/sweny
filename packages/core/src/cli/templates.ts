@@ -1,5 +1,5 @@
 /**
- * Starter workflow templates offered during `sweny init`.
+ * Starter workflow templates offered during `sweny new`.
  *
  * Each template is a valid SWEny workflow YAML. Templates are self-contained
  * strings — no filesystem reads needed, works from npm install.

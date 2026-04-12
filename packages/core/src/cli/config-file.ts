@@ -95,7 +95,7 @@ function findConfigFile(startDir: string): string | null {
   }
 }
 
-/** Starter config written by `sweny init`. */
+/** Starter config written by `sweny new`. */
 export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # Commit this file. Secrets (API keys, tokens) go in .env (gitignored).
 #

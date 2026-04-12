@@ -2,7 +2,7 @@
   "name": "create-sweny",
   "version": "0.1.51",
   "type": "module",
-  "description": "Create a new SWEny project — thin wrapper around @sweny-ai/core init",
+  "description": "Create a new SWEny project — thin wrapper around @sweny-ai/core new",
   "license": "MIT",
   "bin": {
     "create-sweny": "./dist/index.js"

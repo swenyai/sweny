@@ -30,10 +30,12 @@ sweny workflow run .sweny/workflows/pr-review.yml
 Or if you already have `@sweny-ai/core` installed:
 
 ```bash
-sweny init
+sweny new
 ```
 
-Build a workflow from scratch:
+Already have a `.sweny.yml`? `sweny new` adds additional workflows non-destructively.
+
+Build a workflow from scratch — pick "Describe your own" in the `sweny new` picker, or:
 
 ```bash
 sweny workflow create "review PRs for security issues and code quality"
@@ -153,7 +155,7 @@ sweny publish   # interactive CLI — publish a workflow or skill
 | Package | Description |
 |---------|-------------|
 | [`@sweny-ai/core`](packages/core) | Skills, DAG executor, CLI, workflows |
-| [`create-sweny`](packages/create-sweny) | `npx create-sweny` — thin wrapper around `sweny init` |
+| [`create-sweny`](packages/create-sweny) | `npx create-sweny` — thin wrapper around `sweny new` |
 | [`@sweny-ai/studio`](packages/studio) | Visual DAG editor and execution monitor |
 | [`@sweny-ai/mcp`](packages/mcp) | MCP server for Claude Code / Desktop |
 

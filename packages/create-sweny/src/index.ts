@@ -1,4 +1,4 @@
 #!/usr/bin/env node
-import { runInit } from "@sweny-ai/core/init";
+import { runNew } from "@sweny-ai/core/new";
 
-runInit();
+runNew();
