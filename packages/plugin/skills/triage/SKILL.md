@@ -1,5 +1,4 @@
 ---
-name: triage
 description: Run SWEny triage to investigate production alerts, create issues, and optionally implement fixes. Use when the user wants to analyze recent errors or alerts.
 disable-model-invocation: true
 allowed-tools: Bash

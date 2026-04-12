@@ -1,5 +1,4 @@
 ---
-name: workflow-run
 description: Run a SWEny workflow from a YAML file. For custom or built-in workflows.
 disable-model-invocation: true
 allowed-tools: Bash

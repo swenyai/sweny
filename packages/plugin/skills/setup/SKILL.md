@@ -1,5 +1,4 @@
 ---
-name: setup
 description: Create standard SWEny label set in your issue tracker (Linear or GitHub). Run after init to prepare your tracker for triage.
 disable-model-invocation: true
 allowed-tools: Bash

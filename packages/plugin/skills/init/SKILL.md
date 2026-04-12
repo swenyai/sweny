@@ -1,5 +1,4 @@
 ---
-name: init
 description: Set up SWEny in the current project. Interactive wizard that creates .sweny.yml config and .env template.
 disable-model-invocation: true
 ---

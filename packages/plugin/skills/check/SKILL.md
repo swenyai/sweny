@@ -1,5 +1,4 @@
 ---
-name: check
 description: Verify SWEny provider credentials and connectivity. Run to diagnose configuration issues before running workflows.
 allowed-tools: Bash
 ---

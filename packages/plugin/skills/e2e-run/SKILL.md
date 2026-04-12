@@ -1,5 +1,4 @@
 ---
-name: e2e-run
 description: Run SWEny E2E browser test workflows from .sweny/e2e/. Use when the user wants to execute end-to-end tests.
 disable-model-invocation: true
 allowed-tools: Bash

@@ -1,5 +1,4 @@
 ---
-name: implement
 description: Pick up an issue and implement a fix with SWEny. Use when the user has an issue ID or URL they want resolved.
 disable-model-invocation: true
 allowed-tools: Bash

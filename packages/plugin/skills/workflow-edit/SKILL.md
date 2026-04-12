@@ -1,5 +1,4 @@
 ---
-name: workflow-edit
 description: Edit an existing SWEny workflow using natural language instructions.
 allowed-tools: Bash
 argument-hint: "<file> [instruction]"

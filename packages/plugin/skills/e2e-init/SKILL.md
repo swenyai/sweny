@@ -1,5 +1,4 @@
 ---
-name: e2e-init
 description: Generate agent-driven browser E2E test workflows interactively. Creates test files in .sweny/e2e/.
 disable-model-invocation: true
 ---
