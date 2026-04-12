@@ -102,7 +102,9 @@ program
   .command("init", { hidden: true })
   .description("[DEPRECATED] Use `sweny new` instead")
   .action(async () => {
-    console.warn("\x1B[33m  ⚠  `sweny init` is deprecated. Use `sweny new` instead.\x1B[0m\n");
+    console.warn(
+      "\x1B[33m  ⚠  `sweny init` is deprecated and will be removed in v6. Use `sweny new` instead.\x1B[0m\n",
+    );
     await runNew();
   });
 
@@ -113,7 +115,9 @@ e2eCmd
   .command("init")
   .description("[DEPRECATED] Use `sweny new` and pick 'End-to-end browser testing'")
   .action(async () => {
-    console.warn("\x1B[33m  ⚠  `sweny e2e init` is deprecated. Use `sweny new` instead.\x1B[0m\n");
+    console.warn(
+      "\x1B[33m  ⚠  `sweny e2e init` is deprecated and will be removed in v6. Use `sweny new` and pick 'End-to-end browser testing'.\x1B[0m\n",
+    );
     await runE2eInit();
   });
 
@@ -929,7 +933,9 @@ workflowCmd
   .option("--json", "Output workflow JSON to stdout (no interactive prompt)")
   .action(async (description: string, options: { json?: boolean }) => {
     if (!options.json) {
-      console.warn("\x1B[33m  ⚠  `sweny workflow create` is deprecated. Use `sweny new` instead.\x1B[0m\n");
+      console.warn(
+        "\x1B[33m  ⚠  `sweny workflow create` is deprecated and will be removed in v6. Use `sweny new` and pick 'Describe your own'.\x1B[0m\n",
+      );
     }
     const skills = configuredSkills();
     const claude = new ClaudeClient({

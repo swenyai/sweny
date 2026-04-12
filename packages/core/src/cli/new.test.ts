@@ -11,6 +11,8 @@ import {
   buildSwenyYml,
   buildEnvTemplate,
   buildActionWorkflow,
+  runInit,
+  runNew,
   PROVIDER_CREDENTIALS,
   SKILL_CREDENTIALS,
 } from "./new.js";
@@ -772,6 +774,106 @@ describe("collectCredentialsForSkills", () => {
   it("ANTHROPIC_API_KEY is always first", () => {
     const creds = collectCredentialsForSkills(["datadog", "github"]);
     expect(creds[0].key).toBe("ANTHROPIC_API_KEY");
+  });
+});
+
+// ── extractSkillsFromYaml: block-style arrays + malformed input ───────
+//
+// Regression: an earlier regex-based implementation only matched inline
+// arrays (`skills: [a, b]`). `yaml.stringify()` emits block style by
+// default, so AI-generated `__custom` workflows silently dropped every
+// skill and the wizard then asked for zero credentials. These tests pin
+// the parser-based implementation to handle both forms.
+
+describe("extractSkillsFromYaml — block-style arrays", () => {
+  it("extracts skills from block-style arrays (yaml.stringify default)", () => {
+    const yaml = `nodes:
+  review:
+    name: Code Review
+    skills:
+      - github
+      - linear
+`;
+    const skills = extractSkillsFromYaml(yaml);
+    expect(skills.sort()).toEqual(["github", "linear"]);
+  });
+
+  it("deduplicates across block-style nodes", () => {
+    const yaml = `nodes:
+  first:
+    skills:
+      - github
+      - sentry
+  second:
+    skills:
+      - github
+      - linear
+`;
+    const skills = extractSkillsFromYaml(yaml).sort();
+    expect(skills).toEqual(["github", "linear", "sentry"]);
+  });
+
+  it("handles mixed inline and block-style skills in the same doc", () => {
+    const yaml = `nodes:
+  a:
+    skills: [github, datadog]
+  b:
+    skills:
+      - linear
+      - jira
+`;
+    const skills = extractSkillsFromYaml(yaml).sort();
+    expect(skills).toEqual(["datadog", "github", "jira", "linear"]);
+  });
+
+  it("ignores non-string skill entries defensively", () => {
+    const yaml = `nodes:
+  review:
+    skills:
+      - github
+      - 42
+      - null
+      - ""
+`;
+    // Only "github" survives the typeof-string + non-empty filter
+    expect(extractSkillsFromYaml(yaml)).toEqual(["github"]);
+  });
+
+  it("returns empty array for malformed YAML (does not throw)", () => {
+    const yaml = `nodes:
+  review:
+    skills: [github, linear
+    # unclosed bracket above — invalid yaml
+`;
+    expect(extractSkillsFromYaml(yaml)).toEqual([]);
+  });
+
+  it("returns empty array for YAML with no nodes key", () => {
+    expect(extractSkillsFromYaml("foo: bar\n")).toEqual([]);
+  });
+
+  it("returns empty array for empty/whitespace input", () => {
+    expect(extractSkillsFromYaml("")).toEqual([]);
+    expect(extractSkillsFromYaml("   \n")).toEqual([]);
+  });
+
+  it("returns empty array when nodes entries have no skills field", () => {
+    const yaml = `nodes:
+  review:
+    name: Code Review
+    instruction: Review the PR
+`;
+    expect(extractSkillsFromYaml(yaml)).toEqual([]);
+  });
+});
+
+// ── Deprecated alias: runInit === runNew ──────────────────────────────
+
+describe("runInit deprecation alias", () => {
+  it("re-exports runNew as runInit (identity pin)", () => {
+    // Callers using `import { runInit } from "@sweny-ai/core/new"` must
+    // continue to hit the same function during the deprecation window.
+    expect(runInit).toBe(runNew);
   });
 });
 

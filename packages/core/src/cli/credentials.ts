@@ -3,7 +3,7 @@
  * and buildSkillMcpServers.
  *
  * Several env vars have two accepted spellings — the user-facing one
- * (`NR_API_KEY`, `JIRA_BASE_URL`, `SENTRY_BASE_URL`, …) used in init.ts,
+ * (`NR_API_KEY`, `JIRA_BASE_URL`, `SENTRY_BASE_URL`, …) used in new.ts,
  * config.ts, and docs, and the canonical one used by the MCP wiring layer
  * (`NEW_RELIC_API_KEY`, `JIRA_URL`, `SENTRY_URL`, …). We accept either
  * spelling and write the value under the canonical key the wiring functions
