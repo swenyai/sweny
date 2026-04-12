@@ -240,3 +240,30 @@ describe("fetch auth headers", () => {
     expect(headers.Authorization).toBeUndefined();
   });
 });
+
+describe("offline mode", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    rmSync(fileTmp, { recursive: true, force: true });
+    mkdirSync(fileTmp, { recursive: true });
+  });
+
+  it("file resolution still works when offline", async () => {
+    writeFileSync(path.join(fileTmp, "local.md"), "hi");
+    const resolved = await resolveSource("./local.md", "f", {
+      ...baseCtx(),
+      cwd: fileTmp,
+      offline: true,
+    });
+    expect(resolved.content).toBe("hi");
+  });
+
+  it("url resolution fails with SOURCE_OFFLINE_REQUIRES_FETCH when offline", async () => {
+    await expect(
+      resolveSource("https://example.com/x", "rules[0]", {
+        ...baseCtx(),
+        offline: true,
+      }),
+    ).rejects.toThrow(/SOURCE_OFFLINE_REQUIRES_FETCH.*https:\/\/example\.com\/x.*rules\[0\]/);
+  });
+});
