@@ -120,8 +120,14 @@ describe("reportToCloud", () => {
   });
 
   it("does NOT call fetch when repository is missing", async () => {
-    await reportToCloud(makeResults(), 1000, makeConfig({ cloudToken: "sweny_pk_x", repository: "" }), "triage");
-    expect(fetchMock).not.toHaveBeenCalled();
+    const orig = process.env.GITHUB_REPOSITORY;
+    delete process.env.GITHUB_REPOSITORY;
+    try {
+      await reportToCloud(makeResults(), 1000, makeConfig({ cloudToken: "sweny_pk_x", repository: "" }), "triage");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      if (orig !== undefined) process.env.GITHUB_REPOSITORY = orig;
+    }
   });
 
   it("calls fetch with Bearer cloudToken when token is set", async () => {
