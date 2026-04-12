@@ -23,16 +23,16 @@
 ## Quickstart
 
 ```bash
-npx create-sweny        # scaffold config + starter workflow
+npm install -g @sweny-ai/core
+sweny init                  # pick a workflow → auto-detects providers → done
 sweny workflow run .sweny/workflows/pr-review.yml
 ```
 
-Or install globally and build from scratch:
+Or build from scratch:
 
 ```bash
-npm install -g @sweny-ai/core
 sweny workflow create "review PRs for security issues and code quality"
-sweny workflow run .sweny/workflows/pr_review.yml
+sweny workflow run .sweny/workflows/pr-review.yml
 ```
 
 Browse **[marketplace.sweny.ai](https://marketplace.sweny.ai)** for ready-to-run workflows.

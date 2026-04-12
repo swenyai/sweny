@@ -5,11 +5,14 @@ import * as os from "node:os";
 import { parse as parseYaml } from "yaml";
 import {
   collectCredentials,
+  collectCredentialsForSkills,
+  extractSkillsFromYaml,
   detectGitRemote,
   buildSwenyYml,
   buildEnvTemplate,
   buildActionWorkflow,
   PROVIDER_CREDENTIALS,
+  SKILL_CREDENTIALS,
 } from "./init.js";
 import type { InitSelections } from "./init.js";
 
@@ -199,53 +202,19 @@ describe("PROVIDER_CREDENTIALS", () => {
 
 describe("buildSwenyYml", () => {
   it("includes all selected providers", () => {
-    const yml = buildSwenyYml({
-      sourceControl: "github",
-      observability: "datadog",
-      issueTracker: "linear",
-      notification: "slack",
-      githubAction: true,
-      cronExpression: "0 8 * * 1",
-    });
+    const yml = buildSwenyYml("github", "datadog", "linear");
     expect(yml).toContain("source-control-provider: github");
     expect(yml).toContain("observability-provider: datadog");
     expect(yml).toContain("issue-tracker-provider: linear");
-    expect(yml).toContain("notification-provider: slack");
   });
 
   it("omits observability-provider when null", () => {
-    const yml = buildSwenyYml({
-      sourceControl: "github",
-      observability: null,
-      issueTracker: "github-issues",
-      notification: "slack",
-      githubAction: false,
-      cronExpression: null,
-    });
+    const yml = buildSwenyYml("github", null, "github-issues");
     expect(yml).not.toContain("observability-provider");
   });
 
-  it("omits notification-provider when console (default)", () => {
-    const yml = buildSwenyYml({
-      sourceControl: "github",
-      observability: "sentry",
-      issueTracker: "github-issues",
-      notification: "console",
-      githubAction: false,
-      cronExpression: null,
-    });
-    expect(yml).not.toContain("notification-provider");
-  });
-
   it("includes header comments", () => {
-    const yml = buildSwenyYml({
-      sourceControl: "github",
-      observability: null,
-      issueTracker: "github-issues",
-      notification: "console",
-      githubAction: false,
-      cronExpression: null,
-    });
+    const yml = buildSwenyYml("github", null, "github-issues");
     expect(yml).toContain("# .sweny.yml");
   });
 });
@@ -463,51 +432,27 @@ describe("detectGitRemote — edge cases", () => {
 
 describe("buildSwenyYml — YAML validity", () => {
   it("generates valid YAML that can be parsed", () => {
-    const yml = buildSwenyYml({
-      sourceControl: "github",
-      observability: "datadog",
-      issueTracker: "linear",
-      notification: "slack",
-      githubAction: false,
-      cronExpression: null,
-    });
+    const yml = buildSwenyYml("github", "datadog", "linear");
     const parsed = parseYaml(yml);
     expect(parsed["source-control-provider"]).toBe("github");
     expect(parsed["observability-provider"]).toBe("datadog");
     expect(parsed["issue-tracker-provider"]).toBe("linear");
-    expect(parsed["notification-provider"]).toBe("slack");
   });
 
   it("generates valid YAML with minimal selections", () => {
-    const yml = buildSwenyYml({
-      sourceControl: "github",
-      observability: null,
-      issueTracker: "github-issues",
-      notification: "console",
-      githubAction: false,
-      cronExpression: null,
-    });
+    const yml = buildSwenyYml("github", null, "github-issues");
     const parsed = parseYaml(yml);
     expect(parsed["source-control-provider"]).toBe("github");
     expect(parsed["issue-tracker-provider"]).toBe("github-issues");
     expect(parsed["observability-provider"]).toBeUndefined();
-    expect(parsed["notification-provider"]).toBeUndefined();
   });
 
   it("uses correct key names matching config parser expectations", () => {
-    const yml = buildSwenyYml({
-      sourceControl: "gitlab",
-      observability: "sentry",
-      issueTracker: "jira",
-      notification: "teams",
-      githubAction: false,
-      cronExpression: null,
-    });
+    const yml = buildSwenyYml("gitlab", "sentry", "jira");
     // These are the exact keys the config parser reads
     expect(yml).toContain("source-control-provider:");
     expect(yml).toContain("observability-provider:");
     expect(yml).toContain("issue-tracker-provider:");
-    expect(yml).toContain("notification-provider:");
     // Must NOT contain the short form
     expect(yml).not.toMatch(/^source-control:/m);
     expect(yml).not.toMatch(/^issue-tracker:/m);
@@ -517,24 +462,14 @@ describe("buildSwenyYml — YAML validity", () => {
     const sourceControls = ["github", "gitlab"];
     const observabilities = ["datadog", "sentry", "betterstack", "newrelic", "cloudwatch", null];
     const issueTrackers = ["github-issues", "linear", "jira"];
-    const notifications = ["console", "slack", "discord", "teams", "webhook"];
 
     for (const sc of sourceControls) {
       for (const obs of observabilities) {
         for (const it of issueTrackers) {
-          for (const notif of notifications) {
-            const yml = buildSwenyYml({
-              sourceControl: sc,
-              observability: obs,
-              issueTracker: it,
-              notification: notif,
-              githubAction: false,
-              cronExpression: null,
-            });
-            // Should not throw
-            const parsed = parseYaml(yml);
-            expect(parsed["source-control-provider"]).toBe(sc);
-          }
+          const yml = buildSwenyYml(sc, obs, it);
+          // Should not throw
+          const parsed = parseYaml(yml);
+          expect(parsed["source-control-provider"]).toBe(sc);
         }
       }
     }
@@ -737,6 +672,135 @@ describe("collectCredentials — additional cases", () => {
         if (cred.url) {
           expect(cred.url, `${provider}.${cred.key} URL should start with https://`).toMatch(/^https:\/\//);
         }
+      }
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Workflow-first functions: extractSkillsFromYaml, collectCredentialsForSkills
+// ═══════════════════════════════════════════════════════════════════════
+
+describe("extractSkillsFromYaml", () => {
+  it("extracts skills from a single node", () => {
+    const yaml = `
+nodes:
+  review:
+    name: Code Review
+    instruction: Review the PR
+    skills: [github]
+`;
+    expect(extractSkillsFromYaml(yaml)).toEqual(["github"]);
+  });
+
+  it("extracts and deduplicates skills from multiple nodes", () => {
+    const yaml = `
+nodes:
+  review:
+    name: Code Review
+    skills: [github, linear]
+  scan:
+    name: Security Scan
+    skills: [github, sentry]
+`;
+    const skills = extractSkillsFromYaml(yaml);
+    expect(skills).toContain("github");
+    expect(skills).toContain("linear");
+    expect(skills).toContain("sentry");
+    expect(skills.filter((s) => s === "github")).toHaveLength(1);
+  });
+
+  it("returns empty array when no skills present", () => {
+    const yaml = `
+nodes:
+  review:
+    name: Code Review
+    instruction: Review the PR
+`;
+    expect(extractSkillsFromYaml(yaml)).toEqual([]);
+  });
+
+  it("handles skills with spaces around commas", () => {
+    const yaml = `
+nodes:
+  review:
+    skills: [github , linear , sentry]
+`;
+    const skills = extractSkillsFromYaml(yaml);
+    expect(skills).toEqual(["github", "linear", "sentry"]);
+  });
+
+  it("handles single-skill arrays", () => {
+    const yaml = `
+nodes:
+  review:
+    skills: [datadog]
+`;
+    expect(extractSkillsFromYaml(yaml)).toEqual(["datadog"]);
+  });
+});
+
+describe("collectCredentialsForSkills", () => {
+  it("always includes ANTHROPIC_API_KEY even with no skills", () => {
+    const creds = collectCredentialsForSkills([]);
+    expect(creds.map((c) => c.key)).toEqual(["ANTHROPIC_API_KEY"]);
+  });
+
+  it("includes credentials for specified skills", () => {
+    const creds = collectCredentialsForSkills(["github", "linear"]);
+    const keys = creds.map((c) => c.key);
+    expect(keys).toContain("ANTHROPIC_API_KEY");
+    expect(keys).toContain("GITHUB_TOKEN");
+    expect(keys).toContain("LINEAR_API_KEY");
+    expect(keys).toContain("LINEAR_TEAM_ID");
+  });
+
+  it("deduplicates credentials across skills", () => {
+    const creds = collectCredentialsForSkills(["github", "github"]);
+    const tokenCount = creds.filter((c) => c.key === "GITHUB_TOKEN").length;
+    expect(tokenCount).toBe(1);
+  });
+
+  it("skips unknown skills gracefully", () => {
+    const creds = collectCredentialsForSkills(["github", "nonexistent-skill"]);
+    const keys = creds.map((c) => c.key);
+    expect(keys).toContain("ANTHROPIC_API_KEY");
+    expect(keys).toContain("GITHUB_TOKEN");
+    expect(keys).toHaveLength(2);
+  });
+
+  it("ANTHROPIC_API_KEY is always first", () => {
+    const creds = collectCredentialsForSkills(["datadog", "github"]);
+    expect(creds[0].key).toBe("ANTHROPIC_API_KEY");
+  });
+});
+
+describe("SKILL_CREDENTIALS", () => {
+  it("has entries for all built-in skills", () => {
+    const expected = [
+      "github",
+      "gitlab",
+      "datadog",
+      "sentry",
+      "betterstack",
+      "newrelic",
+      "linear",
+      "jira",
+      "slack",
+      "discord",
+      "notification",
+    ];
+    for (const skill of expected) {
+      expect(SKILL_CREDENTIALS).toHaveProperty(skill);
+    }
+  });
+
+  it("every skill has valid credential entries", () => {
+    for (const [skill, creds] of Object.entries(SKILL_CREDENTIALS)) {
+      expect(Array.isArray(creds), `${skill} should have an array`).toBe(true);
+      for (const cred of creds) {
+        expect(typeof cred.key, `${skill}.${cred.key} should be a string`).toBe("string");
+        expect(cred.key, `${skill}.${cred.key} should be UPPER_SNAKE_CASE`).toMatch(/^[A-Z][A-Z0-9_]+$/);
       }
     }
   });

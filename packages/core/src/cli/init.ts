@@ -1,6 +1,9 @@
 /**
  * sweny init — Interactive setup wizard
  *
+ * Workflow-first: pick a template or describe what you want, then SWEny
+ * infers which skills are needed and only asks for those credentials.
+ *
  * Pure functions for file generation + thin @clack/prompts interactive layer.
  * Tests cover the pure functions; the interactive wizard is thin glue.
  */
@@ -34,9 +37,13 @@ export interface GitRemoteInfo {
   remote: string;
 }
 
-// ── Credential table ───────────────────────────────────────────────────
+// ── Skill → Credential mapping ────────────────────────────────────────
 
-export const PROVIDER_CREDENTIALS: Record<string, Credential[]> = {
+/**
+ * Maps skill IDs (as used in workflow nodes) to the credentials they require.
+ * When a workflow uses a skill, we collect only those credentials.
+ */
+export const SKILL_CREDENTIALS: Record<string, Credential[]> = {
   github: [
     {
       key: "GITHUB_TOKEN",
@@ -75,12 +82,6 @@ export const PROVIDER_CREDENTIALS: Record<string, Credential[]> = {
     },
   ],
   newrelic: [{ key: "NR_API_KEY", url: "https://one.newrelic.com/api-keys" }],
-  cloudwatch: [
-    { key: "AWS_ACCESS_KEY_ID", hint: "IAM user access key" },
-    { key: "AWS_SECRET_ACCESS_KEY", hint: "IAM user secret key" },
-    { key: "AWS_REGION", hint: "e.g. us-east-1", default: "us-east-1" },
-  ],
-  "github-issues": [],
   linear: [
     {
       key: "LINEAR_API_KEY",
@@ -99,11 +100,9 @@ export const PROVIDER_CREDENTIALS: Record<string, Credential[]> = {
       url: "https://id.atlassian.com/manage-profile/security/api-tokens",
     },
   ],
-  console: [],
   slack: [{ key: "SLACK_BOT_TOKEN", url: "https://api.slack.com/apps" }],
   discord: [{ key: "DISCORD_WEBHOOK_URL", hint: "Server Settings > Integrations > Webhooks" }],
-  teams: [{ key: "TEAMS_WEBHOOK_URL", hint: "Channel > Connectors > Incoming Webhook" }],
-  webhook: [{ key: "NOTIFICATION_WEBHOOK_URL", hint: "Your webhook endpoint URL" }],
+  notification: [{ key: "NOTIFICATION_WEBHOOK_URL", hint: "Your webhook endpoint URL" }],
 };
 
 const ALWAYS_CREDENTIALS: Credential[] = [
@@ -114,16 +113,70 @@ const ALWAYS_CREDENTIALS: Credential[] = [
   },
 ];
 
+// ── Backward compat alias ─────────────────────────────────────────────
+// Old tests/code may reference PROVIDER_CREDENTIALS
+export const PROVIDER_CREDENTIALS: Record<string, Credential[]> = {
+  ...SKILL_CREDENTIALS,
+  "github-issues": [],
+  cloudwatch: [
+    { key: "AWS_ACCESS_KEY_ID", hint: "IAM user access key" },
+    { key: "AWS_SECRET_ACCESS_KEY", hint: "IAM user secret key" },
+    { key: "AWS_REGION", hint: "e.g. us-east-1", default: "us-east-1" },
+  ],
+  console: [],
+  teams: [{ key: "TEAMS_WEBHOOK_URL", hint: "Channel > Connectors > Incoming Webhook" }],
+  webhook: [{ key: "NOTIFICATION_WEBHOOK_URL", hint: "Your webhook endpoint URL" }],
+};
+
 // ── Functions ──────────────────────────────────────────────────────────
+
+/**
+ * Extract all unique skill IDs from a workflow template YAML string.
+ */
+export function extractSkillsFromYaml(yaml: string): string[] {
+  const skills = new Set<string>();
+  // Match skills: [github, linear, sentry] patterns
+  const matches = yaml.matchAll(/skills:\s*\[([^\]]+)\]/g);
+  for (const m of matches) {
+    for (const skill of m[1].split(",")) {
+      skills.add(skill.trim());
+    }
+  }
+  return [...skills];
+}
+
+/**
+ * Gather credentials required for a set of skills.
+ * Always includes ANTHROPIC_API_KEY. Deduplicates by key name.
+ */
+export function collectCredentialsForSkills(skills: string[]): Credential[] {
+  const seen = new Map<string, Credential>();
+
+  for (const cred of ALWAYS_CREDENTIALS) {
+    seen.set(cred.key, cred);
+  }
+
+  for (const skill of skills) {
+    const creds = SKILL_CREDENTIALS[skill];
+    if (!creds) continue;
+    for (const cred of creds) {
+      if (!seen.has(cred.key)) {
+        seen.set(cred.key, cred);
+      }
+    }
+  }
+
+  return Array.from(seen.values());
+}
 
 /**
  * Gather all unique credentials required for the selected providers.
  * Always includes ANTHROPIC_API_KEY. Deduplicates by key name.
+ * @deprecated Use collectCredentialsForSkills instead — kept for backward compat.
  */
 export function collectCredentials(selections: InitSelections): Credential[] {
   const seen = new Map<string, Credential>();
 
-  // Always-present credentials first
   for (const cred of ALWAYS_CREDENTIALS) {
     seen.set(cred.key, cred);
   }
@@ -214,9 +267,36 @@ export function detectGitRemote(cwd: string): GitRemoteInfo | null {
 }
 
 /**
- * Generate .sweny.yml content from selections.
+ * Infer source-control-provider from git remote detection.
  */
-export function buildSwenyYml(selections: InitSelections): string {
+function inferSourceControl(gitInfo: GitRemoteInfo | null): string {
+  return gitInfo?.provider ?? "github";
+}
+
+/**
+ * Infer issue-tracker-provider from skills in the workflow.
+ */
+function inferIssueTracker(skills: string[], sourceControl: string): string {
+  if (skills.includes("linear")) return "linear";
+  if (skills.includes("jira")) return "jira";
+  return sourceControl === "github" ? "github-issues" : "github-issues";
+}
+
+/**
+ * Infer observability-provider from skills in the workflow.
+ */
+function inferObservability(skills: string[]): string | null {
+  if (skills.includes("datadog")) return "datadog";
+  if (skills.includes("sentry")) return "sentry";
+  if (skills.includes("betterstack")) return "betterstack";
+  if (skills.includes("newrelic")) return "newrelic";
+  return null;
+}
+
+/**
+ * Generate .sweny.yml content from inferred providers.
+ */
+export function buildSwenyYml(sourceControl: string, observability: string | null, issueTracker: string): string {
   const lines: string[] = [];
 
   lines.push("# .sweny.yml — SWEny project configuration");
@@ -224,19 +304,13 @@ export function buildSwenyYml(selections: InitSelections): string {
   lines.push("# Docs: https://docs.sweny.ai/cli");
   lines.push("");
 
-  lines.push(`source-control-provider: ${selections.sourceControl}`);
+  lines.push(`source-control-provider: ${sourceControl}`);
 
-  if (selections.observability !== null) {
-    lines.push(`observability-provider: ${selections.observability}`);
+  if (observability !== null) {
+    lines.push(`observability-provider: ${observability}`);
   }
 
-  lines.push(`issue-tracker-provider: ${selections.issueTracker}`);
-
-  // Omit notification-provider when "console" (it's the default)
-  if (selections.notification !== "console") {
-    lines.push(`notification-provider: ${selections.notification}`);
-  }
-
+  lines.push(`issue-tracker-provider: ${issueTracker}`);
   lines.push("");
 
   return lines.join("\n");
@@ -313,8 +387,13 @@ function cancel(): never {
 }
 
 /**
- * Interactive setup wizard — prompts the user through provider selection,
- * then generates `.sweny.yml`, `.env`, and an optional GitHub Action workflow.
+ * Interactive setup wizard — workflow-first approach.
+ *
+ * 1. Detect git remote (infer source control)
+ * 2. Pick a workflow template
+ * 3. Infer providers from workflow skills
+ * 4. Collect only the credentials those skills need
+ * 5. Generate files
  */
 export async function runInit(): Promise<void> {
   const cwd = process.cwd();
@@ -324,7 +403,7 @@ export async function runInit(): Promise<void> {
 
   const gitInfo = detectGitRemote(cwd);
   if (gitInfo) {
-    p.log.info(`Detected git remote: ${chalk.cyan(gitInfo.remote)}`);
+    p.log.info(`Detected: ${chalk.cyan(gitInfo.remote)} (${gitInfo.provider})`);
   }
 
   // ── Existing file check ─────────────────────────────────────────────
@@ -341,144 +420,56 @@ export async function runInit(): Promise<void> {
     }
   }
 
-  // ── Screen 1: Source control ────────────────────────────────────────
-  const sourceControl = await p.select({
-    message: "Source control provider",
-    initialValue: gitInfo?.provider ?? "github",
+  // ── Step 1: Pick a workflow ─────────────────────────────────────────
+  const templateChoice = await p.select({
+    message: "What do you want to do?",
     options: [
-      {
-        value: "github",
-        label: "GitHub" + (gitInfo?.provider === "github" ? " (detected)" : ""),
-      },
-      {
-        value: "gitlab",
-        label: "GitLab" + (gitInfo?.provider === "gitlab" ? " (detected)" : ""),
-      },
+      ...WORKFLOW_TEMPLATES.map((t) => ({
+        value: t.id,
+        label: t.name,
+        hint: t.description,
+      })),
+      { value: "__blank", label: "Start blank", hint: "just set up config, I'll create workflows later" },
     ],
   });
-  if (p.isCancel(sourceControl)) cancel();
+  if (p.isCancel(templateChoice)) cancel();
 
-  // ── Screen 2: Observability ─────────────────────────────────────────
-  const obsRaw = await p.select({
-    message: "Observability provider",
-    options: [
-      { value: "datadog", label: "Datadog" },
-      { value: "sentry", label: "Sentry" },
-      { value: "betterstack", label: "BetterStack" },
-      { value: "newrelic", label: "New Relic" },
-      { value: "cloudwatch", label: "CloudWatch" },
-      { value: "__other", label: "Other" },
-      { value: "__none", label: "None" },
-    ],
-  });
-  if (p.isCancel(obsRaw)) cancel();
+  // ── Step 2: Infer everything from the workflow ──────────────────────
+  const template = WORKFLOW_TEMPLATES.find((t) => t.id === templateChoice);
+  const workflowSkills = template ? extractSkillsFromYaml(template.yaml) : [];
 
-  let observability: string | null;
-  if ((obsRaw as string) === "__none") {
-    observability = null;
-  } else if ((obsRaw as string) === "__other") {
-    const custom = await p.text({
-      message: "Enter your observability provider name",
-      validate: (v) => {
-        if (!v || v.trim().length === 0) return "Provider name is required";
-        if (!/^[a-z0-9-]+$/.test(v.trim())) return "Provider name must be lowercase letters, numbers, and hyphens only";
-        return undefined;
-      },
-    });
-    if (p.isCancel(custom)) cancel();
-    observability = (custom as string).trim().toLowerCase();
-  } else {
-    observability = obsRaw as string;
-  }
+  const sourceControl = inferSourceControl(gitInfo);
+  const issueTracker = inferIssueTracker(workflowSkills, sourceControl);
+  const observability = inferObservability(workflowSkills);
 
-  // ── Screen 3: Issue tracker ─────────────────────────────────────────
-  const issueTracker = await p.select({
-    message: "Issue tracker",
-    initialValue: (sourceControl as string) === "github" ? "github-issues" : undefined,
-    options: [
-      { value: "github-issues", label: "GitHub Issues" },
-      { value: "linear", label: "Linear" },
-      { value: "jira", label: "Jira" },
-    ],
-  });
-  if (p.isCancel(issueTracker)) cancel();
+  // Collect credentials for the workflow's skills (+ always ANTHROPIC_API_KEY)
+  const credentials = collectCredentialsForSkills(workflowSkills);
 
-  // ── Screen 4: Notification ──────────────────────────────────────────
-  const notification = await p.select({
-    message: "Notification channel",
-    initialValue: "console",
-    options: [
-      { value: "console", label: "Console (default)" },
-      { value: "slack", label: "Slack" },
-      { value: "discord", label: "Discord" },
-      { value: "teams", label: "Microsoft Teams" },
-      { value: "webhook", label: "Webhook" },
-    ],
-  });
-  if (p.isCancel(notification)) cancel();
-
-  // ── Screen 5: GitHub Action ─────────────────────────────────────────
-  const wantAction = await p.confirm({
-    message: "Set up a GitHub Action workflow?",
-    initialValue: true,
-  });
-  if (p.isCancel(wantAction)) cancel();
-
-  let cronExpression: string | null = null;
-  if (wantAction) {
-    const schedule = await p.select({
-      message: "How often should the triage run?",
-      options: [
-        { value: "0 9 * * *", label: "Daily (9 AM UTC)" },
-        { value: "0 9 * * 1", label: "Weekly (Monday 9 AM UTC)" },
-        { value: "__custom", label: "Custom cron expression" },
-      ],
-    });
-    if (p.isCancel(schedule)) cancel();
-
-    if ((schedule as string) === "__custom") {
-      const customCron = await p.text({
-        message: "Enter cron expression (e.g. 0 8 * * 1-5)",
-        validate: (v) => {
-          if (!v || v.trim().length === 0) return "Cron expression is required";
-          if (!/^[\d*,\/-]+(\s+[\d*,\/-]+){4}$/.test(v.trim())) return "Must be a valid 5-field cron expression";
-          return undefined;
-        },
-      });
-      if (p.isCancel(customCron)) cancel();
-      cronExpression = (customCron as string).trim();
-    } else {
-      cronExpression = schedule as string;
-    }
-  }
-
-  // ── Assemble selections ─────────────────────────────────────────────
-  const selections: InitSelections = {
-    sourceControl: sourceControl as string,
-    observability,
-    issueTracker: issueTracker as string,
-    notification: notification as string,
-    githubAction: !!wantAction,
-    cronExpression,
-  };
-
-  const credentials = collectCredentials(selections);
-
-  // ── Screen 6: Summary ───────────────────────────────────────────────
+  // ── Step 3: Summary + confirm ───────────────────────────────────────
   const files = [".sweny.yml", ".env"];
-  if (selections.githubAction) files.push(".github/workflows/sweny.yml");
+  if (template) files.push(`.sweny/workflows/${template.id}.yml`);
+
+  const inferred: string[] = [
+    `  Source control:  ${sourceControl}${gitInfo ? " (detected)" : ""}`,
+    `  Issue tracker:   ${issueTracker}`,
+  ];
+  if (observability) {
+    inferred.push(`  Observability:   ${observability}`);
+  }
+  if (workflowSkills.length > 0) {
+    inferred.push(`  Skills:          ${workflowSkills.join(", ")}`);
+  }
 
   p.log.message(
     [
       chalk.bold("Files to create:"),
       ...files.map((f) => `  ${chalk.cyan(f)}`),
       "",
-      chalk.bold("Providers:"),
-      `  Source control:  ${selections.sourceControl}`,
-      `  Observability:   ${selections.observability ?? "none"}`,
-      `  Issue tracker:   ${selections.issueTracker}`,
-      `  Notification:    ${selections.notification}`,
-      selections.githubAction ? `  GitHub Action:   ${selections.cronExpression}` : "  GitHub Action:   no",
+      chalk.bold("Inferred from workflow:"),
+      ...inferred,
+      "",
+      chalk.bold(`Credentials needed: ${credentials.length}`),
+      ...credentials.map((c) => `  ${chalk.dim(c.key)}`),
     ].join("\n"),
   );
 
@@ -492,17 +483,16 @@ export async function runInit(): Promise<void> {
     process.exit(0);
   }
 
-  // ── Screen 7: Write files ──────────────────────────────────────────
+  // ── Step 4: Write files ─────────────────────────────────────────────
 
   // 1. Write .sweny.yml
-  fs.writeFileSync(configPath, buildSwenyYml(selections), "utf-8");
+  fs.writeFileSync(configPath, buildSwenyYml(sourceControl, observability, issueTracker), "utf-8");
   p.log.success("Created .sweny.yml");
 
   // 2. Write .env
   const envPath = path.join(cwd, ".env");
   if (fs.existsSync(envPath)) {
     const existing = fs.readFileSync(envPath, "utf-8");
-    // Parse defined keys (ignore comment lines)
     const definedKeys = new Set(
       existing
         .split("\n")
@@ -527,57 +517,16 @@ export async function runInit(): Promise<void> {
     p.log.success("Created .env");
   }
 
-  // 3. GitHub Action workflow
-  if (selections.githubAction && selections.cronExpression) {
-    const workflowDir = path.join(cwd, ".github", "workflows");
-    const workflowPath = path.join(workflowDir, "sweny.yml");
-
-    if (fs.existsSync(workflowPath)) {
-      const overwriteWf = await p.confirm({
-        message: ".github/workflows/sweny.yml already exists. Overwrite?",
-        initialValue: false,
-      });
-      if (p.isCancel(overwriteWf)) cancel();
-      if (!overwriteWf) {
-        p.log.info("Skipped GitHub Action workflow");
-      } else {
-        fs.mkdirSync(workflowDir, { recursive: true });
-        fs.writeFileSync(workflowPath, buildActionWorkflow(credentials, selections.cronExpression), "utf-8");
-        p.log.success("Created .github/workflows/sweny.yml");
-      }
-    } else {
-      fs.mkdirSync(workflowDir, { recursive: true });
-      fs.writeFileSync(workflowPath, buildActionWorkflow(credentials, selections.cronExpression), "utf-8");
-      p.log.success("Created .github/workflows/sweny.yml");
-    }
+  // 3. Workflow template
+  if (template) {
+    const workflowDir = path.join(cwd, ".sweny", "workflows");
+    fs.mkdirSync(workflowDir, { recursive: true });
+    const templatePath = path.join(workflowDir, `${template.id}.yml`);
+    fs.writeFileSync(templatePath, template.yaml, "utf-8");
+    p.log.success(`Created .sweny/workflows/${template.id}.yml`);
   }
 
-  // 4. Starter workflow template
-  const wantTemplate = await p.select({
-    message: "Start with a workflow template?",
-    options: [
-      ...WORKFLOW_TEMPLATES.map((t) => ({
-        value: t.id,
-        label: t.name,
-        hint: t.description,
-      })),
-      { value: "__none", label: "Skip", hint: "I'll create my own" },
-    ],
-  });
-  if (p.isCancel(wantTemplate)) cancel();
-
-  if ((wantTemplate as string) !== "__none") {
-    const template = WORKFLOW_TEMPLATES.find((t) => t.id === wantTemplate);
-    if (template) {
-      const workflowDir = path.join(cwd, ".sweny", "workflows");
-      fs.mkdirSync(workflowDir, { recursive: true });
-      const templatePath = path.join(workflowDir, `${template.id}.yml`);
-      fs.writeFileSync(templatePath, template.yaml, "utf-8");
-      p.log.success(`Created .sweny/workflows/${template.id}.yml`);
-    }
-  }
-
-  // 5. .gitignore check
+  // 4. .gitignore check
   const gitignorePath = path.join(cwd, ".gitignore");
   if (fs.existsSync(gitignorePath)) {
     const gitignore = fs.readFileSync(gitignorePath, "utf-8");
@@ -589,26 +538,18 @@ export async function runInit(): Promise<void> {
     p.log.warn(chalk.yellow("No .gitignore found — make sure .env is not committed"));
   }
 
-  // 6. Next steps
-  const docUrls = credentials.filter((c) => c.url).map((c) => `  ${c.key}: ${c.url}`);
+  // 5. Next steps
+  const credUrls = credentials.filter((c) => c.url).map((c) => `  ${c.key}: ${c.url}`);
 
-  const selectedTemplate =
-    (wantTemplate as string) !== "__none" ? WORKFLOW_TEMPLATES.find((t) => t.id === wantTemplate) : null;
+  const steps = ["1. Fill in your API keys in .env:", ...credUrls, "", "2. Verify connectivity:", "   sweny check"];
 
-  const steps = ["1. Fill in your API keys in .env:", ...docUrls, "", "2. Verify connectivity:", "   sweny check"];
-
-  if (selectedTemplate) {
-    steps.push(
-      "",
-      `3. Run your starter workflow:`,
-      `   sweny workflow run .sweny/workflows/${selectedTemplate.id}.yml`,
-    );
+  if (template) {
+    steps.push("", `3. Run your workflow:`, `   sweny workflow run .sweny/workflows/${template.id}.yml`);
   } else {
-    steps.push("", "3. Run a dry-run triage:", "   sweny triage --dry-run");
+    steps.push("", "3. Create your first workflow:", '   sweny workflow create "describe what you want"');
   }
 
   p.note(steps.join("\n"), "Next steps");
 
-  // 7. Done
   p.outro("You're all set!");
 }
