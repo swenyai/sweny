@@ -5,7 +5,8 @@ Claude Code plugin that exposes SWEny AI workflows as skills, MCP tools, hooks, 
 ## Install
 
 ```
-/plugin install https://github.com/swenyai/sweny
+/plugin marketplace add swenyai/sweny
+/plugin install sweny@sweny-official
 ```
 
 Or for local development:

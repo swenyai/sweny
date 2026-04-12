@@ -7,8 +7,11 @@ The SWEny plugin for Claude Code gives you slash commands, MCP tools, a startup 
 
 ## Install
 
+First add the SWEny marketplace, then install the plugin:
+
 ```
-/plugin install https://github.com/swenyai/sweny
+/plugin marketplace add swenyai/sweny
+/plugin install sweny@sweny-official
 ```
 
 ## Skills

@@ -150,7 +150,8 @@ Deploy any workflow to GitHub Actions with three secrets and a cron schedule. SW
 Install the [Claude Code plugin](/advanced/mcp-plugin/) and get slash commands, MCP tools, and a startup hook — without leaving your conversation:
 
 ```
-/plugin install https://github.com/swenyai/sweny
+/plugin marketplace add swenyai/sweny
+/plugin install sweny@sweny-official
 ```
 
 Then type `/sweny:triage`, `/sweny:implement ENG-123`, `/sweny:e2e-run`, or any of the 11 available commands. Claude can also autonomously delegate tasks to SWEny's DAG executor via MCP tools.

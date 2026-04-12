@@ -31,7 +31,8 @@ Or use a Claude subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) for flat-rate bil
 If you use [Claude Code](https://code.claude.com), install the plugin and get 11 slash commands, MCP tools, and a startup hook:
 
 ```
-/plugin install https://github.com/swenyai/sweny
+/plugin marketplace add swenyai/sweny
+/plugin install sweny@sweny-official
 ```
 
 Then use `/sweny:triage` to investigate production alerts, `/sweny:implement ENG-123` to fix an issue, `/sweny:e2e-run` to run browser tests, or `/sweny:workflow-create` to build a custom workflow — all without leaving your conversation.
