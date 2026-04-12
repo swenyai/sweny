@@ -9,7 +9,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import * as p from "@clack/prompts";
 import chalk from "chalk";
 import { parse as parseYaml } from "yaml";
@@ -148,7 +148,7 @@ export function validateSkillDir(dirPath: string): {
 
 function ghAvailable(): boolean {
   try {
-    execSync("gh --version", { stdio: "pipe" });
+    execFileSync("gh", ["--version"], { stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -157,7 +157,7 @@ function ghAvailable(): boolean {
 
 function ghAuthenticated(): boolean {
   try {
-    execSync("gh auth status", { stdio: "pipe" });
+    execFileSync("gh", ["auth", "status"], { stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -345,10 +345,10 @@ async function openGitHubPR(
 
   try {
     // Fork the marketplace repo (idempotent — if already forked, just continues)
-    execSync("gh repo fork swenyai/marketplace --clone=false 2>&1", { stdio: "pipe" });
+    execFileSync("gh", ["repo", "fork", "swenyai/marketplace", "--clone=false"], { stdio: "pipe" });
 
     // Get the fork name
-    const forkInfo = execSync("gh api user", { stdio: "pipe", encoding: "utf-8" });
+    const forkInfo = execFileSync("gh", ["api", "user"], { stdio: "pipe", encoding: "utf-8" });
     const username = JSON.parse(forkInfo).login;
     const forkRepo = `${username}/marketplace`;
 
@@ -357,14 +357,14 @@ async function openGitHubPR(
 
     // Clone to temp, create branch, add file, push, create PR
     const tmpDir = fs.mkdtempSync(path.join(process.env.TMPDIR ?? "/tmp", "sweny-publish-"));
-    execSync(`gh repo clone ${forkRepo} ${tmpDir} -- --depth 1`, { stdio: "pipe" });
+    execFileSync("gh", ["repo", "clone", forkRepo, tmpDir, "--", "--depth", "1"], { stdio: "pipe" });
 
-    execSync(`git -C ${tmpDir} checkout -b ${branchName}`, { stdio: "pipe" });
+    execFileSync("git", ["-C", tmpDir, "checkout", "-b", branchName], { stdio: "pipe" });
 
     if (type === "workflow") {
       const dest = path.join(tmpDir, "workflows", "community", `${id}.yml`);
       fs.copyFileSync(sourcePath, dest);
-      execSync(`git -C ${tmpDir} add workflows/community/${id}.yml`, { stdio: "pipe" });
+      execFileSync("git", ["-C", tmpDir, "add", `workflows/community/${id}.yml`], { stdio: "pipe" });
     } else {
       const destDir = path.join(tmpDir, "skills", "community", id);
       fs.mkdirSync(destDir, { recursive: true });
@@ -373,14 +373,14 @@ async function openGitHubPR(
       for (const file of files) {
         fs.copyFileSync(path.join(sourcePath, file), path.join(destDir, file));
       }
-      execSync(`git -C ${tmpDir} add skills/community/${id}`, { stdio: "pipe" });
+      execFileSync("git", ["-C", tmpDir, "add", `skills/community/${id}`], { stdio: "pipe" });
     }
 
     s.message("Pushing...");
     const commitMsg = type === "workflow" ? `feat: add ${id} workflow` : `feat: add ${id} skill`;
 
-    execSync(`git -C ${tmpDir} commit -m "${commitMsg}"`, { stdio: "pipe" });
-    execSync(`git -C ${tmpDir} push origin ${branchName}`, { stdio: "pipe" });
+    execFileSync("git", ["-C", tmpDir, "commit", "-m", commitMsg], { stdio: "pipe" });
+    execFileSync("git", ["-C", tmpDir, "push", "origin", branchName], { stdio: "pipe" });
 
     s.message("Creating pull request...");
     const prBody =
@@ -388,8 +388,20 @@ async function openGitHubPR(
         ? `## New Workflow: ${id}\n\n**Author:** ${meta.author}\n**Category:** ${meta.category}\n**Tags:** ${meta.tags?.join(", ")}\n\nSubmitted via \`sweny publish\`.`
         : `## New Skill: ${id}\n\nSubmitted via \`sweny publish\`.`;
 
-    const prResult = execSync(
-      `gh pr create --repo swenyai/marketplace --head ${username}:${branchName} --title "feat: add ${type} ${id}" --body "${prBody.replace(/"/g, '\\"')}"`,
+    const prResult = execFileSync(
+      "gh",
+      [
+        "pr",
+        "create",
+        "--repo",
+        "swenyai/marketplace",
+        "--head",
+        `${username}:${branchName}`,
+        "--title",
+        `feat: add ${type} ${id}`,
+        "--body",
+        prBody,
+      ],
       { stdio: "pipe", encoding: "utf-8" },
     );
 

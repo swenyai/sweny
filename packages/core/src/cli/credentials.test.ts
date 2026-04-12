@@ -7,7 +7,7 @@ import { buildSkillMcpServers } from "../mcp.js";
 // ─────────────────────────────────────────────────────────────────────
 //
 // These tests catch env-var name drift between:
-//   - the user-facing env var name (what docs / init.ts / config.ts read)
+//   - the user-facing env var name (what docs / new.ts / config.ts read)
 //   - the canonical key the MCP wiring functions look up
 //
 // Unit tests in mcp.test.ts inject the credentials map directly. That

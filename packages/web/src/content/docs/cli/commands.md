@@ -15,8 +15,6 @@ sweny new
 
 In a fresh repo, walks you through provider inference, credential collection, and writes `.sweny.yml` + `.env` + `.sweny/workflows/<id>.yml`. In a repo that already has `.sweny.yml`, adds the new workflow non-destructively — existing config is preserved and `.env` is append-only.
 
-> `sweny init` is a deprecated alias for `sweny new`. Use `sweny new` instead.
-
 ## sweny check
 
 Verify that all configured provider credentials are valid and can connect.
@@ -335,6 +333,24 @@ sweny e2e run [file] [options]
 | `--timeout <ms>` | Timeout per workflow in milliseconds | `900000` (15 min) |
 
 Without a file argument, runs all `.yml` files in `.sweny/e2e/` sequentially. Loads `.env`, resolves template variables (`{base_url}`, `{test_email}`, `{run_id}`, etc.), and executes each workflow. Exits `0` if all pass, `1` if any fail.
+
+## sweny publish
+
+Publish a workflow or skill to the SWEny marketplace. Interactive CLI that validates your content and opens a pull request against the marketplace repository.
+
+```bash
+sweny publish
+```
+
+Walks you through:
+
+1. **Select type** — workflow or skill
+2. **Select path** — pick the file (workflow) or directory (skill) to publish
+3. **Validate** — checks schema, frontmatter, and structure
+4. **Metadata** — add tags, category, and description
+5. **Submit** — forks the marketplace repo via `gh`, creates a branch, and opens a PR
+
+Requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated. If `gh` is not available, the command saves validated files locally to `./sweny-publish/` for manual submission.
 
 ## Global options
 

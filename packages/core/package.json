@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/core",
-  "version": "0.1.51",
+  "version": "0.1.54",
   "type": "module",
   "bin": {
     "sweny": "./dist/cli/main.js"
@@ -15,7 +15,6 @@
     "./workflows": "./dist/workflows/index.js",
     "./testing": "./dist/testing.js",
     "./schema": "./dist/schema.js",
-    "./init": "./dist/cli/new.js",
     "./new": "./dist/cli/new.js"
   },
   "typesVersions": {
@@ -37,9 +36,6 @@
       ],
       "schema": [
         "dist/schema.d.ts"
-      ],
-      "init": [
-        "dist/cli/new.d.ts"
       ],
       "new": [
         "dist/cli/new.d.ts"

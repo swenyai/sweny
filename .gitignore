@@ -20,6 +20,7 @@ packages/providers/dist/
 packages/cli/dist/
 packages/studio/dist/
 packages/mcp/dist/
+packages/create-sweny/dist/
 
 # Spec site build artifacts
 spec/dist/

@@ -12,13 +12,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as p from "@clack/prompts";
 import chalk from "chalk";
-import { stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from "./templates.js";
 import { buildWorkflow, refineWorkflow } from "../workflow-builder.js";
 import { ClaudeClient } from "../claude.js";
 import { consoleLogger } from "../types.js";
 import { configuredSkills } from "../skills/custom-loader.js";
 import { DagRenderer } from "./renderer.js";
+import { runE2eInit } from "./e2e.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -137,17 +138,43 @@ export const PROVIDER_CREDENTIALS: Record<string, Credential[]> = {
 // ── Functions ──────────────────────────────────────────────────────────
 
 /**
- * Extract all unique skill IDs from a workflow template YAML string.
+ * Extract all unique skill IDs used by nodes in a workflow YAML string.
+ *
+ * Handles both inline (`skills: [github, linear]`) and block-style arrays:
+ *
+ * ```yaml
+ * skills:
+ *   - github
+ *   - linear
+ * ```
+ *
+ * Returns `[]` for malformed YAML or YAML without node skills.
  */
 export function extractSkillsFromYaml(yaml: string): string[] {
   const skills = new Set<string>();
-  // Match skills: [github, linear, sentry] patterns
-  const matches = yaml.matchAll(/skills:\s*\[([^\]]+)\]/g);
-  for (const m of matches) {
-    for (const skill of m[1].split(",")) {
-      skills.add(skill.trim());
+
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(yaml);
+  } catch {
+    return [];
+  }
+
+  if (!parsed || typeof parsed !== "object") return [];
+  const nodes = (parsed as { nodes?: unknown }).nodes;
+  if (!nodes || typeof nodes !== "object") return [];
+
+  for (const node of Object.values(nodes as Record<string, unknown>)) {
+    if (!node || typeof node !== "object") continue;
+    const nodeSkills = (node as { skills?: unknown }).skills;
+    if (!Array.isArray(nodeSkills)) continue;
+    for (const skill of nodeSkills) {
+      if (typeof skill === "string" && skill.trim().length > 0) {
+        skills.add(skill.trim());
+      }
     }
   }
+
   return [...skills];
 }
 
@@ -281,11 +308,16 @@ function inferSourceControl(gitInfo: GitRemoteInfo | null): string {
 
 /**
  * Infer issue-tracker-provider from skills in the workflow.
+ *
+ * Explicit issue-tracker skills win. Otherwise we default to `github-issues`
+ * regardless of source-control provider: we don't ship a gitlab issues
+ * provider (yet), and `github-issues` is a sensible "use the same platform
+ * as source control" default for the supported case.
  */
-function inferIssueTracker(skills: string[], sourceControl: string): string {
+function inferIssueTracker(skills: string[], _sourceControl: string): string {
   if (skills.includes("linear")) return "linear";
   if (skills.includes("jira")) return "jira";
-  return sourceControl === "github" ? "github-issues" : "github-issues";
+  return "github-issues";
 }
 
 /**
@@ -395,11 +427,21 @@ function cancel(): never {
 /**
  * Interactive workflow creation wizard — workflow-first approach.
  *
- * 1. Detect git remote (infer source control)
- * 2. Pick a workflow template (or describe your own, or e2e)
- * 3. Infer providers from workflow skills
- * 4. Collect only the credentials those skills need
- * 5. Generate files (non-destructive if .sweny.yml already exists)
+ * Flow:
+ * 1. Detect git remote (used to infer source-control provider)
+ * 2. Pick one of four branches:
+ *    - A built-in `WORKFLOW_TEMPLATES` entry → write that workflow file
+ *    - `__custom` → LLM generates a workflow from a user description
+ *    - `__e2e` → delegate to the e2e browser-testing wizard in `./e2e.ts`
+ *    - `__blank` → only set up config / credentials (no workflow file)
+ * 3. Infer observability + issue-tracker providers from the workflow's skills
+ * 4. Collect only the credentials those skills need (+ ANTHROPIC_API_KEY)
+ * 5. Write files idempotently:
+ *    - `.sweny.yml` is never overwritten — if it exists, we keep it
+ *    - `.env` is append-only (dedupes by key, incl. commented placeholders)
+ *    - Workflow files in `.sweny/workflows/` prompt before overwriting
+ *
+ * Safe to re-run in an existing project to add additional workflows.
  */
 export async function runNew(): Promise<void> {
   const cwd = process.cwd();
@@ -434,7 +476,6 @@ export async function runNew(): Promise<void> {
 
   // ── E2E short-circuit: delegate to the e2e wizard ────────────────────
   if (templateChoice === "__e2e") {
-    const { runE2eInit } = await import("./e2e.js");
     await runE2eInit({ skipIntro: true });
     return;
   }
@@ -520,12 +561,19 @@ export async function runNew(): Promise<void> {
   const envPath = path.join(cwd, ".env");
   if (fs.existsSync(envPath)) {
     const existing = fs.readFileSync(envPath, "utf-8");
-    const definedKeys = new Set(
-      existing
-        .split("\n")
-        .filter((l) => !l.trimStart().startsWith("#") && l.includes("="))
-        .map((l) => l.split("=")[0].trim()),
-    );
+    // A key is "present" if it appears as either an active `KEY=...` line
+    // or a commented `# KEY=...` placeholder. Either way appending the same
+    // key would create a duplicate the user has to reconcile.
+    const definedKeys = new Set<string>();
+    for (const rawLine of existing.split("\n")) {
+      const line = rawLine.trimStart().replace(/^#\s*/, "");
+      const eq = line.indexOf("=");
+      if (eq <= 0) continue;
+      const key = line.slice(0, eq).trim();
+      if (/^[A-Z_][A-Z0-9_]*$/i.test(key)) {
+        definedKeys.add(key);
+      }
+    }
     const newKeys: Credential[] = [];
     for (const cred of credentials) {
       if (!definedKeys.has(cred.key)) {
@@ -607,12 +655,6 @@ export async function runNew(): Promise<void> {
 
   p.outro(hasExistingConfig ? "Workflow added!" : "You're all set!");
 }
-
-/**
- * @deprecated Use `runNew` instead. Kept as a named re-export so external
- * callers (e.g. create-sweny, plugin skills) don't break during the migration.
- */
-export const runInit = runNew;
 
 // ── Custom workflow branch ────────────────────────────────────────────
 

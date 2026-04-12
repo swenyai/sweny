@@ -33,7 +33,7 @@ import * as readline from "node:readline";
 import { loadDotenv, loadConfigFile } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { runNew } from "./new.js";
-import { runE2eInit, runE2eRun } from "./e2e.js";
+import { runE2eRun } from "./e2e.js";
 import {
   registerTriageCommand,
   registerImplementCommand,
@@ -98,25 +98,8 @@ program
     await runNew();
   });
 
-// ── sweny init (deprecated alias) ─────────────────────────────────────
-program
-  .command("init", { hidden: true })
-  .description("[DEPRECATED] Use `sweny new` instead")
-  .action(async () => {
-    console.warn("\x1B[33m  ⚠  `sweny init` is deprecated. Use `sweny new` instead.\x1B[0m\n");
-    await runNew();
-  });
-
 // ── sweny e2e ────────────────────────────────────────────────────────
 const e2eCmd = program.command("e2e").description("End-to-end browser testing");
-
-e2eCmd
-  .command("init")
-  .description("[DEPRECATED] Use `sweny new` and pick 'End-to-end browser testing'")
-  .action(async () => {
-    console.warn("\x1B[33m  ⚠  `sweny e2e init` is deprecated. Use `sweny new` instead.\x1B[0m\n");
-    await runE2eInit();
-  });
 
 e2eCmd
   .command("run [file]")
