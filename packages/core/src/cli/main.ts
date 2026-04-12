@@ -59,6 +59,7 @@ import {
 import { checkProviderConnectivity } from "./check.js";
 import { registerSetupCommand } from "./setup.js";
 import { registerPublishCommand } from "./publish.js";
+import { reportToCloud } from "./cloud-report.js";
 
 // ── Stream observer (NDJSON) ────────────────────────────────────────
 /**
@@ -445,6 +446,13 @@ triageCmd.action(async (options: Record<string, unknown>) => {
       }
     }
 
+    // Report to SWEny Cloud (best-effort, never block the run)
+    try {
+      await reportToCloud(results, durationMs, config, "triage");
+    } catch {
+      // silent
+    }
+
     // Terminal bell
     if (config.bell) process.stderr.write("\x07");
 
@@ -515,6 +523,8 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   });
 
   console.log(chalk.cyan(`\n  sweny implement ${issueId}\n`));
+
+  const implRunStart = Date.now();
 
   const isTTY = process.stderr.isTTY ?? false;
   const implProgressObserver: Observer = (event: ExecutionEvent) => {
@@ -593,6 +603,14 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     } else {
       console.log(chalk.green(`\n  Implement workflow completed\n`));
     }
+
+    // Report to SWEny Cloud (best-effort)
+    try {
+      await reportToCloud(results, Date.now() - implRunStart, config, "implement");
+    } catch {
+      // silent
+    }
+
     process.exit(0);
   } catch (err) {
     console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
@@ -652,6 +670,8 @@ export async function workflowRunAction(
     }
     process.exit(0);
   }
+
+  const runStart = Date.now();
 
   const fileConfig = loadConfigFile();
   const config = parseCliInputs(options, fileConfig);
@@ -793,6 +813,13 @@ export async function workflowRunAction(
         state[nodeId] = result.status === "success" ? "success" : result.status === "failed" ? "failed" : "skipped";
       }
       process.stdout.write(toMermaidBlock(workflow, { state, trace, title: workflow.name }) + "\n");
+    }
+
+    // Report to SWEny Cloud (best-effort)
+    try {
+      await reportToCloud(results, Date.now() - runStart, config, workflow.id);
+    } catch {
+      // silent
     }
 
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
