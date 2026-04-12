@@ -27,8 +27,11 @@ import type {
   ExecutionEvent,
   ExecutionTrace,
   ExecutionResult,
+  Source,
+  ResolvedSource,
 } from "./types.js";
 import { consoleLogger } from "./types.js";
+import { resolveSources } from "./sources.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -41,6 +44,14 @@ export interface ExecuteOptions {
   observer?: Observer;
   /** Logger */
   logger?: Logger;
+  /** Working directory for resolving file Sources (default: process.cwd()) */
+  cwd?: string;
+  /** Environment variables for Source resolution auth lookup */
+  env?: NodeJS.ProcessEnv;
+  /** Host → env-var-name map for URL Source authentication */
+  fetchAuth?: Record<string, string>;
+  /** When true, URL Sources throw instead of fetching */
+  offline?: boolean;
 }
 
 /**
@@ -63,9 +74,26 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   const results = new Map<string, NodeResult>();
   const edgeCounts = new Map<string, number>(); // "from→to" → times followed
   const nodeRunCounts = new Map<string, number>(); // node → times executed
-  const trace: ExecutionTrace = { steps: [], edges: [] };
+  const trace: ExecutionTrace = { steps: [], edges: [], sources: {} };
 
   validate(workflow, skills);
+
+  // ── Source resolution phase ─────────────────────────────────────
+  // Resolve all node instructions (which are Source values) into plain text
+  // before the main execution loop. This eagerly fetches file/URL content.
+  const sourceMap: Record<string, Source> = {};
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    sourceMap[`nodes.${nodeId}.instruction`] = node.instruction;
+  }
+  const resolvedSources = await resolveSources(sourceMap, {
+    cwd: options.cwd ?? process.cwd(),
+    env: options.env ?? process.env,
+    authConfig: options.fetchAuth ?? {},
+    offline: options.offline ?? false,
+    logger,
+  });
+  trace.sources = resolvedSources;
+  safeObserve(observer, { type: "sources:resolved", sources: resolvedSources }, logger);
 
   safeObserve(observer, { type: "workflow:start", workflow: workflow.id }, logger);
 
@@ -78,7 +106,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     const iteration = (nodeRunCounts.get(currentId) ?? 0) + 1;
     nodeRunCounts.set(currentId, iteration);
 
-    safeObserve(observer, { type: "node:enter", node: currentId, instruction: node.instruction }, logger);
+    const resolvedInstruction = resolvedSources[`nodes.${currentId}.instruction`].content;
+    safeObserve(observer, { type: "node:enter", node: currentId, instruction: resolvedInstruction }, logger);
     logger.info(`→ ${node.name}`, { node: currentId });
 
     // Gather tools from the node's skills
@@ -116,7 +145,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     }));
 
     // Prepend rules and context to instruction if provided
-    const instruction = buildNodeInstruction(node.instruction, input, skillInstructions);
+    const instruction = buildNodeInstruction(resolvedInstruction, input, skillInstructions);
 
     // Run Claude on this node
     const result = await claude.run({

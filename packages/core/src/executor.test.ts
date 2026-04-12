@@ -219,8 +219,9 @@ describe("executor", () => {
     const written = JSON.parse(readFileSync(path.join(outputDir, "result.json"), "utf-8"));
     expect(written.status).toBe("done");
 
-    // Events were emitted correctly
-    expect(events[0]).toEqual({ type: "workflow:start", workflow: "test-simple" });
+    // Events were emitted correctly — sources:resolved fires before workflow:start
+    expect(events[0].type).toBe("sources:resolved");
+    expect(events[1]).toEqual({ type: "workflow:start", workflow: "test-simple" });
     const nodeEnters = events.filter((e) => e.type === "node:enter");
     expect(nodeEnters).toHaveLength(3);
     expect(events[events.length - 1].type).toBe("workflow:end");
@@ -663,5 +664,67 @@ describe("skill instruction injection", () => {
 
     expect(capturedInstruction).toContain("Caller instruction wins.");
     expect(capturedInstruction).not.toContain("Inline instruction should NOT appear.");
+  });
+});
+
+// ─── Source resolution phase tests ────────────────────────────────
+
+describe("executor: Source resolution phase", () => {
+  it("populates trace.sources with node instructions keyed by field path", async () => {
+    const workflow: Workflow = {
+      id: "src-test",
+      name: "Source test",
+      description: "",
+      entry: "only",
+      nodes: { only: { name: "Only", instruction: "Say hi", skills: [] } },
+      edges: [],
+    };
+    const skills = createSkillMap([]);
+    const claude = new MockClaude({ responses: { only: { data: {} } } });
+    const result = await execute(workflow, {}, { skills, claude });
+    expect(result.trace.sources["nodes.only.instruction"]).toBeDefined();
+    expect(result.trace.sources["nodes.only.instruction"].content).toBe("Say hi");
+    expect(result.trace.sources["nodes.only.instruction"].kind).toBe("inline");
+  });
+
+  it("emits sources:resolved event before workflow:start", async () => {
+    const workflow: Workflow = {
+      id: "evt-test",
+      name: "Event test",
+      description: "",
+      entry: "a",
+      nodes: { a: { name: "A", instruction: "Do A", skills: [] } },
+      edges: [],
+    };
+    const events: ExecutionEvent[] = [];
+    const claude = new MockClaude({ responses: { a: { data: {} } } });
+    await execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        observer: (e) => events.push(e),
+      },
+    );
+    const srcIdx = events.findIndex((e) => e.type === "sources:resolved");
+    const startIdx = events.findIndex((e) => e.type === "workflow:start");
+    expect(srcIdx).toBeGreaterThanOrEqual(0);
+    expect(startIdx).toBeGreaterThan(srcIdx);
+  });
+
+  it("resolves object-form Source (inline tag)", async () => {
+    const workflow: Workflow = {
+      id: "obj-src",
+      name: "Object source",
+      description: "",
+      entry: "only",
+      nodes: { only: { name: "Only", instruction: { inline: "Hello from inline" }, skills: [] } },
+      edges: [],
+    };
+    const claude = new MockClaude({ responses: { only: { data: {} } } });
+    const result = await execute(workflow, {}, { skills: createSkillMap([]), claude });
+    expect(result.trace.sources["nodes.only.instruction"].content).toBe("Hello from inline");
+    expect(result.trace.sources["nodes.only.instruction"].kind).toBe("inline");
   });
 });

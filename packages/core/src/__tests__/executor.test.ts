@@ -110,8 +110,9 @@ describe("executor", () => {
     // Verify file was written
     expect(existsSync(path.join(outputDir, "out.json"))).toBe(true);
 
-    // Events
-    expect(events[0]).toEqual({ type: "workflow:start", workflow: "linear" });
+    // Events — sources:resolved fires before workflow:start
+    expect(events[0].type).toBe("sources:resolved");
+    expect(events[1]).toEqual({ type: "workflow:start", workflow: "linear" });
     expect(events.filter((e) => e.type === "node:enter")).toHaveLength(3);
     expect(events[events.length - 1].type).toBe("workflow:end");
   });
