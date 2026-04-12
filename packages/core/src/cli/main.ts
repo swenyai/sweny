@@ -175,13 +175,11 @@ function buildProviderCtx(config: CliConfig, mcpServers: Record<string, unknown>
 
 /**
  * Resolve rules and context from config into structured workflow input fields.
- * Local files + inline text are resolved now; URLs are passed to the prepare node.
+ * All source kinds (inline, file, URL) are resolved eagerly.
  */
 async function resolveRulesAndContext(config: CliConfig): Promise<{
   rules: string;
   context: string;
-  rulesUrls: string[];
-  contextUrls: string[];
 }> {
   const [rulesResult, contextResult] = await Promise.all([
     loadAdditionalContext(config.rules),
@@ -191,8 +189,6 @@ async function resolveRulesAndContext(config: CliConfig): Promise<{
   return {
     rules: rulesResult.resolved,
     context: contextResult.resolved,
-    rulesUrls: rulesResult.urls,
-    contextUrls: contextResult.urls,
   };
 }
 
@@ -362,7 +358,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 
   // ── Build workflow input from config ──────────────────────
   const providerCtx = buildProviderCtx(config, mcpServers);
-  const { rules, context, rulesUrls, contextUrls } = await resolveRulesAndContext(config);
+  const { rules, context } = await resolveRulesAndContext(config);
 
   // Combine provider context + additional instructions into the context field
   const contextParts = [providerCtx];
@@ -393,8 +389,6 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     // Structured rules/context for executor (URLs resolved eagerly by loadAdditionalContext)
     rules,
     context: fullContext,
-    rulesUrls,
-    contextUrls,
   };
 
   try {
@@ -548,7 +542,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
 
   // Resolve rules/context from .sweny.yml (same as triage path)
   const providerCtx = buildProviderCtx(config, mcpServers);
-  const { rules, context, rulesUrls, contextUrls } = await resolveRulesAndContext(config);
+  const { rules, context } = await resolveRulesAndContext(config);
   const implContextParts = [providerCtx];
   if (config.additionalInstructions) implContextParts.push(config.additionalInstructions);
   const fullImplContext = [implContextParts.join("\n\n"), context].filter(Boolean).join("\n\n---\n\n");
@@ -565,8 +559,6 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     // Structured rules/context for executor
     rules,
     context: fullImplContext,
-    rulesUrls,
-    contextUrls,
   };
 
   try {
@@ -817,13 +809,6 @@ export async function workflowRunAction(
     }
 
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
-
-    // Report to SWEny Cloud (best-effort)
-    try {
-      await reportToCloud(results, 0, config, workflow.id);
-    } catch {
-      // silent
-    }
 
     if (hasFailed) {
       console.error(chalk.red(`  Workflow failed\n`));

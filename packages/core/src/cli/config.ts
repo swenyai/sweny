@@ -264,7 +264,16 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     githubToken: env.GITHUB_TOKEN || "",
     botToken: env.BOT_TOKEN || "",
 
-    cloudToken: env.SWENY_CLOUD_TOKEN || f("cloud-token") || "",
+    cloudToken: (() => {
+      const fromEnv = env.SWENY_CLOUD_TOKEN || "";
+      const fromFile = f("cloud-token") || "";
+      if (!fromEnv && fromFile) {
+        console.warn(
+          "\x1b[33m⚠ cloud-token is set in .sweny.yml — consider using SWENY_CLOUD_TOKEN env var instead to avoid accidental commits.\x1b[0m",
+        );
+      }
+      return fromEnv || fromFile;
+    })(),
 
     sourceControlProvider: (options.sourceControlProvider as string) || f("source-control-provider") || "github",
 

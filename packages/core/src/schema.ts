@@ -282,7 +282,7 @@ const sourceJsonSchema = {
     { type: "string", minLength: 1 },
     {
       type: "object",
-      properties: { inline: { type: "string" } },
+      properties: { inline: { type: "string", minLength: 1 } },
       required: ["inline"],
       additionalProperties: false,
     },
