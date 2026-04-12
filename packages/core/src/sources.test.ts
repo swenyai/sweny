@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { classifySource, sourceZ, hashContent } from "./sources.js";
+import { classifySource, sourceZ, hashContent, resolveSource } from "./sources.js";
+
+const baseCtx = () => ({
+  cwd: "/tmp",
+  env: {} as NodeJS.ProcessEnv,
+  authConfig: {} as Record<string, string>,
+  offline: false,
+  logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+});
 
 describe("classifySource", () => {
   it("classifies http(s) URLs as url", () => {
@@ -76,5 +84,25 @@ describe("hashContent", () => {
 
   it("produces different hashes for different content", () => {
     expect(hashContent("a")).not.toBe(hashContent("b"));
+  });
+});
+
+describe("resolveSource (inline)", () => {
+  it("returns the plain string for inline-classified strings", async () => {
+    const resolved = await resolveSource("Just do it.", "test.field", baseCtx());
+    expect(resolved.content).toBe("Just do it.");
+    expect(resolved.kind).toBe("inline");
+    expect(resolved.resolver).toBe("inline");
+    expect(resolved.origin).toBe("Just do it.");
+    expect(resolved.hash).toMatch(/^[0-9a-f]{16}$/);
+    expect(resolved.fetchedAt).toBeUndefined();
+    expect(resolved.sourcePath).toBeUndefined();
+  });
+
+  it("returns the inline text from tagged {inline} form", async () => {
+    const resolved = await resolveSource({ inline: "Tagged body" }, "test.field", baseCtx());
+    expect(resolved.content).toBe("Tagged body");
+    expect(resolved.kind).toBe("inline");
+    expect(resolved.resolver).toBe("inline");
   });
 });

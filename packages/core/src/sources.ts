@@ -10,6 +10,8 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
+import type { Logger } from "./types.js";
+
 export type Source = string | { inline: string } | { file: string } | { url: string; type?: string };
 
 export type SourceKind = "inline" | "file" | "url";
@@ -62,4 +64,43 @@ export function classifySource(raw: string): SourceKind {
     return "file";
   }
   return "inline";
+}
+
+export type SourceResolutionContext = {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  authConfig: Record<string, string>;
+  offline: boolean;
+  logger: Logger;
+};
+
+export async function resolveSource(
+  source: Source,
+  fieldPath: string,
+  ctx: SourceResolutionContext,
+): Promise<ResolvedSource> {
+  const [kind, value] = normalizeSource(source);
+
+  if (kind === "inline") {
+    return {
+      content: value,
+      kind: "inline",
+      origin: source,
+      resolver: "inline",
+      hash: hashContent(value),
+    };
+  }
+
+  throw new Error(`source error: ${kind} resolver not yet implemented (field: ${fieldPath})`);
+}
+
+function normalizeSource(source: Source): [SourceKind, string] {
+  if (typeof source === "string") {
+    const kind = classifySource(source);
+    return [kind, source.trim()];
+  }
+  if ("inline" in source) return ["inline", source.inline];
+  if ("file" in source) return ["file", source.file];
+  if ("url" in source) return ["url", source.url];
+  throw new Error("source error: unrecognised Source shape");
 }
