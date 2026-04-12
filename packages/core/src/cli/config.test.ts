@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateInputs } from "./config.js";
+import { validateInputs, parseCliInputs } from "./config.js";
 import type { CliConfig } from "./config.js";
 
 /**
@@ -68,6 +68,7 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
     workspaceTools: [],
     rules: [],
     context: [],
+    cloudToken: "",
     ...overrides,
   };
 }
@@ -119,5 +120,47 @@ describe("validateInputs — notification provider", () => {
     expect(err).toBeDefined();
     expect(err).toContain("github-summary");
     expect(err).toContain("console");
+  });
+});
+
+describe("parseCliInputs — cloud token", () => {
+  it("reads SWENY_CLOUD_TOKEN from env", () => {
+    const original = process.env.SWENY_CLOUD_TOKEN;
+    process.env.SWENY_CLOUD_TOKEN = "sweny_pk_test123";
+    try {
+      const config = parseCliInputs({});
+      expect(config.cloudToken).toBe("sweny_pk_test123");
+    } finally {
+      if (original === undefined) delete process.env.SWENY_CLOUD_TOKEN;
+      else process.env.SWENY_CLOUD_TOKEN = original;
+    }
+  });
+
+  it("reads cloud-token from config file", () => {
+    const config = parseCliInputs({}, { "cloud-token": "sweny_pk_fromfile" });
+    expect(config.cloudToken).toBe("sweny_pk_fromfile");
+  });
+
+  it("env var overrides config file", () => {
+    const original = process.env.SWENY_CLOUD_TOKEN;
+    process.env.SWENY_CLOUD_TOKEN = "sweny_pk_env";
+    try {
+      const config = parseCliInputs({}, { "cloud-token": "sweny_pk_file" });
+      expect(config.cloudToken).toBe("sweny_pk_env");
+    } finally {
+      if (original === undefined) delete process.env.SWENY_CLOUD_TOKEN;
+      else process.env.SWENY_CLOUD_TOKEN = original;
+    }
+  });
+
+  it("defaults to empty string", () => {
+    const original = process.env.SWENY_CLOUD_TOKEN;
+    delete process.env.SWENY_CLOUD_TOKEN;
+    try {
+      const config = parseCliInputs({});
+      expect(config.cloudToken).toBe("");
+    } finally {
+      if (original !== undefined) process.env.SWENY_CLOUD_TOKEN = original;
+    }
   });
 });
