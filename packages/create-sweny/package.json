@@ -1,0 +1,35 @@
+{
+  "name": "create-sweny",
+  "version": "0.1.51",
+  "type": "module",
+  "description": "Create a new SWEny project — thin wrapper around @sweny-ai/core init",
+  "license": "MIT",
+  "bin": {
+    "create-sweny": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc"
+  },
+  "dependencies": {
+    "@sweny-ai/core": "^0.1.51"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://sweny.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/swenyai/sweny.git",
+    "directory": "packages/create-sweny"
+  },
+  "keywords": [
+    "sweny",
+    "create",
+    "scaffold",
+    "workflow",
+    "ai"
+  ]
+}

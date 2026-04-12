@@ -14,7 +14,8 @@
     "./skills": "./dist/skills/index.js",
     "./workflows": "./dist/workflows/index.js",
     "./testing": "./dist/testing.js",
-    "./schema": "./dist/schema.js"
+    "./schema": "./dist/schema.js",
+    "./init": "./dist/cli/init.js"
   },
   "typesVersions": {
     "*": {
@@ -35,6 +36,9 @@
       ],
       "schema": [
         "dist/schema.d.ts"
+      ],
+      "init": [
+        "dist/cli/init.d.ts"
       ]
     }
   },
