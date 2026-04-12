@@ -25,3 +25,4 @@ packages/create-sweny/dist/
 # Spec site build artifacts
 spec/dist/
 spec/.astro/
+.vercel

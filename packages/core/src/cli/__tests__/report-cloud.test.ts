@@ -87,6 +87,8 @@ describe("reportToCloud", () => {
       workspaceTools: [],
       rules: [],
       context: [],
+      offline: false,
+      fetchAuth: {},
       ...overrides,
     };
   }

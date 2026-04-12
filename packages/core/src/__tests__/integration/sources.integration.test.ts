@@ -128,7 +128,7 @@ describe("integration: Source resolution across a workflow", () => {
     ).rejects.toThrow(/SOURCE_FILE_NOT_FOUND.*nodes\.bad\.instruction/);
   });
 
-  it("emits sources:resolved event with all sources before workflow:start", async () => {
+  it("emits workflow:start before sources:resolved (per spec)", async () => {
     const events: any[] = [];
     const workflow: Workflow = {
       id: "evt-test",
@@ -152,9 +152,9 @@ describe("integration: Source resolution across a workflow", () => {
     expect(srcEvt).toBeDefined();
     expect(srcEvt.sources["nodes.only.instruction"].content).toBe("Go.");
 
-    // sources:resolved should come before workflow:start
-    const srcIdx = events.findIndex((e) => e.type === "sources:resolved");
+    // workflow:start should come before sources:resolved (per spec)
     const startIdx = events.findIndex((e) => e.type === "workflow:start");
-    expect(srcIdx).toBeLessThan(startIdx);
+    const srcIdx = events.findIndex((e) => e.type === "sources:resolved");
+    expect(startIdx).toBeLessThan(srcIdx);
   });
 });
