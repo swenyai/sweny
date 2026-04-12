@@ -694,7 +694,8 @@ Claude Code plugin that exposes SWEny AI workflows as skills, MCP tools, hooks, 
 ## Install
 
 ```
-/plugin install https://github.com/swenyai/sweny
+/plugin marketplace add swenyai/sweny
+/plugin install sweny@sweny-official
 ```
 
 Or for local development:
@@ -828,7 +829,8 @@ Add a new section at the top of `packages/web/src/content/docs/advanced/mcp-plug
 The easiest way to use SWEny from Claude Code is to install the plugin:
 
 ```
-/plugin install https://github.com/swenyai/sweny
+/plugin marketplace add swenyai/sweny
+/plugin install sweny@sweny-official
 ```
 
 This gives you slash commands (`/sweny:triage`, `/sweny:implement`, etc.), MCP tools for autonomous use, and a startup hook that verifies your credentials.
@@ -845,7 +847,8 @@ Then keep the existing "Setup" section as the manual alternative under the "Manu
 Add a row to the "How you use it" section of the root `README.md` mentioning the Claude Code plugin:
 
 ```markdown
-| Claude Code plugin | `/plugin install https://github.com/swenyai/sweny` — slash commands, MCP tools, hooks |
+| Claude Code plugin | `/plugin marketplace add swenyai/sweny
+/plugin install sweny@sweny-official` — slash commands, MCP tools, hooks |
 ```
 
 And add to the Packages table:

@@ -326,7 +326,8 @@ Add `marketplace.json` at repo root:
 
 Users install with:
 ```
-/plugin install https://github.com/swenyai/sweny
+/plugin marketplace add swenyai/sweny
+/plugin install sweny@sweny-official
 ```
 
 ### Official Anthropic marketplace
