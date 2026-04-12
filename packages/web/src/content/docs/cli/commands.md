@@ -15,8 +15,6 @@ sweny new
 
 In a fresh repo, walks you through provider inference, credential collection, and writes `.sweny.yml` + `.env` + `.sweny/workflows/<id>.yml`. In a repo that already has `.sweny.yml`, adds the new workflow non-destructively — existing config is preserved and `.env` is append-only.
 
-> `sweny init` is a deprecated alias for `sweny new`. Use `sweny new` instead.
-
 ## sweny check
 
 Verify that all configured provider credentials are valid and can connect.

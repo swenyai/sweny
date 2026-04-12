@@ -656,12 +656,6 @@ export async function runNew(): Promise<void> {
   p.outro(hasExistingConfig ? "Workflow added!" : "You're all set!");
 }
 
-/**
- * @deprecated Use `runNew` instead. Kept as a named re-export so external
- * callers (e.g. create-sweny, plugin skills) don't break during the migration.
- */
-export const runInit = runNew;
-
 // ── Custom workflow branch ────────────────────────────────────────────
 
 /**

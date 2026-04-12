@@ -11,7 +11,6 @@ import {
   buildSwenyYml,
   buildEnvTemplate,
   buildActionWorkflow,
-  runInit,
   runNew,
   PROVIDER_CREDENTIALS,
   SKILL_CREDENTIALS,
@@ -864,16 +863,6 @@ describe("extractSkillsFromYaml — block-style arrays", () => {
     instruction: Review the PR
 `;
     expect(extractSkillsFromYaml(yaml)).toEqual([]);
-  });
-});
-
-// ── Deprecated alias: runInit === runNew ──────────────────────────────
-
-describe("runInit deprecation alias", () => {
-  it("re-exports runNew as runInit (identity pin)", () => {
-    // Callers using `import { runInit } from "@sweny-ai/core/new"` must
-    // continue to hit the same function during the deprecation window.
-    expect(runInit).toBe(runNew);
   });
 });
 

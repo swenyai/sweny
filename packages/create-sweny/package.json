@@ -31,5 +31,11 @@
     "scaffold",
     "workflow",
     "ai"
-  ]
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "bugs": {
+    "url": "https://github.com/swenyai/sweny/issues"
+  }
 }
