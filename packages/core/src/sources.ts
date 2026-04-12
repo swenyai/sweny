@@ -157,8 +157,26 @@ export async function resolveSource(
   throw new Error(`source error: unreachable (kind: ${kind}, field: ${fieldPath})`);
 }
 
-function buildFetchHeaders(_url: string, _ctx: SourceResolutionContext): Record<string, string> {
-  return { Accept: "text/plain, text/markdown, */*" };
+function buildFetchHeaders(url: string, ctx: SourceResolutionContext): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: "text/plain, text/markdown, */*",
+  };
+  const token = resolveFetchToken(url, ctx);
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+function resolveFetchToken(url: string, ctx: SourceResolutionContext): string | undefined {
+  let host: string;
+  try {
+    host = new URL(url).host;
+  } catch {
+    return undefined;
+  }
+  const envVar = ctx.authConfig[host];
+  if (envVar && ctx.env[envVar]) return ctx.env[envVar];
+  const fallback = ctx.env.SWENY_FETCH_TOKEN;
+  return fallback || undefined;
 }
 
 function normalizeSource(source: Source): [SourceKind, string] {

@@ -196,3 +196,47 @@ describe("resolveSource (fetch)", () => {
     await expect(resolveSource("https://x.test/auth", "x", baseCtx())).rejects.toThrow(/SOURCE_URL_AUTH_REQUIRED/);
   });
 });
+
+describe("fetch auth headers", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sets Authorization from per-host fetch.auth config", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("ok", { status: 200 }));
+    await resolveSource("https://raw.githubusercontent.com/x/y/main/z.md", "f", {
+      ...baseCtx(),
+      env: { GITHUB_TOKEN: "ghp_abc" } as NodeJS.ProcessEnv,
+      authConfig: { "raw.githubusercontent.com": "GITHUB_TOKEN" },
+    });
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: "Bearer ghp_abc",
+    });
+  });
+
+  it("falls back to SWENY_FETCH_TOKEN when no per-host match", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("ok", { status: 200 }));
+    await resolveSource("https://other.example/x", "f", {
+      ...baseCtx(),
+      env: { SWENY_FETCH_TOKEN: "global_token" } as NodeJS.ProcessEnv,
+      authConfig: { "raw.githubusercontent.com": "GITHUB_TOKEN" },
+    });
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: "Bearer global_token",
+    });
+  });
+
+  it("omits Authorization when env var is unset", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("ok", { status: 200 }));
+    await resolveSource("https://raw.githubusercontent.com/x", "f", {
+      ...baseCtx(),
+      env: {} as NodeJS.ProcessEnv,
+      authConfig: { "raw.githubusercontent.com": "GITHUB_TOKEN" },
+    });
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
+  });
+});
