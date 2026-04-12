@@ -196,7 +196,14 @@ function NodePanel({
   const [editId, setEditId] = useState(id);
   const [idError, setIdError] = useState<string | null>(null);
   const [name, setNodeName] = useState(node.name);
-  const [instruction, setInstruction] = useState(node.instruction);
+  const [instruction, setInstruction] = useState(() => {
+    const src = node.instruction;
+    if (typeof src === "string") return src;
+    if ("inline" in src) return src.inline;
+    if ("file" in src) return src.file;
+    if ("url" in src) return src.url;
+    return "";
+  });
   const [showExpanded, setShowExpanded] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
