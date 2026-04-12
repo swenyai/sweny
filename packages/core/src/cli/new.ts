@@ -404,26 +404,16 @@ function cancel(): never {
 export async function runNew(): Promise<void> {
   const cwd = process.cwd();
 
+  // ── Fresh vs existing detection ─────────────────────────────────────
+  const configPath = path.join(cwd, ".sweny.yml");
+  const hasExistingConfig = fs.existsSync(configPath);
+
   // ── Intro ───────────────────────────────────────────────────────────
-  p.intro("Let's set up SWEny");
+  p.intro(hasExistingConfig ? "Adding a new workflow" : "Let's set up SWEny");
 
   const gitInfo = detectGitRemote(cwd);
-  if (gitInfo) {
+  if (gitInfo && !hasExistingConfig) {
     p.log.info(`Detected: ${chalk.cyan(gitInfo.remote)} (${gitInfo.provider})`);
-  }
-
-  // ── Existing file check ─────────────────────────────────────────────
-  const configPath = path.join(cwd, ".sweny.yml");
-  if (fs.existsSync(configPath)) {
-    const overwrite = await p.confirm({
-      message: ".sweny.yml already exists. Overwrite?",
-      initialValue: false,
-    });
-    if (p.isCancel(overwrite)) cancel();
-    if (!overwrite) {
-      p.cancel("Setup cancelled — existing config preserved.");
-      process.exit(0);
-    }
   }
 
   // ── Step 1: Pick a workflow ─────────────────────────────────────────
@@ -472,7 +462,8 @@ export async function runNew(): Promise<void> {
   const credentials = collectCredentialsForSkills(workflowSkills);
 
   // ── Step 3: Summary + confirm ───────────────────────────────────────
-  const files = [".sweny.yml", ".env"];
+  const files: string[] = [];
+  if (!hasExistingConfig) files.push(".sweny.yml", ".env");
   if (template) files.push(`.sweny/workflows/${template.id}.yml`);
 
   const inferred: string[] = [
@@ -486,21 +477,26 @@ export async function runNew(): Promise<void> {
     inferred.push(`  Skills:          ${workflowSkills.join(", ")}`);
   }
 
-  p.log.message(
-    [
-      chalk.bold("Files to create:"),
-      ...files.map((f) => `  ${chalk.cyan(f)}`),
-      "",
-      chalk.bold("Inferred from workflow:"),
-      ...inferred,
-      "",
-      chalk.bold(`Credentials needed: ${credentials.length}`),
-      ...credentials.map((c) => `  ${chalk.dim(c.key)}`),
-    ].join("\n"),
-  );
+  const summaryLines: string[] = [];
+  if (files.length > 0) {
+    summaryLines.push(chalk.bold("Files to create:"));
+    summaryLines.push(...files.map((f) => `  ${chalk.cyan(f)}`));
+    summaryLines.push("");
+  }
+  if (hasExistingConfig) {
+    summaryLines.push(chalk.dim("(.sweny.yml already exists — keeping your existing config)"));
+    summaryLines.push("");
+  }
+  summaryLines.push(chalk.bold(hasExistingConfig ? "Workflow uses:" : "Inferred from workflow:"));
+  summaryLines.push(...inferred);
+  summaryLines.push("");
+  summaryLines.push(chalk.bold(`Credentials needed: ${credentials.length}`));
+  summaryLines.push(...credentials.map((c) => `  ${chalk.dim(c.key)}`));
+
+  p.log.message(summaryLines.join("\n"));
 
   const confirmed = await p.confirm({
-    message: "Create these files?",
+    message: hasExistingConfig ? "Add this workflow?" : "Create these files?",
     initialValue: true,
   });
   if (p.isCancel(confirmed)) cancel();
@@ -511,11 +507,16 @@ export async function runNew(): Promise<void> {
 
   // ── Step 4: Write files ─────────────────────────────────────────────
 
-  // 1. Write .sweny.yml
-  fs.writeFileSync(configPath, buildSwenyYml(sourceControl, observability, issueTracker), "utf-8");
-  p.log.success("Created .sweny.yml");
+  // 1. Write .sweny.yml (only if fresh — never clobber existing config)
+  if (!hasExistingConfig) {
+    fs.writeFileSync(configPath, buildSwenyYml(sourceControl, observability, issueTracker), "utf-8");
+    p.log.success("Created .sweny.yml");
+  } else {
+    p.log.info(".sweny.yml already exists — keeping existing config");
+  }
 
-  // 2. Write .env
+  // 2. Write .env (append-only: safe for both fresh and existing repos)
+  let addedNewKeys = false;
   const envPath = path.join(cwd, ".env");
   if (fs.existsSync(envPath)) {
     const existing = fs.readFileSync(envPath, "utf-8");
@@ -535,19 +536,35 @@ export async function runNew(): Promise<void> {
       const appendBlock = "\n" + buildEnvTemplate(newKeys);
       fs.appendFileSync(envPath, appendBlock, "utf-8");
       p.log.success(`Appended ${newKeys.length} new key(s) to .env`);
+      addedNewKeys = true;
     } else {
       p.log.info(".env already contains all required keys — skipped");
     }
   } else {
     fs.writeFileSync(envPath, buildEnvTemplate(credentials), "utf-8");
     p.log.success("Created .env");
+    addedNewKeys = true;
   }
 
-  // 3. Workflow template
+  // 3. Workflow template (prompt per-file if it already exists)
   if (template) {
     const workflowDir = path.join(cwd, ".sweny", "workflows");
     fs.mkdirSync(workflowDir, { recursive: true });
     const templatePath = path.join(workflowDir, `${template.id}.yml`);
+
+    if (fs.existsSync(templatePath)) {
+      const overwrite = await p.confirm({
+        message: `.sweny/workflows/${template.id}.yml already exists. Overwrite?`,
+        initialValue: false,
+      });
+      if (p.isCancel(overwrite)) cancel();
+      if (!overwrite) {
+        p.log.info("Workflow file preserved — no changes");
+        p.outro("Done.");
+        return;
+      }
+    }
+
     fs.writeFileSync(templatePath, template.yaml, "utf-8");
     p.log.success(`Created .sweny/workflows/${template.id}.yml`);
   }
@@ -566,18 +583,29 @@ export async function runNew(): Promise<void> {
 
   // 5. Next steps
   const credUrls = credentials.filter((c) => c.url).map((c) => `  ${c.key}: ${c.url}`);
+  const steps: string[] = [];
+  let stepNum = 1;
 
-  const steps = ["1. Fill in your API keys in .env:", ...credUrls, "", "2. Verify connectivity:", "   sweny check"];
+  if (addedNewKeys) {
+    steps.push(
+      `${stepNum++}. Fill in your API keys in .env:`,
+      ...credUrls,
+      "",
+      `${stepNum++}. Verify connectivity:`,
+      "   sweny check",
+      "",
+    );
+  }
 
   if (template) {
-    steps.push("", `3. Run your workflow:`, `   sweny workflow run .sweny/workflows/${template.id}.yml`);
+    steps.push(`${stepNum++}. Run your workflow:`, `   sweny workflow run .sweny/workflows/${template.id}.yml`);
   } else {
-    steps.push("", "3. Create your first workflow:", '   sweny workflow create "describe what you want"');
+    steps.push(`${stepNum++}. Create your first workflow:`, "   sweny new");
   }
 
   p.note(steps.join("\n"), "Next steps");
 
-  p.outro("You're all set!");
+  p.outro(hasExistingConfig ? "Workflow added!" : "You're all set!");
 }
 
 /**
