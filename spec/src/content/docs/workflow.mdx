@@ -7,14 +7,14 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 
 ## Fields
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `id` | string | REQUIRED | — | Unique identifier for this workflow. MUST be non-empty. |
-| `name` | string | REQUIRED | — | Human-readable name. MUST be non-empty. |
-| `description` | string | OPTIONAL | `""` | Purpose of the workflow. |
-| `entry` | string | REQUIRED | — | Node ID where execution begins. MUST reference a key in `nodes`. |
-| `nodes` | Record&lt;string, [Node](/nodes)&gt; | REQUIRED | — | Map of node ID to Node definition. Keys are referenced by `entry` and edge `from`/`to` fields. |
-| `edges` | [Edge](/edges)[] | REQUIRED | — | Directed edges defining execution flow and routing conditions. |
+| Field         | Type                                 | Required | Default | Description                                                                                    |
+| ------------- | ------------------------------------ | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `id`          | string                               | REQUIRED | —       | Unique identifier for this workflow. MUST be non-empty.                                        |
+| `name`        | string                               | REQUIRED | —       | Human-readable name. MUST be non-empty.                                                        |
+| `description` | string                               | OPTIONAL | `""`    | Purpose of the workflow.                                                                       |
+| `entry`       | string                               | REQUIRED | —       | Node ID where execution begins. MUST reference a key in `nodes`.                               |
+| `nodes`       | Record&lt;string, [Node](/nodes)&gt; | REQUIRED | —       | Map of node ID to Node definition. Keys are referenced by `entry` and edge `from`/`to` fields. |
+| `edges`       | [Edge](/edges)[]                     | REQUIRED | —       | Directed edges defining execution flow and routing conditions.                                 |
 
 ## Structural Validation
 
@@ -29,15 +29,15 @@ A conforming validator MUST enforce the following rules:
 
 ## Error Codes
 
-| Code | Description |
-|------|-------------|
-| `MISSING_ENTRY` | `entry` does not reference an existing node. |
+| Code                  | Description                                    |
+| --------------------- | ---------------------------------------------- |
+| `MISSING_ENTRY`       | `entry` does not reference an existing node.   |
 | `UNKNOWN_EDGE_SOURCE` | An edge `from` references a non-existent node. |
-| `UNKNOWN_EDGE_TARGET` | An edge `to` references a non-existent node. |
-| `UNREACHABLE_NODE` | A node is not reachable from `entry`. |
-| `SELF_LOOP` | A self-loop edge lacks `max_iterations`. |
-| `UNBOUNDED_CYCLE` | A cycle exists with no `max_iterations` guard. |
-| `UNKNOWN_SKILL` | A node references a skill not in the registry. |
+| `UNKNOWN_EDGE_TARGET` | An edge `to` references a non-existent node.   |
+| `UNREACHABLE_NODE`    | A node is not reachable from `entry`.          |
+| `SELF_LOOP`           | A self-loop edge lacks `max_iterations`.       |
+| `UNBOUNDED_CYCLE`     | A cycle exists with no `max_iterations` guard. |
+| `UNKNOWN_SKILL`       | A node references a skill not in the registry. |
 
 ## Minimal Example
 

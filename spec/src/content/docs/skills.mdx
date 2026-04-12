@@ -7,36 +7,36 @@ A Skill is a composable bundle of tools that provides capabilities to [Nodes](/n
 
 ## Skill Object
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `id` | string | REQUIRED | Unique identifier. Referenced by node `skills` arrays. MUST be non-empty. |
-| `name` | string | REQUIRED | Human-readable name. |
-| `description` | string | REQUIRED | What this skill provides. |
-| `category` | [SkillCategory](#skill-categories) | REQUIRED | Functional category. |
-| `config` | Record&lt;string, [ConfigField](#config-field-object)&gt; | REQUIRED | Configuration fields required by this skill. |
-| `tools` | [Tool](#tool-object)[] | REQUIRED | Tools this skill provides to nodes. |
+| Field         | Type                                                      | Required | Description                                                               |
+| ------------- | --------------------------------------------------------- | -------- | ------------------------------------------------------------------------- |
+| `id`          | string                                                    | REQUIRED | Unique identifier. Referenced by node `skills` arrays. MUST be non-empty. |
+| `name`        | string                                                    | REQUIRED | Human-readable name.                                                      |
+| `description` | string                                                    | REQUIRED | What this skill provides.                                                 |
+| `category`    | [SkillCategory](#skill-categories)                        | REQUIRED | Functional category.                                                      |
+| `config`      | Record&lt;string, [ConfigField](#config-field-object)&gt; | REQUIRED | Configuration fields required by this skill.                              |
+| `tools`       | [Tool](#tool-object)[]                                    | REQUIRED | Tools this skill provides to nodes.                                       |
 
 ## Skill Categories
 
 The `category` field classifies a skill's function. Valid values:
 
-| Category | Description |
-|----------|-------------|
-| `git` | Source control operations (commits, PRs, code search). |
-| `observability` | Error tracking, logs, metrics, incident management. |
-| `tasks` | Issue tracking and project management. |
-| `notification` | Messaging and alerting. |
-| `general` | Catch-all for skills that don't fit other categories. |
+| Category        | Description                                            |
+| --------------- | ------------------------------------------------------ |
+| `git`           | Source control operations (commits, PRs, code search). |
+| `observability` | Error tracking, logs, metrics, incident management.    |
+| `tasks`         | Issue tracking and project management.                 |
+| `notification`  | Messaging and alerting.                                |
+| `general`       | Catch-all for skills that don't fit other categories.  |
 
 ## Config Field Object
 
 Each entry in a skill's `config` map declares a configuration value the skill needs.
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `description` | string | REQUIRED | — | Human-readable description of this config field. |
-| `required` | boolean | OPTIONAL | `false` | Whether this field must be provided for the skill to function. |
-| `env` | string | OPTIONAL | — | Default environment variable name to read this value from. |
+| Field         | Type    | Required | Default | Description                                                    |
+| ------------- | ------- | -------- | ------- | -------------------------------------------------------------- |
+| `description` | string  | REQUIRED | —       | Human-readable description of this config field.               |
+| `required`    | boolean | OPTIONAL | `false` | Whether this field must be provided for the skill to function. |
+| `env`         | string  | OPTIONAL | —       | Default environment variable name to read this value from.     |
 
 ### Config Resolution
 
@@ -49,12 +49,12 @@ If a required config field cannot be resolved from either source, the skill MUST
 
 ## Tool Object
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | REQUIRED | Tool name. MUST be unique within the skill. |
-| `description` | string | REQUIRED | What this tool does. Provided to the AI model for tool selection. |
-| `input_schema` | JSON Schema object | REQUIRED | JSON Schema defining the tool's input parameters. |
-| `handler` | function | REQUIRED (runtime) | Implementation-defined. Receives validated input and a context object. Not serialized. |
+| Field          | Type               | Required           | Description                                                                            |
+| -------------- | ------------------ | ------------------ | -------------------------------------------------------------------------------------- |
+| `name`         | string             | REQUIRED           | Tool name. MUST be unique within the skill.                                            |
+| `description`  | string             | REQUIRED           | What this tool does. Provided to the AI model for tool selection.                      |
+| `input_schema` | JSON Schema object | REQUIRED           | JSON Schema defining the tool's input parameters.                                      |
+| `handler`      | function           | REQUIRED (runtime) | Implementation-defined. Receives validated input and a context object. Not serialized. |
 
 ### Tool Invocation Contract
 
@@ -69,16 +69,16 @@ A conforming executor:
 
 The specification defines the following well-known skill IDs. Implementations SHOULD support these when the required config is available. Implementations MAY support additional skills beyond this registry.
 
-| ID | Category | Required Config | Description |
-|----|----------|-----------------|-------------|
-| `github` | git | `GITHUB_TOKEN` | GitHub code search, issues, pull requests. |
-| `linear` | tasks | `LINEAR_API_KEY` | Linear issue tracking. |
-| `slack` | notification | `SLACK_WEBHOOK_URL` | Slack messaging. |
-| `sentry` | observability | `SENTRY_AUTH_TOKEN` | Sentry error tracking. |
-| `datadog` | observability | `DD_API_KEY`, `DD_APP_KEY` | Datadog logs and metrics. |
-| `betterstack` | observability | `BETTERSTACK_API_TOKEN` | BetterStack incident management. |
-| `notification` | notification | varies | Multi-channel notifications. |
-| `supabase` | general | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Supabase database operations. |
+| ID             | Category      | Required Config                             | Description                                |
+| -------------- | ------------- | ------------------------------------------- | ------------------------------------------ |
+| `github`       | git           | `GITHUB_TOKEN`                              | GitHub code search, issues, pull requests. |
+| `linear`       | tasks         | `LINEAR_API_KEY`                            | Linear issue tracking.                     |
+| `slack`        | notification  | `SLACK_WEBHOOK_URL`                         | Slack messaging.                           |
+| `sentry`       | observability | `SENTRY_AUTH_TOKEN`                         | Sentry error tracking.                     |
+| `datadog`      | observability | `DD_API_KEY`, `DD_APP_KEY`                  | Datadog logs and metrics.                  |
+| `betterstack`  | observability | `BETTERSTACK_API_TOKEN`                     | BetterStack incident management.           |
+| `notification` | notification  | varies                                      | Multi-channel notifications.               |
+| `supabase`     | general       | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Supabase database operations.              |
 
 ## Example
 
