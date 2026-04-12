@@ -406,10 +406,9 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     ...(config.observabilityCredentials.tableName && {
       betterstackTableName: config.observabilityCredentials.tableName,
     }),
-    // Structured rules/context for executor
+    // Structured rules/context for executor (URLs resolved eagerly by loadAdditionalContext)
     rules,
     context: fullContext,
-    // URLs for the prepare node to fetch at runtime
     rulesUrls,
     contextUrls,
   };

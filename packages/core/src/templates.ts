@@ -106,8 +106,9 @@ export async function resolveTemplates(
 
 /**
  * Load additional context documents (local files, URLs, or inline text).
- * Each source is loaded and wrapped with a header.
- * Returns { resolved, urls } — resolved text for files/inline, urls for agent to fetch.
+ * Each source is resolved eagerly (including URLs) and wrapped with a header.
+ * Returns { resolved, urls } — resolved text for all sources; urls is kept
+ * for API compat but will be empty since URLs now resolve eagerly.
  */
 export async function loadAdditionalContext(
   sources: string[],
@@ -116,7 +117,6 @@ export async function loadAdditionalContext(
   if (sources.length === 0) return { resolved: "", urls: [] };
 
   const parts: string[] = [];
-  const urls: string[] = [];
   const ctx = defaultCtx(cwd);
 
   for (const source of sources) {
@@ -124,26 +124,23 @@ export async function loadAdditionalContext(
     if (!trimmed) continue;
 
     const kind = classifySource(trimmed);
-    if (kind === "url") {
-      // URLs are collected for backwards compat — the prepare node / executor resolves them
-      urls.push(trimmed);
-    } else if (kind === "file") {
+    if (kind === "inline") {
+      parts.push(trimmed);
+    } else {
       try {
         const resolved = await resolveSource(trimmed, "context", ctx);
         if (resolved.content) {
-          parts.push(`### ${path.basename(trimmed)}\n\n${resolved.content}`);
+          const label = kind === "file" ? path.basename(trimmed) : trimmed;
+          parts.push(`### ${label}\n\n${resolved.content}`);
         }
       } catch (err: any) {
-        console.warn(`[templates] Failed to load context file: ${err.message}`);
+        console.warn(`[templates] Failed to load context source: ${err.message}`);
       }
-    } else {
-      // Inline text — use as-is
-      parts.push(trimmed);
     }
   }
 
   return {
     resolved: parts.length > 0 ? parts.join("\n\n---\n\n") : "",
-    urls,
+    urls: [],
   };
 }
