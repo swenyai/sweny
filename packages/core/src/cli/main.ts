@@ -436,7 +436,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     try {
       await reportToCloud(results, durationMs, config, "triage");
     } catch {
-      // silent
+      // silent — cloud reporting is optional
     }
 
     // Terminal bell
@@ -817,6 +817,14 @@ export async function workflowRunAction(
     }
 
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
+
+    // Report to SWEny Cloud (best-effort)
+    try {
+      await reportToCloud(results, 0, config, workflow.id);
+    } catch {
+      // silent
+    }
+
     if (hasFailed) {
       console.error(chalk.red(`  Workflow failed\n`));
       process.exit(1);
