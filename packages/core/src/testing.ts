@@ -63,7 +63,10 @@ export class MockClaude implements Claude {
     this.instructionMap = new Map();
     if (opts.workflow) {
       for (const [id, node] of Object.entries(opts.workflow.nodes)) {
-        this.instructionMap.set(node.instruction, id);
+        // Source can be a string or an object — only index string instructions
+        if (typeof node.instruction === "string") {
+          this.instructionMap.set(node.instruction, id);
+        }
       }
     }
   }

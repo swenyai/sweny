@@ -9,6 +9,8 @@
 
 import { z } from "zod";
 import type { Workflow } from "./types.js";
+import { sourceZ } from "./sources.js";
+export { sourceZ };
 
 // ─── Zod Schemas ─────────────────────────────────────────────────
 
@@ -74,7 +76,7 @@ export const skillZ = z
 
 export const nodeZ = z.object({
   name: z.string().min(1),
-  instruction: z.string().min(1),
+  instruction: sourceZ,
   skills: z.array(z.string()).default([]),
   output: jsonSchemaZ.optional(),
 });
@@ -275,6 +277,33 @@ export function validateWorkflow(
  * Static JSON Schema for the Workflow type.
  * Use this for external validation (YAML files, Studio import, CI checks).
  */
+const sourceJsonSchema = {
+  oneOf: [
+    { type: "string", minLength: 1 },
+    {
+      type: "object",
+      properties: { inline: { type: "string" } },
+      required: ["inline"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: { file: { type: "string", minLength: 1 } },
+      required: ["file"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        url: { type: "string", format: "uri" },
+        type: { type: "string" },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+  ],
+} as const;
+
 export const workflowJsonSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://sweny.ai/schemas/workflow.json",
@@ -283,6 +312,7 @@ export const workflowJsonSchema = {
   type: "object",
   required: ["id", "name", "nodes", "edges", "entry"],
   additionalProperties: false,
+  $defs: { Source: sourceJsonSchema },
   properties: {
     id: { type: "string", minLength: 1 },
     name: { type: "string", minLength: 1 },
@@ -296,7 +326,7 @@ export const workflowJsonSchema = {
         additionalProperties: false,
         properties: {
           name: { type: "string", minLength: 1 },
-          instruction: { type: "string", minLength: 1, description: "What Claude should do at this node" },
+          instruction: { $ref: "#/$defs/Source", description: "What Claude should do at this node" },
           skills: {
             type: "array",
             items: { type: "string" },

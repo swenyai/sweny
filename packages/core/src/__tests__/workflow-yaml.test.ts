@@ -86,7 +86,13 @@ describe("loaded workflow objects", () => {
 
       it("every node has a non-empty instruction", () => {
         for (const [nodeId, node] of Object.entries(workflow.nodes)) {
-          expect(node.instruction.length, `node "${nodeId}" has empty instruction`).toBeGreaterThan(0);
+          const instr = node.instruction;
+          if (typeof instr === "string") {
+            expect(instr.length, `node "${nodeId}" has empty instruction`).toBeGreaterThan(0);
+          } else {
+            // Object-form Source — always truthy if it exists
+            expect(instr, `node "${nodeId}" has falsy instruction`).toBeTruthy();
+          }
         }
       });
 

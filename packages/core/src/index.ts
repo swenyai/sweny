@@ -89,6 +89,7 @@ export {
   skillZ,
   mcpServerConfigZ,
   skillDefinitionZ,
+  sourceZ,
   parseWorkflow,
   validateWorkflow,
   workflowJsonSchema,
