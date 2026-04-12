@@ -69,10 +69,10 @@ SWEny also ships production-ready workflows for SRE triage. No external services
 **1. Create a config file:**
 
 ```bash
-sweny init
+sweny new
 ```
 
-This writes a starter `.sweny.yml` with all options commented out. Uncomment the local-only block:
+This runs the interactive picker and writes a starter `.sweny.yml`. Uncomment the local-only block:
 
 ```yaml
 # .sweny.yml

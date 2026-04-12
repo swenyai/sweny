@@ -5,15 +5,17 @@ description: Full reference for every SWEny CLI command, flag, and option.
 
 The `sweny` binary is provided by the `@sweny-ai/core` package. All commands auto-load `.env` and search upward for `.sweny.yml` before parsing flags.
 
-## sweny init
+## sweny new
 
-Create a starter `.sweny.yml` config file in the current directory.
+Create a new SWEny workflow. Interactive picker offering templates, AI-generated workflows, end-to-end browser testing, or a blank start.
 
 ```bash
-sweny init
+sweny new
 ```
 
-Writes a commented template with all available options. Exits with an error if `.sweny.yml` already exists.
+In a fresh repo, walks you through provider inference, credential collection, and writes `.sweny.yml` + `.env` + `.sweny/workflows/<id>.yml`. In a repo that already has `.sweny.yml`, adds the new workflow non-destructively — existing config is preserved and `.env` is append-only.
+
+> `sweny init` is a deprecated alias for `sweny new`. Use `sweny new` instead.
 
 ## sweny check
 
