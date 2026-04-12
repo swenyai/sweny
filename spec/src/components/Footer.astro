@@ -1,30 +1,16 @@
 ---
-// Shows footer links and the deployed git commit SHA.
-// VITE_GIT_COMMIT_SHA is injected by the CI build step.
 import Analytics from "@vercel/analytics/astro";
 import SpeedInsights from "@vercel/speed-insights/astro";
-
-const sha = import.meta.env.VITE_GIT_COMMIT_SHA as string | undefined;
-const repoUrl = "https://github.com/swenyai/sweny";
 ---
 
 <footer class="site-footer">
   <nav class="footer-links">
+    <a href="https://docs.sweny.ai">Docs</a>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
     <a href="https://marketplace.sweny.ai">Marketplace</a>
     <span class="footer-sep" aria-hidden="true">&middot;</span>
-    <a href={repoUrl}>GitHub</a>
-    <span class="footer-sep" aria-hidden="true">&middot;</span>
-    <a href="mailto:hello@sweny.ai">Contact</a>
+    <a href="https://github.com/swenyai/sweny">GitHub</a>
   </nav>
-  {
-    sha && (
-      <div class="deploy-sha">
-        <a href={`${repoUrl}/commit/${sha}`} rel="noopener noreferrer">
-          {sha}
-        </a>
-      </div>
-    )
-  }
 </footer>
 
 <Analytics />
@@ -44,7 +30,6 @@ const repoUrl = "https://github.com/swenyai/sweny";
     gap: 0.5rem;
     flex-wrap: wrap;
     font-size: var(--sl-text-sm);
-    padding-block-end: 0.5rem;
   }
 
   .footer-links a {
@@ -59,22 +44,5 @@ const repoUrl = "https://github.com/swenyai/sweny";
 
   .footer-sep {
     color: var(--sl-color-gray-5);
-  }
-
-  .deploy-sha {
-    font-size: var(--sl-text-xs);
-    color: var(--sl-color-gray-4);
-    padding-block: 0.25rem;
-  }
-
-  .deploy-sha a {
-    font-family: var(--sl-font-mono);
-    color: inherit;
-    text-decoration: none;
-  }
-
-  .deploy-sha a:hover {
-    color: var(--sl-color-text-accent);
-    text-decoration: underline;
   }
 </style>

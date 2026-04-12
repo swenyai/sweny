@@ -14,6 +14,9 @@ export default defineConfig({
         { icon: "github", label: "GitHub", href: "https://github.com/swenyai/sweny" },
         { icon: "external", label: "Docs", href: "https://docs.sweny.ai" },
       ],
+      components: {
+        Footer: "./src/components/Footer.astro",
+      },
       editLink: {
         baseUrl: "https://github.com/swenyai/sweny/edit/main/spec/",
       },
