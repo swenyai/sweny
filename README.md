@@ -142,6 +142,28 @@ Focused actions for common use cases:
 | [`swenyai/triage@v1`](https://github.com/swenyai/triage) | SRE triage — observability + issue tracker |
 | [`swenyai/e2e@v1`](https://github.com/swenyai/e2e) | Agentic E2E browser tests |
 
+### Cloud reporting (optional)
+
+SWEny runs locally or in CI with zero phone-home behavior by default. To enable the cloud dashboard at [cloud.sweny.ai](https://cloud.sweny.ai):
+
+1. Sign up and link your repo — the GitHub App handles this in one click.
+2. Copy the **CI reporting token** from your project page (starts with `sweny_pk_`).
+3. Add it as a GitHub Actions secret named `SWENY_CLOUD_TOKEN`.
+4. Expose it to the Action:
+
+```yaml
+- uses: swenyai/sweny@v5
+  with:
+    workflow: .sweny/workflows/security-audit.yml
+    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+  env:
+    SWENY_CLOUD_TOKEN: ${{ secrets.SWENY_CLOUD_TOKEN }}
+```
+
+Without `SWENY_CLOUD_TOKEN`, the Action performs **no network calls to sweny.ai**. No anonymous telemetry, no pings, nothing.
+
+See [PRIVACY.md](./PRIVACY.md) for the full data policy.
+
 ## Publish to the marketplace
 
 Share your workflows and skills with the community:
