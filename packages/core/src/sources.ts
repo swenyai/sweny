@@ -157,6 +157,38 @@ export async function resolveSource(
   throw new Error(`source error: unreachable (kind: ${kind}, field: ${fieldPath})`);
 }
 
+export async function resolveSources(
+  sources: Record<string, Source>,
+  ctx: SourceResolutionContext,
+): Promise<SourceResolutionMap> {
+  const cache = new Map<string, Promise<ResolvedSource>>();
+  const out: SourceResolutionMap = {};
+  const entries = Object.entries(sources);
+
+  await Promise.all(
+    entries.map(async ([fieldPath, source]) => {
+      const key = canonicalKey(source, ctx);
+      let promise = key ? cache.get(key) : undefined;
+      if (!promise) {
+        promise = resolveSource(source, fieldPath, ctx);
+        if (key) cache.set(key, promise);
+      }
+      out[fieldPath] = await promise;
+    }),
+  );
+
+  return out;
+}
+
+function canonicalKey(source: Source, ctx: SourceResolutionContext): string | null {
+  const [kind, value] = normalizeSource(source);
+  if (kind === "file") {
+    return "file:" + (path.isAbsolute(value) ? value : path.resolve(ctx.cwd, value));
+  }
+  if (kind === "url") return "url:" + value;
+  return null;
+}
+
 function buildFetchHeaders(url: string, ctx: SourceResolutionContext): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "text/plain, text/markdown, */*",

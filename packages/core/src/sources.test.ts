@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { classifySource, sourceZ, hashContent, resolveSource } from "./sources.js";
+import { classifySource, sourceZ, hashContent, resolveSource, resolveSources } from "./sources.js";
 
 const fileTmp = path.join(tmpdir(), "sweny-sources-file-test");
 
@@ -265,5 +265,56 @@ describe("offline mode", () => {
         offline: true,
       }),
     ).rejects.toThrow(/SOURCE_OFFLINE_REQUIRES_FETCH.*https:\/\/example\.com\/x.*rules\[0\]/);
+  });
+});
+
+describe("resolveSources (orchestrator)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    rmSync(fileTmp, { recursive: true, force: true });
+    mkdirSync(fileTmp, { recursive: true });
+  });
+
+  it("resolves a map of Sources and returns a parallel ResolvedSource map", async () => {
+    writeFileSync(path.join(fileTmp, "a.md"), "alpha");
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response("beta", { status: 200 }));
+
+    const out = await resolveSources(
+      {
+        "nodes.n.instruction": "Inline thing.",
+        "rules[0]": "./a.md",
+        "context[0]": "https://x.test/doc",
+      },
+      { ...baseCtx(), cwd: fileTmp },
+    );
+
+    expect(out["nodes.n.instruction"].content).toBe("Inline thing.");
+    expect(out["rules[0]"].content).toBe("alpha");
+    expect(out["context[0]"].content).toBe("beta");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches by canonical key: same URL referenced twice fetches once", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response("shared", { status: 200 }));
+    const out = await resolveSources(
+      {
+        "rules[0]": "https://x.test/shared.md",
+        "context[0]": "https://x.test/shared.md",
+      },
+      baseCtx(),
+    );
+    expect(out["rules[0]"].content).toBe("shared");
+    expect(out["context[0]"].content).toBe("shared");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the first failure's field path", async () => {
+    await expect(
+      resolveSources({ "nodes.bad.instruction": "./does-not-exist.md" }, { ...baseCtx(), cwd: fileTmp }),
+    ).rejects.toThrow(/SOURCE_FILE_NOT_FOUND.*nodes\.bad\.instruction/);
   });
 });
