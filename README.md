@@ -23,12 +23,17 @@
 ## Quickstart
 
 ```bash
-npm install -g @sweny-ai/core
-sweny init                  # pick a workflow → auto-detects providers → done
+npx create-sweny            # pick a workflow → auto-detects providers → done
 sweny workflow run .sweny/workflows/pr-review.yml
 ```
 
-Or build from scratch:
+Or if you already have `@sweny-ai/core` installed:
+
+```bash
+sweny init
+```
+
+Build a workflow from scratch:
 
 ```bash
 sweny workflow create "review PRs for security issues and code quality"
@@ -148,6 +153,7 @@ sweny publish   # interactive CLI — publish a workflow or skill
 | Package | Description |
 |---------|-------------|
 | [`@sweny-ai/core`](packages/core) | Skills, DAG executor, CLI, workflows |
+| [`create-sweny`](packages/create-sweny) | `npx create-sweny` — thin wrapper around `sweny init` |
 | [`@sweny-ai/studio`](packages/studio) | Visual DAG editor and execution monitor |
 | [`@sweny-ai/mcp`](packages/mcp) | MCP server for Claude Code / Desktop |
 
