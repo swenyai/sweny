@@ -219,9 +219,9 @@ describe("executor", () => {
     const written = JSON.parse(readFileSync(path.join(outputDir, "result.json"), "utf-8"));
     expect(written.status).toBe("done");
 
-    // Events were emitted correctly — sources:resolved fires before workflow:start
-    expect(events[0].type).toBe("sources:resolved");
-    expect(events[1]).toEqual({ type: "workflow:start", workflow: "test-simple" });
+    // Events were emitted correctly — workflow:start fires first, then sources:resolved (per spec)
+    expect(events[0]).toEqual({ type: "workflow:start", workflow: "test-simple" });
+    expect(events[1].type).toBe("sources:resolved");
     const nodeEnters = events.filter((e) => e.type === "node:enter");
     expect(nodeEnters).toHaveLength(3);
     expect(events[events.length - 1].type).toBe("workflow:end");
@@ -687,7 +687,7 @@ describe("executor: Source resolution phase", () => {
     expect(result.trace.sources["nodes.only.instruction"].kind).toBe("inline");
   });
 
-  it("emits sources:resolved event before workflow:start", async () => {
+  it("emits workflow:start before sources:resolved (per spec)", async () => {
     const workflow: Workflow = {
       id: "evt-test",
       name: "Event test",
@@ -707,10 +707,10 @@ describe("executor: Source resolution phase", () => {
         observer: (e) => events.push(e),
       },
     );
-    const srcIdx = events.findIndex((e) => e.type === "sources:resolved");
     const startIdx = events.findIndex((e) => e.type === "workflow:start");
-    expect(srcIdx).toBeGreaterThanOrEqual(0);
-    expect(startIdx).toBeGreaterThan(srcIdx);
+    const srcIdx = events.findIndex((e) => e.type === "sources:resolved");
+    expect(startIdx).toBeGreaterThanOrEqual(0);
+    expect(srcIdx).toBeGreaterThan(startIdx);
   });
 
   it("resolves object-form Source (inline tag)", async () => {

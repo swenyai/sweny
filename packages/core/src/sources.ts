@@ -18,7 +18,7 @@ export type Source = string | { inline: string } | { file: string } | { url: str
 
 export type SourceKind = "inline" | "file" | "url";
 
-const inlineTagZ = z.object({ inline: z.string() }).strict();
+const inlineTagZ = z.object({ inline: z.string().min(1) }).strict();
 const fileTagZ = z.object({ file: z.string().min(1) }).strict();
 const urlTagZ = z
   .object({
@@ -105,6 +105,8 @@ export async function resolveSource(
       }
       throw new Error(`SOURCE_FILE_READ_FAILED: could not read ${absolute} (referenced by ${fieldPath}): ${e.message}`);
     }
+    // Strip UTF-8 BOM (Windows editors emit this)
+    if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
     return {
       content,
       kind: "file",
@@ -121,20 +123,15 @@ export async function resolveSource(
         `SOURCE_OFFLINE_REQUIRES_FETCH: cannot fetch ${value} in --offline mode (referenced by ${fieldPath}).`,
       );
     }
-    const url = value;
-    const headers = buildFetchHeaders(url, ctx);
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        headers,
-        signal: AbortSignal.timeout(10_000),
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+    // Validate type field on tagged URL forms — v1 only accepts "fetch" (the default).
+    if (typeof source === "object" && "url" in source && source.type && source.type !== "fetch") {
       throw new Error(
-        `SOURCE_URL_UNREACHABLE: ${url} (referenced by ${fieldPath}): ${msg}. Pass --offline to skip URL sources.`,
+        `SOURCE_INVALID_TYPE: unknown resolver type "${source.type}" on ${value} (referenced by ${fieldPath}). v1 supports only "fetch".`,
       );
     }
+    const url = value;
+    const headers = buildFetchHeaders(url, ctx);
+    const res = await fetchWithRetry(url, headers, fieldPath);
     if (res.status === 401 || res.status === 403) {
       throw new Error(
         `SOURCE_URL_AUTH_REQUIRED: ${url} returned HTTP ${res.status} (referenced by ${fieldPath}). Configure fetch.auth in .sweny.yml or set SWENY_FETCH_TOKEN.`,
@@ -189,6 +186,34 @@ function canonicalKey(source: Source, ctx: SourceResolutionContext): string | nu
   return null;
 }
 
+const RETRY_DELAYS = [250, 1000]; // ms — exponential backoff for 5xx
+
+async function fetchWithRetry(url: string, headers: Record<string, string>, fieldPath: string): Promise<Response> {
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+    try {
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+      // Don't retry on 4xx (client errors) or 2xx (success)
+      if (res.status < 500) return res;
+      // 5xx — retry if attempts remain
+      if (attempt < RETRY_DELAYS.length) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      return res; // final 5xx — let caller handle it
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < RETRY_DELAYS.length) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+    }
+  }
+  throw new Error(
+    `SOURCE_URL_UNREACHABLE: ${url} (referenced by ${fieldPath}): ${lastError?.message ?? "unknown error"}. Pass --offline to skip URL sources.`,
+  );
+}
+
 function buildFetchHeaders(url: string, ctx: SourceResolutionContext): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "text/plain, text/markdown, */*",
@@ -217,7 +242,7 @@ function normalizeSource(source: Source): [SourceKind, string] {
     return [kind, source.trim()];
   }
   if ("inline" in source) return ["inline", source.inline];
-  if ("file" in source) return ["file", source.file];
-  if ("url" in source) return ["url", source.url];
+  if ("file" in source) return ["file", source.file.trim()];
+  if ("url" in source) return ["url", source.url.trim()];
   throw new Error("source error: unrecognised Source shape");
 }

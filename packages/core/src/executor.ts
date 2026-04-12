@@ -93,9 +93,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     logger,
   });
   trace.sources = resolvedSources;
-  safeObserve(observer, { type: "sources:resolved", sources: resolvedSources }, logger);
-
   safeObserve(observer, { type: "workflow:start", workflow: workflow.id }, logger);
+  safeObserve(observer, { type: "sources:resolved", sources: resolvedSources }, logger);
 
   let currentId: string | null = workflow.entry;
 
