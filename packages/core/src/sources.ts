@@ -6,9 +6,28 @@
  * See docs/superpowers/specs/2026-04-12-unified-source-type-design.md.
  */
 
+import { z } from "zod";
+
 export type Source = string | { inline: string } | { file: string } | { url: string; type?: string };
 
 export type SourceKind = "inline" | "file" | "url";
+
+const inlineTagZ = z.object({ inline: z.string() }).strict();
+const fileTagZ = z.object({ file: z.string().min(1) }).strict();
+const urlTagZ = z
+  .object({
+    url: z.string().url(),
+    type: z.string().optional(),
+  })
+  .strict();
+
+/**
+ * Zod schema for a Source. Accepts either a non-empty string (classified by
+ * prefix) or one of three tagged object forms: {inline}, {file}, {url,type?}.
+ * Runtime validation of `type` against the resolver registry happens later —
+ * the schema stays permissive so new resolvers slot in without schema bumps.
+ */
+export const sourceZ = z.union([z.string().min(1), inlineTagZ, fileTagZ, urlTagZ]);
 
 /**
  * Classify a plain-string Source by prefix. Throws on empty strings.

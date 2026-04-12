@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifySource } from "./sources.js";
+import { classifySource, sourceZ } from "./sources.js";
 
 describe("classifySource", () => {
   it("classifies http(s) URLs as url", () => {
@@ -21,5 +21,47 @@ describe("classifySource", () => {
   it("rejects empty strings", () => {
     expect(() => classifySource("")).toThrow(/empty/i);
     expect(() => classifySource("   ")).toThrow(/empty/i);
+  });
+});
+
+describe("sourceZ", () => {
+  it("accepts non-empty string", () => {
+    expect(sourceZ.parse("hello")).toBe("hello");
+    expect(sourceZ.parse("./x.md")).toBe("./x.md");
+    expect(sourceZ.parse("https://x/y")).toBe("https://x/y");
+  });
+
+  it("rejects empty string", () => {
+    expect(() => sourceZ.parse("")).toThrow();
+  });
+
+  it("accepts tagged inline form", () => {
+    expect(sourceZ.parse({ inline: "text" })).toEqual({ inline: "text" });
+  });
+
+  it("accepts tagged file form", () => {
+    expect(sourceZ.parse({ file: "./x.md" })).toEqual({ file: "./x.md" });
+  });
+
+  it("accepts tagged url form with and without type", () => {
+    expect(sourceZ.parse({ url: "https://x" })).toEqual({ url: "https://x" });
+    expect(sourceZ.parse({ url: "https://x", type: "fetch" })).toEqual({
+      url: "https://x",
+      type: "fetch",
+    });
+  });
+
+  it("rejects objects with multiple tag keys", () => {
+    expect(() => sourceZ.parse({ inline: "x", file: "./y" })).toThrow();
+    expect(() => sourceZ.parse({ file: "./x", url: "https://y" })).toThrow();
+  });
+
+  it("rejects objects with no tag keys", () => {
+    expect(() => sourceZ.parse({})).toThrow();
+    expect(() => sourceZ.parse({ foo: "bar" })).toThrow();
+  });
+
+  it("rejects extra keys on tagged forms", () => {
+    expect(() => sourceZ.parse({ inline: "x", extra: true })).toThrow();
   });
 });
