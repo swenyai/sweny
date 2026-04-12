@@ -116,8 +116,8 @@ describe("README", () => {
     expect(readme).not.toMatch(/^## Recipes$/m);
   });
 
-  it("has an Actions section with the multi-repo table", () => {
-    expect(readme).toMatch(/^## Actions$/m);
+  it("has a GitHub Actions section with the multi-repo table", () => {
+    expect(readme).toMatch(/^## GitHub Actions$/m);
     expect(readme).toContain("swenyai/triage@v1");
     expect(readme).toContain("swenyai/e2e@v1");
     expect(readme).toContain(`swenyai/sweny@${CURRENT_ACTION_VERSION}`);

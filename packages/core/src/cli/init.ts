@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as p from "@clack/prompts";
 import chalk from "chalk";
+import { WORKFLOW_TEMPLATES } from "./templates.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -551,7 +552,32 @@ export async function runInit(): Promise<void> {
     }
   }
 
-  // 4. .gitignore check
+  // 4. Starter workflow template
+  const wantTemplate = await p.select({
+    message: "Start with a workflow template?",
+    options: [
+      ...WORKFLOW_TEMPLATES.map((t) => ({
+        value: t.id,
+        label: t.name,
+        hint: t.description,
+      })),
+      { value: "__none", label: "Skip", hint: "I'll create my own" },
+    ],
+  });
+  if (p.isCancel(wantTemplate)) cancel();
+
+  if ((wantTemplate as string) !== "__none") {
+    const template = WORKFLOW_TEMPLATES.find((t) => t.id === wantTemplate);
+    if (template) {
+      const workflowDir = path.join(cwd, ".sweny", "workflows");
+      fs.mkdirSync(workflowDir, { recursive: true });
+      const templatePath = path.join(workflowDir, `${template.id}.yml`);
+      fs.writeFileSync(templatePath, template.yaml, "utf-8");
+      p.log.success(`Created .sweny/workflows/${template.id}.yml`);
+    }
+  }
+
+  // 5. .gitignore check
   const gitignorePath = path.join(cwd, ".gitignore");
   if (fs.existsSync(gitignorePath)) {
     const gitignore = fs.readFileSync(gitignorePath, "utf-8");
@@ -563,23 +589,26 @@ export async function runInit(): Promise<void> {
     p.log.warn(chalk.yellow("No .gitignore found — make sure .env is not committed"));
   }
 
-  // 5. Next steps
+  // 6. Next steps
   const docUrls = credentials.filter((c) => c.url).map((c) => `  ${c.key}: ${c.url}`);
 
-  p.note(
-    [
-      "1. Fill in your API keys in .env:",
-      ...docUrls,
-      "",
-      "2. Verify connectivity:",
-      "   sweny check",
-      "",
-      "3. Run a dry-run triage:",
-      "   sweny triage --dry-run",
-    ].join("\n"),
-    "Next steps",
-  );
+  const selectedTemplate =
+    (wantTemplate as string) !== "__none" ? WORKFLOW_TEMPLATES.find((t) => t.id === wantTemplate) : null;
 
-  // 6. Done
+  const steps = ["1. Fill in your API keys in .env:", ...docUrls, "", "2. Verify connectivity:", "   sweny check"];
+
+  if (selectedTemplate) {
+    steps.push(
+      "",
+      `3. Run your starter workflow:`,
+      `   sweny workflow run .sweny/workflows/${selectedTemplate.id}.yml`,
+    );
+  } else {
+    steps.push("", "3. Run a dry-run triage:", "   sweny triage --dry-run");
+  }
+
+  p.note(steps.join("\n"), "Next steps");
+
+  // 7. Done
   p.outro("You're all set!");
 }
