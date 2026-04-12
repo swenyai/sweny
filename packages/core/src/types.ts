@@ -1,8 +1,13 @@
+// ─── Source re-exports ──────────────────────────────────────────
+export type { Source, ResolvedSource, SourceKind, SourceResolutionMap } from "./sources.js";
+
 // ─── Skill System ────────────────────────────────────────────────
 //
 // A Skill is a logical group of tools that share configuration.
 // Skills replace "providers" — instead of typed interfaces that
 // step code calls, skills expose tools that Claude calls directly.
+
+import type { Source as _Source, ResolvedSource as _ResolvedSource } from "./sources.js";
 
 export type JSONSchema = Record<string, unknown>;
 
@@ -60,7 +65,7 @@ export interface Node {
   /** Human-readable name */
   name: string;
   /** What Claude should accomplish at this step */
-  instruction: string;
+  instruction: _Source;
   /** Skill IDs available at this node */
   skills: string[];
   /** Optional structured output schema */
@@ -119,6 +124,7 @@ export interface ToolCall {
 
 export type ExecutionEvent =
   | { type: "workflow:start"; workflow: string }
+  | { type: "sources:resolved"; sources: Record<string, _ResolvedSource> }
   | { type: "node:enter"; node: string; instruction: string }
   | { type: "tool:call"; node: string; tool: string; input: unknown }
   | { type: "tool:result"; node: string; tool: string; output: unknown }
@@ -160,6 +166,8 @@ export interface ExecutionTrace {
   steps: TraceStep[];
   /** Ordered list of routing decisions */
   edges: TraceEdge[];
+  /** Resolved sources keyed by field path (e.g. "nodes.gather.instruction") */
+  sources: Record<string, _ResolvedSource>;
 }
 
 /** Result of execute() — final node results + full execution trace */

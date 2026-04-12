@@ -44,6 +44,10 @@ export type {
   TraceEdge,
   ExecutionTrace,
   ExecutionResult,
+  Source,
+  ResolvedSource,
+  SourceKind,
+  SourceResolutionMap,
 } from "./types.js";
 
 export { consoleLogger } from "./types.js";
