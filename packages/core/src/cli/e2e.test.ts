@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { stringify as stringifyYaml, parse as parseYaml } from "yaml";
 import {
   resolveTemplateVars,
@@ -13,6 +13,35 @@ import {
 import type { FlowConfig, FlowType, E2eSelections } from "./e2e.js";
 import type { Workflow } from "../types.js";
 import { workflowZ, validateWorkflow } from "../schema.js";
+
+// ── Clack mock for runE2eInit tests ────────────────────────────────────
+// Hoisted spies so `vi.mock` (also hoisted) can reference them.
+const { introSpy, logStepSpy } = vi.hoisted(() => ({
+  introSpy: vi.fn(),
+  logStepSpy: vi.fn(),
+}));
+
+vi.mock("@clack/prompts", () => ({
+  intro: (...args: unknown[]) => introSpy(...args),
+  outro: vi.fn(),
+  cancel: vi.fn(),
+  log: {
+    step: (...args: unknown[]) => logStepSpy(...args),
+    info: vi.fn(),
+    success: vi.fn(),
+    warn: vi.fn(),
+    message: vi.fn(),
+  },
+  // Abort the wizard right after the intro/step decision so we can assert on spies.
+  multiselect: vi.fn(async () => {
+    throw new Error("__abort_test__");
+  }),
+  select: vi.fn(),
+  confirm: vi.fn(),
+  text: vi.fn(),
+  isCancel: vi.fn(() => false),
+  spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn(), message: vi.fn() })),
+}));
 
 describe("resolveTemplateVars", () => {
   it("replaces known variables", () => {
@@ -730,5 +759,26 @@ describe("buildFlowWorkflow — node naming conventions", () => {
       expect(node.name, `${id} has empty name`).toBeTruthy();
       expect(node.name.length, `${id} name too short`).toBeGreaterThan(2);
     }
+  });
+});
+
+describe("runE2eInit — skipIntro option", () => {
+  beforeEach(() => {
+    introSpy.mockClear();
+    logStepSpy.mockClear();
+  });
+
+  it("calls p.intro when skipIntro is not set", async () => {
+    const { runE2eInit } = await import("./e2e.js");
+    await expect(runE2eInit()).rejects.toThrow("__abort_test__");
+    expect(introSpy).toHaveBeenCalledTimes(1);
+    expect(logStepSpy).not.toHaveBeenCalledWith("Setting up end-to-end browser testing");
+  });
+
+  it("skips p.intro and logs a step when skipIntro: true", async () => {
+    const { runE2eInit } = await import("./e2e.js");
+    await expect(runE2eInit({ skipIntro: true })).rejects.toThrow("__abort_test__");
+    expect(introSpy).not.toHaveBeenCalled();
+    expect(logStepSpy).toHaveBeenCalledWith("Setting up end-to-end browser testing");
   });
 });

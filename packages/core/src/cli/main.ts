@@ -111,8 +111,9 @@ const e2eCmd = program.command("e2e").description("End-to-end browser testing");
 
 e2eCmd
   .command("init")
-  .description("Interactive wizard — generates .sweny/e2e/*.yml workflow files")
+  .description("[DEPRECATED] Use `sweny new` and pick 'End-to-end browser testing'")
   .action(async () => {
+    console.warn("\x1B[33m  ⚠  `sweny e2e init` is deprecated. Use `sweny new` instead.\x1B[0m\n");
     await runE2eInit();
   });
 

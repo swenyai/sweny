@@ -435,11 +435,19 @@ export async function runNew(): Promise<void> {
         label: t.name,
         hint: t.description,
       })),
+      { value: "__e2e", label: "End-to-end browser testing", hint: "Automated browser tests for your app" },
       { value: "__custom", label: "Describe your own", hint: "AI-generated from your description" },
       { value: "__blank", label: "Start blank", hint: "just set up config, I'll create workflows later" },
     ],
   });
   if (p.isCancel(templateChoice)) cancel();
+
+  // ── E2E short-circuit: delegate to the e2e wizard ────────────────────
+  if (templateChoice === "__e2e") {
+    const { runE2eInit } = await import("./e2e.js");
+    await runE2eInit({ skipIntro: true });
+    return;
+  }
 
   // ── Step 2: Resolve the chosen workflow ─────────────────────────────
   let template: WorkflowTemplate | undefined;

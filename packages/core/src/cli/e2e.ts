@@ -720,15 +720,24 @@ async function askFlowQuestions(type: FlowType): Promise<FlowConfig> {
 
 // ── Interactive wizard ─────────────────────────────────────────────────
 
+export interface E2eInitOptions {
+  /** Skip the `p.intro()` call — used when invoked from inside another wizard. */
+  skipIntro?: boolean;
+}
+
 /**
  * Interactive E2E setup wizard — prompts through flow selection,
  * then generates .sweny/e2e/*.yml and .env additions.
  */
-export async function runE2eInit(): Promise<void> {
+export async function runE2eInit(options: E2eInitOptions = {}): Promise<void> {
   const cwd = process.cwd();
 
   // ── Screen 1: Intro ──────────────────────────────────────────
-  p.intro("Let's set up end-to-end testing for your app");
+  if (!options.skipIntro) {
+    p.intro("Let's set up end-to-end testing for your app");
+  } else {
+    p.log.step("Setting up end-to-end browser testing");
+  }
 
   // Check for existing files
   const e2eDir = path.join(cwd, ".sweny", "e2e");
