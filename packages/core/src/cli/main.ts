@@ -58,6 +58,7 @@ import {
 } from "./output.js";
 import { checkProviderConnectivity } from "./check.js";
 import { registerSetupCommand } from "./setup.js";
+import { registerPublishCommand } from "./publish.js";
 
 // ── Stream observer (NDJSON) ────────────────────────────────────────
 /**
@@ -137,6 +138,7 @@ program
   });
 
 registerSetupCommand(program);
+registerPublishCommand(program);
 
 // ── Credential map builder ──────────────────────────────────────────
 // buildCredentialMap lives in ./credentials.ts so tests can import it
