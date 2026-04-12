@@ -7,12 +7,12 @@ Edges define the execution flow between [Nodes](/nodes) in a [Workflow](/workflo
 
 ## Fields
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `from` | string | REQUIRED | — | Source node ID. MUST reference a key in `nodes`. |
-| `to` | string | REQUIRED | — | Target node ID. MUST reference a key in `nodes`. |
-| `when` | string | OPTIONAL | — | Natural language routing condition. |
-| `max_iterations` | integer (&ge; 1) | OPTIONAL | unlimited | Maximum times this edge can be followed. |
+| Field            | Type             | Required | Default   | Description                                      |
+| ---------------- | ---------------- | -------- | --------- | ------------------------------------------------ |
+| `from`           | string           | REQUIRED | —         | Source node ID. MUST reference a key in `nodes`. |
+| `to`             | string           | REQUIRED | —         | Target node ID. MUST reference a key in `nodes`. |
+| `when`           | string           | OPTIONAL | —         | Natural language routing condition.              |
+| `max_iterations` | integer (&ge; 1) | OPTIONAL | unlimited | Maximum times this edge can be followed.         |
 
 ## Routing Algorithm
 

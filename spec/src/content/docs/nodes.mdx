@@ -7,12 +7,12 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 
 ## Fields
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `name` | string | REQUIRED | — | Display name for this node. MUST be non-empty. |
-| `instruction` | string | REQUIRED | — | Natural language instruction for the AI model. MUST be non-empty. |
-| `skills` | string[] | OPTIONAL | `[]` | Skill IDs this node has access to. |
-| `output` | JSON Schema object | OPTIONAL | — | Structured output schema for this node's result. |
+| Field         | Type               | Required | Default | Description                                                       |
+| ------------- | ------------------ | -------- | ------- | ----------------------------------------------------------------- |
+| `name`        | string             | REQUIRED | —       | Display name for this node. MUST be non-empty.                    |
+| `instruction` | string             | REQUIRED | —       | Natural language instruction for the AI model. MUST be non-empty. |
+| `skills`      | string[]           | OPTIONAL | `[]`    | Skill IDs this node has access to.                                |
+| `output`      | JSON Schema object | OPTIONAL | —       | Structured output schema for this node's result.                  |
 
 ## Instruction Semantics
 

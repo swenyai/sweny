@@ -9,9 +9,7 @@ export default defineConfig({
       title: "SWEny Workflow Specification",
       description: "A declarative format for AI agent orchestration",
       favicon: "/favicon.svg",
-      head: [
-        { tag: "meta", attrs: { property: "og:type", content: "website" } },
-      ],
+      head: [{ tag: "meta", attrs: { property: "og:type", content: "website" } }],
       social: [
         { icon: "github", label: "GitHub", href: "https://github.com/swenyai/sweny" },
         { icon: "external", label: "Docs", href: "https://docs.sweny.ai" },

@@ -41,18 +41,18 @@ For each node, a conforming executor MUST perform the following steps in order:
 
 The result of executing a single node.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `status` | `"success"` \| `"skipped"` \| `"failed"` | Outcome of this node's execution. |
-| `data` | Record&lt;string, unknown&gt; | Output data. When the node has an `output` schema, this conforms to it. Available to downstream nodes via context. |
-| `toolCalls` | [ToolCall](#toolcall)[] | Record of tools invoked during execution. |
+| Field       | Type                                     | Description                                                                                                        |
+| ----------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `status`    | `"success"` \| `"skipped"` \| `"failed"` | Outcome of this node's execution.                                                                                  |
+| `data`      | Record&lt;string, unknown&gt;            | Output data. When the node has an `output` schema, this conforms to it. Available to downstream nodes via context. |
+| `toolCalls` | [ToolCall](#toolcall)[]                  | Record of tools invoked during execution.                                                                          |
 
 ### ToolCall
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `tool` | string | Tool name. |
-| `input` | unknown | Input passed to the tool. |
+| Field    | Type    | Description                                   |
+| -------- | ------- | --------------------------------------------- |
+| `tool`   | string  | Tool name.                                    |
+| `input`  | unknown | Input passed to the tool.                     |
 | `output` | unknown | Output returned by the tool. Absent on error. |
 
 ## Dry-Run Semantics
@@ -71,16 +71,16 @@ Unconditional edges are deterministic transitions (e.g., `gather` &rarr; `invest
 
 A conforming executor MUST emit the following events during execution. Events are delivered to an observer callback. If the observer throws, the executor MUST NOT crash — observer errors are silently swallowed.
 
-| Event Type | Payload | Emitted When |
-|------------|---------|--------------|
-| `workflow:start` | `{ workflow: string }` | Before the first node executes. |
-| `node:enter` | `{ node: string, instruction: string }` | Before a node begins execution. |
-| `tool:call` | `{ node: string, tool: string, input: unknown }` | Before a tool is invoked. |
-| `tool:result` | `{ node: string, tool: string, output: unknown }` | After a tool returns. |
-| `node:progress` | `{ node: string, message: string }` | During node execution (streaming status). |
-| `node:exit` | `{ node: string, result: NodeResult }` | After a node completes. |
-| `route` | `{ from: string, to: string, reason: string }` | After an edge is selected for routing. |
-| `workflow:end` | `{ results: Record<string, NodeResult> }` | After all execution is complete. |
+| Event Type       | Payload                                           | Emitted When                              |
+| ---------------- | ------------------------------------------------- | ----------------------------------------- |
+| `workflow:start` | `{ workflow: string }`                            | Before the first node executes.           |
+| `node:enter`     | `{ node: string, instruction: string }`           | Before a node begins execution.           |
+| `tool:call`      | `{ node: string, tool: string, input: unknown }`  | Before a tool is invoked.                 |
+| `tool:result`    | `{ node: string, tool: string, output: unknown }` | After a tool returns.                     |
+| `node:progress`  | `{ node: string, message: string }`               | During node execution (streaming status). |
+| `node:exit`      | `{ node: string, result: NodeResult }`            | After a node completes.                   |
+| `route`          | `{ from: string, to: string, reason: string }`    | After an edge is selected for routing.    |
+| `workflow:end`   | `{ results: Record<string, NodeResult> }`         | After all execution is complete.          |
 
 ### Event Ordering
 
@@ -99,28 +99,28 @@ A conforming executor MUST produce an `ExecutionTrace` after execution completes
 
 ### TraceStep
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `node` | string | Node ID. |
-| `status` | `"success"` \| `"failed"` \| `"skipped"` | Outcome. |
-| `iteration` | number | 1-based iteration count. `2` means this node executed a second time (via bounded cycle). |
+| Field       | Type                                     | Description                                                                              |
+| ----------- | ---------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `node`      | string                                   | Node ID.                                                                                 |
+| `status`    | `"success"` \| `"failed"` \| `"skipped"` | Outcome.                                                                                 |
+| `iteration` | number                                   | 1-based iteration count. `2` means this node executed a second time (via bounded cycle). |
 
 ### TraceEdge
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `from` | string | Source node ID. |
-| `to` | string | Target node ID. |
+| Field    | Type   | Description                                                                                       |
+| -------- | ------ | ------------------------------------------------------------------------------------------------- |
+| `from`   | string | Source node ID.                                                                                   |
+| `to`     | string | Target node ID.                                                                                   |
 | `reason` | string | Why this edge was followed — the `when` condition text, or `"only path"` for unconditional edges. |
 
 ### ExecutionResult
 
 The return value of a workflow execution.
 
-| Field | Type | Description |
-|-------|------|-------------|
+| Field     | Type                          | Description                                                                                                  |
+| --------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `results` | Map&lt;string, NodeResult&gt; | Final result per node. If a node executed multiple times (bounded cycle), this contains the **last** result. |
-| `trace` | ExecutionTrace | Ordered record of all steps and routing decisions. |
+| `trace`   | ExecutionTrace                | Ordered record of all steps and routing decisions.                                                           |
 
 ## Error Handling
 
