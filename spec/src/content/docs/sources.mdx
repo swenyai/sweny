@@ -1,0 +1,94 @@
+---
+title: Sources
+description: The Source type — a unified shape for every content-bearing field in a workflow.
+---
+
+A **Source** is the polymorphic type used by every content-bearing field in a [Workflow](/workflow): [Node instructions](/nodes), workflow `input.rules[]` and `input.context[]`, and issue/PR templates. A Source can be inline text, a local file path, or an HTTP(S) URL.
+
+## Forms
+
+A Source takes one of four shapes:
+
+```yaml
+# 1. Inline text (ergonomic default)
+instruction: "Investigate the alert and classify each issue."
+
+# 2. Relative or absolute file path
+instruction: "./prompts/investigate.md"
+instruction: "/opt/prompts/investigate.md"
+
+# 3. HTTP(S) URL
+instruction: "https://raw.githubusercontent.com/acme/playbook/main/investigate.md"
+
+# 4. Tagged object form (escape hatch for ambiguous strings)
+instruction: { inline: "./literal/slash/is-not-a-file" }
+instruction: { file: "./prompts/investigate.md" }
+instruction: { url: "https://x.test/playbook.md", type: "fetch" }
+```
+
+The **string form** classifies by prefix:
+
+| Prefix                | Kind   | Example            |
+| --------------------- | ------ | ------------------ |
+| `./`, `../`, `/`      | file   | `./rules.md`       |
+| `http://`, `https://` | url    | `https://x/y.md`   |
+| anything else         | inline | `Just be helpful.` |
+
+## Resolution Semantics
+
+A conforming executor MUST resolve every Source in a workflow **before any node executes**. Resolution happens once per run. Results are available to the executor and recorded in the [Execution Trace](/execution#execution-trace) for auditability.
+
+- **Inline** — identity; the string is used as-is.
+- **File** — read via UTF-8 `readFile`. Relative paths resolve against the workflow file's directory or the CLI's cwd.
+- **URL** — `fetch()` with 10s timeout. Authorization header picked from `.sweny.yml` `fetch.auth` (per-host env-var-name mapping) or `SWENY_FETCH_TOKEN` (global fallback).
+
+### In-run cache
+
+Files and URLs are cached by canonical key (absolute path / full URL) for the lifetime of a single workflow run. The same URL referenced from multiple fields is fetched once.
+
+### `--offline` flag
+
+When the CLI is invoked with `--offline`:
+
+- File and inline Sources resolve normally.
+- URL Sources MUST fail the run at load time with `SOURCE_OFFLINE_REQUIRES_FETCH`.
+
+## ResolvedSource
+
+Each resolved Source produces a record:
+
+| Field        | Type                                | Description                                    |
+| ------------ | ----------------------------------- | ---------------------------------------------- |
+| `content`    | string                              | The resolved body.                             |
+| `kind`       | `"inline"` \| `"file"` \| `"url"`   | Classification.                                |
+| `origin`     | Source                              | Original YAML value.                           |
+| `resolver`   | `"inline"` \| `"file"` \| `"fetch"` | Name of the resolver that produced `content`.  |
+| `hash`       | string                              | sha256 hex, first 16 chars.                    |
+| `fetchedAt`  | string?                             | ISO 8601; present when `kind === "url"`.       |
+| `sourcePath` | string?                             | Absolute path; present when `kind === "file"`. |
+
+Traces record these under `trace.sources`, keyed by field path (e.g. `nodes.investigate.instruction`).
+
+## Error Codes
+
+| Code                            | When                                                           |
+| ------------------------------- | -------------------------------------------------------------- |
+| `SOURCE_FILE_NOT_FOUND`         | File path does not exist.                                      |
+| `SOURCE_FILE_READ_FAILED`       | Any other filesystem error.                                    |
+| `SOURCE_URL_UNREACHABLE`        | Network error, DNS failure, or timeout.                        |
+| `SOURCE_URL_HTTP_ERROR`         | Non-2xx response.                                              |
+| `SOURCE_URL_AUTH_REQUIRED`      | HTTP 401 or 403.                                               |
+| `SOURCE_OFFLINE_REQUIRES_FETCH` | URL Source encountered with `--offline`.                       |
+| `SOURCE_INVALID_TYPE`           | Tagged URL with an unknown `type` (v1 accepts only `"fetch"`). |
+| `SOURCE_INVALID_SHAPE`          | Tagged object with zero or multiple tag keys, or extra keys.   |
+
+## Fields That Use Source
+
+- `node.instruction` — [Nodes](/nodes)
+- `workflow.input.rules[]` — [Workflow](/workflow)
+- `workflow.input.context[]` — [Workflow](/workflow)
+- `issueTemplate`, `prTemplate` (executor-specific)
+
+## Fields That Stay Plain Strings
+
+Identifiers, display names, and routing logic (`workflow.id`, `node.name`, `edge.when`, `skill.id`, `node.skills[]`) remain plain strings. Routing conditions are workflow-local and tightly coupled to the DAG; they do not benefit from externalization.

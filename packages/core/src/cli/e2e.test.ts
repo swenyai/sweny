@@ -291,7 +291,12 @@ describe("buildFlowNodes", () => {
         const { nodes } = buildFlowNodes(flow);
         for (const [id, node] of Object.entries(nodes)) {
           expect(node.name, `${id}.name`).toBeTruthy();
-          expect(node.instruction.length, `${id}.instruction`).toBeGreaterThan(0);
+          const instr = node.instruction;
+          if (typeof instr === "string") {
+            expect(instr.length, `${id}.instruction`).toBeGreaterThan(0);
+          } else {
+            expect(instr, `${id}.instruction`).toBeTruthy();
+          }
           expect(Array.isArray(node.skills), `${id}.skills`).toBe(true);
         }
       });
@@ -698,7 +703,8 @@ describe("template variable completeness — all {vars} in instructions are reso
       const wf = buildFlowWorkflow(flow, "http://localhost:3000");
 
       for (const [nodeId, node] of Object.entries(wf.nodes)) {
-        const resolved = resolveTemplateVars(node.instruction, vars);
+        const instrText = typeof node.instruction === "string" ? node.instruction : "";
+        const resolved = resolveTemplateVars(instrText, vars);
         // After resolution, no {word} placeholders should remain
         // (except for agent-browser refs like @<ref> which are not {vars})
         const unresolvedVars = resolved.match(/\{(\w+)\}/g) || [];

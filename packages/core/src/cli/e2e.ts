@@ -960,9 +960,11 @@ export async function runE2eRun(options: E2eRunOptions): Promise<void> {
       continue;
     }
 
-    // Replace template vars in node instructions
+    // Replace template vars in node instructions (e2e workflows always use string instructions)
     for (const node of Object.values(workflow.nodes)) {
-      node.instruction = resolveTemplateVars(node.instruction, vars);
+      if (typeof node.instruction === "string") {
+        node.instruction = resolveTemplateVars(node.instruction, vars);
+      }
     }
 
     // Build skills + Claude client

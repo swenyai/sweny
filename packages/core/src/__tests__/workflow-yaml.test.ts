@@ -86,7 +86,13 @@ describe("loaded workflow objects", () => {
 
       it("every node has a non-empty instruction", () => {
         for (const [nodeId, node] of Object.entries(workflow.nodes)) {
-          expect(node.instruction.length, `node "${nodeId}" has empty instruction`).toBeGreaterThan(0);
+          const instr = node.instruction;
+          if (typeof instr === "string") {
+            expect(instr.length, `node "${nodeId}" has empty instruction`).toBeGreaterThan(0);
+          } else {
+            // Object-form Source — always truthy if it exists
+            expect(instr, `node "${nodeId}" has falsy instruction`).toBeTruthy();
+          }
         }
       });
 
@@ -133,12 +139,12 @@ describe("loaded workflow objects", () => {
 // ─── Triage workflow specifics ──────────────────────────────────
 
 describe("triage workflow specifics", () => {
-  it("has 8 nodes", () => {
-    expect(Object.keys(triageWorkflow.nodes).length).toBe(8);
+  it("has 7 nodes", () => {
+    expect(Object.keys(triageWorkflow.nodes).length).toBe(7);
   });
 
-  it("starts at prepare", () => {
-    expect(triageWorkflow.entry).toBe("prepare");
+  it("starts at gather", () => {
+    expect(triageWorkflow.entry).toBe("gather");
   });
 
   it("has conditional edges from investigate", () => {

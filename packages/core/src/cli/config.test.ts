@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateInputs } from "./config.js";
+import { validateInputs, parseCliInputs } from "./config.js";
 import type { CliConfig } from "./config.js";
 
 /**
@@ -68,6 +68,8 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
     workspaceTools: [],
     rules: [],
     context: [],
+    offline: false,
+    fetchAuth: {},
     ...overrides,
   };
 }
@@ -119,5 +121,23 @@ describe("validateInputs — notification provider", () => {
     expect(err).toBeDefined();
     expect(err).toContain("github-summary");
     expect(err).toContain("console");
+  });
+});
+
+describe("fetch.auth + offline parsing", () => {
+  it("parses offline flag", () => {
+    const config = parseCliInputs({ offline: true }, {});
+    expect(config.offline).toBe(true);
+  });
+
+  it("defaults fetchAuth to {} and offline to false", () => {
+    const config = parseCliInputs({}, {});
+    expect(config.offline).toBe(false);
+    expect(config.fetchAuth).toEqual({});
+  });
+
+  it("parses fetch.auth from file config", () => {
+    const config = parseCliInputs({}, { "fetch.auth": { "api.example.com": "MY_TOKEN" } as any });
+    expect(config.fetchAuth).toEqual({ "api.example.com": "MY_TOKEN" });
   });
 });

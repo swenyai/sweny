@@ -389,10 +389,9 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     ...(config.observabilityCredentials.tableName && {
       betterstackTableName: config.observabilityCredentials.tableName,
     }),
-    // Structured rules/context for executor
+    // Structured rules/context for executor (URLs resolved eagerly by loadAdditionalContext)
     rules,
     context: fullContext,
-    // URLs for the prepare node to fetch at runtime
     rulesUrls,
     contextUrls,
   };
@@ -403,6 +402,10 @@ triageCmd.action(async (options: Record<string, unknown>) => {
       claude,
       observer,
       logger: consoleLogger,
+      cwd: process.cwd(),
+      env: process.env,
+      fetchAuth: config.fetchAuth,
+      offline: config.offline,
     });
 
     const durationMs = Date.now() - runStart;
@@ -562,6 +565,10 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       claude,
       observer,
       logger: consoleLogger,
+      cwd: process.cwd(),
+      env: process.env,
+      fetchAuth: config.fetchAuth,
+      offline: config.offline,
     });
 
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
@@ -760,6 +767,10 @@ export async function workflowRunAction(
       claude,
       observer,
       logger: consoleLogger,
+      cwd: process.cwd(),
+      env: process.env,
+      fetchAuth: config.fetchAuth,
+      offline: config.offline,
     });
 
     if (isJson) {
@@ -908,9 +919,12 @@ workflowCmd
 
 workflowCmd
   .command("create <description>")
-  .description("Generate a new workflow from a natural language description")
+  .description("[DEPRECATED] Use `sweny new` and pick 'Describe your own'")
   .option("--json", "Output workflow JSON to stdout (no interactive prompt)")
   .action(async (description: string, options: { json?: boolean }) => {
+    if (!options.json) {
+      console.warn("\x1B[33m  ⚠  `sweny workflow create` is deprecated. Use `sweny new` instead.\x1B[0m\n");
+    }
     const skills = configuredSkills();
     const claude = new ClaudeClient({
       maxTurns: 3,

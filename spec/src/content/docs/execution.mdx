@@ -29,6 +29,7 @@ Context is **append-only**: each completed node adds its result to the context. 
 
 For each node, a conforming executor MUST perform the following steps in order:
 
+0. **Resolve Sources** (once, before any node executes). Every [Source](/sources) in the workflow — node instructions, input rules/context, templates — is resolved. Files are read; URLs are fetched. Results are recorded in `trace.sources`.
 1. **Resolve skills** from the node's `skills` list (see [Skills](/skills)).
 2. **Collect tools** from resolved skills that have `tools`.
 3. **Collect MCP servers** from resolved skills that have `mcp`. Wire them for this node's execution session only (node-scoped, not global).
@@ -73,16 +74,17 @@ Unconditional edges are deterministic transitions (e.g., `gather` &rarr; `invest
 
 A conforming executor MUST emit the following events during execution. Events are delivered to an observer callback. If the observer throws, the executor MUST NOT crash — observer errors are silently swallowed.
 
-| Event Type       | Payload                                           | Emitted When                              |
-| ---------------- | ------------------------------------------------- | ----------------------------------------- |
-| `workflow:start` | `{ workflow: string }`                            | Before the first node executes.           |
-| `node:enter`     | `{ node: string, instruction: string }`           | Before a node begins execution.           |
-| `tool:call`      | `{ node: string, tool: string, input: unknown }`  | Before a tool is invoked.                 |
-| `tool:result`    | `{ node: string, tool: string, output: unknown }` | After a tool returns.                     |
-| `node:progress`  | `{ node: string, message: string }`               | During node execution (streaming status). |
-| `node:exit`      | `{ node: string, result: NodeResult }`            | After a node completes.                   |
-| `route`          | `{ from: string, to: string, reason: string }`    | After an edge is selected for routing.    |
-| `workflow:end`   | `{ results: Record<string, NodeResult> }`         | After all execution is complete.          |
+| Event Type         | Payload                                           | Emitted When                                                                       |
+| ------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `workflow:start`   | `{ workflow: string }`                            | Before the first node executes.                                                    |
+| `sources:resolved` | `{ sources: Record<string, ResolvedSource> }`     | Once, after the Source resolution phase completes, before the first node executes. |
+| `node:enter`       | `{ node: string, instruction: string }`           | Before a node begins execution.                                                    |
+| `tool:call`        | `{ node: string, tool: string, input: unknown }`  | Before a tool is invoked.                                                          |
+| `tool:result`      | `{ node: string, tool: string, output: unknown }` | After a tool returns.                                                              |
+| `node:progress`    | `{ node: string, message: string }`               | During node execution (streaming status).                                          |
+| `node:exit`        | `{ node: string, result: NodeResult }`            | After a node completes.                                                            |
+| `route`            | `{ from: string, to: string, reason: string }`    | After an edge is selected for routing.                                             |
+| `workflow:end`     | `{ results: Record<string, NodeResult> }`         | After all execution is complete.                                                   |
 
 ### Event Ordering
 
@@ -93,7 +95,7 @@ For each node, events MUST be emitted in this order:
 3. `node:exit`
 4. `route` (if a next node exists)
 
-The first event of any execution is `workflow:start`. The last is `workflow:end`.
+The first event of any execution is `workflow:start`, followed by `sources:resolved`, then the first `node:enter`. The last is `workflow:end`.
 
 ## Execution Trace
 
@@ -123,6 +125,12 @@ The return value of a workflow execution.
 | --------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `results` | Map&lt;string, NodeResult&gt; | Final result per node. If a node executed multiple times (bounded cycle), this contains the **last** result. |
 | `trace`   | ExecutionTrace                | Ordered record of all steps and routing decisions.                                                           |
+
+### trace.sources
+
+Every resolved Source is recorded under `trace.sources`, keyed by field path (e.g. `nodes.investigate.instruction`, `input.rules[0]`). The value is a [ResolvedSource](/sources#resolvedsource) containing content, kind, hash, and provenance.
+
+This enables diffing runs to detect drift in externally-hosted content.
 
 ## Error Handling
 

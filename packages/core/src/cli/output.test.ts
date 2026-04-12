@@ -51,6 +51,7 @@ function fakeTrace(steps: Array<{ node: string; iteration?: number }>): Executio
       iteration: s.iteration ?? 1,
     })),
     edges: [],
+    sources: {},
   };
 }
 

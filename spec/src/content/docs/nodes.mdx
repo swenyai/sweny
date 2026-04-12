@@ -10,7 +10,7 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 | Field         | Type               | Required | Default | Description                                                       |
 | ------------- | ------------------ | -------- | ------- | ----------------------------------------------------------------- |
 | `name`        | string             | REQUIRED | —       | Display name for this node. MUST be non-empty.                    |
-| `instruction` | string             | REQUIRED | —       | Natural language instruction for the AI model. MUST be non-empty. |
+| `instruction` | [Source](/sources) | REQUIRED | —       | Natural language instruction for the AI model. MUST be non-empty. |
 | `skills`      | string[]           | OPTIONAL | `[]`    | Skill IDs this node has access to.                                |
 | `output`      | JSON Schema object | OPTIONAL | —       | Structured output schema for this node's result.                  |
 
@@ -53,6 +53,29 @@ If any skill referenced by the node has an `instruction` field, a conforming exe
 ```
 
 When rules, context, and skill instructions are all present, the assembly order is: rules first, then context, then skill instructions, then the node's base instruction, separated by `---`.
+
+### Externalizing Instructions
+
+Because `instruction` is a [Source](/sources), you can keep long or shared prompts in a file or URL and reference them by path:
+
+```yaml
+investigate:
+  name: Root Cause Analysis
+  instruction: ./prompts/investigate.md
+  skills:
+    - github
+    - linear
+```
+
+Or pin to a shared playbook repo:
+
+```yaml
+gather:
+  name: Gather Context
+  instruction: https://raw.githubusercontent.com/acme/playbook/main/gather.md
+```
+
+Files and URLs resolve **once**, eagerly, before any node runs. Resolved content is recorded in `trace.sources` with a content hash for audit.
 
 ## Skills Semantics
 

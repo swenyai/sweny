@@ -207,6 +207,7 @@ describe("toMermaid", () => {
         { from: "triage", to: "investigate", reason: "severity is high or critical" },
         { from: "investigate", to: "close", reason: "only path" },
       ],
+      sources: {},
     };
 
     const result = toMermaid(branching, { trace });
@@ -229,6 +230,7 @@ describe("toMermaid", () => {
         { from: "a", to: "a", reason: "needs retry" },
         { from: "a", to: "b", reason: "only path" },
       ],
+      sources: {},
     };
 
     const result = toMermaid(withLoop, { trace });

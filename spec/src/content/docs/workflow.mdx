@@ -17,6 +17,15 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 | `edges`       | [Edge](/edges)[]                                                 | REQUIRED | —       | Directed edges defining execution flow and routing conditions.                                 |
 | `skills`      | Record&lt;string, [SkillDefinition](#skilldefinition-object)&gt; | OPTIONAL | `{}`    | Inline skill definitions scoped to this workflow.                                              |
 
+## Runtime Input
+
+When executing a workflow, you may pass runtime input parameters. Two special fields are recognized:
+
+- **`rules`** — A [Source](/sources) containing directives that MUST be prepended to every node's instruction. Use this for organization-wide policies or run-specific constraints.
+- **`context`** — A [Source](/sources) containing background information prepended to every node's instruction. Use this for situation-specific details.
+
+Both `rules` and `context` can be inline text, file paths, or URLs. They resolve eagerly before any node executes. See [Nodes — Input Augmentation](/nodes#input-augmentation) for how they integrate into node instructions.
+
 ## Structural Validation
 
 A conforming validator MUST enforce the following rules:
