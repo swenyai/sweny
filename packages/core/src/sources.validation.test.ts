@@ -11,6 +11,7 @@
  */
 
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 
@@ -24,7 +25,7 @@ import {
   type SourceResolutionContext,
 } from "./sources.js";
 
-const fileTmp = path.join(tmpdir(), "sweny-sources-validation-test");
+const fileTmp = path.join(tmpdir(), `sweny-sources-validation-test-${randomBytes(4).toString("hex")}`);
 
 const baseCtx = (): SourceResolutionContext => ({
   cwd: "/tmp",
@@ -320,6 +321,23 @@ describe("error messages include actionable information", () => {
       expect.unreachable("should have thrown");
     } catch (e: any) {
       expect(e.message).toContain("--offline");
+    }
+  });
+
+  it("SOURCE_FILE_READ_FAILED on permission denied", async () => {
+    const unreadable = path.join(fileTmp, "unreadable.md");
+    writeFileSync(unreadable, "secret");
+    const { chmodSync } = await import("node:fs");
+    chmodSync(unreadable, 0o000);
+    try {
+      await resolveSource("./unreadable.md", "context[0]", { ...baseCtx(), cwd: fileTmp });
+      expect.unreachable("should have thrown");
+    } catch (e: any) {
+      expect(e.message).toContain("SOURCE_FILE_READ_FAILED");
+      expect(e.message).toContain("unreadable.md");
+      expect(e.message).toContain("context[0]");
+    } finally {
+      chmodSync(unreadable, 0o644);
     }
   });
 
