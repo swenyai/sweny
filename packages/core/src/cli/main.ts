@@ -924,9 +924,12 @@ workflowCmd
 
 workflowCmd
   .command("create <description>")
-  .description("Generate a new workflow from a natural language description")
+  .description("[DEPRECATED] Use `sweny new` and pick 'Describe your own'")
   .option("--json", "Output workflow JSON to stdout (no interactive prompt)")
   .action(async (description: string, options: { json?: boolean }) => {
+    if (!options.json) {
+      console.warn("\x1B[33m  ⚠  `sweny workflow create` is deprecated. Use `sweny new` instead.\x1B[0m\n");
+    }
     const skills = configuredSkills();
     const claude = new ClaudeClient({
       maxTurns: 3,

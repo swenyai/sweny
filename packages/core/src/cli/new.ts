@@ -12,7 +12,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as p from "@clack/prompts";
 import chalk from "chalk";
-import { WORKFLOW_TEMPLATES } from "./templates.js";
+import { stringify as stringifyYaml } from "yaml";
+import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from "./templates.js";
+import { buildWorkflow, refineWorkflow } from "../workflow-builder.js";
+import { ClaudeClient } from "../claude.js";
+import { consoleLogger } from "../types.js";
+import { configuredSkills } from "../skills/custom-loader.js";
+import { DagRenderer } from "./renderer.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -429,13 +435,25 @@ export async function runNew(): Promise<void> {
         label: t.name,
         hint: t.description,
       })),
+      { value: "__custom", label: "Describe your own", hint: "AI-generated from your description" },
       { value: "__blank", label: "Start blank", hint: "just set up config, I'll create workflows later" },
     ],
   });
   if (p.isCancel(templateChoice)) cancel();
 
-  // ── Step 2: Infer everything from the workflow ──────────────────────
-  const template = WORKFLOW_TEMPLATES.find((t) => t.id === templateChoice);
+  // ── Step 2: Resolve the chosen workflow ─────────────────────────────
+  let template: WorkflowTemplate | undefined;
+
+  if (templateChoice === "__custom") {
+    template = (await runCustomWorkflowBuilder()) ?? undefined;
+    if (!template) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
+  } else {
+    template = WORKFLOW_TEMPLATES.find((t) => t.id === templateChoice);
+  }
+
   const workflowSkills = template ? extractSkillsFromYaml(template.yaml) : [];
 
   const sourceControl = inferSourceControl(gitInfo);
@@ -559,3 +577,90 @@ export async function runNew(): Promise<void> {
  * callers (e.g. create-sweny, plugin skills) don't break during the migration.
  */
 export const runInit = runNew;
+
+// ── Custom workflow branch ────────────────────────────────────────────
+
+/**
+ * Prompt the user for a description, generate a workflow via the LLM,
+ * show it, and run an accept/refine loop. Returns a WorkflowTemplate-shaped
+ * object on accept, null on cancel.
+ *
+ * Consumed by the `__custom` branch of `runNew`'s picker.
+ */
+async function runCustomWorkflowBuilder(): Promise<WorkflowTemplate | null> {
+  const description = await p.text({
+    message: "Describe the workflow you want",
+    placeholder: "e.g. Review Python PRs for security issues and post a comment",
+    validate: (v) => {
+      if (!v || v.trim().length === 0) return "Description is required";
+      if (v.trim().length < 10) return "Please give a bit more detail (10+ characters)";
+      return undefined;
+    },
+  });
+  if (p.isCancel(description)) return null;
+
+  const skills = configuredSkills();
+  const claude = new ClaudeClient({
+    maxTurns: 3,
+    cwd: process.cwd(),
+    logger: consoleLogger,
+  });
+
+  const spinner = p.spinner();
+  spinner.start("Generating workflow...");
+  let workflow;
+  try {
+    workflow = await buildWorkflow(description as string, { claude, skills, logger: consoleLogger });
+    spinner.stop("Generated");
+  } catch (err) {
+    spinner.stop("Failed");
+    p.log.error(`  ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+
+  while (true) {
+    // Show the DAG
+    console.log("");
+    const renderer = new DagRenderer(workflow, { animate: false });
+    console.log(renderer.renderToString());
+    console.log("");
+
+    const action = await p.select({
+      message: "Looks good?",
+      options: [
+        { value: "accept", label: "Yes — use this workflow" },
+        { value: "refine", label: "Refine — describe what to change" },
+        { value: "cancel", label: "Cancel" },
+      ],
+    });
+    if (p.isCancel(action) || action === "cancel") return null;
+
+    if (action === "accept") {
+      return {
+        id: workflow.id,
+        name: workflow.name,
+        description: workflow.description ?? "",
+        yaml: stringifyYaml(workflow, { indent: 2, lineWidth: 120 }),
+      };
+    }
+
+    if (action === "refine") {
+      const refinement = await p.text({
+        message: "What would you like to change?",
+        validate: (v) => (v && v.trim().length > 0 ? undefined : "Refinement is required"),
+      });
+      if (p.isCancel(refinement)) return null;
+
+      const rspin = p.spinner();
+      rspin.start("Refining...");
+      try {
+        workflow = await refineWorkflow(workflow, refinement as string, { claude, skills, logger: consoleLogger });
+        rspin.stop("Refined");
+      } catch (err) {
+        rspin.stop("Failed");
+        p.log.error(`  ${err instanceof Error ? err.message : String(err)}`);
+        // Stay in the loop — let them try again
+      }
+    }
+  }
+}
