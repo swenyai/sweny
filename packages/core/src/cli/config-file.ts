@@ -127,6 +127,11 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # cache-dir: .sweny/cache
 # cache-ttl: 86400
 
+# ── Cloud reporting ───────────────────────────────────────────────────
+# Opt-in: paste your project token from cloud.sweny.ai to enable run reporting.
+# cloud-token: sweny_pk_...
+# Or set SWENY_CLOUD_TOKEN in your environment.
+
 # ── MCP servers ───────────────────────────────────────────────────────
 # Extend the coding agent with additional tools via MCP.
 # Value is a JSON object — each key is a server name you choose.
