@@ -17,7 +17,7 @@ vi.mock("../schema.js", () => ({
 const mockSelect = vi.fn();
 const mockText = vi.fn();
 const mockSpinner = vi.fn();
-const mockIsCancel = vi.fn(() => false);
+const mockIsCancel = vi.fn((_value?: unknown) => false);
 const mockIntro = vi.fn();
 const mockCancel = vi.fn();
 const mockLog = { error: vi.fn(), success: vi.fn(), info: vi.fn() };
@@ -30,7 +30,7 @@ vi.mock("@clack/prompts", () => ({
     mockSpinner(s);
     return s;
   },
-  isCancel: (value: unknown) => mockIsCancel(value),
+  isCancel: (value?: unknown) => mockIsCancel(value),
   intro: (...args: unknown[]) => mockIntro(...args),
   cancel: (...args: unknown[]) => mockCancel(...args),
   log: mockLog,
@@ -98,6 +98,7 @@ describe("validateWorkflowFile", () => {
     vi.mocked(parseWorkflow).mockReturnValue({
       id: "test",
       name: "Test",
+      description: "",
       nodes: { start: mockNode("start") },
       edges: [],
       entry: "start",
@@ -119,6 +120,7 @@ describe("validateWorkflowFile", () => {
     vi.mocked(parseWorkflow).mockReturnValue({
       id: "test",
       name: "Good",
+      description: "",
       nodes: { a: mockNode("a"), b: mockNode("b"), c: mockNode("c") },
       edges: [
         { from: "a", to: "b" },
@@ -332,7 +334,7 @@ describe("runPublish", () => {
   it("returns null when user cancels content type selection", async () => {
     const cancelSymbol = Symbol("cancel");
     mockSelect.mockResolvedValue(cancelSymbol);
-    mockIsCancel.mockImplementation((v: unknown) => v === cancelSymbol);
+    mockIsCancel.mockImplementation((v?: unknown) => v === cancelSymbol);
 
     // cancel() calls process.exit(0), which we need to catch
     const mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
@@ -366,6 +368,7 @@ describe("openGitHubPR flow", () => {
     vi.mocked(parseWorkflow).mockReturnValue({
       id: "my-wf",
       name: "My Workflow",
+      description: "",
       nodes: { a: mockNode("a") },
       edges: [],
       entry: "a",
@@ -453,6 +456,7 @@ describe("openGitHubPR flow", () => {
     vi.mocked(parseWorkflow).mockReturnValue({
       id: "my-wf",
       name: "My Workflow",
+      description: "",
       nodes: { a: mockNode("a") },
       edges: [],
       entry: "a",
@@ -545,6 +549,7 @@ describe("saveLocally flow", () => {
     vi.mocked(parseWorkflow).mockReturnValue({
       id: "local-wf",
       name: "Local",
+      description: "",
       nodes: { a: mockNode("a") },
       edges: [],
       entry: "a",
@@ -639,6 +644,7 @@ describe("gh availability detection", () => {
     vi.mocked(parseWorkflow).mockReturnValue({
       id: "wf",
       name: "WF",
+      description: "",
       nodes: { a: mockNode("a") },
       edges: [],
       entry: "a",
@@ -675,6 +681,7 @@ describe("gh availability detection", () => {
     vi.mocked(parseWorkflow).mockReturnValue({
       id: "wf",
       name: "WF",
+      description: "",
       nodes: { a: mockNode("a") },
       edges: [],
       entry: "a",
