@@ -420,6 +420,10 @@ triageCmd.action(async (options: Record<string, unknown>) => {
       claude,
       observer,
       logger: consoleLogger,
+      cwd: process.cwd(),
+      env: process.env,
+      fetchAuth: config.fetchAuth,
+      offline: config.offline,
     });
 
     const durationMs = Date.now() - runStart;
@@ -579,6 +583,10 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       claude,
       observer,
       logger: consoleLogger,
+      cwd: process.cwd(),
+      env: process.env,
+      fetchAuth: config.fetchAuth,
+      offline: config.offline,
     });
 
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
@@ -777,6 +785,10 @@ export async function workflowRunAction(
       claude,
       observer,
       logger: consoleLogger,
+      cwd: process.cwd(),
+      env: process.env,
+      fetchAuth: config.fetchAuth,
+      offline: config.offline,
     });
 
     if (isJson) {

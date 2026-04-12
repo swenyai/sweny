@@ -100,6 +100,10 @@ export interface CliConfig {
   // Each entry: URL (http/https), file path (./ or /), or inline text
   rules: string[];
   context: string[];
+
+  // Source resolution
+  offline: boolean;
+  fetchAuth: Record<string, string>;
 }
 
 export function registerTriageCommand(program: Command): Command {
@@ -176,7 +180,8 @@ export function registerTriageCommand(program: Command): Command {
     .option(
       "--workspace-tools <tools>",
       "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday)",
-    );
+    )
+    .option("--offline", "Skip URL Sources and fail fast if any are referenced", false);
 }
 
 export function parseCliInputs(options: Record<string, unknown>, fileConfig: FileConfig = {}): CliConfig {
@@ -299,7 +304,20 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
 
     rules: fa("rules"),
     context: fa("context"),
+
+    offline: Boolean(options.offline),
+    fetchAuth: parseFetchAuth(fileConfig),
   };
+}
+
+function parseFetchAuth(fileConfig: FileConfig): Record<string, string> {
+  const raw = (fileConfig as Record<string, unknown>)["fetch.auth"];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [host, envVar] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof envVar === "string" && envVar) out[host] = envVar;
+  }
+  return out;
 }
 
 /**
@@ -751,7 +769,8 @@ export function registerImplementCommand(program: Command): Command {
       "review",
     )
     .option("--additional-instructions <text>", "Extra instructions for the coding agent")
-    .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)", false);
+    .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)", false)
+    .option("--offline", "Skip URL Sources and fail fast if any are referenced", false);
 }
 
 /**

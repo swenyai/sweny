@@ -36,8 +36,8 @@ export function loadDotenv(cwd: string = process.cwd()): void {
   }
 }
 
-/** Parsed config file — flat strings for scalar fields, arrays for list fields. */
-export type FileConfig = Record<string, string | string[]>;
+/** Parsed config file — flat strings for scalar fields, arrays for list fields, objects for nested blocks. */
+export type FileConfig = Record<string, string | string[] | Record<string, unknown>>;
 
 /**
  * Search upward from `cwd` for `.sweny.yml` and parse it.
@@ -68,6 +68,16 @@ export function loadConfigFile(cwd: string = process.cwd()): FileConfig {
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (Array.isArray(value)) {
       config[key] = value.map(String);
+    } else if (value && typeof value === "object") {
+      for (const [subKey, subVal] of Object.entries(value as Record<string, unknown>)) {
+        if (subVal && typeof subVal === "object" && !Array.isArray(subVal)) {
+          config[`${key}.${subKey}`] = subVal as Record<string, unknown>;
+        } else if (Array.isArray(subVal)) {
+          config[`${key}.${subKey}`] = subVal.map(String);
+        } else if (subVal != null && subVal !== "") {
+          config[`${key}.${subKey}`] = String(subVal);
+        }
+      }
     } else if (value != null && value !== "") {
       config[key] = String(value);
     }
