@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { classifySource, sourceZ, hashContent, resolveSource } from "./sources.js";
 
 const fileTmp = path.join(tmpdir(), "sweny-sources-file-test");
@@ -155,5 +155,44 @@ describe("resolveSource (file)", () => {
         cwd: fileTmp,
       }),
     ).rejects.toThrow(/SOURCE_FILE_NOT_FOUND.*nodes\.investigate\.instruction/);
+  });
+});
+
+describe("resolveSource (fetch)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("fetches URL content via plain string", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response("# Shared rules\n\nBe careful.", {
+        status: 200,
+        headers: { "content-type": "text/markdown" },
+      });
+    });
+    const resolved = await resolveSource("https://example.com/rules.md", "rules[0]", baseCtx());
+    expect(resolved.content).toBe("# Shared rules\n\nBe careful.");
+    expect(resolved.kind).toBe("url");
+    expect(resolved.resolver).toBe("fetch");
+    expect(resolved.fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("fetches via tagged {url} form", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("body", { status: 200 }));
+    const resolved = await resolveSource({ url: "https://x.test/y", type: "fetch" }, "x", baseCtx());
+    expect(resolved.content).toBe("body");
+  });
+
+  it("throws SOURCE_URL_HTTP_ERROR on 4xx", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("nope", { status: 404 }));
+    await expect(resolveSource("https://x.test/missing", "nodes.n.instruction", baseCtx())).rejects.toThrow(
+      /SOURCE_URL_HTTP_ERROR.*404.*nodes\.n\.instruction/,
+    );
+  });
+
+  it("throws SOURCE_URL_AUTH_REQUIRED on 401", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("denied", { status: 401 }));
+    await expect(resolveSource("https://x.test/auth", "x", baseCtx())).rejects.toThrow(/SOURCE_URL_AUTH_REQUIRED/);
   });
 });

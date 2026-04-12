@@ -115,7 +115,50 @@ export async function resolveSource(
     };
   }
 
-  throw new Error(`source error: ${kind} resolver not yet implemented (field: ${fieldPath})`);
+  if (kind === "url") {
+    if (ctx.offline) {
+      throw new Error(
+        `SOURCE_OFFLINE_REQUIRES_FETCH: cannot fetch ${value} in --offline mode (referenced by ${fieldPath}).`,
+      );
+    }
+    const url = value;
+    const headers = buildFetchHeaders(url, ctx);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `SOURCE_URL_UNREACHABLE: ${url} (referenced by ${fieldPath}): ${msg}. Pass --offline to skip URL sources.`,
+      );
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(
+        `SOURCE_URL_AUTH_REQUIRED: ${url} returned HTTP ${res.status} (referenced by ${fieldPath}). Configure fetch.auth in .sweny.yml or set SWENY_FETCH_TOKEN.`,
+      );
+    }
+    if (!res.ok) {
+      throw new Error(`SOURCE_URL_HTTP_ERROR: ${url} returned HTTP ${res.status} (referenced by ${fieldPath}).`);
+    }
+    const content = await res.text();
+    return {
+      content,
+      kind: "url",
+      origin: source,
+      resolver: "fetch",
+      hash: hashContent(content),
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  throw new Error(`source error: unreachable (kind: ${kind}, field: ${fieldPath})`);
+}
+
+function buildFetchHeaders(_url: string, _ctx: SourceResolutionContext): Record<string, string> {
+  return { Accept: "text/plain, text/markdown, */*" };
 }
 
 function normalizeSource(source: Source): [SourceKind, string] {
