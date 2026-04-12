@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifySource, sourceZ } from "./sources.js";
+import { classifySource, sourceZ, hashContent } from "./sources.js";
 
 describe("classifySource", () => {
   it("classifies http(s) URLs as url", () => {
@@ -63,5 +63,18 @@ describe("sourceZ", () => {
 
   it("rejects extra keys on tagged forms", () => {
     expect(() => sourceZ.parse({ inline: "x", extra: true })).toThrow();
+  });
+});
+
+describe("hashContent", () => {
+  it("produces stable 16-char hex for same content", () => {
+    const a = hashContent("hello world");
+    const b = hashContent("hello world");
+    expect(a).toBe(b);
+    expect(a).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("produces different hashes for different content", () => {
+    expect(hashContent("a")).not.toBe(hashContent("b"));
   });
 });

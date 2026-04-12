@@ -6,6 +6,8 @@
  * See docs/superpowers/specs/2026-04-12-unified-source-type-design.md.
  */
 
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 export type Source = string | { inline: string } | { file: string } | { url: string; type?: string };
@@ -32,6 +34,22 @@ export const sourceZ = z.union([z.string().min(1), inlineTagZ, fileTagZ, urlTagZ
 /**
  * Classify a plain-string Source by prefix. Throws on empty strings.
  */
+export type ResolvedSource = {
+  content: string;
+  kind: SourceKind;
+  origin: Source;
+  resolver: "inline" | "file" | "fetch";
+  hash: string;
+  fetchedAt?: string;
+  sourcePath?: string;
+};
+
+export type SourceResolutionMap = Record<string, ResolvedSource>;
+
+export function hashContent(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex").slice(0, 16);
+}
+
 export function classifySource(raw: string): SourceKind {
   const trimmed = raw.trim();
   if (!trimmed) {
