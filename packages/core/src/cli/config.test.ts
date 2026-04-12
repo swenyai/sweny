@@ -70,6 +70,7 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
     context: [],
     offline: false,
     fetchAuth: {},
+    cloudToken: "",
     ...overrides,
   };
 }
@@ -139,5 +140,47 @@ describe("fetch.auth + offline parsing", () => {
   it("parses fetch.auth from file config", () => {
     const config = parseCliInputs({}, { "fetch.auth": { "api.example.com": "MY_TOKEN" } as any });
     expect(config.fetchAuth).toEqual({ "api.example.com": "MY_TOKEN" });
+  });
+});
+
+describe("parseCliInputs — cloud token", () => {
+  it("reads SWENY_CLOUD_TOKEN from env", () => {
+    const original = process.env.SWENY_CLOUD_TOKEN;
+    process.env.SWENY_CLOUD_TOKEN = "sweny_pk_test123";
+    try {
+      const config = parseCliInputs({});
+      expect(config.cloudToken).toBe("sweny_pk_test123");
+    } finally {
+      if (original === undefined) delete process.env.SWENY_CLOUD_TOKEN;
+      else process.env.SWENY_CLOUD_TOKEN = original;
+    }
+  });
+
+  it("reads cloud-token from config file", () => {
+    const config = parseCliInputs({}, { "cloud-token": "sweny_pk_fromfile" });
+    expect(config.cloudToken).toBe("sweny_pk_fromfile");
+  });
+
+  it("env var overrides config file", () => {
+    const original = process.env.SWENY_CLOUD_TOKEN;
+    process.env.SWENY_CLOUD_TOKEN = "sweny_pk_env";
+    try {
+      const config = parseCliInputs({}, { "cloud-token": "sweny_pk_file" });
+      expect(config.cloudToken).toBe("sweny_pk_env");
+    } finally {
+      if (original === undefined) delete process.env.SWENY_CLOUD_TOKEN;
+      else process.env.SWENY_CLOUD_TOKEN = original;
+    }
+  });
+
+  it("defaults to empty string", () => {
+    const original = process.env.SWENY_CLOUD_TOKEN;
+    delete process.env.SWENY_CLOUD_TOKEN;
+    try {
+      const config = parseCliInputs({});
+      expect(config.cloudToken).toBe("");
+    } finally {
+      if (original !== undefined) process.env.SWENY_CLOUD_TOKEN = original;
+    }
   });
 });

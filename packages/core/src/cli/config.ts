@@ -51,6 +51,9 @@ export interface CliConfig {
   githubToken: string;
   botToken: string;
 
+  // Cloud reporting (opt-in)
+  cloudToken: string;
+
   // Source control
   sourceControlProvider: string;
 
@@ -260,6 +263,8 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     serviceMapPath: (options.serviceMapPath as string) || f("service-map-path") || ".github/service-map.yml",
     githubToken: env.GITHUB_TOKEN || "",
     botToken: env.BOT_TOKEN || "",
+
+    cloudToken: env.SWENY_CLOUD_TOKEN || f("cloud-token") || "",
 
     sourceControlProvider: (options.sourceControlProvider as string) || f("source-control-provider") || "github",
 
