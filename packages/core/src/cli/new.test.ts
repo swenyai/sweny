@@ -13,8 +13,8 @@ import {
   buildActionWorkflow,
   PROVIDER_CREDENTIALS,
   SKILL_CREDENTIALS,
-} from "./init.js";
-import type { InitSelections } from "./init.js";
+} from "./new.js";
+import type { InitSelections } from "./new.js";
 
 // ── detectGitRemote ────────────────────────────────────────────────────
 

@@ -32,7 +32,7 @@ import * as readline from "node:readline";
 
 import { loadDotenv, loadConfigFile } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
-import { runInit } from "./init.js";
+import { runNew } from "./new.js";
 import { runE2eInit, runE2eRun } from "./e2e.js";
 import {
   registerTriageCommand,
@@ -89,12 +89,21 @@ const program = new Command()
   .description("SWEny CLI \u2014 autonomous engineering workflows")
   .version(version);
 
-// ── sweny init ────────────────────────────────────────────────────────
+// ── sweny new ─────────────────────────────────────────────────────────
 program
-  .command("init")
-  .description("Interactive setup wizard — creates .sweny.yml, .env template, and optional GitHub Action")
+  .command("new")
+  .description("Create a new workflow — interactive picker or direct template")
   .action(async () => {
-    await runInit();
+    await runNew();
+  });
+
+// ── sweny init (deprecated alias) ─────────────────────────────────────
+program
+  .command("init", { hidden: true })
+  .description("[DEPRECATED] Use `sweny new` instead")
+  .action(async () => {
+    console.warn("\x1B[33m  ⚠  `sweny init` is deprecated. Use `sweny new` instead.\x1B[0m\n");
+    await runNew();
   });
 
 // ── sweny e2e ────────────────────────────────────────────────────────
