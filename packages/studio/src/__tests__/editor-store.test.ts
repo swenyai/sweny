@@ -186,10 +186,26 @@ describe("editor-store", () => {
       expect(edge?.when).toBe("on error");
     });
 
-    it("does not add duplicate edge", () => {
+    it("blocks duplicate unconditional edge between same pair", () => {
       const before = useEditorStore.getState().workflow.edges.length;
-      useEditorStore.getState().addEdge("step-a", "step-b"); // already exists
+      useEditorStore.getState().addEdge("step-a", "step-b"); // already exists unconditional
       expect(useEditorStore.getState().workflow.edges.length).toBe(before);
+    });
+
+    it("allows conditional edge alongside existing unconditional edge", () => {
+      const before = useEditorStore.getState().workflow.edges.length;
+      useEditorStore.getState().addEdge("step-a", "step-b", "on error");
+      expect(useEditorStore.getState().workflow.edges.length).toBe(before + 1);
+      const newEdge = useEditorStore.getState().workflow.edges.at(-1);
+      expect(newEdge?.when).toBe("on error");
+    });
+
+    it("allows multiple conditional edges between same pair", () => {
+      useEditorStore.getState().addEdge("step-a", "step-b", "on error");
+      useEditorStore.getState().addEdge("step-a", "step-b", "on timeout");
+      const abEdges = useEditorStore.getState().workflow.edges.filter((e) => e.from === "step-a" && e.to === "step-b");
+      // Original unconditional + 2 conditional = 3
+      expect(abEdges).toHaveLength(3);
     });
   });
 

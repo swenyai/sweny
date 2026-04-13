@@ -159,6 +159,174 @@ describe("workflowToFlow", () => {
   });
 });
 
+describe("edge IDs and edgeIndex", () => {
+  it("generates unique edge IDs using array index", () => {
+    const { edges } = workflowToFlow(testWorkflow);
+    const ids = edges.map((e) => e.id);
+    expect(ids[0]).toBe("edge-0");
+    expect(ids[1]).toBe("edge-1");
+    // All IDs are unique
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("assigns correct edgeIndex matching array position", () => {
+    const { edges } = workflowToFlow(testWorkflow);
+    edges.forEach((edge, i) => {
+      expect(edge.edgeIndex).toBe(i);
+    });
+  });
+
+  it("produces unique IDs for multiple edges between the same node pair", () => {
+    const wf: Workflow = {
+      id: "multi-edge",
+      name: "Multi-Edge",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "A", skills: [] },
+        b: { name: "B", instruction: "B", skills: [] },
+      },
+      edges: [
+        { from: "a", to: "b" },
+        { from: "a", to: "b", when: "error detected" },
+        { from: "a", to: "b", when: "retry needed" },
+      ],
+    };
+    const { edges } = workflowToFlow(wf);
+    expect(edges).toHaveLength(3);
+    const ids = edges.map((e) => e.id);
+    expect(new Set(ids).size).toBe(3);
+    expect(ids).toEqual(["edge-0", "edge-1", "edge-2"]);
+  });
+
+  it("produces stable IDs across multiple conversions", () => {
+    const first = workflowToFlow(testWorkflow).edges.map((e) => e.id);
+    const second = workflowToFlow(testWorkflow).edges.map((e) => e.id);
+    expect(first).toEqual(second);
+  });
+});
+
+describe("max_iterations in conversion", () => {
+  const wfWithMaxIter: Workflow = {
+    id: "retry-loop",
+    name: "Retry Loop",
+    description: "",
+    entry: "check",
+    nodes: {
+      check: { name: "Check", instruction: "Check it", skills: [] },
+      fix: { name: "Fix", instruction: "Fix it", skills: [] },
+    },
+    edges: [
+      { from: "check", to: "fix", when: "issue found" },
+      { from: "fix", to: "check", when: "needs re-check", max_iterations: 3 },
+    ],
+  };
+
+  it("includes max_iterations in flow edge data", () => {
+    const { edges } = workflowToFlow(wfWithMaxIter);
+    const retryEdge = edges.find((e) => e.source === "fix" && e.target === "check");
+    expect(retryEdge?.data.max_iterations).toBe(3);
+  });
+
+  it("omits max_iterations when not set", () => {
+    const { edges } = workflowToFlow(wfWithMaxIter);
+    const firstEdge = edges.find((e) => e.source === "check" && e.target === "fix");
+    expect(firstEdge?.data.max_iterations).toBeUndefined();
+  });
+
+  it("round-trips max_iterations through flowToWorkflow", () => {
+    const { nodes, edges } = workflowToFlow(wfWithMaxIter);
+    const rebuilt = flowToWorkflow(
+      {
+        id: wfWithMaxIter.id,
+        name: wfWithMaxIter.name,
+        description: wfWithMaxIter.description,
+        entry: wfWithMaxIter.entry,
+      },
+      nodes,
+      edges,
+    );
+    const retryEdge = rebuilt.edges.find((e) => e.from === "fix" && e.to === "check");
+    expect(retryEdge?.max_iterations).toBe(3);
+    // Non-retry edge should not have max_iterations
+    const normalEdge = rebuilt.edges.find((e) => e.from === "check" && e.to === "fix");
+    expect(normalEdge).not.toHaveProperty("max_iterations");
+  });
+});
+
+describe("Source type preservation", () => {
+  it("preserves inline string instructions through round-trip", () => {
+    const { nodes, edges } = workflowToFlow(testWorkflow);
+    const rebuilt = flowToWorkflow({ id: "x", name: "X", description: "", entry: "a" }, nodes, edges);
+    expect(rebuilt.nodes.a.instruction).toBe("Do A");
+  });
+
+  it("preserves {file:} Source through round-trip", () => {
+    const wf: Workflow = {
+      id: "file-src",
+      name: "File Source",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: { file: "./instructions/step-a.md" }, skills: [] },
+      },
+      edges: [],
+    };
+    const { nodes, edges } = workflowToFlow(wf);
+    const rebuilt = flowToWorkflow({ id: wf.id, name: wf.name, description: "", entry: "a" }, nodes, edges);
+    expect(rebuilt.nodes.a.instruction).toEqual({ file: "./instructions/step-a.md" });
+  });
+
+  it("preserves {url:} Source through round-trip", () => {
+    const wf: Workflow = {
+      id: "url-src",
+      name: "URL Source",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: { url: "https://example.com/instruction.md" }, skills: [] },
+      },
+      edges: [],
+    };
+    const { nodes, edges } = workflowToFlow(wf);
+    const rebuilt = flowToWorkflow({ id: wf.id, name: wf.name, description: "", entry: "a" }, nodes, edges);
+    expect(rebuilt.nodes.a.instruction).toEqual({ url: "https://example.com/instruction.md" });
+  });
+
+  it("preserves {inline:} Source through round-trip", () => {
+    const wf: Workflow = {
+      id: "inline-src",
+      name: "Inline Source",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: { inline: "Explicit inline text" }, skills: [] },
+      },
+      edges: [],
+    };
+    const { nodes, edges } = workflowToFlow(wf);
+    const rebuilt = flowToWorkflow({ id: wf.id, name: wf.name, description: "", entry: "a" }, nodes, edges);
+    expect(rebuilt.nodes.a.instruction).toEqual({ inline: "Explicit inline text" });
+  });
+
+  it("preserves {url:, type:} Source through round-trip", () => {
+    const wf: Workflow = {
+      id: "url-type-src",
+      name: "URL Type Source",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: { url: "https://example.com/data", type: "fetch" }, skills: [] },
+      },
+      edges: [],
+    };
+    const { nodes, edges } = workflowToFlow(wf);
+    const rebuilt = flowToWorkflow({ id: wf.id, name: wf.name, description: "", entry: "a" }, nodes, edges);
+    const src = rebuilt.nodes.a.instruction;
+    expect(src).toEqual({ url: "https://example.com/data", type: "fetch" });
+  });
+});
+
 describe("flowToWorkflow", () => {
   it("round-trips correctly", () => {
     const { nodes, edges } = workflowToFlow(testWorkflow);
@@ -185,6 +353,14 @@ describe("flowToWorkflow", () => {
     const rebuilt = flowToWorkflow({ id: "x", name: "X", description: "", entry: "a" }, nodes, edges);
     const unconditional = rebuilt.edges.find((e) => e.from === "a" && e.to === "b");
     expect(unconditional).not.toHaveProperty("when");
+  });
+
+  it("omits max_iterations when not set", () => {
+    const { nodes, edges } = workflowToFlow(testWorkflow);
+    const rebuilt = flowToWorkflow({ id: "x", name: "X", description: "", entry: "a" }, nodes, edges);
+    for (const edge of rebuilt.edges) {
+      expect(edge).not.toHaveProperty("max_iterations");
+    }
   });
 });
 
