@@ -15,6 +15,8 @@ import chalk from "chalk";
 import { parse as parseYaml } from "yaml";
 import type { Command } from "commander";
 import { parseWorkflow, validateWorkflow } from "../schema.js";
+import { builtinSkills } from "../skills/index.js";
+import { discoverSkills } from "../skills/custom-loader.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -39,11 +41,13 @@ export function validateWorkflowFile(filePath: string): {
   nodeCount?: number;
   edgeCount?: number;
   errors: string[];
+  warnings: string[];
 } {
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   if (!fs.existsSync(filePath)) {
-    return { valid: false, errors: ["File not found"] };
+    return { valid: false, errors: ["File not found"], warnings };
   }
 
   const raw = fs.readFileSync(filePath, "utf-8");
@@ -51,20 +55,56 @@ export function validateWorkflowFile(filePath: string): {
   try {
     parsed = parseYaml(raw);
   } catch (e) {
-    return { valid: false, errors: [`Invalid YAML: ${e instanceof Error ? e.message : e}`] };
+    return { valid: false, errors: [`Invalid YAML: ${e instanceof Error ? e.message : e}`], warnings };
   }
 
   try {
     const workflow = parseWorkflow(parsed);
-    const schemaErrors = validateWorkflow(workflow);
+
+    // Build known skill IDs from builtins + custom + inline workflow skills
+    const customSkills = discoverSkills();
+    const allSkillIds = new Set([...builtinSkills.map((s) => s.id), ...customSkills.map((s) => s.id)]);
+
+    // Inline skills defined in the workflow's skills block are also valid
+    if (parsed && typeof parsed === "object" && "skills" in (parsed as Record<string, unknown>)) {
+      const inlineSkills = (parsed as Record<string, unknown>).skills;
+      if (Array.isArray(inlineSkills)) {
+        for (const s of inlineSkills) {
+          if (typeof s === "object" && s && "id" in s) allSkillIds.add((s as { id: string }).id);
+          if (typeof s === "string") allSkillIds.add(s);
+        }
+      }
+    }
+
+    const schemaErrors = validateWorkflow(workflow, allSkillIds);
     if (schemaErrors.length > 0) {
       return {
         valid: false,
         id: workflow.id,
         name: workflow.name,
         errors: schemaErrors.map((e) => e.message),
+        warnings,
       };
     }
+
+    // Config completeness warnings
+    const allSkills = [...builtinSkills, ...customSkills];
+    const skillMap = new Map(allSkills.map((s) => [s.id, s]));
+    const referencedSkillIds = new Set<string>();
+    for (const node of Object.values(workflow.nodes)) {
+      for (const id of node.skills) referencedSkillIds.add(id);
+    }
+    for (const id of referencedSkillIds) {
+      const skill = skillMap.get(id);
+      if (!skill) continue;
+      const requiredEnvs = Object.entries(skill.config)
+        .filter(([, f]) => f.required && f.env)
+        .map(([, f]) => f.env!);
+      if (requiredEnvs.length > 0) {
+        warnings.push(`Skill "${id}" requires: ${requiredEnvs.join(", ")}`);
+      }
+    }
+
     return {
       valid: true,
       id: workflow.id,
@@ -72,9 +112,10 @@ export function validateWorkflowFile(filePath: string): {
       nodeCount: Object.keys(workflow.nodes).length,
       edgeCount: workflow.edges.length,
       errors: [],
+      warnings,
     };
   } catch (e) {
-    return { valid: false, errors: [`Schema error: ${e instanceof Error ? e.message : e}`] };
+    return { valid: false, errors: [`Schema error: ${e instanceof Error ? e.message : e}`], warnings };
   }
 }
 
@@ -217,6 +258,12 @@ async function publishWorkflow(): Promise<PublishResult | null> {
   p.log.success(
     `Validated: ${chalk.cyan(validation.name)} — ${validation.nodeCount} nodes, ${validation.edgeCount} edges`,
   );
+
+  if (validation.warnings.length > 0) {
+    for (const warn of validation.warnings) {
+      p.log.warn(warn);
+    }
+  }
 
   // Step 3: Metadata
   const raw = parseYaml(fs.readFileSync(absPath, "utf-8")) as Record<string, unknown>;
