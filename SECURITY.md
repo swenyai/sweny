@@ -32,3 +32,19 @@ SWEny never stores credentials in code. All secrets are read from environment va
 ## Execution Model
 
 SWEny runs entirely in your environment — your terminal, your CI runner, your compute. The cloud dashboard ([cloud.sweny.ai](https://cloud.sweny.ai)) receives only structured metadata (run status, duration, recommendations) when explicitly opted in via `SWENY_CLOUD_TOKEN`. No source code, diffs, or secrets are ever sent.
+
+## Open-Source Worker Audit Path (aws-cloud — not yet live)
+
+> The managed execution model described below is from
+> [aws-cloud](https://github.com/swenyai/aws-cloud) and is not part of the current
+> cloud product. It may be revisited in the future.
+
+The worker binary is open source so customers can audit every line of code that executes their jobs. Build reproducibility is maintained via pinned base images and `npm ci --frozen-lockfile`.
+
+To verify that a worker image matches the published source:
+
+1. Check the Docker image SHA256 on the job detail page (or via `GET /orgs/:orgId/jobs/:jobId/attestation` on Enterprise).
+2. Compare against the published image digest on the GitHub Container Registry page for the matching release tag.
+3. Reproduce the build locally with `verify-build.sh <image> <tag>` and confirm the manifest digest matches.
+
+The audit trail from source commit → Docker image → running job is maintained in the release pipeline. Enterprise customers additionally receive a signed AWS Nitro attestation document for each job.
