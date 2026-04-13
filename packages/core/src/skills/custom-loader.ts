@@ -162,9 +162,10 @@ export function configuredSkills(env: Record<string, string | undefined> = proce
   for (const skill of custom) {
     const existing = configuredMap.get(skill.id);
     if (existing) {
-      // Merge: built-in tools + custom instruction/mcp
+      // Merge: built-in tools + config, custom instruction/mcp + extra config
       configuredMap.set(skill.id, {
         ...existing,
+        config: { ...existing.config, ...skill.config },
         instruction: skill.instruction ?? existing.instruction,
         mcp: skill.mcp ?? existing.mcp,
       });

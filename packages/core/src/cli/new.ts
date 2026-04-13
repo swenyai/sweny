@@ -78,8 +78,9 @@ export const SKILL_EXTRAS: Record<string, { url?: string; hint?: string; default
 };
 
 /**
- * @deprecated Use collectCredentialsForSkills with availableSkills param instead.
- * Kept for backward compatibility.
+ * Static fallback credential map, used when skill objects are unavailable.
+ * When availableSkills is provided, collectCredentialsForSkills derives
+ * credentials from skill.config instead.
  */
 export const SKILL_CREDENTIALS: Record<string, Credential[]> = {
   github: [{ key: "GITHUB_TOKEN", url: "https://github.com/settings/tokens", hint: "repo + issues scopes" }],

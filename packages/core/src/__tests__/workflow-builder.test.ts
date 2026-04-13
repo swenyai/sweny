@@ -45,8 +45,8 @@ describe("buildSystemPrompt", () => {
 
 describe("deriveWorkflowVariables", () => {
   const workflow: Workflow = {
+    id: "test",
     name: "test",
-    version: "1.0.0",
     description: "test workflow",
     entry: "gather",
     nodes: {
@@ -54,7 +54,6 @@ describe("deriveWorkflowVariables", () => {
         name: "Gather",
         instruction: "gather data",
         skills: ["github", "slack"],
-        edges: [],
       },
     },
     edges: [],
@@ -85,8 +84,8 @@ describe("deriveWorkflowVariables", () => {
     const multiNodeWorkflow: Workflow = {
       ...workflow,
       nodes: {
-        a: { name: "A", instruction: "a", skills: ["github"], edges: [] },
-        b: { name: "B", instruction: "b", skills: ["github"], edges: [] },
+        a: { name: "A", instruction: "a", skills: ["github"] },
+        b: { name: "B", instruction: "b", skills: ["github"] },
       },
     };
     const skills = [
@@ -108,7 +107,7 @@ describe("deriveWorkflowVariables", () => {
   it("includes custom skills with config", () => {
     const customWorkflow: Workflow = {
       ...workflow,
-      nodes: { tax: { name: "Tax", instruction: "do taxes", skills: ["my-tax-tool"], edges: [] } },
+      nodes: { tax: { name: "Tax", instruction: "do taxes", skills: ["my-tax-tool"] } },
     };
     const skills = [
       fakeSkill("my-tax-tool", {

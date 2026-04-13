@@ -65,14 +65,10 @@ export function validateWorkflowFile(filePath: string): {
     const customSkills = discoverSkills();
     const allSkillIds = new Set([...builtinSkills.map((s) => s.id), ...customSkills.map((s) => s.id)]);
 
-    // Inline skills defined in the workflow's skills block are also valid
-    if (parsed && typeof parsed === "object" && "skills" in (parsed as Record<string, unknown>)) {
-      const inlineSkills = (parsed as Record<string, unknown>).skills;
-      if (Array.isArray(inlineSkills)) {
-        for (const s of inlineSkills) {
-          if (typeof s === "object" && s && "id" in s) allSkillIds.add((s as { id: string }).id);
-          if (typeof s === "string") allSkillIds.add(s);
-        }
+    // Inline skills defined in the workflow's skills block (a Record<id, def>) are also valid
+    if (workflow.skills) {
+      for (const skillId of Object.keys(workflow.skills)) {
+        allSkillIds.add(skillId);
       }
     }
 
