@@ -125,6 +125,31 @@ describe("validateInputs — notification provider", () => {
   });
 });
 
+describe("validateInputs — observability provider", () => {
+  it("accepts 'none' without requiring any credentials", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "none", observabilityCredentials: {} }));
+    expect(errors.filter((e) => e.includes("DD_") || e.includes("observability"))).toEqual([]);
+  });
+
+  it("requires DD keys when explicitly set to datadog", () => {
+    const errors = validateInputs(baseConfig({ observabilityProvider: "datadog", observabilityCredentials: {} }));
+    expect(errors.some((e) => e.includes("DD_API_KEY"))).toBe(true);
+    expect(errors.some((e) => e.includes("DD_APP_KEY"))).toBe(true);
+  });
+});
+
+describe("parseCliInputs — observability provider default", () => {
+  it("defaults to 'none' when no provider is configured", () => {
+    const config = parseCliInputs({}, {});
+    expect(config.observabilityProvider).toBe("none");
+  });
+
+  it("respects explicit datadog provider", () => {
+    const config = parseCliInputs({ observabilityProvider: "datadog" }, {});
+    expect(config.observabilityProvider).toBe("datadog");
+  });
+});
+
 describe("fetch.auth + offline parsing", () => {
   it("parses offline flag", () => {
     const config = parseCliInputs({ offline: true }, {});

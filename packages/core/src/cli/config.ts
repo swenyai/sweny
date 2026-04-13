@@ -117,7 +117,7 @@ export function registerTriageCommand(program: Command): Command {
     .description("Run the SWEny triage workflow")
     .option("--agent <provider>", "Coding agent: claude (default), codex, gemini")
     .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
-    .option("--observability-provider <provider>", "Observability provider (default: datadog)")
+    .option("--observability-provider <provider>", "Observability provider (default: none)")
     .option("--issue-tracker-provider <provider>", "Issue tracker provider (default: github-issues)")
     .option("--source-control-provider <provider>", "Source control provider (default: github)")
     .option(
@@ -208,7 +208,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     return [];
   };
 
-  const obsProvider = (options.observabilityProvider as string) || f("observability-provider") || "datadog";
+  const obsProvider = (options.observabilityProvider as string) || f("observability-provider") || "none";
 
   return {
     codingAgentProvider:
@@ -378,6 +378,8 @@ export function validateInputs(config: CliConfig): string[] {
 
   // Observability credentials by provider
   switch (config.observabilityProvider) {
+    case "none":
+      break; // No observability provider configured — nothing to validate
     case "datadog":
       if (!config.observabilityCredentials.apiKey)
         errors.push("Missing: DD_API_KEY — find API keys at https://app.datadoghq.com/organization-settings/api-keys");
@@ -495,7 +497,7 @@ export function validateInputs(config: CliConfig): string[] {
       break;
     default:
       errors.push(
-        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, honeycomb, heroku, opsgenie, axiom, betterstack, vercel, supabase, netlify, fly, render, file`,
+        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: none, datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, honeycomb, heroku, opsgenie, axiom, betterstack, vercel, supabase, netlify, fly, render, file`,
       );
   }
 
