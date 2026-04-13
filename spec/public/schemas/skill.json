@@ -11,7 +11,8 @@
     "id": {
       "type": "string",
       "minLength": 1,
-      "description": "Unique skill identifier. Referenced by nodes' skills arrays."
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Unique skill identifier. Referenced by nodes' skills arrays. Lowercase kebab-case recommended."
     },
     "name": {
       "type": "string",

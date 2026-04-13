@@ -88,20 +88,25 @@ A conforming executor:
 - Tool outputs are opaque JSON values. They are included in the [execution trace](/execution) and available to the AI model within the current node's execution.
 - If a tool handler throws, the error is surfaced to the AI model as a tool result. The executor MUST NOT crash.
 
-## Well-Known Skill Registry
+## Built-in Skills
 
-The specification defines the following well-known skill IDs. Implementations SHOULD support these when the required config is available. Implementations MAY support additional skills beyond this registry.
+Implementations MAY provide built-in skills that are available without explicit definition by the user. Built-in skills follow the same Skill Object schema as custom skills — there is no structural distinction.
 
-| ID             | Category      | Required Config                             | Description                                |
-| -------------- | ------------- | ------------------------------------------- | ------------------------------------------ |
-| `github`       | git           | `GITHUB_TOKEN`                              | GitHub code search, issues, pull requests. |
-| `linear`       | tasks         | `LINEAR_API_KEY`                            | Linear issue tracking.                     |
-| `slack`        | notification  | `SLACK_WEBHOOK_URL`                         | Slack messaging.                           |
-| `sentry`       | observability | `SENTRY_AUTH_TOKEN`                         | Sentry error tracking.                     |
-| `datadog`      | observability | `DD_API_KEY`, `DD_APP_KEY`                  | Datadog logs and metrics.                  |
-| `betterstack`  | observability | `BETTERSTACK_API_TOKEN`                     | BetterStack incident management.           |
-| `notification` | notification  | varies                                      | Multi-channel notifications.               |
-| `supabase`     | general       | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Supabase database operations.              |
+### Skill ID Conventions
+
+Skill IDs:
+
+- **MUST** be non-empty strings.
+- **SHOULD** use lowercase kebab-case (e.g., `github`, `error-tracking`, `my-custom-tool`).
+- **MUST** be unique within a workflow. If a [custom skill](#custom-skills) uses the same ID as a built-in skill, the custom skill's `instruction` and `mcp` fields take precedence, but the built-in skill's `tools` remain available.
+
+### Discovery
+
+A conforming executor **SHOULD** document which built-in skills it provides, including their IDs, required config fields, and available tools. This catalog is implementation-specific and outside the scope of this specification.
+
+:::note
+The reference implementation (`@sweny-ai/core`) documents its built-in skills at [docs.sweny.ai/skills](https://docs.sweny.ai/skills).
+:::
 
 ## Custom Skills
 
@@ -141,7 +146,7 @@ A conforming executor SHOULD discover custom skills from the following directori
 | 3        | `.agents/skills/<name>/SKILL.md` | Universal (Codex, Gemini CLI, OpenCode) |
 | 4        | `.gemini/skills/<name>/SKILL.md` | Gemini CLI                              |
 
-On ID collision, the higher-priority directory wins. When a custom skill overrides a well-known skill ID, the custom skill's instruction is injected AND the well-known skill's tools remain available.
+On ID collision, the higher-priority directory wins. When a custom skill overrides a built-in skill ID, the custom skill's `instruction` and `mcp` fields take precedence, but the built-in skill's `tools` remain available.
 
 ## Example
 
