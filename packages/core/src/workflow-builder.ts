@@ -45,7 +45,16 @@ Good: "Query Sentry for unresolved errors from the last 24 hours. Group by issue
  * guidance, rules, and optionally an existing workflow to refine.
  */
 export function buildSystemPrompt(skills: Skill[], existingWorkflow?: Workflow): string {
-  const skillList = skills.map((s) => `- ${s.id}: ${s.description}`).join("\n");
+  const skillList = skills
+    .map((s) => {
+      const configEntries = Object.entries(s.config)
+        .filter(([, f]) => f.env)
+        .map(([, f]) => `${f.env} (${f.required ? "required" : "optional"})`)
+        .join(", ");
+      const configLine = configEntries ? `\n  Config: ${configEntries}` : "";
+      return `- ${s.id}: ${s.description}${configLine}`;
+    })
+    .join("\n");
 
   const parts = [
     "You generate SWEny workflow definitions as JSON.",
@@ -96,6 +105,50 @@ export function extractWorkflow(data: Record<string, unknown>): Workflow {
   }
 
   return parsed;
+}
+
+/**
+ * Derive the required environment variables for a workflow from its skills.
+ * Deterministic — doesn't depend on Claude generating a variables block.
+ */
+export interface DerivedVariable {
+  name: string;
+  description: string;
+  required: boolean;
+  skill: string;
+}
+
+export function deriveWorkflowVariables(workflow: Workflow, skills: Skill[]): DerivedVariable[] {
+  const vars: DerivedVariable[] = [
+    { name: "ANTHROPIC_API_KEY", description: "Claude API key", required: true, skill: "core" },
+  ];
+  const seen = new Set<string>(["ANTHROPIC_API_KEY"]);
+
+  const skillMap = new Map(skills.map((s) => [s.id, s]));
+
+  // Collect all skill IDs referenced by workflow nodes
+  const referencedSkills = new Set<string>();
+  for (const node of Object.values(workflow.nodes)) {
+    for (const id of node.skills) referencedSkills.add(id);
+  }
+
+  for (const id of referencedSkills) {
+    const skill = skillMap.get(id);
+    if (!skill) continue;
+    for (const [envKey, field] of Object.entries(skill.config)) {
+      const name = field.env ?? envKey;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      vars.push({
+        name,
+        description: field.description,
+        required: field.required ?? false,
+        skill: id,
+      });
+    }
+  }
+
+  return vars;
 }
 
 // ─── Public API ───────────────────────────────────────────────────

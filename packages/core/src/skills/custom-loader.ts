@@ -13,7 +13,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 
-import type { Skill, SkillCategory, McpServerConfig } from "../types.js";
+import type { Skill, SkillCategory, McpServerConfig, ConfigField } from "../types.js";
 import { builtinSkills, isSkillConfigured } from "./index.js";
 
 /** Directories to scan, in ascending priority order. Last match wins. */
@@ -68,7 +68,12 @@ function parseSkillMd(content: string): Skill | null {
   if (!raw?.name) return null;
 
   // Narrow the loosely-typed YAML output into the fields we expect
-  const fm = raw as { name: string; description?: string; mcp?: Record<string, unknown> };
+  const fm = raw as {
+    name: string;
+    description?: string;
+    config?: Record<string, unknown>;
+    mcp?: Record<string, unknown>;
+  };
 
   const id = String(fm.name);
   if (!VALID_SKILL_ID.test(id) || id.includes("--") || id.length > 64) return null;
@@ -90,12 +95,27 @@ function parseSkillMd(content: string): Skill | null {
     }
   }
 
+  // Parse config fields from frontmatter
+  const config: Record<string, ConfigField> = {};
+  if (fm.config && typeof fm.config === "object") {
+    for (const [key, value] of Object.entries(fm.config)) {
+      if (value && typeof value === "object") {
+        const v = value as Record<string, unknown>;
+        config[key] = {
+          description: typeof v.description === "string" ? v.description : key,
+          required: v.required === true,
+          env: key,
+        };
+      }
+    }
+  }
+
   return {
     id,
     name: id,
     description: typeof fm.description === "string" ? fm.description : `Custom skill: ${id}`,
     category: "general" as SkillCategory,
-    config: {},
+    config,
     tools: [],
     instruction: instruction || undefined,
     mcp,
@@ -142,9 +162,10 @@ export function configuredSkills(env: Record<string, string | undefined> = proce
   for (const skill of custom) {
     const existing = configuredMap.get(skill.id);
     if (existing) {
-      // Merge: built-in tools + custom instruction/mcp
+      // Merge: built-in tools + config, custom instruction/mcp + extra config
       configuredMap.set(skill.id, {
         ...existing,
+        config: { ...existing.config, ...skill.config },
         instruction: skill.instruction ?? existing.instruction,
         mcp: skill.mcp ?? existing.mcp,
       });

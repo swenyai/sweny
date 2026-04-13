@@ -62,6 +62,48 @@ edges: []
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
   });
+
+  it("rejects a workflow with unknown skill references", () => {
+    const file = path.join(tmpDir, "unknown-skill.yml");
+    fs.writeFileSync(
+      file,
+      `id: unknown-skill-test
+name: Unknown Skill Test
+description: Test
+entry: start
+nodes:
+  start:
+    name: Start
+    instruction: Do something.
+    skills: [unicorn]
+edges: []
+`,
+    );
+    const result = validateWorkflowFile(file);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes("unicorn"))).toBe(true);
+  });
+
+  it("returns config warnings for skills with required env vars", () => {
+    const file = path.join(tmpDir, "with-github.yml");
+    fs.writeFileSync(
+      file,
+      `id: github-test
+name: GitHub Test
+description: Test
+entry: start
+nodes:
+  start:
+    name: Start
+    instruction: Do something.
+    skills: [github]
+edges: []
+`,
+    );
+    const result = validateWorkflowFile(file);
+    expect(result.valid).toBe(true);
+    expect(result.warnings.some((w) => w.includes("GITHUB_TOKEN"))).toBe(true);
+  });
 });
 
 describe("validateSkillDir", () => {

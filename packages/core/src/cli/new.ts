@@ -16,8 +16,9 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from "./templates.js";
 import { buildWorkflow, refineWorkflow } from "../workflow-builder.js";
 import { ClaudeClient } from "../claude.js";
-import { consoleLogger } from "../types.js";
+import { consoleLogger, type Skill } from "../types.js";
 import { configuredSkills } from "../skills/custom-loader.js";
+import { builtinSkills } from "../skills/index.js";
 import { DagRenderer } from "./renderer.js";
 import { runE2eInit } from "./e2e.js";
 
@@ -44,26 +45,47 @@ export interface GitRemoteInfo {
   remote: string;
 }
 
-// ── Skill → Credential mapping ────────────────────────────────────────
+// ── Skill → Credential extras ─────────────────────────────────────────
 
 /**
- * Maps skill IDs (as used in workflow nodes) to the credentials they require.
- * When a workflow uses a skill, we collect only those credentials.
+ * Supplementary metadata (URLs, hints, defaults) for env vars.
+ * skill.config has description/required but not setup URLs or default values.
+ */
+export const SKILL_EXTRAS: Record<string, { url?: string; hint?: string; default?: string }> = {
+  GITHUB_TOKEN: { url: "https://github.com/settings/tokens", hint: "repo + issues scopes" },
+  GITLAB_TOKEN: { url: "https://gitlab.com/-/profile/personal_access_tokens", hint: "api scope" },
+  GITLAB_URL: { hint: "e.g. https://gitlab.com", default: "https://gitlab.com" },
+  DD_API_KEY: { url: "https://app.datadoghq.com/organization-settings", hint: "Organization Settings > API Keys" },
+  DD_APP_KEY: { hint: "Organization Settings > Application Keys" },
+  DD_SITE: { hint: "datadoghq.com, datadoghq.eu, etc.", default: "datadoghq.com" },
+  SENTRY_AUTH_TOKEN: { url: "https://sentry.io/settings/auth-tokens/" },
+  SENTRY_ORG: { hint: "sentry.io/organizations/slug/" },
+  BETTERSTACK_API_TOKEN: { url: "https://betterstack.com/docs/logs/api" },
+  NR_API_KEY: { url: "https://one.newrelic.com/api-keys" },
+  LINEAR_API_KEY: { url: "https://linear.app/settings/api" },
+  LINEAR_TEAM_ID: { hint: "Settings > Teams > copy ID from URL" },
+  JIRA_BASE_URL: { hint: "e.g. https://your-org.atlassian.net" },
+  JIRA_EMAIL: { hint: "your Atlassian account email" },
+  JIRA_API_TOKEN: { url: "https://id.atlassian.com/manage-profile/security/api-tokens" },
+  SLACK_BOT_TOKEN: { url: "https://api.slack.com/apps" },
+  SLACK_WEBHOOK_URL: { hint: "Incoming webhook URL" },
+  DISCORD_WEBHOOK_URL: { hint: "Server Settings > Integrations > Webhooks" },
+  NOTIFICATION_WEBHOOK_URL: { hint: "Your webhook endpoint URL" },
+  TEAMS_WEBHOOK_URL: { hint: "Channel > Connectors > Incoming Webhook" },
+  SUPABASE_URL: { hint: "Supabase project URL" },
+  SUPABASE_SERVICE_ROLE_KEY: { hint: "Settings > API > service_role key" },
+  BETTERSTACK_QUERY_ENDPOINT: { hint: "ClickHouse HTTP endpoint" },
+};
+
+/**
+ * Static fallback credential map, used when skill objects are unavailable.
+ * When availableSkills is provided, collectCredentialsForSkills derives
+ * credentials from skill.config instead.
  */
 export const SKILL_CREDENTIALS: Record<string, Credential[]> = {
-  github: [
-    {
-      key: "GITHUB_TOKEN",
-      url: "https://github.com/settings/tokens",
-      hint: "repo + issues scopes",
-    },
-  ],
+  github: [{ key: "GITHUB_TOKEN", url: "https://github.com/settings/tokens", hint: "repo + issues scopes" }],
   gitlab: [
-    {
-      key: "GITLAB_TOKEN",
-      hint: "api scope",
-      url: "https://gitlab.com/-/profile/personal_access_tokens",
-    },
+    { key: "GITLAB_TOKEN", hint: "api scope", url: "https://gitlab.com/-/profile/personal_access_tokens" },
     { key: "GITLAB_URL", hint: "e.g. https://gitlab.com", default: "https://gitlab.com" },
   ],
   datadog: [
@@ -76,36 +98,19 @@ export const SKILL_CREDENTIALS: Record<string, Credential[]> = {
     { key: "DD_SITE", hint: "datadoghq.com, datadoghq.eu, etc.", default: "datadoghq.com" },
   ],
   sentry: [
-    {
-      key: "SENTRY_AUTH_TOKEN",
-      url: "https://sentry.io/settings/auth-tokens/",
-    },
+    { key: "SENTRY_AUTH_TOKEN", url: "https://sentry.io/settings/auth-tokens/" },
     { key: "SENTRY_ORG", hint: "sentry.io/organizations/slug/" },
   ],
-  betterstack: [
-    {
-      key: "BETTERSTACK_API_TOKEN",
-      url: "https://betterstack.com/docs/logs/api",
-    },
-  ],
+  betterstack: [{ key: "BETTERSTACK_API_TOKEN", url: "https://betterstack.com/docs/logs/api" }],
   newrelic: [{ key: "NR_API_KEY", url: "https://one.newrelic.com/api-keys" }],
   linear: [
-    {
-      key: "LINEAR_API_KEY",
-      url: "https://linear.app/settings/api",
-    },
-    {
-      key: "LINEAR_TEAM_ID",
-      hint: "Settings > Teams > copy ID from URL",
-    },
+    { key: "LINEAR_API_KEY", url: "https://linear.app/settings/api" },
+    { key: "LINEAR_TEAM_ID", hint: "Settings > Teams > copy ID from URL" },
   ],
   jira: [
     { key: "JIRA_BASE_URL", hint: "e.g. https://your-org.atlassian.net" },
     { key: "JIRA_EMAIL", hint: "your Atlassian account email" },
-    {
-      key: "JIRA_API_TOKEN",
-      url: "https://id.atlassian.com/manage-profile/security/api-tokens",
-    },
+    { key: "JIRA_API_TOKEN", url: "https://id.atlassian.com/manage-profile/security/api-tokens" },
   ],
   slack: [{ key: "SLACK_BOT_TOKEN", url: "https://api.slack.com/apps" }],
   discord: [{ key: "DISCORD_WEBHOOK_URL", hint: "Server Settings > Integrations > Webhooks" }],
@@ -181,20 +186,46 @@ export function extractSkillsFromYaml(yaml: string): string[] {
 /**
  * Gather credentials required for a set of skills.
  * Always includes ANTHROPIC_API_KEY. Deduplicates by key name.
+ *
+ * When `availableSkills` is provided, derives credentials from each skill's
+ * `.config` fields (works for both builtins and custom skills from Task 01).
+ * Falls back to `SKILL_CREDENTIALS` for skills not found in the available set.
  */
-export function collectCredentialsForSkills(skills: string[]): Credential[] {
+export function collectCredentialsForSkills(skillIds: string[], availableSkills?: Skill[]): Credential[] {
   const seen = new Map<string, Credential>();
 
   for (const cred of ALWAYS_CREDENTIALS) {
     seen.set(cred.key, cred);
   }
 
-  for (const skill of skills) {
-    const creds = SKILL_CREDENTIALS[skill];
-    if (!creds) continue;
-    for (const cred of creds) {
-      if (!seen.has(cred.key)) {
-        seen.set(cred.key, cred);
+  const skillMap = new Map<string, Skill>();
+  if (availableSkills) {
+    for (const s of availableSkills) skillMap.set(s.id, s);
+  }
+
+  for (const id of skillIds) {
+    const skill = skillMap.get(id);
+    if (skill && Object.keys(skill.config).length > 0) {
+      // Derive from skill.config
+      for (const [envKey, field] of Object.entries(skill.config)) {
+        const key = field.env ?? envKey;
+        if (seen.has(key)) continue;
+        const extras = SKILL_EXTRAS[key];
+        seen.set(key, {
+          key,
+          hint: extras?.hint ?? field.description,
+          url: extras?.url,
+          default: extras?.default,
+        });
+      }
+    } else {
+      // Fallback to SKILL_CREDENTIALS for unknown skills or skills without config
+      const creds = SKILL_CREDENTIALS[id];
+      if (!creds) continue;
+      for (const cred of creds) {
+        if (!seen.has(cred.key)) {
+          seen.set(cred.key, cred);
+        }
       }
     }
   }
@@ -458,6 +489,13 @@ export async function runNew(): Promise<void> {
     p.log.info(`Detected: ${chalk.cyan(gitInfo.remote)} (${gitInfo.provider})`);
   }
 
+  // ── Discover all skills (builtins + custom) ────────────────────────
+  const allSkills = configuredSkills(process.env, cwd);
+  const customSkills = allSkills.filter((s) => !builtinSkills.some((b) => b.id === s.id));
+  if (customSkills.length > 0) {
+    p.log.info(`Found ${customSkills.length} custom skill(s): ${chalk.cyan(customSkills.map((s) => s.id).join(", "))}`);
+  }
+
   // ── Step 1: Pick a workflow ─────────────────────────────────────────
   const templateChoice = await p.select({
     message: "What do you want to do?",
@@ -484,7 +522,7 @@ export async function runNew(): Promise<void> {
   let template: WorkflowTemplate | undefined;
 
   if (templateChoice === "__custom") {
-    template = (await runCustomWorkflowBuilder()) ?? undefined;
+    template = (await runCustomWorkflowBuilder(allSkills)) ?? undefined;
     if (!template) {
       p.cancel("Setup cancelled.");
       process.exit(0);
@@ -500,7 +538,7 @@ export async function runNew(): Promise<void> {
   const observability = inferObservability(workflowSkills);
 
   // Collect credentials for the workflow's skills (+ always ANTHROPIC_API_KEY)
-  const credentials = collectCredentialsForSkills(workflowSkills);
+  const credentials = collectCredentialsForSkills(workflowSkills, allSkills);
 
   // ── Step 3: Summary + confirm ───────────────────────────────────────
   const files: string[] = [];
@@ -665,7 +703,7 @@ export async function runNew(): Promise<void> {
  *
  * Consumed by the `__custom` branch of `runNew`'s picker.
  */
-async function runCustomWorkflowBuilder(): Promise<WorkflowTemplate | null> {
+async function runCustomWorkflowBuilder(skills: Skill[]): Promise<WorkflowTemplate | null> {
   const description = await p.text({
     message: "Describe the workflow you want",
     placeholder: "e.g. Review Python PRs for security issues and post a comment",
@@ -676,8 +714,6 @@ async function runCustomWorkflowBuilder(): Promise<WorkflowTemplate | null> {
     },
   });
   if (p.isCancel(description)) return null;
-
-  const skills = configuredSkills();
   const claude = new ClaudeClient({
     maxTurns: 3,
     cwd: process.cwd(),

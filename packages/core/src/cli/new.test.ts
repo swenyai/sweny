@@ -774,6 +774,45 @@ describe("collectCredentialsForSkills", () => {
     const creds = collectCredentialsForSkills(["datadog", "github"]);
     expect(creds[0].key).toBe("ANTHROPIC_API_KEY");
   });
+
+  it("derives credentials from skill.config when availableSkills provided", () => {
+    const fakeSkill = {
+      id: "my-tax-tool",
+      name: "my-tax-tool",
+      description: "Tax tool",
+      category: "general" as const,
+      config: {
+        MY_TAX_KEY: { description: "Tax API key", required: true, env: "MY_TAX_KEY" },
+        MY_TAX_REGION: { description: "Region code", required: false, env: "MY_TAX_REGION" },
+      },
+      tools: [],
+    };
+    const creds = collectCredentialsForSkills(["my-tax-tool"], [fakeSkill]);
+    const keys = creds.map((c) => c.key);
+    expect(keys).toContain("ANTHROPIC_API_KEY");
+    expect(keys).toContain("MY_TAX_KEY");
+    expect(keys).toContain("MY_TAX_REGION");
+  });
+
+  it("falls back to SKILL_CREDENTIALS when skill not in availableSkills", () => {
+    const creds = collectCredentialsForSkills(["github"], []);
+    const keys = creds.map((c) => c.key);
+    expect(keys).toContain("GITHUB_TOKEN");
+  });
+
+  it("uses SKILL_EXTRAS for url/hint when deriving from config", () => {
+    const githubSkill = {
+      id: "github",
+      name: "github",
+      description: "GitHub",
+      category: "git" as const,
+      config: { GITHUB_TOKEN: { description: "GitHub token", required: true, env: "GITHUB_TOKEN" } },
+      tools: [],
+    };
+    const creds = collectCredentialsForSkills(["github"], [githubSkill]);
+    const token = creds.find((c) => c.key === "GITHUB_TOKEN");
+    expect(token?.url).toBe("https://github.com/settings/tokens");
+  });
 });
 
 // ── extractSkillsFromYaml: block-style arrays + malformed input ───────
