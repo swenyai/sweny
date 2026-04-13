@@ -71,8 +71,11 @@ export interface FlowEdge {
   source: string;
   target: string;
   type: "conditionEdge";
+  /** Array index of this edge in workflow.edges — used for stable lookups. */
+  edgeIndex: number;
   data: {
     when?: string;
+    max_iterations?: number;
     isConditional: boolean;
   };
 }
@@ -122,13 +125,15 @@ export function workflowToFlow(
     },
   }));
 
-  const edges: FlowEdge[] = workflowEdges.map((edge) => ({
-    id: `${edge.from}--${edge.to}`,
+  const edges: FlowEdge[] = workflowEdges.map((edge, i) => ({
+    id: `edge-${i}`,
     source: edge.from,
     target: edge.to,
     type: "conditionEdge" as const,
+    edgeIndex: i,
     data: {
       when: edge.when,
+      max_iterations: edge.max_iterations,
       isConditional: !!edge.when,
     },
   }));
@@ -200,6 +205,7 @@ export function flowToWorkflow(
       from: e.source,
       to: e.target,
       ...(e.data.when ? { when: e.data.when } : {}),
+      ...(e.data.max_iterations ? { max_iterations: e.data.max_iterations } : {}),
     })),
   };
 }

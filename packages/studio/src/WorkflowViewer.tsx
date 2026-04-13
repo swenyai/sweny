@@ -40,7 +40,7 @@ function annotateEdgesWithErrors(
   );
   return edges.map((edge) => {
     const isError = unknownTargets.has(edge.target) || unknownSources.has(edge.source);
-    return { ...edge, data: { ...(edge.data ?? { isConditional: false }), isError } };
+    return { ...edge, data: { ...(edge.data ?? { isConditional: false, edgeIndex: 0 }), isError } };
   });
 }
 
@@ -147,7 +147,8 @@ function WorkflowCanvas() {
   }
 
   function onEdgeClick(_: React.MouseEvent, edge: Edge) {
-    setSelection({ kind: "edge", id: edge.id, from: edge.source, to: edge.target });
+    const edgeIndex = (edge.data as TransitionEdgeData | undefined)?.edgeIndex ?? 0;
+    setSelection({ kind: "edge", id: edge.id, edgeIndex, from: edge.source, to: edge.target });
   }
 
   function onPaneClick() {

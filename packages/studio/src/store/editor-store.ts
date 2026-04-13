@@ -30,7 +30,10 @@ export interface ExecutionSlice {
 }
 
 // What the user has selected on the canvas
-export type Selection = { kind: "node"; id: string } | { kind: "edge"; id: string; from: string; to: string } | null;
+export type Selection =
+  | { kind: "node"; id: string }
+  | { kind: "edge"; id: string; edgeIndex: number; from: string; to: string }
+  | null;
 
 export interface EditorState extends ExecutionSlice {
   workflow: Workflow;
@@ -58,8 +61,8 @@ export interface EditorState extends ExecutionSlice {
 
   // Edge mutations
   addEdge(from: string, to: string, when?: string): void;
-  updateEdge(edgeId: string, patch: { when?: string; to?: string }): void;
-  deleteEdge(edgeId: string): void;
+  updateEdge(edgeIndex: number, patch: { when?: string; to?: string; max_iterations?: number }): void;
+  deleteEdge(edgeIndex: number): void;
 
   markLayoutFresh(): void;
 }
@@ -280,9 +283,12 @@ export const useEditorStore = create<EditorState>()(
       addEdge: (from: string, to: string, when?: string) =>
         set(
           produce((s: EditorState) => {
-            // Don't add duplicate edges
-            const exists = s.workflow.edges.some((e) => e.from === from && e.to === to);
-            if (exists) return;
+            // Block duplicate unconditional edges between the same pair.
+            // Multiple conditional edges (different `when`) are allowed.
+            if (!when) {
+              const exists = s.workflow.edges.some((e) => e.from === from && e.to === to && !e.when);
+              if (exists) return;
+            }
             const edge: Edge = { from, to };
             if (when) edge.when = when;
             s.workflow.edges.push(edge);
@@ -290,16 +296,23 @@ export const useEditorStore = create<EditorState>()(
           }),
         ),
 
-      updateEdge: (edgeId: string, patch: { when?: string; to?: string }) =>
+      updateEdge: (edgeIndex: number, patch: { when?: string; to?: string; max_iterations?: number }) =>
         set(
           produce((s: EditorState) => {
-            const edge = s.workflow.edges.find((e) => `${e.from}--${e.to}` === edgeId);
+            const edge = s.workflow.edges[edgeIndex];
             if (!edge) return;
             if (patch.when !== undefined) {
               if (patch.when) {
                 edge.when = patch.when;
               } else {
                 delete edge.when;
+              }
+            }
+            if (patch.max_iterations !== undefined) {
+              if (patch.max_iterations > 0) {
+                edge.max_iterations = patch.max_iterations;
+              } else {
+                delete edge.max_iterations;
               }
             }
             if (patch.to !== undefined) {
@@ -309,11 +322,13 @@ export const useEditorStore = create<EditorState>()(
           }),
         ),
 
-      deleteEdge: (edgeId: string) =>
+      deleteEdge: (edgeIndex: number) =>
         set(
           produce((s: EditorState) => {
-            s.workflow.edges = s.workflow.edges.filter((e) => `${e.from}--${e.to}` !== edgeId);
-            if (s.selection?.kind === "edge" && s.selection.id === edgeId) {
+            if (edgeIndex >= 0 && edgeIndex < s.workflow.edges.length) {
+              s.workflow.edges.splice(edgeIndex, 1);
+            }
+            if (s.selection?.kind === "edge" && s.selection.edgeIndex === edgeIndex) {
               s.selection = null;
             }
             s.isLayoutStale = true;

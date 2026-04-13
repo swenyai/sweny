@@ -478,7 +478,7 @@ describe("validateWorkflow", () => {
 
 describe("workflowJsonSchema", () => {
   it("has the correct $id", () => {
-    expect(workflowJsonSchema.$id).toBe("https://sweny.ai/schemas/workflow.json");
+    expect(workflowJsonSchema.$id).toBe("https://spec.sweny.ai/schemas/workflow.json");
   });
 
   it("requires all top-level fields", () => {

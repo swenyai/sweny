@@ -2,6 +2,8 @@ import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps }
 
 export type TransitionEdgeData = {
   when?: string;
+  max_iterations?: number;
+  edgeIndex: number;
   isConditional: boolean;
   isError?: boolean;
 };

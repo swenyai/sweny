@@ -82,6 +82,8 @@ export async function layoutWorkflow(
     type: "conditionEdge" as const,
     data: {
       when: flowEdge.data.when,
+      max_iterations: flowEdge.data.max_iterations,
+      edgeIndex: flowEdge.edgeIndex,
       isConditional: flowEdge.data.isConditional,
     },
   }));

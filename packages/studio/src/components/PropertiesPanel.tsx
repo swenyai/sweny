@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import type { Node, NodeResult } from "@sweny-ai/core";
+import { useState, useMemo, useCallback } from "react";
+import type { Node, NodeResult, Source } from "@sweny-ai/core";
 import { validateWorkflow } from "@sweny-ai/core/schema";
 import { getSkillCatalog } from "@sweny-ai/core/studio";
 import { useEditorStore } from "../store/editor-store.js";
@@ -70,20 +70,21 @@ export function PropertiesPanel() {
   }
 
   if (selection?.kind === "edge") {
-    const { id: edgeId, from, to } = selection;
-    const edge = workflow.edges.find((e) => `${e.from}--${e.to}` === edgeId);
+    const { id: edgeId, edgeIndex, from, to } = selection;
+    const edge = workflow.edges[edgeIndex];
     return (
       <EdgePanel
         key={edgeId}
-        edgeId={edgeId}
+        edgeIndex={edgeIndex}
         from={from}
         to={to}
         when={edge?.when ?? ""}
+        maxIterations={edge?.max_iterations}
         nodeIds={nodeIds}
         readOnly={readOnly}
         updateEdge={updateEdge}
-        deleteEdge={(eid) => {
-          deleteEdge(eid);
+        deleteEdge={(idx) => {
+          deleteEdge(idx);
           setSelection(null);
         }}
       />
@@ -196,6 +197,20 @@ function NodePanel({
   const [editId, setEditId] = useState(id);
   const [idError, setIdError] = useState<string | null>(null);
   const [name, setNodeName] = useState(node.name);
+
+  // Source type state — track kind + value separately
+  const [sourceKind, setSourceKind] = useState<"inline" | "file" | "url">(() => {
+    const src = node.instruction;
+    if (typeof src === "string") {
+      const t = src.trim();
+      if (t.startsWith("http://") || t.startsWith("https://")) return "url";
+      if (t.startsWith("./") || t.startsWith("../") || t.startsWith("/")) return "file";
+      return "inline";
+    }
+    if ("url" in src) return "url";
+    if ("file" in src) return "file";
+    return "inline";
+  });
   const [instruction, setInstruction] = useState(() => {
     const src = node.instruction;
     if (typeof src === "string") return src;
@@ -204,6 +219,13 @@ function NodePanel({
     if ("url" in src) return src.url;
     return "";
   });
+
+  const buildSource = useCallback((kind: "inline" | "file" | "url", value: string): Source => {
+    if (kind === "file") return { file: value };
+    if (kind === "url") return { url: value };
+    return value; // inline — plain string
+  }, []);
+
   const [showExpanded, setShowExpanded] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -261,34 +283,73 @@ function NodePanel({
       <div className="mb-3 flex-1 flex flex-col min-h-0">
         <div className="flex items-center justify-between mb-1">
           <label className="text-xs font-medium text-gray-600">Instruction</label>
-          {!readOnly && (
-            <button
-              onClick={() => setShowExpanded(true)}
-              className="text-gray-400 hover:text-indigo-500 transition-colors"
-              title="Expand editor"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <path
-                  d="M2 10v4h4M14 6V2h-4M2 14L6.5 9.5M14 2L9.5 6.5"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {!readOnly && (
+              <select
+                className="text-[10px] border border-gray-300 rounded px-1.5 py-0.5 text-gray-600 bg-white"
+                value={sourceKind}
+                onChange={(e) => {
+                  const newKind = e.target.value as "inline" | "file" | "url";
+                  if (newKind === sourceKind) return;
+                  setSourceKind(newKind);
+                  setInstruction("");
+                  updateNode(id, { instruction: buildSource(newKind, "") });
+                }}
+              >
+                <option value="inline">Inline</option>
+                <option value="file">File</option>
+                <option value="url">URL</option>
+              </select>
+            )}
+            {!readOnly && sourceKind === "inline" && (
+              <button
+                onClick={() => setShowExpanded(true)}
+                className="text-gray-400 hover:text-blue-500 transition-colors"
+                title="Expand editor"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <path
+                    d="M2 10v4h4M14 6V2h-4M2 14L6.5 9.5M14 2L9.5 6.5"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
-        <textarea
-          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm resize-y font-mono flex-1 ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
-          rows={14}
-          value={instruction}
-          disabled={readOnly}
-          onChange={(e) => setInstruction(e.target.value)}
-          onBlur={() => updateNode(id, { instruction })}
-          placeholder="What should Claude do at this node?"
-        />
-        {!readOnly && import.meta.env.DEV && (
+
+        {sourceKind === "inline" ? (
+          <textarea
+            className={`w-full border border-gray-300 rounded px-2 py-1 text-sm resize-y font-mono flex-1 ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
+            rows={14}
+            value={instruction}
+            disabled={readOnly}
+            onChange={(e) => setInstruction(e.target.value)}
+            onBlur={() => updateNode(id, { instruction: buildSource(sourceKind, instruction) })}
+            placeholder="What should the AI model do at this node?"
+          />
+        ) : (
+          <div>
+            <input
+              className={`w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
+              value={instruction}
+              disabled={readOnly}
+              onChange={(e) => setInstruction(e.target.value)}
+              onBlur={() => updateNode(id, { instruction: buildSource(sourceKind, instruction) })}
+              placeholder={sourceKind === "file" ? "./path/to/instruction.md" : "https://example.com/instruction.md"}
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              {sourceKind === "file"
+                ? "Relative or absolute path — resolved at execution time"
+                : "HTTP(S) URL — fetched at execution time"}
+            </p>
+          </div>
+        )}
+
+        {!readOnly && sourceKind === "inline" && import.meta.env.DEV && (
           <div className="mt-2 flex items-center gap-2">
             <button
               disabled={aiLoading}
@@ -316,7 +377,7 @@ function NodePanel({
                   setAiLoading(false);
                 }
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200 disabled:opacity-40 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 disabled:opacity-40 transition-colors"
             >
               <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1l1.5 4.5L14 7l-4.5 1.5L8 13l-1.5-4.5L2 7l4.5-1.5z" />
@@ -336,7 +397,7 @@ function NodePanel({
           skills={node.skills}
           onSave={(text) => {
             setInstruction(text);
-            updateNode(id, { instruction: text });
+            updateNode(id, { instruction: buildSource(sourceKind, text) });
           }}
           onClose={() => setShowExpanded(false)}
         />
@@ -458,18 +519,30 @@ function ExecutionResultCard({ result, isRunning }: ExecutionResultCardProps) {
 // ─────────────────────────────────────────────
 
 interface EdgePanelProps {
-  edgeId: string;
+  edgeIndex: number;
   from: string;
   to: string;
   when: string;
+  maxIterations?: number;
   nodeIds: string[];
   readOnly: boolean;
-  updateEdge: (edgeId: string, patch: { when?: string; to?: string }) => void;
-  deleteEdge: (edgeId: string) => void;
+  updateEdge: (edgeIndex: number, patch: { when?: string; to?: string; max_iterations?: number }) => void;
+  deleteEdge: (edgeIndex: number) => void;
 }
 
-function EdgePanel({ edgeId, from, to, when, nodeIds, readOnly, updateEdge, deleteEdge }: EdgePanelProps) {
+function EdgePanel({
+  edgeIndex,
+  from,
+  to,
+  when,
+  maxIterations,
+  nodeIds,
+  readOnly,
+  updateEdge,
+  deleteEdge,
+}: EdgePanelProps) {
   const [editWhen, setEditWhen] = useState(when);
+  const [editMaxIter, setEditMaxIter] = useState(maxIterations?.toString() ?? "");
 
   return (
     <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
@@ -485,7 +558,7 @@ function EdgePanel({ edgeId, from, to, when, nodeIds, readOnly, updateEdge, dele
         <select
           className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
           value={to}
-          onChange={(e) => updateEdge(edgeId, { to: e.target.value })}
+          onChange={(e) => updateEdge(edgeIndex, { to: e.target.value })}
           disabled={readOnly}
         >
           {nodeIds.map((id) => (
@@ -503,17 +576,38 @@ function EdgePanel({ edgeId, from, to, when, nodeIds, readOnly, updateEdge, dele
           rows={3}
           value={editWhen}
           onChange={(e) => setEditWhen(e.target.value)}
-          onBlur={() => updateEdge(edgeId, { when: editWhen })}
+          onBlur={() => updateEdge(edgeIndex, { when: editWhen })}
           disabled={readOnly}
           placeholder="Leave empty for unconditional edge"
         />
         <p className="text-xs text-gray-400 mt-1">Natural language condition — Claude evaluates at runtime</p>
       </div>
 
+      <div className="mb-3">
+        <label className="block text-xs font-medium text-gray-600 mb-1">Max iterations</label>
+        <input
+          type="number"
+          min="0"
+          step="1"
+          className={`w-full border border-gray-300 rounded px-2 py-1 text-sm ${readOnly ? "opacity-60 cursor-not-allowed bg-gray-50" : ""}`}
+          value={editMaxIter}
+          onChange={(e) => setEditMaxIter(e.target.value)}
+          onBlur={() => {
+            const n = parseInt(editMaxIter, 10);
+            updateEdge(edgeIndex, { max_iterations: isNaN(n) ? 0 : n });
+          }}
+          disabled={readOnly}
+          placeholder="Unlimited"
+        />
+        <p className="text-xs text-gray-400 mt-1">
+          Limits how many times this edge can be followed in retry loops. Leave empty for unlimited.
+        </p>
+      </div>
+
       {!readOnly && (
         <div className="mt-4 pt-4 border-t border-gray-200">
           <button
-            onClick={() => deleteEdge(edgeId)}
+            onClick={() => deleteEdge(edgeIndex)}
             className="w-full px-3 py-1 rounded text-xs bg-red-600 text-white hover:bg-red-500"
           >
             Delete edge

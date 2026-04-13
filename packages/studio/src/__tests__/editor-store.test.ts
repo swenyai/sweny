@@ -194,51 +194,72 @@ describe("editor-store", () => {
   });
 
   describe("updateEdge", () => {
+    // Test workflow edges: [0] step-a→step-b, [1] step-b→step-c (when: "success")
+
     it("updates the when condition", () => {
-      useEditorStore.getState().updateEdge("step-b--step-c", { when: "on failure" });
-      const edge = useEditorStore.getState().workflow.edges.find((e) => e.from === "step-b" && e.to === "step-c");
-      expect(edge?.when).toBe("on failure");
+      useEditorStore.getState().updateEdge(1, { when: "on failure" });
+      const edge = useEditorStore.getState().workflow.edges[1];
+      expect(edge.when).toBe("on failure");
     });
 
     it("removes when condition when set to empty string", () => {
-      useEditorStore.getState().updateEdge("step-b--step-c", { when: "" });
-      const edge = useEditorStore.getState().workflow.edges.find((e) => e.from === "step-b" && e.to === "step-c");
-      expect(edge?.when).toBeUndefined();
+      useEditorStore.getState().updateEdge(1, { when: "" });
+      const edge = useEditorStore.getState().workflow.edges[1];
+      expect(edge.when).toBeUndefined();
     });
 
     it("does NOT mark layout stale when only when changes", () => {
-      useEditorStore.getState().updateEdge("step-b--step-c", { when: "new condition" });
+      useEditorStore.getState().updateEdge(1, { when: "new condition" });
       expect(useEditorStore.getState().isLayoutStale).toBe(false);
     });
 
     it("marks layout stale when to changes", () => {
-      useEditorStore.getState().updateEdge("step-a--step-b", { to: "step-c" });
+      useEditorStore.getState().updateEdge(0, { to: "step-c" });
       const state = useEditorStore.getState();
-      const edge = state.workflow.edges.find((e) => e.from === "step-a" && e.to === "step-c");
-      expect(edge).toBeDefined();
+      expect(state.workflow.edges[0].to).toBe("step-c");
       expect(state.isLayoutStale).toBe(true);
     });
 
-    it("no-ops for nonexistent edge ID", () => {
+    it("no-ops for out-of-bounds index", () => {
       const before = JSON.stringify(useEditorStore.getState().workflow.edges);
-      useEditorStore.getState().updateEdge("fake--edge", { when: "whatever" });
+      useEditorStore.getState().updateEdge(999, { when: "whatever" });
       expect(JSON.stringify(useEditorStore.getState().workflow.edges)).toBe(before);
+    });
+
+    it("sets max_iterations", () => {
+      useEditorStore.getState().updateEdge(1, { max_iterations: 3 });
+      expect(useEditorStore.getState().workflow.edges[1].max_iterations).toBe(3);
+    });
+
+    it("removes max_iterations when set to 0", () => {
+      useEditorStore.getState().updateEdge(1, { max_iterations: 3 });
+      useEditorStore.getState().updateEdge(1, { max_iterations: 0 });
+      expect(useEditorStore.getState().workflow.edges[1].max_iterations).toBeUndefined();
     });
   });
 
   describe("deleteEdge", () => {
-    it("removes edge and marks layout stale", () => {
-      useEditorStore.getState().deleteEdge("step-a--step-b");
+    it("removes edge by index and marks layout stale", () => {
+      useEditorStore.getState().deleteEdge(0);
       const state = useEditorStore.getState();
-      const edge = state.workflow.edges.find((e) => e.from === "step-a" && e.to === "step-b");
-      expect(edge).toBeUndefined();
+      // Only one edge should remain (the step-b→step-c one)
+      expect(state.workflow.edges).toHaveLength(1);
+      expect(state.workflow.edges[0].from).toBe("step-b");
       expect(state.isLayoutStale).toBe(true);
     });
 
     it("clears selection if deleted edge was selected", () => {
-      useEditorStore.getState().setSelection({ kind: "edge", id: "step-a--step-b", from: "step-a", to: "step-b" });
-      useEditorStore.getState().deleteEdge("step-a--step-b");
+      useEditorStore
+        .getState()
+        .setSelection({ kind: "edge", id: "edge-0", edgeIndex: 0, from: "step-a", to: "step-b" });
+      useEditorStore.getState().deleteEdge(0);
       expect(useEditorStore.getState().selection).toBeNull();
+    });
+
+    it("no-ops for out-of-bounds index", () => {
+      const before = useEditorStore.getState().workflow.edges.length;
+      useEditorStore.getState().deleteEdge(999);
+      expect(useEditorStore.getState().workflow.edges).toHaveLength(before);
     });
   });
 
@@ -355,9 +376,14 @@ describe("editor-store", () => {
     });
 
     it("sets edge selection", () => {
-      useEditorStore.getState().setSelection({ kind: "edge", id: "step-a--step-b", from: "step-a", to: "step-b" });
+      useEditorStore
+        .getState()
+        .setSelection({ kind: "edge", id: "edge-0", edgeIndex: 0, from: "step-a", to: "step-b" });
       const sel = useEditorStore.getState().selection;
       expect(sel?.kind).toBe("edge");
+      if (sel?.kind === "edge") {
+        expect(sel.edgeIndex).toBe(0);
+      }
     });
 
     it("clears selection with null", () => {

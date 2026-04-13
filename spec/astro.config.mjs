@@ -25,6 +25,7 @@ export default defineConfig({
         { label: "Workflow", slug: "workflow" },
         { label: "Nodes", slug: "nodes" },
         { label: "Edges & Routing", slug: "edges" },
+        { label: "Sources", slug: "sources" },
         { label: "Skills & Tools", slug: "skills" },
         { label: "Execution Model", slug: "execution" },
       ],

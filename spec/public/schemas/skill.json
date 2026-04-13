@@ -4,16 +4,18 @@
   "title": "SWEny Skill",
   "description": "A composable tool bundle that provides capabilities to workflow nodes.",
   "type": "object",
-  "required": ["id", "name", "description", "category", "config", "tools"],
+  "required": ["id", "name", "description", "category", "config"],
+  "anyOf": [{ "required": ["tools"] }, { "required": ["instruction"] }, { "required": ["mcp"] }],
   "additionalProperties": false,
   "properties": {
     "id": {
       "type": "string",
       "minLength": 1,
-      "description": "Unique skill identifier. Referenced by nodes' 'skills' arrays."
+      "description": "Unique skill identifier. Referenced by nodes' skills arrays."
     },
     "name": {
       "type": "string",
+      "minLength": 1,
       "description": "Human-readable skill name."
     },
     "description": {
@@ -23,7 +25,7 @@
     "category": {
       "type": "string",
       "enum": ["git", "observability", "tasks", "notification", "general"],
-      "description": "Functional category for grouping and validation."
+      "description": "Functional category."
     },
     "config": {
       "type": "object",
@@ -38,6 +40,14 @@
       "items": {
         "$ref": "#/$defs/Tool"
       }
+    },
+    "instruction": {
+      "type": "string",
+      "description": "Natural language expertise injected into the node prompt when this skill is referenced."
+    },
+    "mcp": {
+      "$ref": "#/$defs/McpServerConfig",
+      "description": "External MCP server definition wired for nodes referencing this skill."
     }
   },
   "$defs": {
@@ -79,6 +89,42 @@
           "description": "JSON Schema defining the tool's input parameters."
         }
       }
+    },
+    "McpServerConfig": {
+      "type": "object",
+      "description": "External MCP server definition.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["stdio", "http"],
+          "description": "Transport type. Inferred from presence of command (stdio) or url (http) when omitted."
+        },
+        "command": {
+          "type": "string",
+          "description": "Spawn command (stdio transport)."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments for the command."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "HTTP endpoint (HTTP transport)."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "HTTP headers (HTTP transport only)."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Environment variable names the server needs. Values are descriptions, not secrets."
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

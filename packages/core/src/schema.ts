@@ -306,9 +306,10 @@ const sourceJsonSchema = {
 
 export const workflowJsonSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://sweny.ai/schemas/workflow.json",
+  $id: "https://spec.sweny.ai/schemas/workflow.json",
   title: "SWEny Workflow",
-  description: "A workflow definition for skill-based orchestration (supports controlled cycles via max_iterations)",
+  description:
+    "A declarative YAML format for AI agent orchestration as a directed graph with natural language routing.",
   type: "object",
   required: ["id", "name", "nodes", "edges", "entry"],
   additionalProperties: false,
@@ -326,7 +327,7 @@ export const workflowJsonSchema = {
         additionalProperties: false,
         properties: {
           name: { type: "string", minLength: 1 },
-          instruction: { $ref: "#/$defs/Source", description: "What Claude should do at this node" },
+          instruction: { $ref: "#/$defs/Source", description: "Natural language instruction for the AI model." },
           skills: {
             type: "array",
             items: { type: "string" },
