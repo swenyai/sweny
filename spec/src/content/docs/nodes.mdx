@@ -7,12 +7,111 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 
 ## Fields
 
-| Field         | Type               | Required | Default | Description                                                       |
-| ------------- | ------------------ | -------- | ------- | ----------------------------------------------------------------- |
-| `name`        | string             | REQUIRED | —       | Display name for this node. MUST be non-empty.                    |
-| `instruction` | [Source](/sources) | REQUIRED | —       | Natural language instruction for the AI model. MUST be non-empty. |
-| `skills`      | string[]           | OPTIONAL | `[]`    | Skill IDs this node has access to.                                |
-| `output`      | JSON Schema object | OPTIONAL | —       | Structured output schema for this node's result.                  |
+| Field         | Type                             | Required | Default                      | Description                                                                    |
+| ------------- | -------------------------------- | -------- | ---------------------------- | ------------------------------------------------------------------------------ |
+| `name`        | string                           | REQUIRED | —                            | Display name for this node. MUST be non-empty.                                 |
+| `instruction` | [Source](/sources)               | REQUIRED | —                            | Natural language instruction for the AI model. MUST be non-empty.              |
+| `skills`      | string[]                         | OPTIONAL | `[]`                         | Skill IDs this node has access to.                                             |
+| `output`      | JSON Schema object               | OPTIONAL | —                            | Structured output schema for this node's result.                               |
+| `max_turns`   | integer &ge; 1                   | OPTIONAL | implementation&#8209;defined | Maximum AI model turns for this node's execution.                              |
+| `rules`       | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Rules for this node. Additive by default; see [cascade](#cascade-semantics).   |
+| `context`     | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Context for this node. Additive by default; see [cascade](#cascade-semantics). |
+
+## Max Turns Semantics
+
+The `max_turns` field limits how many AI model turns (request-response cycles) a node may consume. Each turn is one model invocation — a turn that produces tool calls and a turn that produces a final response both count.
+
+A conforming executor:
+
+- **MUST** enforce `max_turns` when present, stopping the model after the specified number of turns.
+- When `max_turns` is absent, the executor applies its own default. The default is **implementation-defined**.
+- When the limit is reached, the executor **SHOULD** capture whatever partial result is available and produce a `NodeResult` with `status: "failed"` and a descriptive error in `data`. The executor **MUST NOT** silently discard the node's work.
+
+Different nodes have vastly different compute needs. A context-gathering node that queries multiple APIs may need many turns, while a summarization node with no tools may need one. Per-node limits give workflow authors fine-grained control over the compute budget.
+
+## Rules & Context
+
+Nodes can declare their own `rules` and `context` that interact with the workflow-level declarations via cascade.
+
+### NodeSources Type
+
+Per-node `rules` and `context` accept two forms:
+
+**Array form** (additive — default):
+
+```yaml
+investigate:
+  name: Root Cause Analysis
+  instruction: Investigate the alert.
+  context:
+    - ./security-playbook.md
+```
+
+The node inherits all workflow-level sources AND adds its own.
+
+**Object form** (with `only` flag):
+
+```yaml
+vendor-review:
+  name: Vendor License Review
+  instruction: Check dependency licenses.
+  rules:
+    only: true
+    sources:
+      - ./license-policy.md
+```
+
+When `only: true`, the node does **not** inherit workflow-level sources for that field. Only the node's own sources are used. This blocks cascade for that field only — `context` still inherits normally unless it also sets `only: true`.
+
+### Cascade Semantics
+
+For each of `rules` and `context`, a conforming executor MUST resolve the effective sources for a node using this algorithm:
+
+1. Start with **runtime input** sources (if any).
+2. Append **workflow-level** sources (if any).
+3. If the node declares the field:
+   - **`only: true`** — discard steps 1–2, use only the node's `sources`.
+   - **Otherwise** (array form, or `only` absent/false) — append the node's sources.
+
+The resolved sources are concatenated in this order and prepended to the node's instruction. See [Input Augmentation](#input-augmentation) for the full assembly.
+
+```
+Effective rules   = (only? node-only : runtime + workflow + node)
+Effective context = (only? node-only : runtime + workflow + node)
+```
+
+### Example: Mixed Cascade
+
+```yaml
+# Workflow level
+rules:
+  - ./coding-standards.md
+context:
+  - ./ARCHITECTURE.md
+
+nodes:
+  gather:
+    name: Gather Context
+    instruction: Investigate the alert.
+    # No per-node rules/context — inherits everything from workflow
+
+  security-audit:
+    name: Security Audit
+    instruction: Audit for OWASP top 10.
+    # Additive — gets workflow context + this
+    context:
+      - ./security-playbook.md
+
+  license-check:
+    name: License Review
+    instruction: Check dependency licenses.
+    # Override — only these rules, no inheritance
+    rules:
+      only: true
+      sources:
+        - ./license-policy.md
+    # Context still inherits from workflow (ARCHITECTURE.md)
+```
 
 ## Instruction Semantics
 
@@ -26,20 +125,20 @@ A conforming executor:
 
 ### Input Augmentation
 
-If the workflow input contains a `rules` field (string), a conforming executor MUST prepend it to the instruction with the heading:
+A conforming executor MUST resolve rules and context from all three layers (runtime input, workflow-level, node-level) per the [cascade semantics](#cascade-semantics) above. The effective rules are prepended with the heading:
 
 ```
 ## Rules — You MUST Follow These
 
-{rules}
+{effective rules, concatenated}
 ```
 
-If the workflow input contains a `context` field (string), a conforming executor MUST prepend it with the heading:
+The effective context is prepended with the heading:
 
 ```
 ## Background Context
 
-{context}
+{effective context, concatenated}
 ```
 
 ### Skill Instruction Injection
@@ -53,6 +152,27 @@ If any skill referenced by the node has an `instruction` field, a conforming exe
 ```
 
 When rules, context, and skill instructions are all present, the assembly order is: rules first, then context, then skill instructions, then the node's base instruction, separated by `---`.
+
+```
+┌─────────────────────────────────┐
+│ ## Rules — You MUST Follow These│  ← effective rules (cascaded)
+│ {rules content}                 │
+├─────────────────────────────────┤
+│ ---                             │
+├─────────────────────────────────┤
+│ ## Background Context           │  ← effective context (cascaded)
+│ {context content}               │
+├─────────────────────────────────┤
+│ ---                             │
+├─────────────────────────────────┤
+│ ## Skill: {skill.name}          │  ← one per skill with instruction
+│ {skill.instruction}             │
+├─────────────────────────────────┤
+│ ---                             │
+├─────────────────────────────────┤
+│ {node.instruction}              │  ← the node's own instruction
+└─────────────────────────────────┘
+```
 
 ### Externalizing Instructions
 
@@ -108,6 +228,7 @@ gather:
   skills:
     - github
     - sentry
+  max_turns: 80
 ```
 
 ### Node with Structured Output
@@ -118,6 +239,7 @@ investigate:
   instruction: >-
     Classify each issue as novel or duplicate. Assess severity and
     fix complexity for each finding.
+  max_turns: 50
   skills:
     - github
     - linear

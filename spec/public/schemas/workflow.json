@@ -51,6 +51,31 @@
         }
       ]
     },
+    "NodeSources": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Source" },
+          "description": "Additive sources — appended to inherited sources."
+        },
+        {
+          "type": "object",
+          "required": ["sources"],
+          "additionalProperties": false,
+          "properties": {
+            "only": {
+              "type": "boolean",
+              "default": false,
+              "description": "When true, blocks cascade — only this node's sources are used."
+            },
+            "sources": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Source" }
+            }
+          }
+        }
+      ]
+    },
     "McpServerConfig": {
       "type": "object",
       "description": "External MCP server definition.",
@@ -105,6 +130,16 @@
       "minLength": 1,
       "description": "ID of the entry node. MUST reference a key in nodes."
     },
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Source" },
+      "description": "Directives prepended to every node's instruction."
+    },
+    "context": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Source" },
+      "description": "Background knowledge prepended to every node's instruction."
+    },
     "nodes": {
       "type": "object",
       "additionalProperties": {
@@ -130,6 +165,19 @@
           "output": {
             "type": "object",
             "description": "JSON Schema for structured output from this node."
+          },
+          "max_turns": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum AI model turns for this node. When absent, the executor's default applies."
+          },
+          "rules": {
+            "$ref": "#/$defs/NodeSources",
+            "description": "Rules for this node. Additive by default; set only: true to block cascade."
+          },
+          "context": {
+            "$ref": "#/$defs/NodeSources",
+            "description": "Context for this node. Additive by default; set only: true to block cascade."
           }
         }
       }

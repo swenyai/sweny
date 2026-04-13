@@ -70,6 +70,8 @@ export interface Node {
   skills: string[];
   /** Optional structured output schema */
   output?: JSONSchema;
+  /** Max AI model turns for this node. When absent, the executor's default applies. */
+  max_turns?: number;
 }
 
 /** An edge connecting two nodes */
@@ -192,6 +194,8 @@ export interface Claude {
     outputSchema?: JSONSchema;
     /** Called with status messages while Claude is working (tool name, etc.) */
     onProgress?: (message: string) => void;
+    /** Per-node turn limit. Overrides the client default when set. */
+    maxTurns?: number;
   }): Promise<NodeResult>;
 
   /** Evaluate a routing condition — pick one of N choices */

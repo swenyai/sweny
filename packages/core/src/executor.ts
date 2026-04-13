@@ -152,6 +152,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       context,
       tools: trackedTools,
       outputSchema: node.output,
+      maxTurns: node.max_turns,
       onProgress: (message) => {
         safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
       },

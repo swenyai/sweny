@@ -79,6 +79,7 @@ export const nodeZ = z.object({
   instruction: sourceZ,
   skills: z.array(z.string()).default([]),
   output: jsonSchemaZ.optional(),
+  max_turns: z.number().int().min(1).optional(),
 });
 
 export const edgeZ = z.object({
@@ -336,6 +337,11 @@ export const workflowJsonSchema = {
           output: {
             type: "object",
             description: "Optional JSON Schema for structured output",
+          },
+          max_turns: {
+            type: "integer",
+            minimum: 1,
+            description: "Max AI model turns for this node. When absent, the executor's default applies.",
           },
         },
       },

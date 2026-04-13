@@ -85,8 +85,11 @@ Traces record these under `trace.sources`, keyed by field path (e.g. `nodes.inve
 ## Fields That Use Source
 
 - `node.instruction` — [Nodes](/nodes)
-- `workflow.input.rules[]` — [Workflow](/workflow)
-- `workflow.input.context[]` — [Workflow](/workflow)
+- `workflow.rules[]` — [Workflow](/workflow)
+- `workflow.context[]` — [Workflow](/workflow)
+- `node.rules[]` / `node.context[]` — [Nodes](/nodes) (per-node knowledge)
+- `workflow.input.rules[]` — [Workflow — Runtime Input](/workflow#runtime-input)
+- `workflow.input.context[]` — [Workflow — Runtime Input](/workflow#runtime-input)
 - `issueTemplate`, `prTemplate` (executor-specific)
 
 ## Fields That Stay Plain Strings

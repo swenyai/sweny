@@ -69,8 +69,9 @@ export class ClaudeClient implements Claude {
     tools: Tool[];
     outputSchema?: JSONSchema;
     onProgress?: (message: string) => void;
+    maxTurns?: number;
   }): Promise<NodeResult> {
-    const { instruction, context, tools, outputSchema, onProgress } = opts;
+    const { instruction, context, tools, outputSchema, onProgress, maxTurns } = opts;
     const toolCalls: ToolCall[] = [];
 
     // Convert core tools to SDK MCP tools
@@ -104,7 +105,7 @@ export class ClaudeClient implements Claude {
       const stream = query({
         prompt,
         options: {
-          maxTurns: this.maxTurns,
+          maxTurns: maxTurns ?? this.maxTurns,
           systemPrompt: SYSTEM_PROMPT,
           cwd: this.cwd,
           env,

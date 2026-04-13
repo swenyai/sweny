@@ -7,24 +7,47 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 
 ## Fields
 
-| Field         | Type                                                             | Required | Default | Description                                                                                    |
-| ------------- | ---------------------------------------------------------------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `id`          | string                                                           | REQUIRED | —       | Unique identifier for this workflow. MUST be non-empty.                                        |
-| `name`        | string                                                           | REQUIRED | —       | Human-readable name. MUST be non-empty.                                                        |
-| `description` | string                                                           | OPTIONAL | `""`    | Purpose of the workflow.                                                                       |
-| `entry`       | string                                                           | REQUIRED | —       | Node ID where execution begins. MUST reference a key in `nodes`.                               |
-| `nodes`       | Record&lt;string, [Node](/nodes)&gt;                             | REQUIRED | —       | Map of node ID to Node definition. Keys are referenced by `entry` and edge `from`/`to` fields. |
-| `edges`       | [Edge](/edges)[]                                                 | REQUIRED | —       | Directed edges defining execution flow and routing conditions.                                 |
-| `skills`      | Record&lt;string, [SkillDefinition](#skilldefinition-object)&gt; | OPTIONAL | `{}`    | Inline skill definitions scoped to this workflow.                                              |
+| Field         | Type                                                             | Required | Default | Description                                                                                     |
+| ------------- | ---------------------------------------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `id`          | string                                                           | REQUIRED | —       | Unique identifier for this workflow. MUST be non-empty.                                         |
+| `name`        | string                                                           | REQUIRED | —       | Human-readable name. MUST be non-empty.                                                         |
+| `description` | string                                                           | OPTIONAL | `""`    | Purpose of the workflow.                                                                        |
+| `entry`       | string                                                           | REQUIRED | —       | Node ID where execution begins. MUST reference a key in `nodes`.                                |
+| `nodes`       | Record&lt;string, [Node](/nodes)&gt;                             | REQUIRED | —       | Map of node ID to Node definition. Keys are referenced by `entry` and edge `from`/`to` fields.  |
+| `edges`       | [Edge](/edges)[]                                                 | REQUIRED | —       | Directed edges defining execution flow and routing conditions.                                  |
+| `skills`      | Record&lt;string, [SkillDefinition](#skilldefinition-object)&gt; | OPTIONAL | `{}`    | Inline skill definitions scoped to this workflow.                                               |
+| `rules`       | [Source](/sources)[]                                             | OPTIONAL | `[]`    | Directives prepended to every node's instruction. Organization-wide policies, coding standards. |
+| `context`     | [Source](/sources)[]                                             | OPTIONAL | `[]`    | Background knowledge prepended to every node's instruction. Architecture docs, playbooks.       |
+
+## Rules & Context
+
+The `rules` and `context` fields attach knowledge documents to the workflow. Every Source in these arrays is resolved eagerly before any node executes, and the resolved content is prepended to every node's instruction (see [Nodes — Input Augmentation](/nodes#input-augmentation)).
+
+- **`rules`** — directives the AI model MUST follow. Coding standards, review policies, compliance requirements.
+- **`context`** — background information the AI model should consider. Architecture docs, service maps, incident history.
+
+Both support inline text, file paths, and URLs:
+
+```yaml
+rules:
+  - ./coding-standards.md
+  - https://raw.githubusercontent.com/acme/playbook/main/review-policy.md
+  - "Never introduce breaking API changes without a migration path."
+context:
+  - ./ARCHITECTURE.md
+  - ./docs/service-map.md
+```
+
+Nodes can declare their own `rules` and `context` that layer on top. See [Nodes — Rules & Context](/nodes#rules--context) for cascade semantics.
 
 ## Runtime Input
 
 When executing a workflow, you may pass runtime input parameters. Two special fields are recognized:
 
-- **`rules`** — A [Source](/sources) containing directives that MUST be prepended to every node's instruction. Use this for organization-wide policies or run-specific constraints.
-- **`context`** — A [Source](/sources) containing background information prepended to every node's instruction. Use this for situation-specific details.
+- **`rules`** — A [Source](/sources) or array of Sources containing directives prepended to every node's instruction. These layer on top of workflow-level and node-level rules.
+- **`context`** — A [Source](/sources) or array of Sources containing background information prepended to every node's instruction. These layer on top of workflow-level and node-level context.
 
-Both `rules` and `context` can be inline text, file paths, or URLs. They resolve eagerly before any node executes. See [Nodes — Input Augmentation](/nodes#input-augmentation) for how they integrate into node instructions.
+Runtime input rules and context resolve eagerly before any node executes. See [Nodes — Input Augmentation](/nodes#input-augmentation) for the full assembly order.
 
 ## Structural Validation
 
@@ -97,13 +120,17 @@ edges: []
 
 ## Full Example
 
-A workflow with conditional routing, multiple skills, and structured output.
+A workflow with conditional routing, multiple skills, structured output, and knowledge files.
 
 ```yaml
 id: triage
 name: Alert Triage
 description: Investigate a production alert and take action based on findings.
 entry: gather
+rules:
+  - ./coding-standards.md
+context:
+  - ./ARCHITECTURE.md
 skills:
   triage-rubric:
     name: Triage Severity Rubric
