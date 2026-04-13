@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/studio",
-  "version": "8.0.9",
+  "version": "8.0.10",
   "type": "module",
   "files": [
     "dist/lib"
