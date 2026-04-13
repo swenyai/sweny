@@ -488,6 +488,13 @@ export async function runNew(): Promise<void> {
     p.log.info(`Detected: ${chalk.cyan(gitInfo.remote)} (${gitInfo.provider})`);
   }
 
+  // ── Discover all skills (builtins + custom) ────────────────────────
+  const allSkills = configuredSkills(process.env, cwd);
+  const customSkills = allSkills.filter((s) => !builtinSkills.some((b) => b.id === s.id));
+  if (customSkills.length > 0) {
+    p.log.info(`Found ${customSkills.length} custom skill(s): ${chalk.cyan(customSkills.map((s) => s.id).join(", "))}`);
+  }
+
   // ── Step 1: Pick a workflow ─────────────────────────────────────────
   const templateChoice = await p.select({
     message: "What do you want to do?",
@@ -514,7 +521,7 @@ export async function runNew(): Promise<void> {
   let template: WorkflowTemplate | undefined;
 
   if (templateChoice === "__custom") {
-    template = (await runCustomWorkflowBuilder()) ?? undefined;
+    template = (await runCustomWorkflowBuilder(allSkills)) ?? undefined;
     if (!template) {
       p.cancel("Setup cancelled.");
       process.exit(0);
@@ -530,7 +537,7 @@ export async function runNew(): Promise<void> {
   const observability = inferObservability(workflowSkills);
 
   // Collect credentials for the workflow's skills (+ always ANTHROPIC_API_KEY)
-  const credentials = collectCredentialsForSkills(workflowSkills, builtinSkills);
+  const credentials = collectCredentialsForSkills(workflowSkills, allSkills);
 
   // ── Step 3: Summary + confirm ───────────────────────────────────────
   const files: string[] = [];
@@ -695,7 +702,7 @@ export async function runNew(): Promise<void> {
  *
  * Consumed by the `__custom` branch of `runNew`'s picker.
  */
-async function runCustomWorkflowBuilder(): Promise<WorkflowTemplate | null> {
+async function runCustomWorkflowBuilder(skills: Skill[]): Promise<WorkflowTemplate | null> {
   const description = await p.text({
     message: "Describe the workflow you want",
     placeholder: "e.g. Review Python PRs for security issues and post a comment",
@@ -706,8 +713,6 @@ async function runCustomWorkflowBuilder(): Promise<WorkflowTemplate | null> {
     },
   });
   if (p.isCancel(description)) return null;
-
-  const skills = configuredSkills();
   const claude = new ClaudeClient({
     maxTurns: 3,
     cwd: process.cwd(),
