@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 import {
   fetchMarketplaceWorkflow,
   fetchMarketplaceIndex,
   computeProviderMismatch,
   buildAdaptPrompt,
   adaptWorkflowInteractive,
+  installMarketplaceWorkflow,
   MARKETPLACE_RAW_BASE,
 } from "./marketplace.js";
 import type { Skill, Workflow } from "../types.js";
@@ -258,5 +262,80 @@ describe("adaptWorkflowInteractive", () => {
 
     expect(wb.refineWorkflow).toHaveBeenCalledWith(sampleWorkflow, "make it better", expect.any(Object));
     expect(result).toEqual(sampleWorkflow);
+  });
+});
+
+describe("installMarketplaceWorkflow", () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
+    vi.restoreAllMocks();
+  });
+
+  function tmp(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-install-"));
+    tmpDirs.push(dir);
+    return dir;
+  }
+
+  const sampleYaml =
+    "id: pr-review\nname: PR Review\ndescription: Review PRs\nentry: start\n" +
+    "nodes:\n  start:\n    name: Start\n    instruction: hi\n    skills: [github]\nedges: []\n";
+
+  it("installs workflow as-is when no mismatch and no .sweny.yml", async () => {
+    const cwd = tmp();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(sampleYaml, { status: 200 }));
+
+    const result = await installMarketplaceWorkflow("pr-review", {
+      cwd,
+      availableSkills: testSkills,
+      claude: null,
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+    });
+
+    expect(result.installed).toBe(true);
+    expect(result.adapted).toBe(false);
+    expect(fs.existsSync(path.join(cwd, ".sweny.yml"))).toBe(true);
+    expect(fs.existsSync(path.join(cwd, ".sweny", "workflows", "pr-review.yml"))).toBe(true);
+  });
+
+  it("warns and installs as-is when mismatch detected but no agent", async () => {
+    const cwd = tmp();
+    fs.writeFileSync(path.join(cwd, ".sweny.yml"), "issue-tracker-provider: github-issues\n");
+    const yamlWithLinear = sampleYaml.replace("[github]", "[linear]");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(yamlWithLinear, { status: 200 }));
+
+    const warnings: string[] = [];
+    const result = await installMarketplaceWorkflow("pr-review", {
+      cwd,
+      availableSkills: testSkills,
+      claude: null,
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: (m: string) => warnings.push(m),
+        error: () => {},
+      },
+    });
+
+    expect(result.installed).toBe(true);
+    expect(result.adapted).toBe(false);
+    expect(result.mismatches).toHaveLength(1);
+    expect(warnings.some((w) => w.includes("linear"))).toBe(true);
+  });
+
+  it("throws with not-found kind when workflow missing", async () => {
+    const cwd = tmp();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 404 }));
+
+    await expect(
+      installMarketplaceWorkflow("nope", {
+        cwd,
+        availableSkills: testSkills,
+        claude: null,
+        logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      }),
+    ).rejects.toMatchObject({ kind: "not-found" });
   });
 });

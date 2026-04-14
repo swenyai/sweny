@@ -7,11 +7,24 @@
  * helpers in ./new.ts.
  */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import * as p from "@clack/prompts";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { Skill, SkillCategory, Workflow, Claude, Logger } from "../types.js";
 import type { FileConfig } from "./config-file.js";
 import { refineWorkflow } from "../workflow-builder.js";
 import { DagRenderer } from "./renderer.js";
+import { workflowZ, validateWorkflow } from "../schema.js";
+import { loadConfigFile } from "./config-file.js";
+import {
+  extractSkillsFromYaml,
+  collectCredentialsForSkills,
+  writeSwenyYmlIfMissing,
+  appendMissingEnvKeys,
+  writeWorkflowFile,
+  type Credential,
+} from "./new.js";
 
 export const MARKETPLACE_REPO = "swenyai/workflows";
 export const MARKETPLACE_RAW_BASE = `https://raw.githubusercontent.com/${MARKETPLACE_REPO}/main`;
@@ -228,4 +241,110 @@ export async function adaptWorkflowInteractive(workflow: Workflow, options: Adap
       }
     }
   }
+}
+
+export interface InstallOptions {
+  cwd: string;
+  availableSkills: Skill[];
+  /** Claude client for optional LLM adaptation. If null, we install as-is with a warning on mismatch. */
+  claude: Claude | null;
+  logger: Logger;
+}
+
+export interface InstallResult {
+  installed: boolean;
+  adapted: boolean;
+  workflowPath: string;
+  mismatches: ProviderMismatch[];
+  addedEnvKeys: number;
+}
+
+/**
+ * Fetch a workflow from swenyai/workflows, adapt if provider mismatch is detected
+ * AND an agent is available, then write files idempotently.
+ */
+export async function installMarketplaceWorkflow(id: string, options: InstallOptions): Promise<InstallResult> {
+  const { cwd, availableSkills, claude, logger } = options;
+
+  // 1. Fetch
+  const fetched = await fetchMarketplaceWorkflow(id);
+
+  // 2. Load existing config to detect mismatches
+  const fileConfig = loadConfigFile(cwd);
+  const workflowSkills = extractSkillsFromYaml(fetched.yaml);
+  const mismatches = computeProviderMismatch(workflowSkills, fileConfig, availableSkills);
+
+  // 3. Adapt if needed + possible
+  let finalYaml = fetched.yaml;
+  let adapted = false;
+  if (mismatches.length > 0 && claude) {
+    try {
+      const parsed = workflowZ.parse(parseYaml(fetched.yaml));
+      const errs = validateWorkflow(parsed);
+      if (errs.length > 0) {
+        throw new Error(`Marketplace workflow has schema errors: ${errs.map((e) => e.message).join("; ")}`);
+      }
+      const refined = await adaptWorkflowInteractive(parsed, {
+        claude,
+        skills: availableSkills,
+        logger,
+        initialRefinement: buildAdaptPrompt(mismatches),
+      });
+      if (refined === null) {
+        // user cancelled — signal no install
+        return {
+          installed: false,
+          adapted: false,
+          workflowPath: "",
+          mismatches,
+          addedEnvKeys: 0,
+        };
+      }
+      finalYaml = stringifyYaml(refined, { indent: 2, lineWidth: 120 });
+      adapted = true;
+    } catch (err) {
+      logger.warn(`Adaptation failed, installing as-is: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } else if (mismatches.length > 0) {
+    const swapDesc = mismatches.map((m) => `${m.workflowSkill} → ${m.userProvider}`).join(", ");
+    logger.warn(
+      `Workflow uses providers different from your .sweny.yml (${swapDesc}). ` +
+        `Install as-is and edit manually, or set ANTHROPIC_API_KEY and re-run to adapt automatically.`,
+    );
+  }
+
+  // 4. Infer providers for fresh-project .sweny.yml (unchanged from existing logic)
+  const finalSkills = extractSkillsFromYaml(finalYaml);
+  const sourceControl = finalSkills.includes("gitlab") ? "gitlab" : "github";
+  const issueTracker = finalSkills.includes("linear")
+    ? "linear"
+    : finalSkills.includes("jira")
+      ? "jira"
+      : "github-issues";
+  const observability = finalSkills.includes("datadog")
+    ? "datadog"
+    : finalSkills.includes("sentry")
+      ? "sentry"
+      : finalSkills.includes("betterstack")
+        ? "betterstack"
+        : finalSkills.includes("newrelic")
+          ? "newrelic"
+          : null;
+
+  writeSwenyYmlIfMissing(cwd, sourceControl, observability, issueTracker);
+
+  // 5. Credentials
+  const creds: Credential[] = collectCredentialsForSkills(finalSkills, availableSkills);
+  const addedEnvKeys = appendMissingEnvKeys(cwd, creds);
+
+  // 6. Workflow file (no overwrite prompt here — caller handles UX)
+  const write = writeWorkflowFile(cwd, id, finalYaml, { overwrite: true });
+
+  return {
+    installed: true,
+    adapted,
+    workflowPath: write.path,
+    mismatches,
+    addedEnvKeys,
+  };
 }
