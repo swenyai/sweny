@@ -61,6 +61,9 @@ import { checkProviderConnectivity } from "./check.js";
 import { registerSetupCommand } from "./setup.js";
 import { registerPublishCommand } from "./publish.js";
 import { reportToCloud } from "./cloud-report.js";
+import { runUpgrade, fetchLatestFromNpm } from "./upgrade.js";
+import { maybeNudge, defaultCachePath } from "./version-check.js";
+import { spawnSync } from "node:child_process";
 
 // ── Stream observer (NDJSON) ────────────────────────────────────────
 /**
@@ -1079,4 +1082,65 @@ workflowCmd
     console.log();
   });
 
-program.parse();
+// ── sweny upgrade / update ────────────────────────────────────────────
+// Self-update the globally-installed @sweny-ai/core. Mirrors the UX of
+// `bun upgrade`, `deno upgrade`, `rustup update`, etc.
+const upgradeCmd = program
+  .command("upgrade")
+  .alias("update")
+  .description("Upgrade sweny to the latest published version")
+  .option("--check", "Report what would be installed without running the installer")
+  .option("--force", "Reinstall even if the current version is already latest")
+  .option("--tag <tag>", "npm dist-tag to install (default: latest)", "latest")
+  .action(async (options: { check?: boolean; force?: boolean; tag?: string }) => {
+    // process.argv[1] is the CLI entrypoint — resolve through any symlinks
+    // (nvm, homebrew, etc. symlink the bin into a PATH dir) so PM detection
+    // looks at the real install location.
+    const argv1 = process.argv[1] ?? "";
+    let installPath = argv1;
+    try {
+      installPath = fs.realpathSync(argv1);
+    } catch {
+      // Fall through with the unresolved path; detection degrades gracefully.
+    }
+    await runUpgrade(options, {
+      currentVersion: version,
+      installPath,
+      fetchLatestVersion: fetchLatestFromNpm,
+      runInstall: (cmd, args) => {
+        const res = spawnSync(cmd, args, { stdio: "inherit" });
+        if (res.error) {
+          process.stderr.write(chalk.red(`  Error: couldn't run ${cmd} — ${res.error.message}`) + "\n");
+          return 127;
+        }
+        return typeof res.status === "number" ? res.status : 1;
+      },
+      canWrite: (dir) => {
+        try {
+          fs.accessSync(dir, fs.constants.W_OK);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    });
+  });
+// Touch upgradeCmd so TS/ESLint don't flag it unused if someone tightens rules.
+void upgradeCmd;
+
+// ── Passive "new version available" nudge ─────────────────────────────
+// Runs after every command. Non-blocking, bounded to 1.5s, silent on any
+// failure, skipped in CI / non-TTY / opt-out environments.
+program.hook("postAction", async (_thisCommand, actionCommand) => {
+  const topLevel = actionCommand.parent?.name() === "sweny" ? actionCommand.name() : actionCommand.parent?.name();
+  await maybeNudge({
+    currentVersion: version,
+    cachePath: defaultCachePath(),
+    now: Date.now(),
+    env: process.env,
+    isTty: Boolean(process.stderr.isTTY),
+    commandName: topLevel,
+  });
+});
+
+await program.parseAsync();

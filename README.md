@@ -45,6 +45,13 @@ sweny workflow run .sweny/workflows/pr-review.yml
 sweny workflow diagram .sweny/workflows/pr-review.yml -o pr-review.mmd
 ```
 
+Keep the CLI current:
+
+```bash
+sweny upgrade          # pulls the latest @sweny-ai/core via your package manager
+sweny upgrade --check  # dry-run: just report the available version
+```
+
 Browse **[marketplace.sweny.ai](https://marketplace.sweny.ai)** for ready-to-run workflows.
 
 ## What it does

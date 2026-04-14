@@ -386,6 +386,45 @@ Walks you through:
 
 Requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated. If `gh` is not available, the command saves validated files locally to `./sweny-publish/` for manual submission.
 
+## sweny upgrade
+
+Upgrade the globally-installed `@sweny-ai/core` CLI to the latest published version. Aliased as `sweny update`.
+
+```bash
+sweny upgrade
+```
+
+Detects how you installed sweny (npm, pnpm, yarn, bun, volta, Homebrew) and runs the right installer. Prints the exact command it's about to run so there's no surprise.
+
+| Option | Description |
+|--------|-------------|
+| `--check` | Report the available version and the install command without running it |
+| `--force` | Reinstall even if the current version is already latest |
+| `--tag <tag>` | Install a specific npm dist-tag (default: `latest`; e.g. `--tag beta`) |
+
+Examples:
+
+```bash
+# Dry-run — see what would be installed
+sweny upgrade --check
+
+# Install a pre-release
+sweny upgrade --tag beta
+
+# Force a reinstall of the current version
+sweny upgrade --force
+```
+
+**Passive version check.** Every sweny command ends with a one-line footer when a newer release is available:
+
+```
+› sweny 0.1.66 is available (you have 0.1.65). Run `sweny upgrade`
+```
+
+The check is cached for 24 hours and skipped in CI, piped invocations, and when `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1` is set.
+
+**Homebrew installs** are detected but not driven automatically — the command prints `brew upgrade sweny` for you to run.
+
 ## Global options
 
 These options are available on all commands:
@@ -394,3 +433,11 @@ These options are available on all commands:
 |--------|-------------|
 | `--version` | Print the CLI version |
 | `--help` | Show help for a command |
+
+## Environment variables
+
+| Variable | Effect |
+|--------|-------------|
+| `SWENY_NO_UPDATE_CHECK=1` | Suppress the "new version available" footer |
+| `SWENY_OFFLINE=1` | Same as above; also recommended for airgapped environments |
+| `CI=1` | Automatically suppresses the footer (set by most CI systems) |
