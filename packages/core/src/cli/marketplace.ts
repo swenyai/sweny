@@ -141,3 +141,20 @@ export function computeProviderMismatch(
 
   return out;
 }
+
+export function buildAdaptPrompt(mismatches: ProviderMismatch[]): string {
+  const swaps = mismatches
+    .map(
+      (m) =>
+        `- Replace the \`${m.workflowSkill}\` skill (${m.configKey}) with \`${m.userProvider}\`, preserving the intent of each node.`,
+    )
+    .join("\n");
+  return [
+    `The target project's .sweny.yml declares different providers than this workflow uses.`,
+    `Rewrite the workflow so every node uses the target project's providers:`,
+    "",
+    swaps,
+    "",
+    `Keep node IDs, edge structure, and instruction intent. Only change skill references and any node instructions that name the old provider by name.`,
+  ].join("\n");
+}

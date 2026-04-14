@@ -3,6 +3,7 @@ import {
   fetchMarketplaceWorkflow,
   fetchMarketplaceIndex,
   computeProviderMismatch,
+  buildAdaptPrompt,
   MARKETPLACE_RAW_BASE,
 } from "./marketplace.js";
 import type { Skill } from "../types.js";
@@ -149,5 +150,42 @@ describe("computeProviderMismatch", () => {
       testSkills,
     );
     expect(mismatches).toEqual([]);
+  });
+});
+
+describe("buildAdaptPrompt", () => {
+  it("describes single mismatch", () => {
+    const prompt = buildAdaptPrompt([
+      {
+        category: "tasks",
+        configKey: "issue-tracker-provider",
+        workflowSkill: "linear",
+        userProvider: "github-issues",
+      },
+    ]);
+    expect(prompt).toContain("linear");
+    expect(prompt).toContain("github-issues");
+    expect(prompt).toContain("issue-tracker");
+    expect(prompt.toLowerCase()).toContain("rewrite");
+  });
+
+  it("describes multiple mismatches", () => {
+    const prompt = buildAdaptPrompt([
+      {
+        category: "tasks",
+        configKey: "issue-tracker-provider",
+        workflowSkill: "linear",
+        userProvider: "github-issues",
+      },
+      {
+        category: "observability",
+        configKey: "observability-provider",
+        workflowSkill: "datadog",
+        userProvider: "sentry",
+      },
+    ]);
+    expect(prompt).toContain("linear");
+    expect(prompt).toContain("datadog");
+    expect(prompt).toContain("sentry");
   });
 });
