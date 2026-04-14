@@ -4,9 +4,21 @@ import {
   fetchMarketplaceIndex,
   computeProviderMismatch,
   buildAdaptPrompt,
+  adaptWorkflowInteractive,
   MARKETPLACE_RAW_BASE,
 } from "./marketplace.js";
-import type { Skill } from "../types.js";
+import type { Skill, Workflow } from "../types.js";
+
+vi.mock("@clack/prompts", () => ({
+  select: vi.fn(),
+  text: vi.fn(),
+  spinner: () => ({ start: vi.fn(), stop: vi.fn() }),
+  log: { message: vi.fn(), error: vi.fn() },
+  isCancel: (v: unknown) => v === Symbol.for("cancel"),
+}));
+vi.mock("../workflow-builder.js", () => ({
+  refineWorkflow: vi.fn(),
+}));
 
 describe("fetchMarketplaceWorkflow", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -187,5 +199,64 @@ describe("buildAdaptPrompt", () => {
     expect(prompt).toContain("linear");
     expect(prompt).toContain("datadog");
     expect(prompt).toContain("sentry");
+  });
+});
+
+describe("adaptWorkflowInteractive", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const sampleWorkflow: Workflow = {
+    id: "pr-review",
+    name: "PR Review",
+    description: "",
+    entry: "start",
+    nodes: { start: { name: "Start", instruction: "x", skills: [] } },
+    edges: [],
+  };
+
+  it("returns the workflow when user accepts on first render", async () => {
+    const p = await import("@clack/prompts");
+    (p.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce("accept");
+
+    const claudeStub = { run: vi.fn() } as any;
+    const result = await adaptWorkflowInteractive(sampleWorkflow, {
+      claude: claudeStub,
+      skills: [],
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+    });
+
+    expect(result).toEqual(sampleWorkflow);
+  });
+
+  it("returns null when user cancels", async () => {
+    const p = await import("@clack/prompts");
+    (p.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce("cancel");
+
+    const claudeStub = { run: vi.fn() } as any;
+    const result = await adaptWorkflowInteractive(sampleWorkflow, {
+      claude: claudeStub,
+      skills: [],
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("calls refineWorkflow when user picks 'refine'", async () => {
+    const p = await import("@clack/prompts");
+    const wb = await import("../workflow-builder.js");
+    (p.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce("refine").mockResolvedValueOnce("accept");
+    (p.text as ReturnType<typeof vi.fn>).mockResolvedValueOnce("make it better");
+    (wb.refineWorkflow as ReturnType<typeof vi.fn>).mockResolvedValueOnce(sampleWorkflow);
+
+    const claudeStub = { run: vi.fn() } as any;
+    const result = await adaptWorkflowInteractive(sampleWorkflow, {
+      claude: claudeStub,
+      skills: [],
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+    });
+
+    expect(wb.refineWorkflow).toHaveBeenCalledWith(sampleWorkflow, "make it better", expect.any(Object));
+    expect(result).toEqual(sampleWorkflow);
   });
 });

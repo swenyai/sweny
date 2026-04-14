@@ -7,8 +7,11 @@
  * helpers in ./new.ts.
  */
 
-import type { Skill, SkillCategory } from "../types.js";
+import * as p from "@clack/prompts";
+import type { Skill, SkillCategory, Workflow, Claude, Logger } from "../types.js";
 import type { FileConfig } from "./config-file.js";
+import { refineWorkflow } from "../workflow-builder.js";
+import { DagRenderer } from "./renderer.js";
 
 export const MARKETPLACE_REPO = "swenyai/workflows";
 export const MARKETPLACE_RAW_BASE = `https://raw.githubusercontent.com/${MARKETPLACE_REPO}/main`;
@@ -157,4 +160,72 @@ export function buildAdaptPrompt(mismatches: ProviderMismatch[]): string {
     "",
     `Keep node IDs, edge structure, and instruction intent. Only change skill references and any node instructions that name the old provider by name.`,
   ].join("\n");
+}
+
+export interface AdaptOptions {
+  claude: Claude;
+  skills: Skill[];
+  logger: Logger;
+  /** Optional pre-filled first refinement (e.g. buildAdaptPrompt output). */
+  initialRefinement?: string;
+}
+
+/**
+ * Render the workflow DAG and run an accept/refine/cancel loop.
+ * Returns the accepted workflow or null on cancel.
+ *
+ * Applies `initialRefinement` (if provided) before the first render.
+ */
+export async function adaptWorkflowInteractive(workflow: Workflow, options: AdaptOptions): Promise<Workflow | null> {
+  const { claude, skills, logger, initialRefinement } = options;
+  let current = workflow;
+
+  if (initialRefinement) {
+    const spinner = p.spinner();
+    spinner.start("Adapting workflow to your project…");
+    try {
+      current = await refineWorkflow(current, initialRefinement, { claude, skills, logger });
+      spinner.stop("Adapted");
+    } catch (err) {
+      spinner.stop("Adaptation failed");
+      p.log.error(`  ${err instanceof Error ? err.message : String(err)}`);
+      // fall through — user sees the un-adapted workflow
+    }
+  }
+
+  while (true) {
+    console.log("");
+    console.log(new DagRenderer(current, { animate: false }).renderToString());
+    console.log("");
+
+    const action = await p.select({
+      message: "Looks good?",
+      options: [
+        { value: "accept", label: "Yes — use this workflow" },
+        { value: "refine", label: "Refine — describe what to change" },
+        { value: "cancel", label: "Cancel" },
+      ],
+    });
+    if (p.isCancel(action) || action === "cancel") return null;
+
+    if (action === "accept") return current;
+
+    if (action === "refine") {
+      const refinement = await p.text({
+        message: "What would you like to change?",
+        validate: (v) => (v && v.trim().length > 0 ? undefined : "Refinement is required"),
+      });
+      if (p.isCancel(refinement)) return null;
+
+      const rspin = p.spinner();
+      rspin.start("Refining…");
+      try {
+        current = await refineWorkflow(current, refinement as string, { claude, skills, logger });
+        rspin.stop("Refined");
+      } catch (err) {
+        rspin.stop("Failed");
+        p.log.error(`  ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
 }
