@@ -16,14 +16,8 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import {
-  classifySource,
-  sourceZ,
-  hashContent,
-  resolveSource,
-  resolveSources,
-  type SourceResolutionContext,
-} from "./sources.js";
+import { classifySource, sourceZ, type SourceResolutionContext } from "./sources.js";
+import { hashContent, resolveSource, resolveSources } from "./source-resolver.js";
 
 const fileTmp = path.join(tmpdir(), `sweny-sources-validation-test-${randomBytes(4).toString("hex")}`);
 

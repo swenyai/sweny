@@ -12,7 +12,8 @@
 
 import * as path from "node:path";
 
-import { resolveSource, classifySource, type SourceResolutionContext } from "./sources.js";
+import { classifySource, type SourceResolutionContext } from "./sources.js";
+import { resolveSource } from "./source-resolver.js";
 import { consoleLogger } from "./types.js";
 
 export const DEFAULT_ISSUE_TEMPLATE = `## Summary

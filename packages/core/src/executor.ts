@@ -33,7 +33,7 @@ import type {
   ResolvedSource,
 } from "./types.js";
 import { consoleLogger } from "./types.js";
-import { resolveSources } from "./sources.js";
+import { resolveSources } from "./source-resolver.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
