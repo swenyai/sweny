@@ -14,8 +14,11 @@ import {
   runNew,
   PROVIDER_CREDENTIALS,
   SKILL_CREDENTIALS,
+  writeSwenyYmlIfMissing,
+  appendMissingEnvKeys,
+  writeWorkflowFile,
 } from "./new.js";
-import type { InitSelections } from "./new.js";
+import type { InitSelections, Credential } from "./new.js";
 
 // ── detectGitRemote ────────────────────────────────────────────────────
 
@@ -933,5 +936,94 @@ describe("SKILL_CREDENTIALS", () => {
         expect(cred.key, `${skill}.${cred.key} should be UPPER_SNAKE_CASE`).toMatch(/^[A-Z][A-Z0-9_]+$/);
       }
     }
+  });
+});
+
+describe("writeSwenyYmlIfMissing", () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
+  });
+
+  it("creates .sweny.yml when missing", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-writer-"));
+    tmpDirs.push(dir);
+    const created = writeSwenyYmlIfMissing(dir, "github", "datadog", "github-issues");
+    expect(created).toBe(true);
+    expect(fs.existsSync(path.join(dir, ".sweny.yml"))).toBe(true);
+  });
+
+  it("does not overwrite existing .sweny.yml", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-writer-"));
+    tmpDirs.push(dir);
+    fs.writeFileSync(path.join(dir, ".sweny.yml"), "custom: value\n");
+    const created = writeSwenyYmlIfMissing(dir, "github", null, "github-issues");
+    expect(created).toBe(false);
+    expect(fs.readFileSync(path.join(dir, ".sweny.yml"), "utf-8")).toBe("custom: value\n");
+  });
+});
+
+describe("appendMissingEnvKeys", () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
+  });
+
+  it("creates .env from scratch", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-writer-"));
+    tmpDirs.push(dir);
+    const creds: Credential[] = [{ key: "FOO", hint: "set FOO" }];
+    const added = appendMissingEnvKeys(dir, creds);
+    expect(added).toBe(1);
+    expect(fs.readFileSync(path.join(dir, ".env"), "utf-8")).toContain("FOO=");
+  });
+
+  it("skips already-present keys (including commented placeholders)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-writer-"));
+    tmpDirs.push(dir);
+    fs.writeFileSync(path.join(dir, ".env"), "# FOO=set-me\nBAR=baz\n");
+    const creds: Credential[] = [{ key: "FOO" }, { key: "BAR" }, { key: "QUUX" }];
+    const added = appendMissingEnvKeys(dir, creds);
+    expect(added).toBe(1);
+    const final = fs.readFileSync(path.join(dir, ".env"), "utf-8");
+    expect(final).toContain("QUUX=");
+  });
+});
+
+describe("writeWorkflowFile", () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
+  });
+
+  it("writes a new workflow file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-writer-"));
+    tmpDirs.push(dir);
+    const result = writeWorkflowFile(dir, "pr-review", "id: pr-review\n");
+    expect(result).toEqual({ written: true, path: path.join(dir, ".sweny", "workflows", "pr-review.yml") });
+    expect(fs.existsSync(result.path)).toBe(true);
+  });
+
+  it("returns exists=true when file already present and overwrite=false", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-writer-"));
+    tmpDirs.push(dir);
+    fs.mkdirSync(path.join(dir, ".sweny", "workflows"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".sweny", "workflows", "pr-review.yml"), "old\n");
+    const result = writeWorkflowFile(dir, "pr-review", "new\n", { overwrite: false });
+    expect(result).toEqual({ written: false, exists: true, path: expect.any(String) });
+    expect(fs.readFileSync(result.path, "utf-8")).toBe("old\n");
+  });
+
+  it("overwrites when overwrite=true", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-writer-"));
+    tmpDirs.push(dir);
+    fs.mkdirSync(path.join(dir, ".sweny", "workflows"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".sweny", "workflows", "pr-review.yml"), "old\n");
+    const result = writeWorkflowFile(dir, "pr-review", "new\n", { overwrite: true });
+    expect(result).toEqual({ written: true, path: expect.any(String) });
+    expect(fs.readFileSync(result.path, "utf-8")).toBe("new\n");
   });
 });

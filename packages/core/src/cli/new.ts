@@ -448,6 +448,61 @@ export function buildActionWorkflow(credentials: Credential[], cronExpression: s
   return lines.join("\n");
 }
 
+// ── Pure write helpers (exported for marketplace install path) ────────
+
+/** Write .sweny.yml if missing. Returns true if created, false if file existed. */
+export function writeSwenyYmlIfMissing(
+  cwd: string,
+  sourceControl: string,
+  observability: string | null,
+  issueTracker: string,
+): boolean {
+  const configPath = path.join(cwd, ".sweny.yml");
+  if (fs.existsSync(configPath)) return false;
+  fs.writeFileSync(configPath, buildSwenyYml(sourceControl, observability, issueTracker), "utf-8");
+  return true;
+}
+
+/** Append credential keys to .env that aren't already present. Returns count appended. */
+export function appendMissingEnvKeys(cwd: string, credentials: Credential[]): number {
+  const envPath = path.join(cwd, ".env");
+  if (!fs.existsSync(envPath)) {
+    fs.writeFileSync(envPath, buildEnvTemplate(credentials), "utf-8");
+    return credentials.length;
+  }
+  const existing = fs.readFileSync(envPath, "utf-8");
+  const definedKeys = new Set<string>();
+  for (const rawLine of existing.split("\n")) {
+    const line = rawLine.trimStart().replace(/^#\s*/, "");
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (/^[A-Z_][A-Z0-9_]*$/i.test(key)) definedKeys.add(key);
+  }
+  const newKeys = credentials.filter((c) => !definedKeys.has(c.key));
+  if (newKeys.length === 0) return 0;
+  fs.appendFileSync(envPath, "\n" + buildEnvTemplate(newKeys), "utf-8");
+  return newKeys.length;
+}
+
+/** Write workflow YAML into .sweny/workflows/<id>.yml. Returns info about what happened. */
+export function writeWorkflowFile(
+  cwd: string,
+  id: string,
+  yaml: string,
+  options?: { overwrite?: boolean },
+): { written: boolean; exists?: boolean; path: string } {
+  const dir = path.join(cwd, ".sweny", "workflows");
+  fs.mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, `${id}.yml`);
+  const overwrite = options?.overwrite ?? false;
+  if (fs.existsSync(target) && !overwrite) {
+    return { written: false, exists: true, path: target };
+  }
+  fs.writeFileSync(target, yaml, "utf-8");
+  return { written: true, path: target };
+}
+
 // ── Interactive wizard ────────────────────────────────────────────────
 
 function cancel(): never {
@@ -586,59 +641,29 @@ export async function runNew(): Promise<void> {
 
   // ── Step 4: Write files ─────────────────────────────────────────────
 
-  // 1. Write .sweny.yml (only if fresh — never clobber existing config)
-  if (!hasExistingConfig) {
-    fs.writeFileSync(configPath, buildSwenyYml(sourceControl, observability, issueTracker), "utf-8");
+  // 1. Write .sweny.yml (only if fresh)
+  if (writeSwenyYmlIfMissing(cwd, sourceControl, observability, issueTracker)) {
     p.log.success("Created .sweny.yml");
   } else {
     p.log.info(".sweny.yml already exists — keeping existing config");
   }
 
-  // 2. Write .env (append-only: safe for both fresh and existing repos)
-  let addedNewKeys = false;
-  const envPath = path.join(cwd, ".env");
-  if (fs.existsSync(envPath)) {
-    const existing = fs.readFileSync(envPath, "utf-8");
-    // A key is "present" if it appears as either an active `KEY=...` line
-    // or a commented `# KEY=...` placeholder. Either way appending the same
-    // key would create a duplicate the user has to reconcile.
-    const definedKeys = new Set<string>();
-    for (const rawLine of existing.split("\n")) {
-      const line = rawLine.trimStart().replace(/^#\s*/, "");
-      const eq = line.indexOf("=");
-      if (eq <= 0) continue;
-      const key = line.slice(0, eq).trim();
-      if (/^[A-Z_][A-Z0-9_]*$/i.test(key)) {
-        definedKeys.add(key);
-      }
-    }
-    const newKeys: Credential[] = [];
-    for (const cred of credentials) {
-      if (!definedKeys.has(cred.key)) {
-        newKeys.push(cred);
-      }
-    }
-    if (newKeys.length > 0) {
-      const appendBlock = "\n" + buildEnvTemplate(newKeys);
-      fs.appendFileSync(envPath, appendBlock, "utf-8");
-      p.log.success(`Appended ${newKeys.length} new key(s) to .env`);
-      addedNewKeys = true;
-    } else {
-      p.log.info(".env already contains all required keys — skipped");
-    }
-  } else {
-    fs.writeFileSync(envPath, buildEnvTemplate(credentials), "utf-8");
+  // 2. Append missing .env keys
+  const envExistedBefore = fs.existsSync(path.join(cwd, ".env"));
+  const addedCount = appendMissingEnvKeys(cwd, credentials);
+  const addedNewKeys = addedCount > 0;
+  if (!envExistedBefore) {
     p.log.success("Created .env");
-    addedNewKeys = true;
+  } else if (addedCount > 0) {
+    p.log.success(`Appended ${addedCount} new key(s) to .env`);
+  } else {
+    p.log.info(".env already contains all required keys — skipped");
   }
 
-  // 3. Workflow template (prompt per-file if it already exists)
+  // 3. Workflow template
   if (template) {
-    const workflowDir = path.join(cwd, ".sweny", "workflows");
-    fs.mkdirSync(workflowDir, { recursive: true });
-    const templatePath = path.join(workflowDir, `${template.id}.yml`);
-
-    if (fs.existsSync(templatePath)) {
+    const firstAttempt = writeWorkflowFile(cwd, template.id, template.yaml, { overwrite: false });
+    if (firstAttempt.exists) {
       const overwrite = await p.confirm({
         message: `.sweny/workflows/${template.id}.yml already exists. Overwrite?`,
         initialValue: false,
@@ -649,9 +674,8 @@ export async function runNew(): Promise<void> {
         p.outro("Done.");
         return;
       }
+      writeWorkflowFile(cwd, template.id, template.yaml, { overwrite: true });
     }
-
-    fs.writeFileSync(templatePath, template.yaml, "utf-8");
     p.log.success(`Created .sweny/workflows/${template.id}.yml`);
   }
 
