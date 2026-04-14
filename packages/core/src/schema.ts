@@ -74,12 +74,27 @@ export const skillZ = z
     message: "Skill must provide at least one of: tools, instruction, or mcp",
   });
 
+/**
+ * NodeSources: either an array of Sources (additive — inherits cascade)
+ * or an object `{ only?: boolean, sources: Source[] }` where `only: true`
+ * blocks the cascade for that field.
+ */
+export const nodeSourcesZ = z.union([
+  z.array(sourceZ),
+  z.object({
+    only: z.boolean().optional(),
+    sources: z.array(sourceZ),
+  }),
+]);
+
 export const nodeZ = z.object({
   name: z.string().min(1),
   instruction: sourceZ,
   skills: z.array(z.string()).default([]),
   output: jsonSchemaZ.optional(),
   max_turns: z.number().int().min(1).optional(),
+  rules: nodeSourcesZ.optional(),
+  context: nodeSourcesZ.optional(),
 });
 
 export const edgeZ = z.object({
@@ -97,6 +112,8 @@ export const workflowZ = z.object({
   edges: z.array(edgeZ),
   entry: z.string().min(1),
   skills: z.record(skillDefinitionZ).default({}),
+  rules: z.array(sourceZ).optional(),
+  context: z.array(sourceZ).optional(),
 });
 
 /** Parse + validate a raw object as a Workflow. Throws on invalid input. */
@@ -314,12 +331,38 @@ export const workflowJsonSchema = {
   type: "object",
   required: ["id", "name", "nodes", "edges", "entry"],
   additionalProperties: false,
-  $defs: { Source: sourceJsonSchema },
+  $defs: {
+    Source: sourceJsonSchema,
+    NodeSources: {
+      oneOf: [
+        { type: "array", items: { $ref: "#/$defs/Source" } },
+        {
+          type: "object",
+          required: ["sources"],
+          additionalProperties: false,
+          properties: {
+            only: { type: "boolean" },
+            sources: { type: "array", items: { $ref: "#/$defs/Source" } },
+          },
+        },
+      ],
+    },
+  },
   properties: {
     id: { type: "string", minLength: 1 },
     name: { type: "string", minLength: 1 },
     description: { type: "string" },
     entry: { type: "string", minLength: 1, description: "ID of the entry node" },
+    rules: {
+      type: "array",
+      items: { $ref: "#/$defs/Source" },
+      description: "Directives prepended to every node's instruction.",
+    },
+    context: {
+      type: "array",
+      items: { $ref: "#/$defs/Source" },
+      description: "Background knowledge prepended to every node's instruction.",
+    },
     nodes: {
       type: "object",
       additionalProperties: {
@@ -342,6 +385,14 @@ export const workflowJsonSchema = {
             type: "integer",
             minimum: 1,
             description: "Max AI model turns for this node. When absent, the executor's default applies.",
+          },
+          rules: {
+            $ref: "#/$defs/NodeSources",
+            description: "Per-node rules. Additive by default; set { only: true } to block cascade.",
+          },
+          context: {
+            $ref: "#/$defs/NodeSources",
+            description: "Per-node context. Additive by default; set { only: true } to block cascade.",
           },
         },
       },

@@ -15,6 +15,8 @@
 
 import type {
   Workflow,
+  Node,
+  NodeSources,
   Skill,
   SkillDefinition,
   Tool,
@@ -79,12 +81,34 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   validate(workflow, skills);
 
   // ── Source resolution phase ─────────────────────────────────────
-  // Resolve all node instructions (which are Source values) into plain text
-  // before the main execution loop. This eagerly fetches file/URL content.
+  // Resolve all Source values (node instructions + rules/context at every
+  // level) into plain text before the main execution loop. This eagerly
+  // fetches file/URL content so the execution path is pure-compute.
   const sourceMap: Record<string, Source> = {};
+
+  // Node instructions
   for (const [nodeId, node] of Object.entries(workflow.nodes)) {
     sourceMap[`nodes.${nodeId}.instruction`] = node.instruction;
   }
+
+  // Runtime input rules/context (accepts Source | Source[])
+  const inputRules = extractRuntimeInputSources(input, "rules");
+  const inputContext = extractRuntimeInputSources(input, "context");
+  inputRules.forEach((s, i) => (sourceMap[`input.rules.${i}`] = s));
+  inputContext.forEach((s, i) => (sourceMap[`input.context.${i}`] = s));
+
+  // Workflow-level rules/context
+  (workflow.rules ?? []).forEach((s, i) => (sourceMap[`workflow.rules.${i}`] = s));
+  (workflow.context ?? []).forEach((s, i) => (sourceMap[`workflow.context.${i}`] = s));
+
+  // Node-level rules/context
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    const nodeRules = nodeSourcesToArray(node.rules).sources;
+    const nodeContext = nodeSourcesToArray(node.context).sources;
+    nodeRules.forEach((s, i) => (sourceMap[`nodes.${nodeId}.rules.${i}`] = s));
+    nodeContext.forEach((s, i) => (sourceMap[`nodes.${nodeId}.context.${i}`] = s));
+  }
+
   const resolvedSources = await resolveSources(sourceMap, {
     cwd: options.cwd ?? process.cwd(),
     env: options.env ?? process.env,
@@ -143,8 +167,30 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       },
     }));
 
-    // Prepend rules and context to instruction if provided
-    const instruction = buildNodeInstruction(resolvedInstruction, input, skillInstructions);
+    // Prepend rules and context to instruction per cascade semantics
+    const effectiveRules = assembleCascaded(
+      "rules",
+      currentId,
+      workflow.nodes[currentId],
+      inputRules.length,
+      (workflow.rules ?? []).length,
+      resolvedSources,
+    );
+    const effectiveContext = assembleCascaded(
+      "context",
+      currentId,
+      workflow.nodes[currentId],
+      inputContext.length,
+      (workflow.context ?? []).length,
+      resolvedSources,
+    );
+    const instruction = buildNodeInstruction(
+      resolvedInstruction,
+      effectiveRules,
+      effectiveContext,
+      input,
+      skillInstructions,
+    );
 
     // Run Claude on this node
     const result = await claude.run({
@@ -204,39 +250,42 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
 // ─── Internals ───────────────────────────────────────────────────
 
 /**
- * Build the full instruction for a node by prepending rules and context.
- * Rules get "You MUST follow" framing; context gets "Background" framing.
- * Falls back to legacy `additionalContext` if rules/context aren't set.
+ * Build the full instruction for a node.
+ *
+ * Assembly order (each section separated by `---`):
+ *   1. Rules (from runtime input + workflow + node, cascaded)
+ *   2. Context (from runtime input + workflow + node, cascaded)
+ *   3. Skill instructions (one per skill with an `instruction` field)
+ *   4. The node's base instruction
+ *
+ * Preserves the legacy `input.additionalContext` fallback for callers
+ * that predate the Source-based rules/context fields.
  */
 function buildNodeInstruction(
   baseInstruction: string,
+  effectiveRules: string,
+  effectiveContext: string,
   input: unknown,
   skillInstructions?: { name: string; instruction: string }[],
 ): string {
-  const inp = input as Record<string, unknown> | null;
   const sections: string[] = [];
 
-  if (inp) {
-    const rules = typeof inp.rules === "string" && inp.rules ? inp.rules : "";
-    const context = typeof inp.context === "string" && inp.context ? inp.context : "";
+  if (effectiveRules) {
+    sections.push(`## Rules — You MUST Follow These\n\n${effectiveRules}`);
+  }
+  if (effectiveContext) {
+    sections.push(`## Background Context\n\n${effectiveContext}`);
+  }
 
-    if (rules) {
-      sections.push(`## Rules — You MUST Follow These\n\n${rules}`);
-    }
-    if (context) {
-      sections.push(`## Background Context\n\n${context}`);
-    }
-
-    // Legacy fallback
-    if (sections.length === 0) {
-      const legacy = typeof inp.additionalContext === "string" ? inp.additionalContext : "";
-      if (legacy) {
-        sections.push(`## Additional Context & Rules\n\n${legacy}`);
-      }
+  // Legacy fallback for `input.additionalContext` when no rules/context cascaded
+  if (sections.length === 0) {
+    const inp = input as Record<string, unknown> | null;
+    const legacy = inp && typeof inp.additionalContext === "string" ? inp.additionalContext : "";
+    if (legacy) {
+      sections.push(`## Additional Context & Rules\n\n${legacy}`);
     }
   }
 
-  // Skill instructions — injected between context and base instruction
   if (skillInstructions && skillInstructions.length > 0) {
     for (const { name, instruction } of skillInstructions) {
       sections.push(`## Skill: ${name}\n\n${instruction}`);
@@ -245,6 +294,67 @@ function buildNodeInstruction(
 
   if (sections.length === 0) return baseInstruction;
   return `${sections.join("\n\n---\n\n")}\n\n---\n\n${baseInstruction}`;
+}
+
+/**
+ * Normalize a NodeSources value into { sources, only }.
+ * - Array form → additive (only = false)
+ * - Object form → use its `only` and `sources`
+ * - undefined → empty additive
+ */
+function nodeSourcesToArray(ns: NodeSources | undefined): { sources: Source[]; only: boolean } {
+  if (!ns) return { sources: [], only: false };
+  if (Array.isArray(ns)) return { sources: ns, only: false };
+  return { sources: ns.sources, only: !!ns.only };
+}
+
+/**
+ * Extract rules/context Sources from runtime input.
+ *
+ * Runtime input is typed `unknown` because workflows are polymorphic.
+ * We accept `Source`, `Source[]`, or undefined. A single string is
+ * classified via the usual Source prefix rules (inline by default).
+ * Invalid shapes are ignored — input is caller-controlled and the
+ * rest of the executor validates it elsewhere.
+ */
+function extractRuntimeInputSources(input: unknown, field: "rules" | "context"): Source[] {
+  if (!input || typeof input !== "object") return [];
+  const v = (input as Record<string, unknown>)[field];
+  if (v == null) return [];
+  if (Array.isArray(v)) return v as Source[];
+  if (typeof v === "string") return [v as Source];
+  if (typeof v === "object") return [v as Source]; // tagged form {inline}/{file}/{url}
+  return [];
+}
+
+/**
+ * Assemble the effective rules or context for a node per cascade semantics:
+ *   runtime input  +  workflow-level  +  node-level
+ * unless the node sets `only: true` for that field, which discards input
+ * and workflow contributions and uses only the node's own sources.
+ *
+ * Returns the concatenated resolved content (empty string when nothing applies).
+ */
+function assembleCascaded(
+  field: "rules" | "context",
+  nodeId: string,
+  node: Node,
+  inputCount: number,
+  workflowCount: number,
+  resolved: Record<string, ResolvedSource>,
+): string {
+  const { sources: nodeSources, only } = nodeSourcesToArray(node[field]);
+  const parts: string[] = [];
+
+  if (!only) {
+    for (let i = 0; i < inputCount; i++) parts.push(resolved[`input.${field}.${i}`]?.content ?? "");
+    for (let i = 0; i < workflowCount; i++) parts.push(resolved[`workflow.${field}.${i}`]?.content ?? "");
+  }
+  for (let i = 0; i < nodeSources.length; i++) {
+    parts.push(resolved[`nodes.${nodeId}.${field}.${i}`]?.content ?? "");
+  }
+
+  return parts.filter((s) => s.length > 0).join("\n\n");
 }
 
 /**

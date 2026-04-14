@@ -60,6 +60,16 @@ export interface Skill {
 // natural-language `when` clause that Claude evaluates at runtime.
 // Edges with `max_iterations` enable controlled retry loops.
 
+/**
+ * Per-node rules or context.
+ *
+ * - Array form (additive): inherits workflow/runtime sources AND adds these.
+ * - Object form: when `only: true`, blocks the cascade for this field and
+ *   uses only `sources`. When `only` is absent/false, behaves like the
+ *   array form.
+ */
+export type NodeSources = _Source[] | { only?: boolean; sources: _Source[] };
+
 /** A node in the workflow DAG */
 export interface Node {
   /** Human-readable name */
@@ -72,6 +82,10 @@ export interface Node {
   output?: JSONSchema;
   /** Max AI model turns for this node. When absent, the executor's default applies. */
   max_turns?: number;
+  /** Per-node directives. Additive by default; set `{ only: true, sources: [...] }` to block cascade. */
+  rules?: NodeSources;
+  /** Per-node background knowledge. Additive by default; set `{ only: true, sources: [...] }` to block cascade. */
+  context?: NodeSources;
 }
 
 /** An edge connecting two nodes */
@@ -93,6 +107,10 @@ export interface Workflow {
   edges: Edge[];
   entry: string;
   skills?: Record<string, SkillDefinition>;
+  /** Directives prepended to every node's instruction. Cascade into per-node rules. */
+  rules?: _Source[];
+  /** Background knowledge prepended to every node's instruction. Cascade into per-node context. */
+  context?: _Source[];
 }
 
 /**
