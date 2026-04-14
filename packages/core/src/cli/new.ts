@@ -333,7 +333,7 @@ export function detectGitRemote(cwd: string): GitRemoteInfo | null {
 /**
  * Infer source-control-provider from git remote detection.
  */
-function inferSourceControl(gitInfo: GitRemoteInfo | null): string {
+export function inferSourceControl(gitInfo: GitRemoteInfo | null): string {
   return gitInfo?.provider ?? "github";
 }
 
@@ -345,7 +345,7 @@ function inferSourceControl(gitInfo: GitRemoteInfo | null): string {
  * provider (yet), and `github-issues` is a sensible "use the same platform
  * as source control" default for the supported case.
  */
-function inferIssueTracker(skills: string[], _sourceControl: string): string {
+export function inferIssueTracker(skills: string[], _sourceControl: string): string {
   if (skills.includes("linear")) return "linear";
   if (skills.includes("jira")) return "jira";
   return "github-issues";
@@ -354,7 +354,7 @@ function inferIssueTracker(skills: string[], _sourceControl: string): string {
 /**
  * Infer observability-provider from skills in the workflow.
  */
-function inferObservability(skills: string[]): string | null {
+export function inferObservability(skills: string[]): string | null {
   if (skills.includes("datadog")) return "datadog";
   if (skills.includes("sentry")) return "sentry";
   if (skills.includes("betterstack")) return "betterstack";
@@ -542,6 +542,28 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
 
     if (!options.skipIntro) p.intro(`Installing ${options.marketplaceId} from marketplace`);
 
+    // Pre-compute providers from git-remote (same method as the wizard path).
+    const gitInfo = detectGitRemote(cwd);
+    const inferredSourceControl = inferSourceControl(gitInfo);
+    const inferredIssueTracker = inferIssueTracker([], inferredSourceControl); // skills resolved after fetch
+    const inferredObservability = inferObservability([]); // skills resolved after fetch
+
+    // Check for existing workflow file and prompt before fetching.
+    const existingWorkflowPath = path.join(cwd, ".sweny", "workflows", `${options.marketplaceId}.yml`);
+    let overwrite = false;
+    if (fs.existsSync(existingWorkflowPath)) {
+      const confirmed = await p.confirm({
+        message: `.sweny/workflows/${options.marketplaceId}.yml already exists. Overwrite?`,
+        initialValue: false,
+      });
+      if (p.isCancel(confirmed) || !confirmed) {
+        p.log.info(`Workflow already exists at ${path.relative(cwd, existingWorkflowPath)}. Not overwritten.`);
+        p.cancel("Setup cancelled.");
+        process.exit(0);
+      }
+      overwrite = true;
+    }
+
     let result;
     try {
       result = await installMarketplaceWorkflow(options.marketplaceId, {
@@ -549,6 +571,10 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
         availableSkills: allSkills,
         claude,
         logger: consoleLogger,
+        inferredSourceControl,
+        inferredIssueTracker,
+        inferredObservability,
+        overwrite,
       });
     } catch (err) {
       p.log.error(err instanceof Error ? err.message : String(err));

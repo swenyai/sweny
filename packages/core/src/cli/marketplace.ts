@@ -249,6 +249,27 @@ export interface InstallOptions {
   /** Claude client for optional LLM adaptation. If null, we install as-is with a warning on mismatch. */
   claude: Claude | null;
   logger: Logger;
+  /**
+   * Pre-computed source-control provider (e.g. from git-remote detection).
+   * When provided, takes precedence over the skill-based fallback inference.
+   */
+  inferredSourceControl?: string;
+  /**
+   * Pre-computed issue-tracker provider.
+   * When provided, takes precedence over the skill-based fallback inference.
+   */
+  inferredIssueTracker?: string;
+  /**
+   * Pre-computed observability provider (or null if none).
+   * When provided, takes precedence over the skill-based fallback inference.
+   */
+  inferredObservability?: string | null;
+  /**
+   * Whether to overwrite an existing workflow file.
+   * Defaults to false. When false and the file already exists,
+   * `installMarketplaceWorkflow` returns `{ installed: false, alreadyExists: true }`.
+   */
+  overwrite?: boolean;
 }
 
 export interface InstallResult {
@@ -257,14 +278,29 @@ export interface InstallResult {
   workflowPath: string;
   mismatches: ProviderMismatch[];
   addedEnvKeys: number;
+  /**
+   * True when `overwrite` was false and a workflow file already existed at the
+   * target path. The caller is responsible for prompting the user if desired.
+   */
+  alreadyExists?: boolean;
 }
 
 /**
  * Fetch a workflow from swenyai/workflows, adapt if provider mismatch is detected
  * AND an agent is available, then write files idempotently.
+ *
+ * When `overwrite` is false (default) and the workflow file already exists,
+ * returns `{ installed: false, alreadyExists: true, workflowPath }` without
+ * touching the file. The caller (runNew) is responsible for prompting the user.
+ *
+ * Pre-computed provider fields (`inferredSourceControl`, `inferredIssueTracker`,
+ * `inferredObservability`) take precedence over skill-based inference when
+ * provided. Omit them to use the original skill-based fallback (backward-compat
+ * for direct callers that don't have git-remote information).
  */
 export async function installMarketplaceWorkflow(id: string, options: InstallOptions): Promise<InstallResult> {
   const { cwd, availableSkills, claude, logger } = options;
+  const overwrite = options.overwrite ?? false;
 
   // 1. Fetch
   const fetched = await fetchMarketplaceWorkflow(id);
@@ -313,23 +349,36 @@ export async function installMarketplaceWorkflow(id: string, options: InstallOpt
     );
   }
 
-  // 4. Infer providers for fresh-project .sweny.yml (unchanged from existing logic)
+  // 4. Infer providers for fresh-project .sweny.yml.
+  // Pre-computed values from the caller (git-remote-based) take precedence;
+  // fall back to skill-based inference for backward-compat with direct callers.
   const finalSkills = extractSkillsFromYaml(finalYaml);
-  const sourceControl = finalSkills.includes("gitlab") ? "gitlab" : "github";
-  const issueTracker = finalSkills.includes("linear")
-    ? "linear"
-    : finalSkills.includes("jira")
-      ? "jira"
-      : "github-issues";
-  const observability = finalSkills.includes("datadog")
-    ? "datadog"
-    : finalSkills.includes("sentry")
-      ? "sentry"
-      : finalSkills.includes("betterstack")
-        ? "betterstack"
-        : finalSkills.includes("newrelic")
-          ? "newrelic"
-          : null;
+  const sourceControl =
+    options.inferredSourceControl !== undefined
+      ? options.inferredSourceControl
+      : finalSkills.includes("gitlab")
+        ? "gitlab"
+        : "github";
+  const issueTracker =
+    options.inferredIssueTracker !== undefined
+      ? options.inferredIssueTracker
+      : finalSkills.includes("linear")
+        ? "linear"
+        : finalSkills.includes("jira")
+          ? "jira"
+          : "github-issues";
+  const observability =
+    options.inferredObservability !== undefined
+      ? options.inferredObservability
+      : finalSkills.includes("datadog")
+        ? "datadog"
+        : finalSkills.includes("sentry")
+          ? "sentry"
+          : finalSkills.includes("betterstack")
+            ? "betterstack"
+            : finalSkills.includes("newrelic")
+              ? "newrelic"
+              : null;
 
   writeSwenyYmlIfMissing(cwd, sourceControl, observability, issueTracker);
 
@@ -337,8 +386,19 @@ export async function installMarketplaceWorkflow(id: string, options: InstallOpt
   const creds: Credential[] = collectCredentialsForSkills(finalSkills, availableSkills);
   const addedEnvKeys = appendMissingEnvKeys(cwd, creds);
 
-  // 6. Workflow file (no overwrite prompt here — caller handles UX)
-  const write = writeWorkflowFile(cwd, id, finalYaml, { overwrite: true });
+  // 6. Workflow file — respect the overwrite flag.
+  const write = writeWorkflowFile(cwd, id, finalYaml, { overwrite });
+  if (!write.written) {
+    // File exists and overwrite was false — signal the caller.
+    return {
+      installed: false,
+      adapted,
+      workflowPath: write.path,
+      mismatches,
+      addedEnvKeys,
+      alreadyExists: true,
+    };
+  }
 
   return {
     installed: true,

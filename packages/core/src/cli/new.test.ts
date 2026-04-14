@@ -1061,14 +1061,29 @@ vi.mock("@clack/prompts", async () => {
 });
 
 describe("runNew with marketplaceId", () => {
-  afterEach(() => vi.restoreAllMocks());
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
 
-  it("calls installMarketplaceWorkflow when marketplaceId is provided", async () => {
+  function tmp(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-new-mkt-"));
+    tmpDirs.push(dir);
+    return dir;
+  }
+
+  it("calls installMarketplaceWorkflow with pre-computed provider fields and overwrite:false when file absent", async () => {
+    const cwd = tmp();
+    vi.spyOn(process, "cwd").mockReturnValue(cwd);
+
     const mkt = await import("./marketplace.js");
     (mkt.installMarketplaceWorkflow as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       installed: true,
       adapted: false,
-      workflowPath: "/tmp/.sweny/workflows/pr-review.yml",
+      workflowPath: path.join(cwd, ".sweny", "workflows", "pr-review.yml"),
       mismatches: [],
       addedEnvKeys: 0,
     });
@@ -1077,8 +1092,75 @@ describe("runNew with marketplaceId", () => {
 
     expect(mkt.installMarketplaceWorkflow).toHaveBeenCalledWith(
       "pr-review",
-      expect.objectContaining({ cwd: process.cwd() }),
+      expect.objectContaining({
+        cwd,
+        inferredSourceControl: expect.any(String),
+        inferredIssueTracker: expect.any(String),
+        // inferredObservability may be null or string — just check key is present
+        overwrite: false,
+      }),
     );
+    // Verify the call includes inferredObservability key (value may be null)
+    const callArgs = (mkt.installMarketplaceWorkflow as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect("inferredObservability" in callArgs).toBe(true);
+  });
+
+  it("passes overwrite:true to installMarketplaceWorkflow when user confirms overwrite", async () => {
+    const cwd = tmp();
+    vi.spyOn(process, "cwd").mockReturnValue(cwd);
+
+    // Pre-create the workflow file so the exists check triggers
+    const wfDir = path.join(cwd, ".sweny", "workflows");
+    fs.mkdirSync(wfDir, { recursive: true });
+    fs.writeFileSync(path.join(wfDir, "pr-review.yml"), "# existing\n", "utf-8");
+
+    const mkt = await import("./marketplace.js");
+    const p = await import("@clack/prompts");
+
+    (mkt.installMarketplaceWorkflow as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      installed: true,
+      adapted: false,
+      workflowPath: path.join(wfDir, "pr-review.yml"),
+      mismatches: [],
+      addedEnvKeys: 0,
+    });
+
+    // User confirms overwrite
+    (p.confirm as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
+
+    await runNew({ marketplaceId: "pr-review" });
+
+    expect(p.confirm).toHaveBeenCalled();
+    expect(mkt.installMarketplaceWorkflow).toHaveBeenCalledWith(
+      "pr-review",
+      expect.objectContaining({ overwrite: true }),
+    );
+  });
+
+  it("exits without installing when user declines overwrite for existing workflow", async () => {
+    const cwd = tmp();
+    vi.spyOn(process, "cwd").mockReturnValue(cwd);
+
+    // Pre-create the workflow file so the exists check triggers
+    const wfDir = path.join(cwd, ".sweny", "workflows");
+    fs.mkdirSync(wfDir, { recursive: true });
+    fs.writeFileSync(path.join(wfDir, "pr-review.yml"), "# existing\n", "utf-8");
+
+    const mkt = await import("./marketplace.js");
+    const p = await import("@clack/prompts");
+
+    // User declines overwrite
+    (p.confirm as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((_code?: string | number | null | undefined) => {
+      throw new Error("process.exit called");
+    });
+
+    await expect(runNew({ marketplaceId: "pr-review" })).rejects.toThrow("process.exit called");
+
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    // installMarketplaceWorkflow must NOT have been called
+    expect(mkt.installMarketplaceWorkflow).not.toHaveBeenCalled();
   });
 });
 

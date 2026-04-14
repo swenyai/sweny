@@ -338,4 +338,97 @@ describe("installMarketplaceWorkflow", () => {
       }),
     ).rejects.toMatchObject({ kind: "not-found" });
   });
+
+  // ── I1: pre-computed provider inference ────────────────────────────────
+
+  it("uses inferredSourceControl instead of skill-based inference for .sweny.yml", async () => {
+    // Workflow references github skill, but caller says the remote is gitlab.
+    // The written .sweny.yml must say gitlab, not github.
+    const cwd = tmp();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(sampleYaml, { status: 200 }));
+
+    await installMarketplaceWorkflow("pr-review", {
+      cwd,
+      availableSkills: testSkills,
+      claude: null,
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      inferredSourceControl: "gitlab",
+      inferredIssueTracker: "github-issues",
+      inferredObservability: null,
+    });
+
+    const swenyYml = fs.readFileSync(path.join(cwd, ".sweny.yml"), "utf-8");
+    expect(swenyYml).toContain("source-control-provider: gitlab");
+    // skill-based fallback would have written "github" — verify it did NOT
+    expect(swenyYml).not.toContain("source-control-provider: github");
+  });
+
+  it("falls back to skill-based inference when inferredSourceControl is absent", async () => {
+    // Workflow references github skill, no pre-computed values → should infer github
+    const cwd = tmp();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(sampleYaml, { status: 200 }));
+
+    await installMarketplaceWorkflow("pr-review", {
+      cwd,
+      availableSkills: testSkills,
+      claude: null,
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+    });
+
+    const swenyYml = fs.readFileSync(path.join(cwd, ".sweny.yml"), "utf-8");
+    expect(swenyYml).toContain("source-control-provider: github");
+  });
+
+  // ── I2: overwrite protection ────────────────────────────────────────────
+
+  it("returns alreadyExists=true without overwriting when overwrite is false (default)", async () => {
+    const cwd = tmp();
+    // Pre-create the workflow file with distinct content
+    const wfDir = path.join(cwd, ".sweny", "workflows");
+    fs.mkdirSync(wfDir, { recursive: true });
+    const wfPath = path.join(wfDir, "pr-review.yml");
+    fs.writeFileSync(wfPath, "# original content\n", "utf-8");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(sampleYaml, { status: 200 }));
+
+    const result = await installMarketplaceWorkflow("pr-review", {
+      cwd,
+      availableSkills: testSkills,
+      claude: null,
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      // overwrite: false is the default — omitting it intentionally
+    });
+
+    expect(result.installed).toBe(false);
+    expect(result.alreadyExists).toBe(true);
+    expect(result.workflowPath).toBe(wfPath);
+    // File must be unchanged
+    expect(fs.readFileSync(wfPath, "utf-8")).toBe("# original content\n");
+  });
+
+  it("overwrites existing workflow file when overwrite is true", async () => {
+    const cwd = tmp();
+    // Pre-create the workflow file with stale content
+    const wfDir = path.join(cwd, ".sweny", "workflows");
+    fs.mkdirSync(wfDir, { recursive: true });
+    const wfPath = path.join(wfDir, "pr-review.yml");
+    fs.writeFileSync(wfPath, "# stale content\n", "utf-8");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(sampleYaml, { status: 200 }));
+
+    const result = await installMarketplaceWorkflow("pr-review", {
+      cwd,
+      availableSkills: testSkills,
+      claude: null,
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      overwrite: true,
+    });
+
+    expect(result.installed).toBe(true);
+    expect(result.alreadyExists).toBeUndefined();
+    // File must contain the new content
+    const written = fs.readFileSync(wfPath, "utf-8");
+    expect(written).toContain("PR Review");
+    expect(written).not.toContain("stale content");
+  });
 });
