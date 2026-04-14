@@ -29,16 +29,36 @@ export interface FetchedWorkflow {
 
 export async function fetchMarketplaceWorkflow(id: string): Promise<FetchedWorkflow> {
   const url = `${MARKETPLACE_RAW_BASE}/workflows/${id}.yml`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw makeFetchError(res, id);
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch {
+    const err = new Error(`Could not reach github.com — check your connection`) as FetchError;
+    err.kind = "network";
+    throw err;
   }
-  const yaml = await res.text();
-  return { id, yaml };
-}
 
-function makeFetchError(res: Response, id: string): FetchError {
-  const err = new Error(`Fetch failed: ${res.status}`) as FetchError;
-  err.kind = "unknown";
-  return err;
+  if (res.status === 404) {
+    const err = new Error(
+      `Workflow "${id}" not found in ${MARKETPLACE_REPO}. See https://marketplace.sweny.ai for available workflows.`,
+    ) as FetchError;
+    err.kind = "not-found";
+    throw err;
+  }
+
+  if (res.status === 403 && res.headers.get("X-RateLimit-Remaining") === "0") {
+    const reset = res.headers.get("X-RateLimit-Reset");
+    const err = new Error(`GitHub rate limit hit. Set GITHUB_TOKEN to raise the limit, or retry later.`) as FetchError;
+    err.kind = "rate-limit";
+    if (reset) err.retryAfter = parseInt(reset, 10);
+    throw err;
+  }
+
+  if (!res.ok) {
+    const err = new Error(`Fetch failed with status ${res.status}`) as FetchError;
+    err.kind = "unknown";
+    throw err;
+  }
+
+  return { id, yaml: await res.text() };
 }
