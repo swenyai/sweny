@@ -92,10 +92,12 @@ const program = new Command()
 
 // ── sweny new ─────────────────────────────────────────────────────────
 program
-  .command("new")
-  .description("Create a new workflow — interactive picker or direct template")
-  .action(async () => {
-    await runNew();
+  .command("new [id]")
+  .description(
+    "Create a new workflow. With no id, opens the interactive picker. With an id, installs that workflow from the marketplace (swenyai/workflows).",
+  )
+  .action(async (id: string | undefined) => {
+    await runNew(id ? { marketplaceId: id } : undefined);
   });
 
 // ── sweny e2e ────────────────────────────────────────────────────────
