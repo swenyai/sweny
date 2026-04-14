@@ -530,7 +530,7 @@ function cancel(): never {
  *
  * Safe to re-run in an existing project to add additional workflows.
  */
-export async function runNew(options?: { marketplaceId?: string }): Promise<void> {
+export async function runNew(options?: { marketplaceId?: string; skipIntro?: boolean }): Promise<void> {
   const cwd = process.cwd();
 
   // ── Marketplace install fast path ───────────────────────────────────
@@ -540,7 +540,7 @@ export async function runNew(options?: { marketplaceId?: string }): Promise<void
     const hasAgent = !!process.env.ANTHROPIC_API_KEY;
     const claude = hasAgent ? new ClaudeClient({ maxTurns: 3, cwd, logger: consoleLogger }) : null;
 
-    p.intro(`Installing ${options.marketplaceId} from marketplace`);
+    if (!options.skipIntro) p.intro(`Installing ${options.marketplaceId} from marketplace`);
 
     let result;
     try {
@@ -633,7 +633,8 @@ export async function runNew(options?: { marketplaceId?: string }): Promise<void
     if (p.isCancel(pick)) cancel();
 
     // Delegate to the marketplace install path
-    return runNew({ marketplaceId: pick as string });
+    // Wizard already showed its intro — skip the fast-path intro to avoid doubling.
+    return runNew({ marketplaceId: pick as string, skipIntro: true });
   }
 
   // ── E2E short-circuit: delegate to the e2e wizard ────────────────────
