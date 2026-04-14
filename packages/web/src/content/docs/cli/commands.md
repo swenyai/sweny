@@ -230,8 +230,42 @@ sweny workflow run <file> [options]
 | `--dry-run` | Validate the workflow and print its node list without running | `false` |
 | `--json` | Output result as JSON to stdout; suppress progress rendering | `false` |
 | `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |
+| `--mermaid` | Print a Mermaid diagram with per-node execution state after the run finishes | `false` |
 
 Loads the workflow definition, validates its schema, then executes it with the same DAG renderer and skill infrastructure as the built-in `triage` and `implement` commands. Provider settings from `.sweny.yml` and `.env` apply.
+
+### sweny workflow diagram
+
+Render a workflow as a [Mermaid](https://mermaid.js.org/) diagram. Handy for PR descriptions, runbooks, and anywhere GitHub/GitLab renders Mermaid natively.
+
+```bash
+sweny workflow diagram <file> [options]
+```
+
+The `<file>` argument accepts a path to a workflow YAML or JSON file, or the name of a built-in workflow (`triage`, `implement`, `seed-content`).
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--direction <dir>` | Graph direction: `TB` (top-bottom) or `LR` (left-right) | `TB` |
+| `--title <title>` | Override the diagram title (defaults to workflow name) | workflow name |
+| `--block` / `--no-block` | Wrap / don't wrap in a ` ```mermaid ` fenced code block | fenced on stdout and `.md`; raw on `.mmd` |
+| `-o, --output <path>` | Write the diagram to a file instead of stdout | — |
+
+When `-o` is used, the output format defaults based on the file extension: `.mmd` gets raw Mermaid (what `mmdc` and Mermaid Live Editor expect), `.md` gets a fenced code block. `--block` / `--no-block` always wins if set explicitly.
+
+```bash
+# Fenced markdown to stdout
+sweny workflow diagram my-workflow.yml
+
+# Raw .mmd file for mmdc / Mermaid Live
+sweny workflow diagram my-workflow.yml -o diagram.mmd
+
+# Paste-ready markdown file for a PR description or README
+sweny workflow diagram triage -o triage.md --direction LR
+
+# Stdout via pipe (equivalent to -o with --no-block)
+sweny workflow diagram my-workflow.yml --no-block > diagram.mmd
+```
 
 ### sweny workflow export
 

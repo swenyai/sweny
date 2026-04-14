@@ -908,7 +908,8 @@ workflowCmd
   .option("--title <title>", "Diagram title (defaults to workflow name)")
   .option("--block", "Wrap in ```mermaid fenced code block (default)", true)
   .option("--no-block", "Output raw Mermaid without code fence")
-  .action((file: string, options: { direction?: string; title?: string; block?: boolean }) => {
+  .option("-o, --output <path>", "Write the diagram to a file instead of stdout")
+  .action((file: string, options: { direction?: string; title?: string; block?: boolean; output?: string }) => {
     let workflow: Workflow;
 
     // Support builtin workflow names
@@ -930,8 +931,34 @@ workflowCmd
 
     const direction = (options.direction === "LR" ? "LR" : "TB") as "TB" | "LR";
     const title = options.title ?? workflow.name;
-    const render = options.block !== false ? toMermaidBlock : toMermaid;
-    process.stdout.write(render(workflow, { direction, title }) + "\n");
+
+    // Block default: when writing to a file, infer from extension.
+    // `.mmd` is raw Mermaid (what mmdc / Mermaid Live expect); `.md` is
+    // fenced markdown. Stdout and unknown extensions keep the prior default
+    // (fenced). An explicit --block / --no-block always wins.
+    const blockExplicit = process.argv.includes("--block") || process.argv.includes("--no-block");
+    let useBlock = options.block !== false;
+    if (!blockExplicit && options.output) {
+      const ext = path.extname(options.output).toLowerCase();
+      if (ext === ".mmd") useBlock = false;
+      else if (ext === ".md") useBlock = true;
+    }
+
+    const render = useBlock ? toMermaidBlock : toMermaid;
+    const output = render(workflow, { direction, title }) + "\n";
+
+    if (options.output) {
+      try {
+        fs.writeFileSync(options.output, output, "utf8");
+        console.error(chalk.green(`  ✓ Wrote diagram to ${options.output}`));
+      } catch (err) {
+        console.error(chalk.red(`  Error: ${err instanceof Error ? err.message : String(err)}`));
+        process.exit(1);
+      }
+      return;
+    }
+
+    process.stdout.write(output);
   });
 
 workflowCmd

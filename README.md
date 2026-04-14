@@ -40,6 +40,9 @@ Build a workflow from scratch — pick "Describe your own" in the `sweny new` pi
 ```bash
 sweny workflow create "review PRs for security issues and code quality"
 sweny workflow run .sweny/workflows/pr-review.yml
+
+# Visualize any workflow as a Mermaid diagram — drop it into a PR or README
+sweny workflow diagram .sweny/workflows/pr-review.yml -o pr-review.mmd
 ```
 
 Browse **[marketplace.sweny.ai](https://marketplace.sweny.ai)** for ready-to-run workflows.

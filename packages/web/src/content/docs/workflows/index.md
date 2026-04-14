@@ -183,6 +183,20 @@ sweny workflow export triage > my-triage.yml
 sweny workflow export implement > my-implement.yml
 ```
 
+## Visualize a workflow
+
+Any workflow can be rendered as a [Mermaid](https://mermaid.js.org/) diagram -- great for PR descriptions, runbooks, or wherever GitHub/GitLab render Mermaid natively:
+
+```bash
+# Fenced markdown, paste-ready
+sweny workflow diagram my-workflow.yml
+
+# Raw .mmd file for mmdc or the Mermaid Live Editor
+sweny workflow diagram my-workflow.yml -o diagram.mmd
+```
+
+See [`sweny workflow diagram`](/cli/commands/#sweny-workflow-diagram) for all options.
+
 ## What's next?
 
 - [Custom Workflows](/workflows/custom/) -- build workflows from natural language, YAML, or Studio
