@@ -208,6 +208,18 @@ describe("runUpgrade — no-op paths", () => {
     expect(runInstall).toHaveBeenCalledWith("npm", ["install", "-g", "@sweny-ai/core@latest"]);
     expect(exit).toHaveBeenCalledWith(0);
   });
+
+  it("downgrades when --force is set against a local-dev build ahead of the registry", async () => {
+    const { deps, runInstall, exit } = makeDeps({
+      currentVersion: "0.2.0",
+      fetchLatestVersion: vi.fn(async () => "0.1.66"),
+    });
+    await runUpgrade({ force: true }, deps);
+    // --force explicitly overrides the "ahead" short-circuit — this is how
+    // someone pins back to the published train from a stale local build.
+    expect(runInstall).toHaveBeenCalledWith("npm", ["install", "-g", "@sweny-ai/core@latest"]);
+    expect(exit).toHaveBeenCalledWith(0);
+  });
 });
 
 describe("runUpgrade — install dispatch", () => {

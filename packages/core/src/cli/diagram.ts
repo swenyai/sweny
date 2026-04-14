@@ -1,7 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import chalk from "chalk";
-import type { Command } from "commander";
 
 import { toMermaid, toMermaidBlock } from "../mermaid.js";
 import type { Workflow } from "../types.js";
@@ -9,7 +8,18 @@ import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workf
 
 export interface DiagramOptions {
   direction?: string;
+  /**
+   * Optional diagram title. When omitted we render pure Mermaid with no
+   * `---\ntitle: …\n---` frontmatter — the format that `mmdc`, Mermaid Live
+   * Editor, and `@mermaid-js/mermaid-cli` all accept as-is.
+   */
   title?: string;
+  /**
+   * Wrap output in a ```mermaid fenced code block. Tri-state:
+   *   - `true`  → fenced (forced by explicit `--block`)
+   *   - `false` → raw (forced by explicit `--no-block`)
+   *   - `undefined` → inferred from `--output` extension; default is raw
+   */
   block?: boolean;
   output?: string;
 }
@@ -17,8 +27,6 @@ export interface DiagramOptions {
 export interface DiagramDeps {
   /** Load a workflow file (YAML or JSON). Injected so tests can stub. */
   loadWorkflowFile: (file: string) => Workflow;
-  /** Commander instance used to detect whether --block was set explicitly. */
-  command?: Command;
   /** Stream for success/error messages. Defaults to process.stderr. */
   stderr?: NodeJS.WritableStream;
   /** Stream for diagram output when no --output is set. Defaults to process.stdout. */
@@ -27,14 +35,36 @@ export interface DiagramDeps {
   exit?: (code: number) => void;
 }
 
+const MARKDOWN_EXTS = new Set([".md", ".markdown"]);
+
+/**
+ * Resolve whether output should be wrapped in a ```mermaid fenced block.
+ *
+ * Precedence:
+ *   1. Explicit `--block` / `--no-block` always wins.
+ *   2. When `-o` points at `.md`/`.markdown` we fence (markdown context).
+ *   3. Everything else — stdout, `.mmd`, `.mermaid`, unknown extensions —
+ *      emits raw Mermaid syntax that Mermaid CLI / Live Editor / mmdc can
+ *      consume directly with no preprocessing.
+ */
+export function resolveUseBlock(options: DiagramOptions): boolean {
+  if (options.block === true) return true;
+  if (options.block === false) return false;
+  if (options.output) {
+    const ext = path.extname(options.output).toLowerCase();
+    if (MARKDOWN_EXTS.has(ext)) return true;
+  }
+  return false;
+}
+
 /**
  * Render a workflow as a Mermaid diagram and write to stdout or a file.
  *
- * Block-default rules (in order of precedence):
- *   1. Explicit `--block` / `--no-block` — always wins (detected via the
- *      Command's option-value source when provided)
- *   2. When `-o` is set, infer from extension: `.mmd` → raw, `.md` → fenced
- *   3. Otherwise default to fenced (matches prior stdout behavior)
+ * By default the output is pure Mermaid — no ```mermaid fence, no
+ * `---\ntitle: …\n---` frontmatter — so the result is directly consumable
+ * by Mermaid CLI (`mmdc`) and the Live Editor. Pass `--block` to wrap in a
+ * fenced code block for README embedding, or `--title` to inject a title
+ * header for Mermaid renderers that support it.
  */
 export function runWorkflowDiagram(file: string, options: DiagramOptions, deps: DiagramDeps): void {
   const stderr = deps.stderr ?? process.stderr;
@@ -61,22 +91,15 @@ export function runWorkflowDiagram(file: string, options: DiagramOptions, deps: 
   }
 
   const direction = (options.direction === "LR" ? "LR" : "TB") as "TB" | "LR";
-  const title = options.title ?? workflow.name;
-
-  // Explicit --block / --no-block always wins. When commander's source is
-  // "cli" or "env" the user (or env var) set it; otherwise we may infer.
-  const blockSource = deps.command?.getOptionValueSource("block");
-  const blockExplicit = blockSource === "cli" || blockSource === "env";
-
-  let useBlock = options.block !== false;
-  if (!blockExplicit && options.output) {
-    const ext = path.extname(options.output).toLowerCase();
-    if (ext === ".mmd") useBlock = false;
-    else if (ext === ".md") useBlock = true;
-  }
-
+  const useBlock = resolveUseBlock(options);
   const render = useBlock ? toMermaidBlock : toMermaid;
-  const output = render(workflow, { direction, title }) + "\n";
+
+  // Title is opt-in only — an unset `--title` produces no frontmatter. Users
+  // who want the workflow.name as title can pass `--title "$(name)"`.
+  const renderOpts: { direction: "TB" | "LR"; title?: string } = { direction };
+  if (options.title) renderOpts.title = options.title;
+
+  const output = render(workflow, renderOpts) + "\n";
 
   if (options.output) {
     try {

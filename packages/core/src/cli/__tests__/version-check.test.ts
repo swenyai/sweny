@@ -212,6 +212,27 @@ describe("maybeNudge", () => {
     expect(stderr.text).toBe(""); // silent on error
   });
 
+  it("gives up silently when the registry is slower than the budget", async () => {
+    // The race between fetch and the internal timer means a slow fetch should
+    // resolve to null → no cache write → no nudge. We pin down the behavior
+    // here so a future regression (forgetting the race or the timeout) gets
+    // caught even though the budget is configured in the module itself.
+    const slowFetch = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          // Never resolves within the test — the internal timer is what wins.
+          const t = setTimeout(() => resolve("9.9.9"), 10_000);
+          if (typeof (t as unknown as { unref?: () => void }).unref === "function") {
+            (t as unknown as { unref: () => void }).unref();
+          }
+        }),
+    );
+    await maybeNudge(baseDeps({ fetchLatestVersion: slowFetch }));
+    expect(slowFetch).toHaveBeenCalled();
+    expect(readCache(cachePath)).toBeNull();
+    expect(stderr.text).toBe("");
+  });
+
   it("does not refresh when cache is fresh (saves bandwidth)", async () => {
     writeCache(cachePath, { latest: "0.1.65", checkedAt: 1_000_000 });
     await maybeNudge(baseDeps({ now: 1_000_000 + 1 }));

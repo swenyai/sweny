@@ -907,18 +907,14 @@ workflowCmd
 
 workflowCmd
   .command("diagram <file>")
-  .description("Render a workflow as a Mermaid diagram")
+  .description("Render a workflow as a Mermaid diagram (raw .mmd by default; .md output auto-fences)")
   .option("--direction <dir>", "Graph direction: TB (top-bottom) or LR (left-right)", "TB")
-  .option("--title <title>", "Diagram title (defaults to workflow name)")
-  .option("--block", "Wrap in ```mermaid fenced code block (default)", true)
-  .option("--no-block", "Output raw Mermaid without code fence")
-  .option("-o, --output <path>", "Write the diagram to a file instead of stdout")
-  .action(function diagramAction(
-    this: Command,
-    file: string,
-    options: { direction?: string; title?: string; block?: boolean; output?: string },
-  ) {
-    runWorkflowDiagram(file, options, { loadWorkflowFile, command: this });
+  .option("--title <title>", "Inject a title header (off by default — raw Mermaid has no title)")
+  .option("--block", "Wrap in ```mermaid fenced code block (forces fencing in any output)")
+  .option("--no-block", "Force raw Mermaid even when writing to a .md file")
+  .option("-o, --output <path>", "Write to a file instead of stdout (.mmd/.mermaid raw; .md fenced)")
+  .action((file: string, options: { direction?: string; title?: string; block?: boolean; output?: string }) => {
+    runWorkflowDiagram(file, options, { loadWorkflowFile });
   });
 
 workflowCmd
@@ -1085,7 +1081,7 @@ workflowCmd
 // ── sweny upgrade / update ────────────────────────────────────────────
 // Self-update the globally-installed @sweny-ai/core. Mirrors the UX of
 // `bun upgrade`, `deno upgrade`, `rustup update`, etc.
-const upgradeCmd = program
+program
   .command("upgrade")
   .alias("update")
   .description("Upgrade sweny to the latest published version")
@@ -1108,7 +1104,13 @@ const upgradeCmd = program
       installPath,
       fetchLatestVersion: fetchLatestFromNpm,
       runInstall: (cmd, args) => {
-        const res = spawnSync(cmd, args, { stdio: "inherit" });
+        // Windows: `npm`/`pnpm`/`yarn` are `.cmd` shims and Node's spawn can't
+        // resolve them without a shell. Everywhere else we skip the shell to
+        // keep argv unambiguous and avoid injection surface.
+        const res = spawnSync(cmd, args, {
+          stdio: "inherit",
+          shell: process.platform === "win32",
+        });
         if (res.error) {
           process.stderr.write(chalk.red(`  Error: couldn't run ${cmd} — ${res.error.message}`) + "\n");
           return 127;
@@ -1125,8 +1127,6 @@ const upgradeCmd = program
       },
     });
   });
-// Touch upgradeCmd so TS/ESLint don't flag it unused if someone tightens rules.
-void upgradeCmd;
 
 // ── Passive "new version available" nudge ─────────────────────────────
 // Runs after every command. Non-blocking, bounded to 1.5s, silent on any

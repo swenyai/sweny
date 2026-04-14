@@ -247,24 +247,28 @@ The `<file>` argument accepts a path to a workflow YAML or JSON file, or the nam
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--direction <dir>` | Graph direction: `TB` (top-bottom) or `LR` (left-right) | `TB` |
-| `--title <title>` | Override the diagram title (defaults to workflow name) | workflow name |
-| `--block` / `--no-block` | Wrap / don't wrap in a ` ```mermaid ` fenced code block | fenced on stdout and `.md`; raw on `.mmd` |
+| `--title <title>` | Inject a `---\ntitle: …\n---` header (off by default — raw Mermaid has no title) | — |
+| `--block` / `--no-block` | Wrap / don't wrap in a ` ```mermaid ` fenced code block | raw on stdout, `.mmd`, `.mermaid`; fenced on `.md`/`.markdown` |
 | `-o, --output <path>` | Write the diagram to a file instead of stdout | — |
 
-When `-o` is used, the output format defaults based on the file extension: `.mmd` gets raw Mermaid (what `mmdc` and Mermaid Live Editor expect), `.md` gets a fenced code block. `--block` / `--no-block` always wins if set explicitly.
+Output defaults to **raw Mermaid syntax** (no fence, no title frontmatter) — the format [`mmdc`](https://github.com/mermaid-js/mermaid-cli), the [Mermaid Live Editor](https://mermaid.live), and GitHub/GitLab inline renderers accept directly. When `-o` points at `.md` or `.markdown`, the output is auto-wrapped in a ` ```mermaid ` fenced block for paste-in-a-README use. `--block` / `--no-block` always wins if set explicitly.
 
 ```bash
-# Fenced markdown to stdout
+# Raw Mermaid to stdout — pipe into mmdc, Live Editor, anything
 sweny workflow diagram my-workflow.yml
 
-# Raw .mmd file for mmdc / Mermaid Live
+# Canonical .mmd / .mermaid for tooling
 sweny workflow diagram my-workflow.yml -o diagram.mmd
+sweny workflow diagram my-workflow.yml -o diagram.mermaid
 
-# Paste-ready markdown file for a PR description or README
+# Paste-ready markdown file for a PR description or README (auto-fenced)
 sweny workflow diagram triage -o triage.md --direction LR
 
-# Stdout via pipe (equivalent to -o with --no-block)
-sweny workflow diagram my-workflow.yml --no-block > diagram.mmd
+# Force fenced output to stdout (e.g. piping to pbcopy for a PR comment)
+sweny workflow diagram my-workflow.yml --block | pbcopy
+
+# Force raw output to a .md file (override the auto-fence)
+sweny workflow diagram my-workflow.yml -o diagram.md --no-block
 ```
 
 ### sweny workflow export
