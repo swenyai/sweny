@@ -542,11 +542,11 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
 
     if (!options.skipIntro) p.intro(`Installing ${options.marketplaceId} from marketplace`);
 
-    // Pre-compute providers from git-remote (same method as the wizard path).
+    // Pre-compute source-control from git-remote (same method as the wizard path).
+    // Don't pre-compute issue-tracker / observability — those are skill-based,
+    // and marketplace.ts infers them after the workflow is fetched.
     const gitInfo = detectGitRemote(cwd);
     const inferredSourceControl = inferSourceControl(gitInfo);
-    const inferredIssueTracker = inferIssueTracker([], inferredSourceControl); // skills resolved after fetch
-    const inferredObservability = inferObservability([]); // skills resolved after fetch
 
     // Check for existing workflow file and prompt before fetching.
     const existingWorkflowPath = path.join(cwd, ".sweny", "workflows", `${options.marketplaceId}.yml`);
@@ -572,8 +572,6 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
         claude,
         logger: consoleLogger,
         inferredSourceControl,
-        inferredIssueTracker,
-        inferredObservability,
         overwrite,
       });
     } catch (err) {

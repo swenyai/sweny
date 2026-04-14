@@ -1095,14 +1095,15 @@ describe("runNew with marketplaceId", () => {
       expect.objectContaining({
         cwd,
         inferredSourceControl: expect.any(String),
-        inferredIssueTracker: expect.any(String),
-        // inferredObservability may be null or string — just check key is present
         overwrite: false,
       }),
     );
-    // Verify the call includes inferredObservability key (value may be null)
+    // inferredIssueTracker / inferredObservability are skill-based — runNew
+    // must NOT pre-compute them (it has no skills list), so marketplace.ts
+    // can fall back to skill-based inference after fetching the workflow.
     const callArgs = (mkt.installMarketplaceWorkflow as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    expect("inferredObservability" in callArgs).toBe(true);
+    expect("inferredIssueTracker" in callArgs).toBe(false);
+    expect("inferredObservability" in callArgs).toBe(false);
   });
 
   it("passes overwrite:true to installMarketplaceWorkflow when user confirms overwrite", async () => {
