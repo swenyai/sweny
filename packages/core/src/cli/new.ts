@@ -515,7 +515,8 @@ function cancel(): never {
  *
  * Flow:
  * 1. Detect git remote (used to infer source-control provider)
- * 2. Pick one of four branches:
+ * 2. Pick one of five branches:
+ *    - `__marketplace` → browse published workflows at swenyai/workflows, then delegate to `installMarketplaceWorkflow`
  *    - A built-in `WORKFLOW_TEMPLATES` entry → write that workflow file
  *    - `__custom` → LLM generates a workflow from a user description
  *    - `__e2e` → delegate to the e2e browser-testing wizard in `./e2e.ts`
@@ -589,6 +590,11 @@ export async function runNew(options?: { marketplaceId?: string }): Promise<void
   const templateChoice = await p.select({
     message: "What do you want to do?",
     options: [
+      {
+        value: "__marketplace",
+        label: "Browse marketplace",
+        hint: "install a published workflow from swenyai/workflows",
+      },
       ...WORKFLOW_TEMPLATES.map((t) => ({
         value: t.id,
         label: t.name,
@@ -600,6 +606,35 @@ export async function runNew(options?: { marketplaceId?: string }): Promise<void
     ],
   });
   if (p.isCancel(templateChoice)) cancel();
+
+  // ── Marketplace short-circuit: fetch index, pick, delegate ──────────
+  if (templateChoice === "__marketplace") {
+    const { fetchMarketplaceIndex } = await import("./marketplace.js");
+    const spinner = p.spinner();
+    spinner.start("Fetching marketplace index…");
+    let entries;
+    try {
+      entries = await fetchMarketplaceIndex();
+      spinner.stop(`Found ${entries.length} workflow(s)`);
+    } catch (err) {
+      spinner.stop("Failed");
+      p.log.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
+    const pick = await p.select({
+      message: "Which workflow?",
+      options: entries.map((e) => ({
+        value: e.id,
+        label: e.name,
+        hint: e.description,
+      })),
+    });
+    if (p.isCancel(pick)) cancel();
+
+    // Delegate to the marketplace install path
+    return runNew({ marketplaceId: pick as string });
+  }
 
   // ── E2E short-circuit: delegate to the e2e wizard ────────────────────
   if (templateChoice === "__e2e") {

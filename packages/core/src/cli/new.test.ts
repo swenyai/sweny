@@ -1033,6 +1033,30 @@ vi.mock("./marketplace.js", async () => {
   return {
     ...actual,
     installMarketplaceWorkflow: vi.fn(),
+    fetchMarketplaceIndex: vi.fn(),
+  };
+});
+
+vi.mock("@clack/prompts", async () => {
+  const actual = await vi.importActual<typeof import("@clack/prompts")>("@clack/prompts");
+  return {
+    ...actual,
+    intro: vi.fn(),
+    outro: vi.fn(),
+    cancel: vi.fn(),
+    isCancel: vi.fn(() => false),
+    select: vi.fn(),
+    confirm: vi.fn(),
+    text: vi.fn(),
+    spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
+    log: {
+      info: vi.fn(),
+      success: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      message: vi.fn(),
+    },
+    note: vi.fn(),
   };
 });
 
@@ -1055,5 +1079,31 @@ describe("runNew with marketplaceId", () => {
       "pr-review",
       expect.objectContaining({ cwd: process.cwd() }),
     );
+  });
+});
+
+describe("runNew wizard — browse marketplace branch", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("fetches index and delegates to installMarketplaceWorkflow when user picks a marketplace entry", async () => {
+    const p = await import("@clack/prompts");
+    const mkt = await import("./marketplace.js");
+
+    (p.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce("__marketplace").mockResolvedValueOnce("pr-review");
+    (mkt.fetchMarketplaceIndex as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { id: "pr-review", name: "PR Review", description: "Review PRs", skills: ["github"] },
+    ]);
+    (mkt.installMarketplaceWorkflow as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      installed: true,
+      adapted: false,
+      workflowPath: "/tmp/.sweny/workflows/pr-review.yml",
+      mismatches: [],
+      addedEnvKeys: 0,
+    });
+
+    await runNew();
+
+    expect(mkt.fetchMarketplaceIndex).toHaveBeenCalled();
+    expect(mkt.installMarketplaceWorkflow).toHaveBeenCalledWith("pr-review", expect.any(Object));
   });
 });
