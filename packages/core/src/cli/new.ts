@@ -529,8 +529,42 @@ function cancel(): never {
  *
  * Safe to re-run in an existing project to add additional workflows.
  */
-export async function runNew(): Promise<void> {
+export async function runNew(options?: { marketplaceId?: string }): Promise<void> {
   const cwd = process.cwd();
+
+  // ── Marketplace install fast path ───────────────────────────────────
+  if (options?.marketplaceId) {
+    const { installMarketplaceWorkflow } = await import("./marketplace.js");
+    const allSkills = configuredSkills(process.env, cwd);
+    const hasAgent = !!process.env.ANTHROPIC_API_KEY;
+    const claude = hasAgent ? new ClaudeClient({ maxTurns: 3, cwd, logger: consoleLogger }) : null;
+
+    p.intro(`Installing ${options.marketplaceId} from marketplace`);
+
+    let result;
+    try {
+      result = await installMarketplaceWorkflow(options.marketplaceId, {
+        cwd,
+        availableSkills: allSkills,
+        claude,
+        logger: consoleLogger,
+      });
+    } catch (err) {
+      p.log.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
+    if (!result.installed) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
+
+    if (result.adapted) p.log.success("Adapted workflow for your project");
+    if (result.addedEnvKeys > 0) p.log.success(`Appended ${result.addedEnvKeys} key(s) to .env`);
+    p.log.success(`Created ${path.relative(cwd, result.workflowPath)}`);
+    p.outro("Workflow installed!");
+    return;
+  }
 
   // ── Fresh vs existing detection ─────────────────────────────────────
   const configPath = path.join(cwd, ".sweny.yml");

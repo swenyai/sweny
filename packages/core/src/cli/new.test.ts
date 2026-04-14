@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -1025,5 +1025,35 @@ describe("writeWorkflowFile", () => {
     const result = writeWorkflowFile(dir, "pr-review", "new\n", { overwrite: true });
     expect(result).toEqual({ written: true, path: expect.any(String) });
     expect(fs.readFileSync(result.path, "utf-8")).toBe("new\n");
+  });
+});
+
+vi.mock("./marketplace.js", async () => {
+  const actual = await vi.importActual<typeof import("./marketplace.js")>("./marketplace.js");
+  return {
+    ...actual,
+    installMarketplaceWorkflow: vi.fn(),
+  };
+});
+
+describe("runNew with marketplaceId", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("calls installMarketplaceWorkflow when marketplaceId is provided", async () => {
+    const mkt = await import("./marketplace.js");
+    (mkt.installMarketplaceWorkflow as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      installed: true,
+      adapted: false,
+      workflowPath: "/tmp/.sweny/workflows/pr-review.yml",
+      mismatches: [],
+      addedEnvKeys: 0,
+    });
+
+    await runNew({ marketplaceId: "pr-review" });
+
+    expect(mkt.installMarketplaceWorkflow).toHaveBeenCalledWith(
+      "pr-review",
+      expect.objectContaining({ cwd: process.cwd() }),
+    );
   });
 });
