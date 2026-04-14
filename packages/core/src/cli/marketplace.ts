@@ -62,3 +62,35 @@ export async function fetchMarketplaceWorkflow(id: string): Promise<FetchedWorkf
 
   return { id, yaml: await res.text() };
 }
+
+export async function fetchMarketplaceIndex(): Promise<MarketplaceEntry[]> {
+  const url = `${MARKETPLACE_RAW_BASE}/index.json`;
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch {
+    const err = new Error(`Could not reach github.com`) as FetchError;
+    err.kind = "network";
+    throw err;
+  }
+
+  if (res.status === 404) {
+    const err = new Error(`Marketplace index not found`) as FetchError;
+    err.kind = "not-found";
+    throw err;
+  }
+  if (!res.ok) {
+    const err = new Error(`Fetch failed with status ${res.status}`) as FetchError;
+    err.kind = "unknown";
+    throw err;
+  }
+
+  const raw = (await res.json()) as unknown;
+  if (!Array.isArray(raw)) {
+    const err = new Error(`Marketplace index is not an array`) as FetchError;
+    err.kind = "bad-yaml";
+    throw err;
+  }
+
+  return raw as MarketplaceEntry[];
+}

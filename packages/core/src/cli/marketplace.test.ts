@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fetchMarketplaceWorkflow, MARKETPLACE_RAW_BASE } from "./marketplace.js";
+import { fetchMarketplaceWorkflow, fetchMarketplaceIndex, MARKETPLACE_RAW_BASE } from "./marketplace.js";
 
 describe("fetchMarketplaceWorkflow", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -51,5 +51,26 @@ describe("fetchMarketplaceWorkflow errors", () => {
     await expect(fetchMarketplaceWorkflow("pr-review")).rejects.toMatchObject({
       kind: "network",
     });
+  });
+});
+
+describe("fetchMarketplaceIndex", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("fetches and parses index.json", async () => {
+    const body = JSON.stringify([
+      { id: "pr-review", name: "PR Review", description: "Reviews PRs", skills: ["github"] },
+      { id: "issue-triage", name: "Issue Triage", description: "Triages issues", skills: ["github"] },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(body, { status: 200 }));
+
+    const entries = await fetchMarketplaceIndex();
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({ id: "pr-review", name: "PR Review" });
+  });
+
+  it("throws not-found when index.json is missing", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 404 }));
+    await expect(fetchMarketplaceIndex()).rejects.toMatchObject({ kind: "not-found" });
   });
 });
