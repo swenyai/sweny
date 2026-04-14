@@ -7,6 +7,9 @@
  * helpers in ./new.ts.
  */
 
+import type { Skill, SkillCategory } from "../types.js";
+import type { FileConfig } from "./config-file.js";
+
 export const MARKETPLACE_REPO = "swenyai/workflows";
 export const MARKETPLACE_RAW_BASE = `https://raw.githubusercontent.com/${MARKETPLACE_REPO}/main`;
 
@@ -93,4 +96,48 @@ export async function fetchMarketplaceIndex(): Promise<MarketplaceEntry[]> {
   }
 
   return raw as MarketplaceEntry[];
+}
+
+export interface ProviderMismatch {
+  category: SkillCategory;
+  configKey: string;
+  workflowSkill: string;
+  userProvider: string;
+}
+
+const CATEGORY_TO_CONFIG_KEY: Partial<Record<SkillCategory, string>> = {
+  git: "source-control-provider",
+  tasks: "issue-tracker-provider",
+  observability: "observability-provider",
+  notification: "notification-provider",
+};
+
+export function computeProviderMismatch(
+  workflowSkills: string[],
+  fileConfig: FileConfig,
+  availableSkills: Skill[],
+): ProviderMismatch[] {
+  const skillMap = new Map(availableSkills.map((s) => [s.id, s]));
+  const out: ProviderMismatch[] = [];
+
+  for (const skillId of workflowSkills) {
+    const skill = skillMap.get(skillId);
+    if (!skill) continue;
+
+    const configKey = CATEGORY_TO_CONFIG_KEY[skill.category];
+    if (!configKey) continue;
+
+    const userProvider = fileConfig[configKey];
+    if (typeof userProvider !== "string") continue;
+    if (userProvider === skillId) continue;
+
+    out.push({
+      category: skill.category,
+      configKey,
+      workflowSkill: skillId,
+      userProvider,
+    });
+  }
+
+  return out;
 }

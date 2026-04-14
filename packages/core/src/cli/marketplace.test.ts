@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fetchMarketplaceWorkflow, fetchMarketplaceIndex, MARKETPLACE_RAW_BASE } from "./marketplace.js";
+import {
+  fetchMarketplaceWorkflow,
+  fetchMarketplaceIndex,
+  computeProviderMismatch,
+  MARKETPLACE_RAW_BASE,
+} from "./marketplace.js";
+import type { Skill } from "../types.js";
 
 describe("fetchMarketplaceWorkflow", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -72,5 +78,76 @@ describe("fetchMarketplaceIndex", () => {
   it("throws not-found when index.json is missing", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 404 }));
     await expect(fetchMarketplaceIndex()).rejects.toMatchObject({ kind: "not-found" });
+  });
+});
+
+const testSkills: Skill[] = [
+  { id: "linear", name: "Linear", description: "", category: "tasks", config: {}, tools: [] },
+  {
+    id: "github-issues",
+    name: "GitHub Issues",
+    description: "",
+    category: "tasks",
+    config: {},
+    tools: [],
+  },
+  { id: "github", name: "GitHub", description: "", category: "git", config: {}, tools: [] },
+  {
+    id: "datadog",
+    name: "Datadog",
+    description: "",
+    category: "observability",
+    config: {},
+    tools: [],
+  },
+  { id: "sentry", name: "Sentry", description: "", category: "observability", config: {}, tools: [] },
+];
+
+describe("computeProviderMismatch", () => {
+  it("returns empty array when all workflow skills match config", () => {
+    const mismatches = computeProviderMismatch(
+      ["github", "github-issues"],
+      { "source-control-provider": "github", "issue-tracker-provider": "github-issues" },
+      testSkills,
+    );
+    expect(mismatches).toEqual([]);
+  });
+
+  it("detects tasks mismatch (workflow=linear, config=github-issues)", () => {
+    const mismatches = computeProviderMismatch(["linear"], { "issue-tracker-provider": "github-issues" }, testSkills);
+    expect(mismatches).toEqual([
+      {
+        category: "tasks",
+        configKey: "issue-tracker-provider",
+        workflowSkill: "linear",
+        userProvider: "github-issues",
+      },
+    ]);
+  });
+
+  it("detects observability mismatch and ignores general-category skills", () => {
+    const mismatches = computeProviderMismatch(["datadog"], { "observability-provider": "sentry" }, testSkills);
+    expect(mismatches).toEqual([
+      {
+        category: "observability",
+        configKey: "observability-provider",
+        workflowSkill: "datadog",
+        userProvider: "sentry",
+      },
+    ]);
+  });
+
+  it("skips mismatch when the user has no provider set for that role", () => {
+    const mismatches = computeProviderMismatch(["linear"], {}, testSkills);
+    expect(mismatches).toEqual([]);
+  });
+
+  it("ignores workflow skills not in the available skill registry", () => {
+    const mismatches = computeProviderMismatch(
+      ["unknown-skill"],
+      { "issue-tracker-provider": "github-issues" },
+      testSkills,
+    );
+    expect(mismatches).toEqual([]);
   });
 });
