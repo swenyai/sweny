@@ -179,6 +179,44 @@ nodes:
     skills:
       - linear
       - github
+    output:
+      type: object
+      properties:
+        issueIdentifier:
+          type: string
+          description: Primary issue identifier (e.g. OFF-1234). This is the first novel issue created — used by downstream nodes for branch naming and PR linking.
+        issueTitle:
+          type: string
+          description: Title of the primary issue created
+        issueUrl:
+          type: string
+          description: URL of the primary issue created
+        issues:
+          type: array
+          description: All issues created or updated during this step
+          items:
+            type: object
+            properties:
+              identifier:
+                type: string
+              title:
+                type: string
+              url:
+                type: string
+              action:
+                type: string
+                enum:
+                  - created
+                  - updated
+                  - reopened
+            required:
+              - identifier
+              - action
+      required:
+        - issueIdentifier
+        - issueTitle
+        - issueUrl
+        - issues
   skip:
     name: Skip — All Duplicates or Low Priority
     instruction: >-
@@ -205,13 +243,17 @@ nodes:
   implement:
     name: Implement Fix
     instruction: |-
-      Implement the fix identified during investigation:
+      Implement the fix identified during investigation. The issue created in the previous step is in your context — use its identifier for branch naming and commit messages.
 
       1. Create a feature branch from the base branch (check context for baseBranch, default "main").
+         **Branch name MUST include the issue identifier** (e.g. context.create_issue.issueIdentifier).
+         Format: lowercase the identifier and use it as a prefix, e.g. `off-1234-fix-null-check`.
+         If the repository uses a different branch convention (check context.branchPattern), follow that instead.
       2. Read the relevant source files to understand the current code.
       3. Make the necessary code changes — fix the bug, nothing more.
       4. Run any existing tests if available to verify the fix doesn't break anything.
-      5. Stage and commit with a clear commit message referencing the issue.
+      5. Stage and commit with a clear commit message. Start the message with the issue identifier in brackets,
+         e.g. `[OFF-1234] fix: guard null projectId before database lookup`.
 
       Keep changes minimal and focused. Do not refactor surrounding code or add unrelated improvements.
 
@@ -221,15 +263,17 @@ nodes:
   create_pr:
     name: Open Pull Request
     instruction: >-
-      Open a pull request for the fix:
+      Open a pull request for the fix. The issue identifier and URL are in your context from the create_issue step.
 
 
       1. Push the branch to the remote.
 
-      2. Create a PR with a clear title referencing the issue (e.g. "[OFF-1020] fix: guard empty pdf_texts before
-      access").
+      2. Create a PR with a title that starts with the issue identifier in brackets.
+      Format: `[{context.create_issue.issueIdentifier}] fix: {short description}`.
 
-      3. In the PR body, include: summary of the bug, what the fix does, and a link to the issue.
+      3. In the PR body, include: summary of the bug, what the fix does, and a link to the issue
+      (context.create_issue.issueUrl). If the investigation found a Sentry issue, include "Fixes {sentryShortId}"
+      in the PR body so Sentry auto-resolves on merge.
 
       4. Add appropriate labels if available.
 
