@@ -17,7 +17,7 @@ function minimalConfig(overrides: Partial<CliConfig> = {}): Partial<CliConfig> {
     timeRange: "6h",
     serviceFilter: "permit-service",
     repository: "acme/app",
-    observabilityProvider: "betterstack",
+    observabilityProviders: ["betterstack"],
     issueTrackerProvider: "linear",
     dryRun: false,
     ...overrides,

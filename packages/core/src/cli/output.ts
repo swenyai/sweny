@@ -109,7 +109,7 @@ export function formatBanner(config: CliConfig, version: string): string {
   const rows = [
     `${c.subtle("Repository")}${" ".repeat(6)}${chalk.white(config.repository)}`,
     `${c.subtle("Agent")}${" ".repeat(11)}${chalk.white(config.codingAgentProvider)}`,
-    `${c.subtle("Observability")}${" ".repeat(3)}${chalk.white(config.observabilityProvider)}`,
+    `${c.subtle("Observability")}${" ".repeat(3)}${chalk.white(config.observabilityProviders.join(", "))}`,
     `${c.subtle("Issue tracker")}${" ".repeat(3)}${chalk.white(config.issueTrackerProvider)}`,
     `${c.subtle("Time range")}${" ".repeat(6)}${chalk.white(config.timeRange)}`,
     `${c.subtle("Mode")}${" ".repeat(12)}${mode}`,
@@ -536,7 +536,7 @@ export function formatDagResultMarkdown(
   // ── Config / run metadata table ───────────────────────────────
   const rows: Array<[string, string]> = [];
   if (config?.repository) rows.push(["Repository", `\`${config.repository}\``]);
-  if (config?.observabilityProvider) rows.push(["Observability", config.observabilityProvider]);
+  if (config?.observabilityProviders?.length) rows.push(["Observability", config.observabilityProviders.join(", ")]);
   if (config?.issueTrackerProvider) rows.push(["Issue tracker", config.issueTrackerProvider]);
   if (config?.timeRange) rows.push(["Time range", config.timeRange]);
   if (config?.serviceFilter && config.serviceFilter !== "*") {

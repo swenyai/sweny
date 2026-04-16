@@ -238,7 +238,8 @@ export interface McpServerConfig {
 export interface McpAutoConfig {
   sourceControlProvider?: string;
   issueTrackerProvider?: string;
-  observabilityProvider?: string;
+  /** One or more observability providers (e.g. ["loki", "sentry"]). */
+  observabilityProviders?: string[];
   credentials: Record<string, string>;
   workspaceTools?: string[];
   userMcpServers?: Record<string, McpServerConfig>;

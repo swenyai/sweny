@@ -15,8 +15,8 @@ export interface CliConfig {
   geminiApiKey: string;
 
   // Observability
-  observabilityProvider: string;
-  observabilityCredentials: Record<string, string>;
+  observabilityProviders: string[];
+  observabilityCredentials: Record<string, Record<string, string>>;
 
   // Issue tracker
   issueTrackerProvider: string;
@@ -208,7 +208,15 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     return [];
   };
 
-  const obsProvider = (options.observabilityProvider as string) || f("observability-provider") || "none";
+  const obsRaw = (options.observabilityProvider as string) || f("observability-provider") || "none";
+  const obsProviders = obsRaw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s && s !== "none");
+  const obsCreds: Record<string, Record<string, string>> = {};
+  for (const p of obsProviders) {
+    obsCreds[p] = parseObservabilityCredentials(p, options, fileConfig);
+  }
 
   return {
     codingAgentProvider:
@@ -220,8 +228,8 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     openaiApiKey: env.OPENAI_API_KEY || "",
     geminiApiKey: env.GEMINI_API_KEY || env.GOOGLE_API_KEY || "",
 
-    observabilityProvider: obsProvider,
-    observabilityCredentials: parseObservabilityCredentials(obsProvider, options, fileConfig),
+    observabilityProviders: obsProviders,
+    observabilityCredentials: obsCreds,
 
     issueTrackerProvider: (options.issueTrackerProvider as string) || f("issue-tracker-provider") || "github-issues",
     linearApiKey: env.LINEAR_API_KEY || "",
@@ -376,129 +384,115 @@ export function validateInputs(config: CliConfig): string[] {
     errors.push("Missing: --repository <owner/repo> or GITHUB_REPOSITORY (could not auto-detect from git remote)");
   }
 
-  // Observability credentials by provider
-  switch (config.observabilityProvider) {
-    case "none":
-      break; // No observability provider configured — nothing to validate
-    case "datadog":
-      if (!config.observabilityCredentials.apiKey)
-        errors.push("Missing: DD_API_KEY — find API keys at https://app.datadoghq.com/organization-settings/api-keys");
-      if (!config.observabilityCredentials.appKey)
+  // Observability credentials by provider — validate each configured provider
+  for (const provider of config.observabilityProviders) {
+    const creds = config.observabilityCredentials[provider] ?? {};
+    switch (provider) {
+      case "datadog":
+        if (!creds.apiKey)
+          errors.push(
+            "Missing: DD_API_KEY — find API keys at https://app.datadoghq.com/organization-settings/api-keys",
+          );
+        if (!creds.appKey)
+          errors.push(
+            "Missing: DD_APP_KEY — find application keys at https://app.datadoghq.com/organization-settings/application-keys",
+          );
+        break;
+      case "sentry":
+        if (!creds.authToken)
+          errors.push("Missing: SENTRY_AUTH_TOKEN — create a token at https://sentry.io/settings/auth-tokens/");
+        if (!creds.organization) errors.push("Missing: --sentry-org is required for sentry provider");
+        if (!creds.project) errors.push("Missing: --sentry-project is required for sentry provider");
+        break;
+      case "cloudwatch":
+        if (!creds.logGroupPrefix)
+          errors.push("Missing: --cloudwatch-log-group-prefix is required for cloudwatch provider");
+        break;
+      case "splunk":
+        if (!creds.baseUrl) errors.push("Missing: SPLUNK_URL is required for splunk provider");
+        if (!creds.token) errors.push("Missing: SPLUNK_TOKEN is required for splunk provider");
+        break;
+      case "elastic":
+        if (!creds.baseUrl) errors.push("Missing: ELASTIC_URL is required for elastic provider");
+        if (!creds.apiKey) errors.push("Missing: ELASTIC_API_KEY is required for elastic provider");
+        break;
+      case "newrelic":
+        if (!creds.apiKey) errors.push("Missing: NR_API_KEY is required for newrelic provider");
+        if (!creds.accountId) errors.push("Missing: NR_ACCOUNT_ID is required for newrelic provider");
+        break;
+      case "loki":
+        if (!creds.baseUrl) errors.push("Missing: LOKI_URL is required for loki provider");
+        break;
+      case "file":
+        if (!creds.path) errors.push("Missing: --log-file <path> is required for file provider");
+        break;
+      case "prometheus":
+        if (!creds.url) errors.push("Missing: PROMETHEUS_URL or --prometheus-url is required for prometheus provider");
+        break;
+      case "pagerduty":
+        if (!creds.apiKey) errors.push("Missing: PAGERDUTY_API_KEY is required for pagerduty provider");
+        break;
+      case "heroku":
+        if (!creds.apiKey) errors.push("Missing: HEROKU_API_KEY is required for heroku provider");
+        if (!creds.appName)
+          errors.push("Missing: HEROKU_APP_NAME or --heroku-app-name is required for heroku provider");
+        break;
+      case "opsgenie":
+        if (!creds.apiKey) errors.push("Missing: OPSGENIE_API_KEY is required for opsgenie provider");
+        break;
+      case "honeycomb":
+        if (!creds.apiKey) errors.push("Missing: HONEYCOMB_API_KEY is required for honeycomb provider");
+        if (!creds.dataset) errors.push("Missing: HONEYCOMB_DATASET is required for honeycomb provider");
+        break;
+      case "axiom":
+        if (!creds.apiToken) errors.push("Missing: AXIOM_TOKEN is required for axiom provider");
+        if (!creds.dataset) errors.push("Missing: AXIOM_DATASET or --axiom-dataset is required for axiom provider");
+        break;
+      case "betterstack":
+        if (!creds.apiToken)
+          errors.push(
+            "Missing: BETTERSTACK_API_TOKEN, BETTERSTACK_TELEMETRY_TOKEN, or BETTERSTACK_UPTIME_TOKEN is required for betterstack provider",
+          );
+        if (!creds.sourceId && !creds.tableName)
+          errors.push(
+            "Missing: either BETTERSTACK_SOURCE_ID (--betterstack-source-id) or BETTERSTACK_TABLE_NAME (--betterstack-table-name) is required for betterstack provider",
+          );
+        break;
+      case "vercel":
+        if (!creds.token) errors.push("Missing: VERCEL_TOKEN — create a token at https://vercel.com/account/tokens");
+        if (!creds.projectId) errors.push("Missing: VERCEL_PROJECT_ID — find it in your Vercel project settings");
+        break;
+      case "supabase":
+        if (!creds.managementApiKey)
+          errors.push(
+            "Missing: SUPABASE_MANAGEMENT_KEY — create a token at https://supabase.com/dashboard/account/tokens",
+          );
+        if (!creds.projectRef)
+          errors.push("Missing: SUPABASE_PROJECT_REF — find it in your Supabase project settings > General");
+        break;
+      case "netlify":
+        if (!creds.token)
+          errors.push(
+            "Missing: NETLIFY_TOKEN — create a token at https://app.netlify.com/user/applications#personal-access-tokens",
+          );
+        if (!creds.siteId) errors.push("Missing: NETLIFY_SITE_ID — find it in Site Settings > General > Site details");
+        break;
+      case "fly":
+        if (!creds.token)
+          errors.push("Missing: FLY_TOKEN — create a token at https://fly.io/user/personal_access_tokens");
+        if (!creds.appName) errors.push("Missing: FLY_APP_NAME — the name of your Fly.io application");
+        break;
+      case "render":
+        if (!creds.apiKey)
+          errors.push("Missing: RENDER_API_KEY — create an API key at https://dashboard.render.com/u/settings");
+        if (!creds.serviceId)
+          errors.push("Missing: RENDER_SERVICE_ID — find it in your service's Settings page (srv-...)");
+        break;
+      default:
         errors.push(
-          "Missing: DD_APP_KEY — find application keys at https://app.datadoghq.com/organization-settings/application-keys",
+          `Unknown --observability-provider "${provider}". Valid values: none, datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, honeycomb, heroku, opsgenie, axiom, betterstack, vercel, supabase, netlify, fly, render, file`,
         );
-      break;
-    case "sentry":
-      if (!config.observabilityCredentials.authToken)
-        errors.push("Missing: SENTRY_AUTH_TOKEN — create a token at https://sentry.io/settings/auth-tokens/");
-      if (!config.observabilityCredentials.organization)
-        errors.push("Missing: --sentry-org is required for sentry provider");
-      if (!config.observabilityCredentials.project)
-        errors.push("Missing: --sentry-project is required for sentry provider");
-      break;
-    case "cloudwatch":
-      if (!config.observabilityCredentials.logGroupPrefix)
-        errors.push("Missing: --cloudwatch-log-group-prefix is required for cloudwatch provider");
-      break;
-    case "splunk":
-      if (!config.observabilityCredentials.baseUrl) errors.push("Missing: SPLUNK_URL is required for splunk provider");
-      if (!config.observabilityCredentials.token) errors.push("Missing: SPLUNK_TOKEN is required for splunk provider");
-      break;
-    case "elastic":
-      if (!config.observabilityCredentials.baseUrl)
-        errors.push("Missing: ELASTIC_URL is required for elastic provider");
-      if (!config.observabilityCredentials.apiKey)
-        errors.push("Missing: ELASTIC_API_KEY is required for elastic provider");
-      break;
-    case "newrelic":
-      if (!config.observabilityCredentials.apiKey) errors.push("Missing: NR_API_KEY is required for newrelic provider");
-      if (!config.observabilityCredentials.accountId)
-        errors.push("Missing: NR_ACCOUNT_ID is required for newrelic provider");
-      break;
-    case "loki":
-      if (!config.observabilityCredentials.baseUrl) errors.push("Missing: LOKI_URL is required for loki provider");
-      break;
-    case "file":
-      if (!config.observabilityCredentials.path)
-        errors.push("Missing: --log-file <path> is required for file provider");
-      break;
-    case "prometheus":
-      if (!config.observabilityCredentials.url)
-        errors.push("Missing: PROMETHEUS_URL or --prometheus-url is required for prometheus provider");
-      break;
-    case "pagerduty":
-      if (!config.observabilityCredentials.apiKey)
-        errors.push("Missing: PAGERDUTY_API_KEY is required for pagerduty provider");
-      break;
-    case "heroku":
-      if (!config.observabilityCredentials.apiKey)
-        errors.push("Missing: HEROKU_API_KEY is required for heroku provider");
-      if (!config.observabilityCredentials.appName)
-        errors.push("Missing: HEROKU_APP_NAME or --heroku-app-name is required for heroku provider");
-      break;
-    case "opsgenie":
-      if (!config.observabilityCredentials.apiKey)
-        errors.push("Missing: OPSGENIE_API_KEY is required for opsgenie provider");
-      break;
-    case "honeycomb":
-      if (!config.observabilityCredentials.apiKey)
-        errors.push("Missing: HONEYCOMB_API_KEY is required for honeycomb provider");
-      if (!config.observabilityCredentials.dataset)
-        errors.push("Missing: HONEYCOMB_DATASET is required for honeycomb provider");
-      break;
-    case "axiom":
-      if (!config.observabilityCredentials.apiToken) errors.push("Missing: AXIOM_TOKEN is required for axiom provider");
-      if (!config.observabilityCredentials.dataset)
-        errors.push("Missing: AXIOM_DATASET or --axiom-dataset is required for axiom provider");
-      break;
-    case "betterstack":
-      if (!config.observabilityCredentials.apiToken)
-        errors.push(
-          "Missing: BETTERSTACK_API_TOKEN, BETTERSTACK_TELEMETRY_TOKEN, or BETTERSTACK_UPTIME_TOKEN is required for betterstack provider",
-        );
-      if (!config.observabilityCredentials.sourceId && !config.observabilityCredentials.tableName)
-        errors.push(
-          "Missing: either BETTERSTACK_SOURCE_ID (--betterstack-source-id) or BETTERSTACK_TABLE_NAME (--betterstack-table-name) is required for betterstack provider",
-        );
-      break;
-    case "vercel":
-      if (!config.observabilityCredentials.token)
-        errors.push("Missing: VERCEL_TOKEN — create a token at https://vercel.com/account/tokens");
-      if (!config.observabilityCredentials.projectId)
-        errors.push("Missing: VERCEL_PROJECT_ID — find it in your Vercel project settings");
-      break;
-    case "supabase":
-      if (!config.observabilityCredentials.managementApiKey)
-        errors.push(
-          "Missing: SUPABASE_MANAGEMENT_KEY — create a token at https://supabase.com/dashboard/account/tokens",
-        );
-      if (!config.observabilityCredentials.projectRef)
-        errors.push("Missing: SUPABASE_PROJECT_REF — find it in your Supabase project settings > General");
-      break;
-    case "netlify":
-      if (!config.observabilityCredentials.token)
-        errors.push(
-          "Missing: NETLIFY_TOKEN — create a token at https://app.netlify.com/user/applications#personal-access-tokens",
-        );
-      if (!config.observabilityCredentials.siteId)
-        errors.push("Missing: NETLIFY_SITE_ID — find it in Site Settings > General > Site details");
-      break;
-    case "fly":
-      if (!config.observabilityCredentials.token)
-        errors.push("Missing: FLY_TOKEN — create a token at https://fly.io/user/personal_access_tokens");
-      if (!config.observabilityCredentials.appName)
-        errors.push("Missing: FLY_APP_NAME — the name of your Fly.io application");
-      break;
-    case "render":
-      if (!config.observabilityCredentials.apiKey)
-        errors.push("Missing: RENDER_API_KEY — create an API key at https://dashboard.render.com/u/settings");
-      if (!config.observabilityCredentials.serviceId)
-        errors.push("Missing: RENDER_SERVICE_ID — find it in your service's Settings page (srv-...)");
-      break;
-    default:
-      errors.push(
-        `Unknown --observability-provider "${config.observabilityProvider}". Valid values: none, datadog, sentry, cloudwatch, splunk, elastic, newrelic, loki, prometheus, pagerduty, honeycomb, heroku, opsgenie, axiom, betterstack, vercel, supabase, netlify, fly, render, file`,
-      );
+    }
   }
 
   // Issue tracker credentials by provider
