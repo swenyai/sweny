@@ -273,10 +273,15 @@ export function buildAutoMcpServers(config: McpAutoConfig): Record<string, McpSe
     };
   }
 
+  // ── Observability MCP servers ──────────────────────────────────
+  // Inject MCP for every configured observability provider whose credentials
+  // are present. Multiple providers are supported (e.g. "loki,sentry").
+  const obsProviders = new Set(config.observabilityProviders ?? []);
+
   // Datadog MCP — HTTP transport.
   const ddApiKey = creds.DD_API_KEY;
   const ddAppKey = creds.DD_APP_KEY;
-  if (config.observabilityProvider === "datadog" && ddApiKey && ddAppKey) {
+  if (obsProviders.has("datadog") && ddApiKey && ddAppKey) {
     auto["datadog"] = {
       type: "http",
       url: "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
@@ -286,7 +291,7 @@ export function buildAutoMcpServers(config: McpAutoConfig): Record<string, McpSe
 
   // Sentry MCP — @sentry/mcp-server reads SENTRY_ACCESS_TOKEN (not SENTRY_AUTH_TOKEN).
   const sentryAuthToken = creds.SENTRY_AUTH_TOKEN;
-  if (config.observabilityProvider === "sentry" && sentryAuthToken) {
+  if (obsProviders.has("sentry") && sentryAuthToken) {
     const sentryEnv: Record<string, string> = { SENTRY_ACCESS_TOKEN: sentryAuthToken };
     const sentryUrl = creds.SENTRY_URL;
     if (sentryUrl && sentryUrl !== "https://sentry.io") {
@@ -305,10 +310,8 @@ export function buildAutoMcpServers(config: McpAutoConfig): Record<string, McpSe
   }
 
   // New Relic MCP — HTTP transport; region-aware endpoint.
-  // Header key is "Api-Key" (not "Authorization"), unique to New Relic's MCP.
-  // Trailing slash is intentional — New Relic's MCP spec requires it.
   const nrApiKey = creds.NEW_RELIC_API_KEY;
-  if (config.observabilityProvider === "newrelic" && nrApiKey) {
+  if (obsProviders.has("newrelic") && nrApiKey) {
     const nrRegion = creds.NEW_RELIC_REGION;
     const nrEndpoint = nrRegion === "eu" ? "https://mcp.eu.newrelic.com/mcp/" : "https://mcp.newrelic.com/mcp/";
     auto["newrelic"] = {
@@ -319,13 +322,8 @@ export function buildAutoMcpServers(config: McpAutoConfig): Record<string, McpSe
   }
 
   // Better Stack MCP — HTTP remote MCP; Bearer token auth.
-  // BetterStack uses separate tokens for Uptime vs Telemetry APIs.
-  // The MCP server accepts the telemetry token for log/metric queries.
-  // Accept: BETTERSTACK_API_TOKEN (legacy), BETTERSTACK_TELEMETRY_TOKEN, or BETTERSTACK_UPTIME_TOKEN.
-  // Injected whenever any token is present (not just when it's the primary provider)
-  // because BetterStack logs complement any primary observability provider.
   const bsApiToken = creds.BETTERSTACK_API_TOKEN || creds.BETTERSTACK_TELEMETRY_TOKEN || creds.BETTERSTACK_UPTIME_TOKEN;
-  if (bsApiToken) {
+  if (obsProviders.has("betterstack") && bsApiToken) {
     auto["betterstack"] = {
       type: "http",
       url: "https://mcp.betterstack.com",
@@ -410,7 +408,7 @@ export function buildAutoMcpServers(config: McpAutoConfig): Record<string, McpSe
 // ── Provider context for dynamic instruction injection ─────────────
 
 export interface ProviderContextOptions {
-  observabilityProvider?: string;
+  observabilityProviders?: string[];
   issueTrackerProvider?: string;
   sourceControlProvider?: string;
   /** Which MCP servers were actually injected (keys from buildAutoMcpServers) */
@@ -427,17 +425,13 @@ export interface ProviderContextOptions {
 export function buildProviderContext(opts: ProviderContextOptions): string {
   const lines: string[] = ["## Available Providers & Tools", ""];
 
-  // Observability
-  if (opts.observabilityProvider) {
-    const mcpNote = opts.mcpServers.includes(opts.observabilityProvider)
+  // Observability — list all configured providers
+  const obsProviders = opts.observabilityProviders ?? [];
+  for (const provider of obsProviders) {
+    const mcpNote = opts.mcpServers.includes(provider)
       ? ` (available via MCP — use its tools to query logs, errors, and metrics)`
       : "";
-    lines.push(`- **Observability**: ${opts.observabilityProvider}${mcpNote}`);
-  }
-
-  // BetterStack as secondary (token present but not primary provider)
-  if (opts.observabilityProvider !== "betterstack" && opts.mcpServers.includes("betterstack")) {
-    lines.push(`- **Logs**: betterstack (available via MCP — use its tools to query logs)`);
+    lines.push(`- **Observability**: ${provider}${mcpNote}`);
   }
 
   // Issue tracker

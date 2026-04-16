@@ -36,7 +36,7 @@ describe("reportToCloud", () => {
       claudeOauthToken: "",
       openaiApiKey: "",
       geminiApiKey: "",
-      observabilityProvider: "",
+      observabilityProviders: [],
       observabilityCredentials: {},
       issueTrackerProvider: "",
       linearApiKey: "",

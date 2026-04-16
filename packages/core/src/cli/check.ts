@@ -36,18 +36,21 @@ export async function checkProviderConnectivity(config: CliConfig): Promise<Chec
   }
 
   // ── Observability ────────────────────────────────────────────────────────────
-  if (config.observabilityProvider === "datadog") {
-    results.push(await checkDatadog(config.observabilityCredentials));
-  } else if (config.observabilityProvider === "sentry") {
-    results.push(await checkSentry(config.observabilityCredentials));
-  } else if (config.observabilityProvider === "file") {
-    results.push({ name: "Observability (file)", status: "skip", detail: "File provider — no network check needed" });
-  } else {
-    results.push({
-      name: `Observability (${config.observabilityProvider})`,
-      status: "skip",
-      detail: "Connectivity check not implemented for this provider",
-    });
+  for (const provider of config.observabilityProviders) {
+    const creds = config.observabilityCredentials[provider] ?? {};
+    if (provider === "datadog") {
+      results.push(await checkDatadog(creds));
+    } else if (provider === "sentry") {
+      results.push(await checkSentry(creds));
+    } else if (provider === "file") {
+      results.push({ name: "Observability (file)", status: "skip", detail: "File provider — no network check needed" });
+    } else {
+      results.push({
+        name: `Observability (${provider})`,
+        status: "skip",
+        detail: "Connectivity check not implemented for this provider",
+      });
+    }
   }
 
   // ── Issue tracker ────────────────────────────────────────────────────────────

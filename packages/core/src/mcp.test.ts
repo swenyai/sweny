@@ -68,7 +68,7 @@ describe("buildAutoMcpServers", () => {
   it("injects Datadog MCP (HTTP) when observabilityProvider is datadog with DD_API_KEY + DD_APP_KEY", () => {
     const result = buildAutoMcpServers(
       cfg({
-        observabilityProvider: "datadog",
+        observabilityProviders: ["datadog"],
         credentials: { DD_API_KEY: "dd_api", DD_APP_KEY: "dd_app" },
       }),
     );
@@ -81,7 +81,7 @@ describe("buildAutoMcpServers", () => {
 
   it("does NOT inject Datadog MCP when DD_APP_KEY is missing", () => {
     const result = buildAutoMcpServers(
-      cfg({ observabilityProvider: "datadog", credentials: { DD_API_KEY: "dd_api" } }),
+      cfg({ observabilityProviders: ["datadog"], credentials: { DD_API_KEY: "dd_api" } }),
     );
     expect(result["datadog"]).toBeUndefined();
   });
@@ -90,7 +90,7 @@ describe("buildAutoMcpServers", () => {
 
   it("injects Sentry MCP (stdio) when observabilityProvider is sentry with SENTRY_AUTH_TOKEN", () => {
     const result = buildAutoMcpServers(
-      cfg({ observabilityProvider: "sentry", credentials: { SENTRY_AUTH_TOKEN: "sntryu_abc" } }),
+      cfg({ observabilityProviders: ["sentry"], credentials: { SENTRY_AUTH_TOKEN: "sntryu_abc" } }),
     );
     expect(result["sentry"]).toEqual({
       type: "stdio",
@@ -103,7 +103,7 @@ describe("buildAutoMcpServers", () => {
   it("injects Sentry MCP with self-hosted SENTRY_HOST from SENTRY_URL", () => {
     const result = buildAutoMcpServers(
       cfg({
-        observabilityProvider: "sentry",
+        observabilityProviders: ["sentry"],
         credentials: {
           SENTRY_AUTH_TOKEN: "sntryu_abc",
           SENTRY_URL: "https://sentry.mycompany.com",
@@ -119,7 +119,7 @@ describe("buildAutoMcpServers", () => {
   it("does NOT set SENTRY_HOST when SENTRY_URL is sentry.io", () => {
     const result = buildAutoMcpServers(
       cfg({
-        observabilityProvider: "sentry",
+        observabilityProviders: ["sentry"],
         credentials: {
           SENTRY_AUTH_TOKEN: "sntryu_abc",
           SENTRY_URL: "https://sentry.io",
@@ -132,7 +132,7 @@ describe("buildAutoMcpServers", () => {
   it("handles malformed SENTRY_URL gracefully (no SENTRY_HOST set)", () => {
     const result = buildAutoMcpServers(
       cfg({
-        observabilityProvider: "sentry",
+        observabilityProviders: ["sentry"],
         credentials: {
           SENTRY_AUTH_TOKEN: "sntryu_abc",
           SENTRY_URL: "not-a-url",
@@ -194,7 +194,7 @@ describe("buildAutoMcpServers", () => {
   it("injects New Relic MCP with EU region endpoint", () => {
     const result = buildAutoMcpServers(
       cfg({
-        observabilityProvider: "newrelic",
+        observabilityProviders: ["newrelic"],
         credentials: { NEW_RELIC_API_KEY: "NRAK-abc", NEW_RELIC_REGION: "eu" },
       }),
     );
@@ -208,7 +208,7 @@ describe("buildAutoMcpServers", () => {
   it("injects New Relic MCP with US (default) region endpoint", () => {
     const result = buildAutoMcpServers(
       cfg({
-        observabilityProvider: "newrelic",
+        observabilityProviders: ["newrelic"],
         credentials: { NEW_RELIC_API_KEY: "NRAK-abc" },
       }),
     );
@@ -224,7 +224,7 @@ describe("buildAutoMcpServers", () => {
   it("injects Better Stack MCP (HTTP) with Bearer token", () => {
     const result = buildAutoMcpServers(
       cfg({
-        observabilityProvider: "betterstack",
+        observabilityProviders: ["betterstack"],
         credentials: { BETTERSTACK_API_TOKEN: "bst_abc" },
       }),
     );
@@ -235,10 +235,10 @@ describe("buildAutoMcpServers", () => {
     });
   });
 
-  it("injects Better Stack MCP even when primary provider is not betterstack", () => {
+  it("injects multiple observability MCPs when both are configured", () => {
     const result = buildAutoMcpServers(
       cfg({
-        observabilityProvider: "sentry",
+        observabilityProviders: ["sentry", "betterstack"],
         credentials: { BETTERSTACK_API_TOKEN: "bst_xyz", SENTRY_AUTH_TOKEN: "sntrx_test" },
       }),
     );
@@ -431,7 +431,7 @@ describe("buildAutoMcpServers", () => {
       cfg({
         sourceControlProvider: "github",
         issueTrackerProvider: "linear",
-        observabilityProvider: "datadog",
+        observabilityProviders: ["datadog"],
         credentials: {
           GITHUB_TOKEN: "ghp_abc",
           LINEAR_API_KEY: "lin_key_abc",

@@ -151,7 +151,7 @@ function buildMcpAutoConfig(config: CliConfig): McpAutoConfig {
   return {
     sourceControlProvider: config.sourceControlProvider,
     issueTrackerProvider: config.issueTrackerProvider,
-    observabilityProvider: config.observabilityProvider,
+    observabilityProviders: config.observabilityProviders,
     credentials: buildCredentialMap(),
     workspaceTools: config.workspaceTools,
     userMcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
@@ -163,15 +163,16 @@ function buildMcpAutoConfig(config: CliConfig): McpAutoConfig {
  */
 function buildProviderCtx(config: CliConfig, mcpServers: Record<string, unknown>): string {
   const extras: Record<string, string> = {};
-  if (config.observabilityCredentials.sourceId) {
-    extras["BetterStack source ID"] = config.observabilityCredentials.sourceId;
+  const bsCreds = config.observabilityCredentials["betterstack"];
+  if (bsCreds?.sourceId) {
+    extras["BetterStack source ID"] = bsCreds.sourceId;
   }
-  if (config.observabilityCredentials.tableName) {
-    extras["BetterStack table name"] = config.observabilityCredentials.tableName;
+  if (bsCreds?.tableName) {
+    extras["BetterStack table name"] = bsCreds.tableName;
   }
 
   return buildProviderContext({
-    observabilityProvider: config.observabilityProvider,
+    observabilityProviders: config.observabilityProviders,
     issueTrackerProvider: config.issueTrackerProvider,
     sourceControlProvider: config.sourceControlProvider,
     mcpServers: Object.keys(mcpServers),
@@ -371,6 +372,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   if (config.additionalInstructions) contextParts.push(config.additionalInstructions);
   const fullContext = [contextParts.join("\n\n"), context].filter(Boolean).join("\n\n---\n\n");
 
+  const bsCreds = config.observabilityCredentials["betterstack"];
   const workflowInput = {
     timeRange: config.timeRange,
     severityFocus: config.severityFocus,
@@ -385,12 +387,12 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     issueOverride: config.issueOverride,
     noveltyMode: config.noveltyMode,
     reviewMode: config.reviewMode,
-    observabilityProvider: config.observabilityProvider,
-    ...(config.observabilityCredentials.sourceId && {
-      betterstackSourceId: config.observabilityCredentials.sourceId,
+    observabilityProviders: config.observabilityProviders,
+    ...(bsCreds?.sourceId && {
+      betterstackSourceId: bsCreds.sourceId,
     }),
-    ...(config.observabilityCredentials.tableName && {
-      betterstackTableName: config.observabilityCredentials.tableName,
+    ...(bsCreds?.tableName && {
+      betterstackTableName: bsCreds.tableName,
     }),
     // Structured rules/context for executor (URLs resolved eagerly by loadAdditionalContext)
     rules,
@@ -768,12 +770,12 @@ export async function workflowRunAction(
       baseBranch: config.baseBranch,
       prLabels: config.prLabels,
       additionalInstructions: config.additionalInstructions,
-      observabilityProvider: config.observabilityProvider,
-      ...(config.observabilityCredentials.sourceId && {
-        betterstackSourceId: config.observabilityCredentials.sourceId,
+      observabilityProviders: config.observabilityProviders,
+      ...(config.observabilityCredentials["betterstack"]?.sourceId && {
+        betterstackSourceId: config.observabilityCredentials["betterstack"].sourceId,
       }),
-      ...(config.observabilityCredentials.tableName && {
-        betterstackTableName: config.observabilityCredentials.tableName,
+      ...(config.observabilityCredentials["betterstack"]?.tableName && {
+        betterstackTableName: config.observabilityCredentials["betterstack"].tableName,
       }),
       context: buildProviderCtx(config, mcpServers),
     };

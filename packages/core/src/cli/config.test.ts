@@ -15,8 +15,8 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
     claudeOauthToken: "",
     openaiApiKey: "",
     geminiApiKey: "",
-    observabilityProvider: "file",
-    observabilityCredentials: {},
+    observabilityProviders: ["file"],
+    observabilityCredentials: { file: {} },
     issueTrackerProvider: "file",
     linearApiKey: "",
     linearTeamId: "",
@@ -127,26 +127,31 @@ describe("validateInputs — notification provider", () => {
 
 describe("validateInputs — observability provider", () => {
   it("accepts 'none' without requiring any credentials", () => {
-    const errors = validateInputs(baseConfig({ observabilityProvider: "none", observabilityCredentials: {} }));
+    const errors = validateInputs(baseConfig({ observabilityProviders: [], observabilityCredentials: {} }));
     expect(errors.filter((e) => e.includes("DD_") || e.includes("observability"))).toEqual([]);
   });
 
   it("requires DD keys when explicitly set to datadog", () => {
-    const errors = validateInputs(baseConfig({ observabilityProvider: "datadog", observabilityCredentials: {} }));
+    const errors = validateInputs(baseConfig({ observabilityProviders: ["datadog"], observabilityCredentials: {} }));
     expect(errors.some((e) => e.includes("DD_API_KEY"))).toBe(true);
     expect(errors.some((e) => e.includes("DD_APP_KEY"))).toBe(true);
   });
 });
 
 describe("parseCliInputs — observability provider default", () => {
-  it("defaults to 'none' when no provider is configured", () => {
+  it("defaults to empty array when no provider is configured", () => {
     const config = parseCliInputs({}, {});
-    expect(config.observabilityProvider).toBe("none");
+    expect(config.observabilityProviders).toEqual([]);
   });
 
   it("respects explicit datadog provider", () => {
     const config = parseCliInputs({ observabilityProvider: "datadog" }, {});
-    expect(config.observabilityProvider).toBe("datadog");
+    expect(config.observabilityProviders).toEqual(["datadog"]);
+  });
+
+  it("supports comma-separated multiple providers", () => {
+    const config = parseCliInputs({ observabilityProvider: "loki,sentry" }, {});
+    expect(config.observabilityProviders).toEqual(["loki", "sentry"]);
   });
 });
 
