@@ -40,13 +40,17 @@ nodes:
       3. Assess fix complexity: "simple" (a few lines, clear change), "moderate" (multiple files but well-understood),
       or "complex" (architectural, risky, or unclear).
 
-      4. **Novelty check (REQUIRED):** Filing a duplicate ticket is worse than under-reporting — the team inherits
-      sprawl that humans have to clean up later. Complete EVERY step below before classifying anything as novel.
+      4. **Novelty check (REQUIRED — you MUST call tools for this step):** Filing a duplicate ticket is worse
+      than under-reporting — the team inherits sprawl that humans have to clean up later. Complete EVERY step
+      below before classifying anything as novel. Do NOT skip these searches even if the gather context already
+      mentions existing issues or branches — you must verify independently.
 
-      4a. **Search broadly.** Run multiple queries against the issue tracker (BOTH open AND closed): the affected
-      file or module path, the error message or log string verbatim, the feature or service name, and the symptom
-      family (e.g. "startup crash", "data dropped silently"). Do not rely on a single keyword — a narrow search is
-      how duplicates slip through.
+      4a. **Search broadly — THIS REQUIRES TOOL CALLS.** You MUST call `linear_search_issues` (or
+      `github_search_issues`) with multiple queries against the issue tracker (BOTH open AND closed): the
+      affected file or module path, the error message or log string verbatim, the feature or service name,
+      and the symptom family (e.g. "startup crash", "data dropped silently"). Do not rely on a single
+      keyword — a narrow search is how duplicates slip through. If you skip this search, the verify check
+      will fail.
 
       4b. **Read the full body of every promising candidate — do NOT match on title alone.** For each top match,
       open the issue and read its entire description, including any "Recommended Fix", "Proposed Fix", "Action
@@ -95,6 +99,13 @@ nodes:
     skills:
       - github
       - linear
+    verify:
+      # The novelty check REQUIRES searching the issue tracker. If the node finishes
+      # with 0 search tool calls, it means the agent skipped the novelty check entirely
+      # and any "novel" classification is unreliable.
+      any_tool_called:
+        - linear_search_issues
+        - github_search_issues
     output:
       type: object
       properties:
@@ -162,21 +173,30 @@ nodes:
 
       **For each NOVEL finding** (is_duplicate = false):
 
-      1. Create a new issue with a clear, actionable title by invoking the appropriate tool
-      (`linear_create_issue` or `github_create_issue`). You MUST actually call the tool — do NOT
+      1. **First, check if a prior triage run already created an issue for this exact bug.** Call
+      `linear_search_issues` (or `github_search_issues`) with the error message or root cause.
+      If a matching issue already exists with the same root cause:
+         - Treat it as a duplicate: DO NOT create a new issue.
+         - Populate `issueIdentifier`, `issueTitle`, and `issueUrl` from the existing issue.
+         - Add a "+1" comment if appropriate (using `linear_add_comment` or `github_add_comment`).
+         - Set the `action` to `updated` in the `issues` array.
+         - This prevents duplicate tickets when the same alert fires multiple times.
+
+      2. If no matching issue exists, create a new one with a clear, actionable title by invoking
+      `linear_create_issue` or `github_create_issue`. You MUST actually call the tool — do NOT
       synthesize an identifier from an alert ID, commit SHA, or your own imagination. If the
       tool errors, stop and report the failure; do not invent a fallback identifier.
       **Use the exact tool names above** — do NOT use generic alternatives like `create_issue`
       or `create_pull_request` from ToolSearch. The verify check requires the specific tool
       names listed here.
 
-      2. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
+      3. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
 
-      3. Add appropriate labels (bug, severity level, affected service).
+      4. Add appropriate labels (bug, severity level, affected service).
 
-      4. Link to relevant commits, PRs, or existing issues.
+      5. Link to relevant commits, PRs, or existing issues.
 
-      5. Copy the identifier returned by the tool verbatim into the `issueIdentifier` output
+      6. Copy the identifier returned by the tool verbatim into the `issueIdentifier` output
       field. The identifier must match `^[A-Z][A-Z0-9]*-\d+$` (e.g. `OFF-1234`) — do not
       prefix it with anything else.
 
@@ -200,17 +220,30 @@ nodes:
 
       Use the issue tracker specified in context (e.g. Linear, Jira, or GitHub Issues) — do NOT fall back to a
       different tracker. Output the created/updated issue identifiers.
+
+
+      **IMPORTANT — scope boundaries for this node:**
+
+      - DO NOT create branches, commits, or pull requests. The `implement` and `create_pr` nodes handle that.
+
+      - DO NOT call `create_pull_request`, `github_create_pr`, or any PR/branch tools.
+
+      - Your job is issue creation and duplicate management ONLY.
     skills:
       - linear
       - github
     verify:
-      # Reject output that claims success without a real issue-creation tool call.
-      # The executor checks this after the node finishes; if none of these tools
-      # was invoked successfully, the node is marked failed and downstream nodes
-      # (implement, create_pr) never run with a hallucinated identifier.
+      # Require a real issue-tracker tool call. linear_create_issue / github_create_issue
+      # for novel findings; linear_search_issues / github_search_issues for duplicate-check
+      # when the issue already exists from a prior triage run. linear_add_comment covers
+      # the +1 path for duplicates.
       any_tool_called:
         - linear_create_issue
         - github_create_issue
+        - linear_search_issues
+        - github_search_issues
+        - linear_add_comment
+        - github_add_comment
     output:
       type: object
       properties:
