@@ -176,8 +176,10 @@ nodes:
       1. **First, check if a prior triage run already created an issue for this exact bug.** Call
       `linear_search_issues` (or `github_search_issues`) with the error message or root cause.
       If a matching issue already exists with the same root cause:
-         - Treat it as a duplicate: set `is_duplicate = true`, use the existing identifier,
-           add a "+1" comment if appropriate, and DO NOT create a new issue.
+         - Treat it as a duplicate: DO NOT create a new issue.
+         - Populate `issueIdentifier`, `issueTitle`, and `issueUrl` from the existing issue.
+         - Add a "+1" comment if appropriate (using `linear_add_comment` or `github_add_comment`).
+         - Set the `action` to `updated` in the `issues` array.
          - This prevents duplicate tickets when the same alert fires multiple times.
 
       2. If no matching issue exists, create a new one with a clear, actionable title by invoking
