@@ -567,4 +567,103 @@ describe("executor", () => {
     // Should still complete — falls back to first valid edge target
     expect(results.size).toBe(2);
   });
+
+  describe("node.verify", () => {
+    // Context: a create_issue node can satisfy its output schema (issueIdentifier
+    // present) while never actually calling the Linear/GitHub create-issue tool.
+    // The verify block catches this by requiring a real, successful tool call.
+    const verifyWorkflow: Workflow = {
+      id: "verify-create-issue",
+      name: "Verify Create Issue",
+      description: "Single node that must call linear_create_issue",
+      entry: "create",
+      nodes: {
+        create: {
+          name: "Create",
+          instruction: "Create an issue",
+          skills: [],
+          verify: { any_tool_called: ["linear_create_issue", "github_create_issue"] },
+        },
+      },
+      edges: [],
+    };
+
+    it("marks node failed when required tool was never called", async () => {
+      const claude: any = {
+        async run() {
+          return {
+            status: "success",
+            data: { issueIdentifier: "OFF-9999", issueTitle: "hallucinated", issueUrl: "https://" },
+            toolCalls: [{ tool: "linear_search_issues", input: {}, output: [] }],
+          };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+
+      const { results } = await execute(verifyWorkflow, {}, { skills: createSkillMap([]), claude, config: {} });
+      const r = results.get("create")!;
+      expect(r.status).toBe("failed");
+      expect(r.data.error).toMatch(/verify\.any_tool_called failed/);
+      expect(r.data.error).toMatch(/linear_create_issue/);
+    });
+
+    it("marks node failed when required tool erred (output.error set)", async () => {
+      const claude: any = {
+        async run() {
+          return {
+            status: "success",
+            data: { issueIdentifier: "OFF-9999" },
+            toolCalls: [{ tool: "linear_create_issue", input: {}, output: { error: "Linear API 403" } }],
+          };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+
+      const { results } = await execute(verifyWorkflow, {}, { skills: createSkillMap([]), claude, config: {} });
+      expect(results.get("create")!.status).toBe("failed");
+    });
+
+    it("passes when a required tool was invoked successfully", async () => {
+      const claude: any = {
+        async run() {
+          return {
+            status: "success",
+            data: { issueIdentifier: "OFF-1234" },
+            toolCalls: [
+              {
+                tool: "linear_create_issue",
+                input: { title: "t" },
+                output: { issueCreate: { success: true, issue: { identifier: "OFF-1234" } } },
+              },
+            ],
+          };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+
+      const { results } = await execute(verifyWorkflow, {}, { skills: createSkillMap([]), claude, config: {} });
+      expect(results.get("create")!.status).toBe("success");
+    });
+
+    it("leaves already-failed nodes alone (does not overwrite Claude errors)", async () => {
+      const claude: any = {
+        async run() {
+          return { status: "failed", data: { error: "max_turns" }, toolCalls: [] };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+
+      const { results } = await execute(verifyWorkflow, {}, { skills: createSkillMap([]), claude, config: {} });
+      expect(results.get("create")!.status).toBe("failed");
+      expect(results.get("create")!.data.error).toBe("max_turns");
+    });
+  });
 });

@@ -63,6 +63,23 @@ describe("Zod schemas", () => {
       });
       expect(result.output).toBeDefined();
     });
+
+    it("accepts a verify block with any_tool_called", () => {
+      const result = nodeZ.parse({
+        name: "S",
+        instruction: "I",
+        verify: { any_tool_called: ["linear_create_issue", "github_create_issue"] },
+      });
+      expect(result.verify?.any_tool_called).toEqual(["linear_create_issue", "github_create_issue"]);
+    });
+
+    it("rejects verify with no check declared", () => {
+      expect(() => nodeZ.parse({ name: "S", instruction: "I", verify: {} })).toThrow();
+    });
+
+    it("rejects verify with empty any_tool_called", () => {
+      expect(() => nodeZ.parse({ name: "S", instruction: "I", verify: { any_tool_called: [] } })).toThrow();
+    });
   });
 
   describe("edgeZ", () => {
