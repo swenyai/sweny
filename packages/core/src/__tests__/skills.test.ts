@@ -117,7 +117,16 @@ describe("linear skill", () => {
   const ctx = () => mockCtx({ LINEAR_API_KEY: "lin_test" });
 
   it("create_issue sends correct GraphQL mutation", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ data: { issueCreate: { success: true, issue: { id: "1" } } } }));
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        data: {
+          issueCreate: {
+            success: true,
+            issue: { id: "1", identifier: "TEST-1", url: "https://linear.app/test/issue/TEST-1", title: "Bug" },
+          },
+        },
+      }),
+    );
     const tool = findTool(linear.tools, "linear_create_issue");
     await tool.handler({ teamId: "team1", title: "Bug" }, ctx());
 
@@ -126,6 +135,22 @@ describe("linear skill", () => {
     expect(opts.headers.Authorization).toBe("lin_test");
     const body = JSON.parse(opts.body);
     expect(body.query).toContain("issueCreate");
+  });
+
+  it("throws when issueCreate returns no identifier (silent failure guard)", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ data: { issueCreate: { success: true, issue: { id: "1" } } } }));
+    const tool = findTool(linear.tools, "linear_create_issue");
+    await expect(tool.handler({ teamId: "team1", title: "Bug" }, ctx())).rejects.toThrow(
+      /linear_create_issue returned no identifier/,
+    );
+  });
+
+  it("throws when issueCreate returns success: false", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ data: { issueCreate: { success: false } } }));
+    const tool = findTool(linear.tools, "linear_create_issue");
+    await expect(tool.handler({ teamId: "team1", title: "Bug" }, ctx())).rejects.toThrow(
+      /linear_create_issue returned no identifier/,
+    );
   });
 
   it("search_issues sends correct query", async () => {

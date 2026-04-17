@@ -148,13 +148,20 @@ nodes:
 
       **For each NOVEL finding** (is_duplicate = false):
 
-      1. Create a new issue with a clear, actionable title.
+      1. Create a new issue with a clear, actionable title by invoking the appropriate tool
+      (`linear_create_issue` or `github_create_issue`). You MUST actually call the tool — do NOT
+      synthesize an identifier from an alert ID, commit SHA, or your own imagination. If the
+      tool errors, stop and report the failure; do not invent a fallback identifier.
 
       2. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
 
       3. Add appropriate labels (bug, severity level, affected service).
 
       4. Link to relevant commits, PRs, or existing issues.
+
+      5. Copy the identifier returned by the tool verbatim into the `issueIdentifier` output
+      field. The identifier must match `^[A-Z][A-Z0-9]*-\d+$` (e.g. `OFF-1234`) — do not
+      prefix it with anything else.
 
 
       **For each DUPLICATE finding** (is_duplicate = true):
@@ -179,20 +186,35 @@ nodes:
     skills:
       - linear
       - github
+    verify:
+      # Reject output that claims success without a real issue-creation tool call.
+      # The executor checks this after the node finishes; if none of these tools
+      # was invoked successfully, the node is marked failed and downstream nodes
+      # (implement, create_pr) never run with a hallucinated identifier.
+      any_tool_called:
+        - linear_create_issue
+        - github_create_issue
     output:
       type: object
       properties:
         issueIdentifier:
           type: string
-          description: Primary issue identifier (e.g. OFF-1234). This is the first novel issue created — used by downstream nodes for branch naming and PR linking.
+          pattern: '^[A-Z][A-Z0-9]*-\d+$'
+          description: >-
+            Primary issue identifier (e.g. OFF-1234). MUST be the identifier returned by
+            `linear_create_issue` / `github_create_issue` — do NOT invent a value from a
+            Sentry short-ID or commit SHA. Used by downstream nodes for branch naming and
+            PR linking.
         issueTitle:
           type: string
           description: Title of the primary issue created
         issueUrl:
           type: string
-          description: URL of the primary issue created
+          pattern: "^https?://"
+          description: URL of the primary issue created, as returned by the create-issue tool
         issues:
           type: array
+          minItems: 1
           description: All issues created or updated during this step
           items:
             type: object
@@ -245,10 +267,20 @@ nodes:
     instruction: |-
       Implement the fix identified during investigation. The issue created in the previous step is in your context — use its identifier for branch naming and commit messages.
 
+      0. **Precondition — verify context.create_issue.issueIdentifier is well-formed.**
+         The identifier MUST match `^[A-Z][A-Z0-9]*-\d+$` (e.g. `OFF-1234`). If it is
+         missing, empty, or matches a Sentry short-ID / slug / any other shape, STOP
+         immediately — do NOT invent a branch name from the Sentry event, commit SHA,
+         or alert payload. Return a failed status with a clear message instead; the
+         workflow will route to notify and a human will pick it up.
+
       1. Create a feature branch from the base branch (check context for baseBranch, default "main").
-         **Branch name MUST include the issue identifier** (e.g. context.create_issue.issueIdentifier).
-         Format: lowercase the identifier and use it as a prefix, e.g. `off-1234-fix-null-check`.
-         If the repository uses a different branch convention (check context.branchPattern), follow that instead.
+         **Branch name MUST include the issue identifier** exactly as provided in
+         `context.create_issue.issueIdentifier`. Format: lowercase the identifier and use
+         it as a prefix, e.g. `off-1234-fix-null-check`. If the repository uses a different
+         branch convention (check context.branchPattern or the rules/CLAUDE.md for a
+         regex), follow that — but the identifier piece MUST still come from
+         `context.create_issue.issueIdentifier`, never from a Sentry short-ID.
       2. Read the relevant source files to understand the current code.
       3. Make the necessary code changes — fix the bug, nothing more.
       4. Run any existing tests if available to verify the fix doesn't break anything.

@@ -49,12 +49,19 @@ export const linear: Skill = {
         },
         required: ["teamId", "title"],
       },
-      handler: async (input: any, ctx) =>
-        linearGql(
+      handler: async (input: any, ctx) => {
+        const data = await linearGql(
           `mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url title } } }`,
           { input },
           ctx,
-        ),
+        );
+        if (!data?.issueCreate?.success || !data?.issueCreate?.issue?.identifier) {
+          throw new Error(
+            `[Linear] linear_create_issue returned no identifier — issue was not created. Raw response: ${JSON.stringify(data)}`,
+          );
+        }
+        return data;
+      },
     },
     {
       name: "linear_search_issues",
@@ -157,11 +164,15 @@ export const linear: Skill = {
       },
       handler: async (input: { issueId: string; [key: string]: any }, ctx) => {
         const { issueId, ...updates } = input;
-        return linearGql(
+        const data = await linearGql(
           `mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier url title state { name } } } }`,
           { id: issueId, input: updates },
           ctx,
         );
+        if (!data?.issueUpdate?.success) {
+          throw new Error(`[Linear] linear_update_issue failed for ${issueId}. Raw response: ${JSON.stringify(data)}`);
+        }
+        return data;
       },
     },
   ],

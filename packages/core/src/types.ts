@@ -70,6 +70,27 @@ export interface Skill {
  */
 export type NodeSources = _Source[] | { only?: boolean; sources: _Source[] };
 
+/**
+ * Machine-checked post-condition for a node.
+ *
+ * Evaluated by the executor AFTER the LLM finishes. If the check fails, the
+ * node is marked `failed` even if the LLM itself returned success — this
+ * catches the common case of the model claiming success without actually
+ * invoking the side-effectful tool (e.g. reporting "issue created" when no
+ * `linear_create_issue` call was made, or the call errored).
+ *
+ * Keep the shape small and declarative. Anything richer should be a skill
+ * or a dedicated workflow node, not a verify clause.
+ */
+export interface NodeVerify {
+  /**
+   * At least one of the named tools must have been invoked successfully during
+   * this node's execution (no `output.error` recorded in `toolCalls`). The
+   * node is marked failed otherwise.
+   */
+  any_tool_called?: string[];
+}
+
 /** A node in the workflow DAG */
 export interface Node {
   /** Human-readable name */
@@ -86,6 +107,8 @@ export interface Node {
   rules?: NodeSources;
   /** Per-node background knowledge. Additive by default; set `{ only: true, sources: [...] }` to block cascade. */
   context?: NodeSources;
+  /** Machine-checked post-conditions. Enforced by the executor after the LLM finishes. */
+  verify?: NodeVerify;
 }
 
 /** An edge connecting two nodes */

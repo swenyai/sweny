@@ -87,6 +87,14 @@ export const nodeSourcesZ = z.union([
   }),
 ]);
 
+export const nodeVerifyZ = z
+  .object({
+    any_tool_called: z.array(z.string().min(1)).min(1).optional(),
+  })
+  .refine((v) => v.any_tool_called !== undefined, {
+    message: "verify must declare at least one check (e.g. any_tool_called)",
+  });
+
 export const nodeZ = z.object({
   name: z.string().min(1),
   instruction: sourceZ,
@@ -95,6 +103,7 @@ export const nodeZ = z.object({
   max_turns: z.number().int().min(1).optional(),
   rules: nodeSourcesZ.optional(),
   context: nodeSourcesZ.optional(),
+  verify: nodeVerifyZ.optional(),
 });
 
 export const edgeZ = z.object({
