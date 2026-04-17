@@ -86,11 +86,12 @@ nodes:
 
       - DO NOT create branches, commits, or pull requests. A downstream `implement` node handles that.
 
-      - DO NOT call `linear_create_issue`, `github_create_issue`, `github_create_pr`, or any
-      write tool besides `linear_add_comment` / `github_add_comment` (for +1 duplicate comments).
+      - DO NOT call any write tools (`linear_create_issue`, `github_create_issue`,
+      `github_create_pr`, `linear_add_comment`, `github_add_comment`, etc.).
+      Downstream nodes handle all writes — issue creation, +1 comments, and PRs.
 
-      - Your ONLY job is classification and output. If you create an issue here, the downstream
-      verify check will fail because it expects to be the one calling the create tool.
+      - Your ONLY job is read, search, classify, and output. If you create an issue
+      or add a comment here, the downstream verify check will fail or duplicate work.
     skills:
       - github
       - linear
@@ -165,9 +166,9 @@ nodes:
       (`linear_create_issue` or `github_create_issue`). You MUST actually call the tool — do NOT
       synthesize an identifier from an alert ID, commit SHA, or your own imagination. If the
       tool errors, stop and report the failure; do not invent a fallback identifier.
-      **Use the exact tool names above** — do NOT use generic alternatives like `create_issue`,
-      `create_pull_request`, or `get_issue` from ToolSearch. The verify check requires the
-      specific tool names listed here.
+      **Use the exact tool names above** — do NOT use generic alternatives like `create_issue`
+      or `create_pull_request` from ToolSearch. The verify check requires the specific tool
+      names listed here.
 
       2. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
 
