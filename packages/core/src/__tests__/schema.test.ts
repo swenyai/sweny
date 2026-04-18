@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   workflowZ,
   nodeZ,
+  nodeVerifyZ,
   edgeZ,
   skillZ,
   toolZ,
@@ -79,6 +80,71 @@ describe("Zod schemas", () => {
 
     it("rejects verify with empty any_tool_called", () => {
       expect(() => nodeZ.parse({ name: "S", instruction: "I", verify: { any_tool_called: [] } })).toThrow();
+    });
+
+    it("accepts all_tools_called", () => {
+      const v = nodeVerifyZ.parse({ all_tools_called: ["a", "b"] });
+      expect(v.all_tools_called).toEqual(["a", "b"]);
+    });
+
+    it("accepts no_tool_called", () => {
+      const v = nodeVerifyZ.parse({ no_tool_called: ["force_push"] });
+      expect(v.no_tool_called).toEqual(["force_push"]);
+    });
+
+    it("accepts output_required", () => {
+      const v = nodeVerifyZ.parse({ output_required: ["prUrl", "branch"] });
+      expect(v.output_required).toEqual(["prUrl", "branch"]);
+    });
+
+    it("accepts output_matches with each operator", () => {
+      const v = nodeVerifyZ.parse({
+        output_matches: [
+          { path: "a", equals: 1 },
+          { path: "b", in: ["x", "y"] },
+          { path: "c", matches: "^foo" },
+        ],
+      });
+      expect(v.output_matches).toHaveLength(3);
+    });
+
+    it("accepts a combination of multiple checks", () => {
+      const v = nodeVerifyZ.parse({
+        any_tool_called: ["a"],
+        output_required: ["x"],
+        output_matches: [{ path: "x", equals: 1 }],
+      });
+      expect(v.any_tool_called).toBeDefined();
+      expect(v.output_required).toBeDefined();
+      expect(v.output_matches).toBeDefined();
+    });
+
+    it("rejects an output_matches entry with zero operators", () => {
+      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "a" }] })).toThrow();
+    });
+
+    it("rejects an output_matches entry with two operators", () => {
+      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "a", equals: 1, in: [1, 2] }] })).toThrow();
+    });
+
+    it("rejects an output_matches entry with empty path", () => {
+      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "", equals: 1 }] })).toThrow();
+    });
+
+    it("rejects empty output_required", () => {
+      expect(() => nodeVerifyZ.parse({ output_required: [] })).toThrow();
+    });
+
+    it("rejects empty all_tools_called", () => {
+      expect(() => nodeVerifyZ.parse({ all_tools_called: [] })).toThrow();
+    });
+
+    it("rejects empty no_tool_called", () => {
+      expect(() => nodeVerifyZ.parse({ no_tool_called: [] })).toThrow();
+    });
+
+    it("rejects empty output_matches array", () => {
+      expect(() => nodeVerifyZ.parse({ output_matches: [] })).toThrow();
     });
   });
 
