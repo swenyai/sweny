@@ -73,22 +73,42 @@ export type NodeSources = _Source[] | { only?: boolean; sources: _Source[] };
 /**
  * Machine-checked post-condition for a node.
  *
- * Evaluated by the executor AFTER the LLM finishes. If the check fails, the
- * node is marked `failed` even if the LLM itself returned success — this
- * catches the common case of the model claiming success without actually
- * invoking the side-effectful tool (e.g. reporting "issue created" when no
- * `linear_create_issue` call was made, or the call errored).
+ * Evaluated by the executor AFTER the LLM finishes. If any declared check
+ * fails, the node is marked `failed` even if the LLM itself returned success.
  *
- * Keep the shape small and declarative. Anything richer should be a skill
- * or a dedicated workflow node, not a verify clause.
+ * All declared checks are AND-ed. The executor runs every check (no fast-fail)
+ * and concatenates failures into a single error string on `result.data.error`.
+ *
+ * Keep the shape small and declarative. Anything richer should be a skill or
+ * a dedicated workflow node, not a verify clause.
  */
 export interface NodeVerify {
-  /**
-   * At least one of the named tools must have been invoked successfully during
-   * this node's execution (no `output.error` recorded in `toolCalls`). The
-   * node is marked failed otherwise.
-   */
+  /** At least one of these tools was called and succeeded during this node. */
   any_tool_called?: string[];
+  /** Every named tool was called and succeeded at least once during this node. */
+  all_tools_called?: string[];
+  /** None of these tools may have been invoked during this node. */
+  no_tool_called?: string[];
+  /** Listed paths must be present and non-null in `result.data` (see Path resolution in the spec). */
+  output_required?: string[];
+  /** Each assertion must hold against `result.data`. */
+  output_matches?: OutputMatch[];
+}
+
+/**
+ * A single output assertion. Exactly one of `equals | in | matches` must be set.
+ *
+ * `path` is a dotted path that may include `[*]` wildcard segments and may be
+ * prefixed with `all:` or `any:` to set wildcard semantics (default `all:`).
+ *
+ * Examples: `prUrl`, `findings[*].severity`, `any:checks[*].conclusion`.
+ */
+export interface OutputMatch {
+  path: string;
+  equals?: unknown;
+  in?: unknown[];
+  /** Regex source (no surrounding slashes, no flags). Value is coerced to string. */
+  matches?: string;
 }
 
 /** A node in the workflow DAG */
