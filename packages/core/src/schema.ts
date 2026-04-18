@@ -87,13 +87,41 @@ export const nodeSourcesZ = z.union([
   }),
 ]);
 
+export const outputMatchZ = z
+  .object({
+    path: z.string().min(1),
+    equals: z.unknown().optional(),
+    in: z.array(z.unknown()).optional(),
+    matches: z.string().min(1).optional(),
+  })
+  .refine(
+    (m) => {
+      const operators = [m.equals !== undefined, m.in !== undefined, m.matches !== undefined];
+      return operators.filter(Boolean).length === 1;
+    },
+    { message: "output_matches entry must declare exactly one of: equals, in, matches" },
+  );
+
 export const nodeVerifyZ = z
   .object({
     any_tool_called: z.array(z.string().min(1)).min(1).optional(),
+    all_tools_called: z.array(z.string().min(1)).min(1).optional(),
+    no_tool_called: z.array(z.string().min(1)).min(1).optional(),
+    output_required: z.array(z.string().min(1)).min(1).optional(),
+    output_matches: z.array(outputMatchZ).min(1).optional(),
   })
-  .refine((v) => v.any_tool_called !== undefined, {
-    message: "verify must declare at least one check (e.g. any_tool_called)",
-  });
+  .refine(
+    (v) =>
+      v.any_tool_called !== undefined ||
+      v.all_tools_called !== undefined ||
+      v.no_tool_called !== undefined ||
+      v.output_required !== undefined ||
+      v.output_matches !== undefined,
+    {
+      message:
+        "verify must declare at least one check (any_tool_called, all_tools_called, no_tool_called, output_required, or output_matches)",
+    },
+  );
 
 export const nodeZ = z.object({
   name: z.string().min(1),

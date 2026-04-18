@@ -605,7 +605,7 @@ describe("executor", () => {
       const { results } = await execute(verifyWorkflow, {}, { skills: createSkillMap([]), claude, config: {} });
       const r = results.get("create")!;
       expect(r.status).toBe("failed");
-      expect(r.data.error).toMatch(/verify\.any_tool_called failed/);
+      expect(r.data.error).toMatch(/verify failed:.*any_tool_called/s);
       expect(r.data.error).toMatch(/linear_create_issue/);
     });
 
@@ -664,6 +664,207 @@ describe("executor", () => {
       const { results } = await execute(verifyWorkflow, {}, { skills: createSkillMap([]), claude, config: {} });
       expect(results.get("create")!.status).toBe("failed");
       expect(results.get("create")!.data.error).toBe("max_turns");
+    });
+
+    it("marks node failed when all_tools_called missing a required tool", async () => {
+      const wf: Workflow = {
+        id: "wf",
+        name: "wf",
+        description: "",
+        entry: "n",
+        nodes: {
+          n: {
+            name: "N",
+            instruction: "Do",
+            skills: [],
+            verify: { all_tools_called: ["a", "b"] },
+          },
+        },
+        edges: [],
+      };
+      const claude: any = {
+        async run() {
+          return {
+            status: "success",
+            data: {},
+            toolCalls: [{ tool: "a", input: {}, output: { ok: true } }],
+          };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+      const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+      const r = results.get("n")!;
+      expect(r.status).toBe("failed");
+      expect(r.data.error).toMatch(/verify failed.*all_tools_called.*\[b\]/s);
+    });
+
+    it("marks node failed when no_tool_called was violated", async () => {
+      const wf: Workflow = {
+        id: "wf",
+        name: "wf",
+        description: "",
+        entry: "n",
+        nodes: {
+          n: {
+            name: "N",
+            instruction: "Do",
+            skills: [],
+            verify: { no_tool_called: ["force_push"] },
+          },
+        },
+        edges: [],
+      };
+      const claude: any = {
+        async run() {
+          return {
+            status: "success",
+            data: {},
+            toolCalls: [{ tool: "force_push", input: {}, output: { ok: true } }],
+          };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+      const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+      const r = results.get("n")!;
+      expect(r.status).toBe("failed");
+      expect(r.data.error).toMatch(/verify failed.*no_tool_called.*force_push/s);
+    });
+
+    it("marks node failed when output_required is missing", async () => {
+      const wf: Workflow = {
+        id: "wf",
+        name: "wf",
+        description: "",
+        entry: "n",
+        nodes: {
+          n: {
+            name: "N",
+            instruction: "Do",
+            skills: [],
+            verify: { output_required: ["prUrl"] },
+          },
+        },
+        edges: [],
+      };
+      const claude: any = {
+        async run() {
+          return { status: "success", data: { branch: "main" }, toolCalls: [] };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+      const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+      const r = results.get("n")!;
+      expect(r.status).toBe("failed");
+      expect(r.data.error).toMatch(/verify failed.*output_required.*'prUrl'/s);
+    });
+
+    it("marks node failed when output_matches assertion fails", async () => {
+      const wf: Workflow = {
+        id: "wf",
+        name: "wf",
+        description: "",
+        entry: "n",
+        nodes: {
+          n: {
+            name: "N",
+            instruction: "Do",
+            skills: [],
+            verify: { output_matches: [{ path: "branch", matches: "^sweny/" }] },
+          },
+        },
+        edges: [],
+      };
+      const claude: any = {
+        async run() {
+          return { status: "success", data: { branch: "main" }, toolCalls: [] };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+      const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+      const r = results.get("n")!;
+      expect(r.status).toBe("failed");
+      expect(r.data.error).toMatch(/verify failed.*output_matches.*'branch'/s);
+    });
+
+    it("aggregates multiple verify failures into one error string", async () => {
+      const wf: Workflow = {
+        id: "wf",
+        name: "wf",
+        description: "",
+        entry: "n",
+        nodes: {
+          n: {
+            name: "N",
+            instruction: "Do",
+            skills: [],
+            verify: {
+              all_tools_called: ["create_pr"],
+              output_required: ["prUrl"],
+            },
+          },
+        },
+        edges: [],
+      };
+      const claude: any = {
+        async run() {
+          return { status: "success", data: {}, toolCalls: [] };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+      const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+      const r = results.get("n")!;
+      expect(r.status).toBe("failed");
+      expect(r.data.error).toMatch(/all_tools_called/);
+      expect(r.data.error).toMatch(/output_required/);
+    });
+
+    it("passes a node when every declared check passes", async () => {
+      const wf: Workflow = {
+        id: "wf",
+        name: "wf",
+        description: "",
+        entry: "n",
+        nodes: {
+          n: {
+            name: "N",
+            instruction: "Do",
+            skills: [],
+            verify: {
+              all_tools_called: ["create_pr"],
+              no_tool_called: ["force_push"],
+              output_required: ["prUrl"],
+              output_matches: [{ path: "prUrl", matches: "^https://" }],
+            },
+          },
+        },
+        edges: [],
+      };
+      const claude: any = {
+        async run() {
+          return {
+            status: "success",
+            data: { prUrl: "https://github.com/x/y/pull/1" },
+            toolCalls: [{ tool: "create_pr", input: {}, output: { ok: true } }],
+          };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+      const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+      const r = results.get("n")!;
+      expect(r.status).toBe("success");
+      expect(r.data.error).toBeUndefined();
     });
   });
 });
