@@ -605,7 +605,7 @@ describe("executor", () => {
       const { results } = await execute(verifyWorkflow, {}, { skills: createSkillMap([]), claude, config: {} });
       const r = results.get("create")!;
       expect(r.status).toBe("failed");
-      expect(r.data.error).toMatch(/verify\.any_tool_called failed/);
+      expect(r.data.error).toMatch(/verify failed:.*any_tool_called/s);
       expect(r.data.error).toMatch(/linear_create_issue/);
     });
 

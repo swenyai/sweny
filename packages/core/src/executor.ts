@@ -34,6 +34,7 @@ import type {
 } from "./types.js";
 import { consoleLogger } from "./types.js";
 import { resolveSources } from "./source-resolver.js";
+import { evaluateVerify } from "./verify.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -258,36 +259,6 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
 }
 
 // ─── Internals ───────────────────────────────────────────────────
-
-/**
- * Evaluate a node's `verify` post-condition against the executed result.
- *
- * Returns an error string when the check fails, or null when the node
- * passes verification (or has no verify block).
- *
- * Keep this deterministic and side-effect free — the executor calls it
- * synchronously right after the LLM finishes.
- */
-function evaluateVerify(verify: import("./types.js").NodeVerify | undefined, result: NodeResult): string | null {
-  if (!verify) return null;
-
-  if (verify.any_tool_called && verify.any_tool_called.length > 0) {
-    const required = new Set(verify.any_tool_called);
-    const success = result.toolCalls.some(
-      (c) =>
-        required.has(c.tool) &&
-        // Treat explicit error outputs (from coreToolToSdkTool's catch branch)
-        // as failed calls so a swallowed handler throw doesn't count as success.
-        !(c.output && typeof c.output === "object" && "error" in (c.output as Record<string, unknown>)),
-    );
-    if (!success) {
-      const called = result.toolCalls.map((c) => c.tool).join(", ") || "none";
-      return `verify.any_tool_called failed — required one of [${verify.any_tool_called.join(", ")}] to succeed, but tool calls were: [${called}]`;
-    }
-  }
-
-  return null;
-}
 
 /**
  * Build the full instruction for a node.
