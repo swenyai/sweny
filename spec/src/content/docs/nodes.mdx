@@ -347,9 +347,9 @@ A representative failure message:
 
 ```
 verify failed:
-  - any_tool_called: required one of [linear_create_issue, github_create_issue], called: [linear_search_issues]
-  - output_required: 'prUrl' missing
-  - output_matches: findings[*].severity not in [critical, high, medium, low] (got: [urgent])
+  - any_tool_called: required one of [linear_create_issue, github_create_issue] to succeed, called: [linear_search_issues]
+  - output_required: 'prUrl' missing segment 'prUrl'
+  - output_matches: 'findings[*].severity' in ["critical", "high", "medium", "low"], got ["urgent"]
 ```
 
 ### Worked example

@@ -127,6 +127,26 @@ describe("Zod schemas", () => {
       expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "a", equals: 1, in: [1, 2] }] })).toThrow();
     });
 
+    it("rejects an output_matches entry with equals + matches", () => {
+      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "a", equals: 1, matches: "^x$" }] })).toThrow();
+    });
+
+    it("rejects an output_matches entry with in + matches", () => {
+      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "a", in: [1, 2], matches: "^x$" }] })).toThrow();
+    });
+
+    it("rejects an output_matches entry with all three operators", () => {
+      expect(() =>
+        nodeVerifyZ.parse({ output_matches: [{ path: "a", equals: 1, in: [1], matches: "^x$" }] }),
+      ).toThrow();
+    });
+
+    it("accepts equals: null as a valid operator value", () => {
+      // null IS a valid value to assert equality against; only `undefined` means
+      // "not set". Schema must distinguish.
+      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "a", equals: null }] })).not.toThrow();
+    });
+
     it("rejects an output_matches entry with empty path", () => {
       expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "", equals: 1 }] })).toThrow();
     });
