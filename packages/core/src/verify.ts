@@ -197,3 +197,42 @@ export function checkOutputMatches(matches: OutputMatch[], data: unknown): strin
   if (failures.length === 0) return null;
   return `output_matches: ${failures.join("; ")}`;
 }
+
+import type { NodeResult, NodeVerify } from "./types.js";
+
+/**
+ * Evaluate every declared check and return a concatenated error string,
+ * or null when the node passes verification (or has no verify block).
+ *
+ * Deterministic and side-effect free — the executor calls this synchronously
+ * after the LLM finishes.
+ */
+export function evaluateVerify(verify: NodeVerify | undefined, result: NodeResult): string | null {
+  if (!verify) return null;
+
+  const failures: string[] = [];
+
+  if (verify.any_tool_called && verify.any_tool_called.length > 0) {
+    const e = checkAnyToolCalled(verify.any_tool_called, result.toolCalls);
+    if (e) failures.push(e);
+  }
+  if (verify.all_tools_called && verify.all_tools_called.length > 0) {
+    const e = checkAllToolsCalled(verify.all_tools_called, result.toolCalls);
+    if (e) failures.push(e);
+  }
+  if (verify.no_tool_called && verify.no_tool_called.length > 0) {
+    const e = checkNoToolCalled(verify.no_tool_called, result.toolCalls);
+    if (e) failures.push(e);
+  }
+  if (verify.output_required && verify.output_required.length > 0) {
+    const e = checkOutputRequired(verify.output_required, result.data);
+    if (e) failures.push(e);
+  }
+  if (verify.output_matches && verify.output_matches.length > 0) {
+    const e = checkOutputMatches(verify.output_matches, result.data);
+    if (e) failures.push(e);
+  }
+
+  if (failures.length === 0) return null;
+  return `verify failed:\n  - ${failures.join("\n  - ")}`;
+}

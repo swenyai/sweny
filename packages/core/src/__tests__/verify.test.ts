@@ -5,9 +5,10 @@ import {
   checkNoToolCalled,
   checkOutputMatches,
   checkOutputRequired,
+  evaluateVerify,
   resolvePath,
 } from "../verify.js";
-import type { ToolCall } from "../types.js";
+import type { NodeResult, ToolCall } from "../types.js";
 
 const tc = (tool: string, output?: unknown): ToolCall => ({ tool, input: {}, output });
 const errOut = { error: "boom" };
@@ -317,5 +318,51 @@ describe("checkOutputMatches", () => {
     );
     expect(err).toMatch(/'a'/);
     expect(err).toMatch(/'b'/);
+  });
+});
+
+const result = (data: Record<string, unknown>, toolCalls: ToolCall[] = []): NodeResult => ({
+  status: "success",
+  data,
+  toolCalls,
+});
+
+describe("evaluateVerify", () => {
+  it("returns null when verify is undefined", () => {
+    expect(evaluateVerify(undefined, result({}))).toBeNull();
+  });
+
+  it("returns null when every declared check passes", () => {
+    const v = {
+      any_tool_called: ["a"],
+      output_required: ["x"],
+      output_matches: [{ path: "x", equals: 1 }],
+    };
+    const r = result({ x: 1 }, [tc("a", { ok: true })]);
+    expect(evaluateVerify(v, r)).toBeNull();
+  });
+
+  it("aggregates failures from multiple checks into one error string", () => {
+    const v = {
+      any_tool_called: ["create_pr"],
+      no_tool_called: ["force_push"],
+      output_required: ["prUrl"],
+      output_matches: [{ path: "branch", matches: "^sweny/" }],
+    };
+    const r = result({ branch: "main" }, [tc("force_push", { ok: true })]);
+    const err = evaluateVerify(v, r);
+    expect(err).not.toBeNull();
+    expect(err!).toMatch(/^verify failed:/);
+    expect(err!).toMatch(/any_tool_called/);
+    expect(err!).toMatch(/no_tool_called/);
+    expect(err!).toMatch(/output_required/);
+    expect(err!).toMatch(/output_matches/);
+  });
+
+  it("formats failures as a bulleted list", () => {
+    const v = { any_tool_called: ["a"], no_tool_called: ["b"] };
+    const r = result({}, [tc("b")]);
+    const err = evaluateVerify(v, r);
+    expect(err).toMatch(/\n {2}- /);
   });
 });
