@@ -208,11 +208,15 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // Machine-checked post-condition. Enforced AFTER the LLM finishes so that
     // a model claiming success cannot bypass side-effect requirements (e.g.
     // reporting "issue created" when no `linear_create_issue` call was made).
-    const verifyError = evaluateVerify(node.verify, result);
-    if (verifyError && result.status === "success") {
-      result.status = "failed";
-      result.data = { ...result.data, error: verifyError };
-      logger.warn(`  verify failed: ${verifyError}`, { node: currentId });
+    // Skipped entirely when the node already failed — the node's own error is
+    // the root cause and verify would just add noise.
+    if (result.status === "success") {
+      const verifyError = evaluateVerify(node.verify, result);
+      if (verifyError) {
+        result.status = "failed";
+        result.data = { ...result.data, error: verifyError };
+        logger.warn(`  verify failed: ${verifyError}`, { node: currentId });
+      }
     }
 
     results.set(currentId, result);

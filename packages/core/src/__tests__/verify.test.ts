@@ -260,7 +260,7 @@ describe("checkOutputMatches", () => {
 
   it("fails `in` when the value is not in the set", () => {
     const err = checkOutputMatches([{ path: "sev", in: ["high", "low"] }], { sev: "urgent" });
-    expect(err).toMatch(/output_matches.*'sev'.*in.*\[high, low\].*got.*urgent/);
+    expect(err).toMatch(/output_matches.*'sev'.*in \["high", "low"\].*got \["urgent"\]/);
   });
 
   it("passes `matches` when the regex matches the coerced string", () => {
@@ -295,7 +295,7 @@ describe("checkOutputMatches", () => {
   it("with `any` wildcard, fails when no element satisfies operator", () => {
     const data = { sevs: [{ s: "low" }, { s: "high" }] };
     const err = checkOutputMatches([{ path: "any:sevs[*].s", equals: "critical" }], data);
-    expect(err).toMatch(/output_matches.*no element.*satisfied/);
+    expect(err).toMatch(/output_matches.*no element satisfies/);
   });
 
   it("with `any` wildcard over empty array, fails", () => {

@@ -3,7 +3,7 @@
 // Evaluates `node.verify` post-conditions after the LLM finishes.
 // All checks are AND-ed; failures are aggregated into one error string.
 
-import type { OutputMatch, ToolCall } from "./types.js";
+import type { NodeResult, NodeVerify, OutputMatch, ToolCall } from "./types.js";
 
 export type Resolution = { ok: true; mode: "all" | "any"; values: unknown[] } | { ok: false; reason: string };
 
@@ -13,21 +13,21 @@ interface Segment {
 }
 
 const SEGMENT_RE = /^([a-zA-Z_][a-zA-Z0-9_]*)(\[\*\])?$/;
+const PREFIX_RE = /^([a-z]+):/;
 
 function parsePath(path: string): { mode: "all" | "any"; segments: Segment[] } | string {
   if (path.length === 0) return "empty path";
 
   let mode: "all" | "any" = "all";
   let body = path;
-  const colon = path.indexOf(":");
-  if (colon !== -1 && /^[a-z]+$/.test(path.slice(0, colon))) {
-    const prefix = path.slice(0, colon);
-    if (prefix === "all" || prefix === "any") {
-      mode = prefix;
-      body = path.slice(colon + 1);
-    } else {
+  const prefixMatch = PREFIX_RE.exec(path);
+  if (prefixMatch) {
+    const prefix = prefixMatch[1]!;
+    if (prefix !== "all" && prefix !== "any") {
       return `unknown prefix '${prefix}' (expected 'all' or 'any')`;
     }
+    mode = prefix;
+    body = path.slice(prefixMatch[0].length);
     if (body.length === 0) return "empty path after prefix";
   }
 
@@ -80,8 +80,13 @@ export function resolvePath(data: unknown, path: string): Resolution {
   return { ok: true, mode: parsed.mode, values: current };
 }
 
+// A tool call "succeeded" when its output does not carry a non-null `error` field.
+// `{ error: null }` and `{ error: false }` are treated as success — many real
+// tools include the key with a null sentinel.
 function isErrorOutput(output: unknown): boolean {
-  return !!(output && typeof output === "object" && "error" in (output as Record<string, unknown>));
+  if (!output || typeof output !== "object") return false;
+  const err = (output as Record<string, unknown>).error;
+  return err !== undefined && err !== null && err !== false;
 }
 
 function succeededTools(toolCalls: ToolCall[]): Set<string> {
@@ -92,35 +97,64 @@ function succeededTools(toolCalls: ToolCall[]): Set<string> {
   return names;
 }
 
+function calledList(toolCalls: ToolCall[]): string {
+  return toolCalls.map((c) => c.tool).join(", ") || "none";
+}
+
 export function checkAnyToolCalled(required: string[], toolCalls: ToolCall[]): string | null {
   const succeeded = succeededTools(toolCalls);
   if (required.some((t) => succeeded.has(t))) return null;
-  const called = toolCalls.map((c) => c.tool).join(", ") || "none";
-  return `any_tool_called: required one of [${required.join(", ")}] to succeed, called: [${called}]`;
+  return `any_tool_called: required one of [${required.join(", ")}] to succeed, called: [${calledList(toolCalls)}]`;
 }
 
 export function checkAllToolsCalled(required: string[], toolCalls: ToolCall[]): string | null {
   const succeeded = succeededTools(toolCalls);
   const missing = required.filter((t) => !succeeded.has(t));
   if (missing.length === 0) return null;
-  return `all_tools_called: missing successful calls to [${missing.join(", ")}]`;
+  return `all_tools_called: missing successful calls to [${missing.join(", ")}], called: [${calledList(toolCalls)}]`;
 }
 
 export function checkNoToolCalled(forbidden: string[], toolCalls: ToolCall[]): string | null {
   const calledNames = new Set(toolCalls.map((c) => c.tool));
   const violated = forbidden.filter((t) => calledNames.has(t));
   if (violated.length === 0) return null;
-  return `no_tool_called: forbidden tools were invoked: [${violated.join(", ")}]`;
+  return `no_tool_called: forbidden tools were invoked: [${violated.join(", ")}], called: [${calledList(toolCalls)}]`;
 }
 
+// Structural deep equality for JSON-shaped values. Handles object key-order
+// (compares by key set, not insertion order), NaN (NaN === NaN here), arrays
+// (element-wise), and treats `undefined` distinctly from missing keys. Does
+// not handle Date/Map/Set/RegExp — verify only ever sees agent-produced JSON.
 function deepEqual(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  if (Object.is(a, b)) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null) return false;
+  if (typeof a !== "object") return false;
+
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  if (Array.isArray(b)) return false;
+
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const aKeys = Object.keys(ao);
+  const bKeys = Object.keys(bo);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const k of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(bo, k)) return false;
+    if (!deepEqual(ao[k], bo[k])) return false;
+  }
+  return true;
 }
 
 function formatValue(v: unknown): string {
   if (v === null) return "null";
   if (v === undefined) return "undefined";
-  if (typeof v === "string") return v;
   return JSON.stringify(v);
 }
 
@@ -148,7 +182,22 @@ export function checkOutputRequired(paths: string[], data: unknown): string | nu
   return `output_required: ${failures.join("; ")}`;
 }
 
-function applyOperator(m: OutputMatch, value: unknown): { ok: true } | { ok: false; reason: string } {
+interface CompiledMatch {
+  match: OutputMatch;
+  regex?: RegExp;
+}
+
+function compileMatch(m: OutputMatch): CompiledMatch {
+  if (m.matches !== undefined) {
+    // Throws synchronously if the regex source is invalid; surfaced as a
+    // verify failure rather than a crash because the executor catches.
+    return { match: m, regex: new RegExp(m.matches) };
+  }
+  return { match: m };
+}
+
+function applyOperator(c: CompiledMatch, value: unknown): { ok: true } | { ok: false; reason: string } {
+  const m = c.match;
   if (m.equals !== undefined) {
     if (deepEqual(value, m.equals)) return { ok: true };
     return { ok: false, reason: `equals ${formatValue(m.equals)}, got ${formatValue(value)}` };
@@ -160,10 +209,9 @@ function applyOperator(m: OutputMatch, value: unknown): { ok: true } | { ok: fal
       reason: `in [${m.in.map(formatValue).join(", ")}], got ${formatValue(value)}`,
     };
   }
-  if (m.matches !== undefined) {
-    const re = new RegExp(m.matches);
+  if (c.regex) {
     const s = typeof value === "string" ? value : JSON.stringify(value);
-    if (re.test(s)) return { ok: true };
+    if (c.regex.test(s)) return { ok: true };
     return { ok: false, reason: `matches /${m.matches}/, got ${formatValue(value)}` };
   }
   return { ok: false, reason: "no operator declared (zod should have caught this)" };
@@ -172,6 +220,14 @@ function applyOperator(m: OutputMatch, value: unknown): { ok: true } | { ok: fal
 export function checkOutputMatches(matches: OutputMatch[], data: unknown): string | null {
   const failures: string[] = [];
   for (const m of matches) {
+    let compiled: CompiledMatch;
+    try {
+      compiled = compileMatch(m);
+    } catch (err) {
+      failures.push(`'${m.path}' invalid regex /${m.matches}/: ${(err as Error).message}`);
+      continue;
+    }
+
     const r = resolvePath(data, m.path);
     if (!r.ok) {
       failures.push(`'${m.path}' ${r.reason}`);
@@ -179,18 +235,24 @@ export function checkOutputMatches(matches: OutputMatch[], data: unknown): strin
     }
     if (r.mode === "all") {
       if (r.values.length === 0) continue;
-      const firstFailure = r.values
-        .map((v) => applyOperator(m, v))
-        .find((res): res is { ok: false; reason: string } => !res.ok);
-      if (firstFailure) failures.push(`'${m.path}' ${firstFailure.reason}`);
+      const offenders: string[] = [];
+      for (const v of r.values) {
+        const res = applyOperator(compiled, v);
+        if (!res.ok) offenders.push(formatValue(v));
+      }
+      if (offenders.length > 0) {
+        const opDescription = describeOperator(compiled);
+        failures.push(`'${m.path}' ${opDescription}, got [${offenders.join(", ")}]`);
+      }
     } else {
       if (r.values.length === 0) {
         failures.push(`'${m.path}' (any:) resolved to no elements`);
         continue;
       }
-      const anyOk = r.values.some((v) => applyOperator(m, v).ok);
+      const anyOk = r.values.some((v) => applyOperator(compiled, v).ok);
       if (!anyOk) {
-        failures.push(`'${m.path}' (any:) no element satisfied operator`);
+        const opDescription = describeOperator(compiled);
+        failures.push(`'${m.path}' (any:) no element satisfies ${opDescription}`);
       }
     }
   }
@@ -198,7 +260,13 @@ export function checkOutputMatches(matches: OutputMatch[], data: unknown): strin
   return `output_matches: ${failures.join("; ")}`;
 }
 
-import type { NodeResult, NodeVerify } from "./types.js";
+function describeOperator(c: CompiledMatch): string {
+  const m = c.match;
+  if (m.equals !== undefined) return `equals ${formatValue(m.equals)}`;
+  if (m.in !== undefined) return `in [${m.in.map(formatValue).join(", ")}]`;
+  if (m.matches !== undefined) return `matches /${m.matches}/`;
+  return "no operator";
+}
 
 /**
  * Evaluate every declared check and return a concatenated error string,
