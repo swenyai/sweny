@@ -556,6 +556,46 @@ describe("tool-call message parity", () => {
   });
 });
 
+describe("isErrorOutput against non-object output", () => {
+  it("treats string output as success (no error key possible)", () => {
+    const err = checkAnyToolCalled(["save"], [tc("save", "ok")]);
+    expect(err).toBeNull();
+  });
+
+  it("treats number output as success", () => {
+    const err = checkAnyToolCalled(["save"], [tc("save", 42)]);
+    expect(err).toBeNull();
+  });
+
+  it("treats undefined output (no result reported) as success", () => {
+    const err = checkAnyToolCalled(["save"], [tc("save")]);
+    expect(err).toBeNull();
+  });
+});
+
+describe("output_matches matches operator with mixed pass/fail values", () => {
+  it("aggregates only the offending values under all-mode matches", () => {
+    const data = { urls: ["https://a", "ftp://b", "https://c", "ssh://d"] };
+    const err = checkOutputMatches([{ path: "urls[*]", matches: "^https://" }], data);
+    expect(err).toMatch(/"ftp:\/\/b"/);
+    expect(err).toMatch(/"ssh:\/\/d"/);
+    const offenders = err!.match(/got \[(.*)\]$/)![1]!;
+    expect(offenders).not.toContain("https://a");
+    expect(offenders).not.toContain("https://c");
+  });
+});
+
+describe("applyOperator defensive fallthrough", () => {
+  it("returns a clean error when no operator is declared (zod-bypass guard)", () => {
+    // Construct an OutputMatch that bypasses zod (cast-as-any) to exercise the
+    // applyOperator default branch. In real flow zod prevents this, but we want
+    // the runtime to degrade gracefully if a producer ever skips schema parsing.
+    const bogus = { path: "x" } as unknown as Parameters<typeof checkOutputMatches>[0][0];
+    const err = checkOutputMatches([bogus], { x: 1 });
+    expect(err).toMatch(/output_matches.*'x'.*no operator/);
+  });
+});
+
 describe("evaluateVerify exact failure-string format (public contract)", () => {
   it("produces the exact bulleted format", () => {
     const v = {
