@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolvePath } from "../verify.js";
+import { checkAllToolsCalled, checkAnyToolCalled, checkNoToolCalled, resolvePath } from "../verify.js";
+import type { ToolCall } from "../types.js";
+
+const tc = (tool: string, output?: unknown): ToolCall => ({ tool, input: {}, output });
+const errOut = { error: "boom" };
 
 describe("resolvePath", () => {
   describe("simple dotted paths", () => {
@@ -117,5 +121,70 @@ describe("resolvePath", () => {
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.reason).toMatch(/malformed/);
     });
+  });
+});
+
+describe("checkAnyToolCalled", () => {
+  it("passes when one of the named tools succeeded", () => {
+    expect(checkAnyToolCalled(["a", "b"], [tc("a", { ok: true })])).toBeNull();
+  });
+
+  it("passes when one succeeded among others", () => {
+    expect(checkAnyToolCalled(["a"], [tc("x"), tc("a", { ok: true }), tc("y")])).toBeNull();
+  });
+
+  it("fails when only an unrelated tool was called", () => {
+    const err = checkAnyToolCalled(["a", "b"], [tc("x")]);
+    expect(err).toMatch(/any_tool_called.*required one of \[a, b\].*called.*x/);
+  });
+
+  it("fails when the required tool errored", () => {
+    const err = checkAnyToolCalled(["a"], [tc("a", errOut)]);
+    expect(err).toMatch(/any_tool_called/);
+  });
+
+  it("reports 'none' when no tools were called", () => {
+    const err = checkAnyToolCalled(["a"], []);
+    expect(err).toMatch(/called: \[none\]/);
+  });
+});
+
+describe("checkAllToolsCalled", () => {
+  it("passes when every named tool succeeded", () => {
+    expect(checkAllToolsCalled(["a", "b"], [tc("a", { ok: true }), tc("b", { ok: true })])).toBeNull();
+  });
+
+  it("passes when extras were also called", () => {
+    expect(checkAllToolsCalled(["a"], [tc("a", { ok: true }), tc("x"), tc("y")])).toBeNull();
+  });
+
+  it("fails when a required tool was never called", () => {
+    const err = checkAllToolsCalled(["a", "b"], [tc("a", { ok: true })]);
+    expect(err).toMatch(/all_tools_called.*missing.*\[b\]/);
+  });
+
+  it("fails when a required tool only errored", () => {
+    const err = checkAllToolsCalled(["a", "b"], [tc("a", { ok: true }), tc("b", errOut)]);
+    expect(err).toMatch(/all_tools_called.*missing.*\[b\]/);
+  });
+});
+
+describe("checkNoToolCalled", () => {
+  it("passes when none of the named tools were called", () => {
+    expect(checkNoToolCalled(["a", "b"], [tc("x"), tc("y")])).toBeNull();
+  });
+
+  it("passes when toolCalls is empty", () => {
+    expect(checkNoToolCalled(["a"], [])).toBeNull();
+  });
+
+  it("fails when a forbidden tool was called successfully", () => {
+    const err = checkNoToolCalled(["force_push"], [tc("force_push", { ok: true })]);
+    expect(err).toMatch(/no_tool_called.*forbidden.*\[force_push\]/);
+  });
+
+  it("fails when a forbidden tool was called even with error", () => {
+    const err = checkNoToolCalled(["force_push"], [tc("force_push", errOut)]);
+    expect(err).toMatch(/no_tool_called/);
   });
 });

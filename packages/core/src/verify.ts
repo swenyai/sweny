@@ -3,6 +3,8 @@
 // Evaluates `node.verify` post-conditions after the LLM finishes.
 // All checks are AND-ed; failures are aggregated into one error string.
 
+import type { ToolCall } from "./types.js";
+
 export type Resolution = { ok: true; mode: "all" | "any"; values: unknown[] } | { ok: false; reason: string };
 
 interface Segment {
@@ -76,4 +78,37 @@ export function resolvePath(data: unknown, path: string): Resolution {
   }
 
   return { ok: true, mode: parsed.mode, values: current };
+}
+
+function isErrorOutput(output: unknown): boolean {
+  return !!(output && typeof output === "object" && "error" in (output as Record<string, unknown>));
+}
+
+function succeededTools(toolCalls: ToolCall[]): Set<string> {
+  const names = new Set<string>();
+  for (const c of toolCalls) {
+    if (!isErrorOutput(c.output)) names.add(c.tool);
+  }
+  return names;
+}
+
+export function checkAnyToolCalled(required: string[], toolCalls: ToolCall[]): string | null {
+  const succeeded = succeededTools(toolCalls);
+  if (required.some((t) => succeeded.has(t))) return null;
+  const called = toolCalls.map((c) => c.tool).join(", ") || "none";
+  return `any_tool_called: required one of [${required.join(", ")}] to succeed, called: [${called}]`;
+}
+
+export function checkAllToolsCalled(required: string[], toolCalls: ToolCall[]): string | null {
+  const succeeded = succeededTools(toolCalls);
+  const missing = required.filter((t) => !succeeded.has(t));
+  if (missing.length === 0) return null;
+  return `all_tools_called: missing successful calls to [${missing.join(", ")}]`;
+}
+
+export function checkNoToolCalled(forbidden: string[], toolCalls: ToolCall[]): string | null {
+  const calledNames = new Set(toolCalls.map((c) => c.tool));
+  const violated = forbidden.filter((t) => calledNames.has(t));
+  if (violated.length === 0) return null;
+  return `no_tool_called: forbidden tools were invoked: [${violated.join(", ")}]`;
 }
