@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { checkAllToolsCalled, checkAnyToolCalled, checkNoToolCalled, resolvePath } from "../verify.js";
+import {
+  checkAllToolsCalled,
+  checkAnyToolCalled,
+  checkNoToolCalled,
+  checkOutputMatches,
+  checkOutputRequired,
+  resolvePath,
+} from "../verify.js";
 import type { ToolCall } from "../types.js";
 
 const tc = (tool: string, output?: unknown): ToolCall => ({ tool, input: {}, output });
@@ -186,5 +193,129 @@ describe("checkNoToolCalled", () => {
   it("fails when a forbidden tool was called even with error", () => {
     const err = checkNoToolCalled(["force_push"], [tc("force_push", errOut)]);
     expect(err).toMatch(/no_tool_called/);
+  });
+});
+
+describe("checkOutputRequired", () => {
+  it("passes when all paths resolve to non-null values", () => {
+    expect(checkOutputRequired(["a", "b.c"], { a: 1, b: { c: "x" } })).toBeNull();
+  });
+
+  it("fails when a path is missing", () => {
+    const err = checkOutputRequired(["a", "missing"], { a: 1 });
+    expect(err).toMatch(/output_required.*'missing'.*missing segment/);
+  });
+
+  it("fails when a path resolves to null", () => {
+    const err = checkOutputRequired(["a"], { a: null });
+    expect(err).toMatch(/output_required.*'a'.*null/);
+  });
+
+  it("with default (all) wildcard, requires every element to have non-null path", () => {
+    const data = { findings: [{ severity: "critical" }, { severity: null }] };
+    const err = checkOutputRequired(["findings[*].severity"], data);
+    expect(err).toMatch(/output_required/);
+  });
+
+  it("with default (all) wildcard, passes when every element has non-null path", () => {
+    const data = { findings: [{ severity: "critical" }, { severity: "low" }] };
+    expect(checkOutputRequired(["findings[*].severity"], data)).toBeNull();
+  });
+
+  it("with default (all) wildcard over empty array, vacuously passes", () => {
+    expect(checkOutputRequired(["findings[*].severity"], { findings: [] })).toBeNull();
+  });
+
+  it("with `any` wildcard, passes when at least one element has non-null path", () => {
+    const data = { findings: [{ severity: null }, { severity: "low" }] };
+    expect(checkOutputRequired(["any:findings[*].severity"], data)).toBeNull();
+  });
+
+  it("with `any` wildcard over empty array, fails", () => {
+    const err = checkOutputRequired(["any:findings[*].severity"], { findings: [] });
+    expect(err).toMatch(/output_required.*no elements/);
+  });
+
+  it("aggregates multiple required-path failures into one message", () => {
+    const err = checkOutputRequired(["a", "b"], {});
+    expect(err).toMatch(/'a'/);
+    expect(err).toMatch(/'b'/);
+  });
+});
+
+describe("checkOutputMatches", () => {
+  it("passes equals on a single value", () => {
+    expect(checkOutputMatches([{ path: "a", equals: 1 }], { a: 1 })).toBeNull();
+  });
+
+  it("fails equals on a mismatched value", () => {
+    const err = checkOutputMatches([{ path: "a", equals: 1 }], { a: 2 });
+    expect(err).toMatch(/output_matches.*'a'.*equals.*1.*got.*2/);
+  });
+
+  it("passes `in` when the value is in the set", () => {
+    expect(checkOutputMatches([{ path: "sev", in: ["high", "low"] }], { sev: "low" })).toBeNull();
+  });
+
+  it("fails `in` when the value is not in the set", () => {
+    const err = checkOutputMatches([{ path: "sev", in: ["high", "low"] }], { sev: "urgent" });
+    expect(err).toMatch(/output_matches.*'sev'.*in.*\[high, low\].*got.*urgent/);
+  });
+
+  it("passes `matches` when the regex matches the coerced string", () => {
+    expect(checkOutputMatches([{ path: "url", matches: "^https://" }], { url: "https://x" })).toBeNull();
+  });
+
+  it("fails `matches` when the regex does not match", () => {
+    const err = checkOutputMatches([{ path: "url", matches: "^https://" }], { url: "ftp://x" });
+    expect(err).toMatch(/output_matches.*'url'.*matches.*ftp/);
+  });
+
+  it("with default (all) wildcard, requires every element to satisfy operator", () => {
+    const data = { sevs: [{ s: "high" }, { s: "urgent" }] };
+    const err = checkOutputMatches([{ path: "sevs[*].s", in: ["high", "low"] }], data);
+    expect(err).toMatch(/output_matches/);
+  });
+
+  it("with default (all) wildcard, passes when every element satisfies operator", () => {
+    const data = { sevs: [{ s: "high" }, { s: "low" }] };
+    expect(checkOutputMatches([{ path: "sevs[*].s", in: ["high", "low"] }], data)).toBeNull();
+  });
+
+  it("with default (all) wildcard over empty array, vacuously passes", () => {
+    expect(checkOutputMatches([{ path: "sevs[*].s", in: ["high"] }], { sevs: [] })).toBeNull();
+  });
+
+  it("with `any` wildcard, passes when at least one element satisfies operator", () => {
+    const data = { sevs: [{ s: "low" }, { s: "critical" }] };
+    expect(checkOutputMatches([{ path: "any:sevs[*].s", equals: "critical" }], data)).toBeNull();
+  });
+
+  it("with `any` wildcard, fails when no element satisfies operator", () => {
+    const data = { sevs: [{ s: "low" }, { s: "high" }] };
+    const err = checkOutputMatches([{ path: "any:sevs[*].s", equals: "critical" }], data);
+    expect(err).toMatch(/output_matches.*no element.*satisfied/);
+  });
+
+  it("with `any` wildcard over empty array, fails", () => {
+    const err = checkOutputMatches([{ path: "any:sevs[*].s", equals: "x" }], { sevs: [] });
+    expect(err).toMatch(/output_matches/);
+  });
+
+  it("fails when the path itself does not resolve", () => {
+    const err = checkOutputMatches([{ path: "missing", equals: 1 }], {});
+    expect(err).toMatch(/output_matches.*'missing'.*missing segment/);
+  });
+
+  it("aggregates multiple match failures into one message", () => {
+    const err = checkOutputMatches(
+      [
+        { path: "a", equals: 1 },
+        { path: "b", equals: 2 },
+      ],
+      { a: 999, b: 999 },
+    );
+    expect(err).toMatch(/'a'/);
+    expect(err).toMatch(/'b'/);
   });
 });
