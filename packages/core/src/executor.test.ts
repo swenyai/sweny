@@ -432,6 +432,9 @@ describe("skill instruction injection", () => {
       async evaluate() {
         return "";
       },
+      async ask() {
+        return "";
+      },
     };
 
     await execute(
@@ -493,6 +496,9 @@ describe("skill instruction injection", () => {
       async evaluate() {
         return "";
       },
+      async ask() {
+        return "";
+      },
     };
 
     await execute(
@@ -545,6 +551,9 @@ describe("skill instruction injection", () => {
       async evaluate() {
         return "";
       },
+      async ask() {
+        return "";
+      },
     };
 
     // Should NOT throw "none are configured"
@@ -589,6 +598,9 @@ describe("skill instruction injection", () => {
         return { status: "success", data: {}, toolCalls: [] };
       },
       async evaluate() {
+        return "";
+      },
+      async ask() {
         return "";
       },
     };
@@ -648,6 +660,9 @@ describe("skill instruction injection", () => {
         return { status: "success", data: {}, toolCalls: [] };
       },
       async evaluate() {
+        return "";
+      },
+      async ask() {
         return "";
       },
     };

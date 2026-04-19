@@ -188,6 +188,26 @@ describe("MockClaude", () => {
       expect(chosen).toBe("valid"); // falls back to first choice
     });
   });
+
+  describe("ask", () => {
+    it("returns scripted response from ask handler", async () => {
+      const claude = new MockClaude({
+        responses: {},
+        ask: (instruction, context) => `Got: ${instruction}; ctx keys: ${Object.keys(context).join(",")}`,
+      });
+      const result = await claude.ask({
+        instruction: "diagnose this",
+        context: { error: "x" },
+      });
+      expect(result).toBe("Got: diagnose this; ctx keys: error");
+    });
+
+    it("returns default mock string when no ask handler is provided", async () => {
+      const claude = new MockClaude({ responses: {} });
+      const result = await claude.ask({ instruction: "anything", context: {} });
+      expect(result).toMatch(/Mock reflection/);
+    });
+  });
 });
 
 // ─── File skill tests ────────────────────────────────────────────
