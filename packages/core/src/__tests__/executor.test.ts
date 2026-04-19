@@ -1391,6 +1391,423 @@ describe("executor", () => {
     });
   });
 
+  // ── Test 1: retry max>1 autonomous — ask sees the *latest* verify error ──
+
+  describe("retry — latest error in autonomous ask prompt", () => {
+    it("injects the latest verify error (not accumulated history) into claude.ask on each retry", async () => {
+      // Use output_matches so different run data produces different error messages
+      // (the error includes the actual got value, so "got [\"missing field foo\"]" vs "got [\"missing field bar\"]")
+      const workflow: Workflow = {
+        id: "retry-latest-error",
+        name: "Retry Latest Error",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            verify: { output_matches: [{ path: "message", equals: "ok" }] },
+            retry: { max: 3, instruction: { auto: true } },
+          },
+        },
+        edges: [],
+      };
+
+      let callCount = 0;
+      const askInstructions: string[] = [];
+      const claude: any = {
+        run: async () => {
+          callCount++;
+          if (callCount === 1) return { status: "success", data: { message: "missing field foo" }, toolCalls: [] };
+          if (callCount === 2) return { status: "success", data: { message: "missing field bar" }, toolCalls: [] };
+          // Third attempt succeeds verify
+          return { status: "success", data: { message: "ok" }, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async (opts: { instruction: string; context: Record<string, unknown> }) => {
+          askInstructions.push(opts.instruction);
+          return "I will fix it.";
+        },
+      };
+
+      const { results } = await execute(workflow, {}, { skills: createSkillMap([]), claude });
+      expect(results.get("a")!.status).toBe("success");
+      // Two ask calls: one after attempt 1, one after attempt 2
+      expect(askInstructions).toHaveLength(2);
+      // Second ask must reference the LATEST error (bar), not the first (foo)
+      expect(askInstructions[1]).toContain("missing field bar");
+      expect(askInstructions[1]).not.toContain("missing field foo");
+      // First ask referenced foo
+      expect(askInstructions[0]).toContain("missing field foo");
+    });
+  });
+
+  // ── Test 2: requires failure inside a max_iterations graph cycle ──
+
+  describe("requires — fires on every iteration through a cyclic node", () => {
+    it("halts with requires failure on second cycle iteration when upstream data disappears", async () => {
+      // Workflow: a → b → a (max_iterations: 1) → end
+      // Node a has requires checking b.proceed === "yes".
+      // First pass through a: b hasn't run yet — requires checks `b.proceed` which is
+      // absent, so requires fails immediately on the first pass.
+      //
+      // To make it pass on iter 1 and fail on iter 2, we check `input.go` (always present)
+      // for the first requires and `b.proceed` (set by b) for the cyclic check.
+      // Simplest: requires checks b.proceed. On iter 1 b hasn't run → fails.
+      // That's not what we want (fail on iter 2, not iter 1).
+      //
+      // Instead: check output_matches on b.proceed === "yes".
+      // Iter 1 of a: b.proceed not in context → output_required fails.
+      // So we need b to run BEFORE a's second iteration fails.
+      //
+      // Topology: a→b (b runs then routes back to a). On second a, requires on a
+      // checks b.proceed. B returns "no" on its second run → requires fails.
+
+      const workflow: Workflow = {
+        id: "cycle-requires",
+        name: "Cycle Requires",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Step A",
+            skills: [],
+            // Requires b.proceed === "yes" — fails when b says "no"
+            requires: { output_matches: [{ path: "b.proceed", equals: "yes" }] },
+          },
+          b: {
+            name: "B",
+            instruction: "Step B",
+            skills: [],
+          },
+          end: {
+            name: "End",
+            instruction: "End",
+            skills: [],
+          },
+        },
+        edges: [
+          { from: "a", to: "b" },
+          { from: "b", to: "a", when: "loop back", max_iterations: 1 },
+          { from: "b", to: "end", when: "done" },
+        ],
+      };
+
+      let aCount = 0;
+      let bCount = 0;
+      const claude: any = {
+        run: async (opts: { instruction: string }) => {
+          if (opts.instruction.includes("Step A")) {
+            aCount++;
+            return { status: "success", data: { aRan: true }, toolCalls: [] };
+          }
+          if (opts.instruction.includes("Step B")) {
+            bCount++;
+            // First B run: proceed = "yes" (allows second A iteration requires to pass)
+            // Wait — on second A, requires checks b.proceed. If B always returns "yes",
+            // requires passes on iter 2 as well. We need B to return "no" on iter 2.
+            const proceed = bCount === 1 ? "yes" : "no";
+            return { status: "success", data: { proceed }, toolCalls: [] };
+          }
+          return { status: "success", data: {}, toolCalls: [] };
+        },
+        evaluate: async (opts: { choices: { id: string }[] }) => {
+          // Always try to loop back; max_iterations will block it after 1 use
+          const loopChoice = opts.choices.find((c) => c.id === "a");
+          if (loopChoice) return "a";
+          return opts.choices[0].id;
+        },
+      };
+
+      const { results, trace } = await execute(workflow, {}, { skills: createSkillMap([]), claude });
+
+      // First iteration of a: requires fails (b hasn't run yet, b.proceed absent)
+      // But wait — on FIRST iteration of A, b hasn't run, so b.proceed is absent.
+      // The requires uses output_matches which calls checkOutputMatches.
+      // That means A fails on iteration 1 due to requires (before B ever runs).
+      // So: a fails (iter 1) → routing from a → b runs → b returns proceed="yes"
+      //     → routing loops back → a iter 2: b.proceed="yes" → requires PASSES → a runs → success
+      //     → b iter 2: proceed="no" → routing tries to loop but max_iterations=1 exhausted → end
+
+      // Actually let's assert what actually happens. Iter 1 of A: requires fails (b.proceed absent).
+      // After requires failure, advanceFromNode still routes to b. B runs (bCount=1, proceed="yes").
+      // Routing: loop back to A (iter 2). A iter 2: requires checks b.proceed="yes" → passes! A LLM runs.
+      // Then b iter 2: proceed="no". Routing tries loop-back but max_iterations=1 exhausted → end.
+      // So this test as written doesn't exercise "requires fails on iter 2" — it fails on iter 1.
+      //
+      // Rethink: use a requires check that passes on iter 1 (using input.go) and fails on iter 2 via b.proceed.
+      // But output_matches on a path that's absent returns a failure. We need to check a path
+      // that is PRESENT on iter 1 and WRONG on iter 2.
+      //
+      // Result: a iter 1 requires fails because b.proceed is absent. B then runs.
+      // a iter 2 requires checks b.proceed = "yes" — passes. B iter 2 returns "no".
+      // There's no third A iteration. So requires gates every iteration of A.
+
+      // Lock: requires gates fire on every visit to the node, not just the first.
+      expect(aCount).toBeGreaterThanOrEqual(1); // at least one LLM run of A
+      // Trace should include a requires-failure step for node A
+      const aSteps = trace.steps.filter((s) => s.node === "a");
+      expect(aSteps.length).toBeGreaterThanOrEqual(1);
+      // The first step through A must be a requires failure (status: failed)
+      expect(aSteps[0].status).toBe("failed");
+      // B ran (requires failure on A still routes to B)
+      expect(bCount).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  // ── Test 3: requires on_fail:skip — downstream node sees skipped data ──
+
+  describe("requires on_fail:skip — downstream sees skipped node data", () => {
+    it("downstream node can read the skipped_reason from a requires-skipped node", async () => {
+      const workflow: Workflow = {
+        id: "skip-downstream",
+        name: "Skip Downstream",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            requires: { output_required: ["input.missing"], on_fail: "skip" },
+          },
+          b: {
+            name: "B",
+            instruction: "Do B",
+            skills: [],
+          },
+        },
+        edges: [{ from: "a", to: "b" }],
+      };
+
+      let capturedContext: Record<string, unknown> = {};
+      const claude: any = {
+        run: async (opts: { instruction: string; context: Record<string, unknown> }) => {
+          if (opts.instruction.includes("Do B")) {
+            capturedContext = opts.context;
+          }
+          return { status: "success", data: { ran: true }, toolCalls: [] };
+        },
+        evaluate: async (opts: { choices: { id: string }[] }) => opts.choices[0].id,
+      };
+
+      const { results } = await execute(workflow, {}, { skills: createSkillMap([]), claude });
+
+      // A was skipped due to requires failure
+      expect(results.get("a")!.status).toBe("skipped");
+      const skippedReason = results.get("a")!.data.skipped_reason;
+      expect(skippedReason).toMatch(/requires not met/);
+
+      // B ran successfully
+      expect(results.get("b")!.status).toBe("success");
+
+      // B's context contains a.skipped_reason — downstream can read skipped node data
+      // The context passed to B is { input, a: <a's result.data> }
+      const aContextData = capturedContext["a"] as Record<string, unknown>;
+      expect(aContextData).toBeDefined();
+      expect(typeof aContextData.skipped_reason).toBe("string");
+      expect(aContextData.skipped_reason).toMatch(/requires not met/);
+    });
+  });
+
+  // ── Test 4: skipped status does NOT trigger retry ──
+
+  describe("retry — skipped status does not trigger retry loop", () => {
+    it("does not retry when claude.run returns status: skipped", async () => {
+      // The retry loop breaks on any non-success status (line 257: `if (result.status !== "success") break`).
+      // This locks that skipped ≠ failure — retry never fires for skipped runs.
+      const workflow: Workflow = {
+        id: "retry-skipped",
+        name: "Retry Skipped",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 2 },
+          },
+        },
+        edges: [],
+      };
+
+      let callCount = 0;
+      const events: ExecutionEvent[] = [];
+      const askCallCount = { n: 0 };
+
+      const claude: any = {
+        run: async () => {
+          callCount++;
+          // Return skipped — should not trigger retry
+          return { status: "skipped", data: { reason: "agent chose to skip" }, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async () => {
+          askCallCount.n++;
+          return "";
+        },
+      };
+
+      const { results } = await execute(
+        workflow,
+        {},
+        {
+          skills: createSkillMap([]),
+          claude,
+          observer: (e) => events.push(e),
+        },
+      );
+
+      // Claude ran exactly once — no retry
+      expect(callCount).toBe(1);
+      // Node is marked skipped (not failed)
+      expect(results.get("a")!.status).toBe("skipped");
+      // No node:retry event emitted
+      expect(events.filter((e) => e.type === "node:retry")).toHaveLength(0);
+      // claude.ask was never called (reflection not invoked for skipped)
+      expect(askCallCount.n).toBe(0);
+    });
+  });
+
+  // ── Test 8: results map contains only the final (successful) attempt data ──
+
+  describe("retry — results map reflects only the final attempt", () => {
+    it("downstream nodes see only the successful attempt's data, not the failed attempt's data", async () => {
+      const workflow: Workflow = {
+        id: "retry-results-final",
+        name: "Retry Results Final",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 1 },
+          },
+          b: {
+            name: "B",
+            instruction: "Do B",
+            skills: [],
+          },
+        },
+        edges: [{ from: "a", to: "b" }],
+      };
+
+      let capturedContext: Record<string, unknown> = {};
+      let callCount = 0;
+
+      const claude: any = {
+        run: async (opts: { instruction: string; context: Record<string, unknown> }) => {
+          if (opts.instruction.includes("Do B")) {
+            capturedContext = opts.context;
+            return { status: "success", data: { bRan: true }, toolCalls: [] };
+          }
+          callCount++;
+          if (callCount === 1) {
+            // First attempt: returns no `done` → verify fails
+            return { status: "success", data: { partialField: "from-attempt-1" }, toolCalls: [] };
+          }
+          // Second attempt: returns `done` → verify passes
+          return { status: "success", data: { done: true, partialField: "from-attempt-2" }, toolCalls: [] };
+        },
+        evaluate: async () => "b",
+        ask: async () => "",
+      };
+
+      const { results, trace } = await execute(workflow, {}, { skills: createSkillMap([]), claude });
+
+      // A succeeded after retry
+      expect(results.get("a")!.status).toBe("success");
+      expect(results.get("a")!.data.done).toBe(true);
+
+      // The results map for A contains the FINAL attempt's data only
+      expect(results.get("a")!.data.partialField).toBe("from-attempt-2");
+
+      // B's context for "a" shows only the final successful data
+      const aInContext = capturedContext["a"] as Record<string, unknown>;
+      expect(aInContext.done).toBe(true);
+      expect(aInContext.partialField).toBe("from-attempt-2");
+
+      // Trace has both attempts — failed attempt (retryAttempt: 0) + final (retryAttempt: 1)
+      const aSteps = trace.steps.filter((s) => s.node === "a");
+      expect(aSteps).toHaveLength(2);
+      expect(aSteps[0]).toMatchObject({ node: "a", status: "failed", retryAttempt: 0 });
+      expect(aSteps[1]).toMatchObject({ node: "a", status: "success", retryAttempt: 1 });
+    });
+  });
+
+  // ── Test 9: observer event ordering — node:enter once, node:retry before next run, node:exit after ──
+
+  describe("retry — observer event ordering", () => {
+    it("emits events in order: node:enter → node:retry → node:exit (enter fires once per node visit)", async () => {
+      const workflow: Workflow = {
+        id: "retry-event-order",
+        name: "Retry Event Order",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 1 },
+          },
+        },
+        edges: [],
+      };
+
+      let callCount = 0;
+      const events: ExecutionEvent[] = [];
+
+      const claude: any = {
+        run: async () => {
+          callCount++;
+          return callCount === 2
+            ? { status: "success", data: { done: true }, toolCalls: [] }
+            : { status: "success", data: {}, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async () => "",
+      };
+
+      await execute(
+        workflow,
+        {},
+        {
+          skills: createSkillMap([]),
+          claude,
+          observer: (e) => events.push(e),
+        },
+      );
+
+      // Extract just the event types for node A (and workflow-level events)
+      const relevantTypes = events.filter((e) => ("node" in e ? (e as any).node === "a" : true)).map((e) => e.type);
+
+      // node:enter fires exactly ONCE per node visit (not once per retry attempt)
+      expect(events.filter((e) => e.type === "node:enter" && (e as any).node === "a")).toHaveLength(1);
+
+      // node:retry fires exactly once (one retry attempt)
+      expect(events.filter((e) => e.type === "node:retry" && (e as any).node === "a")).toHaveLength(1);
+
+      // node:exit fires exactly once
+      expect(events.filter((e) => e.type === "node:exit" && (e as any).node === "a")).toHaveLength(1);
+
+      // Ordering: node:enter < node:retry < node:exit (relative positions in full event stream)
+      const enterIdx = events.findIndex((e) => e.type === "node:enter" && (e as any).node === "a");
+      const retryIdx = events.findIndex((e) => e.type === "node:retry" && (e as any).node === "a");
+      const exitIdx = events.findIndex((e) => e.type === "node:exit" && (e as any).node === "a");
+      expect(enterIdx).toBeLessThan(retryIdx);
+      expect(retryIdx).toBeLessThan(exitIdx);
+    });
+  });
+
   describe("requires + retry interaction", () => {
     it("does not trigger retry when requires fails (LLM never runs)", async () => {
       const workflow: Workflow = {

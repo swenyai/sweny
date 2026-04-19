@@ -145,4 +145,76 @@ describe("buildRetryPreamble", () => {
     expect(promptText).toContain("bar");
     expect(promptText).toMatch(/error/i);
   });
+
+  // ── Test 5: whitespace-only ask response falls back to default preamble ──
+
+  it("falls back to default preamble when claude.ask returns whitespace-only string", async () => {
+    // Locks the trim() behavior at retry.ts:54 — whitespace-only is treated as empty.
+    const warnSpy = vi.fn();
+    const logger: Logger = { ...silentLogger, warn: warnSpy };
+    const claude = fakeClaude("\n\n\t   ");
+    const result = await buildRetryPreamble({
+      retry: { max: 1, instruction: { auto: true } },
+      verifyError,
+      toolCalls: [],
+      nodeInstruction,
+      claude,
+      logger,
+    });
+    expect(result).toMatch(/Previous attempt failed verification/);
+    expect(result).toContain(verifyError);
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy.mock.calls[0][0]).toMatch(/empty/i);
+  });
+
+  // ── Test 6: nodeInstruction containing the same header as defaultPreamble ──
+
+  it("produces a correct preamble even when nodeInstruction contains the default header verbatim", async () => {
+    // Regression: if buildReflectionPrompt did brittle string-replace on the header,
+    // embedding the header in the instruction would corrupt output. Assert it still
+    // produces a preamble starting with "## Reflection on previous attempt".
+    const tricky = "## Previous attempt failed verification\nDo the thing anyway.";
+    const claude = fakeClaude("Here is my diagnosis.");
+    const result = await buildRetryPreamble({
+      retry: { max: 1, instruction: { auto: true } },
+      verifyError,
+      toolCalls: [],
+      nodeInstruction: tricky,
+      claude,
+      logger: silentLogger,
+    });
+    // The returned preamble should start with the reflection header, not the
+    // default header, because claude.ask returned a non-empty string.
+    expect(result).toMatch(/^## Reflection on previous attempt/);
+    expect(result).toContain("Here is my diagnosis.");
+    expect(result).toContain(verifyError);
+  });
+
+  // ── Test 7: instruction.reflect = "" (empty string, bypasses Zod) ──
+
+  it("uses empty string as reflect prompt when reflect is '' (documents current behavior)", async () => {
+    // Zod schema requires reflect: string.min(1), but programmatic construction
+    // can bypass it. Current code: `typeof inst.reflect === "string" ? inst.reflect : DEFAULT`
+    // An empty string IS a string, so it gets used verbatim — the reflection prompt
+    // sent to claude.ask will contain the empty reflect line.
+    // FUTURE: consider falling back to DEFAULT_REFLECTION_PROMPT on empty reflect.
+    const claude = fakeClaude("diagnosis from empty reflect.");
+    const askSpy = claude.ask as ReturnType<typeof vi.fn>;
+    await buildRetryPreamble({
+      // Cast to bypass TypeScript's NodeRetry type (which mirrors Zod min(1))
+      retry: { max: 1, instruction: { reflect: "" } } as any,
+      verifyError,
+      toolCalls: [],
+      nodeInstruction,
+      claude,
+      logger: silentLogger,
+    });
+    expect(askSpy).toHaveBeenCalledOnce();
+    // The reflection prompt is built from the empty string — it should NOT contain
+    // the default "Briefly diagnose" text because reflect="" was used instead.
+    const sentInstruction = askSpy.mock.calls[0][0].instruction as string;
+    expect(sentInstruction).not.toContain("Briefly diagnose");
+    // The verify error is always included regardless of reflect content.
+    expect(sentInstruction).toContain(verifyError);
+  });
 });

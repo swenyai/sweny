@@ -79,4 +79,16 @@ describe("evaluateRequires", () => {
     const err = evaluateRequires(requires, {});
     expect(err).not.toBeNull();
   });
+
+  // ── Test 10: malformed block with no checks declared (fix B) ──
+
+  it("returns failure when requires block has no checks declared (fix B defensive guard)", () => {
+    // Post-merge fix B: evaluateRequires fails loudly when a requires block
+    // exists but declares neither output_required nor output_matches.
+    // Passing on_fail directly to bypass TypeScript's NodeRequires type.
+    const err = evaluateRequires({ on_fail: "fail" } as any, { input: {} });
+    expect(err).not.toBeNull();
+    expect(err).toMatch(/^requires failed:/);
+    expect(err).toMatch(/no checks declared/);
+  });
 });
