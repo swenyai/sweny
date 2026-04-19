@@ -1286,4 +1286,108 @@ describe("executor", () => {
       expect(askCalls[0].instruction).toContain("Focus on tool selection only.");
     });
   });
+
+  describe("retry — trace and observer", () => {
+    it("records each retry attempt as its own TraceStep with retryAttempt", async () => {
+      const workflow: Workflow = {
+        id: "retry-trace",
+        name: "Retry Trace",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 2 },
+          },
+        },
+        edges: [],
+      };
+
+      let callCount = 0;
+      const claude: any = {
+        run: async () => {
+          callCount++;
+          return callCount === 3
+            ? { status: "success", data: { done: true }, toolCalls: [] }
+            : { status: "success", data: {}, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async () => "",
+      };
+
+      const { trace } = await execute(workflow, {}, { skills: createSkillMap([]), claude });
+      const aSteps = trace.steps.filter((s) => s.node === "a");
+      expect(aSteps).toHaveLength(3);
+      expect(aSteps[0]).toMatchObject({ node: "a", status: "failed", iteration: 1, retryAttempt: 0 });
+      expect(aSteps[1]).toMatchObject({ node: "a", status: "failed", iteration: 1, retryAttempt: 1 });
+      expect(aSteps[2]).toMatchObject({ node: "a", status: "success", iteration: 1, retryAttempt: 2 });
+    });
+
+    it("emits node:retry observer events with attempt and preamble", async () => {
+      const workflow: Workflow = {
+        id: "retry-observer",
+        name: "Retry Observer",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 1 },
+          },
+        },
+        edges: [],
+      };
+
+      const events: ExecutionEvent[] = [];
+      let callCount = 0;
+      const claude: any = {
+        run: async () => {
+          callCount++;
+          return callCount === 2
+            ? { status: "success", data: { done: true }, toolCalls: [] }
+            : { status: "success", data: {}, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async () => "",
+      };
+
+      await execute(
+        workflow,
+        {},
+        {
+          skills: createSkillMap([]),
+          claude,
+          observer: (e) => events.push(e),
+        },
+      );
+
+      const retryEvents = events.filter((e) => e.type === "node:retry");
+      expect(retryEvents).toHaveLength(1);
+      const evt = retryEvents[0] as Extract<ExecutionEvent, { type: "node:retry" }>;
+      expect(evt.node).toBe("a");
+      expect(evt.attempt).toBe(1);
+      expect(evt.preamble).toMatch(/Previous attempt failed verification/);
+      expect(evt.reason).toMatch(/output_required/);
+    });
+
+    it("omits retryAttempt on TraceStep when no retry fires", async () => {
+      const workflow: Workflow = {
+        id: "no-retry",
+        name: "No Retry",
+        description: "",
+        entry: "a",
+        nodes: { a: { name: "A", instruction: "Do A", skills: [] } },
+        edges: [],
+      };
+      const claude = new MockClaude({ responses: { a: { data: { ok: true } } }, workflow });
+      const { trace } = await execute(workflow, {}, { skills: createSkillMap([]), claude });
+      expect(trace.steps[0].retryAttempt).toBeUndefined();
+    });
+  });
 });
