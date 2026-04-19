@@ -999,4 +999,169 @@ describe("executor", () => {
       expect(results.get("b")!.status).toBe("success");
     });
   });
+
+  describe("retry on verify failure", () => {
+    it("retries with default preamble and succeeds on second attempt", async () => {
+      const workflow: Workflow = {
+        id: "retry-default",
+        name: "Retry Default",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 1 },
+          },
+        },
+        edges: [],
+      };
+
+      let callCount = 0;
+      const claude: any = {
+        run: async (opts: { instruction: string }) => {
+          callCount++;
+          if (callCount === 1) return { status: "success", data: {}, toolCalls: [] };
+          // Second call sees the retry preamble in the instruction
+          expect(opts.instruction).toMatch(/Previous attempt failed verification/);
+          return { status: "success", data: { done: true }, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async () => "",
+      };
+
+      const { results } = await execute(
+        workflow,
+        {},
+        {
+          skills: createSkillMap([]),
+          claude,
+        },
+      );
+      expect(callCount).toBe(2);
+      const a = results.get("a")!;
+      expect(a.status).toBe("success");
+      expect(a.data.done).toBe(true);
+    });
+
+    it("marks failed and stops after retry exhaustion", async () => {
+      const workflow: Workflow = {
+        id: "retry-exhaust",
+        name: "Retry Exhaust",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 2 },
+          },
+        },
+        edges: [],
+      };
+
+      let callCount = 0;
+      const claude: any = {
+        run: async () => {
+          callCount++;
+          return { status: "success", data: {}, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async () => "",
+      };
+
+      const { results } = await execute(
+        workflow,
+        {},
+        {
+          skills: createSkillMap([]),
+          claude,
+        },
+      );
+      expect(callCount).toBe(3); // initial + 2 retries
+      const a = results.get("a")!;
+      expect(a.status).toBe("failed");
+      expect(a.data.error).toMatch(/output_required/);
+    });
+
+    it("includes the static preamble text in the retry instruction", async () => {
+      const workflow: Workflow = {
+        id: "retry-static",
+        name: "Retry Static",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 1, instruction: "Try harder this time." },
+          },
+        },
+        edges: [],
+      };
+
+      const seenInstructions: string[] = [];
+      const claude: any = {
+        run: async (opts: { instruction: string }) => {
+          seenInstructions.push(opts.instruction);
+          return seenInstructions.length === 2
+            ? { status: "success", data: { done: true }, toolCalls: [] }
+            : { status: "success", data: {}, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async () => "",
+      };
+
+      await execute(workflow, {}, { skills: createSkillMap([]), claude });
+      expect(seenInstructions[1]).toContain("Try harder this time.");
+      expect(seenInstructions[1]).toContain("Previous attempt failed verification");
+    });
+
+    it("does not retry when claude.run itself fails (non-verify failure)", async () => {
+      const workflow: Workflow = {
+        id: "retry-no-trigger",
+        name: "No Trigger",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 3 },
+          },
+        },
+        edges: [],
+      };
+
+      let callCount = 0;
+      const claude: any = {
+        run: async () => {
+          callCount++;
+          return { status: "failed", data: { error: "API down" }, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async () => "",
+      };
+
+      const { results } = await execute(
+        workflow,
+        {},
+        {
+          skills: createSkillMap([]),
+          claude,
+        },
+      );
+      expect(callCount).toBe(1);
+      expect(results.get("a")!.status).toBe("failed");
+      expect(results.get("a")!.data.error).toBe("API down");
+    });
+  });
 });

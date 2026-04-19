@@ -36,6 +36,7 @@ import { consoleLogger } from "./types.js";
 import { resolveSources } from "./source-resolver.js";
 import { evaluateVerify } from "./verify.js";
 import { evaluateRequires } from "./requires.js";
+import { buildRetryPreamble } from "./retry.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -237,34 +238,66 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       skillInstructions,
     );
 
-    // Run Claude on this node
-    const result = await claude.run({
-      instruction,
-      context,
-      tools: trackedTools,
-      outputSchema: node.output,
-      maxTurns: node.max_turns,
-      onProgress: (message) => {
-        safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
-      },
-    });
+    // Run Claude on this node, with optional verify-failure retry loop.
+    let attempt = 0;
+    let result: NodeResult;
+    let currentInstruction = instruction;
+    const retry = node.retry;
 
-    // Machine-checked post-condition. Enforced AFTER the LLM finishes so that
-    // a model claiming success cannot bypass side-effect requirements (e.g.
-    // reporting "issue created" when no `linear_create_issue` call was made).
-    // Skipped entirely when the node already failed — the node's own error is
-    // the root cause and verify would just add noise.
-    if (result.status === "success") {
+    while (true) {
+      result = await claude.run({
+        instruction: currentInstruction,
+        context,
+        tools: trackedTools,
+        outputSchema: node.output,
+        maxTurns: node.max_turns,
+        onProgress: (message) => {
+          safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
+        },
+      });
+
+      // Retry only triggers on verify failure — bail on tool/API errors.
+      if (result.status !== "success") break;
+
       const verifyError = evaluateVerify(node.verify, result);
-      if (verifyError) {
-        result.status = "failed";
-        result.data = { ...result.data, error: verifyError };
+      if (!verifyError) break;
+
+      // Apply verify failure to the result.
+      result.status = "failed";
+      result.data = { ...result.data, error: verifyError };
+
+      if (!retry || attempt >= retry.max) {
         logger.warn(`  verify failed: ${verifyError}`, { node: currentId });
+        break;
       }
+
+      // Build retry preamble + record attempt in trace.
+      trace.steps.push({ node: currentId, status: "failed", iteration, retryAttempt: attempt });
+      logger.warn(`  verify failed (attempt ${attempt + 1}/${retry.max + 1}): ${verifyError}`, { node: currentId });
+
+      const preamble = await buildRetryPreamble({
+        retry,
+        verifyError,
+        toolCalls: result.toolCalls,
+        nodeInstruction: resolvedInstruction,
+        claude,
+        logger,
+      });
+      currentInstruction = `${preamble}\n\n---\n\n${instruction}`;
+      safeObserve(
+        observer,
+        { type: "node:retry", node: currentId, attempt: attempt + 1, reason: verifyError, preamble },
+        logger,
+      );
+      attempt++;
     }
 
     results.set(currentId, result);
-    trace.steps.push({ node: currentId, status: result.status, iteration });
+    trace.steps.push(
+      attempt > 0
+        ? { node: currentId, status: result.status, iteration, retryAttempt: attempt }
+        : { node: currentId, status: result.status, iteration },
+    );
     safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
     logger.info(`  ✓ ${result.status}`, { node: currentId, toolCalls: result.toolCalls.length });
 
