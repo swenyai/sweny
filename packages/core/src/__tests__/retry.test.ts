@@ -31,6 +31,7 @@ describe("buildRetryPreamble", () => {
     const result = await buildRetryPreamble({
       retry: { max: 1 },
       verifyError,
+      context: {},
       toolCalls: [],
       nodeInstruction,
       claude,
@@ -46,6 +47,7 @@ describe("buildRetryPreamble", () => {
     const result = await buildRetryPreamble({
       retry: { max: 1, instruction: "Remember to call linear_create_issue first." },
       verifyError,
+      context: {},
       toolCalls: [],
       nodeInstruction,
       claude,
@@ -62,6 +64,7 @@ describe("buildRetryPreamble", () => {
     const result = await buildRetryPreamble({
       retry: { max: 1, instruction: { auto: true } },
       verifyError,
+      context: {},
       toolCalls: [tc("bar", { ok: true })],
       nodeInstruction,
       claude,
@@ -83,6 +86,7 @@ describe("buildRetryPreamble", () => {
     await buildRetryPreamble({
       retry: { max: 1, instruction: { reflect: "Focus on the missing tool calls only." } },
       verifyError,
+      context: {},
       toolCalls: [],
       nodeInstruction,
       claude,
@@ -102,6 +106,7 @@ describe("buildRetryPreamble", () => {
     const result = await buildRetryPreamble({
       retry: { max: 1, instruction: { auto: true } },
       verifyError,
+      context: {},
       toolCalls: [],
       nodeInstruction,
       claude,
@@ -120,6 +125,7 @@ describe("buildRetryPreamble", () => {
     const result = await buildRetryPreamble({
       retry: { max: 1, instruction: { auto: true } },
       verifyError,
+      context: {},
       toolCalls: [],
       nodeInstruction,
       claude,
@@ -135,6 +141,7 @@ describe("buildRetryPreamble", () => {
     await buildRetryPreamble({
       retry: { max: 1, instruction: { auto: true } },
       verifyError,
+      context: {},
       toolCalls: [tc("foo", { ok: true }), tc("bar", { error: "boom" })],
       nodeInstruction,
       claude,
@@ -156,6 +163,7 @@ describe("buildRetryPreamble", () => {
     const result = await buildRetryPreamble({
       retry: { max: 1, instruction: { auto: true } },
       verifyError,
+      context: {},
       toolCalls: [],
       nodeInstruction,
       claude,
@@ -178,6 +186,7 @@ describe("buildRetryPreamble", () => {
     const result = await buildRetryPreamble({
       retry: { max: 1, instruction: { auto: true } },
       verifyError,
+      context: {},
       toolCalls: [],
       nodeInstruction: tricky,
       claude,
@@ -204,6 +213,7 @@ describe("buildRetryPreamble", () => {
       // Cast to bypass TypeScript's NodeRetry type (which mirrors Zod min(1))
       retry: { max: 1, instruction: { reflect: "" } } as any,
       verifyError,
+      context: {},
       toolCalls: [],
       nodeInstruction,
       claude,

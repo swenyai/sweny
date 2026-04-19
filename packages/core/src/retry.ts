@@ -46,7 +46,8 @@ export async function buildRetryPreamble(opts: BuildRetryPreambleOptions): Promi
   }
 
   if (inst && typeof inst === "object") {
-    const reflectPrompt = typeof inst.reflect === "string" ? inst.reflect : DEFAULT_REFLECTION_PROMPT;
+    const reflectPrompt =
+      "reflect" in inst && typeof inst.reflect === "string" ? inst.reflect : DEFAULT_REFLECTION_PROMPT;
     const askInstruction = buildReflectionPrompt(reflectPrompt, nodeInstruction, verifyError, toolCalls);
     try {
       const diagnosis = await claude.ask({ instruction: askInstruction, context });
