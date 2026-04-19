@@ -96,6 +96,48 @@ export interface NodeVerify {
 }
 
 /**
+ * Machine-checked pre-condition for a node.
+ *
+ * Evaluated by the executor BEFORE the LLM runs. If any declared check fails,
+ * the node is marked `failed` (or `skipped` when `on_fail: "skip"`) and the
+ * LLM is never invoked.
+ *
+ * Path roots resolve against the cross-node context map:
+ *   { input: <runtime input>, [priorNodeId]: <data of prior node>, ... }
+ *
+ * Reuses the same path grammar as `verify` (dotted segments, `[*]` wildcard,
+ * optional `all:`/`any:` prefix).
+ */
+export interface NodeRequires {
+  /** Listed paths must be present and non-null in the context map. */
+  output_required?: string[];
+  /** Each assertion must hold against the context map. */
+  output_matches?: OutputMatch[];
+  /** Action when checks fail. Default: "fail". */
+  on_fail?: "fail" | "skip";
+}
+
+/**
+ * Node-local retry on verify failure.
+ *
+ * Re-runs the LLM up to `max` additional times, prepending feedback derived
+ * from the verify failure. Triggered ONLY by verify failure — not by tool/API
+ * errors and not by `requires` failure.
+ *
+ * `instruction` shapes the feedback preamble:
+ *   - omitted        → default "## Previous attempt failed verification..."
+ *   - string         → static text + verify error
+ *   - { auto: true } → LLM-generated diagnosis from default reflection prompt
+ *   - { reflect: s } → LLM-generated diagnosis from author-provided prompt
+ */
+export interface NodeRetry {
+  /** Maximum number of retry attempts after the initial run. Must be ≥ 1. */
+  max: number;
+  /** Preamble shape — see interface docs. */
+  instruction?: string | { auto: true } | { reflect: string };
+}
+
+/**
  * A single output assertion. Exactly one of `equals | in | matches` must be set.
  *
  * `path` is a dotted path that may include `[*]` wildcard segments and may be
@@ -129,6 +171,10 @@ export interface Node {
   context?: NodeSources;
   /** Machine-checked post-conditions. Enforced by the executor after the LLM finishes. */
   verify?: NodeVerify;
+  /** Machine-checked pre-conditions. Enforced by the executor before the LLM runs. */
+  requires?: NodeRequires;
+  /** Node-local retry on verify failure (with optional autonomous reflection). */
+  retry?: NodeRetry;
 }
 
 /** An edge connecting two nodes */
@@ -193,6 +239,7 @@ export type ExecutionEvent =
   | { type: "tool:result"; node: string; tool: string; output: unknown }
   | { type: "node:exit"; node: string; result: NodeResult }
   | { type: "node:progress"; node: string; message: string }
+  | { type: "node:retry"; node: string; attempt: number; reason: string; preamble: string }
   | { type: "route"; from: string; to: string; reason: string }
   | { type: "workflow:end"; results: Record<string, NodeResult> };
 
@@ -213,6 +260,8 @@ export interface TraceStep {
   status: "success" | "failed" | "skipped";
   /** 1-based iteration count (2 = second time this node ran) */
   iteration: number;
+  /** 0-indexed retry attempt for this iteration. Absent when no retry fired. */
+  retryAttempt?: number;
 }
 
 /** A routing decision between nodes */
@@ -265,6 +314,12 @@ export interface Claude {
     context: Record<string, unknown>;
     choices: { id: string; description: string }[];
   }): Promise<string>;
+
+  /**
+   * Single-completion free-text query. No tools, no output schema.
+   * Used by the executor to generate retry strategies in autonomous reflection mode.
+   */
+  ask(opts: { instruction: string; context: Record<string, unknown> }): Promise<string>;
 }
 
 // ─── MCP Auto-injection ──────────────────────────────────────────
