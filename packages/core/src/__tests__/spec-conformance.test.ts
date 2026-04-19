@@ -1088,6 +1088,17 @@ describe("spec: JSON Schema", () => {
     const errors = validateWorkflow(result);
     expect(errors).toHaveLength(0);
   });
+
+  it("workflowJsonSchema declares verify, requires, and retry on node properties", () => {
+    const nodeProps = (workflowJsonSchema.properties.nodes as any).additionalProperties.properties;
+    expect(nodeProps.verify).toBeDefined();
+    expect(nodeProps.requires).toBeDefined();
+    expect(nodeProps.retry).toBeDefined();
+    expect(nodeProps.requires.properties.output_required).toBeDefined();
+    expect(nodeProps.requires.properties.on_fail.enum).toEqual(["fail", "skip"]);
+    expect(nodeProps.retry.properties.max.type).toBe("integer");
+    expect(nodeProps.retry.properties.instruction.oneOf).toBeDefined();
+  });
 });
 
 // ─── Spec Section: Source Types ──────────────────────────────────

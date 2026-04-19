@@ -451,6 +451,86 @@ export const workflowJsonSchema = {
             $ref: "#/$defs/NodeSources",
             description: "Per-node context. Additive by default; set { only: true } to block cascade.",
           },
+          verify: {
+            type: "object",
+            description: "Machine-checked post-conditions evaluated after the LLM finishes.",
+            additionalProperties: false,
+            properties: {
+              any_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+              all_tools_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+              no_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+              output_required: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+              output_matches: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["path"],
+                  additionalProperties: false,
+                  properties: {
+                    path: { type: "string", minLength: 1 },
+                    equals: {},
+                    in: { type: "array" },
+                    matches: { type: "string", minLength: 1 },
+                  },
+                },
+                minItems: 1,
+              },
+            },
+          },
+          requires: {
+            type: "object",
+            description: "Pre-condition checks evaluated before the LLM runs.",
+            additionalProperties: false,
+            properties: {
+              output_required: {
+                type: "array",
+                items: { type: "string", minLength: 1 },
+                minItems: 1,
+              },
+              output_matches: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["path"],
+                  additionalProperties: false,
+                  properties: {
+                    path: { type: "string", minLength: 1 },
+                    equals: {},
+                    in: { type: "array" },
+                    matches: { type: "string", minLength: 1 },
+                  },
+                },
+                minItems: 1,
+              },
+              on_fail: { type: "string", enum: ["fail", "skip"] },
+            },
+          },
+          retry: {
+            type: "object",
+            description: "Node-local retry on verify failure.",
+            required: ["max"],
+            additionalProperties: false,
+            properties: {
+              max: { type: "integer", minimum: 1 },
+              instruction: {
+                oneOf: [
+                  { type: "string", minLength: 1 },
+                  {
+                    type: "object",
+                    required: ["auto"],
+                    additionalProperties: false,
+                    properties: { auto: { const: true } },
+                  },
+                  {
+                    type: "object",
+                    required: ["reflect"],
+                    additionalProperties: false,
+                    properties: { reflect: { type: "string", minLength: 1 } },
+                  },
+                ],
+              },
+            },
+          },
         },
       },
     },
