@@ -61,6 +61,7 @@ import { checkProviderConnectivity } from "./check.js";
 import { registerSetupCommand } from "./setup.js";
 import { registerPublishCommand } from "./publish.js";
 import { reportToCloud } from "./cloud-report.js";
+import { createCloudStreamObserver } from "./cloud-stream-observer.js";
 import { runUpgrade, fetchLatestFromNpm } from "./upgrade.js";
 import { maybeNudge, defaultCachePath } from "./version-check.js";
 import { spawnSync } from "node:child_process";
@@ -361,7 +362,16 @@ triageCmd.action(async (options: Record<string, unknown>) => {
         }
       };
 
-  const observer = composeObservers(progressObserver, config.stream ? createStreamObserver() : undefined);
+  const cloudObserver = await createCloudStreamObserver({
+    workflow: "triage",
+    config,
+    startedAt: runStart,
+  });
+  const observer = composeObservers(
+    progressObserver,
+    config.stream ? createStreamObserver() : undefined,
+    cloudObserver ?? undefined,
+  );
 
   // ── Build workflow input from config ──────────────────────
   const providerCtx = buildProviderCtx(config, mcpServers);
@@ -543,9 +553,15 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     }
   };
 
+  const implCloudObserver = await createCloudStreamObserver({
+    workflow: "implement",
+    config,
+    startedAt: implRunStart,
+  });
   const observer = composeObservers(
     implProgressObserver,
     Boolean(options.stream) ? createStreamObserver() : undefined,
+    implCloudObserver ?? undefined,
   )!;
 
   // Resolve rules/context from .sweny.yml (same as triage path)
@@ -747,7 +763,16 @@ export async function workflowRunAction(
         }
       };
 
-  const observer = composeObservers(wfProgressObserver, options.stream ? createStreamObserver() : undefined);
+  const wfCloudObserver = await createCloudStreamObserver({
+    workflow: workflow.id,
+    config,
+    startedAt: runStart,
+  });
+  const observer = composeObservers(
+    wfProgressObserver,
+    options.stream ? createStreamObserver() : undefined,
+    wfCloudObserver ?? undefined,
+  );
 
   // Build workflow input — prefer --input JSON if provided, else fall back to config-derived input
   let workflowInput: Record<string, unknown>;
