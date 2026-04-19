@@ -1390,4 +1390,92 @@ describe("executor", () => {
       expect(trace.steps[0].retryAttempt).toBeUndefined();
     });
   });
+
+  describe("requires + retry interaction", () => {
+    it("does not trigger retry when requires fails (LLM never runs)", async () => {
+      const workflow: Workflow = {
+        id: "req-no-retry",
+        name: "Req No Retry",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            requires: { output_required: ["input.missing"] },
+            verify: { output_required: ["done"] },
+            retry: { max: 5 },
+          },
+        },
+        edges: [],
+      };
+
+      let callCount = 0;
+      const claude: any = {
+        run: async () => {
+          callCount++;
+          return { status: "success", data: { done: true }, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async () => "",
+      };
+
+      const { results } = await execute(
+        workflow,
+        {},
+        {
+          skills: createSkillMap([]),
+          claude,
+        },
+      );
+      expect(callCount).toBe(0);
+      const a = results.get("a")!;
+      expect(a.status).toBe("failed");
+      expect(a.data.error).toMatch(/^requires failed:/);
+    });
+
+    it("requires passes → verify fails → retry runs as normal", async () => {
+      const workflow: Workflow = {
+        id: "req-pass-retry",
+        name: "Req Pass Retry",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            requires: { output_required: ["input.x"] },
+            verify: { output_required: ["done"] },
+            retry: { max: 1 },
+          },
+        },
+        edges: [],
+      };
+
+      let callCount = 0;
+      const claude: any = {
+        run: async () => {
+          callCount++;
+          return callCount === 2
+            ? { status: "success", data: { done: true }, toolCalls: [] }
+            : { status: "success", data: {}, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async () => "",
+      };
+
+      const { results } = await execute(
+        workflow,
+        { x: 1 },
+        {
+          skills: createSkillMap([]),
+          claude,
+        },
+      );
+      expect(callCount).toBe(2);
+      expect(results.get("a")!.status).toBe("success");
+    });
+  });
 });
