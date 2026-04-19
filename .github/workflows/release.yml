@@ -57,58 +57,54 @@ jobs:
 
           PUBLISHED=false
 
-          if [ -n "$CHANGED_CORE" ]; then
-            cd packages/core
+          # Bump from whichever is higher (LOCAL or NPM) +1 patch.
+          # Guards against the race where a prior Release run published to npm
+          # but its post-publish git push lost to a concurrent merge — leaving
+          # main's package.json behind npm. Without this max(), the next run
+          # would retry the same already-published version and 403.
+          bump_and_publish() {
+            local pkg_dir="$1"
+            local pkg_name="$2"
+            cd "$pkg_dir"
+            local LOCAL_VER NPM_VER HIGHER NEXT
             LOCAL_VER=$(node -p "require('./package.json').version")
-            NPM_VER=$(npm view @sweny-ai/core version 2>/dev/null || echo "0.0.0")
-
-            if [ "$LOCAL_VER" = "$NPM_VER" ]; then
-              NEXT=$(echo "$LOCAL_VER" | awk -F. '{$NF=$NF+1; print}' OFS=.)
+            NPM_VER=$(npm view "$pkg_name" version 2>/dev/null || echo "0.0.0")
+            HIGHER=$(printf '%s\n%s\n' "$LOCAL_VER" "$NPM_VER" | sort -V | tail -1)
+            NEXT=$(echo "$HIGHER" | awk -F. '{$NF=$NF+1; print}' OFS=.)
+            if [ "$NEXT" != "$LOCAL_VER" ]; then
               npm version "$NEXT" --no-git-tag-version
             fi
-
             npm publish
+            echo "Published $pkg_name@$(node -p "require('./package.json').version")"
+            cd - > /dev/null
+          }
+
+          if [ -n "$CHANGED_CORE" ]; then
+            bump_and_publish packages/core "@sweny-ai/core"
             PUBLISHED=true
-            echo "Published @sweny-ai/core@$(node -p "require('./package.json').version")"
-            cd ../..
           fi
 
           if [ -n "$CHANGED_STUDIO" ]; then
-            cd packages/studio
-            LOCAL_VER=$(node -p "require('./package.json').version")
-            NPM_VER=$(npm view @sweny-ai/studio version 2>/dev/null || echo "0.0.0")
-
-            if [ "$LOCAL_VER" = "$NPM_VER" ]; then
-              NEXT=$(echo "$LOCAL_VER" | awk -F. '{$NF=$NF+1; print}' OFS=.)
-              npm version "$NEXT" --no-git-tag-version
-            fi
-
-            npm publish
+            bump_and_publish packages/studio "@sweny-ai/studio"
             PUBLISHED=true
-            echo "Published @sweny-ai/studio@$(node -p "require('./package.json').version")"
-            cd ../..
           fi
 
           if [ -n "$CHANGED_MCP" ]; then
-            cd packages/mcp
-            LOCAL_VER=$(node -p "require('./package.json').version")
-            NPM_VER=$(npm view @sweny-ai/mcp version 2>/dev/null || echo "0.0.0")
-
-            if [ "$LOCAL_VER" = "$NPM_VER" ]; then
-              NEXT=$(echo "$LOCAL_VER" | awk -F. '{$NF=$NF+1; print}' OFS=.)
-              npm version "$NEXT" --no-git-tag-version
-            fi
-
-            npm publish
+            bump_and_publish packages/mcp "@sweny-ai/mcp"
             PUBLISHED=true
-            echo "Published @sweny-ai/mcp@$(node -p "require('./package.json').version")"
-            cd ../..
           fi
 
           if [ "$PUBLISHED" = true ]; then
             git add -A
             git commit -m "chore: release packages [skip ci]"
-            git push
+            # Rebase onto any commits that landed during build/test/publish.
+            # Without this, a concurrent dependabot merge causes "fetch first"
+            # rejection and main is left with package.json behind npm.
+            for attempt in 1 2 3; do
+              if git push; then break; fi
+              echo "push rejected, attempt $attempt — pulling and retrying"
+              git pull --rebase origin main
+            done
           fi
 
       - name: Tag v5 moving tag and immutable v5.<core-version>
