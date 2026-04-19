@@ -1164,4 +1164,126 @@ describe("executor", () => {
       expect(results.get("a")!.data.error).toBe("API down");
     });
   });
+
+  describe("retry — autonomous reflection", () => {
+    it("calls claude.ask and injects reflection into the retry preamble", async () => {
+      const workflow: Workflow = {
+        id: "retry-auto",
+        name: "Retry Auto",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Open the PR",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 1, instruction: { auto: true } },
+          },
+        },
+        edges: [],
+      };
+
+      const askCalls: { instruction: string; context: Record<string, unknown> }[] = [];
+      const seenInstructions: string[] = [];
+
+      const claude: any = {
+        run: async (opts: { instruction: string }) => {
+          seenInstructions.push(opts.instruction);
+          return seenInstructions.length === 2
+            ? { status: "success", data: { done: true }, toolCalls: [] }
+            : { status: "success", data: {}, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async (opts: { instruction: string; context: Record<string, unknown> }) => {
+          askCalls.push(opts);
+          return "Diagnosis: missing the create_pr tool. Strategy: call it before returning.";
+        },
+      };
+
+      await execute(workflow, {}, { skills: createSkillMap([]), claude });
+      expect(askCalls).toHaveLength(1);
+      expect(askCalls[0].instruction).toContain("Open the PR");
+      expect(askCalls[0].instruction).toMatch(/Briefly diagnose/);
+      expect(seenInstructions[1]).toContain("Diagnosis: missing the create_pr tool");
+    });
+
+    it("falls back to default preamble when claude.ask throws", async () => {
+      const workflow: Workflow = {
+        id: "retry-auto-fallback",
+        name: "Retry Auto Fallback",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Open the PR",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 1, instruction: { auto: true } },
+          },
+        },
+        edges: [],
+      };
+
+      const seenInstructions: string[] = [];
+      const claude: any = {
+        run: async (opts: { instruction: string }) => {
+          seenInstructions.push(opts.instruction);
+          return seenInstructions.length === 2
+            ? { status: "success", data: { done: true }, toolCalls: [] }
+            : { status: "success", data: {}, toolCalls: [] };
+        },
+        evaluate: async () => "x",
+        ask: async () => {
+          throw new Error("network down");
+        },
+      };
+
+      await execute(workflow, {}, { skills: createSkillMap([]), claude });
+      expect(seenInstructions[1]).toMatch(/Previous attempt failed verification/);
+    });
+
+    it("uses the author's reflect prompt when instruction.reflect is set", async () => {
+      const workflow: Workflow = {
+        id: "retry-reflect",
+        name: "Retry Reflect",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Open the PR",
+            skills: [],
+            verify: { output_required: ["done"] },
+            retry: { max: 1, instruction: { reflect: "Focus on tool selection only." } },
+          },
+        },
+        edges: [],
+      };
+
+      const askCalls: { instruction: string }[] = [];
+      const claude: any = {
+        run: async () => ({ status: "success", data: { done: true }, toolCalls: [] }),
+        evaluate: async () => "x",
+        ask: async (opts: { instruction: string; context: Record<string, unknown> }) => {
+          askCalls.push(opts);
+          return "diagnosis";
+        },
+      };
+
+      // First call deliberately fails verify (output_required missing) to trigger ask.
+      let callCount = 0;
+      claude.run = async () => {
+        callCount++;
+        return callCount === 1
+          ? { status: "success", data: {}, toolCalls: [] }
+          : { status: "success", data: { done: true }, toolCalls: [] };
+      };
+
+      await execute(workflow, {}, { skills: createSkillMap([]), claude });
+      expect(askCalls).toHaveLength(1);
+      expect(askCalls[0].instruction).toContain("Focus on tool selection only.");
+    });
+  });
 });
