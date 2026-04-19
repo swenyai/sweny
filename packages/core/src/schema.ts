@@ -123,6 +123,16 @@ export const nodeVerifyZ = z
     },
   );
 
+export const nodeRequiresZ = z
+  .object({
+    output_required: z.array(z.string().min(1)).min(1).optional(),
+    output_matches: z.array(outputMatchZ).min(1).optional(),
+    on_fail: z.enum(["fail", "skip"]).optional(),
+  })
+  .refine((r) => r.output_required !== undefined || r.output_matches !== undefined, {
+    message: "requires must declare at least one check (output_required or output_matches)",
+  });
+
 export const nodeZ = z.object({
   name: z.string().min(1),
   instruction: sourceZ,
@@ -132,6 +142,7 @@ export const nodeZ = z.object({
   rules: nodeSourcesZ.optional(),
   context: nodeSourcesZ.optional(),
   verify: nodeVerifyZ.optional(),
+  requires: nodeRequiresZ.optional(),
 });
 
 export const edgeZ = z.object({

@@ -3,6 +3,7 @@ import {
   workflowZ,
   nodeZ,
   nodeVerifyZ,
+  nodeRequiresZ,
   edgeZ,
   skillZ,
   toolZ,
@@ -165,6 +166,47 @@ describe("Zod schemas", () => {
 
     it("rejects empty output_matches array", () => {
       expect(() => nodeVerifyZ.parse({ output_matches: [] })).toThrow();
+    });
+  });
+
+  describe("nodeRequiresZ", () => {
+    it("accepts output_required only", () => {
+      expect(() => nodeRequiresZ.parse({ output_required: ["input.x"] })).not.toThrow();
+    });
+
+    it("accepts output_matches only", () => {
+      expect(() => nodeRequiresZ.parse({ output_matches: [{ path: "input.x", equals: 1 }] })).not.toThrow();
+    });
+
+    it("accepts on_fail: 'fail'", () => {
+      expect(() => nodeRequiresZ.parse({ output_required: ["input.x"], on_fail: "fail" })).not.toThrow();
+    });
+
+    it("accepts on_fail: 'skip'", () => {
+      expect(() => nodeRequiresZ.parse({ output_required: ["input.x"], on_fail: "skip" })).not.toThrow();
+    });
+
+    it("rejects empty requires (no checks declared)", () => {
+      expect(() => nodeRequiresZ.parse({})).toThrow();
+    });
+
+    it("rejects on_fail other than 'fail' or 'skip'", () => {
+      expect(() => nodeRequiresZ.parse({ output_required: ["input.x"], on_fail: "throw" })).toThrow();
+    });
+
+    it("rejects empty output_required array", () => {
+      expect(() => nodeRequiresZ.parse({ output_required: [] })).toThrow();
+    });
+
+    it("nodeZ accepts a node with requires", () => {
+      expect(() =>
+        nodeZ.parse({
+          name: "Test",
+          instruction: "Do thing",
+          skills: [],
+          requires: { output_required: ["input.x"] },
+        }),
+      ).not.toThrow();
     });
   });
 
