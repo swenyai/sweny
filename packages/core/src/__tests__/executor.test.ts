@@ -867,4 +867,136 @@ describe("executor", () => {
       expect(r.data.error).toBeUndefined();
     });
   });
+
+  describe("requires (pre-conditions)", () => {
+    it("fails the node and skips the LLM when output_required is missing", async () => {
+      const workflow: Workflow = {
+        id: "req-fail",
+        name: "Req Fail",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            requires: { output_required: ["input.missing"] },
+          },
+        },
+        edges: [],
+      };
+      const claude = new MockClaude({
+        responses: { a: { data: { ran: true } } },
+        workflow,
+      });
+      const { results } = await execute(
+        workflow,
+        { other: 1 },
+        {
+          skills: createSkillMap([]),
+          claude,
+        },
+      );
+      const a = results.get("a")!;
+      expect(a.status).toBe("failed");
+      expect(a.data.error).toMatch(/^requires failed:/);
+      expect(a.data.error).toMatch(/'input\.missing'/);
+      expect(claude.executedNodes).toEqual([]); // LLM never ran
+    });
+
+    it("skips the node when on_fail: 'skip' and requires fails", async () => {
+      const workflow: Workflow = {
+        id: "req-skip",
+        name: "Req Skip",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            requires: { output_required: ["input.missing"], on_fail: "skip" },
+          },
+        },
+        edges: [],
+      };
+      const claude = new MockClaude({ responses: { a: { data: {} } }, workflow });
+      const { results } = await execute(
+        workflow,
+        {},
+        {
+          skills: createSkillMap([]),
+          claude,
+        },
+      );
+      const a = results.get("a")!;
+      expect(a.status).toBe("skipped");
+      expect(a.data.skipped_reason).toMatch(/requires not met/);
+      expect(claude.executedNodes).toEqual([]);
+    });
+
+    it("runs the LLM when requires passes", async () => {
+      const workflow: Workflow = {
+        id: "req-pass",
+        name: "Req Pass",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do A",
+            skills: [],
+            requires: { output_required: ["input.x"] },
+          },
+        },
+        edges: [],
+      };
+      const claude = new MockClaude({ responses: { a: { data: { ran: true } } }, workflow });
+      const { results } = await execute(
+        workflow,
+        { x: 1 },
+        {
+          skills: createSkillMap([]),
+          claude,
+        },
+      );
+      expect(results.get("a")!.status).toBe("success");
+      expect(claude.executedNodes).toEqual(["a"]);
+    });
+
+    it("resolves cross-node paths against prior node data", async () => {
+      const workflow: Workflow = {
+        id: "req-cross",
+        name: "Req Cross",
+        description: "",
+        entry: "a",
+        nodes: {
+          a: { name: "A", instruction: "Do A", skills: [] },
+          b: {
+            name: "B",
+            instruction: "Do B",
+            skills: [],
+            requires: { output_required: ["a.handle"] },
+          },
+        },
+        edges: [{ from: "a", to: "b" }],
+      };
+      const claude = new MockClaude({
+        responses: {
+          a: { data: { handle: "ok" } },
+          b: { data: { ran: true } },
+        },
+        workflow,
+      });
+      const { results } = await execute(
+        workflow,
+        {},
+        {
+          skills: createSkillMap([]),
+          claude,
+        },
+      );
+      expect(results.get("b")!.status).toBe("success");
+    });
+  });
 });

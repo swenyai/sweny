@@ -35,6 +35,7 @@ import type {
 import { consoleLogger } from "./types.js";
 import { resolveSources } from "./source-resolver.js";
 import { evaluateVerify } from "./verify.js";
+import { evaluateRequires } from "./requires.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -155,6 +156,49 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       input,
       ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, v.data])),
     };
+
+    // Pre-condition gate: evaluate `requires` against the cross-node context
+    // BEFORE invoking the LLM. Failure either marks the node failed (on_fail
+    // default) or skipped (on_fail: "skip") and skips execution entirely.
+    const requiresError = evaluateRequires(node.requires, context);
+    if (requiresError) {
+      const onFail = node.requires?.on_fail ?? "fail";
+      const result: NodeResult =
+        onFail === "skip"
+          ? {
+              status: "skipped",
+              data: { skipped_reason: requiresError.replace(/^requires failed:/, "requires not met:") },
+              toolCalls: [],
+            }
+          : {
+              status: "failed",
+              data: { error: requiresError },
+              toolCalls: [],
+            };
+      results.set(currentId, result);
+      trace.steps.push({ node: currentId, status: result.status, iteration });
+      safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
+      logger.warn(`  requires ${onFail === "skip" ? "skipped" : "failed"}: ${requiresError}`, { node: currentId });
+
+      // Apply normal routing rules (dry run gate + resolveNext).
+      const isDryRun = input && typeof input === "object" && (input as Record<string, unknown>).dryRun === true;
+      if (isDryRun) {
+        const outEdges = workflow.edges.filter((e) => e.from === currentId);
+        if (outEdges.some((e) => e.when)) {
+          safeObserve(observer, { type: "route", from: currentId, to: "(end)", reason: "dry run" }, logger);
+          currentId = null;
+          continue;
+        }
+      }
+
+      const prevId = currentId;
+      currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
+      if (currentId) {
+        const reason = workflow.edges.find((e) => e.from === prevId && e.to === currentId)?.when ?? "only path";
+        trace.edges.push({ from: prevId, to: currentId, reason });
+      }
+      continue;
+    }
 
     // Wrap tool handlers to emit events + inject context
     const trackedTools = tools.map((t) => ({
