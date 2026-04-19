@@ -156,21 +156,41 @@ Focused actions for common use cases:
 
 SWEny runs locally or in CI with zero phone-home behavior by default. To enable the cloud dashboard at [cloud.sweny.ai](https://cloud.sweny.ai):
 
-1. Sign up and link your repo — the GitHub App handles this in one click.
-2. Copy the **CI reporting token** from your project page (starts with `sweny_pk_`).
-3. Add it as a GitHub Actions secret named `SWENY_CLOUD_TOKEN`.
-4. Expose it to the Action:
+1. Install the [SWEny GitHub App](https://github.com/apps/sweny-ai) on your org or user account.
+2. Grant the Action permission to mint an OIDC token by adding `id-token: write` to your workflow permissions.
+
+```yaml
+jobs:
+  triage:
+    permissions:
+      id-token: write        # required for SWEny Cloud OIDC auth
+      contents: read
+      issues: write
+    steps:
+      - uses: swenyai/sweny@v5
+        with:
+          workflow: .sweny/workflows/triage.yml
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+That's it — the Action mints a short-lived OIDC JWT per run, SWEny Cloud verifies it against GitHub's public keys, and matches the repo owner against your App installation. No secrets to rotate, no tokens to copy.
+
+<details>
+<summary>Legacy: project-token auth</summary>
+
+If you can't grant `id-token: write` (self-hosted runner, reusable workflow constraints, etc.), fall back to a long-lived project token:
 
 ```yaml
 - uses: swenyai/sweny@v5
   with:
-    workflow: .sweny/workflows/security-audit.yml
+    workflow: .sweny/workflows/triage.yml
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
   env:
     SWENY_CLOUD_TOKEN: ${{ secrets.SWENY_CLOUD_TOKEN }}
 ```
+</details>
 
-Without `SWENY_CLOUD_TOKEN`, the Action performs **no network calls to sweny.ai**. No anonymous telemetry, no pings, nothing.
+Without either auth path, the Action performs **no network calls to sweny.ai**. No anonymous telemetry, no pings, nothing.
 
 See [PRIVACY.md](./PRIVACY.md) for the full data policy.
 

@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import type { NodeResult } from "../types.js";
 import type { CliConfig } from "./config.js";
 import { c } from "./output.js";
+import { hasGitHubOidc, mintGitHubOidcToken } from "./github-oidc.js";
 
 const _require = createRequire(import.meta.url);
 const { version } = _require("../../package.json") as { version: string };
@@ -12,9 +13,13 @@ const CLOUD_URL_DEFAULT = "https://cloud.sweny.ai";
 /**
  * Opt-in run reporting to SWEny Cloud.
  *
- * Fires only when `config.cloudToken` (from SWENY_CLOUD_TOKEN or .sweny.yml)
- * is set. Authenticates using the user's cloud token — the user's GITHUB_TOKEN
- * is never forwarded to sweny.ai.
+ * Authentication is tried in order:
+ *   1. GitHub Actions OIDC — when running inside an Action step with
+ *      `permissions: { id-token: write }`. Zero-config, preferred.
+ *   2. `config.cloudToken` (SWENY_CLOUD_TOKEN or .sweny.yml) — legacy.
+ *
+ * If neither is available the function is a silent no-op. The user's
+ * GITHUB_TOKEN is never forwarded to sweny.ai.
  *
  * Failure is silent; reporting never blocks a workflow run.
  */
@@ -24,8 +29,9 @@ export async function reportToCloud(
   config: CliConfig,
   workflow: string,
 ): Promise<void> {
-  const cloudToken = config.cloudToken;
-  if (!cloudToken) return;
+  const cloudUrl = process.env.SWENY_CLOUD_URL || CLOUD_URL_DEFAULT;
+  const authHeader = await resolveAuthHeader(cloudUrl, config.cloudToken);
+  if (!authHeader) return;
 
   const repo = config.repository || process.env.GITHUB_REPOSITORY || "";
   const [owner, name] = repo.split("/");
@@ -70,14 +76,12 @@ export async function reportToCloud(
     runner_os: process.env.RUNNER_OS,
   };
 
-  const cloudUrl = process.env.SWENY_CLOUD_URL || CLOUD_URL_DEFAULT;
-
   try {
     const res = await fetch(`${cloudUrl}/api/report`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${cloudToken}`,
+        Authorization: authHeader,
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
@@ -92,4 +96,25 @@ export async function reportToCloud(
   } catch {
     // Never block the workflow on a reporting failure.
   }
+}
+
+/**
+ * Try OIDC first (if running in Actions with id-token permission); fall back
+ * to a project token. Returns `null` when neither is available so the caller
+ * can silently skip reporting.
+ */
+async function resolveAuthHeader(cloudUrl: string, cloudToken: string | undefined): Promise<string | null> {
+  if (hasGitHubOidc()) {
+    try {
+      const jwt = await mintGitHubOidcToken({ audience: cloudUrl });
+      return `Bearer ${jwt}`;
+    } catch (err) {
+      // A visible (but non-fatal) hint so users can debug why OIDC didn't take.
+      // We never throw — reporting must never block a workflow.
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(c.subtle(`  cloud: OIDC mint failed (${msg}); falling back to project token`));
+    }
+  }
+  if (cloudToken) return `Bearer ${cloudToken}`;
+  return null;
 }

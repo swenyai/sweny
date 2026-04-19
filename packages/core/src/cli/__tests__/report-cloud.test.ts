@@ -188,4 +188,102 @@ describe("reportToCloud", () => {
     expect(Array.isArray(body.findings)).toBe(true);
     expect(Array.isArray(body.nodes)).toBe(true);
   });
+
+  // ── GitHub Actions OIDC path ─────────────────────────────────
+  describe("GitHub Actions OIDC", () => {
+    const origOidcUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    const origOidcToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+
+    beforeEach(() => {
+      process.env.ACTIONS_ID_TOKEN_REQUEST_URL = "https://runner.example/oidc";
+      process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = "runner-token";
+    });
+
+    afterEach(() => {
+      if (origOidcUrl === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+      else process.env.ACTIONS_ID_TOKEN_REQUEST_URL = origOidcUrl;
+      if (origOidcToken === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+      else process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = origOidcToken;
+    });
+
+    // Route fetch calls: runner mint URL returns JWT, cloud URL returns success.
+    function routeFetch(opts: { jwt: string; mintStatus?: number }): void {
+      fetchMock.mockImplementation(async (url: string | URL) => {
+        const urlStr = url.toString();
+        if (urlStr.startsWith("https://runner.example/oidc")) {
+          return new Response(JSON.stringify({ value: opts.jwt }), {
+            status: opts.mintStatus ?? 200,
+          });
+        }
+        return new Response(JSON.stringify({ run_url: "https://cloud.sweny.ai/runs/x" }), {
+          status: 200,
+        });
+      });
+    }
+
+    it("uses OIDC JWT as Bearer when runner env vars are set", async () => {
+      routeFetch({ jwt: "oidc-jwt-value" });
+
+      await reportToCloud(makeResults(), 1000, makeConfig({ cloudToken: "" }), "triage");
+
+      // Two fetches: mint + report
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const reportCall = fetchMock.mock.calls.find(([url]) => url.toString().endsWith("/api/report"));
+      expect(reportCall).toBeDefined();
+      expect(reportCall![1].headers.Authorization).toBe("Bearer oidc-jwt-value");
+    });
+
+    it("prefers OIDC over cloudToken when both available", async () => {
+      routeFetch({ jwt: "oidc-wins" });
+
+      await reportToCloud(makeResults(), 1000, makeConfig({ cloudToken: "sweny_pk_abc" }), "triage");
+
+      const reportCall = fetchMock.mock.calls.find(([url]) => url.toString().endsWith("/api/report"));
+      expect(reportCall![1].headers.Authorization).toBe("Bearer oidc-wins");
+    });
+
+    it("mints JWT with SWENY_CLOUD_URL as audience when set", async () => {
+      process.env.SWENY_CLOUD_URL = "https://cloud.test.example";
+      try {
+        routeFetch({ jwt: "jwt" });
+        await reportToCloud(makeResults(), 1000, makeConfig({ cloudToken: "" }), "triage");
+
+        const mintCall = fetchMock.mock.calls.find(([url]) => url.toString().startsWith("https://runner.example/oidc"));
+        expect(mintCall).toBeDefined();
+        const mintUrl = new URL(mintCall![0] as string);
+        expect(mintUrl.searchParams.get("audience")).toBe("https://cloud.test.example");
+      } finally {
+        delete process.env.SWENY_CLOUD_URL;
+      }
+    });
+
+    it("falls back to cloudToken when OIDC mint fails", async () => {
+      fetchMock.mockImplementation(async (url: string | URL) => {
+        const urlStr = url.toString();
+        if (urlStr.startsWith("https://runner.example/oidc")) {
+          return new Response("nope", { status: 500 });
+        }
+        return new Response(JSON.stringify({}), { status: 200 });
+      });
+
+      await reportToCloud(makeResults(), 1000, makeConfig({ cloudToken: "sweny_pk_fallback" }), "triage");
+
+      const reportCall = fetchMock.mock.calls.find(([url]) => url.toString().endsWith("/api/report"));
+      expect(reportCall![1].headers.Authorization).toBe("Bearer sweny_pk_fallback");
+    });
+
+    it("is a no-op when OIDC fails AND cloudToken is empty", async () => {
+      fetchMock.mockImplementation(async (url: string | URL) => {
+        if (url.toString().startsWith("https://runner.example/oidc")) {
+          return new Response("nope", { status: 500 });
+        }
+        return new Response(JSON.stringify({}), { status: 200 });
+      });
+
+      await reportToCloud(makeResults(), 1000, makeConfig({ cloudToken: "" }), "triage");
+
+      // Mint tried, but no /api/report call because auth could not be resolved
+      expect(fetchMock.mock.calls.some(([url]) => url.toString().endsWith("/api/report"))).toBe(false);
+    });
+  });
 });
