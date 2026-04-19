@@ -279,6 +279,10 @@ export class ClaudeClient implements Claude {
           const resultMsg = message as SDKResultMessage;
           if (resultMsg.subtype === "success" && "result" in resultMsg) {
             response = resultMsg.result;
+          } else if (resultMsg.subtype !== "success") {
+            this.logger.warn(
+              `claude.ask: SDK returned non-success subtype "${resultMsg.subtype}" — returning empty string`,
+            );
           }
         }
       }

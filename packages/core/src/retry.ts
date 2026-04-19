@@ -7,6 +7,7 @@
 // escalates to a workflow failure.
 
 import type { Claude, NodeRetry, ToolCall, Logger } from "./types.js";
+import { isErrorOutput } from "./verify.js";
 
 const DEFAULT_REFLECTION_PROMPT =
   "Briefly diagnose the failure and state your strategy for the retry. Keep your response to 2-4 sentences.";
@@ -20,6 +21,7 @@ export interface BuildRetryPreambleOptions {
   nodeInstruction: string;
   claude: Claude;
   logger: Logger;
+  context: Record<string, unknown>;
 }
 
 /**
@@ -35,7 +37,7 @@ export interface BuildRetryPreambleOptions {
  * default static preamble and logs a warning.
  */
 export async function buildRetryPreamble(opts: BuildRetryPreambleOptions): Promise<string> {
-  const { retry, verifyError, toolCalls, nodeInstruction, claude, logger } = opts;
+  const { retry, verifyError, toolCalls, nodeInstruction, claude, logger, context } = opts;
 
   const inst = retry.instruction;
 
@@ -44,10 +46,10 @@ export async function buildRetryPreamble(opts: BuildRetryPreambleOptions): Promi
   }
 
   if (inst && typeof inst === "object") {
-    const reflectPrompt = "reflect" in inst ? inst.reflect : DEFAULT_REFLECTION_PROMPT;
+    const reflectPrompt = typeof inst.reflect === "string" ? inst.reflect : DEFAULT_REFLECTION_PROMPT;
     const askInstruction = buildReflectionPrompt(reflectPrompt, nodeInstruction, verifyError, toolCalls);
     try {
-      const diagnosis = await claude.ask({ instruction: askInstruction, context: {} });
+      const diagnosis = await claude.ask({ instruction: askInstruction, context });
       const trimmed = diagnosis.trim();
       if (trimmed.length > 0) {
         return `## Reflection on previous attempt\n\n${trimmed}\n\n${DEFAULT_PREAMBLE_HEADER}\n\n${verifyError}`;
@@ -89,14 +91,8 @@ function summarizeToolCalls(toolCalls: ToolCall[]): string {
   if (toolCalls.length === 0) return "(no tools were called)";
   return toolCalls
     .map((c) => {
-      const status = isError(c.output) ? "error" : "ok";
+      const status = isErrorOutput(c.output) ? "error" : "ok";
       return `  - ${c.tool} (${status})`;
     })
     .join("\n");
-}
-
-function isError(output: unknown): boolean {
-  if (!output || typeof output !== "object") return false;
-  const err = (output as Record<string, unknown>).error;
-  return err !== undefined && err !== null && err !== false;
 }

@@ -15,14 +15,21 @@ import { checkOutputRequired, checkOutputMatches } from "./verify.js";
 export function evaluateRequires(requires: NodeRequires | undefined, context: Record<string, unknown>): string | null {
   if (!requires) return null;
 
+  const hasRequiredChecks = requires.output_required && requires.output_required.length > 0;
+  const hasMatchChecks = requires.output_matches && requires.output_matches.length > 0;
+
+  if (!hasRequiredChecks && !hasMatchChecks) {
+    return `requires failed:\n  - Requires block present but no checks declared`;
+  }
+
   const failures: string[] = [];
 
-  if (requires.output_required && requires.output_required.length > 0) {
-    const e = checkOutputRequired(requires.output_required, context);
+  if (hasRequiredChecks) {
+    const e = checkOutputRequired(requires.output_required!, context);
     if (e) failures.push(e);
   }
-  if (requires.output_matches && requires.output_matches.length > 0) {
-    const e = checkOutputMatches(requires.output_matches, context);
+  if (hasMatchChecks) {
+    const e = checkOutputMatches(requires.output_matches!, context);
     if (e) failures.push(e);
   }
 

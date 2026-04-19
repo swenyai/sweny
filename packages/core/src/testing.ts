@@ -144,7 +144,7 @@ export class MockClaude implements Claude {
 
   async ask(opts: { instruction: string; context: Record<string, unknown> }): Promise<string> {
     if (this.askFn) return this.askFn(opts.instruction, opts.context);
-    return "Mock reflection: no scripted ask handler.";
+    return "";
   }
 
   /**

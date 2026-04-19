@@ -182,22 +182,19 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       logger.warn(`  requires ${onFail === "skip" ? "skipped" : "failed"}: ${requiresError}`, { node: currentId });
 
       // Apply normal routing rules (dry run gate + resolveNext).
-      const isDryRun = input && typeof input === "object" && (input as Record<string, unknown>).dryRun === true;
-      if (isDryRun) {
-        const outEdges = workflow.edges.filter((e) => e.from === currentId);
-        if (outEdges.some((e) => e.when)) {
-          safeObserve(observer, { type: "route", from: currentId, to: "(end)", reason: "dry run" }, logger);
-          currentId = null;
-          continue;
-        }
-      }
-
-      const prevId = currentId;
-      currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
-      if (currentId) {
-        const reason = workflow.edges.find((e) => e.from === prevId && e.to === currentId)?.when ?? "only path";
-        trace.edges.push({ from: prevId, to: currentId, reason });
-      }
+      // TODO: dedupe with requires path — see advanceFromNode helper below
+      const next = await advanceFromNode(
+        workflow,
+        currentId,
+        results,
+        input,
+        claude,
+        observer,
+        edgeCounts,
+        logger,
+        trace,
+      );
+      currentId = next;
       continue;
     }
 
@@ -282,6 +279,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         nodeInstruction: resolvedInstruction,
         claude,
         logger,
+        context,
       });
       currentInstruction = `${preamble}\n\n---\n\n${instruction}`;
       safeObserve(
@@ -301,30 +299,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
     logger.info(`  ✓ ${result.status}`, { node: currentId, toolCalls: result.toolCalls.length });
 
-    // Dry run hard gate — stop at the first conditional routing decision.
-    // Unconditional edges are analysis flow (prepare→gather→investigate);
-    // conditional edges are action decisions (investigate→create_issue/skip).
-    // Enforced in the executor so it cannot be bypassed by LLM evaluation.
-    const isDryRun = input && typeof input === "object" && (input as Record<string, unknown>).dryRun === true;
-    if (isDryRun) {
-      const outEdges = workflow.edges.filter((e) => e.from === currentId);
-      if (outEdges.some((e) => e.when)) {
-        safeObserve(observer, { type: "route", from: currentId!, to: "(end)", reason: "dry run" }, logger);
-        currentId = null;
-        continue;
-      }
-    }
-
-    // Resolve next node via edge conditions
-    const prevId = currentId;
-    currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
-
-    // Record the routing decision in the trace
-    if (currentId) {
-      const edgeKey = `${prevId}→${currentId}`;
-      const reason = workflow.edges.find((e) => e.from === prevId && e.to === currentId)?.when ?? "only path";
-      trace.edges.push({ from: prevId, to: currentId, reason });
-    }
+    // Dry run gate + routing — shared with requires path via advanceFromNode helper.
+    currentId = await advanceFromNode(workflow, currentId, results, input, claude, observer, edgeCounts, logger, trace);
   }
 
   safeObserve(
@@ -534,6 +510,47 @@ function resolveConfig(skills: Map<string, Skill>, overrides?: Record<string, st
   }
 
   return config;
+}
+
+/**
+ * Apply the dry-run gate and then resolve the next node via edge conditions.
+ *
+ * Used in both the normal execution path and the requires-failure path so
+ * the dry-run guard + resolveNext + trace-edge recording logic lives in one place.
+ *
+ * Returns the next node ID, or null when execution should stop.
+ */
+async function advanceFromNode(
+  workflow: Workflow,
+  currentId: string,
+  results: Map<string, NodeResult>,
+  input: unknown,
+  claude: Claude,
+  observer: Observer | undefined,
+  edgeCounts: Map<string, number>,
+  logger: Logger,
+  trace: ExecutionTrace,
+): Promise<string | null> {
+  // Dry run hard gate — stop at the first conditional routing decision.
+  // Unconditional edges are analysis flow (prepare→gather→investigate);
+  // conditional edges are action decisions (investigate→create_issue/skip).
+  // Enforced in the executor so it cannot be bypassed by LLM evaluation.
+  const isDryRun = input && typeof input === "object" && (input as Record<string, unknown>).dryRun === true;
+  if (isDryRun) {
+    const outEdges = workflow.edges.filter((e) => e.from === currentId);
+    if (outEdges.some((e) => e.when)) {
+      safeObserve(observer, { type: "route", from: currentId, to: "(end)", reason: "dry run" }, logger);
+      return null;
+    }
+  }
+
+  const prevId = currentId;
+  const nextId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
+  if (nextId) {
+    const reason = workflow.edges.find((e) => e.from === prevId && e.to === nextId)?.when ?? "only path";
+    trace.edges.push({ from: prevId, to: nextId, reason });
+  }
+  return nextId;
 }
 
 /**

@@ -202,10 +202,10 @@ describe("MockClaude", () => {
       expect(result).toBe("Got: diagnose this; ctx keys: error");
     });
 
-    it("returns default mock string when no ask handler is provided", async () => {
+    it("returns empty string when no ask handler is provided (exercises default-preamble fallback)", async () => {
       const claude = new MockClaude({ responses: {} });
       const result = await claude.ask({ instruction: "anything", context: {} });
-      expect(result).toMatch(/Mock reflection/);
+      expect(result).toBe("");
     });
   });
 });
