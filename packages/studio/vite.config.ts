@@ -32,6 +32,10 @@ export default defineConfig({
               editor: resolve(__dirname, "src/lib-editor.ts"),
             },
             formats: ["es"],
+            // Vite 6+ derives css filename from package name ("studio.css")
+            // by default; pin to "style" so the published exports map
+            // (./style.css → ./dist/lib/style.css) keeps working.
+            cssFileName: "style",
           },
           rollupOptions: {
             // Don't bundle peer dependencies — consumer provides them
