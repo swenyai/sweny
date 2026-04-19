@@ -133,6 +133,14 @@ export const nodeRequiresZ = z
     message: "requires must declare at least one check (output_required or output_matches)",
   });
 
+const retryInstructionAutoZ = z.object({ auto: z.literal(true) }).strict();
+const retryInstructionReflectZ = z.object({ reflect: z.string().min(1) }).strict();
+
+export const nodeRetryZ = z.object({
+  max: z.number().int().min(1),
+  instruction: z.union([z.string().min(1), retryInstructionAutoZ, retryInstructionReflectZ]).optional(),
+});
+
 export const nodeZ = z.object({
   name: z.string().min(1),
   instruction: sourceZ,
@@ -143,6 +151,7 @@ export const nodeZ = z.object({
   context: nodeSourcesZ.optional(),
   verify: nodeVerifyZ.optional(),
   requires: nodeRequiresZ.optional(),
+  retry: nodeRetryZ.optional(),
 });
 
 export const edgeZ = z.object({

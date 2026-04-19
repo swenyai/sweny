@@ -4,6 +4,7 @@ import {
   nodeZ,
   nodeVerifyZ,
   nodeRequiresZ,
+  nodeRetryZ,
   edgeZ,
   skillZ,
   toolZ,
@@ -205,6 +206,63 @@ describe("Zod schemas", () => {
           instruction: "Do thing",
           skills: [],
           requires: { output_required: ["input.x"] },
+        }),
+      ).not.toThrow();
+    });
+  });
+
+  describe("nodeRetryZ", () => {
+    it("accepts max alone", () => {
+      expect(() => nodeRetryZ.parse({ max: 2 })).not.toThrow();
+    });
+
+    it("accepts max + string instruction", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: "Try harder" })).not.toThrow();
+    });
+
+    it("accepts max + { auto: true }", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: { auto: true } })).not.toThrow();
+    });
+
+    it("accepts max + { reflect: '...' }", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: { reflect: "Focus on tool calls" } })).not.toThrow();
+    });
+
+    it("rejects max: 0", () => {
+      expect(() => nodeRetryZ.parse({ max: 0 })).toThrow();
+    });
+
+    it("rejects negative max", () => {
+      expect(() => nodeRetryZ.parse({ max: -1 })).toThrow();
+    });
+
+    it("rejects non-integer max", () => {
+      expect(() => nodeRetryZ.parse({ max: 1.5 })).toThrow();
+    });
+
+    it("rejects { auto: false }", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: { auto: false } })).toThrow();
+    });
+
+    it("rejects empty reflect string", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: { reflect: "" } })).toThrow();
+    });
+
+    it("rejects instruction with both auto and reflect", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: { auto: true, reflect: "x" } as any })).toThrow();
+    });
+
+    it("requires max field", () => {
+      expect(() => nodeRetryZ.parse({ instruction: "x" })).toThrow();
+    });
+
+    it("nodeZ accepts a node with retry", () => {
+      expect(() =>
+        nodeZ.parse({
+          name: "Test",
+          instruction: "Do thing",
+          skills: [],
+          retry: { max: 2, instruction: { auto: true } },
         }),
       ).not.toThrow();
     });
