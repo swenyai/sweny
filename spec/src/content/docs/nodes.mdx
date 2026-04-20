@@ -536,7 +536,7 @@ retry:
 
 | `instruction` value       | Behavior                                                                                     |
 | ------------------------- | -------------------------------------------------------------------------------------------- |
-| (omitted)                 | Default preamble: "Previous attempt failed verification: {error}. Fix and try again."        |
+| (omitted)                 | Default preamble: "Previous attempt failed verification: \{error\}. Fix and try again."      |
 | `"static text"`           | Author's text + the verify error appended.                                                   |
 | `{ auto: true }`          | Executor calls `claude.ask` with a default reflection prompt; the response becomes preamble. |
 | `{ reflect: "<prompt>" }` | Same as `auto`, but the author's `reflect` prompt is used as the diagnosis question.         |
