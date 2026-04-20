@@ -41,6 +41,8 @@ export interface MockClaudeOptions {
   routes?: Record<string, string>;
   /** Workflow definition — enables instruction-based node matching (required for branching workflows) */
   workflow?: Workflow;
+  /** Scripted handler for `ask()` calls. */
+  ask?: (instruction: string, context: Record<string, unknown>) => string;
 }
 
 /**
@@ -55,10 +57,12 @@ export class MockClaude implements Claude {
   private responses: Record<string, MockNodeResponse>;
   private routes: Record<string, string>;
   private instructionMap: Map<string, string>; // instruction text → node ID
+  private askFn?: (i: string, c: Record<string, unknown>) => string;
 
   constructor(opts: MockClaudeOptions) {
     this.responses = opts.responses;
     this.routes = opts.routes ?? {};
+    this.askFn = opts.ask;
     // Build reverse map: instruction → node ID (for accurate matching in branching workflows)
     this.instructionMap = new Map();
     if (opts.workflow) {
@@ -136,6 +140,11 @@ export class MockClaude implements Claude {
 
     // Default: first choice
     return opts.choices[0].id;
+  }
+
+  async ask(opts: { instruction: string; context: Record<string, unknown> }): Promise<string> {
+    if (this.askFn) return this.askFn(opts.instruction, opts.context);
+    return "";
   }
 
   /**

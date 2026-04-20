@@ -35,6 +35,8 @@ import type {
 import { consoleLogger } from "./types.js";
 import { resolveSources } from "./source-resolver.js";
 import { evaluateVerify } from "./verify.js";
+import { evaluateRequires } from "./requires.js";
+import { buildRetryPreamble } from "./retry.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -156,6 +158,46 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, v.data])),
     };
 
+    // Pre-condition gate: evaluate `requires` against the cross-node context
+    // BEFORE invoking the LLM. Failure either marks the node failed (on_fail
+    // default) or skipped (on_fail: "skip") and skips execution entirely.
+    const requiresError = evaluateRequires(node.requires, context);
+    if (requiresError) {
+      const onFail = node.requires?.on_fail ?? "fail";
+      const result: NodeResult =
+        onFail === "skip"
+          ? {
+              status: "skipped",
+              data: { skipped_reason: requiresError.replace(/^requires failed:/, "requires not met:") },
+              toolCalls: [],
+            }
+          : {
+              status: "failed",
+              data: { error: requiresError },
+              toolCalls: [],
+            };
+      results.set(currentId, result);
+      trace.steps.push({ node: currentId, status: result.status, iteration });
+      safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
+      logger.warn(`  requires ${onFail === "skip" ? "skipped" : "failed"}: ${requiresError}`, { node: currentId });
+
+      // Apply normal routing rules (dry run gate + resolveNext).
+      // TODO: dedupe with requires path — see advanceFromNode helper below
+      const next = await advanceFromNode(
+        workflow,
+        currentId,
+        results,
+        input,
+        claude,
+        observer,
+        edgeCounts,
+        logger,
+        trace,
+      );
+      currentId = next;
+      continue;
+    }
+
     // Wrap tool handlers to emit events + inject context
     const trackedTools = tools.map((t) => ({
       ...t,
@@ -193,61 +235,72 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       skillInstructions,
     );
 
-    // Run Claude on this node
-    const result = await claude.run({
-      instruction,
-      context,
-      tools: trackedTools,
-      outputSchema: node.output,
-      maxTurns: node.max_turns,
-      onProgress: (message) => {
-        safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
-      },
-    });
+    // Run Claude on this node, with optional verify-failure retry loop.
+    let attempt = 0;
+    let result: NodeResult;
+    let currentInstruction = instruction;
+    const retry = node.retry;
 
-    // Machine-checked post-condition. Enforced AFTER the LLM finishes so that
-    // a model claiming success cannot bypass side-effect requirements (e.g.
-    // reporting "issue created" when no `linear_create_issue` call was made).
-    // Skipped entirely when the node already failed — the node's own error is
-    // the root cause and verify would just add noise.
-    if (result.status === "success") {
+    while (true) {
+      result = await claude.run({
+        instruction: currentInstruction,
+        context,
+        tools: trackedTools,
+        outputSchema: node.output,
+        maxTurns: node.max_turns,
+        onProgress: (message) => {
+          safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
+        },
+      });
+
+      // Retry only triggers on verify failure — bail on tool/API errors.
+      if (result.status !== "success") break;
+
       const verifyError = evaluateVerify(node.verify, result);
-      if (verifyError) {
-        result.status = "failed";
-        result.data = { ...result.data, error: verifyError };
+      if (!verifyError) break;
+
+      // Apply verify failure to the result.
+      result.status = "failed";
+      result.data = { ...result.data, error: verifyError };
+
+      if (!retry || attempt >= retry.max) {
         logger.warn(`  verify failed: ${verifyError}`, { node: currentId });
+        break;
       }
+
+      // Build retry preamble + record attempt in trace.
+      trace.steps.push({ node: currentId, status: "failed", iteration, retryAttempt: attempt });
+      logger.warn(`  verify failed (attempt ${attempt + 1}/${retry.max + 1}): ${verifyError}`, { node: currentId });
+
+      const preamble = await buildRetryPreamble({
+        retry,
+        verifyError,
+        toolCalls: result.toolCalls,
+        nodeInstruction: resolvedInstruction,
+        claude,
+        logger,
+        context,
+      });
+      currentInstruction = `${preamble}\n\n---\n\n${instruction}`;
+      safeObserve(
+        observer,
+        { type: "node:retry", node: currentId, attempt: attempt + 1, reason: verifyError, preamble },
+        logger,
+      );
+      attempt++;
     }
 
     results.set(currentId, result);
-    trace.steps.push({ node: currentId, status: result.status, iteration });
+    trace.steps.push(
+      attempt > 0
+        ? { node: currentId, status: result.status, iteration, retryAttempt: attempt }
+        : { node: currentId, status: result.status, iteration },
+    );
     safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
     logger.info(`  ✓ ${result.status}`, { node: currentId, toolCalls: result.toolCalls.length });
 
-    // Dry run hard gate — stop at the first conditional routing decision.
-    // Unconditional edges are analysis flow (prepare→gather→investigate);
-    // conditional edges are action decisions (investigate→create_issue/skip).
-    // Enforced in the executor so it cannot be bypassed by LLM evaluation.
-    const isDryRun = input && typeof input === "object" && (input as Record<string, unknown>).dryRun === true;
-    if (isDryRun) {
-      const outEdges = workflow.edges.filter((e) => e.from === currentId);
-      if (outEdges.some((e) => e.when)) {
-        safeObserve(observer, { type: "route", from: currentId!, to: "(end)", reason: "dry run" }, logger);
-        currentId = null;
-        continue;
-      }
-    }
-
-    // Resolve next node via edge conditions
-    const prevId = currentId;
-    currentId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
-
-    // Record the routing decision in the trace
-    if (currentId) {
-      const edgeKey = `${prevId}→${currentId}`;
-      const reason = workflow.edges.find((e) => e.from === prevId && e.to === currentId)?.when ?? "only path";
-      trace.edges.push({ from: prevId, to: currentId, reason });
-    }
+    // Dry run gate + routing — shared with requires path via advanceFromNode helper.
+    currentId = await advanceFromNode(workflow, currentId, results, input, claude, observer, edgeCounts, logger, trace);
   }
 
   safeObserve(
@@ -457,6 +510,47 @@ function resolveConfig(skills: Map<string, Skill>, overrides?: Record<string, st
   }
 
   return config;
+}
+
+/**
+ * Apply the dry-run gate and then resolve the next node via edge conditions.
+ *
+ * Used in both the normal execution path and the requires-failure path so
+ * the dry-run guard + resolveNext + trace-edge recording logic lives in one place.
+ *
+ * Returns the next node ID, or null when execution should stop.
+ */
+async function advanceFromNode(
+  workflow: Workflow,
+  currentId: string,
+  results: Map<string, NodeResult>,
+  input: unknown,
+  claude: Claude,
+  observer: Observer | undefined,
+  edgeCounts: Map<string, number>,
+  logger: Logger,
+  trace: ExecutionTrace,
+): Promise<string | null> {
+  // Dry run hard gate — stop at the first conditional routing decision.
+  // Unconditional edges are analysis flow (prepare→gather→investigate);
+  // conditional edges are action decisions (investigate→create_issue/skip).
+  // Enforced in the executor so it cannot be bypassed by LLM evaluation.
+  const isDryRun = input && typeof input === "object" && (input as Record<string, unknown>).dryRun === true;
+  if (isDryRun) {
+    const outEdges = workflow.edges.filter((e) => e.from === currentId);
+    if (outEdges.some((e) => e.when)) {
+      safeObserve(observer, { type: "route", from: currentId, to: "(end)", reason: "dry run" }, logger);
+      return null;
+    }
+  }
+
+  const prevId = currentId;
+  const nextId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
+  if (nextId) {
+    const reason = workflow.edges.find((e) => e.from === prevId && e.to === nextId)?.when ?? "only path";
+    trace.edges.push({ from: prevId, to: nextId, reason });
+  }
+  return nextId;
 }
 
 /**

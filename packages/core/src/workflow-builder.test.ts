@@ -88,6 +88,9 @@ describe("buildWorkflow", () => {
       async evaluate() {
         return "";
       },
+      async ask() {
+        return "";
+      },
     };
 
     const opts: BuildWorkflowOptions = { claude: capturingClaude, skills: [mockSkill] };
@@ -129,6 +132,9 @@ describe("refineWorkflow", () => {
         return { status: "success", data: { ...validWorkflow }, toolCalls: [] };
       },
       async evaluate() {
+        return "";
+      },
+      async ask() {
         return "";
       },
     };

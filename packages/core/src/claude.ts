@@ -247,6 +247,52 @@ export class ClaudeClient implements Claude {
     this.logger.warn(`Could not parse route choice from: "${text.slice(0, 100)}". Falling back to first choice.`);
     return validIds[0];
   }
+
+  async ask(opts: { instruction: string; context: Record<string, unknown> }): Promise<string> {
+    const { instruction, context } = opts;
+    const prompt = [
+      instruction,
+      Object.keys(context).length > 0 ? `\nContext:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const env = this.buildEnv();
+    let response = "";
+
+    try {
+      const stream = query({
+        prompt,
+        options: {
+          maxTurns: 1,
+          cwd: this.cwd,
+          env,
+          permissionMode: "bypassPermissions",
+          allowDangerouslySkipPermissions: true,
+          stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
+          ...(this.model ? { model: this.model } : {}),
+        },
+      });
+
+      for await (const message of stream) {
+        if (message.type === "result") {
+          const resultMsg = message as SDKResultMessage;
+          if (resultMsg.subtype === "success" && "result" in resultMsg) {
+            response = resultMsg.result;
+          } else {
+            this.logger.warn(
+              `claude.ask: SDK returned non-success subtype "${resultMsg.subtype}" — returning empty string`,
+            );
+          }
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`Ask query failed: ${err.message}`);
+      return "";
+    }
+
+    return response.trim();
+  }
 }
 
 // ─── Tool conversion ────────────────────────────────────────────

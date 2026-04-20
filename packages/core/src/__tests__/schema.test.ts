@@ -3,6 +3,8 @@ import {
   workflowZ,
   nodeZ,
   nodeVerifyZ,
+  nodeRequiresZ,
+  nodeRetryZ,
   edgeZ,
   skillZ,
   toolZ,
@@ -165,6 +167,104 @@ describe("Zod schemas", () => {
 
     it("rejects empty output_matches array", () => {
       expect(() => nodeVerifyZ.parse({ output_matches: [] })).toThrow();
+    });
+  });
+
+  describe("nodeRequiresZ", () => {
+    it("accepts output_required only", () => {
+      expect(() => nodeRequiresZ.parse({ output_required: ["input.x"] })).not.toThrow();
+    });
+
+    it("accepts output_matches only", () => {
+      expect(() => nodeRequiresZ.parse({ output_matches: [{ path: "input.x", equals: 1 }] })).not.toThrow();
+    });
+
+    it("accepts on_fail: 'fail'", () => {
+      expect(() => nodeRequiresZ.parse({ output_required: ["input.x"], on_fail: "fail" })).not.toThrow();
+    });
+
+    it("accepts on_fail: 'skip'", () => {
+      expect(() => nodeRequiresZ.parse({ output_required: ["input.x"], on_fail: "skip" })).not.toThrow();
+    });
+
+    it("rejects empty requires (no checks declared)", () => {
+      expect(() => nodeRequiresZ.parse({})).toThrow();
+    });
+
+    it("rejects on_fail other than 'fail' or 'skip'", () => {
+      expect(() => nodeRequiresZ.parse({ output_required: ["input.x"], on_fail: "throw" })).toThrow();
+    });
+
+    it("rejects empty output_required array", () => {
+      expect(() => nodeRequiresZ.parse({ output_required: [] })).toThrow();
+    });
+
+    it("nodeZ accepts a node with requires", () => {
+      expect(() =>
+        nodeZ.parse({
+          name: "Test",
+          instruction: "Do thing",
+          skills: [],
+          requires: { output_required: ["input.x"] },
+        }),
+      ).not.toThrow();
+    });
+  });
+
+  describe("nodeRetryZ", () => {
+    it("accepts max alone", () => {
+      expect(() => nodeRetryZ.parse({ max: 2 })).not.toThrow();
+    });
+
+    it("accepts max + string instruction", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: "Try harder" })).not.toThrow();
+    });
+
+    it("accepts max + { auto: true }", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: { auto: true } })).not.toThrow();
+    });
+
+    it("accepts max + { reflect: '...' }", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: { reflect: "Focus on tool calls" } })).not.toThrow();
+    });
+
+    it("rejects max: 0", () => {
+      expect(() => nodeRetryZ.parse({ max: 0 })).toThrow();
+    });
+
+    it("rejects negative max", () => {
+      expect(() => nodeRetryZ.parse({ max: -1 })).toThrow();
+    });
+
+    it("rejects non-integer max", () => {
+      expect(() => nodeRetryZ.parse({ max: 1.5 })).toThrow();
+    });
+
+    it("rejects { auto: false }", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: { auto: false } })).toThrow();
+    });
+
+    it("rejects empty reflect string", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: { reflect: "" } })).toThrow();
+    });
+
+    it("rejects instruction with both auto and reflect", () => {
+      expect(() => nodeRetryZ.parse({ max: 1, instruction: { auto: true, reflect: "x" } as any })).toThrow();
+    });
+
+    it("requires max field", () => {
+      expect(() => nodeRetryZ.parse({ instruction: "x" })).toThrow();
+    });
+
+    it("nodeZ accepts a node with retry", () => {
+      expect(() =>
+        nodeZ.parse({
+          name: "Test",
+          instruction: "Do thing",
+          skills: [],
+          retry: { max: 2, instruction: { auto: true } },
+        }),
+      ).not.toThrow();
     });
   });
 

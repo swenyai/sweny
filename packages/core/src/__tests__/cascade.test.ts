@@ -43,6 +43,9 @@ function recordingClaude(defaultData: Record<string, unknown> = {}): {
     async evaluate(opts) {
       return opts.choices[0].id;
     },
+    async ask() {
+      return "";
+    },
   };
   return { claude, runs };
 }

@@ -123,6 +123,24 @@ export const nodeVerifyZ = z
     },
   );
 
+export const nodeRequiresZ = z
+  .object({
+    output_required: z.array(z.string().min(1)).min(1).optional(),
+    output_matches: z.array(outputMatchZ).min(1).optional(),
+    on_fail: z.enum(["fail", "skip"]).optional(),
+  })
+  .refine((r) => r.output_required !== undefined || r.output_matches !== undefined, {
+    message: "requires must declare at least one check (output_required or output_matches)",
+  });
+
+const retryInstructionAutoZ = z.object({ auto: z.literal(true) }).strict();
+const retryInstructionReflectZ = z.object({ reflect: z.string().min(1) }).strict();
+
+export const nodeRetryZ = z.object({
+  max: z.number().int().min(1),
+  instruction: z.union([z.string().min(1), retryInstructionAutoZ, retryInstructionReflectZ]).optional(),
+});
+
 export const nodeZ = z.object({
   name: z.string().min(1),
   instruction: sourceZ,
@@ -132,6 +150,8 @@ export const nodeZ = z.object({
   rules: nodeSourcesZ.optional(),
   context: nodeSourcesZ.optional(),
   verify: nodeVerifyZ.optional(),
+  requires: nodeRequiresZ.optional(),
+  retry: nodeRetryZ.optional(),
 });
 
 export const edgeZ = z.object({
@@ -430,6 +450,86 @@ export const workflowJsonSchema = {
           context: {
             $ref: "#/$defs/NodeSources",
             description: "Per-node context. Additive by default; set { only: true } to block cascade.",
+          },
+          verify: {
+            type: "object",
+            description: "Machine-checked post-conditions evaluated after the LLM finishes.",
+            additionalProperties: false,
+            properties: {
+              any_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+              all_tools_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+              no_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+              output_required: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+              output_matches: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["path"],
+                  additionalProperties: false,
+                  properties: {
+                    path: { type: "string", minLength: 1 },
+                    equals: {},
+                    in: { type: "array" },
+                    matches: { type: "string", minLength: 1 },
+                  },
+                },
+                minItems: 1,
+              },
+            },
+          },
+          requires: {
+            type: "object",
+            description: "Pre-condition checks evaluated before the LLM runs.",
+            additionalProperties: false,
+            properties: {
+              output_required: {
+                type: "array",
+                items: { type: "string", minLength: 1 },
+                minItems: 1,
+              },
+              output_matches: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["path"],
+                  additionalProperties: false,
+                  properties: {
+                    path: { type: "string", minLength: 1 },
+                    equals: {},
+                    in: { type: "array" },
+                    matches: { type: "string", minLength: 1 },
+                  },
+                },
+                minItems: 1,
+              },
+              on_fail: { type: "string", enum: ["fail", "skip"] },
+            },
+          },
+          retry: {
+            type: "object",
+            description: "Node-local retry on verify failure.",
+            required: ["max"],
+            additionalProperties: false,
+            properties: {
+              max: { type: "integer", minimum: 1 },
+              instruction: {
+                oneOf: [
+                  { type: "string", minLength: 1 },
+                  {
+                    type: "object",
+                    required: ["auto"],
+                    additionalProperties: false,
+                    properties: { auto: { const: true } },
+                  },
+                  {
+                    type: "object",
+                    required: ["reflect"],
+                    additionalProperties: false,
+                    properties: { reflect: { type: "string", minLength: 1 } },
+                  },
+                ],
+              },
+            },
           },
         },
       },

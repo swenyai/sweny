@@ -17,6 +17,8 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 | `rules`       | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Rules for this node. Additive by default; see [cascade](#cascade-semantics).   |
 | `context`     | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Context for this node. Additive by default; see [cascade](#cascade-semantics). |
 | `verify`      | [Verify](#verify)                | OPTIONAL | —                            | Machine-checked post-conditions evaluated after the AI finishes the node.      |
+| `requires`    | [Requires](#requires)            | OPTIONAL | —                            | Machine-checked pre-conditions evaluated before the AI starts the node.        |
+| `retry`       | [Retry](#retry)                  | OPTIONAL | —                            | Node-local retry on verify failure with optional autonomous reflection.        |
 
 ## Max Turns Semantics
 
@@ -217,6 +219,71 @@ A conforming executor:
 - **MUST** request structured output from the AI model conforming to this schema when `output` is present.
 - The structured output becomes the node's result data, available to downstream nodes via [context accumulation](/execution#context-accumulation).
 - When `output` is absent, the node's result data is implementation-defined.
+
+## Requires
+
+Machine-checked **pre-conditions**. Evaluated before the LLM runs. If any
+declared check fails, the node is marked failed (or skipped) and the LLM
+is never invoked.
+
+### Why
+
+Catch missing upstream context — bad runtime input, an upstream node that
+returned without producing a required field — before burning tokens. The
+checks are deterministic and run synchronously.
+
+### Schema
+
+```yaml
+requires:
+  output_required: [string] # paths must resolve, non-null/undefined
+  output_matches: [OutputMatch] # equals / in / matches
+  on_fail: fail | skip # default: fail
+```
+
+### Path roots
+
+Paths resolve against the cross-node context map:
+
+```
+{ input: <runtime input>, [priorNodeId]: <data of prior node>, ... }
+```
+
+The grammar is identical to [verify paths](#path-grammar): dotted segments,
+`[*]` wildcards, optional `all:` / `any:` prefix.
+
+| Path                            | Resolves to                                       |
+| ------------------------------- | ------------------------------------------------- |
+| `input.repoUrl`                 | The `repoUrl` field on the runtime input.         |
+| `triage.recommendation`         | `data.recommendation` of the prior `triage` node. |
+| `any:scan.findings[*].severity` | At least one finding has a non-null severity.     |
+
+### Failure modes
+
+| `on_fail`        | Result status | Result data                                   |
+| ---------------- | ------------- | --------------------------------------------- |
+| `fail` (default) | `failed`      | `{ error: "requires failed: ..." }`           |
+| `skip`           | `skipped`     | `{ skipped_reason: "requires not met: ..." }` |
+
+In both cases the LLM is not invoked. Routing continues normally — edges
+with `when` conditions can read the failure status and route around it.
+
+### Example
+
+```yaml
+nodes:
+  open_pr:
+    name: Open PR
+    instruction: Open a PR with the fix
+    skills: [github]
+    requires:
+      output_required:
+        - input.repoUrl
+        - implement_fix.branch
+      output_matches:
+        - { path: implement_fix.filesChanged, matches: "^[1-9]" }
+      on_fail: fail
+```
 
 ## Verify
 
@@ -443,4 +510,71 @@ summarize:
   instruction: >-
     Produce a concise summary of all findings for the notification.
     Include severity, root cause, and links to created issues.
+```
+
+## Retry
+
+**Node-local self-healing on verify failure.** When `verify` fails, the
+executor re-invokes the LLM up to `max` additional times, prepending
+feedback derived from the failure.
+
+Triggered ONLY by verify failure — not by tool/API errors and not by
+`requires` failure. Re-running cannot fix upstream data problems.
+
+### Schema
+
+```yaml
+retry:
+  max: integer                      # ≥ 1
+  instruction:                      # optional
+    | string                        # static preamble
+    | { auto: true }                # LLM-generated diagnosis (default prompt)
+    | { reflect: string }           # LLM-generated diagnosis (author prompt)
+```
+
+### Modes
+
+| `instruction` value       | Behavior                                                                                     |
+| ------------------------- | -------------------------------------------------------------------------------------------- |
+| (omitted)                 | Default preamble: "Previous attempt failed verification: \{error\}. Fix and try again."      |
+| `"static text"`           | Author's text + the verify error appended.                                                   |
+| `{ auto: true }`          | Executor calls `claude.ask` with a default reflection prompt; the response becomes preamble. |
+| `{ reflect: "<prompt>" }` | Same as `auto`, but the author's `reflect` prompt is used as the diagnosis question.         |
+
+The preamble is prepended to the node's normal instruction so the LLM sees
+it before the original task. Each retry uses only the **latest** verify
+failure as feedback — older errors are noise.
+
+### Reflection failure
+
+If `claude.ask` throws or returns empty during autonomous mode, the
+executor falls back to the default static preamble for that attempt and
+logs a warning. Reflection failure never escalates to a workflow failure.
+
+### Cost
+
+`retry × autonomous reflection` is up to `2 × max + 1` LLM calls per
+node (initial + N retries × 2 calls each). Workflow authors set the
+ceiling via `max`.
+
+### Trace and observer events
+
+Each attempt is recorded as its own `TraceStep` with a `retryAttempt`
+field (0-indexed). The executor emits a `node:retry` observer event
+before each retry attempt with `{ node, attempt, reason, preamble }`.
+
+### Example
+
+```yaml
+nodes:
+  open_pr:
+    name: Open PR
+    instruction: Open a PR with the fix
+    skills: [github]
+    verify:
+      any_tool_called: [github_create_pr]
+      output_required: [prUrl]
+    retry:
+      max: 2
+      instruction: { auto: true }
 ```

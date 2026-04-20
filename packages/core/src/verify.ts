@@ -83,7 +83,7 @@ export function resolvePath(data: unknown, path: string): Resolution {
 // A tool call "succeeded" when its output does not carry a non-null `error` field.
 // `{ error: null }` and `{ error: false }` are treated as success — many real
 // tools include the key with a null sentinel.
-function isErrorOutput(output: unknown): boolean {
+export function isErrorOutput(output: unknown): boolean {
   if (!output || typeof output !== "object") return false;
   const err = (output as Record<string, unknown>).error;
   return err !== undefined && err !== null && err !== false;
