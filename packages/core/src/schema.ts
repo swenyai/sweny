@@ -455,6 +455,8 @@ export const workflowJsonSchema = {
             type: "object",
             description: "Machine-checked post-conditions evaluated after the LLM finishes.",
             additionalProperties: false,
+            // Fix #4: at least one check must be declared.
+            minProperties: 1,
             properties: {
               any_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
               all_tools_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
@@ -472,6 +474,8 @@ export const workflowJsonSchema = {
                     in: { type: "array" },
                     matches: { type: "string", minLength: 1 },
                   },
+                  // Fix #4: exactly one operator must be declared.
+                  oneOf: [{ required: ["equals"] }, { required: ["in"] }, { required: ["matches"] }],
                 },
                 minItems: 1,
               },
@@ -481,6 +485,9 @@ export const workflowJsonSchema = {
             type: "object",
             description: "Pre-condition checks evaluated before the LLM runs.",
             additionalProperties: false,
+            // Fix #4: at least one of output_required / output_matches must be declared.
+            // on_fail alone is not sufficient — it only tags how a failing check behaves.
+            anyOf: [{ required: ["output_required"] }, { required: ["output_matches"] }],
             properties: {
               output_required: {
                 type: "array",
@@ -499,6 +506,8 @@ export const workflowJsonSchema = {
                     in: { type: "array" },
                     matches: { type: "string", minLength: 1 },
                   },
+                  // Fix #4: exactly one operator must be declared.
+                  oneOf: [{ required: ["equals"] }, { required: ["in"] }, { required: ["matches"] }],
                 },
                 minItems: 1,
               },
@@ -557,6 +566,8 @@ export const workflowJsonSchema = {
       description: "Inline skill definitions scoped to this workflow",
       additionalProperties: {
         type: "object",
+        // Fix #4: an inline skill must provide instruction, mcp, or both.
+        anyOf: [{ required: ["instruction"] }, { required: ["mcp"] }],
         properties: {
           name: { type: "string" },
           description: { type: "string" },
@@ -564,6 +575,8 @@ export const workflowJsonSchema = {
           mcp: {
             type: "object",
             description: "External MCP server definition",
+            // Fix #4: an MCP server must declare command (stdio) or url (http).
+            anyOf: [{ required: ["command"] }, { required: ["url"] }],
             properties: {
               type: { type: "string", enum: ["stdio", "http"] },
               command: { type: "string" },

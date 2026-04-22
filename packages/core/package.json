@@ -46,7 +46,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/workflows/*.yml dist/workflows/ && node scripts/build-workflow-browser.mjs",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/workflows/*.yml dist/workflows/ && node scripts/build-workflow-browser.mjs && node scripts/write-public-schema.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude 'src/__tests__/integration/**' --exclude 'dist/**'",
     "test:integration": "vitest run --config vitest.integration.config.ts"
@@ -61,6 +61,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/claude-code": "^2.1.114",
+    "ajv": "^8.18.0",
     "vitest": "^4.1.4"
   },
   "publishConfig": {

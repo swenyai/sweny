@@ -55,8 +55,9 @@
       "oneOf": [
         {
           "type": "array",
-          "items": { "$ref": "#/$defs/Source" },
-          "description": "Additive sources — appended to inherited sources."
+          "items": {
+            "$ref": "#/$defs/Source"
+          }
         },
         {
           "type": "object",
@@ -64,53 +65,17 @@
           "additionalProperties": false,
           "properties": {
             "only": {
-              "type": "boolean",
-              "default": false,
-              "description": "When true, blocks cascade — only this node's sources are used."
+              "type": "boolean"
             },
             "sources": {
               "type": "array",
-              "items": { "$ref": "#/$defs/Source" }
+              "items": {
+                "$ref": "#/$defs/Source"
+              }
             }
           }
         }
       ]
-    },
-    "McpServerConfig": {
-      "type": "object",
-      "description": "External MCP server definition.",
-      "properties": {
-        "type": {
-          "type": "string",
-          "enum": ["stdio", "http"],
-          "description": "Transport type. Inferred from presence of command (stdio) or url (http) when omitted."
-        },
-        "command": {
-          "type": "string",
-          "description": "Spawn command (stdio transport)."
-        },
-        "args": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Arguments for the command."
-        },
-        "url": {
-          "type": "string",
-          "format": "uri",
-          "description": "HTTP endpoint (HTTP transport)."
-        },
-        "headers": {
-          "type": "object",
-          "additionalProperties": { "type": "string" },
-          "description": "HTTP headers (HTTP transport only)."
-        },
-        "env": {
-          "type": "object",
-          "additionalProperties": { "type": "string" },
-          "description": "Environment variable names the server needs. Values are descriptions, not secrets."
-        }
-      },
-      "additionalProperties": false
     }
   },
   "properties": {
@@ -128,16 +93,20 @@
     "entry": {
       "type": "string",
       "minLength": 1,
-      "description": "ID of the entry node. MUST reference a key in nodes."
+      "description": "ID of the entry node"
     },
     "rules": {
       "type": "array",
-      "items": { "$ref": "#/$defs/Source" },
+      "items": {
+        "$ref": "#/$defs/Source"
+      },
       "description": "Directives prepended to every node's instruction."
     },
     "context": {
       "type": "array",
-      "items": { "$ref": "#/$defs/Source" },
+      "items": {
+        "$ref": "#/$defs/Source"
+      },
       "description": "Background knowledge prepended to every node's instruction."
     },
     "nodes": {
@@ -149,8 +118,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "minLength": 1,
-            "description": "Display name for this node."
+            "minLength": 1
           },
           "instruction": {
             "$ref": "#/$defs/Source",
@@ -158,26 +126,203 @@
           },
           "skills": {
             "type": "array",
-            "items": { "type": "string" },
-            "default": [],
-            "description": "Skill IDs this node has access to."
+            "items": {
+              "type": "string"
+            },
+            "description": "Skill IDs available at this node"
           },
           "output": {
             "type": "object",
-            "description": "JSON Schema for structured output from this node."
+            "description": "Optional JSON Schema for structured output"
           },
           "max_turns": {
             "type": "integer",
             "minimum": 1,
-            "description": "Maximum AI model turns for this node. When absent, the executor's default applies."
+            "description": "Max AI model turns for this node. When absent, the executor's default applies."
           },
           "rules": {
             "$ref": "#/$defs/NodeSources",
-            "description": "Rules for this node. Additive by default; set only: true to block cascade."
+            "description": "Per-node rules. Additive by default; set { only: true } to block cascade."
           },
           "context": {
             "$ref": "#/$defs/NodeSources",
-            "description": "Context for this node. Additive by default; set only: true to block cascade."
+            "description": "Per-node context. Additive by default; set { only: true } to block cascade."
+          },
+          "verify": {
+            "type": "object",
+            "description": "Machine-checked post-conditions evaluated after the LLM finishes.",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "any_tool_called": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1
+              },
+              "all_tools_called": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1
+              },
+              "no_tool_called": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1
+              },
+              "output_required": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1
+              },
+              "output_matches": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["path"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "equals": {},
+                    "in": {
+                      "type": "array"
+                    },
+                    "matches": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "oneOf": [
+                    {
+                      "required": ["equals"]
+                    },
+                    {
+                      "required": ["in"]
+                    },
+                    {
+                      "required": ["matches"]
+                    }
+                  ]
+                },
+                "minItems": 1
+              }
+            }
+          },
+          "requires": {
+            "type": "object",
+            "description": "Pre-condition checks evaluated before the LLM runs.",
+            "additionalProperties": false,
+            "anyOf": [
+              {
+                "required": ["output_required"]
+              },
+              {
+                "required": ["output_matches"]
+              }
+            ],
+            "properties": {
+              "output_required": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1
+              },
+              "output_matches": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["path"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "equals": {},
+                    "in": {
+                      "type": "array"
+                    },
+                    "matches": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "oneOf": [
+                    {
+                      "required": ["equals"]
+                    },
+                    {
+                      "required": ["in"]
+                    },
+                    {
+                      "required": ["matches"]
+                    }
+                  ]
+                },
+                "minItems": 1
+              },
+              "on_fail": {
+                "type": "string",
+                "enum": ["fail", "skip"]
+              }
+            }
+          },
+          "retry": {
+            "type": "object",
+            "description": "Node-local retry on verify failure.",
+            "required": ["max"],
+            "additionalProperties": false,
+            "properties": {
+              "max": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "instruction": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "object",
+                    "required": ["auto"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "auto": {
+                        "const": true
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": ["reflect"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "reflect": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            }
           }
         }
       }
@@ -191,50 +336,91 @@
         "properties": {
           "from": {
             "type": "string",
-            "minLength": 1,
-            "description": "Source node ID. MUST reference a key in nodes."
+            "minLength": 1
           },
           "to": {
             "type": "string",
-            "minLength": 1,
-            "description": "Target node ID. MUST reference a key in nodes."
+            "minLength": 1
           },
           "when": {
             "type": "string",
-            "description": "Natural language routing condition evaluated by the AI model at runtime."
+            "description": "Natural language condition — Claude evaluates at runtime"
           },
           "max_iterations": {
             "type": "integer",
             "minimum": 1,
-            "description": "Maximum times this edge can be followed. Required for self-loops."
+            "description": "Max times this edge can be followed — enables controlled retry loops"
           }
         }
       }
     },
     "skills": {
       "type": "object",
-      "description": "Inline skill definitions scoped to this workflow.",
+      "description": "Inline skill definitions scoped to this workflow",
       "additionalProperties": {
         "type": "object",
-        "anyOf": [{ "required": ["instruction"] }, { "required": ["mcp"] }],
+        "anyOf": [
+          {
+            "required": ["instruction"]
+          },
+          {
+            "required": ["mcp"]
+          }
+        ],
         "properties": {
           "name": {
-            "type": "string",
-            "description": "Display name. Defaults to the map key."
+            "type": "string"
           },
           "description": {
-            "type": "string",
-            "description": "What this skill provides."
+            "type": "string"
           },
           "instruction": {
             "type": "string",
-            "description": "Natural language expertise injected into the node prompt."
+            "description": "Natural language expertise injected into the node prompt"
           },
           "mcp": {
-            "$ref": "#/$defs/McpServerConfig"
+            "type": "object",
+            "description": "External MCP server definition",
+            "anyOf": [
+              {
+                "required": ["command"]
+              },
+              {
+                "required": ["url"]
+              }
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["stdio", "http"]
+              },
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "type": "string"
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
           }
-        },
-        "additionalProperties": false
+        }
       }
     }
   }
