@@ -173,6 +173,37 @@ describe("fetch.auth + offline parsing", () => {
   });
 });
 
+// Fix #10: numeric flags must reject NaN. Previously parseInt("abc", 10) → NaN
+// slipped past the bounds check because NaN compares false for both < min and
+// > max. Invalid values now fail validation with a clear field-specific error.
+describe("validateInputs — numeric bounds reject NaN", () => {
+  it("rejects non-numeric max-investigate-turns", () => {
+    const errors = validateInputs(baseConfig({ maxInvestigateTurns: Number.NaN }));
+    expect(errors.some((e) => e.includes("max-investigate-turns"))).toBe(true);
+  });
+
+  it("rejects non-numeric max-implement-turns", () => {
+    const errors = validateInputs(baseConfig({ maxImplementTurns: Number.NaN }));
+    expect(errors.some((e) => e.includes("max-implement-turns"))).toBe(true);
+  });
+
+  it("rejects Infinity values", () => {
+    const errors = validateInputs(baseConfig({ maxInvestigateTurns: Infinity }));
+    expect(errors.some((e) => e.includes("max-investigate-turns"))).toBe(true);
+  });
+});
+
+describe("parseCliInputs — numeric parsing rejects junk", () => {
+  it("rejects a non-numeric --max-investigate-turns via validateInputs", () => {
+    const config = parseCliInputs({ maxInvestigateTurns: "abc" }, {});
+    // parseInt produces NaN; the config object reflects that.
+    expect(Number.isNaN(config.maxInvestigateTurns)).toBe(true);
+    // validateInputs must catch the NaN and report it.
+    const errors = validateInputs(config);
+    expect(errors.some((e) => e.includes("max-investigate-turns"))).toBe(true);
+  });
+});
+
 describe("parseCliInputs — cloud token", () => {
   it("reads SWENY_CLOUD_TOKEN from env", () => {
     const original = process.env.SWENY_CLOUD_TOKEN;

@@ -46,9 +46,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc && cp src/workflows/*.yml dist/workflows/ && node scripts/build-workflow-browser.mjs",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/workflows/*.yml dist/workflows/ && node scripts/build-workflow-browser.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --exclude 'src/__tests__/integration/**'",
+    "test": "vitest run --exclude 'src/__tests__/integration/**' --exclude 'dist/**'",
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {

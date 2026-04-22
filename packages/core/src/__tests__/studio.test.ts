@@ -415,6 +415,16 @@ describe("applyExecutionEvent", () => {
     expect(map.get("a")!.exec.status).toBe("failed");
   });
 
+  // Fix #7: skipped nodes have their own distinct state — do not collapse
+  // them into "failed", which misrepresents the workflow for Studio users.
+  it("marks node as skipped on node:exit with skipped", () => {
+    const map = makeNodeDataMap();
+    const result: NodeResult = { status: "skipped", data: { skipped_reason: "requires not met" }, toolCalls: [] };
+    applyExecutionEvent({ type: "node:exit", node: "a", result } as ExecutionEvent, map);
+    expect(map.get("a")!.exec.status).toBe("skipped");
+    expect(map.get("a")!.exec.result).toBe(result);
+  });
+
   it("ignores events for unknown nodes", () => {
     const map = makeNodeDataMap();
     // Should not throw

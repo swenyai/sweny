@@ -174,8 +174,11 @@ export function applyExecutionEvent(event: ExecutionEvent, nodeDataMap: Map<stri
     case "node:exit": {
       const data = nodeDataMap.get(event.node);
       if (data) {
+        // NodeResult.status is already one of "success" | "failed" | "skipped";
+        // pass it through so Studio can render each distinctly. Previously
+        // collapsed skipped → failed (Fix #7).
         data.exec = {
-          status: event.result.status === "success" ? "success" : "failed",
+          status: event.result.status,
           result: event.result,
         };
       }

@@ -11,7 +11,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc"
+    "build": "rm -rf dist && tsc",
+    "test": "echo 'create-sweny is a thin wrapper around @sweny-ai/core new — covered by the core test suite' && exit 0"
   },
   "dependencies": {
     "@sweny-ai/core": "^0.1.51"

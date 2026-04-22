@@ -590,15 +590,23 @@ export function validateInputs(config: CliConfig): string[] {
     errors.push("--review-mode must be one of: auto, review");
   }
 
-  // Integer bounds
-  if (config.maxInvestigateTurns < 1 || config.maxInvestigateTurns > 500) {
-    errors.push("--max-investigate-turns must be between 1 and 500");
-  }
-  if (config.maxImplementTurns < 1 || config.maxImplementTurns > 500) {
-    errors.push("--max-implement-turns must be between 1 and 500");
-  }
+  // Integer bounds — reject NaN and Infinity first (parseInt can yield NaN
+  // silently and NaN compares false to both < min and > max, so the old
+  // bounds check let junk through).
+  validateIntegerBound(errors, "--max-investigate-turns", config.maxInvestigateTurns, 1, 500);
+  validateIntegerBound(errors, "--max-implement-turns", config.maxImplementTurns, 1, 500);
 
   return errors;
+}
+
+function validateIntegerBound(errors: string[], flag: string, value: number, min: number, max: number): void {
+  if (!Number.isFinite(value)) {
+    errors.push(`${flag} must be a finite integer between ${min} and ${max} (got "${value}")`);
+    return;
+  }
+  if (value < min || value > max) {
+    errors.push(`${flag} must be between ${min} and ${max}`);
+  }
 }
 
 const DEFAULT_SERVICE_MAP_PATH = ".github/service-map.yml";
