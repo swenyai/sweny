@@ -525,4 +525,166 @@ describe("ClaudeClient", () => {
     expect(prompt).toContain("Required Output");
     expect(prompt).toContain("severity");
   });
+
+  // Fix #1: tool-call accounting. The runtime must record each tool call
+  // exactly once and attach an explicit status that verify can trust.
+  describe("tool-call accounting", () => {
+    it("records an external MCP tool success as status:success", async () => {
+      // External MCP tool: assistant emits tool_use, SDK routes to the external
+      // MCP server (no in-process wrapper fires), then the SDK emits a user
+      // tool_result with is_error=false.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "call_1", name: "mcp__linear__search", input: { q: "bug" } }],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [{ type: "tool_result", tool_use_id: "call_1", content: "found 3 issues", is_error: false }],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0]).toMatchObject({ tool: "search", status: "success" });
+    });
+
+    it("records an external MCP tool error as status:error", async () => {
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "call_1", name: "mcp__sentry__get_issue", input: { id: 7 } }],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [{ type: "tool_result", tool_use_id: "call_1", content: "401 Unauthorized", is_error: true }],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0]).toMatchObject({ tool: "get_issue", status: "error" });
+    });
+
+    it("does not double-count an in-process tool (one entry per call)", async () => {
+      // In-process tool: assistant tool_use → our SDK wrapper runs → user tool_result.
+      // Only ONE ToolCall entry should appear, even though we observe three events.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "call_1", name: "mcp__sweny-core__fetch_data", input: { q: "x" } }],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [{ type: "tool_result", tool_use_id: "call_1", content: '{"items":[1,2]}', is_error: false }],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const handler = vi.fn().mockResolvedValue({ items: [1, 2] });
+      const client = new ClaudeClient();
+      const result = await client.run({
+        instruction: "x",
+        context: {},
+        tools: [{ name: "fetch_data", description: "d", input_schema: {}, handler }],
+      });
+
+      // Simulate the SDK invoking our wrapper during the stream — register it
+      // BEFORE the user tool_result fires would require controlling timing;
+      // for the purpose of this test, the stream order is enough: the entry
+      // created by the assistant tool_use should be the only one.
+      const names = result.toolCalls.map((c: { tool: string }) => c.tool);
+      expect(names).toEqual(["fetch_data"]);
+    });
+
+    it("leaves status undefined for a tool_use with no matching tool_result", async () => {
+      // Truncated stream: assistant started a tool call but the run ended
+      // before the result came back. The entry is preserved (useful for
+      // debugging) but has no status, so verify falls back to legacy heuristic.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "call_1", name: "search_code", input: { q: "x" } }],
+            },
+          },
+          { type: "result", subtype: "success", result: "partial", terminal_reason: "max_turns" },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0].status).toBeUndefined();
+    });
+
+    it("in-process tool error surfaces as status:error in the final ToolCall", async () => {
+      // Simulate the full stream path: assistant tool_use → wrapper throws →
+      // user tool_result with is_error=true. Only one ToolCall entry, status
+      // is "error", and its output carries the thrown error message.
+      mockQuery.mockImplementationOnce(async function* () {
+        yield {
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", id: "call_1", name: "mcp__sweny-core__bad_tool", input: {} }],
+          },
+        };
+        // At this point the SDK would invoke our wrapper; simulate that call.
+        const sdkHandler = mockSdkTool.mock.calls[0][3];
+        const wrapperResult = await sdkHandler({}, {});
+        yield {
+          type: "user",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "call_1",
+                content: wrapperResult.content[0].text,
+                is_error: wrapperResult.isError === true,
+              },
+            ],
+          },
+        };
+        yield { type: "result", subtype: "success", result: "done" };
+      });
+
+      const handler = vi.fn().mockRejectedValue(new Error("boom"));
+      const client = new ClaudeClient();
+      const result = await client.run({
+        instruction: "x",
+        context: {},
+        tools: [{ name: "bad_tool", description: "d", input_schema: {}, handler }],
+      });
+
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0].tool).toBe("bad_tool");
+      expect(result.toolCalls[0].status).toBe("error");
+    });
+  });
 });

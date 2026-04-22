@@ -229,6 +229,18 @@ export interface ToolCall {
   tool: string;
   input: unknown;
   output?: unknown;
+  /**
+   * Authoritative outcome of the tool invocation.
+   *
+   * When present, this is the source of truth for `verify` checks — the
+   * output-shape heuristic is a legacy fallback only. Set by the Claude
+   * runtime on tool completion: "success" when the tool returned normally,
+   * "error" when it threw or the MCP server returned is_error=true.
+   *
+   * Absent status indicates a legacy or hand-constructed ToolCall — verify
+   * falls back to inspecting `output` for an `error` key.
+   */
+  status?: "success" | "error";
 }
 
 export type ExecutionEvent =
