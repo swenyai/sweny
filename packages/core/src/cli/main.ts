@@ -15,12 +15,11 @@ import type { ExecutionEvent, NodeResult, Workflow, McpServerConfig, Observer } 
 import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
 import { createSkillMap, validateWorkflowSkills } from "../skills/index.js";
-import { configuredSkills } from "../skills/custom-loader.js";
+import { configuredSkills, configuredSkillsWithDiagnostics } from "../skills/custom-loader.js";
 import { buildAutoMcpServers, buildSkillMcpServers, buildProviderContext } from "../mcp.js";
 import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
-import { validateWorkflow as validateWorkflowSchema } from "../schema.js";
-import { parseWorkflow } from "../schema.js";
+import { loadAndValidateWorkflow } from "../loader.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -622,20 +621,12 @@ function promptUser(question: string): Promise<string> {
 
 const workflowCmd = program.command("workflow").description("Manage and run workflow files");
 
-/** Reads and parses a workflow file (YAML or JSON). Throws on I/O or parse error. */
-function parseWorkflowFileContent(filePath: string): unknown {
-  const content = fs.readFileSync(filePath, "utf-8");
-  const ext = path.extname(filePath).toLowerCase();
-  return ext === ".yaml" || ext === ".yml" ? parseYaml(content) : JSON.parse(content);
-}
-
 export function loadWorkflowFile(filePath: string): Workflow {
-  const raw = parseWorkflowFileContent(filePath);
-  const errors = validateWorkflowSchema(raw as Workflow);
-  if (errors.length > 0) {
-    throw new Error(`Invalid workflow file:\n${errors.map((e) => `  ${e.message}`).join("\n")}`);
+  const result = loadAndValidateWorkflow(filePath);
+  if (!result.ok) {
+    throw new Error(`Invalid workflow file:\n${result.errors.map((e) => `  ${e.message}`).join("\n")}`);
   }
-  return raw as Workflow;
+  return result.workflow;
 }
 
 export async function workflowRunAction(
@@ -668,12 +659,19 @@ export async function workflowRunAction(
   const isJson = Boolean(options.json);
   const isTTY = !isJson && (process.stderr.isTTY ?? false);
 
-  const skills = createSkillMap(configuredSkills(process.env, process.cwd()));
+  const { skills: configuredSkillList, warnings: skillWarnings } = configuredSkillsWithDiagnostics(
+    process.env,
+    process.cwd(),
+  );
+  for (const w of skillWarnings) {
+    console.error(chalk.yellow(`  ⚠  ${w.message}`));
+  }
+  const skills = createSkillMap(configuredSkillList);
 
   // Hard-fail at startup if the workflow references skills that aren't available.
   // Each node lists alternatives by category (e.g. [sentry, datadog, betterstack]);
   // we require at least one configured skill per category.
-  const validation = validateWorkflowSkills(workflow, skills);
+  const validation = validateWorkflowSkills(workflow, skills, workflow.skills);
   if (validation.errors.length > 0) {
     console.error(chalk.red(`\n  Workflow cannot run — missing required skills:\n`));
     for (const err of validation.errors) console.error(chalk.red(`    \u2717 ${err}`));
@@ -849,46 +847,23 @@ export function workflowExportAction(name: string): void {
 }
 
 export function workflowValidateAction(file: string, options: { json?: boolean }): void {
-  let raw: unknown;
-  try {
-    raw = parseWorkflowFileContent(file);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (options.json) {
-      process.stderr.write(JSON.stringify({ valid: false, errors: [{ message }] }, null, 2) + "\n");
-    } else {
-      console.error(chalk.red(`  Cannot read "${file}": ${message}`));
-    }
-    process.exit(1);
-    return;
-  }
-
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    const kind = raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw;
-    const message = `Expected a YAML/JSON object, got ${kind}`;
-    if (options.json) {
-      process.stderr.write(JSON.stringify({ valid: false, errors: [{ message }] }, null, 2) + "\n");
-    } else {
-      console.error(chalk.red(`  \u2717 ${file}: ${message}`));
-    }
-    process.exit(1);
-    return;
-  }
-
-  const errors = validateWorkflowSchema(raw as Workflow);
+  const result = loadAndValidateWorkflow(file);
 
   if (options.json) {
-    process.stdout.write(JSON.stringify({ valid: errors.length === 0, errors }, null, 2) + "\n");
-  } else if (errors.length === 0) {
+    const errs = result.ok ? [] : result.errors;
+    process.stdout.write(JSON.stringify({ valid: result.ok, errors: errs }, null, 2) + "\n");
+  } else if (result.ok) {
     console.log(chalk.green(`  \u2713 ${file} is valid`));
   } else {
-    console.error(chalk.red(`  \u2717 ${file} has ${errors.length} validation error${errors.length > 1 ? "s" : ""}:`));
-    for (const err of errors) {
+    console.error(
+      chalk.red(`  \u2717 ${file} has ${result.errors.length} validation error${result.errors.length > 1 ? "s" : ""}:`),
+    );
+    for (const err of result.errors) {
       console.error(chalk.dim(`    ${err.message}`));
     }
   }
 
-  process.exit(errors.length === 0 ? 0 : 1);
+  process.exit(result.ok ? 0 : 1);
 }
 
 workflowCmd

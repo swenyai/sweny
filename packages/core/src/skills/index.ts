@@ -97,9 +97,23 @@ export interface SkillValidationResult {
   warnings: string[];
 }
 
+/**
+ * Minimal shape we need off an inline skill definition. Matches
+ * `SkillDefinition` from types.ts (kept loose here to avoid a cross-import
+ * that drags the full type graph into skill-index consumers).
+ */
+type InlineSkillDef = {
+  name?: string;
+  description?: string;
+  instruction?: string;
+  mcp?: unknown;
+  category?: SkillCategory;
+};
+
 export function validateWorkflowSkills(
   workflow: { nodes: Record<string, { skills: string[] }> },
   available: Map<string, Skill>,
+  inlineSkills?: Record<string, InlineSkillDef>,
 ): SkillValidationResult {
   const configured: Skill[] = [];
   const configuredIds = new Set<string>();
@@ -107,6 +121,12 @@ export function validateWorkflowSkills(
   const missingIds = new Set<string>();
   const errors: string[] = [];
   const warnings: string[] = [];
+
+  // Inline workflow.skills are first-class at runtime (the executor merges
+  // them into the skill map via mergeInlineSkills). Treat them as present
+  // for validation so spec-valid workflows don't fail CLI pre-flight.
+  const inlineIds = new Set(inlineSkills ? Object.keys(inlineSkills) : []);
+  const inlineCategory = (id: string): SkillCategory => inlineSkills?.[id]?.category ?? "general";
 
   // Collect all referenced skill IDs
   const allReferencedIds = new Set<string>();
@@ -122,6 +142,9 @@ export function validateWorkflowSkills(
         configured.push(skill);
         configuredIds.add(id);
       }
+    } else if (inlineIds.has(id)) {
+      // Inline skills need no env vars and are auto-configured by the executor.
+      continue;
     } else {
       if (!missingIds.has(id)) {
         // Try to find it in builtins to get its category and required env vars
@@ -146,14 +169,14 @@ export function validateWorkflowSkills(
     for (const id of node.skills) {
       const skill = available.get(id);
       const builtin = builtinSkills.find((s) => s.id === id);
-      const cat = skill?.category ?? builtin?.category ?? "unknown";
+      const cat = skill?.category ?? builtin?.category ?? (inlineIds.has(id) ? inlineCategory(id) : "unknown");
       if (!categoriesNeeded.has(cat)) categoriesNeeded.set(cat, []);
       categoriesNeeded.get(cat)!.push(id);
     }
 
     // Check each category has at least one configured skill
     for (const [cat, skillIds] of categoriesNeeded) {
-      const hasAny = skillIds.some((id) => available.has(id));
+      const hasAny = skillIds.some((id) => available.has(id) || inlineIds.has(id));
       if (!hasAny) {
         const msg = `Node "${nodeId}" has no configured ${cat} providers (needs one of: ${skillIds.join(", ")})`;
         if (cat === "notification") {
