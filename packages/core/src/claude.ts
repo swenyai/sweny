@@ -75,26 +75,27 @@ export class ClaudeClient implements Claude {
 
     // Tool-call accounting (Fix #1).
     //
-    // We record tool calls from the stream, not from our in-process SDK wrapper:
+    // Stream-driven recording, correlated by tool_use_id:
     //   - `assistant` message with tool_use block → create a pending ToolCall
-    //     keyed by tool_use_id.
-    //   - `user` message with tool_result block → attach status+output to the
-    //     pending entry by tool_use_id.
+    //     and register it in `pendingByUseId` under its tool_use_id.
+    //   - `user` message with tool_result block → look up by tool_use_id, set
+    //     `status` from `is_error`, and recover the typed output by parsing
+    //     the stringified `content` field (our wrapper JSON-stringifies it
+    //     before returning; external MCP servers also return structured
+    //     content).
     //
-    // In-process tools (wired via `tools`) still execute through our wrapper;
-    // the wrapper stashes typed outputs keyed by tool name, and the
-    // tool_result handler prefers that typed output over the stringified
-    // `tool_result.content` carried by the stream. External MCP tools (wired
-    // via `this.mcpServers`) bypass our wrapper entirely; their outcome comes
-    // from the user message's `is_error` + `content`.
+    // Keying by tool_use_id (not by tool name) avoids mis-pairing when
+    // Claude invokes the same tool in parallel — the self-review test
+    // `pairs parallel same-named in-process tool outputs correctly` shows
+    // why FIFO-by-name is wrong.
     const toolCalls: ToolCall[] = [];
     const pendingByUseId = new Map<string, ToolCall>();
-    const inProcessOutputsByName = new Map<string, Array<{ output: unknown; status: "success" | "error" }>>();
 
-    // Convert core tools to SDK MCP tools. The wrapper writes outcomes into
-    // `inProcessOutputsByName` instead of pushing into `toolCalls` directly,
-    // so we don't double-count once the stream's tool_result fires.
-    const sdkTools = tools.map((t) => coreToolToSdkTool(t, this.defaultContext, inProcessOutputsByName));
+    // Convert core tools to SDK MCP tools. The wrapper invokes the user's
+    // handler and returns `content` via the MCP transport. We do not push
+    // to toolCalls from the wrapper — the stream's tool_result is the sole
+    // signal of completion, which keeps pairing correct under parallelism.
+    const sdkTools = tools.map((t) => coreToolToSdkTool(t, this.defaultContext));
 
     // Create in-process MCP server
     const mcpServer = createSdkMcpServer({
@@ -167,9 +168,15 @@ export class ClaudeClient implements Claude {
             }
           }
         } else if (message.type === "user") {
-          // Tool_result blocks close the loop: either an in-process tool's
-          // typed outcome (via inProcessOutputsByName) or an external MCP
-          // server's stringified content/is_error.
+          // Tool_result blocks close the loop. Pair to the pending ToolCall
+          // by tool_use_id — NOT by name, which would break parallel calls
+          // of the same tool (see regression test).
+          //
+          // Output handling is unified across in-process and external tools:
+          // our wrapper JSON-stringifies structured output before returning,
+          // and external MCP servers also send structured content as string.
+          // We parse the content back into a value so verify's output-path
+          // checks work against typed data.
           const um = message as any;
           if (um.message?.content && Array.isArray(um.message.content)) {
             for (const block of um.message.content) {
@@ -178,15 +185,10 @@ export class ClaudeClient implements Claude {
               if (!call) continue;
               pendingByUseId.delete(block.tool_use_id);
 
-              const inProcess = inProcessOutputsByName.get(call.tool);
-              if (inProcess && inProcess.length > 0) {
-                const outcome = inProcess.shift()!;
-                call.status = outcome.status;
-                call.output = outcome.output;
-              } else {
-                call.status = block.is_error === true ? "error" : "success";
-                call.output = block.is_error === true ? { error: block.content } : block.content;
-              }
+              const isError = block.is_error === true;
+              call.status = isError ? "error" : "success";
+              const parsed = parseToolResultContent(block.content);
+              call.output = isError ? { error: parsed } : parsed;
             }
           }
         } else if (message.type === "result") {
@@ -345,42 +347,54 @@ export class ClaudeClient implements Claude {
 /**
  * Convert a core Tool to an SDK MCP tool definition.
  *
- * The wrapper records each invocation's typed outcome into `outputsByName`
- * rather than pushing a ToolCall directly. `run()` pairs that outcome with
- * the matching `tool_use_id` when the user tool_result message arrives, so
- * each in-process call produces exactly one ToolCall entry with its typed
- * output preserved.
+ * The wrapper runs the user's handler and returns the MCP `CallToolResult`.
+ * Output bookkeeping happens on the stream side (see the tool_result
+ * handler in `run()`), keyed by `tool_use_id` — never from inside the
+ * wrapper. Keeping the wrapper stateless means parallel calls to the same
+ * tool cannot mis-pair outputs.
  */
-function coreToolToSdkTool(
-  coreTool: Tool,
-  defaultCtx: ToolContext,
-  outputsByName: Map<string, Array<{ output: unknown; status: "success" | "error" }>>,
-) {
+function coreToolToSdkTool(coreTool: Tool, defaultCtx: ToolContext) {
   const zodShape = jsonSchemaToZodShape(coreTool.input_schema);
-
-  function record(outcome: { output: unknown; status: "success" | "error" }) {
-    const q = outputsByName.get(coreTool.name) ?? [];
-    q.push(outcome);
-    outputsByName.set(coreTool.name, q);
-  }
 
   return sdkTool(coreTool.name, coreTool.description, zodShape, async (args: Record<string, unknown>) => {
     try {
       // The executor wraps handlers to inject ToolContext.
       // When used standalone, defaultCtx is the fallback.
       const output = await coreTool.handler(args, defaultCtx);
-      record({ output, status: "success" });
+      // JSON-stringify structured output so the tool_result handler can
+      // recover it via parseToolResultContent. Strings pass through.
       return {
         content: [{ type: "text" as const, text: typeof output === "string" ? output : JSON.stringify(output) }],
       };
     } catch (err: any) {
-      record({ output: { error: err.message }, status: "error" });
       return {
         content: [{ type: "text" as const, text: `Error: ${err.message}` }],
         isError: true,
       };
     }
   });
+}
+
+/**
+ * Best-effort recovery of typed output from a tool_result's `content`.
+ *
+ * The MCP protocol sends tool results as string content (optionally a
+ * structured block array). Our in-process wrapper JSON-stringifies
+ * structured output before returning; external MCP servers do the same.
+ * If the string parses as JSON, return the parsed value — that's what
+ * verify's output-path walks expect. Otherwise keep the raw string.
+ */
+function parseToolResultContent(content: unknown): unknown {
+  if (typeof content !== "string") return content;
+  const trimmed = content.trim();
+  if (trimmed.length === 0) return content;
+  const first = trimmed[0];
+  if (first !== "{" && first !== "[" && first !== '"') return content;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return content;
+  }
 }
 
 // ─── JSON Schema → Zod conversion ───────────────────────────────

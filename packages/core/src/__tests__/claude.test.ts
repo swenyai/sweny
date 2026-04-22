@@ -645,34 +645,34 @@ describe("ClaudeClient", () => {
     });
 
     it("in-process tool error surfaces as status:error in the final ToolCall", async () => {
-      // Simulate the full stream path: assistant tool_use → wrapper throws →
-      // user tool_result with is_error=true. Only one ToolCall entry, status
-      // is "error", and its output carries the thrown error message.
-      mockQuery.mockImplementationOnce(async function* () {
-        yield {
-          type: "assistant",
-          message: {
-            content: [{ type: "tool_use", id: "call_1", name: "mcp__sweny-core__bad_tool", input: {} }],
+      // Full stream path for a throwing in-process tool. The SDK fires our
+      // wrapper (which catches the throw and returns isError: true), then
+      // emits a tool_result with is_error: true. Record exactly one
+      // ToolCall with status: "error".
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "call_1", name: "mcp__sweny-core__bad_tool", input: {} }],
+            },
           },
-        };
-        // At this point the SDK would invoke our wrapper; simulate that call.
-        const sdkHandler = mockSdkTool.mock.calls[0][3];
-        const wrapperResult = await sdkHandler({}, {});
-        yield {
-          type: "user",
-          message: {
-            content: [
-              {
-                type: "tool_result",
-                tool_use_id: "call_1",
-                content: wrapperResult.content[0].text,
-                is_error: wrapperResult.isError === true,
-              },
-            ],
+          {
+            type: "user",
+            message: {
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "call_1",
+                  content: "Error: boom",
+                  is_error: true,
+                },
+              ],
+            },
           },
-        };
-        yield { type: "result", subtype: "success", result: "done" };
-      });
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
 
       const handler = vi.fn().mockRejectedValue(new Error("boom"));
       const client = new ClaudeClient();
@@ -685,6 +685,101 @@ describe("ClaudeClient", () => {
       expect(result.toolCalls).toHaveLength(1);
       expect(result.toolCalls[0].tool).toBe("bad_tool");
       expect(result.toolCalls[0].status).toBe("error");
+    });
+
+    // Self-review found: FIFO-by-name queue could mis-pair outputs when
+    // the same in-process tool is called twice and tool_result messages
+    // arrive in non-invocation order. Claude's parallel tool calling makes
+    // this reachable in practice. Outputs must be paired to the correct
+    // ToolCall by tool_use_id, not by name order.
+    it("pairs parallel same-named in-process tool outputs correctly", async () => {
+      // Scenario: agent fires two `fetch_data` calls in parallel with
+      // different inputs. tool_result messages arrive in REVERSE order
+      // (call_2 first, then call_1). Each ToolCall entry must carry the
+      // output that corresponds to its own tool_use_id.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [
+                { type: "tool_use", id: "call_1", name: "mcp__sweny-core__fetch_data", input: { id: 1 } },
+                { type: "tool_use", id: "call_2", name: "mcp__sweny-core__fetch_data", input: { id: 2 } },
+              ],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "call_2",
+                  content: JSON.stringify({ id: 2, payload: "two" }),
+                  is_error: false,
+                },
+              ],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "call_1",
+                  content: JSON.stringify({ id: 1, payload: "one" }),
+                  is_error: false,
+                },
+              ],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const handler = vi
+        .fn()
+        .mockImplementation(async (args: any) => ({ id: args.id, payload: args.id === 1 ? "one" : "two" }));
+      const client = new ClaudeClient();
+      const result = await client.run({
+        instruction: "x",
+        context: {},
+        tools: [{ name: "fetch_data", description: "d", input_schema: {}, handler }],
+      });
+
+      expect(result.toolCalls).toHaveLength(2);
+      const call1 = result.toolCalls.find((c: { input: unknown }) => (c.input as { id: number }).id === 1)!;
+      const call2 = result.toolCalls.find((c: { input: unknown }) => (c.input as { id: number }).id === 2)!;
+
+      expect(call1).toBeDefined();
+      expect(call2).toBeDefined();
+      // Regression guard: output is paired by tool_use_id, not by wrapper-fire order.
+      expect((call1.output as { payload: string }).payload).toBe("one");
+      expect((call2.output as { payload: string }).payload).toBe("two");
+    });
+
+    it("ignores a tool_result with an unknown tool_use_id (malformed stream)", async () => {
+      // Defensive: the SDK should never send a tool_result for a tool_use
+      // we didn't see, but if it does, we must not crash or silently record
+      // a phantom ToolCall.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "user",
+            message: {
+              content: [{ type: "tool_result", tool_use_id: "ghost", content: "noise", is_error: false }],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.toolCalls).toHaveLength(0);
+      expect(result.status).toBe("success");
     });
   });
 });
