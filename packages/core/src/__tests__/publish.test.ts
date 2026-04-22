@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { validateWorkflowFile, validateSkillDir } from "../cli/publish.js";
+import { validateWorkflowFile, validateSkillDir, copySkillDir } from "../cli/publish.js";
 
 describe("validateWorkflowFile", () => {
   let tmpDir: string;
@@ -222,5 +222,61 @@ name: empty-skill
     const result = validateSkillDir(skillDir);
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("Skill must have an instruction body or an mcp config");
+  });
+});
+
+// Fix #17: skill publishing must preserve nested directories. The previous
+// shallow readdirSync + copyFileSync loop either silently shipped incomplete
+// or threw EISDIR on the first subdirectory it hit.
+describe("copySkillDir", () => {
+  let tmpDir: string;
+
+  beforeAll(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-copyskilldir-test-"));
+  });
+
+  afterAll(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("copies a flat skill directory", () => {
+    const src = fs.mkdtempSync(path.join(tmpDir, "src-flat-"));
+    const dst = path.join(tmpDir, "dst-flat");
+    fs.writeFileSync(path.join(src, "SKILL.md"), "---\nname: x\n---\nbody\n");
+    fs.writeFileSync(path.join(src, "README.md"), "hi");
+
+    copySkillDir(src, dst);
+
+    expect(fs.readFileSync(path.join(dst, "SKILL.md"), "utf-8")).toContain("name: x");
+    expect(fs.readFileSync(path.join(dst, "README.md"), "utf-8")).toBe("hi");
+  });
+
+  it("copies nested subdirectories", () => {
+    const src = fs.mkdtempSync(path.join(tmpDir, "src-nested-"));
+    const dst = path.join(tmpDir, "dst-nested");
+    fs.writeFileSync(path.join(src, "SKILL.md"), "---\nname: x\n---\nbody\n");
+    fs.mkdirSync(path.join(src, "scripts"));
+    fs.writeFileSync(path.join(src, "scripts", "helper.sh"), "#!/bin/sh\n");
+    fs.mkdirSync(path.join(src, "references", "docs"), { recursive: true });
+    fs.writeFileSync(path.join(src, "references", "docs", "note.md"), "ref");
+
+    copySkillDir(src, dst);
+
+    expect(fs.existsSync(path.join(dst, "SKILL.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(dst, "scripts", "helper.sh"), "utf-8")).toBe("#!/bin/sh\n");
+    expect(fs.readFileSync(path.join(dst, "references", "docs", "note.md"), "utf-8")).toBe("ref");
+  });
+
+  it("copies binary assets verbatim", () => {
+    const src = fs.mkdtempSync(path.join(tmpDir, "src-binary-"));
+    const dst = path.join(tmpDir, "dst-binary");
+    fs.writeFileSync(path.join(src, "SKILL.md"), "---\nname: x\n---\nbody\n");
+    const binary = Buffer.from([0, 1, 2, 3, 0xff, 0xfe]);
+    fs.writeFileSync(path.join(src, "logo.bin"), binary);
+
+    copySkillDir(src, dst);
+
+    const copied = fs.readFileSync(path.join(dst, "logo.bin"));
+    expect(copied.equals(binary)).toBe(true);
   });
 });

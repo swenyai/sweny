@@ -199,11 +199,13 @@ SWEny validates workflows before execution. The `sweny workflow validate` comman
 | Entry exists | `MISSING_ENTRY` | The `entry` value must match a key in `nodes`. |
 | Valid edge sources | `UNKNOWN_EDGE_SOURCE` | Every edge `from` must reference an existing node ID. |
 | Valid edge targets | `UNKNOWN_EDGE_TARGET` | Every edge `to` must reference an existing node ID. |
-| No self-loops | `SELF_LOOP` | An edge cannot have the same `from` and `to` value. |
+| Bounded self-loops | `SELF_LOOP` | An edge where `from` equals `to` must declare `max_iterations`. Bounded self-loops are allowed — only unbounded ones are rejected. |
 | All nodes reachable | `UNREACHABLE_NODE` | Every node must be reachable from the entry node via BFS traversal. |
+| No unbounded cycles | `UNBOUNDED_CYCLE` | Any cycle must have at least one edge with `max_iterations`. The detector removes bounded edges, then checks the remaining subgraph for cycles. |
 | Known skills | `UNKNOWN_SKILL` | If a skill catalog is provided, all referenced skill IDs must exist in it. |
+| Valid inline skills | `INVALID_INLINE_SKILL` | Inline `skills` entries in a workflow must declare `instruction`, `mcp`, or both. |
 
-Validation runs in two phases. First, structural checks (entry exists, edges reference valid nodes, no self-loops). If those pass, reachability is checked via breadth-first search from the entry node.
+Validation runs in two phases. First, structural checks (entry exists, edges reference valid nodes, bounded self-loops, no unbounded cycles). If those pass, reachability is checked via breadth-first search from the entry node.
 
 ## JSON Schema
 
@@ -212,7 +214,7 @@ SWEny publishes a static JSON Schema for workflow files. Use it for editor autoc
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sweny.ai/schemas/workflow.json",
+  "$id": "https://spec.sweny.ai/schemas/workflow.json",
   "title": "SWEny Workflow",
   "description": "A DAG workflow definition for skill-based orchestration",
   "type": "object",
@@ -275,7 +277,7 @@ SWEny publishes a static JSON Schema for workflow files. Use it for editor autoc
 Reference it in your YAML editor by adding a schema comment:
 
 ```yaml
-# yaml-language-server: $schema=https://sweny.ai/schemas/workflow.json
+# yaml-language-server: $schema=https://spec.sweny.ai/schemas/workflow.json
 id: my-workflow
 name: My Workflow
 # ...

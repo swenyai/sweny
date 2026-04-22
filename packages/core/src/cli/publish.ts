@@ -410,12 +410,7 @@ async function openGitHubPR(
       execFileSync("git", ["-C", tmpDir, "add", `workflows/community/${id}.yml`], { stdio: "pipe" });
     } else {
       const destDir = path.join(tmpDir, "skills", "community", id);
-      fs.mkdirSync(destDir, { recursive: true });
-      // Copy entire skill directory
-      const files = fs.readdirSync(sourcePath);
-      for (const file of files) {
-        fs.copyFileSync(path.join(sourcePath, file), path.join(destDir, file));
-      }
+      copySkillDir(sourcePath, destDir);
       execFileSync("git", ["-C", tmpDir, "add", `skills/community/${id}`], { stdio: "pipe" });
     }
 
@@ -476,15 +471,25 @@ async function saveLocally(type: "workflow" | "skill", id: string, sourcePath: s
     return { type, id, name: id, outputPath: dest };
   } else {
     const destDir = path.join(outputDir, id);
-    fs.mkdirSync(destDir, { recursive: true });
-    const files = fs.readdirSync(sourcePath);
-    for (const file of files) {
-      fs.copyFileSync(path.join(sourcePath, file), path.join(destDir, file));
-    }
+    copySkillDir(sourcePath, destDir);
     p.log.success(`Saved to ${chalk.cyan(destDir)}`);
     p.log.info(`Submit manually: copy to skills/community/ in a fork of swenyai/marketplace`);
     return { type, id, name: id, outputPath: destDir };
   }
+}
+
+/**
+ * Recursively copy a skill source directory to its destination (Fix #17).
+ *
+ * Previously a flat `fs.readdirSync` + `fs.copyFileSync` loop: skills with
+ * nested directories (scripts/, references/, assets/) either silently
+ * shipped incomplete or — more often — threw EISDIR on the first subdir.
+ *
+ * Exported for tests; node:fs cp's recursive mode preserves structure.
+ */
+export function copySkillDir(sourceDir: string, destDir: string): void {
+  fs.mkdirSync(destDir, { recursive: true });
+  fs.cpSync(sourceDir, destDir, { recursive: true });
 }
 
 // ── Command registration ───────────────────────────────────────────────

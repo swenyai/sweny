@@ -37,6 +37,14 @@ When a workflow runs (via CLI or GitHub Action):
 
 All execution happens locally. If `SWENY_CLOUD_TOKEN` is set, a structured summary (status, duration, recommendations) is sent to cloud.sweny.ai — no code, no diffs, no secrets.
 
+### What "scoped tools" means
+
+Each node declares `skills`, and SWEny wires only those skills' MCP servers into that node's invocation. In that sense the MCP tool surface is scoped per node.
+
+What SWEny does **not** scope: the underlying Claude Code subprocess runs with `permissionMode: "bypassPermissions"`, which keeps the built-in Bash/Read/Write/Edit tools available without permission prompting. This is intentional — SWEny targets CI-style autonomous runs where interactive approval is not an option, and the agent needs these capabilities to do the work. If you need a stricter sandbox, run the Action in a container that constrains the filesystem and network instead of looking for a flag inside SWEny.
+
+`verify` post-conditions are the primary mechanism for making a node's behavior auditable: `any_tool_called`, `all_tools_called`, `no_tool_called`, and `output_matches` are all checked against the actual recorded tool outcomes.
+
 ### Skills
 
 Skills are composable tool bundles. Three types:

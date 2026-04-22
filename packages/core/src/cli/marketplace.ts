@@ -15,7 +15,7 @@ import type { Skill, SkillCategory, Workflow, Claude, Logger } from "../types.js
 import type { FileConfig } from "./config-file.js";
 import { refineWorkflow } from "../workflow-builder.js";
 import { DagRenderer } from "./renderer.js";
-import { workflowZ, validateWorkflow } from "../schema.js";
+import { validateParsed } from "../loader.js";
 import { loadConfigFile } from "./config-file.js";
 import {
   extractSkillsFromYaml,
@@ -305,21 +305,39 @@ export async function installMarketplaceWorkflow(id: string, options: InstallOpt
   // 1. Fetch
   const fetched = await fetchMarketplaceWorkflow(id);
 
-  // 2. Load existing config to detect mismatches
+  // 2. Validate fetched content BEFORE any local side effects (Fix #3).
+  // Previously, an invalid workflow could still get written to disk and
+  // .sweny.yml / .env polluted with keys inferred from broken content.
+  let parsed: Workflow;
+  {
+    let yamlParsed: unknown;
+    try {
+      yamlParsed = parseYaml(fetched.yaml);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Marketplace workflow "${id}" is not valid YAML: ${msg}`);
+    }
+    const validated = validateParsed(yamlParsed);
+    if (!validated.ok) {
+      throw new Error(
+        `Marketplace workflow "${id}" failed validation:\n${validated.errors.map((e) => `  ${e.message}`).join("\n")}`,
+      );
+    }
+    parsed = validated.workflow;
+  }
+
+  // 3. Load existing config to detect mismatches
   const fileConfig = loadConfigFile(cwd);
   const workflowSkills = extractSkillsFromYaml(fetched.yaml);
   const mismatches = computeProviderMismatch(workflowSkills, fileConfig, availableSkills);
 
-  // 3. Adapt if needed + possible
+  // 4. Adapt if needed + possible. Schema was already validated above, so
+  // adaptation failure no longer hides a schema failure — it falls back to
+  // installing the validated-original.
   let finalYaml = fetched.yaml;
   let adapted = false;
   if (mismatches.length > 0 && claude) {
     try {
-      const parsed = workflowZ.parse(parseYaml(fetched.yaml));
-      const errs = validateWorkflow(parsed);
-      if (errs.length > 0) {
-        throw new Error(`Marketplace workflow has schema errors: ${errs.map((e) => e.message).join("; ")}`);
-      }
       const refined = await adaptWorkflowInteractive(parsed, {
         claude,
         skills: availableSkills,
