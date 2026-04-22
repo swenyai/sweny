@@ -1,4 +1,5 @@
 import type { McpAutoConfig, McpServerConfig } from "./types.js";
+import { MCP_CATALOG } from "./mcp-catalog.js";
 
 // ── Skill-driven MCP wiring ─────────────────────────────────────────
 //
@@ -10,6 +11,9 @@ import type { McpAutoConfig, McpServerConfig } from "./types.js";
 // used by `sweny triage` / `sweny implement`. It is retained so those
 // commands keep working unchanged; over time they should migrate to the
 // skill-driven path too.
+//
+// Both functions are thin projections of MCP_CATALOG (see mcp-catalog.ts).
+// Adding a provider is a one-place edit.
 
 export interface SkillMcpOptions {
   /** Skill IDs referenced by the workflow being executed. Only these get MCPs. */
@@ -25,169 +29,24 @@ export interface SkillMcpOptions {
 /**
  * Build MCP server configs for the skills a workflow references.
  *
- * For each skill ID in `referencedSkills`, look up its MCP wiring (if any)
- * and include it only when the required credentials are present in `credentials`.
+ * For each entry in MCP_CATALOG whose skill triggers intersect
+ * `referencedSkills`, wire its MCP if credentials are present. Skills with
+ * no MCP variant (e.g. `notification`, `supabase`) are silently skipped —
+ * their in-process tools are wired separately by the executor. Unknown
+ * skill IDs pass through; the engine's hard-fail validation handles them.
  *
- * Skills with no MCP variant (e.g. `notification`, `supabase`) are silently
- * skipped — their in-process tools are wired separately by the executor.
- *
- * Unknown skill IDs (not built-in, not in this MCP catalog) are silently
- * skipped here; the engine's hard-fail validation handles them upstream.
- *
- * User-supplied servers always win on key conflict.
+ * Inline skill-declared servers and user-supplied servers layer on top.
  */
 export function buildSkillMcpServers(opts: SkillMcpOptions): Record<string, McpServerConfig> {
   const auto: Record<string, McpServerConfig> = {};
   const refs = opts.referencedSkills;
   const creds = opts.credentials;
 
-  // GitHub MCP — wired when workflow uses `github` skill and a token is set.
-  if (refs.has("github") && creds.GITHUB_TOKEN) {
-    auto["github"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-github@latest"],
-      env: { GITHUB_PERSONAL_ACCESS_TOKEN: creds.GITHUB_TOKEN },
-    };
-  }
-
-  // GitLab MCP.
-  if (refs.has("gitlab") && creds.GITLAB_TOKEN) {
-    const env: Record<string, string> = { GITLAB_PERSONAL_ACCESS_TOKEN: creds.GITLAB_TOKEN };
-    const baseUrl = creds.GITLAB_URL || "https://gitlab.com";
-    if (baseUrl !== "https://gitlab.com") env.GITLAB_API_URL = `${baseUrl}/api/v4`;
-    auto["gitlab"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-gitlab@latest"],
-      env,
-    };
-  }
-
-  // Linear MCP — official remote HTTP endpoint.
-  if (refs.has("linear") && creds.LINEAR_API_KEY) {
-    auto["linear"] = {
-      type: "http",
-      url: "https://mcp.linear.app/mcp",
-      headers: { Authorization: `Bearer ${creds.LINEAR_API_KEY}` },
-    };
-  }
-
-  // Jira / Confluence — needs all 3 creds.
-  if (refs.has("jira") && creds.JIRA_URL && creds.JIRA_EMAIL && creds.JIRA_API_TOKEN) {
-    auto["jira"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@sooperset/mcp-atlassian@latest"],
-      env: {
-        JIRA_URL: creds.JIRA_URL,
-        JIRA_EMAIL: creds.JIRA_EMAIL,
-        JIRA_API_TOKEN: creds.JIRA_API_TOKEN,
-      },
-    };
-  }
-
-  // Datadog MCP.
-  if (refs.has("datadog") && creds.DD_API_KEY && creds.DD_APP_KEY) {
-    auto["datadog"] = {
-      type: "http",
-      url: "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
-      headers: { DD_API_KEY: creds.DD_API_KEY, DD_APPLICATION_KEY: creds.DD_APP_KEY },
-    };
-  }
-
-  // Sentry MCP — server reads SENTRY_ACCESS_TOKEN, not SENTRY_AUTH_TOKEN.
-  if (refs.has("sentry") && creds.SENTRY_AUTH_TOKEN) {
-    const env: Record<string, string> = { SENTRY_ACCESS_TOKEN: creds.SENTRY_AUTH_TOKEN };
-    const sentryUrl = creds.SENTRY_URL;
-    if (sentryUrl && sentryUrl !== "https://sentry.io") {
-      try {
-        env.SENTRY_HOST = new URL(sentryUrl).hostname;
-      } catch {
-        // malformed URL — leave SENTRY_HOST unset
-      }
-    }
-    auto["sentry"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@sentry/mcp-server@latest"],
-      env,
-    };
-  }
-
-  // New Relic MCP — region-aware HTTP endpoint, header is "Api-Key".
-  if (refs.has("newrelic") && creds.NEW_RELIC_API_KEY) {
-    const region = creds.NEW_RELIC_REGION;
-    const url = region === "eu" ? "https://mcp.eu.newrelic.com/mcp/" : "https://mcp.newrelic.com/mcp/";
-    auto["newrelic"] = {
-      type: "http",
-      url,
-      headers: { "Api-Key": creds.NEW_RELIC_API_KEY },
-    };
-  }
-
-  // BetterStack MCP — accept any of the legacy/telemetry/uptime tokens.
-  const bsToken = creds.BETTERSTACK_API_TOKEN || creds.BETTERSTACK_TELEMETRY_TOKEN || creds.BETTERSTACK_UPTIME_TOKEN;
-  if (refs.has("betterstack") && bsToken) {
-    auto["betterstack"] = {
-      type: "http",
-      url: "https://mcp.betterstack.com",
-      headers: { Authorization: `Bearer ${bsToken}` },
-    };
-  }
-
-  // Slack MCP — wired when workflow uses `slack` skill and bot token is set.
-  if (refs.has("slack") && creds.SLACK_BOT_TOKEN) {
-    const env: Record<string, string> = { SLACK_BOT_TOKEN: creds.SLACK_BOT_TOKEN };
-    if (creds.SLACK_TEAM_ID) env.SLACK_TEAM_ID = creds.SLACK_TEAM_ID;
-    auto["slack"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-slack@latest"],
-      env,
-    };
-  }
-
-  // Notion MCP — accept either NOTION_TOKEN or NOTION_API_KEY.
-  if (refs.has("notion")) {
-    const token = creds.NOTION_TOKEN || creds.NOTION_API_KEY;
-    if (token) {
-      auto["notion"] = {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@notionhq/notion-mcp-server@latest"],
-        env: { NOTION_TOKEN: token },
-      };
-    }
-  }
-
-  // PagerDuty MCP — auth scheme is `Token token=<key>`.
-  if (refs.has("pagerduty") && creds.PAGERDUTY_API_TOKEN) {
-    auto["pagerduty"] = {
-      type: "http",
-      url: "https://mcp.pagerduty.com/mcp",
-      headers: { Authorization: `Token token=${creds.PAGERDUTY_API_TOKEN}` },
-    };
-  }
-
-  // Monday.com MCP.
-  if (refs.has("monday") && creds.MONDAY_TOKEN) {
-    auto["monday"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@mondaydotcomorg/monday-api-mcp@latest"],
-      env: { MONDAY_TOKEN: creds.MONDAY_TOKEN },
-    };
-  }
-
-  // Asana MCP.
-  if (refs.has("asana") && creds.ASANA_ACCESS_TOKEN) {
-    auto["asana"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "asana-mcp@latest"],
-      env: { ASANA_ACCESS_TOKEN: creds.ASANA_ACCESS_TOKEN },
-    };
+  for (const entry of MCP_CATALOG) {
+    const skillIds = entry.triggers.skill ?? [];
+    if (!skillIds.some((id) => refs.has(id))) continue;
+    const wired = entry.wire(creds);
+    if (wired) auto[entry.id] = wired;
   }
 
   // Skill-declared MCP servers — only include for referenced skills.
@@ -215,190 +74,18 @@ export function buildSkillMcpServers(opts: SkillMcpOptions): Record<string, McpS
 export function buildAutoMcpServers(config: McpAutoConfig): Record<string, McpServerConfig> {
   const auto: Record<string, McpServerConfig> = {};
   const creds = config.credentials;
-
-  // ── Category A: Provider-config triggered ──────────────────────
-
-  // GitHub MCP — inject when using GitHub source control OR GitHub Issues tracker.
-  // @modelcontextprotocol/server-github requires GITHUB_PERSONAL_ACCESS_TOKEN.
-  const githubToken = creds.GITHUB_TOKEN;
-  if ((config.sourceControlProvider === "github" || config.issueTrackerProvider === "github-issues") && githubToken) {
-    auto["github"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-github@latest"],
-      env: { GITHUB_PERSONAL_ACCESS_TOKEN: githubToken },
-    };
-  }
-
-  // GitLab MCP — inject when source control provider is gitlab.
-  const gitlabToken = creds.GITLAB_TOKEN;
-  if (config.sourceControlProvider === "gitlab" && gitlabToken) {
-    const gitlabEnv: Record<string, string> = { GITLAB_PERSONAL_ACCESS_TOKEN: gitlabToken };
-    const baseUrl = creds.GITLAB_URL || "https://gitlab.com";
-    if (baseUrl !== "https://gitlab.com") {
-      gitlabEnv.GITLAB_API_URL = `${baseUrl}/api/v4`;
-    }
-    auto["gitlab"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-gitlab@latest"],
-      env: gitlabEnv,
-    };
-  }
-
-  // Linear MCP — official HTTP remote MCP endpoint.
-  const linearApiKey = creds.LINEAR_API_KEY;
-  if (config.issueTrackerProvider === "linear" && linearApiKey) {
-    auto["linear"] = {
-      type: "http",
-      url: "https://mcp.linear.app/mcp",
-      headers: { Authorization: `Bearer ${linearApiKey}` },
-    };
-  }
-
-  // Jira / Confluence (Atlassian) MCP — needs all 3 credentials.
-  const jiraUrl = creds.JIRA_URL;
-  const jiraEmail = creds.JIRA_EMAIL;
-  const jiraApiToken = creds.JIRA_API_TOKEN;
-  if (config.issueTrackerProvider === "jira" && jiraUrl && jiraEmail && jiraApiToken) {
-    auto["jira"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@sooperset/mcp-atlassian@latest"],
-      env: {
-        JIRA_URL: jiraUrl,
-        JIRA_EMAIL: jiraEmail,
-        JIRA_API_TOKEN: jiraApiToken,
-      },
-    };
-  }
-
-  // ── Observability MCP servers ──────────────────────────────────
-  // Inject MCP for every configured observability provider whose credentials
-  // are present. Multiple providers are supported (e.g. "loki,sentry").
   const obsProviders = new Set(config.observabilityProviders ?? []);
-
-  // Datadog MCP — HTTP transport.
-  const ddApiKey = creds.DD_API_KEY;
-  const ddAppKey = creds.DD_APP_KEY;
-  if (obsProviders.has("datadog") && ddApiKey && ddAppKey) {
-    auto["datadog"] = {
-      type: "http",
-      url: "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp",
-      headers: { DD_API_KEY: ddApiKey, DD_APPLICATION_KEY: ddAppKey },
-    };
-  }
-
-  // Sentry MCP — @sentry/mcp-server reads SENTRY_ACCESS_TOKEN (not SENTRY_AUTH_TOKEN).
-  const sentryAuthToken = creds.SENTRY_AUTH_TOKEN;
-  if (obsProviders.has("sentry") && sentryAuthToken) {
-    const sentryEnv: Record<string, string> = { SENTRY_ACCESS_TOKEN: sentryAuthToken };
-    const sentryUrl = creds.SENTRY_URL;
-    if (sentryUrl && sentryUrl !== "https://sentry.io") {
-      try {
-        sentryEnv.SENTRY_HOST = new URL(sentryUrl).hostname;
-      } catch {
-        // malformed URL — leave SENTRY_HOST unset, server defaults to sentry.io
-      }
-    }
-    auto["sentry"] = {
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@sentry/mcp-server@latest"],
-      env: sentryEnv,
-    };
-  }
-
-  // New Relic MCP — HTTP transport; region-aware endpoint.
-  const nrApiKey = creds.NEW_RELIC_API_KEY;
-  if (obsProviders.has("newrelic") && nrApiKey) {
-    const nrRegion = creds.NEW_RELIC_REGION;
-    const nrEndpoint = nrRegion === "eu" ? "https://mcp.eu.newrelic.com/mcp/" : "https://mcp.newrelic.com/mcp/";
-    auto["newrelic"] = {
-      type: "http",
-      url: nrEndpoint,
-      headers: { "Api-Key": nrApiKey },
-    };
-  }
-
-  // Better Stack MCP — HTTP remote MCP; Bearer token auth.
-  const bsApiToken = creds.BETTERSTACK_API_TOKEN || creds.BETTERSTACK_TELEMETRY_TOKEN || creds.BETTERSTACK_UPTIME_TOKEN;
-  if (obsProviders.has("betterstack") && bsApiToken) {
-    auto["betterstack"] = {
-      type: "http",
-      url: "https://mcp.betterstack.com",
-      headers: { Authorization: `Bearer ${bsApiToken}` },
-    };
-  }
-
-  // ── Category B: Workspace tools (explicit opt-in) ──────────────
-
   const tools = new Set(config.workspaceTools ?? []);
 
-  // Slack MCP — requires opt-in AND SLACK_BOT_TOKEN.
-  if (tools.has("slack")) {
-    const slackBotToken = creds.SLACK_BOT_TOKEN;
-    if (slackBotToken) {
-      const slackEnv: Record<string, string> = { SLACK_BOT_TOKEN: slackBotToken };
-      if (creds.SLACK_TEAM_ID) slackEnv.SLACK_TEAM_ID = creds.SLACK_TEAM_ID;
-      auto["slack"] = {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-slack@latest"],
-        env: slackEnv,
-      };
-    }
-  }
-
-  // Notion MCP — requires opt-in; accepts NOTION_TOKEN or NOTION_API_KEY.
-  if (tools.has("notion")) {
-    const notionToken = creds.NOTION_TOKEN || creds.NOTION_API_KEY;
-    if (notionToken) {
-      auto["notion"] = {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@notionhq/notion-mcp-server@latest"],
-        env: { NOTION_TOKEN: notionToken },
-      };
-    }
-  }
-
-  // PagerDuty MCP — HTTP remote endpoint; auth uses "Token token=<key>".
-  if (tools.has("pagerduty")) {
-    const pagerdutyToken = creds.PAGERDUTY_API_TOKEN;
-    if (pagerdutyToken) {
-      auto["pagerduty"] = {
-        type: "http",
-        url: "https://mcp.pagerduty.com/mcp",
-        headers: { Authorization: `Token token=${pagerdutyToken}` },
-      };
-    }
-  }
-
-  // Monday.com MCP — requires opt-in AND MONDAY_TOKEN.
-  if (tools.has("monday")) {
-    const mondayToken = creds.MONDAY_TOKEN;
-    if (mondayToken) {
-      auto["monday"] = {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@mondaydotcomorg/monday-api-mcp@latest"],
-        env: { MONDAY_TOKEN: mondayToken },
-      };
-    }
-  }
-
-  // Asana MCP — requires opt-in AND ASANA_ACCESS_TOKEN.
-  if (tools.has("asana")) {
-    const asanaToken = creds.ASANA_ACCESS_TOKEN;
-    if (asanaToken) {
-      auto["asana"] = {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "asana-mcp@latest"],
-        env: { ASANA_ACCESS_TOKEN: asanaToken },
-      };
-    }
+  for (const entry of MCP_CATALOG) {
+    const matches =
+      (entry.triggers.sourceControl?.includes(config.sourceControlProvider ?? "") ?? false) ||
+      (entry.triggers.issueTracker?.includes(config.issueTrackerProvider ?? "") ?? false) ||
+      (entry.triggers.observability?.some((o) => obsProviders.has(o)) ?? false) ||
+      (entry.triggers.workspaceTool?.some((t) => tools.has(t)) ?? false);
+    if (!matches) continue;
+    const wired = entry.wire(creds);
+    if (wired) auto[entry.id] = wired;
   }
 
   // User-supplied servers always win on key conflict.
