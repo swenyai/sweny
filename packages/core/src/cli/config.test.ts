@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateInputs, parseCliInputs } from "./config.js";
+import { validateInputs, parseCliInputs, parsePositiveInt } from "./config.js";
 import type { CliConfig } from "./config.js";
 
 /**
@@ -170,6 +170,51 @@ describe("fetch.auth + offline parsing", () => {
   it("parses fetch.auth from file config", () => {
     const config = parseCliInputs({}, { "fetch.auth": { "api.example.com": "MY_TOKEN" } as any });
     expect(config.fetchAuth).toEqual({ "api.example.com": "MY_TOKEN" });
+  });
+});
+
+// Fix #10 completion: parsePositiveInt helper. Returns the fallback for
+// null/undefined/empty, NaN for malformed input (so validateInputs can
+// surface a field-specific error), parsed integer otherwise.
+describe("parsePositiveInt", () => {
+  it("returns fallback for undefined", () => {
+    expect(parsePositiveInt(undefined, 42)).toBe(42);
+  });
+
+  it("returns fallback for null", () => {
+    expect(parsePositiveInt(null, 42)).toBe(42);
+  });
+
+  it("returns fallback for empty string", () => {
+    expect(parsePositiveInt("", 42)).toBe(42);
+    expect(parsePositiveInt("   ", 42)).toBe(42);
+  });
+
+  it("parses numeric string", () => {
+    expect(parsePositiveInt("100", 42)).toBe(100);
+  });
+
+  it("parses number value", () => {
+    expect(parsePositiveInt(100, 42)).toBe(100);
+  });
+
+  it("truncates fractional numbers", () => {
+    expect(parsePositiveInt(100.7, 42)).toBe(100);
+    expect(parsePositiveInt("100.7", 42)).toBe(100);
+  });
+
+  it("returns NaN for malformed string (not silent fallback)", () => {
+    expect(Number.isNaN(parsePositiveInt("abc", 42))).toBe(true);
+    expect(Number.isNaN(parsePositiveInt("5o", 42))).toBe(true);
+    expect(Number.isNaN(parsePositiveInt("not a number", 42))).toBe(true);
+  });
+
+  it("returns NaN for NaN number input", () => {
+    expect(Number.isNaN(parsePositiveInt(Number.NaN, 42))).toBe(true);
+  });
+
+  it("returns NaN for Infinity", () => {
+    expect(Number.isNaN(parsePositiveInt(Infinity, 42))).toBe(true);
   });
 });
 

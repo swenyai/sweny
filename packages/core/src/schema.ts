@@ -110,6 +110,12 @@ export const nodeVerifyZ = z
     output_required: z.array(z.string().min(1)).min(1).optional(),
     output_matches: z.array(outputMatchZ).min(1).optional(),
   })
+  // Fix #4 gap: the exported JSON Schema sets additionalProperties: false.
+  // Without .strict() here Zod would silently drop unknown keys and then
+  // the refine would run on the stripped object, producing a different
+  // verdict than ajv (which rejects the unknown key directly). Keep them
+  // in sync.
+  .strict()
   .refine(
     (v) =>
       v.any_tool_called !== undefined ||
@@ -129,6 +135,7 @@ export const nodeRequiresZ = z
     output_matches: z.array(outputMatchZ).min(1).optional(),
     on_fail: z.enum(["fail", "skip"]).optional(),
   })
+  .strict()
   .refine((r) => r.output_required !== undefined || r.output_matches !== undefined, {
     message: "requires must declare at least one check (output_required or output_matches)",
   });

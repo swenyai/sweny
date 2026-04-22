@@ -1,8 +1,22 @@
-# SWEny Architecture & Design Philosophy
+# SWEny Architecture & Design Philosophy (ARCHIVED)
 
-> **This document is the source of truth for architectural decisions.**
-> Before changing how providers, workflows, or MCP integration work — read this first.
-> It exists because the wrong patterns are easy to accidentally rebuild.
+> **This document is archived.** It predates the current workflow/node/edge/skill
+> model in `@sweny-ai/core`. Terminology like "recipe", "provider", and "step"
+> has been superseded by workflow / skill / node.
+>
+> For the current architecture see:
+> - **[`ARCHITECTURE.md`](../ARCHITECTURE.md)** (repo root) — authoritative
+>   current architecture, including the MCP catalog policy and "scoped tools"
+>   semantics.
+> - **[`spec/src/content/docs/`](../spec/src/content/docs/)** — the formal
+>   spec published at spec.sweny.ai.
+> - **[`packages/core/src/mcp-catalog.ts`](../packages/core/src/mcp-catalog.ts)**
+>   — the single source of truth for provider/skill → MCP wiring.
+>
+> The material below is preserved for historical context — the distinction
+> between orchestration vs agentic layers and Type A vs Type B providers
+> still informs current design — but flag names, file paths, and some
+> conclusions are stale. Treat this as background, not as operative guidance.
 
 ---
 

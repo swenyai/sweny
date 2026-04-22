@@ -233,7 +233,11 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   }
 
   // ── Build skill map + MCP servers + Claude client ──────────
-  const skills = createSkillMap(configuredSkills(process.env, process.cwd()));
+  const triageSkillDiscovery = configuredSkillsWithDiagnostics(process.env, process.cwd());
+  for (const w of triageSkillDiscovery.warnings) {
+    console.error(chalk.yellow(`  ⚠  ${w.message}`));
+  }
+  const skills = createSkillMap(triageSkillDiscovery.skills);
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({
@@ -508,7 +512,11 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       ".sweny/output",
   };
 
-  const skills = createSkillMap(configuredSkills(process.env, process.cwd()));
+  const implementSkillDiscovery = configuredSkillsWithDiagnostics(process.env, process.cwd());
+  for (const w of implementSkillDiscovery.warnings) {
+    console.error(chalk.yellow(`  ⚠  ${w.message}`));
+  }
+  const skills = createSkillMap(implementSkillDiscovery.skills);
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({

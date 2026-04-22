@@ -249,8 +249,8 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     severityFocus: (options.severityFocus as string) || f("severity-focus") || "errors",
     serviceFilter: (options.serviceFilter as string) || f("service-filter") || "*",
     investigationDepth: (options.investigationDepth as string) || f("investigation-depth") || "standard",
-    maxInvestigateTurns: parseInt(String(options.maxInvestigateTurns || f("max-investigate-turns") || "50"), 10),
-    maxImplementTurns: parseInt(String(options.maxImplementTurns || f("max-implement-turns") || "30"), 10),
+    maxInvestigateTurns: parsePositiveInt(options.maxInvestigateTurns ?? f("max-investigate-turns"), 50),
+    maxImplementTurns: parsePositiveInt(options.maxImplementTurns ?? f("max-implement-turns"), 30),
 
     baseBranch: (options.baseBranch as string) || f("base-branch") || "main",
     prLabels: ((options.prLabels as string) || f("pr-labels") || "agent,triage,needs-review")
@@ -312,7 +312,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     bell: Boolean(options.bell),
 
     cacheDir: (options.cacheDir as string) || env.SWENY_CACHE_DIR || f("cache-dir") || ".sweny/cache",
-    cacheTtl: parseInt(String(options.cacheTtl || f("cache-ttl") || "86400"), 10),
+    cacheTtl: parsePositiveInt(options.cacheTtl ?? f("cache-ttl"), 86400),
     noCache: options.cache === false,
 
     outputDir: (options.outputDir as string) || env.SWENY_OUTPUT_DIR || f("output-dir") || ".sweny/output",
@@ -607,6 +607,30 @@ function validateIntegerBound(errors: string[], flag: string, value: number, min
   if (value < min || value > max) {
     errors.push(`${flag} must be between ${min} and ${max}`);
   }
+}
+
+/**
+ * Parse a value (number, string, or undefined) as a positive integer.
+ *
+ * Returns the parsed integer when the input represents one; returns NaN
+ * for malformed strings so validateInputs can surface a field-specific
+ * error; returns the default when the input is null/undefined/empty.
+ *
+ * Keeps NaN as a signal rather than silently falling back to the default
+ * for junk input — otherwise users get accidental behavior when they
+ * typo "5o" for 50.
+ */
+export function parsePositiveInt(raw: unknown, fallback: number): number {
+  if (raw === undefined || raw === null || raw === "") return fallback;
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) ? Math.trunc(raw) : Number.NaN;
+  }
+  const asString = String(raw).trim();
+  if (asString.length === 0) return fallback;
+  // Number() is stricter than parseInt — "5o" → NaN rather than 5.
+  const parsed = Number(asString);
+  if (!Number.isFinite(parsed)) return Number.NaN;
+  return Math.trunc(parsed);
 }
 
 const DEFAULT_SERVICE_MAP_PATH = ".github/service-map.yml";

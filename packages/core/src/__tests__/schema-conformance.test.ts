@@ -173,6 +173,36 @@ const fixtures: Fixture[] = [
     expected: false,
   },
 
+  // Self-review gap: Zod strips unknown keys by default, JSON Schema
+  // rejects them via additionalProperties: false. Both validators must
+  // agree, so nodeVerifyZ / nodeRequiresZ are now .strict().
+  {
+    name: "verify with unknown key (strict: both must reject)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: { ...baseNode(), verify: { any_tool_called: ["x"], unknown_key: true } },
+      },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "requires with unknown key (strict: both must reject)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: { ...baseNode(), requires: { output_required: ["x"], mystery: 1 } },
+      },
+      edges: [],
+    },
+    expected: false,
+  },
+
   // ── Negative — structural (shared by Zod schema parse + structural check) ──
   // These are rejected by Zod parse, so they should also be rejected by the
   // exported JSON Schema. (Structural checks like SELF_LOOP and UNREACHABLE

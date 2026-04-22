@@ -16,7 +16,7 @@ import { parse as parseYaml } from "yaml";
 import type { Command } from "commander";
 import { parseWorkflow, validateWorkflow } from "../schema.js";
 import { builtinSkills } from "../skills/index.js";
-import { discoverSkills } from "../skills/custom-loader.js";
+import { discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -61,8 +61,11 @@ export function validateWorkflowFile(filePath: string): {
   try {
     const workflow = parseWorkflow(parsed);
 
-    // Build known skill IDs from builtins + custom + inline workflow skills
-    const customSkills = discoverSkills();
+    // Build known skill IDs from builtins + custom + inline workflow skills.
+    // Surface skill-loader diagnostics (malformed frontmatter, invalid ids,
+    // duplicate overrides) so publishers don't ship broken dependencies.
+    const { skills: customSkills, warnings: skillWarnings } = discoverSkillsWithDiagnostics();
+    for (const w of skillWarnings) warnings.push(w.message);
     const allSkillIds = new Set([...builtinSkills.map((s) => s.id), ...customSkills.map((s) => s.id)]);
 
     // Inline skills defined in the workflow's skills block (a Record<id, def>) are also valid
