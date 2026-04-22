@@ -182,14 +182,23 @@ function buildProviderCtx(config: CliConfig, mcpServers: Record<string, unknown>
 /**
  * Resolve rules and context from config into structured workflow input fields.
  * All source kinds (inline, file, URL) are resolved eagerly.
+ *
+ * `offline` and `fetchAuth` are threaded through so CLI-preloaded rules/context
+ * honor the same policy as Sources resolved later by the executor (Fix #16).
  */
 async function resolveRulesAndContext(config: CliConfig): Promise<{
   rules: string;
   context: string;
 }> {
+  const loadOptions = {
+    cwd: process.cwd(),
+    offline: config.offline,
+    fetchAuth: config.fetchAuth,
+    env: process.env,
+  };
   const [rulesResult, contextResult] = await Promise.all([
-    loadAdditionalContext(config.rules),
-    loadAdditionalContext(config.context),
+    loadAdditionalContext(config.rules, loadOptions),
+    loadAdditionalContext(config.context, loadOptions),
   ]);
 
   return {
