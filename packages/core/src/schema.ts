@@ -44,6 +44,7 @@ export const mcpServerConfigZ = z
     headers: z.record(z.string()).optional(),
     env: z.record(z.string()).optional(),
   })
+  .strict()
   .refine((c) => c.command || c.url, {
     message: "MCP server must have either command (stdio) or url (HTTP)",
   });
@@ -55,6 +56,7 @@ export const skillDefinitionZ = z
     instruction: z.string().optional(),
     mcp: mcpServerConfigZ.optional(),
   })
+  .strict()
   .refine((s) => s.instruction || s.mcp, {
     message: "Inline skill must provide instruction, mcp, or both",
   });
@@ -94,6 +96,7 @@ export const outputMatchZ = z
     in: z.array(z.unknown()).optional(),
     matches: z.string().min(1).optional(),
   })
+  .strict()
   .refine(
     (m) => {
       const operators = [m.equals !== undefined, m.in !== undefined, m.matches !== undefined];
@@ -143,31 +146,43 @@ export const nodeRequiresZ = z
 const retryInstructionAutoZ = z.object({ auto: z.literal(true) }).strict();
 const retryInstructionReflectZ = z.object({ reflect: z.string().min(1) }).strict();
 
-export const nodeRetryZ = z.object({
-  max: z.number().int().min(1),
-  instruction: z.union([z.string().min(1), retryInstructionAutoZ, retryInstructionReflectZ]).optional(),
-});
+export const nodeRetryZ = z
+  .object({
+    max: z.number().int().min(1),
+    instruction: z.union([z.string().min(1), retryInstructionAutoZ, retryInstructionReflectZ]).optional(),
+  })
+  .strict();
 
-export const nodeZ = z.object({
-  name: z.string().min(1),
-  instruction: sourceZ,
-  skills: z.array(z.string()).default([]),
-  output: jsonSchemaZ.optional(),
-  max_turns: z.number().int().min(1).optional(),
-  rules: nodeSourcesZ.optional(),
-  context: nodeSourcesZ.optional(),
-  verify: nodeVerifyZ.optional(),
-  requires: nodeRequiresZ.optional(),
-  retry: nodeRetryZ.optional(),
-});
+export const nodeZ = z
+  .object({
+    name: z.string().min(1),
+    instruction: sourceZ,
+    skills: z.array(z.string()).default([]),
+    output: jsonSchemaZ.optional(),
+    max_turns: z.number().int().min(1).optional(),
+    rules: nodeSourcesZ.optional(),
+    context: nodeSourcesZ.optional(),
+    verify: nodeVerifyZ.optional(),
+    requires: nodeRequiresZ.optional(),
+    retry: nodeRetryZ.optional(),
+  })
+  .strict();
 
-export const edgeZ = z.object({
-  from: z.string().min(1),
-  to: z.string().min(1),
-  when: z.string().optional(),
-  max_iterations: z.number().int().min(1).optional(),
-});
+export const edgeZ = z
+  .object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+    when: z.string().optional(),
+    max_iterations: z.number().int().min(1).optional(),
+  })
+  .strict();
 
+// Fix #4 gap — workflowZ is intentionally NOT .strict(). The published
+// JSON Schema's `additionalProperties: false` only scopes the properties
+// block, but marketplace workflows routinely carry top-level metadata
+// (author, category, tags) handled by publish.ts. Striping rather than
+// rejecting them preserves compatibility with the existing marketplace
+// contract while the inner objects (nodes, edges, skills) stay strict.
 export const workflowZ = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -394,7 +409,10 @@ export const workflowJsonSchema = {
     "A declarative YAML format for AI agent orchestration as a directed graph with natural language routing.",
   type: "object",
   required: ["id", "name", "nodes", "edges", "entry"],
-  additionalProperties: false,
+  // Top-level is intentionally open: marketplace workflows carry extra
+  // metadata (author, category, tags) that publish.ts reads. Inner
+  // objects (nodes, edges, skills, verify, requires, etc.) are strict.
+  additionalProperties: true,
   $defs: {
     Source: sourceJsonSchema,
     NodeSources: {
@@ -575,6 +593,8 @@ export const workflowJsonSchema = {
         type: "object",
         // Fix #4: an inline skill must provide instruction, mcp, or both.
         anyOf: [{ required: ["instruction"] }, { required: ["mcp"] }],
+        // Round 2: reject unknown keys to match Zod skillDefinitionZ.strict().
+        additionalProperties: false,
         properties: {
           name: { type: "string" },
           description: { type: "string" },
@@ -584,6 +604,8 @@ export const workflowJsonSchema = {
             description: "External MCP server definition",
             // Fix #4: an MCP server must declare command (stdio) or url (http).
             anyOf: [{ required: ["command"] }, { required: ["url"] }],
+            // Round 2: reject unknown keys to match Zod mcpServerConfigZ.strict().
+            additionalProperties: false,
             properties: {
               type: { type: "string", enum: ["stdio", "http"] },
               command: { type: "string" },

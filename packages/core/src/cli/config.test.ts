@@ -216,6 +216,22 @@ describe("parsePositiveInt", () => {
   it("returns NaN for Infinity", () => {
     expect(Number.isNaN(parsePositiveInt(Infinity, 42))).toBe(true);
   });
+
+  // Round 2: the helper must enforce the "positive" in its name.
+  // Non-positive input returns NaN so validateInputs can reject it
+  // with a field-specific error instead of silently accepting <= 0.
+  it("returns NaN for zero (not positive)", () => {
+    expect(Number.isNaN(parsePositiveInt(0, 42))).toBe(true);
+    expect(Number.isNaN(parsePositiveInt("0", 42))).toBe(true);
+  });
+
+  it("returns NaN for negative string", () => {
+    expect(Number.isNaN(parsePositiveInt("-5", 42))).toBe(true);
+  });
+
+  it("returns NaN for negative number", () => {
+    expect(Number.isNaN(parsePositiveInt(-5, 42))).toBe(true);
+  });
 });
 
 // Fix #10: numeric flags must reject NaN. Previously parseInt("abc", 10) → NaN

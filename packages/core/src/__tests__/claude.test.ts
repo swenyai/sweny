@@ -759,6 +759,34 @@ describe("ClaudeClient", () => {
       expect((call2.output as { payload: string }).payload).toBe("two");
     });
 
+    // Round 2 self-review: assistant tool_use without an id has no
+    // correlation key. We still record the ToolCall (useful for debugging
+    // truncated streams) but leave status undefined. Verify's legacy
+    // output-shape heuristic takes over. No crash.
+    it("records a tool_use without id; status stays undefined", async () => {
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [
+                // No id field — observed on some SDK builds or malformed mocks.
+                { type: "tool_use", name: "mcp__x__search", input: { q: "foo" } },
+              ],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0].tool).toBe("search");
+      expect(result.toolCalls[0].status).toBeUndefined();
+    });
+
     it("ignores a tool_result with an unknown tool_use_id (malformed stream)", async () => {
       // Defensive: the SDK should never send a tool_result for a tool_use
       // we didn't see, but if it does, we must not crash or silently record

@@ -5,7 +5,7 @@
   "description": "A declarative YAML format for AI agent orchestration as a directed graph with natural language routing.",
   "type": "object",
   "required": ["id", "name", "nodes", "edges", "entry"],
-  "additionalProperties": false,
+  "additionalProperties": true,
   "$defs": {
     "Source": {
       "oneOf": [
@@ -367,6 +367,7 @@
             "required": ["mcp"]
           }
         ],
+        "additionalProperties": false,
         "properties": {
           "name": {
             "type": "string"
@@ -389,6 +390,7 @@
                 "required": ["url"]
               }
             ],
+            "additionalProperties": false,
             "properties": {
               "type": {
                 "type": "string",

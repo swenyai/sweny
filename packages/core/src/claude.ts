@@ -378,20 +378,31 @@ function coreToolToSdkTool(coreTool: Tool, defaultCtx: ToolContext) {
 /**
  * Best-effort recovery of typed output from a tool_result's `content`.
  *
- * The MCP protocol sends tool results as string content (optionally a
- * structured block array). Our in-process wrapper JSON-stringifies
- * structured output before returning; external MCP servers do the same.
- * If the string parses as JSON, return the parsed value — that's what
- * verify's output-path walks expect. Otherwise keep the raw string.
+ * The MCP protocol sends tool results as string content. Our in-process
+ * wrapper JSON-stringifies structured output before returning; external
+ * MCP servers generally do the same for JSON payloads. If the string
+ * looks like a JSON object or array and parses, return the parsed value
+ * so verify's output-path walks work against typed data.
+ *
+ * Raw strings are preserved verbatim. JSON-primitive strings (e.g. the
+ * literal four characters `"42"`) are intentionally NOT parsed — we
+ * cannot distinguish a tool that returned the number 42 (wrapper sends
+ * `"42"`) from a tool that returned the string "42" (wrapper also sends
+ * `"42"`). Preserving the string is safer than guessing.
  */
-function parseToolResultContent(content: unknown): unknown {
+export function parseToolResultContent(content: unknown): unknown {
   if (typeof content !== "string") return content;
   const trimmed = content.trim();
   if (trimmed.length === 0) return content;
   const first = trimmed[0];
-  if (first !== "{" && first !== "[" && first !== '"') return content;
+  // Only objects and arrays are unambiguous to parse. Strings, numbers,
+  // booleans, and null would all corrupt or discard information.
+  if (first !== "{" && first !== "[") return content;
   try {
-    return JSON.parse(trimmed);
+    const parsed: unknown = JSON.parse(trimmed);
+    // Guard against edge cases like `{}` that parse to a non-object.
+    if (parsed === null || typeof parsed !== "object") return content;
+    return parsed;
   } catch {
     return content;
   }

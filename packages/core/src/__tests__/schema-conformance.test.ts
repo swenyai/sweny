@@ -203,6 +203,103 @@ const fixtures: Fixture[] = [
     expected: false,
   },
 
+  // Round 2 self-review: .strict() was only applied to verify/requires.
+  // All other objects with additionalProperties: false must also reject
+  // unknown keys. Fixtures for each.
+  {
+    name: "node with unknown key (strict: both must reject)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), bogus_field: 1 } },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "edge with unknown key (strict: both must reject)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode(), b: baseNode() },
+      edges: [{ from: "a", to: "b", weight: 5 }],
+    },
+    expected: false,
+  },
+  {
+    name: "retry with unknown key (strict: both must reject)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: {
+          ...baseNode(),
+          verify: { any_tool_called: ["x"] },
+          retry: { max: 3, extra: true },
+        },
+      },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "output_matches entry with unknown key (strict: both must reject)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: {
+          ...baseNode(),
+          verify: { output_matches: [{ path: "p", equals: 1, rogue: true }] },
+        },
+      },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "inline skill with unknown key (strict: both must reject)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), skills: ["c"] } },
+      edges: [],
+      skills: { c: { instruction: "do it", extra: "nope" } },
+    },
+    expected: false,
+  },
+  {
+    name: "inline skill mcp with unknown key (strict: both must reject)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), skills: ["c"] } },
+      edges: [],
+      skills: { c: { mcp: { url: "https://x.example", custom_field: 1 } } },
+    },
+    expected: false,
+  },
+  {
+    name: "top-level unknown key is tolerated (marketplace metadata)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      author: "alice",
+      category: "triage",
+      tags: ["x", "y"],
+    },
+    expected: true,
+  },
+
   // ── Negative — structural (shared by Zod schema parse + structural check) ──
   // These are rejected by Zod parse, so they should also be rejected by the
   // exported JSON Schema. (Structural checks like SELF_LOOP and UNREACHABLE

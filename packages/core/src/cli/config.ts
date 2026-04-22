@@ -610,27 +610,32 @@ function validateIntegerBound(errors: string[], flag: string, value: number, min
 }
 
 /**
- * Parse a value (number, string, or undefined) as a positive integer.
+ * Parse a value as a positive integer (>= 1).
  *
- * Returns the parsed integer when the input represents one; returns NaN
- * for malformed strings so validateInputs can surface a field-specific
- * error; returns the default when the input is null/undefined/empty.
+ * Returns:
+ *   - the parsed integer when the input represents a positive finite one
+ *   - the fallback when the input is null/undefined/empty (unset flag)
+ *   - NaN for any malformed or non-positive input, so validateInputs can
+ *     surface a field-specific error
  *
- * Keeps NaN as a signal rather than silently falling back to the default
- * for junk input — otherwise users get accidental behavior when they
- * typo "5o" for 50.
+ * Name enforces the contract: non-positive values (0, -5) return NaN so
+ * validation rejects them loudly rather than quietly passing through as
+ * `0` and breaking downstream invariants.
  */
 export function parsePositiveInt(raw: unknown, fallback: number): number {
   if (raw === undefined || raw === null || raw === "") return fallback;
   if (typeof raw === "number") {
-    return Number.isFinite(raw) ? Math.trunc(raw) : Number.NaN;
+    if (!Number.isFinite(raw)) return Number.NaN;
+    const truncated = Math.trunc(raw);
+    return truncated >= 1 ? truncated : Number.NaN;
   }
   const asString = String(raw).trim();
   if (asString.length === 0) return fallback;
   // Number() is stricter than parseInt — "5o" → NaN rather than 5.
   const parsed = Number(asString);
   if (!Number.isFinite(parsed)) return Number.NaN;
-  return Math.trunc(parsed);
+  const truncated = Math.trunc(parsed);
+  return truncated >= 1 ? truncated : Number.NaN;
 }
 
 const DEFAULT_SERVICE_MAP_PATH = ".github/service-map.yml";

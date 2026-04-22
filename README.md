@@ -56,7 +56,7 @@ Browse **[marketplace.sweny.ai](https://marketplace.sweny.ai)** for ready-to-run
 
 ## What it does
 
-Describe a task in plain English. SWEny builds a DAG of focused AI agents — each node gets scoped tools, structured output, and conditional routing. Every tool call is tracked.
+Describe a task in plain English. SWEny builds a DAG of focused AI agents — each node gets its own MCP tool set scoped by the skills it declares, structured output, and conditional routing. Every tool call is tracked. (The underlying Claude Code agent process keeps its built-in tools available so nodes stay agentic inside their box; see [ARCHITECTURE.md](./ARCHITECTURE.md#what-scoped-tools-means) for the exact capability contract.)
 
 ```
 $ sweny workflow create "audit our repo for security issues, \
