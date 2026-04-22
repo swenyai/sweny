@@ -642,7 +642,9 @@ export async function workflowRunAction(
     return;
   }
 
-  if (options.dryRun) {
+  // --list-nodes: lightweight static inspection, no execution. Used to be
+  // the behavior of --dry-run before Fix #6.
+  if (options.listNodes) {
     console.log(chalk.green(`  Workflow "${workflow.name}" is valid (${Object.keys(workflow.nodes).length} nodes)`));
     for (const [id, node] of Object.entries(workflow.nodes)) {
       console.log(
@@ -875,7 +877,11 @@ workflowCmd
 workflowCmd
   .command("run <file>")
   .description("Run a workflow from a YAML or JSON file")
-  .option("--dry-run", "Validate workflow without running")
+  .option(
+    "--dry-run",
+    "Execute until the first conditional routing decision, then stop (no side effects past that point)",
+  )
+  .option("--list-nodes", "Validate, print nodes/skills, and exit without running")
   .option("--json", "Output result as JSON on stdout; suppress progress output")
   .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)")
   .option("--mermaid", "Output a Mermaid diagram with execution state after run")
