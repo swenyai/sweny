@@ -467,6 +467,22 @@ describe("regex / matches edge cases", () => {
     const err = checkOutputMatches([{ path: "v", matches: "(unclosed" }], { v: "x" });
     expect(err).toMatch(/output_matches.*invalid regex/);
   });
+
+  // Round 3 (PR review): cap regex source length to defend against ReDoS
+  // via marketplace-supplied workflows. A pathological pattern in
+  // verify.output_matches.matches could trigger exponential backtracking.
+  it("rejects regex source longer than the safety cap (ReDoS guard)", () => {
+    const longPattern = "a".repeat(1001);
+    const err = checkOutputMatches([{ path: "v", matches: longPattern }], { v: "x" });
+    expect(err).toMatch(/output_matches.*1000 characters/);
+  });
+
+  it("accepts regex sources just under the safety cap", () => {
+    // 1000-char pattern that always matches the input.
+    const pattern = "a".repeat(999) + "b";
+    const value = "a".repeat(999) + "b";
+    expect(checkOutputMatches([{ path: "v", matches: pattern }], { v: value })).toBeNull();
+  });
 });
 
 describe("nested wildcard chains", () => {

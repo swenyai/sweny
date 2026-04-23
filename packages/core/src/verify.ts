@@ -202,8 +202,27 @@ interface CompiledMatch {
   regex?: RegExp;
 }
 
+/**
+ * Cap on `verify.output_matches[].matches` source length.
+ *
+ * `matches` is user-supplied through workflow YAML, including marketplace
+ * workflows. A pathological pattern like `(a+)+$` causes exponential
+ * backtracking in V8's regex engine. Capping the source length is a cheap,
+ * useful defense — well-formed verify regexes are tens of characters at
+ * most. Patterns longer than this are almost always either generated junk
+ * or a deliberate ReDoS attempt; either way, refusing to compile is safer
+ * than executing them.
+ */
+const MAX_REGEX_SOURCE_LENGTH = 1000;
+
 function compileMatch(m: OutputMatch): CompiledMatch {
   if (m.matches !== undefined) {
+    if (m.matches.length > MAX_REGEX_SOURCE_LENGTH) {
+      throw new Error(
+        `regex source exceeds ${MAX_REGEX_SOURCE_LENGTH} characters (got ${m.matches.length}); ` +
+          `tighten the pattern to avoid catastrophic-backtracking risk`,
+      );
+    }
     // Throws synchronously if the regex source is invalid; surfaced as a
     // verify failure rather than a crash because the executor catches.
     return { match: m, regex: new RegExp(m.matches) };
