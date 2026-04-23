@@ -15,12 +15,11 @@ import type { ExecutionEvent, NodeResult, Workflow, McpServerConfig, Observer } 
 import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
 import { createSkillMap, validateWorkflowSkills } from "../skills/index.js";
-import { configuredSkills } from "../skills/custom-loader.js";
+import { configuredSkills, configuredSkillsWithDiagnostics } from "../skills/custom-loader.js";
 import { buildAutoMcpServers, buildSkillMcpServers, buildProviderContext } from "../mcp.js";
 import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
-import { validateWorkflow as validateWorkflowSchema } from "../schema.js";
-import { parseWorkflow } from "../schema.js";
+import { loadAndValidateWorkflow } from "../loader.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -183,14 +182,23 @@ function buildProviderCtx(config: CliConfig, mcpServers: Record<string, unknown>
 /**
  * Resolve rules and context from config into structured workflow input fields.
  * All source kinds (inline, file, URL) are resolved eagerly.
+ *
+ * `offline` and `fetchAuth` are threaded through so CLI-preloaded rules/context
+ * honor the same policy as Sources resolved later by the executor (Fix #16).
  */
 async function resolveRulesAndContext(config: CliConfig): Promise<{
   rules: string;
   context: string;
 }> {
+  const loadOptions = {
+    cwd: process.cwd(),
+    offline: config.offline,
+    fetchAuth: config.fetchAuth,
+    env: process.env,
+  };
   const [rulesResult, contextResult] = await Promise.all([
-    loadAdditionalContext(config.rules),
-    loadAdditionalContext(config.context),
+    loadAdditionalContext(config.rules, loadOptions),
+    loadAdditionalContext(config.context, loadOptions),
   ]);
 
   return {
@@ -225,7 +233,11 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   }
 
   // ── Build skill map + MCP servers + Claude client ──────────
-  const skills = createSkillMap(configuredSkills(process.env, process.cwd()));
+  const triageSkillDiscovery = configuredSkillsWithDiagnostics(process.env, process.cwd());
+  for (const w of triageSkillDiscovery.warnings) {
+    console.error(chalk.yellow(`  ⚠  ${w.message}`));
+  }
+  const skills = createSkillMap(triageSkillDiscovery.skills);
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({
@@ -500,7 +512,11 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       ".sweny/output",
   };
 
-  const skills = createSkillMap(configuredSkills(process.env, process.cwd()));
+  const implementSkillDiscovery = configuredSkillsWithDiagnostics(process.env, process.cwd());
+  for (const w of implementSkillDiscovery.warnings) {
+    console.error(chalk.yellow(`  ⚠  ${w.message}`));
+  }
+  const skills = createSkillMap(implementSkillDiscovery.skills);
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({
@@ -622,36 +638,41 @@ function promptUser(question: string): Promise<string> {
 
 const workflowCmd = program.command("workflow").description("Manage and run workflow files");
 
-/** Reads and parses a workflow file (YAML or JSON). Throws on I/O or parse error. */
-function parseWorkflowFileContent(filePath: string): unknown {
-  const content = fs.readFileSync(filePath, "utf-8");
-  const ext = path.extname(filePath).toLowerCase();
-  return ext === ".yaml" || ext === ".yml" ? parseYaml(content) : JSON.parse(content);
-}
-
-export function loadWorkflowFile(filePath: string): Workflow {
-  const raw = parseWorkflowFileContent(filePath);
-  const errors = validateWorkflowSchema(raw as Workflow);
-  if (errors.length > 0) {
-    throw new Error(`Invalid workflow file:\n${errors.map((e) => `  ${e.message}`).join("\n")}`);
+export function loadWorkflowFile(filePath: string, knownSkills?: Set<string>): Workflow {
+  const result = loadAndValidateWorkflow(filePath, { knownSkills });
+  if (!result.ok) {
+    throw new Error(`Invalid workflow file:\n${result.errors.map((e) => `  ${e.message}`).join("\n")}`);
   }
-  return raw as Workflow;
+  return result.workflow;
 }
 
 export async function workflowRunAction(
   file: string,
   options: Record<string, unknown> & { json?: boolean; stream?: boolean; mermaid?: boolean },
 ): Promise<void> {
+  // Discover skills first so the loader can flag UNKNOWN_SKILL at parse
+  // time. validateWorkflowSkills below still runs for richer category /
+  // env-var diagnostics, but the loader's structural check fires earlier
+  // and gives users a clear "you typed `gtihub`" pointer before any other
+  // validation noise.
+  const earlySkillDiscovery = configuredSkillsWithDiagnostics(process.env, process.cwd());
+  for (const w of earlySkillDiscovery.warnings) {
+    console.error(chalk.yellow(`  ⚠  ${w.message}`));
+  }
+  const knownSkillIds = new Set(earlySkillDiscovery.skills.map((s) => s.id));
+
   let workflow: Workflow;
   try {
-    workflow = loadWorkflowFile(file);
+    workflow = loadWorkflowFile(file, knownSkillIds);
   } catch (err) {
     console.error(chalk.red(`  Error loading workflow file: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
     return;
   }
 
-  if (options.dryRun) {
+  // --list-nodes: lightweight static inspection, no execution. Used to be
+  // the behavior of --dry-run before Fix #6.
+  if (options.listNodes) {
     console.log(chalk.green(`  Workflow "${workflow.name}" is valid (${Object.keys(workflow.nodes).length} nodes)`));
     for (const [id, node] of Object.entries(workflow.nodes)) {
       console.log(
@@ -668,12 +689,14 @@ export async function workflowRunAction(
   const isJson = Boolean(options.json);
   const isTTY = !isJson && (process.stderr.isTTY ?? false);
 
-  const skills = createSkillMap(configuredSkills(process.env, process.cwd()));
+  // Reuse the discovery pulled before workflow load (above). Diagnostics
+  // already surfaced; just turn the skill list into a map for the executor.
+  const skills = createSkillMap(earlySkillDiscovery.skills);
 
   // Hard-fail at startup if the workflow references skills that aren't available.
   // Each node lists alternatives by category (e.g. [sentry, datadog, betterstack]);
   // we require at least one configured skill per category.
-  const validation = validateWorkflowSkills(workflow, skills);
+  const validation = validateWorkflowSkills(workflow, skills, workflow.skills);
   if (validation.errors.length > 0) {
     console.error(chalk.red(`\n  Workflow cannot run — missing required skills:\n`));
     for (const err of validation.errors) console.error(chalk.red(`    \u2717 ${err}`));
@@ -849,46 +872,23 @@ export function workflowExportAction(name: string): void {
 }
 
 export function workflowValidateAction(file: string, options: { json?: boolean }): void {
-  let raw: unknown;
-  try {
-    raw = parseWorkflowFileContent(file);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (options.json) {
-      process.stderr.write(JSON.stringify({ valid: false, errors: [{ message }] }, null, 2) + "\n");
-    } else {
-      console.error(chalk.red(`  Cannot read "${file}": ${message}`));
-    }
-    process.exit(1);
-    return;
-  }
-
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    const kind = raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw;
-    const message = `Expected a YAML/JSON object, got ${kind}`;
-    if (options.json) {
-      process.stderr.write(JSON.stringify({ valid: false, errors: [{ message }] }, null, 2) + "\n");
-    } else {
-      console.error(chalk.red(`  \u2717 ${file}: ${message}`));
-    }
-    process.exit(1);
-    return;
-  }
-
-  const errors = validateWorkflowSchema(raw as Workflow);
+  const result = loadAndValidateWorkflow(file);
 
   if (options.json) {
-    process.stdout.write(JSON.stringify({ valid: errors.length === 0, errors }, null, 2) + "\n");
-  } else if (errors.length === 0) {
+    const errs = result.ok ? [] : result.errors;
+    process.stdout.write(JSON.stringify({ valid: result.ok, errors: errs }, null, 2) + "\n");
+  } else if (result.ok) {
     console.log(chalk.green(`  \u2713 ${file} is valid`));
   } else {
-    console.error(chalk.red(`  \u2717 ${file} has ${errors.length} validation error${errors.length > 1 ? "s" : ""}:`));
-    for (const err of errors) {
+    console.error(
+      chalk.red(`  \u2717 ${file} has ${result.errors.length} validation error${result.errors.length > 1 ? "s" : ""}:`),
+    );
+    for (const err of result.errors) {
       console.error(chalk.dim(`    ${err.message}`));
     }
   }
 
-  process.exit(errors.length === 0 ? 0 : 1);
+  process.exit(result.ok ? 0 : 1);
 }
 
 workflowCmd
@@ -900,7 +900,14 @@ workflowCmd
 workflowCmd
   .command("run <file>")
   .description("Run a workflow from a YAML or JSON file")
-  .option("--dry-run", "Validate workflow without running")
+  .option(
+    "--dry-run",
+    "Execute until the first conditional routing decision, then stop (no side effects past that point). NOTE: behavior changed in this release — previously --dry-run only printed the node list. For that behavior use --list-nodes.",
+  )
+  .option(
+    "--list-nodes",
+    "Validate, print nodes/skills, and exit without running. (Replaces the pre-Fix-#6 --dry-run behavior.)",
+  )
   .option("--json", "Output result as JSON on stdout; suppress progress output")
   .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)")
   .option("--mermaid", "Output a Mermaid diagram with execution state after run")

@@ -525,4 +525,289 @@ describe("ClaudeClient", () => {
     expect(prompt).toContain("Required Output");
     expect(prompt).toContain("severity");
   });
+
+  // Fix #1: tool-call accounting. The runtime must record each tool call
+  // exactly once and attach an explicit status that verify can trust.
+  describe("tool-call accounting", () => {
+    it("records an external MCP tool success as status:success", async () => {
+      // External MCP tool: assistant emits tool_use, SDK routes to the external
+      // MCP server (no in-process wrapper fires), then the SDK emits a user
+      // tool_result with is_error=false.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "call_1", name: "mcp__linear__search", input: { q: "bug" } }],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [{ type: "tool_result", tool_use_id: "call_1", content: "found 3 issues", is_error: false }],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0]).toMatchObject({ tool: "search", status: "success" });
+    });
+
+    it("records an external MCP tool error as status:error", async () => {
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "call_1", name: "mcp__sentry__get_issue", input: { id: 7 } }],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [{ type: "tool_result", tool_use_id: "call_1", content: "401 Unauthorized", is_error: true }],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0]).toMatchObject({ tool: "get_issue", status: "error" });
+    });
+
+    it("does not double-count an in-process tool (one entry per call)", async () => {
+      // In-process tool: assistant tool_use → our SDK wrapper runs → user tool_result.
+      // Only ONE ToolCall entry should appear, even though we observe three events.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "call_1", name: "mcp__sweny-core__fetch_data", input: { q: "x" } }],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [{ type: "tool_result", tool_use_id: "call_1", content: '{"items":[1,2]}', is_error: false }],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const handler = vi.fn().mockResolvedValue({ items: [1, 2] });
+      const client = new ClaudeClient();
+      const result = await client.run({
+        instruction: "x",
+        context: {},
+        tools: [{ name: "fetch_data", description: "d", input_schema: {}, handler }],
+      });
+
+      // Simulate the SDK invoking our wrapper during the stream — register it
+      // BEFORE the user tool_result fires would require controlling timing;
+      // for the purpose of this test, the stream order is enough: the entry
+      // created by the assistant tool_use should be the only one.
+      const names = result.toolCalls.map((c: { tool: string }) => c.tool);
+      expect(names).toEqual(["fetch_data"]);
+    });
+
+    it("leaves status undefined for a tool_use with no matching tool_result", async () => {
+      // Truncated stream: assistant started a tool call but the run ended
+      // before the result came back. The entry is preserved (useful for
+      // debugging) but has no status, so verify falls back to legacy heuristic.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "call_1", name: "search_code", input: { q: "x" } }],
+            },
+          },
+          { type: "result", subtype: "success", result: "partial", terminal_reason: "max_turns" },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0].status).toBeUndefined();
+    });
+
+    it("in-process tool error surfaces as status:error in the final ToolCall", async () => {
+      // Full stream path for a throwing in-process tool. The SDK fires our
+      // wrapper (which catches the throw and returns isError: true), then
+      // emits a tool_result with is_error: true. Record exactly one
+      // ToolCall with status: "error".
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "call_1", name: "mcp__sweny-core__bad_tool", input: {} }],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "call_1",
+                  content: "Error: boom",
+                  is_error: true,
+                },
+              ],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const handler = vi.fn().mockRejectedValue(new Error("boom"));
+      const client = new ClaudeClient();
+      const result = await client.run({
+        instruction: "x",
+        context: {},
+        tools: [{ name: "bad_tool", description: "d", input_schema: {}, handler }],
+      });
+
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0].tool).toBe("bad_tool");
+      expect(result.toolCalls[0].status).toBe("error");
+    });
+
+    // Self-review found: FIFO-by-name queue could mis-pair outputs when
+    // the same in-process tool is called twice and tool_result messages
+    // arrive in non-invocation order. Claude's parallel tool calling makes
+    // this reachable in practice. Outputs must be paired to the correct
+    // ToolCall by tool_use_id, not by name order.
+    it("pairs parallel same-named in-process tool outputs correctly", async () => {
+      // Scenario: agent fires two `fetch_data` calls in parallel with
+      // different inputs. tool_result messages arrive in REVERSE order
+      // (call_2 first, then call_1). Each ToolCall entry must carry the
+      // output that corresponds to its own tool_use_id.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [
+                { type: "tool_use", id: "call_1", name: "mcp__sweny-core__fetch_data", input: { id: 1 } },
+                { type: "tool_use", id: "call_2", name: "mcp__sweny-core__fetch_data", input: { id: 2 } },
+              ],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "call_2",
+                  content: JSON.stringify({ id: 2, payload: "two" }),
+                  is_error: false,
+                },
+              ],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "call_1",
+                  content: JSON.stringify({ id: 1, payload: "one" }),
+                  is_error: false,
+                },
+              ],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const handler = vi
+        .fn()
+        .mockImplementation(async (args: any) => ({ id: args.id, payload: args.id === 1 ? "one" : "two" }));
+      const client = new ClaudeClient();
+      const result = await client.run({
+        instruction: "x",
+        context: {},
+        tools: [{ name: "fetch_data", description: "d", input_schema: {}, handler }],
+      });
+
+      expect(result.toolCalls).toHaveLength(2);
+      const call1 = result.toolCalls.find((c: { input: unknown }) => (c.input as { id: number }).id === 1)!;
+      const call2 = result.toolCalls.find((c: { input: unknown }) => (c.input as { id: number }).id === 2)!;
+
+      expect(call1).toBeDefined();
+      expect(call2).toBeDefined();
+      // Regression guard: output is paired by tool_use_id, not by wrapper-fire order.
+      expect((call1.output as { payload: string }).payload).toBe("one");
+      expect((call2.output as { payload: string }).payload).toBe("two");
+    });
+
+    // Round 2 self-review: assistant tool_use without an id has no
+    // correlation key. We still record the ToolCall (useful for debugging
+    // truncated streams) but leave status undefined. Verify's legacy
+    // output-shape heuristic takes over. No crash.
+    it("records a tool_use without id; status stays undefined", async () => {
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [
+                // No id field — observed on some SDK builds or malformed mocks.
+                { type: "tool_use", name: "mcp__x__search", input: { q: "foo" } },
+              ],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0].tool).toBe("search");
+      expect(result.toolCalls[0].status).toBeUndefined();
+    });
+
+    it("ignores a tool_result with an unknown tool_use_id (malformed stream)", async () => {
+      // Defensive: the SDK should never send a tool_result for a tool_use
+      // we didn't see, but if it does, we must not crash or silently record
+      // a phantom ToolCall.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "user",
+            message: {
+              content: [{ type: "tool_result", tool_use_id: "ghost", content: "noise", is_error: false }],
+            },
+          },
+          { type: "result", subtype: "success", result: "done" },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.toolCalls).toHaveLength(0);
+      expect(result.status).toBe("success");
+    });
+  });
 });

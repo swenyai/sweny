@@ -23,10 +23,31 @@ const SKILL_DIRS = [".gemini/skills", ".agents/skills", ".claude/skills", ".swen
 const VALID_SKILL_ID = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 /**
- * Discover custom skills from all known harness directories.
+ * Diagnostic emitted when a SKILL.md file is skipped or overridden during
+ * discovery. CLI flows can render these as yellow warnings; library consumers
+ * can inspect `kind` to decide whether to surface, ignore, or fail.
  */
-export function discoverSkills(cwd: string = process.cwd()): Skill[] {
+export interface SkillDiagnostic {
+  kind: "invalid-frontmatter" | "missing-name" | "invalid-id" | "unreadable-file" | "duplicate-id";
+  path: string;
+  message: string;
+}
+
+export interface SkillDiscoveryResult {
+  skills: Skill[];
+  warnings: SkillDiagnostic[];
+}
+
+/**
+ * Discover custom skills and surface diagnostics for broken ones.
+ *
+ * Prefer this over `discoverSkills` for CLI flows that can surface warnings
+ * to users. `discoverSkills` stays as a backward-compatible wrapper for
+ * callers that only want the happy-path skill list.
+ */
+export function discoverSkillsWithDiagnostics(cwd: string = process.cwd()): SkillDiscoveryResult {
   const skillMap = new Map<string, Skill>();
+  const warnings: SkillDiagnostic[] = [];
 
   for (const relDir of SKILL_DIRS) {
     const skillsDir = join(cwd, relDir);
@@ -45,27 +66,64 @@ export function discoverSkills(cwd: string = process.cwd()): Skill[] {
       const skillFile = join(skillsDir, dirName, "SKILL.md");
       if (!existsSync(skillFile)) continue;
 
+      let content: string;
       try {
-        const content = readFileSync(skillFile, "utf-8");
-        const parsed = parseSkillMd(content);
-        if (!parsed) continue;
+        content = readFileSync(skillFile, "utf-8");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "unknown error";
+        warnings.push({
+          kind: "unreadable-file",
+          path: skillFile,
+          message: `Could not read ${skillFile}: ${msg}`,
+        });
+        continue;
+      }
 
-        skillMap.set(parsed.id, parsed);
-      } catch {
-        // Skip malformed skill files
+      const parsed = parseSkillMd(content, skillFile);
+      if (parsed.kind === "ok") {
+        if (skillMap.has(parsed.skill.id)) {
+          warnings.push({
+            kind: "duplicate-id",
+            path: skillFile,
+            message: `Skill "${parsed.skill.id}" overrides an earlier definition (last-one-wins)`,
+          });
+        }
+        skillMap.set(parsed.skill.id, parsed.skill);
+      } else {
+        warnings.push(parsed.diagnostic);
       }
     }
   }
 
-  return [...skillMap.values()];
+  return { skills: [...skillMap.values()], warnings };
 }
 
 /**
- * Parse a SKILL.md file into a Skill object.
+ * Discover custom skills from all known harness directories.
+ *
+ * Backwards-compatible wrapper that drops diagnostics. Use
+ * `discoverSkillsWithDiagnostics` when you want to surface warnings.
  */
-function parseSkillMd(content: string): Skill | null {
+export function discoverSkills(cwd: string = process.cwd()): Skill[] {
+  return discoverSkillsWithDiagnostics(cwd).skills;
+}
+
+type ParseResult = { kind: "ok"; skill: Skill } | { kind: "err"; diagnostic: SkillDiagnostic };
+
+function parseSkillMd(content: string, path: string): ParseResult {
   const raw = parseFrontmatter(content);
-  if (!raw?.name) return null;
+  if (raw === "invalid") {
+    return {
+      kind: "err",
+      diagnostic: { kind: "invalid-frontmatter", path, message: `Invalid YAML frontmatter in ${path}` },
+    };
+  }
+  if (!raw?.name) {
+    return {
+      kind: "err",
+      diagnostic: { kind: "missing-name", path, message: `SKILL.md at ${path} has no 'name' field in frontmatter` },
+    };
+  }
 
   // Narrow the loosely-typed YAML output into the fields we expect
   const fm = raw as {
@@ -76,7 +134,16 @@ function parseSkillMd(content: string): Skill | null {
   };
 
   const id = String(fm.name);
-  if (!VALID_SKILL_ID.test(id) || id.includes("--") || id.length > 64) return null;
+  if (!VALID_SKILL_ID.test(id) || id.includes("--") || id.length > 64) {
+    return {
+      kind: "err",
+      diagnostic: {
+        kind: "invalid-id",
+        path,
+        message: `Skill id "${id}" is invalid (lowercase alphanumeric + hyphens only, no consecutive hyphens, max 64 chars)`,
+      },
+    };
+  }
 
   const instruction = extractBody(content);
 
@@ -111,25 +178,39 @@ function parseSkillMd(content: string): Skill | null {
   }
 
   return {
-    id,
-    name: id,
-    description: typeof fm.description === "string" ? fm.description : `Custom skill: ${id}`,
-    category: "general" as SkillCategory,
-    config,
-    tools: [],
-    instruction: instruction || undefined,
-    mcp,
+    kind: "ok",
+    skill: {
+      id,
+      name: id,
+      description: typeof fm.description === "string" ? fm.description : `Custom skill: ${id}`,
+      category: "general" as SkillCategory,
+      config,
+      tools: [],
+      instruction: instruction || undefined,
+      mcp,
+    },
   };
 }
 
-/** Extract YAML frontmatter from a markdown file (between --- delimiters). */
-function parseFrontmatter(content: string): Record<string, unknown> | null {
+/**
+ * Extract and parse YAML frontmatter.
+ *
+ * Returns:
+ *   - parsed object when frontmatter is present and valid
+ *   - `null` when no frontmatter delimiters found (treat as no-op skip)
+ *   - `"invalid"` when delimiters are present but the YAML body is malformed
+ *     (distinct from "missing" so diagnostics can differentiate).
+ */
+function parseFrontmatter(content: string): Record<string, unknown> | null | "invalid" {
   const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
   if (!match) return null;
   try {
-    return YAML.parse(match[1]);
+    const parsed = YAML.parse(match[1]);
+    if (parsed === null || parsed === undefined) return null;
+    if (typeof parsed !== "object") return "invalid";
+    return parsed as Record<string, unknown>;
   } catch {
-    return null;
+    return "invalid";
   }
 }
 
@@ -149,11 +230,19 @@ export function loadCustomSkills(cwd: string = process.cwd()): Skill[] {
 }
 
 /**
- * From all builtins + custom repo skills, return only the skills that are usable.
+ * From all builtins + custom repo skills, return only the skills that are usable
+ * alongside any custom-skill loader diagnostics (warnings for malformed or
+ * duplicate SKILL.md files).
+ *
+ * Most CLI flows should prefer this over `configuredSkills` so they can
+ * surface warnings to the user.
  */
-export function configuredSkills(env: Record<string, string | undefined> = process.env, cwd?: string): Skill[] {
+export function configuredSkillsWithDiagnostics(
+  env: Record<string, string | undefined> = process.env,
+  cwd?: string,
+): { skills: Skill[]; warnings: SkillDiagnostic[] } {
   const configured = builtinSkills.filter((s) => isSkillConfigured(s, env));
-  const custom = discoverSkills(cwd);
+  const { skills: custom, warnings } = discoverSkillsWithDiagnostics(cwd);
 
   // Custom skills can override built-in IDs. When overriding, merge:
   // keep the built-in's tools and config, add the custom instruction/mcp.
@@ -162,7 +251,6 @@ export function configuredSkills(env: Record<string, string | undefined> = proce
   for (const skill of custom) {
     const existing = configuredMap.get(skill.id);
     if (existing) {
-      // Merge: built-in tools + config, custom instruction/mcp + extra config
       configuredMap.set(skill.id, {
         ...existing,
         config: { ...existing.config, ...skill.config },
@@ -174,5 +262,15 @@ export function configuredSkills(env: Record<string, string | undefined> = proce
     }
   }
 
-  return [...configuredMap.values()];
+  return { skills: [...configuredMap.values()], warnings };
+}
+
+/**
+ * From all builtins + custom repo skills, return only the skills that are usable.
+ *
+ * Backwards-compatible wrapper that drops diagnostics. Prefer
+ * `configuredSkillsWithDiagnostics` in CLI flows so broken skill files surface.
+ */
+export function configuredSkills(env: Record<string, string | undefined> = process.env, cwd?: string): Skill[] {
+  return configuredSkillsWithDiagnostics(env, cwd).skills;
 }

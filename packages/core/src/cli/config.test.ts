@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateInputs, parseCliInputs } from "./config.js";
+import { validateInputs, parseCliInputs, parsePositiveInt } from "./config.js";
 import type { CliConfig } from "./config.js";
 
 /**
@@ -170,6 +170,98 @@ describe("fetch.auth + offline parsing", () => {
   it("parses fetch.auth from file config", () => {
     const config = parseCliInputs({}, { "fetch.auth": { "api.example.com": "MY_TOKEN" } as any });
     expect(config.fetchAuth).toEqual({ "api.example.com": "MY_TOKEN" });
+  });
+});
+
+// Fix #10 completion: parsePositiveInt helper. Returns the fallback for
+// null/undefined/empty, NaN for malformed input (so validateInputs can
+// surface a field-specific error), parsed integer otherwise.
+describe("parsePositiveInt", () => {
+  it("returns fallback for undefined", () => {
+    expect(parsePositiveInt(undefined, 42)).toBe(42);
+  });
+
+  it("returns fallback for null", () => {
+    expect(parsePositiveInt(null, 42)).toBe(42);
+  });
+
+  it("returns fallback for empty string", () => {
+    expect(parsePositiveInt("", 42)).toBe(42);
+    expect(parsePositiveInt("   ", 42)).toBe(42);
+  });
+
+  it("parses numeric string", () => {
+    expect(parsePositiveInt("100", 42)).toBe(100);
+  });
+
+  it("parses number value", () => {
+    expect(parsePositiveInt(100, 42)).toBe(100);
+  });
+
+  it("truncates fractional numbers", () => {
+    expect(parsePositiveInt(100.7, 42)).toBe(100);
+    expect(parsePositiveInt("100.7", 42)).toBe(100);
+  });
+
+  it("returns NaN for malformed string (not silent fallback)", () => {
+    expect(Number.isNaN(parsePositiveInt("abc", 42))).toBe(true);
+    expect(Number.isNaN(parsePositiveInt("5o", 42))).toBe(true);
+    expect(Number.isNaN(parsePositiveInt("not a number", 42))).toBe(true);
+  });
+
+  it("returns NaN for NaN number input", () => {
+    expect(Number.isNaN(parsePositiveInt(Number.NaN, 42))).toBe(true);
+  });
+
+  it("returns NaN for Infinity", () => {
+    expect(Number.isNaN(parsePositiveInt(Infinity, 42))).toBe(true);
+  });
+
+  // Round 2: the helper must enforce the "positive" in its name.
+  // Non-positive input returns NaN so validateInputs can reject it
+  // with a field-specific error instead of silently accepting <= 0.
+  it("returns NaN for zero (not positive)", () => {
+    expect(Number.isNaN(parsePositiveInt(0, 42))).toBe(true);
+    expect(Number.isNaN(parsePositiveInt("0", 42))).toBe(true);
+  });
+
+  it("returns NaN for negative string", () => {
+    expect(Number.isNaN(parsePositiveInt("-5", 42))).toBe(true);
+  });
+
+  it("returns NaN for negative number", () => {
+    expect(Number.isNaN(parsePositiveInt(-5, 42))).toBe(true);
+  });
+});
+
+// Fix #10: numeric flags must reject NaN. Previously parseInt("abc", 10) → NaN
+// slipped past the bounds check because NaN compares false for both < min and
+// > max. Invalid values now fail validation with a clear field-specific error.
+describe("validateInputs — numeric bounds reject NaN", () => {
+  it("rejects non-numeric max-investigate-turns", () => {
+    const errors = validateInputs(baseConfig({ maxInvestigateTurns: Number.NaN }));
+    expect(errors.some((e) => e.includes("max-investigate-turns"))).toBe(true);
+  });
+
+  it("rejects non-numeric max-implement-turns", () => {
+    const errors = validateInputs(baseConfig({ maxImplementTurns: Number.NaN }));
+    expect(errors.some((e) => e.includes("max-implement-turns"))).toBe(true);
+  });
+
+  it("rejects Infinity values", () => {
+    const errors = validateInputs(baseConfig({ maxInvestigateTurns: Infinity }));
+    expect(errors.some((e) => e.includes("max-investigate-turns"))).toBe(true);
+  });
+});
+
+describe("parseCliInputs — numeric parsing rejects junk", () => {
+  it("rejects a non-numeric --max-investigate-turns via validateInputs", () => {
+    const config = parseCliInputs({ maxInvestigateTurns: "abc" }, {});
+    // parseInt produces NaN; the config object reflects that.
+    expect(Number.isNaN(config.maxInvestigateTurns)).toBe(true);
+    // validateInputs must catch the NaN and report it.
+    const errors = validateInputs(config);
+    expect(errors.some((e) => e.includes("max-investigate-turns"))).toBe(true);
   });
 });
 

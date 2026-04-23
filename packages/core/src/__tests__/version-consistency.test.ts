@@ -140,7 +140,9 @@ describe("action.yml", () => {
   });
 
   it("does not have triage-specific inputs", () => {
-    // These belong on swenyai/triage, not the generic runner
+    // These belong on swenyai/triage, not the generic runner.
+    // dry-run is workflow-generic (Fix #6 — stops at first conditional edge)
+    // so it lives on this action.
     const triageInputs = [
       "observability-provider",
       "sentry-auth-token",
@@ -148,7 +150,6 @@ describe("action.yml", () => {
       "dd-app-key",
       "issue-tracker-provider",
       "linear-api-key",
-      "dry-run",
       "time-range",
       "severity-focus",
     ];

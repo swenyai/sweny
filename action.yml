@@ -33,6 +33,11 @@ inputs:
     required: false
     default: "."
 
+  dry-run:
+    description: "When 'true', execute until the first conditional routing decision and stop. Validates the workflow end-to-end without triggering downstream actions."
+    required: false
+    default: "false"
+
 runs:
   using: "composite"
   steps:
@@ -65,4 +70,14 @@ runs:
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-oauth-token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         WORKFLOW_PATH: ${{ inputs.workflow }}
-      run: sweny workflow run "$WORKFLOW_PATH"
+        DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        # Normalize so dry-run accepts true / TRUE / 1 / yes equivalently.
+        # GitHub Actions usually passes the literal "true"/"false" string,
+        # but workflow YAML can produce other truthy spellings.
+        DRY_NORM=$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')
+        if [ "$DRY_NORM" = "true" ] || [ "$DRY_NORM" = "1" ] || [ "$DRY_NORM" = "yes" ]; then
+          sweny workflow run "$WORKFLOW_PATH" --dry-run
+        else
+          sweny workflow run "$WORKFLOW_PATH"
+        fi

@@ -16,7 +16,7 @@ import { parse as parseYaml } from "yaml";
 import type { Command } from "commander";
 import { parseWorkflow, validateWorkflow } from "../schema.js";
 import { builtinSkills } from "../skills/index.js";
-import { discoverSkills } from "../skills/custom-loader.js";
+import { discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -61,8 +61,11 @@ export function validateWorkflowFile(filePath: string): {
   try {
     const workflow = parseWorkflow(parsed);
 
-    // Build known skill IDs from builtins + custom + inline workflow skills
-    const customSkills = discoverSkills();
+    // Build known skill IDs from builtins + custom + inline workflow skills.
+    // Surface skill-loader diagnostics (malformed frontmatter, invalid ids,
+    // duplicate overrides) so publishers don't ship broken dependencies.
+    const { skills: customSkills, warnings: skillWarnings } = discoverSkillsWithDiagnostics();
+    for (const w of skillWarnings) warnings.push(w.message);
     const allSkillIds = new Set([...builtinSkills.map((s) => s.id), ...customSkills.map((s) => s.id)]);
 
     // Inline skills defined in the workflow's skills block (a Record<id, def>) are also valid
@@ -410,12 +413,7 @@ async function openGitHubPR(
       execFileSync("git", ["-C", tmpDir, "add", `workflows/community/${id}.yml`], { stdio: "pipe" });
     } else {
       const destDir = path.join(tmpDir, "skills", "community", id);
-      fs.mkdirSync(destDir, { recursive: true });
-      // Copy entire skill directory
-      const files = fs.readdirSync(sourcePath);
-      for (const file of files) {
-        fs.copyFileSync(path.join(sourcePath, file), path.join(destDir, file));
-      }
+      copySkillDir(sourcePath, destDir);
       execFileSync("git", ["-C", tmpDir, "add", `skills/community/${id}`], { stdio: "pipe" });
     }
 
@@ -476,15 +474,25 @@ async function saveLocally(type: "workflow" | "skill", id: string, sourcePath: s
     return { type, id, name: id, outputPath: dest };
   } else {
     const destDir = path.join(outputDir, id);
-    fs.mkdirSync(destDir, { recursive: true });
-    const files = fs.readdirSync(sourcePath);
-    for (const file of files) {
-      fs.copyFileSync(path.join(sourcePath, file), path.join(destDir, file));
-    }
+    copySkillDir(sourcePath, destDir);
     p.log.success(`Saved to ${chalk.cyan(destDir)}`);
     p.log.info(`Submit manually: copy to skills/community/ in a fork of swenyai/marketplace`);
     return { type, id, name: id, outputPath: destDir };
   }
+}
+
+/**
+ * Recursively copy a skill source directory to its destination (Fix #17).
+ *
+ * Previously a flat `fs.readdirSync` + `fs.copyFileSync` loop: skills with
+ * nested directories (scripts/, references/, assets/) either silently
+ * shipped incomplete or — more often — threw EISDIR on the first subdir.
+ *
+ * Exported for tests; node:fs cp's recursive mode preserves structure.
+ */
+export function copySkillDir(sourceDir: string, destDir: string): void {
+  fs.mkdirSync(destDir, { recursive: true });
+  fs.cpSync(sourceDir, destDir, { recursive: true });
 }
 
 // ── Command registration ───────────────────────────────────────────────

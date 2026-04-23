@@ -44,6 +44,7 @@ export const mcpServerConfigZ = z
     headers: z.record(z.string()).optional(),
     env: z.record(z.string()).optional(),
   })
+  .strict()
   .refine((c) => c.command || c.url, {
     message: "MCP server must have either command (stdio) or url (HTTP)",
   });
@@ -55,6 +56,7 @@ export const skillDefinitionZ = z
     instruction: z.string().optional(),
     mcp: mcpServerConfigZ.optional(),
   })
+  .strict()
   .refine((s) => s.instruction || s.mcp, {
     message: "Inline skill must provide instruction, mcp, or both",
   });
@@ -94,6 +96,7 @@ export const outputMatchZ = z
     in: z.array(z.unknown()).optional(),
     matches: z.string().min(1).optional(),
   })
+  .strict()
   .refine(
     (m) => {
       const operators = [m.equals !== undefined, m.in !== undefined, m.matches !== undefined];
@@ -110,6 +113,12 @@ export const nodeVerifyZ = z
     output_required: z.array(z.string().min(1)).min(1).optional(),
     output_matches: z.array(outputMatchZ).min(1).optional(),
   })
+  // Fix #4 gap: the exported JSON Schema sets additionalProperties: false.
+  // Without .strict() here Zod would silently drop unknown keys and then
+  // the refine would run on the stripped object, producing a different
+  // verdict than ajv (which rejects the unknown key directly). Keep them
+  // in sync.
+  .strict()
   .refine(
     (v) =>
       v.any_tool_called !== undefined ||
@@ -129,6 +138,7 @@ export const nodeRequiresZ = z
     output_matches: z.array(outputMatchZ).min(1).optional(),
     on_fail: z.enum(["fail", "skip"]).optional(),
   })
+  .strict()
   .refine((r) => r.output_required !== undefined || r.output_matches !== undefined, {
     message: "requires must declare at least one check (output_required or output_matches)",
   });
@@ -136,31 +146,43 @@ export const nodeRequiresZ = z
 const retryInstructionAutoZ = z.object({ auto: z.literal(true) }).strict();
 const retryInstructionReflectZ = z.object({ reflect: z.string().min(1) }).strict();
 
-export const nodeRetryZ = z.object({
-  max: z.number().int().min(1),
-  instruction: z.union([z.string().min(1), retryInstructionAutoZ, retryInstructionReflectZ]).optional(),
-});
+export const nodeRetryZ = z
+  .object({
+    max: z.number().int().min(1),
+    instruction: z.union([z.string().min(1), retryInstructionAutoZ, retryInstructionReflectZ]).optional(),
+  })
+  .strict();
 
-export const nodeZ = z.object({
-  name: z.string().min(1),
-  instruction: sourceZ,
-  skills: z.array(z.string()).default([]),
-  output: jsonSchemaZ.optional(),
-  max_turns: z.number().int().min(1).optional(),
-  rules: nodeSourcesZ.optional(),
-  context: nodeSourcesZ.optional(),
-  verify: nodeVerifyZ.optional(),
-  requires: nodeRequiresZ.optional(),
-  retry: nodeRetryZ.optional(),
-});
+export const nodeZ = z
+  .object({
+    name: z.string().min(1),
+    instruction: sourceZ,
+    skills: z.array(z.string()).default([]),
+    output: jsonSchemaZ.optional(),
+    max_turns: z.number().int().min(1).optional(),
+    rules: nodeSourcesZ.optional(),
+    context: nodeSourcesZ.optional(),
+    verify: nodeVerifyZ.optional(),
+    requires: nodeRequiresZ.optional(),
+    retry: nodeRetryZ.optional(),
+  })
+  .strict();
 
-export const edgeZ = z.object({
-  from: z.string().min(1),
-  to: z.string().min(1),
-  when: z.string().optional(),
-  max_iterations: z.number().int().min(1).optional(),
-});
+export const edgeZ = z
+  .object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+    when: z.string().optional(),
+    max_iterations: z.number().int().min(1).optional(),
+  })
+  .strict();
 
+// Fix #4 gap — workflowZ is intentionally NOT .strict(). The published
+// JSON Schema's `additionalProperties: false` only scopes the properties
+// block, but marketplace workflows routinely carry top-level metadata
+// (author, category, tags) handled by publish.ts. Striping rather than
+// rejecting them preserves compatibility with the existing marketplace
+// contract while the inner objects (nodes, edges, skills) stay strict.
 export const workflowZ = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -387,7 +409,10 @@ export const workflowJsonSchema = {
     "A declarative YAML format for AI agent orchestration as a directed graph with natural language routing.",
   type: "object",
   required: ["id", "name", "nodes", "edges", "entry"],
-  additionalProperties: false,
+  // Top-level is intentionally open: marketplace workflows carry extra
+  // metadata (author, category, tags) that publish.ts reads. Inner
+  // objects (nodes, edges, skills, verify, requires, etc.) are strict.
+  additionalProperties: true,
   $defs: {
     Source: sourceJsonSchema,
     NodeSources: {
@@ -455,6 +480,8 @@ export const workflowJsonSchema = {
             type: "object",
             description: "Machine-checked post-conditions evaluated after the LLM finishes.",
             additionalProperties: false,
+            // Fix #4: at least one check must be declared.
+            minProperties: 1,
             properties: {
               any_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
               all_tools_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
@@ -472,6 +499,8 @@ export const workflowJsonSchema = {
                     in: { type: "array" },
                     matches: { type: "string", minLength: 1 },
                   },
+                  // Fix #4: exactly one operator must be declared.
+                  oneOf: [{ required: ["equals"] }, { required: ["in"] }, { required: ["matches"] }],
                 },
                 minItems: 1,
               },
@@ -481,6 +510,9 @@ export const workflowJsonSchema = {
             type: "object",
             description: "Pre-condition checks evaluated before the LLM runs.",
             additionalProperties: false,
+            // Fix #4: at least one of output_required / output_matches must be declared.
+            // on_fail alone is not sufficient — it only tags how a failing check behaves.
+            anyOf: [{ required: ["output_required"] }, { required: ["output_matches"] }],
             properties: {
               output_required: {
                 type: "array",
@@ -499,6 +531,8 @@ export const workflowJsonSchema = {
                     in: { type: "array" },
                     matches: { type: "string", minLength: 1 },
                   },
+                  // Fix #4: exactly one operator must be declared.
+                  oneOf: [{ required: ["equals"] }, { required: ["in"] }, { required: ["matches"] }],
                 },
                 minItems: 1,
               },
@@ -557,6 +591,10 @@ export const workflowJsonSchema = {
       description: "Inline skill definitions scoped to this workflow",
       additionalProperties: {
         type: "object",
+        // Fix #4: an inline skill must provide instruction, mcp, or both.
+        anyOf: [{ required: ["instruction"] }, { required: ["mcp"] }],
+        // Round 2: reject unknown keys to match Zod skillDefinitionZ.strict().
+        additionalProperties: false,
         properties: {
           name: { type: "string" },
           description: { type: "string" },
@@ -564,6 +602,10 @@ export const workflowJsonSchema = {
           mcp: {
             type: "object",
             description: "External MCP server definition",
+            // Fix #4: an MCP server must declare command (stdio) or url (http).
+            anyOf: [{ required: ["command"] }, { required: ["url"] }],
+            // Round 2: reject unknown keys to match Zod mcpServerConfigZ.strict().
+            additionalProperties: false,
             properties: {
               type: { type: "string", enum: ["stdio", "http"] },
               command: { type: "string" },

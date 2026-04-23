@@ -1,13 +1,15 @@
 /**
- * Template loading for issues and PRs.
+ * Template + rules/context loading for the CLI.
  *
- * Templates can come from:
+ * Templates and additional-context documents can come from:
  *   1. Local file path (relative to repo root)
  *   2. URL (fetched at runtime)
- *   3. Built-in defaults
+ *   3. Built-in defaults / inline text
  *
- * Delegates to sources.ts for actual resolution; this module provides
- * backwards-compatible wrappers with fallback semantics.
+ * Delegates to source-resolver.ts for the actual fetch. Fix #16: both
+ * `loadTemplate` and `loadAdditionalContext` now honor `offline` and
+ * `fetchAuth` the same way the executor's per-node Sources do, so CLI-level
+ * rules/context stay consistent with everything the executor touches later.
  */
 
 import * as path from "node:path";
@@ -60,13 +62,28 @@ export interface Templates {
   prTemplate: string;
 }
 
-/** Default resolution context used by template helpers. */
-function defaultCtx(cwd: string): SourceResolutionContext {
+/**
+ * Options shared by `loadTemplate` and `loadAdditionalContext`.
+ *
+ * `offline` and `fetchAuth` mirror the same knobs on the executor's
+ * `ExecuteOptions`, so CLI-preloaded rules/context resolve under the same
+ * policy as Sources resolved later by the executor.
+ */
+export interface SourceLoadOptions {
+  cwd?: string;
+  offline?: boolean;
+  /** Host → env-var-name map for URL Source authentication (Bearer). */
+  fetchAuth?: Record<string, string>;
+  /** Environment used to resolve `fetchAuth` env-var names. Defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
+}
+
+function buildCtx(options: SourceLoadOptions): SourceResolutionContext {
   return {
-    cwd,
-    env: process.env,
-    authConfig: {},
-    offline: false,
+    cwd: options.cwd ?? process.cwd(),
+    env: options.env ?? process.env,
+    authConfig: options.fetchAuth ?? {},
+    offline: options.offline ?? false,
     logger: consoleLogger,
   };
 }
@@ -74,19 +91,23 @@ function defaultCtx(cwd: string): SourceResolutionContext {
 /**
  * Load a template from a file path or URL.
  * Returns the default if source is empty or loading fails.
+ *
+ * Accepts the legacy `cwd?: string` signature for backward compat.
  */
 export async function loadTemplate(
   source: string | undefined,
   fallback: string,
-  cwd: string = process.cwd(),
+  options: SourceLoadOptions | string = {},
 ): Promise<string> {
   if (!source || source.trim() === "") return fallback;
+  const opts: SourceLoadOptions = typeof options === "string" ? { cwd: options } : options;
 
   try {
-    const resolved = await resolveSource(source.trim(), "template", defaultCtx(cwd));
+    const resolved = await resolveSource(source.trim(), "template", buildCtx(opts));
     return resolved.content;
-  } catch (err: any) {
-    console.warn(`[templates] Failed to load template: ${err.message}, using default`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[templates] Failed to load template: ${msg}, using default`);
     return fallback;
   }
 }
@@ -96,11 +117,12 @@ export async function loadTemplate(
  */
 export async function resolveTemplates(
   config: { issueTemplate?: string; prTemplate?: string },
-  cwd?: string,
+  options: SourceLoadOptions | string = {},
 ): Promise<Templates> {
+  const opts: SourceLoadOptions = typeof options === "string" ? { cwd: options } : options;
   const [issueTemplate, prTemplate] = await Promise.all([
-    loadTemplate(config.issueTemplate, DEFAULT_ISSUE_TEMPLATE, cwd),
-    loadTemplate(config.prTemplate, DEFAULT_PR_TEMPLATE, cwd),
+    loadTemplate(config.issueTemplate, DEFAULT_ISSUE_TEMPLATE, opts),
+    loadTemplate(config.prTemplate, DEFAULT_PR_TEMPLATE, opts),
   ]);
   return { issueTemplate, prTemplate };
 }
@@ -110,15 +132,18 @@ export async function resolveTemplates(
  * Each source is resolved eagerly (including URLs) and wrapped with a header.
  * Returns { resolved, urls } — resolved text for all sources; urls is kept
  * for API compat but will be empty since URLs now resolve eagerly.
+ *
+ * Accepts the legacy `cwd?: string` signature for backward compat.
  */
 export async function loadAdditionalContext(
   sources: string[],
-  cwd: string = process.cwd(),
+  options: SourceLoadOptions | string = {},
 ): Promise<{ resolved: string; urls: string[] }> {
   if (sources.length === 0) return { resolved: "", urls: [] };
 
+  const opts: SourceLoadOptions = typeof options === "string" ? { cwd: options } : options;
   const parts: string[] = [];
-  const ctx = defaultCtx(cwd);
+  const ctx = buildCtx(opts);
 
   for (const source of sources) {
     const trimmed = source.trim();
@@ -134,8 +159,9 @@ export async function loadAdditionalContext(
           const label = kind === "file" ? path.basename(trimmed) : trimmed;
           parts.push(`### ${label}\n\n${resolved.content}`);
         }
-      } catch (err: any) {
-        console.warn(`[templates] Failed to load context source: ${err.message}`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[templates] Failed to load context source: ${msg}`);
       }
     }
   }

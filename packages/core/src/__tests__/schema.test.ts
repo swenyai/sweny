@@ -692,8 +692,12 @@ describe("workflowJsonSchema", () => {
     expect(workflowJsonSchema.required).toContain("entry");
   });
 
-  it("has additionalProperties: false at top level", () => {
-    expect(workflowJsonSchema.additionalProperties).toBe(false);
+  it("has additionalProperties: true at top level (marketplace metadata is tolerated)", () => {
+    // Round 2: relaxed from false to true. Marketplace workflows carry
+    // author / category / tags alongside the schema-defined fields, read
+    // by publish.ts. Inner objects (nodes, edges, skills, verify, requires)
+    // stay strict — that's where drift actually matters.
+    expect(workflowJsonSchema.additionalProperties).toBe(true);
   });
 
   it("has additionalProperties: false on edge items", () => {

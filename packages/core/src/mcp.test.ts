@@ -378,19 +378,18 @@ describe("buildAutoMcpServers", () => {
     });
   });
 
-  it("injects Asana when opted in with ASANA_ACCESS_TOKEN", () => {
+  // Fix #15: asana was removed from the catalog. It had been absent from
+  // SUPPORTED_WORKSPACE_TOOLS for some time; the asana-mcp package is
+  // community-maintained with no first-party alternative. Add back with a
+  // dedicated catalog entry if demand + a policy-compliant server exist.
+  it("does NOT inject asana (retired)", () => {
     const result = buildAutoMcpServers(
       cfg({
         workspaceTools: ["asana"],
         credentials: { ASANA_ACCESS_TOKEN: "asa_abc" },
       }),
     );
-    expect(result["asana"]).toEqual({
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "asana-mcp@latest"],
-      env: { ASANA_ACCESS_TOKEN: "asa_abc" },
-    });
+    expect(result["asana"]).toBeUndefined();
   });
 
   // ── User MCP servers win on conflict ────────────────────────────
@@ -760,17 +759,12 @@ describe("buildSkillMcpServers", () => {
     });
   });
 
-  it("wires asana MCP", () => {
+  it("does NOT wire asana (retired — see Fix #15 notes)", () => {
     const result = buildSkillMcpServers({
       referencedSkills: new Set(["asana"]),
       credentials: { ASANA_ACCESS_TOKEN: "asana_abc" },
     });
-    expect(result["asana"]).toEqual({
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "asana-mcp@latest"],
-      env: { ASANA_ACCESS_TOKEN: "asana_abc" },
-    });
+    expect(result["asana"]).toBeUndefined();
   });
 
   // ── BetterStack token fallback ─────────────────────────────────────

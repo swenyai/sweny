@@ -80,19 +80,34 @@ export function resolvePath(data: unknown, path: string): Resolution {
   return { ok: true, mode: parsed.mode, values: current };
 }
 
-// A tool call "succeeded" when its output does not carry a non-null `error` field.
-// `{ error: null }` and `{ error: false }` are treated as success — many real
-// tools include the key with a null sentinel.
+// Legacy output-shape heuristic: a tool call "succeeded" when its output
+// does not carry a non-null `error` field. Kept as a fallback for ToolCall
+// records that predate the explicit `status` field (hand-constructed in
+// tests, older runtimes). The Claude runtime now sets `status` directly.
 export function isErrorOutput(output: unknown): boolean {
   if (!output || typeof output !== "object") return false;
   const err = (output as Record<string, unknown>).error;
   return err !== undefined && err !== null && err !== false;
 }
 
+/**
+ * A tool call is considered successful when:
+ *   - explicit `status === "success"`, OR
+ *   - no explicit status AND output does not look like an error.
+ *
+ * `status` is authoritative. It's the only signal we have for external MCP
+ * tools whose structured output isn't exposed to the workflow runtime.
+ */
+function didSucceed(c: ToolCall): boolean {
+  if (c.status === "error") return false;
+  if (c.status === "success") return true;
+  return !isErrorOutput(c.output);
+}
+
 function succeededTools(toolCalls: ToolCall[]): Set<string> {
   const names = new Set<string>();
   for (const c of toolCalls) {
-    if (!isErrorOutput(c.output)) names.add(c.tool);
+    if (didSucceed(c)) names.add(c.tool);
   }
   return names;
 }
@@ -187,8 +202,33 @@ interface CompiledMatch {
   regex?: RegExp;
 }
 
+/**
+ * Cap on `verify.output_matches[].matches` source length.
+ *
+ * `matches` is user-supplied through workflow YAML, including marketplace
+ * workflows. A pathological pattern like `(a+)+$` causes exponential
+ * backtracking in V8's regex engine. Capping the source length is a cheap,
+ * useful defense — well-formed verify regexes are tens of characters at
+ * most. Patterns longer than this are almost always either generated junk
+ * or a deliberate ReDoS attempt; either way, refusing to compile is safer
+ * than executing them.
+ *
+ * Caveat: length alone does NOT prevent all ReDoS — a 12-char pattern like
+ * `(a+)+$` is still catastrophic against the right input. Future work:
+ * gate compilation through `safe-regex` or use the `re2` engine for
+ * marketplace inputs. The cap closes the obvious abuse surface without
+ * adding a runtime dep right now.
+ */
+const MAX_REGEX_SOURCE_LENGTH = 1000;
+
 function compileMatch(m: OutputMatch): CompiledMatch {
   if (m.matches !== undefined) {
+    if (m.matches.length > MAX_REGEX_SOURCE_LENGTH) {
+      throw new Error(
+        `regex source exceeds ${MAX_REGEX_SOURCE_LENGTH} characters (got ${m.matches.length}); ` +
+          `tighten the pattern to avoid catastrophic-backtracking risk`,
+      );
+    }
     // Throws synchronously if the regex source is invalid; surfaced as a
     // verify failure rather than a crash because the executor catches.
     return { match: m, regex: new RegExp(m.matches) };

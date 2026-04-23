@@ -249,8 +249,8 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     severityFocus: (options.severityFocus as string) || f("severity-focus") || "errors",
     serviceFilter: (options.serviceFilter as string) || f("service-filter") || "*",
     investigationDepth: (options.investigationDepth as string) || f("investigation-depth") || "standard",
-    maxInvestigateTurns: parseInt(String(options.maxInvestigateTurns || f("max-investigate-turns") || "50"), 10),
-    maxImplementTurns: parseInt(String(options.maxImplementTurns || f("max-implement-turns") || "30"), 10),
+    maxInvestigateTurns: parsePositiveInt(options.maxInvestigateTurns ?? f("max-investigate-turns"), 50),
+    maxImplementTurns: parsePositiveInt(options.maxImplementTurns ?? f("max-implement-turns"), 30),
 
     baseBranch: (options.baseBranch as string) || f("base-branch") || "main",
     prLabels: ((options.prLabels as string) || f("pr-labels") || "agent,triage,needs-review")
@@ -312,7 +312,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     bell: Boolean(options.bell),
 
     cacheDir: (options.cacheDir as string) || env.SWENY_CACHE_DIR || f("cache-dir") || ".sweny/cache",
-    cacheTtl: parseInt(String(options.cacheTtl || f("cache-ttl") || "86400"), 10),
+    cacheTtl: parsePositiveInt(options.cacheTtl ?? f("cache-ttl"), 86400),
     noCache: options.cache === false,
 
     outputDir: (options.outputDir as string) || env.SWENY_OUTPUT_DIR || f("output-dir") || ".sweny/output",
@@ -590,15 +590,60 @@ export function validateInputs(config: CliConfig): string[] {
     errors.push("--review-mode must be one of: auto, review");
   }
 
-  // Integer bounds
-  if (config.maxInvestigateTurns < 1 || config.maxInvestigateTurns > 500) {
-    errors.push("--max-investigate-turns must be between 1 and 500");
-  }
-  if (config.maxImplementTurns < 1 || config.maxImplementTurns > 500) {
-    errors.push("--max-implement-turns must be between 1 and 500");
-  }
+  // Integer bounds — reject NaN and Infinity first (parseInt can yield NaN
+  // silently and NaN compares false to both < min and > max, so the old
+  // bounds check let junk through).
+  validateIntegerBound(errors, "--max-investigate-turns", config.maxInvestigateTurns, 1, 500);
+  validateIntegerBound(errors, "--max-implement-turns", config.maxImplementTurns, 1, 500);
 
   return errors;
+}
+
+function validateIntegerBound(errors: string[], flag: string, value: number, min: number, max: number): void {
+  if (!Number.isFinite(value)) {
+    errors.push(`${flag} must be a finite integer between ${min} and ${max} (got "${value}")`);
+    return;
+  }
+  if (value < min || value > max) {
+    errors.push(`${flag} must be between ${min} and ${max}`);
+  }
+}
+
+/**
+ * Parse a value as a positive integer (>= 1).
+ *
+ * Returns:
+ *   - the parsed integer when the input represents a positive finite one
+ *   - the fallback when the input is null/undefined/empty (unset flag)
+ *   - NaN for any malformed or non-positive input, so validateInputs can
+ *     surface a field-specific error
+ *
+ * Name enforces the contract: non-positive values (0, -5) return NaN so
+ * validation rejects them loudly rather than quietly passing through as
+ * `0` and breaking downstream invariants.
+ *
+ * Why zero is rejected: every current caller (max-investigate-turns,
+ * max-implement-turns, cache-ttl) uses the result as a positive count or
+ * timeout. There is no "zero means disabled" semantics anywhere — a
+ * cache-ttl of 0 wouldn't disable cache, it would expire entries
+ * immediately, which is broken. If a future flag wants "0 = disabled",
+ * use a sibling helper (parseNonNegativeInt) rather than weakening this
+ * one's contract.
+ */
+export function parsePositiveInt(raw: unknown, fallback: number): number {
+  if (raw === undefined || raw === null || raw === "") return fallback;
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw)) return Number.NaN;
+    const truncated = Math.trunc(raw);
+    return truncated >= 1 ? truncated : Number.NaN;
+  }
+  const asString = String(raw).trim();
+  if (asString.length === 0) return fallback;
+  // Number() is stricter than parseInt — "5o" → NaN rather than 5.
+  const parsed = Number(asString);
+  if (!Number.isFinite(parsed)) return Number.NaN;
+  const truncated = Math.trunc(parsed);
+  return truncated >= 1 ? truncated : Number.NaN;
 }
 
 const DEFAULT_SERVICE_MAP_PATH = ".github/service-map.yml";

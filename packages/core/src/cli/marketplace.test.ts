@@ -431,4 +431,51 @@ describe("installMarketplaceWorkflow", () => {
     expect(written).toContain("PR Review");
     expect(written).not.toContain("stale content");
   });
+
+  // Fix #3: marketplace fetches must be validated BEFORE any local side
+  // effects. Previously installMarketplaceWorkflow only ran Zod validation
+  // inside the "adapt" branch, so invalid fetched content could still be
+  // written as-is AND pollute .sweny.yml / .env with skill keys from the
+  // broken workflow.
+  describe("install rejects invalid marketplace content", () => {
+    it("aborts when fetched YAML is not parseable", async () => {
+      const cwd = tmp();
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        async () => new Response("id: x\nnodes:\n  a: {name: [unclosed", { status: 200 }),
+      );
+
+      await expect(
+        installMarketplaceWorkflow("broken", {
+          cwd,
+          availableSkills: testSkills,
+          claude: null,
+          logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+        }),
+      ).rejects.toThrow();
+
+      // Nothing should have been written to the user's project.
+      expect(fs.existsSync(path.join(cwd, ".sweny.yml"))).toBe(false);
+      expect(fs.existsSync(path.join(cwd, ".sweny", "workflows", "broken.yml"))).toBe(false);
+    });
+
+    it("aborts when fetched YAML is valid YAML but fails schema (missing entry)", async () => {
+      const cwd = tmp();
+      const bad =
+        "id: bad\nname: Bad\ndescription: d\n" +
+        "nodes:\n  a:\n    name: A\n    instruction: hi\n    skills: []\nedges: []\n";
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(bad, { status: 200 }));
+
+      await expect(
+        installMarketplaceWorkflow("bad", {
+          cwd,
+          availableSkills: testSkills,
+          claude: null,
+          logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+        }),
+      ).rejects.toThrow();
+
+      expect(fs.existsSync(path.join(cwd, ".sweny.yml"))).toBe(false);
+      expect(fs.existsSync(path.join(cwd, ".sweny", "workflows", "bad.yml"))).toBe(false);
+    });
+  });
 });

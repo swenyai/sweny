@@ -115,6 +115,40 @@ describe("skills registry", () => {
     expect(result.warnings.length).toBeGreaterThan(0);
   });
 
+  // Fix #5: workflow.skills (inline skill definitions) must count as available
+  // during CLI validation. Previously the CLI called validateWorkflowSkills
+  // with only the configured-builtins+custom map, so a spec-valid workflow
+  // that defined a skill inline would be rejected as UNKNOWN_SKILL before
+  // the executor ever ran mergeInlineSkills on it.
+  it("validateWorkflowSkills accepts inline workflow.skills via inlineSkills param", () => {
+    const workflow = {
+      nodes: {
+        gather: { skills: ["my-inline"] },
+      },
+      skills: {
+        "my-inline": { instruction: "Do custom work" },
+      },
+    };
+    const available = createSkillMap([]);
+    const result = validateWorkflowSkills(workflow, available, workflow.skills);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("validateWorkflowSkills without inlineSkills param still rejects unknown ids", () => {
+    const workflow = {
+      nodes: {
+        gather: { skills: ["my-inline"] },
+      },
+      skills: {
+        "my-inline": { instruction: "Do custom work" },
+      },
+    };
+    const available = createSkillMap([]);
+    // No inlineSkills → treat as unknown, as before.
+    const result = validateWorkflowSkills(workflow, available);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
   it("validateWorkflowSkills passes when all categories covered", () => {
     const workflow = {
       nodes: {

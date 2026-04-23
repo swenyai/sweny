@@ -13,6 +13,10 @@ import type { NodeResult, ToolCall } from "../types.js";
 const tc = (tool: string, output?: unknown): ToolCall => ({ tool, input: {}, output });
 const errOut = { error: "boom" };
 
+// Explicit-status helpers — new in Fix #1 (trust toolCall.status over output shape).
+const ok = (tool: string, output?: unknown): ToolCall => ({ tool, input: {}, output, status: "success" });
+const err = (tool: string, output?: unknown): ToolCall => ({ tool, input: {}, output, status: "error" });
+
 describe("resolvePath", () => {
   describe("simple dotted paths", () => {
     it("resolves a top-level key", () => {
@@ -155,6 +159,29 @@ describe("checkAnyToolCalled", () => {
     const err = checkAnyToolCalled(["a"], []);
     expect(err).toMatch(/called: \[none\]/);
   });
+
+  // Fix #1: explicit status is authoritative — the old output-shape heuristic
+  // could be fooled by a tool that had no output field at all (external MCP
+  // tools always look like success under the old rule) or that returned a
+  // structured payload alongside an error flag.
+  it("does not count a tool with status:error toward any_tool_called", () => {
+    // Regression for: external MCP tool failed, but because output was never
+    // captured, isErrorOutput returned false and the tool looked successful.
+    const e = checkAnyToolCalled(["a"], [err("a")]);
+    expect(e).toMatch(/any_tool_called/);
+  });
+
+  it("honors explicit status:error over a success-looking output", () => {
+    // Output LOOKS successful but status says otherwise.
+    const e = checkAnyToolCalled(["a"], [err("a", { data: "ok" })]);
+    expect(e).toMatch(/any_tool_called/);
+  });
+
+  it("honors explicit status:success over an error-looking output", () => {
+    // Some tools return { error: null } or include an error key as metadata
+    // alongside a real success. Trust the explicit status.
+    expect(checkAnyToolCalled(["a"], [ok("a", { error: null, data: "fine" })])).toBeNull();
+  });
 });
 
 describe("checkAllToolsCalled", () => {
@@ -174,6 +201,16 @@ describe("checkAllToolsCalled", () => {
   it("fails when a required tool only errored", () => {
     const err = checkAllToolsCalled(["a", "b"], [tc("a", { ok: true }), tc("b", errOut)]);
     expect(err).toMatch(/all_tools_called.*missing.*\[b\]/);
+  });
+
+  // Fix #1: explicit status over output-shape inference.
+  it("honors explicit status:error for all_tools_called", () => {
+    const e = checkAllToolsCalled(["a", "b"], [ok("a"), err("b")]);
+    expect(e).toMatch(/all_tools_called.*missing.*\[b\]/);
+  });
+
+  it("honors explicit status:success even with no output", () => {
+    expect(checkAllToolsCalled(["a", "b"], [ok("a"), ok("b")])).toBeNull();
   });
 });
 
@@ -429,6 +466,22 @@ describe("regex / matches edge cases", () => {
   it("reports a clear failure when the regex source is invalid", () => {
     const err = checkOutputMatches([{ path: "v", matches: "(unclosed" }], { v: "x" });
     expect(err).toMatch(/output_matches.*invalid regex/);
+  });
+
+  // Round 3 (PR review): cap regex source length to defend against ReDoS
+  // via marketplace-supplied workflows. A pathological pattern in
+  // verify.output_matches.matches could trigger exponential backtracking.
+  it("rejects regex source longer than the safety cap (ReDoS guard)", () => {
+    const longPattern = "a".repeat(1001);
+    const err = checkOutputMatches([{ path: "v", matches: longPattern }], { v: "x" });
+    expect(err).toMatch(/output_matches.*1000 characters/);
+  });
+
+  it("accepts regex sources just under the safety cap", () => {
+    // 1000-char pattern that always matches the input.
+    const pattern = "a".repeat(999) + "b";
+    const value = "a".repeat(999) + "b";
+    expect(checkOutputMatches([{ path: "v", matches: pattern }], { v: value })).toBeNull();
   });
 });
 

@@ -37,6 +37,14 @@ When a workflow runs (via CLI or GitHub Action):
 
 All execution happens locally. If `SWENY_CLOUD_TOKEN` is set, a structured summary (status, duration, recommendations) is sent to cloud.sweny.ai — no code, no diffs, no secrets.
 
+### What "scoped tools" means
+
+Each node declares `skills`, and SWEny wires only those skills' MCP servers into that node's invocation. In that sense the MCP tool surface is scoped per node.
+
+What SWEny does **not** scope: the underlying Claude Code subprocess runs with `permissionMode: "bypassPermissions"`, which keeps the built-in Bash/Read/Write/Edit tools available without permission prompting. This is intentional — SWEny targets CI-style autonomous runs where interactive approval is not an option, and the agent needs these capabilities to do the work. If you need a stricter sandbox, run the Action in a container that constrains the filesystem and network instead of looking for a flag inside SWEny.
+
+`verify` post-conditions are the primary mechanism for making a node's behavior auditable: `any_tool_called`, `all_tools_called`, `no_tool_called`, and `output_matches` are all checked against the actual recorded tool outcomes.
+
 ### Skills
 
 Skills are composable tool bundles. Three types:
@@ -54,23 +62,27 @@ See [spec.sweny.ai/skills](https://spec.sweny.ai/skills/) for the formal specifi
 General rule: **don't use `npx -y`** — runtime package downloads bypass lockfiles and
 security audits, and the package version is non-deterministic.
 
-**Exception**: `buildAutoMcpServers()` in the CLI uses `npx -y` for a small set of
-official first-party vendor MCP servers that have no stable HTTP endpoint:
+**Exception**: stdio MCP servers are allowed via `npx -y` when no public HTTP MCP
+endpoint exists and the package is official first-party vendor code (or the
+de-facto community standard where no first-party alternative exists). Every
+exception must declare its reason in code.
 
-| Server | Package | Why npx |
-|--------|---------|---------|
-| GitHub | `@modelcontextprotocol/server-github` | No public HTTP MCP endpoint |
-| GitLab | `@modelcontextprotocol/server-gitlab` | No public HTTP MCP endpoint |
-| Sentry | `@sentry/mcp-server` | No public HTTP MCP endpoint |
-| Slack | `@modelcontextprotocol/server-slack` | No public HTTP MCP endpoint |
-| Notion | `@notionhq/notion-mcp-server` | No public HTTP MCP endpoint |
-| Monday.com | `@mondaydotcomorg/monday-api-mcp` | No public HTTP MCP endpoint |
+**Authoritative list:** `packages/core/src/mcp-catalog.ts` — each entry's
+`npxExceptionReason` field names the server, its package, and why the exception is
+acceptable. A module-load assertion and `mcp-catalog.test.ts` fail the build if a
+stdio entry is missing its reason or an http entry declares one. Update the code
+and the notes here together whenever a provider is added, removed, or changes
+transport.
 
-These packages are all official vendor packages, not third-party. Users can override any
-auto-injected server with a pre-installed binary by setting `mcp-servers-json` in `.sweny.yml`.
+Currently stdio (via `npx -y`): GitHub, GitLab, Sentry, Slack, Notion, Monday.com,
+Jira/Confluence (community `@sooperset/mcp-atlassian` — documented in the catalog
+as a community exception; revisit when Atlassian ships a first-party server).
 
-For services that DO have HTTP MCP endpoints (Datadog, Linear, New Relic, Better Stack,
-PagerDuty), we always prefer the HTTP transport — no download required.
+Currently http (no exception needed): Datadog, Linear, New Relic, BetterStack,
+PagerDuty.
+
+Users can override any auto-injected server with a pre-installed binary by setting
+`mcp-servers-json` in `.sweny.yml`.
 
 ---
 
