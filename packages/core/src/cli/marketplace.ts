@@ -354,7 +354,19 @@ export async function installMarketplaceWorkflow(id: string, options: InstallOpt
           addedEnvKeys: 0,
         };
       }
-      finalYaml = stringifyYaml(refined, { indent: 2, lineWidth: 120 });
+      // Re-validate the refined output before writing. refineWorkflow runs
+      // an LLM that produces a new Workflow object — it could drift away
+      // from the upfront-validated parse (renamed required fields, dropped
+      // edges). Reparsing the stringified YAML closes that loop so we
+      // never write content that hasn't been schema-checked.
+      const refinedYaml = stringifyYaml(refined, { indent: 2, lineWidth: 120 });
+      const revalidated = validateParsed(parseYaml(refinedYaml));
+      if (!revalidated.ok) {
+        throw new Error(
+          `Adapted workflow failed re-validation:\n${revalidated.errors.map((e) => `  ${e.message}`).join("\n")}`,
+        );
+      }
+      finalYaml = refinedYaml;
       adapted = true;
     } catch (err) {
       logger.warn(`Adaptation failed, installing as-is: ${err instanceof Error ? err.message : String(err)}`);

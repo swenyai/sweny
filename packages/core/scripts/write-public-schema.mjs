@@ -15,9 +15,11 @@
 import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
+const require = createRequire(import.meta.url);
 
 const { workflowJsonSchema } = await import("../dist/schema.js");
 if (!workflowJsonSchema) {
@@ -27,7 +29,15 @@ if (!workflowJsonSchema) {
 
 const target = resolve(repoRoot, "spec", "public", "schemas", "workflow.json");
 mkdirSync(dirname(target), { recursive: true });
-const next = JSON.stringify(workflowJsonSchema, null, 2) + "\n";
+
+// Format through prettier so the generated file matches the repo's
+// formatting conventions exactly. Otherwise the lint-staged hook would
+// reformat on commit and the CI schema-drift check would fail on every
+// build.
+const prettier = require("prettier");
+const prettierConfig = (await prettier.resolveConfig(target)) ?? {};
+const raw = JSON.stringify(workflowJsonSchema, null, 2);
+const next = await prettier.format(raw, { ...prettierConfig, filepath: target, parser: "json" });
 
 let current = "";
 try {

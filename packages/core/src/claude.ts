@@ -183,6 +183,8 @@ export class ClaudeClient implements Claude {
               if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
               const call = pendingByUseId.get(block.tool_use_id);
               if (!call) continue;
+              // Delete after first match so a duplicate tool_result (SDK
+              // retry, malformed stream) cannot overwrite a completed call.
               pendingByUseId.delete(block.tool_use_id);
 
               const isError = block.is_error === true;
@@ -399,10 +401,7 @@ export function parseToolResultContent(content: unknown): unknown {
   // booleans, and null would all corrupt or discard information.
   if (first !== "{" && first !== "[") return content;
   try {
-    const parsed: unknown = JSON.parse(trimmed);
-    // Guard against edge cases like `{}` that parse to a non-object.
-    if (parsed === null || typeof parsed !== "object") return content;
-    return parsed;
+    return JSON.parse(trimmed);
   } catch {
     return content;
   }

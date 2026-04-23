@@ -621,6 +621,14 @@ function validateIntegerBound(errors: string[], flag: string, value: number, min
  * Name enforces the contract: non-positive values (0, -5) return NaN so
  * validation rejects them loudly rather than quietly passing through as
  * `0` and breaking downstream invariants.
+ *
+ * Why zero is rejected: every current caller (max-investigate-turns,
+ * max-implement-turns, cache-ttl) uses the result as a positive count or
+ * timeout. There is no "zero means disabled" semantics anywhere — a
+ * cache-ttl of 0 wouldn't disable cache, it would expire entries
+ * immediately, which is broken. If a future flag wants "0 = disabled",
+ * use a sibling helper (parseNonNegativeInt) rather than weakening this
+ * one's contract.
  */
 export function parsePositiveInt(raw: unknown, fallback: number): number {
   if (raw === undefined || raw === null || raw === "") return fallback;

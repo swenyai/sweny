@@ -212,6 +212,12 @@ interface CompiledMatch {
  * most. Patterns longer than this are almost always either generated junk
  * or a deliberate ReDoS attempt; either way, refusing to compile is safer
  * than executing them.
+ *
+ * Caveat: length alone does NOT prevent all ReDoS — a 12-char pattern like
+ * `(a+)+$` is still catastrophic against the right input. Future work:
+ * gate compilation through `safe-regex` or use the `re2` engine for
+ * marketplace inputs. The cap closes the obvious abuse surface without
+ * adding a runtime dep right now.
  */
 const MAX_REGEX_SOURCE_LENGTH = 1000;
 

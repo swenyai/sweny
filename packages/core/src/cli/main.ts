@@ -638,8 +638,8 @@ function promptUser(question: string): Promise<string> {
 
 const workflowCmd = program.command("workflow").description("Manage and run workflow files");
 
-export function loadWorkflowFile(filePath: string): Workflow {
-  const result = loadAndValidateWorkflow(filePath);
+export function loadWorkflowFile(filePath: string, knownSkills?: Set<string>): Workflow {
+  const result = loadAndValidateWorkflow(filePath, { knownSkills });
   if (!result.ok) {
     throw new Error(`Invalid workflow file:\n${result.errors.map((e) => `  ${e.message}`).join("\n")}`);
   }
@@ -650,9 +650,20 @@ export async function workflowRunAction(
   file: string,
   options: Record<string, unknown> & { json?: boolean; stream?: boolean; mermaid?: boolean },
 ): Promise<void> {
+  // Discover skills first so the loader can flag UNKNOWN_SKILL at parse
+  // time. validateWorkflowSkills below still runs for richer category /
+  // env-var diagnostics, but the loader's structural check fires earlier
+  // and gives users a clear "you typed `gtihub`" pointer before any other
+  // validation noise.
+  const earlySkillDiscovery = configuredSkillsWithDiagnostics(process.env, process.cwd());
+  for (const w of earlySkillDiscovery.warnings) {
+    console.error(chalk.yellow(`  ⚠  ${w.message}`));
+  }
+  const knownSkillIds = new Set(earlySkillDiscovery.skills.map((s) => s.id));
+
   let workflow: Workflow;
   try {
-    workflow = loadWorkflowFile(file);
+    workflow = loadWorkflowFile(file, knownSkillIds);
   } catch (err) {
     console.error(chalk.red(`  Error loading workflow file: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
@@ -678,14 +689,9 @@ export async function workflowRunAction(
   const isJson = Boolean(options.json);
   const isTTY = !isJson && (process.stderr.isTTY ?? false);
 
-  const { skills: configuredSkillList, warnings: skillWarnings } = configuredSkillsWithDiagnostics(
-    process.env,
-    process.cwd(),
-  );
-  for (const w of skillWarnings) {
-    console.error(chalk.yellow(`  ⚠  ${w.message}`));
-  }
-  const skills = createSkillMap(configuredSkillList);
+  // Reuse the discovery pulled before workflow load (above). Diagnostics
+  // already surfaced; just turn the skill list into a map for the executor.
+  const skills = createSkillMap(earlySkillDiscovery.skills);
 
   // Hard-fail at startup if the workflow references skills that aren't available.
   // Each node lists alternatives by category (e.g. [sentry, datadog, betterstack]);
@@ -896,9 +902,12 @@ workflowCmd
   .description("Run a workflow from a YAML or JSON file")
   .option(
     "--dry-run",
-    "Execute until the first conditional routing decision, then stop (no side effects past that point)",
+    "Execute until the first conditional routing decision, then stop (no side effects past that point). NOTE: behavior changed in this release — previously --dry-run only printed the node list. For that behavior use --list-nodes.",
   )
-  .option("--list-nodes", "Validate, print nodes/skills, and exit without running")
+  .option(
+    "--list-nodes",
+    "Validate, print nodes/skills, and exit without running. (Replaces the pre-Fix-#6 --dry-run behavior.)",
+  )
   .option("--json", "Output result as JSON on stdout; suppress progress output")
   .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)")
   .option("--mermaid", "Output a Mermaid diagram with execution state after run")
