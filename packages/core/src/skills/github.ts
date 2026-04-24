@@ -191,13 +191,20 @@ export const github: Skill = {
     },
   ],
   // Equivalent tool names on GitHub's official MCP server
-  // (github.com/github/github-mcp-server). `create_pull_request` and
-  // `add_issue_comment` are GitHub-unique. `create_issue`, `get_issue`,
-  // `search_issues`, `list_issues` collide with Linear's MCP naming and are
-  // omitted here — the executor also drops any alias declared by more than
-  // one loaded skill.
+  // (github.com/github/github-mcp-server). Aliases declared for every
+  // GitHub MCP name that does NOT also exist on Linear's MCP. The
+  // executor's buildToolAliases already drops any name claimed by more
+  // than one loaded skill, so these declarations are safe even if a
+  // future provider starts using the same name — declare what this
+  // skill knows, let the runtime resolve conflicts.
+  //
+  // Names that currently exist on both Linear and GitHub MCPs and are
+  // therefore intentionally NOT aliased on either side: `get_issue`,
+  // `list_issues`.
   mcpAliases: {
     github_create_pr: ["create_pull_request"],
     github_add_comment: ["add_issue_comment"],
+    github_create_issue: ["create_issue"],
+    github_search_issues: ["search_issues"],
   },
 };

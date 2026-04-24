@@ -257,10 +257,10 @@ export function buildToolAliases(skills: Iterable<Skill>, logger?: Logger): Read
     if (ra !== rb) parent.set(ra, rb);
   };
 
+  // `find` registers previously-unseen nodes via `parent.get(x) ?? x` and
+  // writes them back, so `union` handles first-contact pairs on its own.
   for (const [canonical, alias] of pairs) {
     if (ambiguous.has(alias)) continue;
-    parent.set(canonical, parent.get(canonical) ?? canonical);
-    parent.set(alias, parent.get(alias) ?? alias);
     union(canonical, alias);
   }
 

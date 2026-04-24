@@ -177,10 +177,18 @@ export const linear: Skill = {
     },
   ],
   // Equivalent tool names on Linear's official remote MCP server (mcp.linear.app).
-  // Omit names that collide with other providers' MCP servers (e.g. `get_issue`,
-  // `list_issues`, `list_teams` are also exposed by GitHub's MCP server). When
-  // both Linear and GitHub MCPs are wired, the executor drops any alias that
-  // appears in more than one skill.
+  //
+  // Linear's MCP uses upsert naming: a single `save_issue` handles both
+  // create and update. The executor builds symmetric equivalence groups, so
+  // both `linear_create_issue` and `linear_update_issue` end up in one group
+  // with `save_issue`. A `save_issue` call satisfies verify rules for either
+  // canonical name — verify cannot distinguish create from update when the
+  // agent uses the remote MCP. That reflects the provider's reality, not a
+  // shortcoming of the alias layer.
+  //
+  // Names that also exist on GitHub's MCP server (`get_issue`, `list_issues`,
+  // `get_team`) are left out. `buildToolAliases` also drops any MCP name
+  // claimed by more than one loaded skill as a defensive backstop.
   mcpAliases: {
     linear_create_issue: ["save_issue"],
     linear_update_issue: ["save_issue"],

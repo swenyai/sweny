@@ -298,6 +298,37 @@ describe("tool-alias expansion (MCP ↔ first-party skill tools)", () => {
         checkAnyToolCalled(["github_create_pr"], [tc("create_pull_request", { ok: true })], firstPartyAliases),
       ).toBeNull();
     });
+
+    it("github_create_issue is satisfied by GitHub MCP create_issue", () => {
+      // create_issue does not appear on Linear's MCP (Linear uses save_issue),
+      // so GitHub can claim it without ambiguity.
+      expect(
+        checkAnyToolCalled(["github_create_issue"], [tc("create_issue", { ok: true })], firstPartyAliases),
+      ).toBeNull();
+    });
+
+    it("github_search_issues is satisfied by GitHub MCP search_issues", () => {
+      // search_issues is GitHub-only; Linear exposes list_issues for the same
+      // semantic, so no cross-provider collision.
+      expect(
+        checkAnyToolCalled(["github_search_issues"], [tc("search_issues", { ok: true })], firstPartyAliases),
+      ).toBeNull();
+    });
+  });
+
+  describe("intentionally-ambiguous names remain strict", () => {
+    // `get_issue` and `list_issues` (GitHub side) exist on both MCPs, so
+    // neither skill declares them as aliases. A raw call to those names
+    // must never satisfy a provider-specific canonical rule it did not
+    // explicitly claim.
+    it("get_issue does not satisfy a linear_get_issue or github_get_issue rule", () => {
+      expect(checkAnyToolCalled(["linear_get_issue"], [tc("get_issue", { ok: true })], firstPartyAliases)).toMatch(
+        /any_tool_called/,
+      );
+      expect(checkAnyToolCalled(["github_get_issue"], [tc("get_issue", { ok: true })], firstPartyAliases)).toMatch(
+        /any_tool_called/,
+      );
+    });
   });
 
   describe("regression: real Triage create_issue call pattern", () => {
