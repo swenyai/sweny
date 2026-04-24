@@ -332,12 +332,19 @@ nodes:
       - **Completeness**: handles the obvious edge cases (nulls, empties, off-by-one,
         concurrent paths). If the issue lists multiple symptoms, address them all
         or explicitly state which are out of scope and why.
-      - **Industry-standard idiom**: use the framework's own primitives. In a NestJS
-        service, throw `NotFoundException` / `BadRequestException` — not
-        `throw new Error(...)`. In a TypeScript codebase, narrow types properly —
-        do not `as any` past the type checker. Match the repository's existing
-        patterns; read at least one neighboring file before deciding what "idiom"
-        means here.
+      - **Idiomatic for THIS repo, not in general.** Read at least one
+        neighboring file in the same module before you write any code, and
+        match the patterns you see: error-handling primitives the codebase
+        already uses, type discipline, naming, file layout. Examples to make
+        the shape concrete:
+        - In a NestJS service, throwing `NotFoundException` /
+          `BadRequestException` is idiomatic; `throw new Error(...)` is not.
+        - In a Go service, returning a wrapped `fmt.Errorf("...: %w", err)`
+          beats panicking.
+        - In a TypeScript repo, narrow types properly — do not `as any` past
+          the type checker.
+        These are illustrations. Generalize: whatever the repo already does,
+        keep doing.
       - **No hacky shortcuts**: no `try/catch` to swallow errors, no commented-out
         guards, no `// TODO: revisit`, no global flags to bypass validation, no
         copy-pasted bodies. If the right fix needs a small refactor (e.g. extract
@@ -404,15 +411,18 @@ nodes:
       - **Lives in the right file** (next to the source under test, in the
          project's existing test layout).
 
-      The verify gate on this node REQUIRES `test_status: pass` AND at
-      least one entry in `test_files_changed`. There is no escape valve:
-      a fix without a passing test fails verify, retries once with
-      reflection, and then halts the workflow if it still fails. That is
-      intentional — repos without test infrastructure should require
-      human attention, not silent skipping.
+      The verify gate on this node REQUIRES `test_status` to be either
+      `pass` (tests ran and all passed) OR `no-framework` (the project
+      genuinely has no test runner — not "I couldn't be bothered").
 
-      If the fix turns out to be more complex than expected, stop and explain
-      why — do not force a bad fix.
+      If the project HAS a test framework, you must write tests and they
+      must pass. Empty `test_files_changed` with `test_status: pass` is a
+      lie and verify will reject it via the schema's required-fields
+      contract; `not-run` and `fail` will retry once with reflection and
+      then halt for human attention.
+
+      If the fix turns out to be more complex than expected, stop and
+      explain why — do not force a bad fix.
     skills:
       - github
     output:
@@ -432,10 +442,10 @@ nodes:
         test_files_changed:
           type: array
           description: |
-            Test files added or modified to cover the fix. MUST be non-empty —
-            verify rejects any output where this is empty, regardless of
-            test_status. A passing run with zero test file changes means
-            you didn't write tests for your fix.
+            Test files added or modified to cover the fix. Should be
+            non-empty whenever `test_status: pass`. May be empty when
+            `test_status: no-framework` (genuinely no test runner in
+            the repo).
           items:
             type: string
         test_command:
@@ -443,15 +453,21 @@ nodes:
           description: Exact command run to validate (e.g. `npx nx test server`).
         test_status:
           type: string
-          enum: [pass, fail, not-run]
+          enum: [pass, fail, no-framework, not-run]
           description: |
-            Outcome of running the test suite. `pass` is the only value
-            that clears verify: tests ran end-to-end and every assertion
-            passed. `fail` means tests ran and at least one failed —
-            return that and stop, do not push a broken fix. `not-run`
-            means tests exist but the environment couldn't execute them;
-            explain in test_notes. The latter two will fail verify and
-            trigger one retry, then halt for human attention.
+            Outcome of running the test suite.
+            - `pass` — tests ran end-to-end and every assertion passed.
+              `test_files_changed` MUST be non-empty in this case (you
+              changed code; tests must cover it).
+            - `no-framework` — the repo genuinely has no test runner
+              (e.g. a docs-only repo, a YAML-config repo, a research
+              notebook collection). Reserved for cases where there is
+              no test infrastructure to extend — not a permission slip
+              to skip tests in a normal codebase.
+            - `fail` — tests ran and at least one failed. Do not push
+              a broken fix. Return this status, retry will fire once.
+            - `not-run` — tests exist but the environment couldn't
+              execute them. Explain in `test_notes`. Retry will fire.
         test_notes:
           type: string
           description: One-paragraph explanation of which tests were added and what they assert.
@@ -462,12 +478,13 @@ nodes:
         - test_files_changed
         - test_status
     verify:
-      # A code change without a passing test is unfinished work.
+      # `pass` and `no-framework` both clear the gate. `fail` and `not-run`
+      # trigger retry. The instruction text + schema's required-fields list
+      # are the contract that prevents `pass` with empty `test_files_changed`
+      # — verify cannot express that conditional declaratively.
       output_matches:
         - path: test_status
-          equals: pass
-      output_required:
-        - any:test_files_changed[*]
+          in: [pass, no-framework]
     retry:
       max: 1
       instruction:
