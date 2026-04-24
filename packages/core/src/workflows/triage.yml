@@ -319,33 +319,159 @@ nodes:
   implement:
     name: Implement Fix
     instruction: |-
-      Implement the fix identified during investigation. The issue created in the previous step is in your context — use its identifier for branch naming and commit messages.
+      Implement the fix identified during investigation, plus the tests that pin
+      it as a regression guard. The issue created in the previous step is in your
+      context — use its identifier for branch naming and commit messages.
+
+      ## Quality bar (non-negotiable)
+
+      Every change you make must clear all of these. If you cannot, STOP and
+      return a failed status — do not ship a half-measure.
+
+      - **Correctness**: the fix actually closes the failure mode in the issue.
+      - **Completeness**: handles the obvious edge cases (nulls, empties, off-by-one,
+        concurrent paths). If the issue lists multiple symptoms, address them all
+        or explicitly state which are out of scope and why.
+      - **Industry-standard idiom**: use the framework's own primitives. In a NestJS
+        service, throw `NotFoundException` / `BadRequestException` — not
+        `throw new Error(...)`. In a TypeScript codebase, narrow types properly —
+        do not `as any` past the type checker. Match the repository's existing
+        patterns; read at least one neighboring file before deciding what "idiom"
+        means here.
+      - **No hacky shortcuts**: no `try/catch` to swallow errors, no commented-out
+        guards, no `// TODO: revisit`, no global flags to bypass validation, no
+        copy-pasted bodies. If the right fix needs a small refactor (e.g. extract
+        a helper), do it; if it needs a large refactor, file a follow-up issue
+        and ship the minimal correct fix without the refactor.
+      - **Well-tested**: see Test Requirements below.
+
+      ## Steps
 
       0. **Precondition — verify context.create_issue.issueIdentifier is well-formed.**
-         The identifier MUST match `^[A-Z][A-Z0-9]*-\d+$` (e.g. `OFF-1234`). If it is
-         missing, empty, or matches a Sentry short-ID / slug / any other shape, STOP
-         immediately — do NOT invent a branch name from the Sentry event, commit SHA,
-         or alert payload. Return a failed status with a clear message instead; the
-         workflow will route to notify and a human will pick it up.
+         The identifier MUST match `^[A-Z][A-Z0-9]*-\d+$` (e.g. `OFF-1234`). If it
+         is missing, empty, or matches a Sentry short-ID / slug / any other shape,
+         STOP immediately — do NOT invent a branch name from the Sentry event,
+         commit SHA, or alert payload. Return a failed status with a clear message
+         instead; the workflow will route to notify and a human will pick it up.
 
-      1. Create a feature branch from the base branch (check context for baseBranch, default "main").
-         **Branch name MUST include the issue identifier** exactly as provided in
-         `context.create_issue.issueIdentifier`. Format: lowercase the identifier and use
-         it as a prefix, e.g. `off-1234-fix-null-check`. If the repository uses a different
-         branch convention (check context.branchPattern or the rules/CLAUDE.md for a
+      1. Create a feature branch from the base branch (check context for
+         baseBranch, default `main`). **Branch name MUST include the issue
+         identifier** exactly as provided in `context.create_issue.issueIdentifier`.
+         Format: lowercase the identifier and use it as a prefix, e.g.
+         `off-1234-fix-null-check`. If the repository uses a different branch
+         convention (check context.branchPattern or the rules/CLAUDE.md for a
          regex), follow that — but the identifier piece MUST still come from
          `context.create_issue.issueIdentifier`, never from a Sentry short-ID.
-      2. Read the relevant source files to understand the current code.
-      3. Make the necessary code changes — fix the bug, nothing more.
-      4. Run any existing tests if available to verify the fix doesn't break anything.
-      5. Stage and commit with a clear commit message. Start the message with the issue identifier in brackets,
-         e.g. `[OFF-1234] fix: guard null projectId before database lookup`.
 
-      Keep changes minimal and focused. Do not refactor surrounding code or add unrelated improvements.
+      2. Read the relevant source files to understand the current code AND read
+         the nearest existing test file (e.g. `foo.service.spec.ts` next to
+         `foo.service.ts`, or `foo_test.py` next to `foo.py`) so your new tests
+         match the existing test conventions: framework, mock style, factory use,
+         describe/it shape, naming.
 
-      If the fix turns out to be more complex than expected, stop and explain why — do not force a bad fix.
+      3. Make the necessary code change. Keep it minimal and focused — do not
+         refactor surrounding code or add unrelated improvements.
+
+      4. **Write tests for the fix.** See Test Requirements below.
+
+      5. **Run the test suite for the affected package** and confirm green
+         (the package's `test` command from package.json, `pytest` for Python,
+         etc.). If the test runner is not obvious, read the project's
+         CLAUDE.md / README / package.json scripts. If you cannot run the
+         tests at all in this environment, say so explicitly in the output —
+         do not claim "tests pass" when you didn't run them.
+
+      6. Stage and commit with a clear commit message. Start the message with the
+         issue identifier in brackets, e.g.
+         `[OFF-1234] fix: guard null projectId before database lookup`.
+
+      ## Test Requirements
+
+      A code change without a test is unfinished work. Every fix this node ships
+      MUST come with at least one new test case that:
+
+      - **Would fail on the unfixed code.** A test that passes both before and
+         after the fix is decoration, not a regression guard. Mentally run it
+         against the previous version; if it would have passed, it is not the
+         right test.
+      - **Asserts the user-facing contract**, not just an implementation
+         detail. For an API/handler bug: assert the response shape, status code,
+         or error type the client sees. For a data corruption bug: assert the
+         persisted row's final state, not just an internal call count.
+      - **Covers the obvious adjacent edge cases.** If the bug was "throws plain
+         Error on missing record", add the missing-record case AND at least one
+         success-path case to confirm the fix didn't break the happy path.
+      - **Lives in the right file** (next to the source under test, in the
+         project's existing test layout).
+
+      The verify gate on this node REQUIRES `test_status: pass` AND at
+      least one entry in `test_files_changed`. There is no escape valve:
+      a fix without a passing test fails verify, retries once with
+      reflection, and then halts the workflow if it still fails. That is
+      intentional — repos without test infrastructure should require
+      human attention, not silent skipping.
+
+      If the fix turns out to be more complex than expected, stop and explain
+      why — do not force a bad fix.
     skills:
       - github
+    output:
+      type: object
+      properties:
+        branch:
+          type: string
+          description: Feature branch name (must include the issue identifier).
+        commit_sha:
+          type: string
+          description: SHA of the commit shipping the fix and tests.
+        files_changed:
+          type: array
+          description: Source files modified by the fix (NOT including test files).
+          items:
+            type: string
+        test_files_changed:
+          type: array
+          description: |
+            Test files added or modified to cover the fix. MUST be non-empty —
+            verify rejects any output where this is empty, regardless of
+            test_status. A passing run with zero test file changes means
+            you didn't write tests for your fix.
+          items:
+            type: string
+        test_command:
+          type: string
+          description: Exact command run to validate (e.g. `npx nx test server`).
+        test_status:
+          type: string
+          enum: [pass, fail, not-run]
+          description: |
+            Outcome of running the test suite. `pass` is the only value
+            that clears verify: tests ran end-to-end and every assertion
+            passed. `fail` means tests ran and at least one failed —
+            return that and stop, do not push a broken fix. `not-run`
+            means tests exist but the environment couldn't execute them;
+            explain in test_notes. The latter two will fail verify and
+            trigger one retry, then halt for human attention.
+        test_notes:
+          type: string
+          description: One-paragraph explanation of which tests were added and what they assert.
+      required:
+        - branch
+        - commit_sha
+        - files_changed
+        - test_files_changed
+        - test_status
+    verify:
+      # A code change without a passing test is unfinished work.
+      output_matches:
+        - path: test_status
+          equals: pass
+      output_required:
+        - any:test_files_changed[*]
+    retry:
+      max: 1
+      instruction:
+        auto: true
   create_pr:
     name: Open Pull Request
     instruction: >-
