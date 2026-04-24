@@ -809,5 +809,79 @@ describe("ClaudeClient", () => {
       expect(result.toolCalls).toHaveLength(0);
       expect(result.status).toBe("success");
     });
+
+    it("surfaces tool errors at warn level so CI logs show the failure body", async () => {
+      // Observability gap this closes: before, a tool_result with
+      // is_error=true was captured onto the ToolCall for in-memory verify
+      // evaluation but never logged. The only signal was the downstream
+      // verify failure message, which names the tool but not the why.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "assistant",
+            message: {
+              content: [{ type: "tool_use", id: "u1", name: "github_create_pr", input: {} }],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "u1",
+                  content: '[GitHub] API request failed (HTTP 422): {"message":"Validation Failed"}',
+                  is_error: true,
+                },
+              ],
+            },
+          },
+          { type: "result", subtype: "success", result: "{}" },
+        ]),
+      );
+
+      const warnSpy = vi.fn();
+      const logger = {
+        info: () => undefined,
+        warn: warnSpy,
+        error: () => undefined,
+        debug: () => undefined,
+      };
+      const client = new ClaudeClient({ logger });
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0].status).toBe("error");
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/tool github_create_pr failed: .*HTTP 422.*Validation Failed/),
+      );
+    });
+  });
+});
+
+describe("summarizeToolError", () => {
+  it("stringifies objects", async () => {
+    const { summarizeToolError } = await import("../claude.js");
+    expect(summarizeToolError({ message: "boom", code: 422 })).toBe('{"message":"boom","code":422}');
+  });
+
+  it("collapses whitespace on strings", async () => {
+    const { summarizeToolError } = await import("../claude.js");
+    expect(summarizeToolError("line one\n\nline two\n   indented")).toBe("line one line two indented");
+  });
+
+  it("caps very long payloads at 300 chars with ellipsis", async () => {
+    const { summarizeToolError } = await import("../claude.js");
+    const s = "x".repeat(500);
+    const out = summarizeToolError(s);
+    expect(out).toHaveLength(300);
+    expect(out.endsWith("...")).toBe(true);
+  });
+
+  it("coerces primitives without crashing", async () => {
+    const { summarizeToolError } = await import("../claude.js");
+    expect(summarizeToolError(null)).toBe("null");
+    expect(summarizeToolError(undefined)).toBe("undefined");
+    expect(summarizeToolError(42)).toBe("42");
   });
 });

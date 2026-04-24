@@ -191,6 +191,16 @@ export class ClaudeClient implements Claude {
               call.status = isError ? "error" : "success";
               const parsed = parseToolResultContent(block.content);
               call.output = isError ? { error: parsed } : parsed;
+
+              // Surface tool errors in the CI log stream at warn level so
+              // postmortems don't have to reconstruct them from verify-time
+              // tool-call summaries. Without this, "verify failed: tool X
+              // did not succeed" never answers the WHY question, because
+              // the error body is buried in the per-call output captured
+              // only for in-memory verify evaluation.
+              if (isError) {
+                this.logger.warn(`  tool ${call.tool} failed: ${summarizeToolError(parsed)}`);
+              }
             }
           }
         } else if (message.type === "result") {
@@ -405,6 +415,31 @@ export function parseToolResultContent(content: unknown): unknown {
   } catch {
     return content;
   }
+}
+
+/**
+ * Produce a short, single-line description of a tool-error payload suitable
+ * for the CI log stream. The full parsed value stays on the ToolCall for
+ * verify and downstream tooling — this is only for inline observability.
+ *
+ * Collapses newlines, trims whitespace, and caps to 300 chars so a huge
+ * API response body doesn't flood the log.
+ */
+export function summarizeToolError(parsed: unknown): string {
+  let raw: string;
+  if (typeof parsed === "string") {
+    raw = parsed;
+  } else if (parsed && typeof parsed === "object") {
+    try {
+      raw = JSON.stringify(parsed);
+    } catch {
+      raw = String(parsed);
+    }
+  } else {
+    raw = String(parsed);
+  }
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  return collapsed.length > 300 ? collapsed.slice(0, 297) + "..." : collapsed;
 }
 
 // ─── JSON Schema → Zod conversion ───────────────────────────────

@@ -289,6 +289,10 @@ nodes:
         - issueTitle
         - issueUrl
         - issues
+    retry:
+      max: 1
+      instruction:
+        auto: true
   skip:
     name: Skip — All Duplicates or Low Priority
     instruction: >-
@@ -378,6 +382,10 @@ nodes:
     verify:
       any_tool_called:
         - github_create_pr
+    retry:
+      max: 1
+      instruction:
+        auto: true
   notify:
     name: Notify Team
     instruction: |-
