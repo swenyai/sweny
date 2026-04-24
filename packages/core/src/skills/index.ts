@@ -8,7 +8,7 @@
  * which is Node-only and re-exported from `@sweny-ai/core` (the Node entry).
  */
 
-import type { Skill, SkillCategory } from "../types.js";
+import type { Logger, Skill, SkillCategory } from "../types.js";
 
 import { github } from "./github.js";
 import { linear } from "./linear.js";
@@ -189,4 +189,96 @@ export function validateWorkflowSkills(
   }
 
   return { configured, missing, errors, warnings };
+}
+
+/**
+ * Build a symmetric tool-name alias table from the loaded skills.
+ *
+ * Each skill declares its own `mcpAliases` (canonical name → list of
+ * equivalent MCP tool names). This function:
+ *
+ *   1. Collects every alias pair declared by every loaded skill.
+ *   2. Flattens each pair into one equivalence group (symmetric closure).
+ *   3. Drops any MCP name claimed by more than one skill (ambiguous).
+ *
+ * Core stays vendor-neutral: nothing here knows Linear or GitHub by name.
+ * Skills own their own naming, and ambiguity is detected at map-build
+ * time so a call to one provider's `get_issue` can never spuriously
+ * satisfy another provider's `any_tool_called` verify rule.
+ *
+ * @returns a map from every participating name to the full set of names
+ *   that count as equivalent to it (including itself). Names that do not
+ *   participate in any alias are absent — callers should fall back to
+ *   name-equality when a lookup returns `undefined`.
+ */
+export function buildToolAliases(skills: Iterable<Skill>, logger?: Logger): ReadonlyMap<string, ReadonlySet<string>> {
+  // First pass: record which skill(s) claim each MCP alias name.
+  const mcpClaims = new Map<string, string[]>(); // mcp name → skill ids that declared it
+  const pairs: Array<[string, string]> = []; // [canonical, mcpAlias]
+
+  for (const skill of skills) {
+    if (!skill.mcpAliases) continue;
+    for (const [canonical, aliases] of Object.entries(skill.mcpAliases)) {
+      for (const alias of aliases) {
+        if (canonical === alias) continue;
+        pairs.push([canonical, alias]);
+        const claimers = mcpClaims.get(alias);
+        if (claimers) {
+          if (!claimers.includes(skill.id)) claimers.push(skill.id);
+        } else {
+          mcpClaims.set(alias, [skill.id]);
+        }
+      }
+    }
+  }
+
+  // Drop ambiguous MCP names (claimed by >1 skill) and log once.
+  const ambiguous = new Set<string>();
+  for (const [name, claimers] of mcpClaims) {
+    if (claimers.length > 1) {
+      ambiguous.add(name);
+      logger?.warn(
+        `Tool alias "${name}" is declared by multiple skills (${claimers.join(", ")}); dropping from verify alias table to avoid cross-provider false positives.`,
+      );
+    }
+  }
+
+  // Second pass: union-find over the remaining pairs.
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let cur = parent.get(x) ?? x;
+    while (cur !== (parent.get(cur) ?? cur)) cur = parent.get(cur) ?? cur;
+    parent.set(x, cur);
+    return cur;
+  };
+  const union = (a: string, b: string) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+
+  // `find` registers previously-unseen nodes via `parent.get(x) ?? x` and
+  // writes them back, so `union` handles first-contact pairs on its own.
+  for (const [canonical, alias] of pairs) {
+    if (ambiguous.has(alias)) continue;
+    union(canonical, alias);
+  }
+
+  // Build the result: each name → its full equivalence set.
+  const groups = new Map<string, Set<string>>();
+  for (const name of parent.keys()) {
+    const root = find(name);
+    let group = groups.get(root);
+    if (!group) {
+      group = new Set<string>();
+      groups.set(root, group);
+    }
+    group.add(name);
+  }
+
+  const result = new Map<string, ReadonlySet<string>>();
+  for (const group of groups.values()) {
+    for (const name of group) result.set(name, group);
+  }
+  return result;
 }

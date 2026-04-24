@@ -50,6 +50,25 @@ export interface Skill {
   instruction?: string;
   /** External MCP server definition wired for nodes referencing this skill. */
   mcp?: McpServerConfig;
+  /**
+   * Tool-name aliases recognized by `verify`.
+   *
+   * When a workflow references `any_tool_called: [linear_create_issue]` and
+   * the agent instead calls the equivalent MCP tool exposed by this skill's
+   * MCP server (e.g. `save_issue` on Linear's remote MCP), the two names
+   * should count as equivalent. Each skill owns the mapping for its own
+   * domain — core stays vendor-neutral.
+   *
+   * Key: a canonical tool name (usually one of this skill's `tools[].name`,
+   * but any name the skill wants to equate is valid).
+   * Value: list of equivalent names, typically tool names exposed by this
+   * skill's external MCP server.
+   *
+   * Aliases are symmetric: a verify rule naming either side matches a call
+   * on either side. Omit names that are ambiguous across providers
+   * (e.g. `get_issue` is exposed by both Linear and GitHub MCP servers).
+   */
+  mcpAliases?: Record<string, string[]>;
 }
 
 // ─── Workflow Graph ─────────────────────────────────────────────

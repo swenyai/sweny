@@ -37,6 +37,7 @@ import { resolveSources } from "./source-resolver.js";
 import { evaluateVerify } from "./verify.js";
 import { evaluateRequires } from "./requires.js";
 import { buildRetryPreamble } from "./retry.js";
+import { buildToolAliases } from "./skills/index.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -82,6 +83,11 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   const trace: ExecutionTrace = { steps: [], edges: [], sources: {} };
 
   validate(workflow, skills);
+
+  // Build a verify-time alias table from the loaded skills. Each skill owns
+  // its own mapping between skill-tool names and equivalent MCP names. Core
+  // stays vendor-neutral — this call just unions what the skills declare.
+  const toolAliases = buildToolAliases(skills.values(), logger);
 
   // ── Source resolution phase ─────────────────────────────────────
   // Resolve all Source values (node instructions + rules/context at every
@@ -256,7 +262,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       // Retry only triggers on verify failure — bail on tool/API errors.
       if (result.status !== "success") break;
 
-      const verifyError = evaluateVerify(node.verify, result);
+      const verifyError = evaluateVerify(node.verify, result, toolAliases);
       if (!verifyError) break;
 
       // Apply verify failure to the result.
