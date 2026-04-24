@@ -165,6 +165,176 @@ describe("triage workflow specifics", () => {
   });
 });
 
+// ─── Triage `implement` node contract ───────────────────────────
+//
+// The implement node is the one that ships code. Its instruction text and
+// verify gate are what stops the agent from shipping a fix without tests.
+// Regressions here are silent and expensive — a fix lands on main without
+// coverage and the agent's quality bar quietly drops. So pin every load-
+// bearing piece of the contract: instruction shape, output schema, verify
+// rule, retry block. Includes one explicit "known limitation" test that
+// documents the pass-with-empty-tests escape hole so a future fix doesn't
+// quietly close it without us noticing.
+
+describe("triage implement node — fix-quality contract", () => {
+  const node = triageWorkflow.nodes.implement;
+
+  describe("instruction text", () => {
+    const instruction = node.instruction as string;
+
+    it("is a string source (not an external file ref)", () => {
+      // Inline instruction is intentional — keeps the contract auditable
+      // in this test file via simple substring assertions.
+      expect(typeof instruction).toBe("string");
+    });
+
+    it("declares a Quality Bar covering the five Nate requirements", () => {
+      // Each axis in the Quality Bar maps to a value in the user's
+      // directive: correctness, completeness, industry-standard, no hacky
+      // shortcuts, well-tested. A fix that drops any one is incomplete.
+      expect(instruction).toMatch(/Quality bar/i);
+      expect(instruction).toMatch(/Correctness/);
+      expect(instruction).toMatch(/Completeness/);
+      expect(instruction).toMatch(/Idiomatic/);
+      expect(instruction).toMatch(/No hacky shortcuts/);
+      expect(instruction).toMatch(/Well-tested/);
+    });
+
+    it("requires reading the nearest existing test file before writing tests", () => {
+      // Without this the agent picks an arbitrary test framework /
+      // mocking style that diverges from the repo's conventions, which
+      // is the most common form of "test exists but doesn't fit."
+      expect(instruction).toMatch(/nearest existing test file/);
+    });
+
+    it("requires tests that would fail on the unfixed code", () => {
+      // A test that passes both before AND after the fix is decoration,
+      // not a regression guard. This is the load-bearing distinction
+      // between "wrote tests" and "wrote regression coverage."
+      expect(instruction).toMatch(/fail on the unfixed code/i);
+    });
+
+    it("requires tests that assert the user-facing contract, not implementation detail", () => {
+      expect(instruction).toMatch(/user-facing contract/);
+    });
+
+    it("frames idiom examples as illustrations (multiple stacks, not a single dictate)", () => {
+      // Earlier draft (PR #168) cited NestJS exception subclasses as if they
+      // were the rule. That biased the agent toward web-backend stacks. The
+      // softened version (PR #169) shows NestJS, Go, and TypeScript as
+      // equal-weight illustrations. Lock that in so a future revision
+      // doesn't accidentally narrow the framing again.
+      expect(instruction).toMatch(/NestJS/);
+      expect(instruction).toMatch(/Go/);
+      expect(instruction).toMatch(/TypeScript/);
+      expect(instruction).toMatch(/illustrations/i);
+      // YAML `|-` block scalar preserves newlines mid-sentence, so allow
+      // whitespace (including \n + indent) inside the phrase.
+      expect(instruction).toMatch(/whatever the repo already does,\s+keep doing/i);
+    });
+  });
+
+  describe("output schema", () => {
+    const output = node.output;
+
+    it("declares an object schema", () => {
+      expect(output).toBeDefined();
+      expect(output!.type).toBe("object");
+    });
+
+    it("requires the fix-tracking fields the verify gate depends on", () => {
+      const required = output!.required as string[];
+      // These are the fields the agent MUST report. Removing any of them
+      // breaks the verify contract or makes audit impossible.
+      expect(required).toContain("branch");
+      expect(required).toContain("commit_sha");
+      expect(required).toContain("files_changed");
+      expect(required).toContain("test_files_changed");
+      expect(required).toContain("test_status");
+    });
+
+    it("declares test_status with exactly the four allowed values", () => {
+      const props = output!.properties as Record<string, any>;
+      expect(props.test_status).toBeDefined();
+      // Order doesn't matter; set semantics for the enum.
+      expect(new Set(props.test_status.enum)).toEqual(new Set(["pass", "fail", "no-framework", "not-run"]));
+    });
+
+    it("declares test_files_changed as an array of strings", () => {
+      const props = output!.properties as Record<string, any>;
+      expect(props.test_files_changed.type).toBe("array");
+      expect(props.test_files_changed.items.type).toBe("string");
+    });
+  });
+
+  describe("verify gate", () => {
+    const verify = node.verify;
+
+    it("uses output_matches on test_status", () => {
+      expect(verify).toBeDefined();
+      expect(verify!.output_matches).toBeDefined();
+      const match = verify!.output_matches!.find((m) => m.path === "test_status");
+      expect(match).toBeDefined();
+    });
+
+    it("allows pass and no-framework, and only those two", () => {
+      const match = verify!.output_matches!.find((m) => m.path === "test_status")!;
+      // Behavior contract: pass is the happy path; no-framework is the
+      // documented escape valve for genuinely test-less repos. Anything
+      // else (fail, not-run) trips the gate and triggers retry.
+      expect(new Set(match.in as string[])).toEqual(new Set(["pass", "no-framework"]));
+    });
+  });
+
+  describe("retry block", () => {
+    const retry = node.retry;
+
+    it("is configured with max=1 and auto reflection", () => {
+      // One retry is the right shape: enough to recover from an honest
+      // forget-the-tests, not so many that we burn a whole turn budget
+      // on an agent that's already off the rails.
+      expect(retry).toBeDefined();
+      expect(retry!.max).toBe(1);
+      expect(retry!.instruction).toEqual({ auto: true });
+    });
+  });
+
+  describe("known limitation: pass + empty test_files_changed", () => {
+    // This test documents a real enforcement gap, NOT desired behavior.
+    //
+    // The contract we want is: if test_status is "pass", test_files_changed
+    // MUST be non-empty. Verify cannot express "A AND (B implies C)"
+    // declaratively (no OR / conditional). The schema's `required` list
+    // only checks PRESENCE of the field, not that the array is non-empty.
+    //
+    // So today an agent that returns { test_status: "pass",
+    // test_files_changed: [] } passes verify, even though the instruction
+    // text explicitly says that combination is a lie. This test pins the
+    // current state and will need to be inverted (with the gap actually
+    // closed) when we fix this — most likely via JSON Schema if/then/else
+    // in the output, or via routing edges that branch on tests-absent vs
+    // tests-present after implement.
+    it("currently passes verify (the hole) — instruction prose is the only push-back", () => {
+      const verify = node.verify!;
+      const testStatusMatch = verify.output_matches!.find((m) => m.path === "test_status")!;
+      const allowedStatuses = testStatusMatch.in as string[];
+
+      // The hole: `pass` clears the gate without any verify-time check
+      // on the test_files_changed array.
+      expect(allowedStatuses).toContain("pass");
+
+      // No verify rule asserts test_files_changed is non-empty when status
+      // is pass. If a future contributor adds one (e.g. via output_required
+      // with the any: prefix on test_files_changed[*]), this assertion
+      // will fail and they'll know to update / remove this gap-test.
+      const checksTestFilesNonEmpty =
+        (verify.output_required ?? []).some((p) => p.includes("test_files_changed")) ||
+        (verify.output_matches ?? []).some((m) => m.path.includes("test_files_changed"));
+      expect(checksTestFilesNonEmpty).toBe(false);
+    });
+  });
+});
+
 // ─── Implement workflow specifics ───────────────────────────────
 
 describe("implement workflow specifics", () => {
