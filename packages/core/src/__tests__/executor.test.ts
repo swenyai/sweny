@@ -1895,4 +1895,116 @@ describe("executor", () => {
       expect(results.get("a")!.status).toBe("success");
     });
   });
+
+  describe("verify alias expansion through loaded skills", () => {
+    // Reproduces the 2026-04-23 SWEny Triage production failure end-to-end.
+    // The failing node had `verify: { any_tool_called: ["linear_add_comment", ...] }`
+    // but the agent only called Linear's remote MCP tool `save_comment`.
+    // Core no longer ships a vendor alias table — the Linear skill declares
+    // `linear_add_comment: ["save_comment"]` and the executor must union
+    // that into the alias map it hands to verify.
+    it("a linear_add_comment verify rule is satisfied by an MCP save_comment call", async () => {
+      const { linear } = await import("../skills/linear.js");
+
+      const workflow: Workflow = {
+        id: "verify-alias-e2e",
+        name: "Verify alias E2E",
+        description: "single node, verify hits the Linear alias path",
+        entry: "create_issue",
+        nodes: {
+          create_issue: {
+            name: "Create Issue",
+            instruction: "File a Linear comment",
+            skills: ["linear"],
+            verify: {
+              any_tool_called: [
+                "linear_create_issue",
+                "github_create_issue",
+                "linear_search_issues",
+                "github_search_issues",
+                "linear_add_comment",
+                "github_add_comment",
+              ],
+            },
+          },
+        },
+        edges: [],
+      };
+
+      const claude: any = {
+        run: async () => ({
+          status: "success",
+          data: { filed: true },
+          toolCalls: [
+            // Exact sequence from the production failure, minus tool_use_id
+            // bookkeeping: agent searches + reads + leaves a comment via the
+            // Linear remote MCP (save_comment).
+            { tool: "list_issues", input: {}, output: { issues: [] } },
+            { tool: "get_issue", input: {}, output: { id: "OFF-1" } },
+            { tool: "list_comments", input: {}, output: { comments: [] } },
+            { tool: "save_comment", input: {}, output: { id: "cmt-1" } },
+          ],
+        }),
+        evaluate: async () => "",
+        ask: async () => "",
+      };
+
+      const { results } = await execute(
+        workflow,
+        {},
+        {
+          skills: createSkillMap([linear]),
+          claude,
+          config: { LINEAR_API_KEY: "stub" },
+        },
+      );
+
+      expect(results.get("create_issue")?.status).toBe("success");
+      // Without the skill alias wiring, status would be "failed" and
+      // result.data.error would contain the `any_tool_called` message.
+      expect(results.get("create_issue")?.data).not.toHaveProperty("error");
+    });
+
+    it("fails cleanly when the skill is absent and no alias is wired", async () => {
+      const workflow: Workflow = {
+        id: "verify-alias-e2e-miss",
+        name: "Verify alias miss",
+        description: "no linear skill loaded, alias does not apply",
+        entry: "create_issue",
+        nodes: {
+          create_issue: {
+            name: "Create Issue",
+            instruction: "File a Linear comment",
+            skills: [],
+            verify: { any_tool_called: ["linear_add_comment"] },
+          },
+        },
+        edges: [],
+      };
+
+      const claude: any = {
+        run: async () => ({
+          status: "success",
+          data: {},
+          toolCalls: [{ tool: "save_comment", input: {}, output: { id: "cmt-1" } }],
+        }),
+        evaluate: async () => "",
+        ask: async () => "",
+      };
+
+      const { results } = await execute(
+        workflow,
+        {},
+        {
+          skills: createSkillMap([]),
+          claude,
+        },
+      );
+
+      expect(results.get("create_issue")?.status).toBe("failed");
+      expect(results.get("create_issue")?.data).toMatchObject({
+        error: expect.stringMatching(/any_tool_called.*linear_add_comment/),
+      });
+    });
+  });
 });
