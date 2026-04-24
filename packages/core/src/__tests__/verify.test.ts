@@ -8,7 +8,14 @@ import {
   evaluateVerify,
   resolvePath,
 } from "../verify.js";
-import type { NodeResult, ToolCall } from "../types.js";
+import { buildToolAliases } from "../skills/index.js";
+import { github } from "../skills/github.js";
+import { linear } from "../skills/linear.js";
+import type { NodeResult, Skill, ToolCall } from "../types.js";
+
+// Skill-owned alias tables used by the alias-expansion tests below. Core
+// verify no longer carries a hardcoded vendor table — callers build this.
+const firstPartyAliases = buildToolAliases([linear, github]);
 
 const tc = (tool: string, output?: unknown): ToolCall => ({ tool, input: {}, output });
 const errOut = { error: "boom" };
@@ -235,43 +242,61 @@ describe("checkNoToolCalled", () => {
 });
 
 describe("tool-alias expansion (MCP ↔ first-party skill tools)", () => {
-  describe("Linear", () => {
-    it("linear_search_issues is satisfied by Linear MCP list_issues", () => {
-      expect(checkAnyToolCalled(["linear_search_issues"], [tc("list_issues", { ok: true })])).toBeNull();
+  describe("no aliases passed — strict name equality", () => {
+    it("returns a failure when only an MCP-named call is present", () => {
+      const err = checkAnyToolCalled(["linear_create_issue"], [tc("save_issue", { ok: true })]);
+      expect(err).toMatch(/any_tool_called/);
     });
 
-    it("linear_create_issue is satisfied by Linear MCP save_issue", () => {
-      expect(checkAnyToolCalled(["linear_create_issue"], [tc("save_issue", { ok: true })])).toBeNull();
-    });
-
-    it("linear_update_issue is satisfied by Linear MCP save_issue", () => {
-      expect(checkAnyToolCalled(["linear_update_issue"], [tc("save_issue", { ok: true })])).toBeNull();
-    });
-
-    it("linear_add_comment is satisfied by Linear MCP save_comment", () => {
-      expect(checkAnyToolCalled(["linear_add_comment"], [tc("save_comment", { ok: true })])).toBeNull();
-    });
-
-    it("the reverse direction also matches — MCP name required, first-party called", () => {
-      expect(checkAnyToolCalled(["list_issues"], [tc("linear_search_issues", { ok: true })])).toBeNull();
+    it("unaliased names still match themselves", () => {
+      expect(checkAnyToolCalled(["a", "b"], [tc("a", { ok: true })])).toBeNull();
+      expect(checkAnyToolCalled(["a"], [tc("different", { ok: true })])).toMatch(/any_tool_called/);
     });
   });
 
-  describe("GitHub", () => {
-    it("github_create_issue is satisfied by GitHub MCP create_issue", () => {
-      expect(checkAnyToolCalled(["github_create_issue"], [tc("create_issue", { ok: true })])).toBeNull();
+  describe("Linear skill aliases", () => {
+    it("linear_search_issues is satisfied by Linear MCP list_issues", () => {
+      expect(
+        checkAnyToolCalled(["linear_search_issues"], [tc("list_issues", { ok: true })], firstPartyAliases),
+      ).toBeNull();
     });
 
-    it("github_search_issues is satisfied by GitHub MCP search_issues", () => {
-      expect(checkAnyToolCalled(["github_search_issues"], [tc("search_issues", { ok: true })])).toBeNull();
+    it("linear_create_issue is satisfied by Linear MCP save_issue", () => {
+      expect(
+        checkAnyToolCalled(["linear_create_issue"], [tc("save_issue", { ok: true })], firstPartyAliases),
+      ).toBeNull();
     });
 
+    it("linear_update_issue is satisfied by Linear MCP save_issue", () => {
+      expect(
+        checkAnyToolCalled(["linear_update_issue"], [tc("save_issue", { ok: true })], firstPartyAliases),
+      ).toBeNull();
+    });
+
+    it("linear_add_comment is satisfied by Linear MCP save_comment", () => {
+      expect(
+        checkAnyToolCalled(["linear_add_comment"], [tc("save_comment", { ok: true })], firstPartyAliases),
+      ).toBeNull();
+    });
+
+    it("the reverse direction also matches — MCP name required, first-party called", () => {
+      expect(
+        checkAnyToolCalled(["list_issues"], [tc("linear_search_issues", { ok: true })], firstPartyAliases),
+      ).toBeNull();
+    });
+  });
+
+  describe("GitHub skill aliases", () => {
     it("github_add_comment is satisfied by GitHub MCP add_issue_comment", () => {
-      expect(checkAnyToolCalled(["github_add_comment"], [tc("add_issue_comment", { ok: true })])).toBeNull();
+      expect(
+        checkAnyToolCalled(["github_add_comment"], [tc("add_issue_comment", { ok: true })], firstPartyAliases),
+      ).toBeNull();
     });
 
     it("github_create_pr is satisfied by GitHub MCP create_pull_request", () => {
-      expect(checkAnyToolCalled(["github_create_pr"], [tc("create_pull_request", { ok: true })])).toBeNull();
+      expect(
+        checkAnyToolCalled(["github_create_pr"], [tc("create_pull_request", { ok: true })], firstPartyAliases),
+      ).toBeNull();
     });
   });
 
@@ -298,25 +323,26 @@ describe("tool-alias expansion (MCP ↔ first-party skill tools)", () => {
         tc("list_comments", { ok: true }),
         tc("save_comment", { ok: true }),
       ];
-      expect(checkAnyToolCalled(triageCreateIssueRequirement, calls)).toBeNull();
+      expect(checkAnyToolCalled(triageCreateIssueRequirement, calls, firstPartyAliases)).toBeNull();
     });
 
     it("passes the investigate-node tool pattern (list_issues satisfies linear_search_issues)", () => {
       const calls = [tc("ToolSearch"), tc("list_issues", { ok: true }), tc("get_issue", { ok: true })];
-      expect(checkAnyToolCalled(["linear_search_issues", "github_search_issues"], calls)).toBeNull();
+      expect(checkAnyToolCalled(["linear_search_issues", "github_search_issues"], calls, firstPartyAliases)).toBeNull();
     });
   });
 
   describe("all_tools_called uses aliases", () => {
     it("satisfies each required tool via its MCP equivalent", () => {
       const calls = [tc("list_issues", { ok: true }), tc("save_issue", { ok: true })];
-      expect(checkAllToolsCalled(["linear_search_issues", "linear_create_issue"], calls)).toBeNull();
+      expect(checkAllToolsCalled(["linear_search_issues", "linear_create_issue"], calls, firstPartyAliases)).toBeNull();
     });
 
     it("reports the missing canonical name when no alias fires", () => {
       const err = checkAllToolsCalled(
         ["linear_search_issues", "linear_create_issue"],
         [tc("list_issues", { ok: true })],
+        firstPartyAliases,
       );
       expect(err).toMatch(/all_tools_called.*missing.*linear_create_issue/);
     });
@@ -324,16 +350,66 @@ describe("tool-alias expansion (MCP ↔ first-party skill tools)", () => {
 
   describe("no_tool_called uses aliases", () => {
     it("flags a forbidden first-party call via its MCP equivalent", () => {
-      const err = checkNoToolCalled(["linear_create_issue"], [tc("save_issue", { ok: true })]);
+      const err = checkNoToolCalled(["linear_create_issue"], [tc("save_issue", { ok: true })], firstPartyAliases);
       expect(err).toMatch(/no_tool_called.*forbidden.*linear_create_issue/);
     });
   });
+});
 
-  describe("unaliased names behave identically to before", () => {
-    it("ordinary tool names still match only themselves", () => {
-      expect(checkAnyToolCalled(["a", "b"], [tc("a", { ok: true })])).toBeNull();
-      expect(checkAnyToolCalled(["a"], [tc("different", { ok: true })])).toMatch(/any_tool_called/);
-    });
+describe("buildToolAliases", () => {
+  const mkSkill = (id: string, aliases: Record<string, string[]>): Skill => ({
+    id,
+    name: id,
+    description: id,
+    category: "general",
+    config: {},
+    tools: [],
+    instruction: "stub",
+    mcpAliases: aliases,
+  });
+
+  it("produces a symmetric equivalence group", () => {
+    const table = buildToolAliases([mkSkill("a", { canonical: ["alias"] })]);
+    expect(table.get("canonical")).toEqual(new Set(["canonical", "alias"]));
+    expect(table.get("alias")).toEqual(new Set(["canonical", "alias"]));
+  });
+
+  it("returns undefined for names with no declared aliases (caller falls back to equality)", () => {
+    const table = buildToolAliases([]);
+    expect(table.get("anything")).toBeUndefined();
+  });
+
+  it("drops MCP names claimed by more than one skill (ambiguity guard)", () => {
+    const warnings: string[] = [];
+    const logger = {
+      info: () => undefined,
+      warn: (m: string) => warnings.push(m),
+      error: () => undefined,
+      debug: () => undefined,
+    };
+    // Two skills both claim `get_issue` — the canonical names still map to
+    // themselves only, and `get_issue` does not appear in the table.
+    const table = buildToolAliases(
+      [mkSkill("linear", { linear_get_issue: ["get_issue"] }), mkSkill("github", { github_get_issue: ["get_issue"] })],
+      logger,
+    );
+    expect(table.get("get_issue")).toBeUndefined();
+    expect(table.get("linear_get_issue")).toBeUndefined();
+    expect(table.get("github_get_issue")).toBeUndefined();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/get_issue.*multiple skills.*linear.*github/);
+  });
+
+  it("self-aliases are ignored", () => {
+    const table = buildToolAliases([mkSkill("a", { same: ["same"] })]);
+    expect(table.get("same")).toBeUndefined();
+  });
+
+  it("unions multiple aliases for the same canonical name into one group", () => {
+    const table = buildToolAliases([mkSkill("a", { canonical: ["alias_a", "alias_b"] })]);
+    expect(table.get("canonical")).toEqual(new Set(["canonical", "alias_a", "alias_b"]));
+    expect(table.get("alias_a")).toEqual(new Set(["canonical", "alias_a", "alias_b"]));
+    expect(table.get("alias_b")).toEqual(new Set(["canonical", "alias_a", "alias_b"]));
   });
 });
 

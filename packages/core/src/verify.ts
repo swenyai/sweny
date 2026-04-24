@@ -116,75 +116,39 @@ function calledList(toolCalls: ToolCall[]): string {
   return toolCalls.map((c) => c.tool).join(", ") || "none";
 }
 
-// Tool aliases: first-party SWEny skill tool names ↔ their MCP-server equivalents.
-//
-// When an external MCP server is wired for the same provider a skill covers
-// (e.g. the Linear HTTP MCP server alongside the `linear` skill), both sets of
-// tools are presented to the agent and the agent may pick either. The calls
-// are functionally equivalent — same backend, same effect — but the names
-// differ, so a verify rule that lists one will fail when the agent picked the
-// other. These aliases let either call satisfy the rule.
-//
-// Only unambiguous MCP tool names are aliased. Names that collide across
-// providers (e.g. `get_issue` exists on both Linear and GitHub MCP servers)
-// are deliberately omitted so a call to one provider cannot spuriously
-// satisfy a rule about the other.
-const TOOL_ALIAS_GROUPS: ReadonlyArray<ReadonlyArray<string>> = [
-  // Linear (official remote MCP at mcp.linear.app — upsert naming)
-  ["linear_search_issues", "list_issues"],
-  ["linear_create_issue", "save_issue"],
-  ["linear_update_issue", "save_issue"],
-  ["linear_add_comment", "save_comment"],
-  ["linear_list_teams", "list_teams"],
-  // GitHub (github.com/github/github-mcp-server)
-  ["github_create_issue", "create_issue"],
-  ["github_search_issues", "search_issues"],
-  ["github_add_comment", "add_issue_comment"],
-  ["github_create_pr", "create_pull_request"],
-];
+// Tool aliases are supplied by the caller (the executor builds them from the
+// loaded skills via `buildToolAliases`). Core knows nothing about Linear,
+// GitHub, or any other vendor — each skill owns its own MCP name mapping.
+// When no alias map is provided, checks fall back to strict name equality.
+export type ToolAliases = ReadonlyMap<string, ReadonlySet<string>>;
 
-const TOOL_ALIASES: ReadonlyMap<string, ReadonlySet<string>> = (() => {
-  const map = new Map<string, Set<string>>();
-  for (const group of TOOL_ALIAS_GROUPS) {
-    for (const name of group) {
-      let set = map.get(name);
-      if (!set) {
-        set = new Set<string>();
-        map.set(name, set);
-      }
-      for (const other of group) set.add(other);
-    }
-  }
-  return map;
-})();
-
-function expandAliases(name: string): ReadonlySet<string> {
-  return TOOL_ALIASES.get(name) ?? new Set([name]);
+function expandAliases(name: string, aliases?: ToolAliases): ReadonlySet<string> {
+  return aliases?.get(name) ?? new Set([name]);
 }
 
-function anyAliasIn(name: string, set: Set<string>): boolean {
-  for (const alias of expandAliases(name)) {
+function anyAliasIn(name: string, set: Set<string>, aliases?: ToolAliases): boolean {
+  for (const alias of expandAliases(name, aliases)) {
     if (set.has(alias)) return true;
   }
   return false;
 }
 
-export function checkAnyToolCalled(required: string[], toolCalls: ToolCall[]): string | null {
+export function checkAnyToolCalled(required: string[], toolCalls: ToolCall[], aliases?: ToolAliases): string | null {
   const succeeded = succeededTools(toolCalls);
-  if (required.some((t) => anyAliasIn(t, succeeded))) return null;
+  if (required.some((t) => anyAliasIn(t, succeeded, aliases))) return null;
   return `any_tool_called: required one of [${required.join(", ")}] to succeed, called: [${calledList(toolCalls)}]`;
 }
 
-export function checkAllToolsCalled(required: string[], toolCalls: ToolCall[]): string | null {
+export function checkAllToolsCalled(required: string[], toolCalls: ToolCall[], aliases?: ToolAliases): string | null {
   const succeeded = succeededTools(toolCalls);
-  const missing = required.filter((t) => !anyAliasIn(t, succeeded));
+  const missing = required.filter((t) => !anyAliasIn(t, succeeded, aliases));
   if (missing.length === 0) return null;
   return `all_tools_called: missing successful calls to [${missing.join(", ")}], called: [${calledList(toolCalls)}]`;
 }
 
-export function checkNoToolCalled(forbidden: string[], toolCalls: ToolCall[]): string | null {
+export function checkNoToolCalled(forbidden: string[], toolCalls: ToolCall[], aliases?: ToolAliases): string | null {
   const calledNames = new Set(toolCalls.map((c) => c.tool));
-  const violated = forbidden.filter((t) => anyAliasIn(t, calledNames));
+  const violated = forbidden.filter((t) => anyAliasIn(t, calledNames, aliases));
   if (violated.length === 0) return null;
   return `no_tool_called: forbidden tools were invoked: [${violated.join(", ")}], called: [${calledList(toolCalls)}]`;
 }
@@ -368,21 +332,25 @@ function describeOperator(c: CompiledMatch): string {
  * Deterministic and side-effect free — the executor calls this synchronously
  * after the LLM finishes.
  */
-export function evaluateVerify(verify: NodeVerify | undefined, result: NodeResult): string | null {
+export function evaluateVerify(
+  verify: NodeVerify | undefined,
+  result: NodeResult,
+  aliases?: ToolAliases,
+): string | null {
   if (!verify) return null;
 
   const failures: string[] = [];
 
   if (verify.any_tool_called && verify.any_tool_called.length > 0) {
-    const e = checkAnyToolCalled(verify.any_tool_called, result.toolCalls);
+    const e = checkAnyToolCalled(verify.any_tool_called, result.toolCalls, aliases);
     if (e) failures.push(e);
   }
   if (verify.all_tools_called && verify.all_tools_called.length > 0) {
-    const e = checkAllToolsCalled(verify.all_tools_called, result.toolCalls);
+    const e = checkAllToolsCalled(verify.all_tools_called, result.toolCalls, aliases);
     if (e) failures.push(e);
   }
   if (verify.no_tool_called && verify.no_tool_called.length > 0) {
-    const e = checkNoToolCalled(verify.no_tool_called, result.toolCalls);
+    const e = checkNoToolCalled(verify.no_tool_called, result.toolCalls, aliases);
     if (e) failures.push(e);
   }
   if (verify.output_required && verify.output_required.length > 0) {

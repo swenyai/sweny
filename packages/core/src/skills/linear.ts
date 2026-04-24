@@ -176,4 +176,16 @@ export const linear: Skill = {
       },
     },
   ],
+  // Equivalent tool names on Linear's official remote MCP server (mcp.linear.app).
+  // Omit names that collide with other providers' MCP servers (e.g. `get_issue`,
+  // `list_issues`, `list_teams` are also exposed by GitHub's MCP server). When
+  // both Linear and GitHub MCPs are wired, the executor drops any alias that
+  // appears in more than one skill.
+  mcpAliases: {
+    linear_create_issue: ["save_issue"],
+    linear_update_issue: ["save_issue"],
+    linear_search_issues: ["list_issues"],
+    linear_add_comment: ["save_comment"],
+    linear_list_teams: ["list_teams"],
+  },
 };

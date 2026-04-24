@@ -71,6 +71,7 @@ export const skillZ = z
     tools: z.array(toolZ).default([]),
     instruction: z.string().optional(),
     mcp: mcpServerConfigZ.optional(),
+    mcpAliases: z.record(z.array(z.string().min(1)).min(1)).optional(),
   })
   .refine((s) => s.tools.length > 0 || s.instruction || s.mcp, {
     message: "Skill must provide at least one of: tools, instruction, or mcp",
