@@ -234,6 +234,109 @@ describe("checkNoToolCalled", () => {
   });
 });
 
+describe("tool-alias expansion (MCP ↔ first-party skill tools)", () => {
+  describe("Linear", () => {
+    it("linear_search_issues is satisfied by Linear MCP list_issues", () => {
+      expect(checkAnyToolCalled(["linear_search_issues"], [tc("list_issues", { ok: true })])).toBeNull();
+    });
+
+    it("linear_create_issue is satisfied by Linear MCP save_issue", () => {
+      expect(checkAnyToolCalled(["linear_create_issue"], [tc("save_issue", { ok: true })])).toBeNull();
+    });
+
+    it("linear_update_issue is satisfied by Linear MCP save_issue", () => {
+      expect(checkAnyToolCalled(["linear_update_issue"], [tc("save_issue", { ok: true })])).toBeNull();
+    });
+
+    it("linear_add_comment is satisfied by Linear MCP save_comment", () => {
+      expect(checkAnyToolCalled(["linear_add_comment"], [tc("save_comment", { ok: true })])).toBeNull();
+    });
+
+    it("the reverse direction also matches — MCP name required, first-party called", () => {
+      expect(checkAnyToolCalled(["list_issues"], [tc("linear_search_issues", { ok: true })])).toBeNull();
+    });
+  });
+
+  describe("GitHub", () => {
+    it("github_create_issue is satisfied by GitHub MCP create_issue", () => {
+      expect(checkAnyToolCalled(["github_create_issue"], [tc("create_issue", { ok: true })])).toBeNull();
+    });
+
+    it("github_search_issues is satisfied by GitHub MCP search_issues", () => {
+      expect(checkAnyToolCalled(["github_search_issues"], [tc("search_issues", { ok: true })])).toBeNull();
+    });
+
+    it("github_add_comment is satisfied by GitHub MCP add_issue_comment", () => {
+      expect(checkAnyToolCalled(["github_add_comment"], [tc("add_issue_comment", { ok: true })])).toBeNull();
+    });
+
+    it("github_create_pr is satisfied by GitHub MCP create_pull_request", () => {
+      expect(checkAnyToolCalled(["github_create_pr"], [tc("create_pull_request", { ok: true })])).toBeNull();
+    });
+  });
+
+  describe("regression: real Triage create_issue call pattern", () => {
+    // Reproduces the 2026-04-23 SWEny Triage failure: the workflow listed
+    // `linear_create_issue / github_create_issue / linear_search_issues /
+    // github_search_issues / linear_add_comment / github_add_comment` as
+    // acceptable tools, but the agent used the Linear remote MCP server
+    // (save_comment + get_issue + list_comments). Before aliasing this
+    // failed verify; now it passes.
+    const triageCreateIssueRequirement = [
+      "linear_create_issue",
+      "github_create_issue",
+      "linear_search_issues",
+      "github_search_issues",
+      "linear_add_comment",
+      "github_add_comment",
+    ];
+
+    it("passes with the real tool call sequence from the failing production run", () => {
+      const calls = [
+        tc("ToolSearch"),
+        tc("get_issue", { ok: true }),
+        tc("list_comments", { ok: true }),
+        tc("save_comment", { ok: true }),
+      ];
+      expect(checkAnyToolCalled(triageCreateIssueRequirement, calls)).toBeNull();
+    });
+
+    it("passes the investigate-node tool pattern (list_issues satisfies linear_search_issues)", () => {
+      const calls = [tc("ToolSearch"), tc("list_issues", { ok: true }), tc("get_issue", { ok: true })];
+      expect(checkAnyToolCalled(["linear_search_issues", "github_search_issues"], calls)).toBeNull();
+    });
+  });
+
+  describe("all_tools_called uses aliases", () => {
+    it("satisfies each required tool via its MCP equivalent", () => {
+      const calls = [tc("list_issues", { ok: true }), tc("save_issue", { ok: true })];
+      expect(checkAllToolsCalled(["linear_search_issues", "linear_create_issue"], calls)).toBeNull();
+    });
+
+    it("reports the missing canonical name when no alias fires", () => {
+      const err = checkAllToolsCalled(
+        ["linear_search_issues", "linear_create_issue"],
+        [tc("list_issues", { ok: true })],
+      );
+      expect(err).toMatch(/all_tools_called.*missing.*linear_create_issue/);
+    });
+  });
+
+  describe("no_tool_called uses aliases", () => {
+    it("flags a forbidden first-party call via its MCP equivalent", () => {
+      const err = checkNoToolCalled(["linear_create_issue"], [tc("save_issue", { ok: true })]);
+      expect(err).toMatch(/no_tool_called.*forbidden.*linear_create_issue/);
+    });
+  });
+
+  describe("unaliased names behave identically to before", () => {
+    it("ordinary tool names still match only themselves", () => {
+      expect(checkAnyToolCalled(["a", "b"], [tc("a", { ok: true })])).toBeNull();
+      expect(checkAnyToolCalled(["a"], [tc("different", { ok: true })])).toMatch(/any_tool_called/);
+    });
+  });
+});
+
 describe("checkOutputRequired", () => {
   it("passes when all paths resolve to non-null values", () => {
     expect(checkOutputRequired(["a", "b.c"], { a: 1, b: { c: "x" } })).toBeNull();
