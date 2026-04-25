@@ -193,8 +193,8 @@ export class ClaudeClient implements Claude {
               call.output = isError ? { error: parsed } : parsed;
 
               // Surface tool errors in the CI log stream at warn level so
-              // postmortems don't have to reconstruct them from verify-time
-              // tool-call summaries. Without this, "verify failed: tool X
+              // postmortems don't have to reconstruct them from eval-time
+              // tool-call summaries. Without this, "eval failed: tool X
               // did not succeed" never answers the WHY question, because
               // the error body is buried in the per-call output captured
               // only for in-memory verify evaluation.
@@ -307,8 +307,8 @@ export class ClaudeClient implements Claude {
     return validIds[0];
   }
 
-  async ask(opts: { instruction: string; context: Record<string, unknown> }): Promise<string> {
-    const { instruction, context } = opts;
+  async ask(opts: { instruction: string; context: Record<string, unknown>; model?: string }): Promise<string> {
+    const { instruction, context, model } = opts;
     const prompt = [
       instruction,
       Object.keys(context).length > 0 ? `\nContext:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`` : "",
@@ -318,6 +318,7 @@ export class ClaudeClient implements Claude {
 
     const env = this.buildEnv();
     let response = "";
+    const effectiveModel = model ?? this.model;
 
     try {
       const stream = query({
@@ -329,7 +330,7 @@ export class ClaudeClient implements Claude {
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
-          ...(this.model ? { model: this.model } : {}),
+          ...(effectiveModel ? { model: effectiveModel } : {}),
         },
       });
 

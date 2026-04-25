@@ -16,9 +16,10 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 | `max_turns`   | integer &ge; 1                   | OPTIONAL | implementation&#8209;defined | Maximum AI model turns for this node's execution.                              |
 | `rules`       | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Rules for this node. Additive by default; see [cascade](#cascade-semantics).   |
 | `context`     | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Context for this node. Additive by default; see [cascade](#cascade-semantics). |
-| `verify`      | [Verify](#verify)                | OPTIONAL | —                            | Machine-checked post-conditions evaluated after the AI finishes the node.      |
+| `eval`        | [Eval](#eval)                    | OPTIONAL | —                            | Named evaluators (value, function, judge) run after the AI finishes the node.  |
+| `eval_policy` | string                           | OPTIONAL | `all_pass`                   | How to aggregate evaluator results. v1 supports `all_pass`.                    |
 | `requires`    | [Requires](#requires)            | OPTIONAL | —                            | Machine-checked pre-conditions evaluated before the AI starts the node.        |
-| `retry`       | [Retry](#retry)                  | OPTIONAL | —                            | Node-local retry on verify failure with optional autonomous reflection.        |
+| `retry`       | [Retry](#retry)                  | OPTIONAL | —                            | Node-local retry on eval failure with optional autonomous reflection.          |
 
 ## Max Turns Semantics
 
@@ -249,7 +250,7 @@ Paths resolve against the cross-node context map:
 { input: <runtime input>, [priorNodeId]: <data of prior node>, ... }
 ```
 
-The grammar is identical to [verify paths](#path-grammar): dotted segments,
+The grammar is identical to [eval paths](#path-grammar): dotted segments,
 `[*]` wildcards, optional `all:` / `any:` prefix.
 
 | Path                            | Resolves to                                       |
@@ -285,74 +286,137 @@ nodes:
       on_fail: fail
 ```
 
-## Verify
+## Eval
 
-The `verify` field declares machine-checked post-conditions the executor evaluates after the AI model finishes a node. A node passes only if every declared check passes; otherwise the node is marked failed and the workflow halts (or routes to the next failure edge).
+The `eval` field declares a list of named **evaluators** the executor runs after the AI model finishes a node. Each evaluator produces an [EvalResult](#evalresult-type) with a `pass` verdict and optional reasoning. Under the default `eval_policy: all_pass`, every evaluator must pass for the node to pass; any failure marks the node failed and the workflow halts (or routes to the next failure edge).
 
-Verify catches the common "the model claims success without doing the work" failure mode: a tool was supposed to be called and wasn't, a required field is missing from the structured output, a value is outside the allowed set. It complements — and does not replace — [conditional edges](/edges#conditional-routing), which decide _where to go next_ based on the result.
+Eval catches the common "the model claims success without doing the work" failure mode: a tool was supposed to be called and wasn't, a required field is missing from the structured output, a value is outside the allowed set, or the result claims a contract it doesn't actually meet. It complements, and does not replace, [conditional edges](/edges#conditional-routing), which decide _where to go next_ based on the result.
 
-### Fields
+The shape mirrors how every other agent eval framework (LangSmith, Promptfoo, OpenAI Evals, DeepEval, Ragas) names this primitive. SWEny's three evaluator kinds map to the same three categories the field has converged on.
 
-| Field              | Type                               | Meaning                                                               |
-| ------------------ | ---------------------------------- | --------------------------------------------------------------------- |
-| `any_tool_called`  | string[]                           | At least one of the named tools was called and succeeded.             |
-| `all_tools_called` | string[]                           | Every named tool was called and succeeded at least once.              |
-| `no_tool_called`   | string[]                           | None of the named tools may have been invoked at all.                 |
-| `output_required`  | string[]                           | Each path resolves to a present, non-null value in `result.data`.     |
-| `output_matches`   | [OutputMatch](#outputmatch-type)[] | Each assertion holds against the value(s) at `path` in `result.data`. |
-
-A `verify` block MUST declare at least one of these fields. Each string-array field MUST be non-empty.
-
-### Tool-call checks
-
-A tool "was called and succeeded" when it appears in the node's tool-call trace with no error. The same rule applies to all three checks. For `no_tool_called`, _any_ appearance — successful or not — counts as a violation.
+### Schema
 
 ```yaml
-implement-fix:
-  name: Implement Fix
-  instruction: Open a PR that fixes the issue.
-  skills:
-    - github
-  verify:
-    all_tools_called: [github_create_pr]
-    no_tool_called: [github_force_push]
+nodes:
+  open_pr:
+    name: Open PR
+    instruction: Open a PR with the fix.
+    skills: [github]
+    eval:
+      - name: pr_was_created
+        kind: function
+        rule:
+          all_tools_called: [github_create_pr]
+      - name: pr_url_present
+        kind: value
+        rule:
+          output_required: [prUrl]
+    eval_policy: all_pass # default; can be omitted
 ```
+
+Each entry in `eval` is an **Evaluator** with these fields:
+
+| Field       | Required                          | Applies to      | Description                                                                                                        |
+| ----------- | --------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `name`      | REQUIRED                          | all kinds       | Stable identifier for the evaluator. Used in result objects and retry preambles.                                   |
+| `kind`      | REQUIRED                          | all kinds       | One of `value`, `function`, `judge`.                                                                               |
+| `rule`      | REQUIRED for `value` / `function` | value, function | The deterministic rule. See per-kind shapes below.                                                                 |
+| `rubric`    | REQUIRED for `judge`              | judge           | Natural-language rubric the judge model evaluates against the node's data and trace.                               |
+| `pass_when` | OPTIONAL for `judge`              | judge           | Expected verdict word. Default `yes`. MUST be a single whitespace-free token; the judge response is parsed for it. |
+| `model`     | OPTIONAL for `judge`              | judge           | Override the judge model for this evaluator. See [Judge mechanics](#judge-mechanics).                              |
+
+A node with no `eval` field has no post-conditions; the node passes when the AI finishes without error.
+
+### The three kinds
+
+#### `value`: data-shape match
+
+Pure, deterministic, fast. Operates on the node's structured `output` (`result.data`). Use when you can express the contract as a path-and-operator check.
+
+The rule object accepts `output_required` and `output_matches`:
 
 ```yaml
-triage:
-  name: Triage
-  instruction: Either create a follow-up issue or escalate to the on-call engineer.
-  skills:
-    - linear
-    - github
-  verify:
-    any_tool_called: [linear_create_issue, github_create_issue]
+eval:
+  - name: pr_url_well_formed
+    kind: value
+    rule:
+      output_required: [prUrl, branchName]
+      output_matches:
+        - { path: prUrl, matches: "^https://github.com/" }
+        - { path: branchName, matches: "^sweny/" }
 ```
 
-### Output checks
+`output_required` is a list of paths into `result.data` that must each resolve to a present, non-null value. `output_matches` is a list of [OutputMatch](#outputmatch-type) entries, each asserting `equals`, `in`, or `matches` against a path.
 
-`output_required` and `output_matches` operate on the node's structured `output` (`result.data`).
+A single `value` evaluator MAY combine both fields. They are AND-ed within the rule.
+
+#### `function`: trace-shape match
+
+Pure, deterministic, fast. Operates on the node's tool-call trace, not its data. Use when the contract is "the model did (or did not) call this tool."
+
+The rule object accepts `any_tool_called`, `all_tools_called`, and `no_tool_called`:
 
 ```yaml
-implement-fix:
-  name: Implement Fix
-  instruction: Open a PR that fixes the issue and report the URL.
-  skills:
-    - github
-  output:
-    type: object
-    properties:
-      prUrl: { type: string }
-      branchName: { type: string }
-    required: [prUrl, branchName]
-  verify:
-    output_required: [prUrl, branchName]
-    output_matches:
-      - { path: prUrl, matches: "^https://github.com/" }
-      - { path: branchName, matches: "^sweny/" }
+eval:
+  - name: pr_was_created
+    kind: function
+    rule:
+      all_tools_called: [github_create_pr]
+      no_tool_called: [github_force_push]
 ```
 
-#### OutputMatch type
+A tool "was called and succeeded" when it appears in the node's tool-call trace with no error. For `no_tool_called`, _any_ appearance, successful or not, counts as a violation.
+
+The `function` kind is also the natural home for any future code-based check (for example, "the diff touched fewer than 10 files"). v1 covers tool-call assertions; the kind is intentionally named `function` rather than `tool_call` to leave that door open.
+
+#### `judge`: LLM-as-judge
+
+Calls a small Claude model with the node's data, the node's tool-call trace, and the author's rubric. The judge returns a single verdict word (default `yes` / `no`) plus a short reasoning string. Use when the contract is conditional, semantic, or otherwise outside the reach of a deterministic rule.
+
+```yaml
+eval:
+  - name: tests_present_when_pass_claimed
+    kind: judge
+    rubric: |
+      If result.data.test_status is "pass", does
+      result.data.test_files_changed contain at least one real test
+      file path? An empty array with status "pass" is a contract
+      violation. If status is anything else, this rule passes
+      vacuously.
+    pass_when: yes
+```
+
+The judge sees the node's `result.data`, the tool-call trace, and the rubric. It does not see runtime input or upstream node results unless you put them in the rubric explicitly.
+
+See [Judge mechanics](#judge-mechanics) for model selection, cost gating, and parse failures.
+
+### `eval_policy`
+
+How the executor aggregates evaluator results into a single node verdict.
+
+| Policy     | v1 status | Behavior                                                  |
+| ---------- | --------- | --------------------------------------------------------- |
+| `all_pass` | shipped   | Every evaluator must pass. Default.                       |
+| `any_pass` | reserved  | At least one evaluator must pass. Not implemented in v1.  |
+| `weighted` | reserved  | Sum of `score`s above a threshold. Not implemented in v1. |
+
+A conforming executor MUST accept `eval_policy: all_pass` and MAY reject other values until the corresponding semantics ship.
+
+### `EvalResult` type
+
+Each evaluator produces a structured result. The full list lands on `NodeResult.evals`:
+
+| Field       | Type                             | Description                                                                                                                                         |
+| ----------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`      | string                           | The evaluator's `name`.                                                                                                                             |
+| `kind`      | `value` \| `function` \| `judge` | The evaluator's `kind`.                                                                                                                             |
+| `pass`      | boolean                          | Whether this evaluator passed.                                                                                                                      |
+| `reasoning` | string (optional)                | Failure detail. Populated by the judge model on judge evaluators, by the executor's failure formatter on value/function. Capped at ~500 characters. |
+| `score`     | number (optional)                | Reserved for `weighted` aggregation. Not populated in v1.                                                                                           |
+
+Downstream nodes can read individual evaluator outcomes via context paths, e.g. `priorNode.evals.pr_was_created.pass`.
+
+### OutputMatch type
 
 | Field     | Type   | Required | Description                                                                                            |
 | --------- | ------ | -------- | ------------------------------------------------------------------------------------------------------ |
@@ -391,7 +455,7 @@ A path is resolved by walking segments left-to-right against `result.data`:
 - A `[*]` segment requires its parent to be an array. If the parent is not an array, resolution fails. If the parent is an empty array, expansion succeeds and the wildcard rule below applies.
 - Encountering `null` mid-path → resolution fails.
 
-`output_required` and `output_matches` both treat a failed resolution as a failed check. The error message names the missing segment.
+A failed resolution is treated as a failed check inside `value` evaluators. The reasoning string names the missing segment.
 
 ### Wildcard semantics
 
@@ -402,21 +466,46 @@ When a path contains `[*]` and resolves successfully:
 
 `output_required` follows the same rule. `output_required: [findings[*].severity]` means the `findings` array is present and every finding has a non-null `severity`. `output_required: ["any:findings[*].severity"]` means at least one finding does.
 
-### Combining checks & failure reporting
+### Judge mechanics
 
-All checks declared on a node are AND-ed; order does not matter. A conforming executor:
+#### Model selection
 
-- **MUST** evaluate every declared check (no fast-fail), so the workflow author sees every problem in one pass.
-- **MUST** mark the node failed if any check fails, with a single `error` message that lists every failing check.
-- **MUST NOT** evaluate `verify` when the AI model already failed the node (verify only runs against successful node executions).
+Three layers of override, narrowest wins:
+
+1. Evaluator-level `model` field on a `judge` evaluator.
+2. Node-level `judge_model` field.
+3. Workflow-level `judge_model` field. Default `claude-haiku-4-5`.
+
+Judges return a single token verdict, so a small fast model is the right default.
+
+#### Cost gating
+
+Workflow-level `judge_budget` (integer, default `50`) caps the expected number of judge calls per workflow run. The executor SHOULD warn at load time when `count(judges) * estimated_runs` exceeds the budget. The budget is a soft signal in v1, not a hard runtime cap.
+
+#### Parse failures
+
+When the judge response cannot be parsed for the `pass_when` token (model returned garbage, timed out, errored), the executor:
+
+- Retries the judge call once.
+- If the second call also fails, the evaluator is recorded as `pass: false` with `reasoning: "judge parse failure"`.
+- A workflow author who wants a parse-failure to be a halt can wrap the judge in a stricter retry policy at the node level.
+
+### Aggregation and failure reporting
+
+A conforming executor:
+
+- **MUST** evaluate every declared evaluator (no fast-fail), so the workflow author sees every problem in one pass.
+- **MUST** populate `NodeResult.evals` with one [EvalResult](#evalresult-type) per evaluator, in the order they were declared.
+- **MUST** mark the node failed under `eval_policy: all_pass` if any evaluator fails. The node's `error` message is a structured list, one line per failing evaluator: `name (kind): reasoning`.
+- **MUST NOT** run `eval` when the AI model already failed the node. Eval only runs against successful node executions.
 
 A representative failure message:
 
 ```
-verify failed:
-  - any_tool_called: required one of [linear_create_issue, github_create_issue] to succeed, called: [linear_search_issues]
-  - output_required: 'prUrl' missing segment 'prUrl'
-  - output_matches: 'findings[*].severity' in ["critical", "high", "medium", "low"], got ["urgent"]
+eval failed (policy: all_pass):
+  - pr_was_created (function): required all of [github_create_pr] to succeed, called: [github_search_issues]
+  - pr_url_well_formed (value): output_required 'prUrl' missing segment 'prUrl'
+  - tests_present_when_pass_claimed (judge): test_status was 'pass' but test_files_changed was empty
 ```
 
 ### Worked example
@@ -432,6 +521,8 @@ implement-fix:
     properties:
       prUrl:      { type: string }
       branchName: { type: string }
+      test_status: { type: string, enum: [pass, fail, no-framework] }
+      test_files_changed: { type: array, items: { type: string } }
       checks:
         type: array
         items:
@@ -439,22 +530,44 @@ implement-fix:
           properties:
             name:       { type: string }
             conclusion: { type: string }
-    required: [prUrl, branchName]
-  verify:
-    all_tools_called: [github_create_pr]
-    no_tool_called:   [github_force_push]
-    output_required:  [prUrl, branchName]
-    output_matches:
-      - { path: prUrl,                    matches: "^https://github.com/" }
-      - { path: branchName,               matches: "^sweny/" }
-      - { path: any:checks[*].conclusion, equals:  "success" }
+    required: [prUrl, branchName, test_status]
+  eval:
+    - name: pr_was_created
+      kind: function
+      rule:
+        all_tools_called: [github_create_pr]
+        no_tool_called:   [github_force_push]
+    - name: pr_url_well_formed
+      kind: value
+      rule:
+        output_required: [prUrl, branchName]
+        output_matches:
+          - { path: prUrl,                    matches: "^https://github.com/" }
+          - { path: branchName,               matches: "^sweny/" }
+          - { path: any:checks[*].conclusion, equals:  "success" }
+    - name: status_is_recognized
+      kind: value
+      rule:
+        output_matches:
+          - { path: test_status, in: [pass, fail, no-framework] }
+    - name: tests_present_when_pass_claimed
+      kind: judge
+      rubric: |
+        If result.data.test_status is "pass", does
+        result.data.test_files_changed contain at least one real test
+        file path? An empty array with status "pass" is a contract
+        violation. If status is anything else, this rule passes
+        vacuously.
+      pass_when: yes
 ```
 
-### When to use verify
+### When to use eval
 
-- Use `verify` for _post-conditions_: facts that must be true once the node has run.
+- Use a `value` evaluator for _data-shape post-conditions_: facts about the structured output that you can express as a path and an operator.
+- Use a `function` evaluator for _trace-shape post-conditions_: a specific tool was, or was not, called.
+- Use a `judge` evaluator for _semantic_ or _conditional_ post-conditions: claims that depend on context, comparisons across fields, or anything outside the reach of a deterministic rule.
 - Use [conditional edges](/edges#conditional-routing) for _routing_: which node runs next based on the result.
-- Use the node's `output` JSON Schema for _shape_: the structural contract on the data. `verify` is for the looser "did the model actually do the right thing" check that JSON Schema can't express.
+- Use the node's `output` JSON Schema for _shape_: the structural contract on the data. Eval is for the looser "did the model actually do the right thing" checks that JSON Schema can't express.
 
 ## Examples
 
@@ -514,11 +627,11 @@ summarize:
 
 ## Retry
 
-**Node-local self-healing on verify failure.** When `verify` fails, the
+**Node-local self-healing on eval failure.** When `eval` fails, the
 executor re-invokes the LLM up to `max` additional times, prepending
-feedback derived from the failure.
+feedback derived from the failing evaluators.
 
-Triggered ONLY by verify failure — not by tool/API errors and not by
+Triggered ONLY by eval failure, not by tool/API errors and not by
 `requires` failure. Re-running cannot fix upstream data problems.
 
 ### Schema
@@ -534,16 +647,16 @@ retry:
 
 ### Modes
 
-| `instruction` value       | Behavior                                                                                     |
-| ------------------------- | -------------------------------------------------------------------------------------------- |
-| (omitted)                 | Default preamble: "Previous attempt failed verification: \{error\}. Fix and try again."      |
-| `"static text"`           | Author's text + the verify error appended.                                                   |
-| `{ auto: true }`          | Executor calls `claude.ask` with a default reflection prompt; the response becomes preamble. |
-| `{ reflect: "<prompt>" }` | Same as `auto`, but the author's `reflect` prompt is used as the diagnosis question.         |
+| `instruction` value       | Behavior                                                                                                                            |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| (omitted)                 | Default preamble: a structured list of failing evaluators (`name (kind): reasoning`, one per line) followed by "Fix and try again." |
+| `"static text"`           | Author's text + the structured failing-evaluator list appended.                                                                     |
+| `{ auto: true }`          | Executor calls `claude.ask` with a default reflection prompt; the response becomes preamble.                                        |
+| `{ reflect: "<prompt>" }` | Same as `auto`, but the author's `reflect` prompt is used as the diagnosis question.                                                |
 
 The preamble is prepended to the node's normal instruction so the LLM sees
-it before the original task. Each retry uses only the **latest** verify
-failure as feedback — older errors are noise.
+it before the original task. Each retry uses only the **latest** eval
+failure as feedback. Older errors are noise.
 
 ### Reflection failure
 
@@ -571,9 +684,15 @@ nodes:
     name: Open PR
     instruction: Open a PR with the fix
     skills: [github]
-    verify:
-      any_tool_called: [github_create_pr]
-      output_required: [prUrl]
+    eval:
+      - name: pr_was_created
+        kind: function
+        rule:
+          any_tool_called: [github_create_pr]
+      - name: pr_url_present
+        kind: value
+        rule:
+          output_required: [prUrl]
     retry:
       max: 2
       instruction: { auto: true }

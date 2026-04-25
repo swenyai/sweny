@@ -242,10 +242,10 @@ describe("triage implement node — fix-quality contract", () => {
       expect(output!.type).toBe("object");
     });
 
-    it("requires the fix-tracking fields the verify gate depends on", () => {
+    it("requires the fix-tracking fields the eval gate depends on", () => {
       const required = output!.required as string[];
       // These are the fields the agent MUST report. Removing any of them
-      // breaks the verify contract or makes audit impossible.
+      // breaks the eval contract or makes audit impossible.
       expect(required).toContain("branch");
       expect(required).toContain("commit_sha");
       expect(required).toContain("files_changed");
@@ -267,18 +267,20 @@ describe("triage implement node — fix-quality contract", () => {
     });
   });
 
-  describe("verify gate", () => {
-    const verify = node.verify;
+  describe("eval gate", () => {
+    const evaluators = node.eval;
 
-    it("uses output_matches on test_status", () => {
-      expect(verify).toBeDefined();
-      expect(verify!.output_matches).toBeDefined();
-      const match = verify!.output_matches!.find((m) => m.path === "test_status");
+    it("declares a value evaluator with output_matches on test_status", () => {
+      expect(evaluators).toBeDefined();
+      const ev = evaluators!.find((e) => e.kind === "value" && e.rule?.output_matches !== undefined);
+      expect(ev).toBeDefined();
+      const match = ev!.rule!.output_matches!.find((m) => m.path === "test_status");
       expect(match).toBeDefined();
     });
 
     it("allows pass and no-framework, and only those two", () => {
-      const match = verify!.output_matches!.find((m) => m.path === "test_status")!;
+      const ev = evaluators!.find((e) => e.kind === "value" && e.rule?.output_matches !== undefined)!;
+      const match = ev.rule!.output_matches!.find((m) => m.path === "test_status")!;
       // Behavior contract: pass is the happy path; no-framework is the
       // documented escape valve for genuinely test-less repos. Anything
       // else (fail, not-run) trips the gate and triggers retry.
@@ -299,38 +301,42 @@ describe("triage implement node — fix-quality contract", () => {
     });
   });
 
-  describe("known limitation: pass + empty test_files_changed", () => {
-    // This test documents a real enforcement gap, NOT desired behavior.
+  describe("test_files_changed contract: judge closes the gap", () => {
+    // The contract: if test_status is "pass", test_files_changed MUST be
+    // non-empty. Value/function evaluators can't express "A AND (B implies
+    // C)" declaratively. A judge evaluator absorbs the conditional.
     //
-    // The contract we want is: if test_status is "pass", test_files_changed
-    // MUST be non-empty. Verify cannot express "A AND (B implies C)"
-    // declaratively (no OR / conditional). The schema's `required` list
-    // only checks PRESENCE of the field, not that the array is non-empty.
-    //
-    // So today an agent that returns { test_status: "pass",
-    // test_files_changed: [] } passes verify, even though the instruction
-    // text explicitly says that combination is a lie. This test pins the
-    // current state and will need to be inverted (with the gap actually
-    // closed) when we fix this — most likely via JSON Schema if/then/else
-    // in the output, or via routing edges that branch on tests-absent vs
-    // tests-present after implement.
-    it("currently passes verify (the hole) — instruction prose is the only push-back", () => {
-      const verify = node.verify!;
-      const testStatusMatch = verify.output_matches!.find((m) => m.path === "test_status")!;
-      const allowedStatuses = testStatusMatch.in as string[];
+    // Driving incident: PR #366, where triage shipped a NestJS fix to
+    // letsoffload/offload without writing tests, even though *.spec.ts
+    // already existed.
+    it("declares a judge evaluator that names test_files_changed", () => {
+      const evaluators = node.eval ?? [];
+      const judges = evaluators.filter((e) => e.kind === "judge");
+      expect(judges.length).toBeGreaterThan(0);
 
-      // The hole: `pass` clears the gate without any verify-time check
-      // on the test_files_changed array.
-      expect(allowedStatuses).toContain("pass");
+      const testFilesJudge = judges.find((e) => (e.rubric ?? "").includes("test_files_changed"));
+      expect(testFilesJudge).toBeDefined();
+      expect(testFilesJudge!.rubric).toMatch(/test_status/);
+      expect(testFilesJudge!.pass_when).toBe("yes");
+    });
 
-      // No verify rule asserts test_files_changed is non-empty when status
-      // is pass. If a future contributor adds one (e.g. via output_required
-      // with the any: prefix on test_files_changed[*]), this assertion
-      // will fail and they'll know to update / remove this gap-test.
-      const checksTestFilesNonEmpty =
-        (verify.output_required ?? []).some((p) => p.includes("test_files_changed")) ||
-        (verify.output_matches ?? []).some((m) => m.path.includes("test_files_changed"));
-      expect(checksTestFilesNonEmpty).toBe(false);
+    it("keeps the value evaluator that gates on test_status", () => {
+      const evaluators = node.eval ?? [];
+      const valueEvs = evaluators.filter((e) => e.kind === "value");
+      const testStatusMatches = valueEvs.flatMap(
+        (e) => e.rule?.output_matches?.filter((m) => m.path === "test_status") ?? [],
+      );
+      expect(testStatusMatches.length).toBeGreaterThan(0);
+      const allowedStatuses = testStatusMatches[0]!.in as string[];
+      expect(new Set(allowedStatuses)).toEqual(new Set(["pass", "no-framework"]));
+    });
+
+    it("retains a single retry attempt with autonomous reflection", () => {
+      // The judge can fail spuriously; one retry with reflection lets the
+      // agent recover from a genuine forget-the-tests miss.
+      expect(node.retry).toBeDefined();
+      expect(node.retry!.max).toBe(1);
+      expect(node.retry!.instruction).toEqual({ auto: true });
     });
   });
 });

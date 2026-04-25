@@ -582,7 +582,13 @@ describe("executor", () => {
           name: "Create",
           instruction: "Create an issue",
           skills: [],
-          verify: { any_tool_called: ["linear_create_issue", "github_create_issue"] },
+          eval: [
+            {
+              name: "called",
+              kind: "function",
+              rule: { any_tool_called: ["linear_create_issue", "github_create_issue"] },
+            },
+          ],
         },
       },
       edges: [],
@@ -605,7 +611,7 @@ describe("executor", () => {
       const { results } = await execute(verifyWorkflow, {}, { skills: createSkillMap([]), claude, config: {} });
       const r = results.get("create")!;
       expect(r.status).toBe("failed");
-      expect(r.data.error).toMatch(/verify failed:.*any_tool_called/s);
+      expect(r.data.error).toMatch(/eval failed.*any_tool_called/s);
       expect(r.data.error).toMatch(/linear_create_issue/);
     });
 
@@ -677,7 +683,7 @@ describe("executor", () => {
             name: "N",
             instruction: "Do",
             skills: [],
-            verify: { all_tools_called: ["a", "b"] },
+            eval: [{ name: "called", kind: "function", rule: { all_tools_called: ["a", "b"] } }],
           },
         },
         edges: [],
@@ -697,7 +703,7 @@ describe("executor", () => {
       const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
       const r = results.get("n")!;
       expect(r.status).toBe("failed");
-      expect(r.data.error).toMatch(/verify failed.*all_tools_called.*\[b\]/s);
+      expect(r.data.error).toMatch(/eval failed.*all_tools_called.*\[b\]/s);
     });
 
     it("marks node failed when no_tool_called was violated", async () => {
@@ -711,7 +717,7 @@ describe("executor", () => {
             name: "N",
             instruction: "Do",
             skills: [],
-            verify: { no_tool_called: ["force_push"] },
+            eval: [{ name: "called", kind: "function", rule: { no_tool_called: ["force_push"] } }],
           },
         },
         edges: [],
@@ -731,7 +737,7 @@ describe("executor", () => {
       const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
       const r = results.get("n")!;
       expect(r.status).toBe("failed");
-      expect(r.data.error).toMatch(/verify failed.*no_tool_called.*force_push/s);
+      expect(r.data.error).toMatch(/eval failed.*no_tool_called.*force_push/s);
     });
 
     it("marks node failed when output_required is missing", async () => {
@@ -745,7 +751,7 @@ describe("executor", () => {
             name: "N",
             instruction: "Do",
             skills: [],
-            verify: { output_required: ["prUrl"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["prUrl"] } }],
           },
         },
         edges: [],
@@ -761,7 +767,7 @@ describe("executor", () => {
       const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
       const r = results.get("n")!;
       expect(r.status).toBe("failed");
-      expect(r.data.error).toMatch(/verify failed.*output_required.*'prUrl'/s);
+      expect(r.data.error).toMatch(/eval failed.*output_required.*'prUrl'/s);
     });
 
     it("marks node failed when output_matches assertion fails", async () => {
@@ -775,7 +781,9 @@ describe("executor", () => {
             name: "N",
             instruction: "Do",
             skills: [],
-            verify: { output_matches: [{ path: "branch", matches: "^sweny/" }] },
+            eval: [
+              { name: "shape", kind: "value", rule: { output_matches: [{ path: "branch", matches: "^sweny/" }] } },
+            ],
           },
         },
         edges: [],
@@ -791,7 +799,7 @@ describe("executor", () => {
       const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
       const r = results.get("n")!;
       expect(r.status).toBe("failed");
-      expect(r.data.error).toMatch(/verify failed.*output_matches.*'branch'/s);
+      expect(r.data.error).toMatch(/eval failed.*output_matches.*'branch'/s);
     });
 
     it("aggregates multiple verify failures into one error string", async () => {
@@ -805,10 +813,10 @@ describe("executor", () => {
             name: "N",
             instruction: "Do",
             skills: [],
-            verify: {
-              all_tools_called: ["create_pr"],
-              output_required: ["prUrl"],
-            },
+            eval: [
+              { name: "called", kind: "function", rule: { all_tools_called: ["create_pr"] } },
+              { name: "shape", kind: "value", rule: { output_required: ["prUrl"] } },
+            ],
           },
         },
         edges: [],
@@ -839,12 +847,18 @@ describe("executor", () => {
             name: "N",
             instruction: "Do",
             skills: [],
-            verify: {
-              all_tools_called: ["create_pr"],
-              no_tool_called: ["force_push"],
-              output_required: ["prUrl"],
-              output_matches: [{ path: "prUrl", matches: "^https://" }],
-            },
+            eval: [
+              {
+                name: "called",
+                kind: "function",
+                rule: { all_tools_called: ["create_pr"], no_tool_called: ["force_push"] },
+              },
+              {
+                name: "shape",
+                kind: "value",
+                rule: { output_required: ["prUrl"], output_matches: [{ path: "prUrl", matches: "^https://" }] },
+              },
+            ],
           },
         },
         edges: [],
@@ -1012,7 +1026,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Do A",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 1 },
           },
         },
@@ -1025,7 +1039,7 @@ describe("executor", () => {
           callCount++;
           if (callCount === 1) return { status: "success", data: {}, toolCalls: [] };
           // Second call sees the retry preamble in the instruction
-          expect(opts.instruction).toMatch(/Previous attempt failed verification/);
+          expect(opts.instruction).toMatch(/Previous attempt failed evaluation/);
           return { status: "success", data: { done: true }, toolCalls: [] };
         },
         evaluate: async () => "x",
@@ -1057,7 +1071,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Do A",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 2 },
           },
         },
@@ -1099,7 +1113,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Do A",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 1, instruction: "Try harder this time." },
           },
         },
@@ -1120,7 +1134,7 @@ describe("executor", () => {
 
       await execute(workflow, {}, { skills: createSkillMap([]), claude });
       expect(seenInstructions[1]).toContain("Try harder this time.");
-      expect(seenInstructions[1]).toContain("Previous attempt failed verification");
+      expect(seenInstructions[1]).toContain("Previous attempt failed evaluation");
     });
 
     it("does not retry when claude.run itself fails (non-verify failure)", async () => {
@@ -1134,7 +1148,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Do A",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 3 },
           },
         },
@@ -1177,7 +1191,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Open the PR",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 1, instruction: { auto: true } },
           },
         },
@@ -1219,7 +1233,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Open the PR",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 1, instruction: { auto: true } },
           },
         },
@@ -1241,7 +1255,7 @@ describe("executor", () => {
       };
 
       await execute(workflow, {}, { skills: createSkillMap([]), claude });
-      expect(seenInstructions[1]).toMatch(/Previous attempt failed verification/);
+      expect(seenInstructions[1]).toMatch(/Previous attempt failed evaluation/);
     });
 
     it("uses the author's reflect prompt when instruction.reflect is set", async () => {
@@ -1255,7 +1269,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Open the PR",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 1, instruction: { reflect: "Focus on tool selection only." } },
           },
         },
@@ -1299,7 +1313,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Do A",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 2 },
           },
         },
@@ -1337,7 +1351,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Do A",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 1 },
           },
         },
@@ -1372,7 +1386,7 @@ describe("executor", () => {
       const evt = retryEvents[0] as Extract<ExecutionEvent, { type: "node:retry" }>;
       expect(evt.node).toBe("a");
       expect(evt.attempt).toBe(1);
-      expect(evt.preamble).toMatch(/Previous attempt failed verification/);
+      expect(evt.preamble).toMatch(/Previous attempt failed evaluation/);
       expect(evt.reason).toMatch(/output_required/);
     });
 
@@ -1407,7 +1421,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Do A",
             skills: [],
-            verify: { output_matches: [{ path: "message", equals: "ok" }] },
+            eval: [{ name: "shape", kind: "value", rule: { output_matches: [{ path: "message", equals: "ok" }] } }],
             retry: { max: 3, instruction: { auto: true } },
           },
         },
@@ -1628,7 +1642,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Do A",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 2 },
           },
         },
@@ -1687,7 +1701,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Do A",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 1 },
           },
           b: {
@@ -1756,7 +1770,7 @@ describe("executor", () => {
             name: "A",
             instruction: "Do A",
             skills: [],
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 1 },
           },
         },
@@ -1821,7 +1835,7 @@ describe("executor", () => {
             instruction: "Do A",
             skills: [],
             requires: { output_required: ["input.missing"] },
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 5 },
           },
         },
@@ -1864,7 +1878,7 @@ describe("executor", () => {
             instruction: "Do A",
             skills: [],
             requires: { output_required: ["input.x"] },
-            verify: { output_required: ["done"] },
+            eval: [{ name: "shape", kind: "value", rule: { output_required: ["done"] } }],
             retry: { max: 1 },
           },
         },
@@ -1898,7 +1912,7 @@ describe("executor", () => {
 
   describe("verify alias expansion through loaded skills", () => {
     // Reproduces the 2026-04-23 SWEny Triage production failure end-to-end.
-    // The failing node had `verify: { any_tool_called: ["linear_add_comment", ...] }`
+    // The failing node had `eval: [{ name: "called", kind: "function", rule: { any_tool_called: ["linear_add_comment", ...] } }]`
     // but the agent only called Linear's remote MCP tool `save_comment`.
     // Core no longer ships a vendor alias table — the Linear skill declares
     // `linear_add_comment: ["save_comment"]` and the executor must union
@@ -1916,16 +1930,22 @@ describe("executor", () => {
             name: "Create Issue",
             instruction: "File a Linear comment",
             skills: ["linear"],
-            verify: {
-              any_tool_called: [
-                "linear_create_issue",
-                "github_create_issue",
-                "linear_search_issues",
-                "github_search_issues",
-                "linear_add_comment",
-                "github_add_comment",
-              ],
-            },
+            eval: [
+              {
+                name: "called",
+                kind: "function",
+                rule: {
+                  any_tool_called: [
+                    "linear_create_issue",
+                    "github_create_issue",
+                    "linear_search_issues",
+                    "github_search_issues",
+                    "linear_add_comment",
+                    "github_add_comment",
+                  ],
+                },
+              },
+            ],
           },
         },
         edges: [],
@@ -1976,7 +1996,7 @@ describe("executor", () => {
             name: "Create Issue",
             instruction: "File a Linear comment",
             skills: [],
-            verify: { any_tool_called: ["linear_add_comment"] },
+            eval: [{ name: "called", kind: "function", rule: { any_tool_called: ["linear_add_comment"] } }],
           },
         },
         edges: [],

@@ -106,7 +106,11 @@ export const outputMatchZ = z
     { message: "output_matches entry must declare exactly one of: equals, in, matches" },
   );
 
-export const nodeVerifyZ = z
+export const evaluatorKindZ = z.enum(["value", "function", "judge"]);
+
+export const evalPolicyZ = z.enum(["all_pass", "any_pass", "weighted"]);
+
+export const evaluatorRuleZ = z
   .object({
     any_tool_called: z.array(z.string().min(1)).min(1).optional(),
     all_tools_called: z.array(z.string().min(1)).min(1).optional(),
@@ -114,24 +118,77 @@ export const nodeVerifyZ = z
     output_required: z.array(z.string().min(1)).min(1).optional(),
     output_matches: z.array(outputMatchZ).min(1).optional(),
   })
-  // Fix #4 gap: the exported JSON Schema sets additionalProperties: false.
-  // Without .strict() here Zod would silently drop unknown keys and then
-  // the refine would run on the stripped object, producing a different
-  // verdict than ajv (which rejects the unknown key directly). Keep them
-  // in sync.
   .strict()
   .refine(
-    (v) =>
-      v.any_tool_called !== undefined ||
-      v.all_tools_called !== undefined ||
-      v.no_tool_called !== undefined ||
-      v.output_required !== undefined ||
-      v.output_matches !== undefined,
+    (r) =>
+      r.any_tool_called !== undefined ||
+      r.all_tools_called !== undefined ||
+      r.no_tool_called !== undefined ||
+      r.output_required !== undefined ||
+      r.output_matches !== undefined,
     {
       message:
-        "verify must declare at least one check (any_tool_called, all_tools_called, no_tool_called, output_required, or output_matches)",
+        "evaluator rule must declare at least one of: any_tool_called, all_tools_called, no_tool_called, output_required, output_matches",
     },
   );
+
+/**
+ * A single evaluator. The `kind` field discriminates required-fields:
+ * `value` and `function` need `rule`; `judge` needs `rubric`.
+ *
+ * Strict object: unknown keys are rejected to match the public JSON Schema.
+ */
+export const evaluatorZ = z
+  .object({
+    name: z.string().min(1),
+    kind: evaluatorKindZ,
+    rule: evaluatorRuleZ.optional(),
+    rubric: z.string().min(1).optional(),
+    // `pass_when` is parsed against a single VERDICT token from the model's
+    // response (default `yes`). Whitespace breaks the prompt format and the
+    // verdict comparison, so reject it at parse time rather than producing
+    // a confusing runtime mismatch.
+    pass_when: z
+      .string()
+      .min(1)
+      .refine((v) => !/\s/.test(v), { message: "pass_when must be a single whitespace-free token" })
+      .optional(),
+    model: z.string().min(1).optional(),
+  })
+  .strict()
+  .superRefine((e, ctx) => {
+    if (e.kind === "value" || e.kind === "function") {
+      if (!e.rule) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `evaluator '${e.name}' (kind: ${e.kind}) must declare a rule`,
+          path: ["rule"],
+        });
+      }
+      if (e.rubric !== undefined || e.pass_when !== undefined || e.model !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `evaluator '${e.name}' (kind: ${e.kind}) must not declare rubric / pass_when / model (those are 'judge' only)`,
+          path: [],
+        });
+      }
+    } else if (e.kind === "judge") {
+      if (!e.rubric) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `evaluator '${e.name}' (kind: judge) must declare a rubric`,
+          path: ["rubric"],
+        });
+      }
+      if (e.rule !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `evaluator '${e.name}' (kind: judge) must not declare a rule`,
+          path: ["rule"],
+        });
+      }
+    }
+  });
 
 export const nodeRequiresZ = z
   .object({
@@ -163,7 +220,9 @@ export const nodeZ = z
     max_turns: z.number().int().min(1).optional(),
     rules: nodeSourcesZ.optional(),
     context: nodeSourcesZ.optional(),
-    verify: nodeVerifyZ.optional(),
+    eval: z.array(evaluatorZ).min(1).optional(),
+    eval_policy: evalPolicyZ.optional(),
+    judge_model: z.string().min(1).optional(),
     requires: nodeRequiresZ.optional(),
     retry: nodeRetryZ.optional(),
   })
@@ -194,10 +253,45 @@ export const workflowZ = z.object({
   skills: z.record(skillDefinitionZ).default({}),
   rules: z.array(sourceZ).optional(),
   context: z.array(sourceZ).optional(),
+  judge_model: z.string().min(1).optional(),
+  judge_budget: z.number().int().min(0).optional(),
 });
+
+const LEGACY_VERIFY_MESSAGE =
+  "uses the legacy 'verify:' field. It was renamed to 'eval:' in @sweny-ai/core v0.2.0 with a different shape (named evaluators with kind: value | function | judge). " +
+  "Migration guide: https://spec.sweny.ai/nodes/#eval";
+
+/**
+ * Detect legacy `verify:` blocks before parse and throw a clear migration
+ * error. Without this preflight, the user gets Zod's generic "Unrecognized
+ * key(s)" message at the node level (and silent passthrough at the
+ * workflow level, since workflowZ allows extra top-level fields for
+ * marketplace metadata).
+ *
+ * Catches:
+ *   - Top-level `workflow.verify` (typo / wrong scope).
+ *   - Per-node `nodes[*].verify` (the most common shape pre-rename).
+ */
+function preflightLegacyVerify(raw: unknown): void {
+  if (!raw || typeof raw !== "object") return;
+  const wf = raw as Record<string, unknown>;
+
+  if ("verify" in wf) {
+    throw new Error(`Workflow ${LEGACY_VERIFY_MESSAGE}`);
+  }
+
+  const nodes = wf.nodes;
+  if (!nodes || typeof nodes !== "object") return;
+  for (const [id, node] of Object.entries(nodes as Record<string, unknown>)) {
+    if (node && typeof node === "object" && "verify" in node) {
+      throw new Error(`Node "${id}" ${LEGACY_VERIFY_MESSAGE}`);
+    }
+  }
+}
 
 /** Parse + validate a raw object as a Workflow. Throws on invalid input. */
 export function parseWorkflow(raw: unknown) {
+  preflightLegacyVerify(raw);
   return workflowZ.parse(raw);
 }
 
@@ -412,7 +506,7 @@ export const workflowJsonSchema = {
   required: ["id", "name", "nodes", "edges", "entry"],
   // Top-level is intentionally open: marketplace workflows carry extra
   // metadata (author, category, tags) that publish.ts reads. Inner
-  // objects (nodes, edges, skills, verify, requires, etc.) are strict.
+  // objects (nodes, edges, skills, eval, requires, etc.) are strict.
   additionalProperties: true,
   $defs: {
     Source: sourceJsonSchema,
@@ -427,6 +521,70 @@ export const workflowJsonSchema = {
             only: { type: "boolean" },
             sources: { type: "array", items: { $ref: "#/$defs/Source" } },
           },
+        },
+      ],
+    },
+    OutputMatch: {
+      type: "object",
+      required: ["path"],
+      additionalProperties: false,
+      properties: {
+        path: { type: "string", minLength: 1 },
+        equals: {},
+        in: { type: "array" },
+        matches: { type: "string", minLength: 1 },
+      },
+      oneOf: [{ required: ["equals"] }, { required: ["in"] }, { required: ["matches"] }],
+    },
+    Evaluator: {
+      type: "object",
+      required: ["name", "kind"],
+      additionalProperties: false,
+      properties: {
+        name: {
+          type: "string",
+          minLength: 1,
+          description: "Stable identifier for this evaluator. Used in EvalResult and retry preambles.",
+        },
+        kind: { type: "string", enum: ["value", "function", "judge"] },
+        rule: {
+          type: "object",
+          description: "Required for value and function kinds. Shape depends on kind.",
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            any_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+            all_tools_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+            no_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+            output_required: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+            output_matches: { type: "array", items: { $ref: "#/$defs/OutputMatch" }, minItems: 1 },
+          },
+        },
+        rubric: {
+          type: "string",
+          minLength: 1,
+          description: "Required for judge kind. Natural-language criterion the judge model evaluates.",
+        },
+        pass_when: {
+          type: "string",
+          minLength: 1,
+          default: "yes",
+          description: "judge only. Verdict token that indicates pass. Default 'yes'.",
+        },
+        model: {
+          type: "string",
+          minLength: 1,
+          description: "judge only. Override the judge model for this evaluator.",
+        },
+      },
+      allOf: [
+        {
+          if: { properties: { kind: { enum: ["value", "function"] } } },
+          then: { required: ["rule"] },
+        },
+        {
+          if: { properties: { kind: { const: "judge" } } },
+          then: { required: ["rubric"] },
         },
       ],
     },
@@ -445,6 +603,19 @@ export const workflowJsonSchema = {
       type: "array",
       items: { $ref: "#/$defs/Source" },
       description: "Background knowledge prepended to every node's instruction.",
+    },
+    judge_model: {
+      type: "string",
+      minLength: 1,
+      default: "claude-haiku-4-5",
+      description: "Default model for judge evaluators across the workflow. Overridable per-node and per-evaluator.",
+    },
+    judge_budget: {
+      type: "integer",
+      minimum: 0,
+      default: 50,
+      description:
+        "Soft cap on expected judge calls per workflow run. Executor warns at load time if exceeded; not a hard runtime cap in v1.",
     },
     nodes: {
       type: "object",
@@ -477,42 +648,29 @@ export const workflowJsonSchema = {
             $ref: "#/$defs/NodeSources",
             description: "Per-node context. Additive by default; set { only: true } to block cascade.",
           },
-          verify: {
-            type: "object",
-            description: "Machine-checked post-conditions evaluated after the LLM finishes.",
-            additionalProperties: false,
-            // Fix #4: at least one check must be declared.
-            minProperties: 1,
-            properties: {
-              any_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
-              all_tools_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
-              no_tool_called: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
-              output_required: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
-              output_matches: {
-                type: "array",
-                items: {
-                  type: "object",
-                  required: ["path"],
-                  additionalProperties: false,
-                  properties: {
-                    path: { type: "string", minLength: 1 },
-                    equals: {},
-                    in: { type: "array" },
-                    matches: { type: "string", minLength: 1 },
-                  },
-                  // Fix #4: exactly one operator must be declared.
-                  oneOf: [{ required: ["equals"] }, { required: ["in"] }, { required: ["matches"] }],
-                },
-                minItems: 1,
-              },
-            },
+          eval: {
+            type: "array",
+            description: "Named evaluators (value, function, judge) run after the LLM finishes the node.",
+            items: { $ref: "#/$defs/Evaluator" },
+            minItems: 1,
+          },
+          eval_policy: {
+            type: "string",
+            enum: ["all_pass", "any_pass", "weighted"],
+            default: "all_pass",
+            description: "How evaluator results aggregate. v1 implements all_pass; the others are reserved.",
+          },
+          judge_model: {
+            type: "string",
+            minLength: 1,
+            description: "Default model for judge evaluators on this node. Overrides workflow-level judge_model.",
           },
           requires: {
             type: "object",
             description: "Pre-condition checks evaluated before the LLM runs.",
             additionalProperties: false,
             // Fix #4: at least one of output_required / output_matches must be declared.
-            // on_fail alone is not sufficient — it only tags how a failing check behaves.
+            // on_fail alone is not sufficient. It only tags how a failing check behaves.
             anyOf: [{ required: ["output_required"] }, { required: ["output_matches"] }],
             properties: {
               output_required: {
@@ -522,19 +680,7 @@ export const workflowJsonSchema = {
               },
               output_matches: {
                 type: "array",
-                items: {
-                  type: "object",
-                  required: ["path"],
-                  additionalProperties: false,
-                  properties: {
-                    path: { type: "string", minLength: 1 },
-                    equals: {},
-                    in: { type: "array" },
-                    matches: { type: "string", minLength: 1 },
-                  },
-                  // Fix #4: exactly one operator must be declared.
-                  oneOf: [{ required: ["equals"] }, { required: ["in"] }, { required: ["matches"] }],
-                },
+                items: { $ref: "#/$defs/OutputMatch" },
                 minItems: 1,
               },
               on_fail: { type: "string", enum: ["fail", "skip"] },
@@ -542,7 +688,7 @@ export const workflowJsonSchema = {
           },
           retry: {
             type: "object",
-            description: "Node-local retry on verify failure.",
+            description: "Node-local retry on eval failure.",
             required: ["max"],
             additionalProperties: false,
             properties: {
@@ -578,11 +724,11 @@ export const workflowJsonSchema = {
         properties: {
           from: { type: "string", minLength: 1 },
           to: { type: "string", minLength: 1 },
-          when: { type: "string", description: "Natural language condition — Claude evaluates at runtime" },
+          when: { type: "string", description: "Natural language condition. Claude evaluates at runtime." },
           max_iterations: {
             type: "integer",
             minimum: 1,
-            description: "Max times this edge can be followed — enables controlled retry loops",
+            description: "Max times this edge can be followed. Enables controlled retry loops.",
           },
         },
       },

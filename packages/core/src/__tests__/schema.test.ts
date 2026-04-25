@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   workflowZ,
   nodeZ,
-  nodeVerifyZ,
+  evaluatorZ,
+  evaluatorRuleZ,
   nodeRequiresZ,
   nodeRetryZ,
   edgeZ,
@@ -67,40 +68,64 @@ describe("Zod schemas", () => {
       expect(result.output).toBeDefined();
     });
 
-    it("accepts a verify block with any_tool_called", () => {
+    it("accepts an eval block with a function evaluator", () => {
       const result = nodeZ.parse({
         name: "S",
         instruction: "I",
-        verify: { any_tool_called: ["linear_create_issue", "github_create_issue"] },
+        eval: [
+          {
+            name: "issue_tracker_called",
+            kind: "function",
+            rule: { any_tool_called: ["linear_create_issue", "github_create_issue"] },
+          },
+        ],
       });
-      expect(result.verify?.any_tool_called).toEqual(["linear_create_issue", "github_create_issue"]);
+      expect(result.eval).toHaveLength(1);
+      expect(result.eval![0]!.kind).toBe("function");
+      expect(result.eval![0]!.rule!.any_tool_called).toEqual(["linear_create_issue", "github_create_issue"]);
     });
 
-    it("rejects verify with no check declared", () => {
-      expect(() => nodeZ.parse({ name: "S", instruction: "I", verify: {} })).toThrow();
+    it("rejects an eval block with empty array", () => {
+      expect(() => nodeZ.parse({ name: "S", instruction: "I", eval: [] })).toThrow();
     });
 
-    it("rejects verify with empty any_tool_called", () => {
-      expect(() => nodeZ.parse({ name: "S", instruction: "I", verify: { any_tool_called: [] } })).toThrow();
+    it("rejects an evaluator missing a name", () => {
+      expect(() =>
+        nodeZ.parse({
+          name: "S",
+          instruction: "I",
+          eval: [{ kind: "value", rule: { output_required: ["x"] } }],
+        }),
+      ).toThrow();
     });
 
-    it("accepts all_tools_called", () => {
-      const v = nodeVerifyZ.parse({ all_tools_called: ["a", "b"] });
+    it("rejects an evaluator with empty any_tool_called rule", () => {
+      expect(() =>
+        nodeZ.parse({
+          name: "S",
+          instruction: "I",
+          eval: [{ name: "x", kind: "function", rule: { any_tool_called: [] } }],
+        }),
+      ).toThrow();
+    });
+
+    it("accepts a value evaluator with all_tools_called rule", () => {
+      const v = evaluatorRuleZ.parse({ all_tools_called: ["a", "b"] });
       expect(v.all_tools_called).toEqual(["a", "b"]);
     });
 
-    it("accepts no_tool_called", () => {
-      const v = nodeVerifyZ.parse({ no_tool_called: ["force_push"] });
+    it("accepts a no_tool_called rule", () => {
+      const v = evaluatorRuleZ.parse({ no_tool_called: ["force_push"] });
       expect(v.no_tool_called).toEqual(["force_push"]);
     });
 
-    it("accepts output_required", () => {
-      const v = nodeVerifyZ.parse({ output_required: ["prUrl", "branch"] });
+    it("accepts an output_required rule", () => {
+      const v = evaluatorRuleZ.parse({ output_required: ["prUrl", "branch"] });
       expect(v.output_required).toEqual(["prUrl", "branch"]);
     });
 
     it("accepts output_matches with each operator", () => {
-      const v = nodeVerifyZ.parse({
+      const v = evaluatorRuleZ.parse({
         output_matches: [
           { path: "a", equals: 1 },
           { path: "b", in: ["x", "y"] },
@@ -110,8 +135,8 @@ describe("Zod schemas", () => {
       expect(v.output_matches).toHaveLength(3);
     });
 
-    it("accepts a combination of multiple checks", () => {
-      const v = nodeVerifyZ.parse({
+    it("accepts a rule combining multiple check types", () => {
+      const v = evaluatorRuleZ.parse({
         any_tool_called: ["a"],
         output_required: ["x"],
         output_matches: [{ path: "x", equals: 1 }],
@@ -122,51 +147,212 @@ describe("Zod schemas", () => {
     });
 
     it("rejects an output_matches entry with zero operators", () => {
-      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "a" }] })).toThrow();
+      expect(() => evaluatorRuleZ.parse({ output_matches: [{ path: "a" }] })).toThrow();
     });
 
     it("rejects an output_matches entry with two operators", () => {
-      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "a", equals: 1, in: [1, 2] }] })).toThrow();
+      expect(() => evaluatorRuleZ.parse({ output_matches: [{ path: "a", equals: 1, in: [1, 2] }] })).toThrow();
     });
 
     it("rejects an output_matches entry with equals + matches", () => {
-      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "a", equals: 1, matches: "^x$" }] })).toThrow();
+      expect(() => evaluatorRuleZ.parse({ output_matches: [{ path: "a", equals: 1, matches: "^x$" }] })).toThrow();
     });
 
     it("rejects an output_matches entry with in + matches", () => {
-      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "a", in: [1, 2], matches: "^x$" }] })).toThrow();
+      expect(() => evaluatorRuleZ.parse({ output_matches: [{ path: "a", in: [1, 2], matches: "^x$" }] })).toThrow();
     });
 
     it("rejects an output_matches entry with all three operators", () => {
       expect(() =>
-        nodeVerifyZ.parse({ output_matches: [{ path: "a", equals: 1, in: [1], matches: "^x$" }] }),
+        evaluatorRuleZ.parse({ output_matches: [{ path: "a", equals: 1, in: [1], matches: "^x$" }] }),
       ).toThrow();
     });
 
     it("accepts equals: null as a valid operator value", () => {
-      // null IS a valid value to assert equality against; only `undefined` means
-      // "not set". Schema must distinguish.
-      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "a", equals: null }] })).not.toThrow();
+      expect(() => evaluatorRuleZ.parse({ output_matches: [{ path: "a", equals: null }] })).not.toThrow();
     });
 
     it("rejects an output_matches entry with empty path", () => {
-      expect(() => nodeVerifyZ.parse({ output_matches: [{ path: "", equals: 1 }] })).toThrow();
+      expect(() => evaluatorRuleZ.parse({ output_matches: [{ path: "", equals: 1 }] })).toThrow();
     });
 
-    it("rejects empty output_required", () => {
-      expect(() => nodeVerifyZ.parse({ output_required: [] })).toThrow();
+    it("rejects an empty output_required array", () => {
+      expect(() => evaluatorRuleZ.parse({ output_required: [] })).toThrow();
     });
 
-    it("rejects empty all_tools_called", () => {
-      expect(() => nodeVerifyZ.parse({ all_tools_called: [] })).toThrow();
+    it("rejects an empty all_tools_called array", () => {
+      expect(() => evaluatorRuleZ.parse({ all_tools_called: [] })).toThrow();
     });
 
-    it("rejects empty no_tool_called", () => {
-      expect(() => nodeVerifyZ.parse({ no_tool_called: [] })).toThrow();
+    it("rejects an empty no_tool_called array", () => {
+      expect(() => evaluatorRuleZ.parse({ no_tool_called: [] })).toThrow();
     });
 
-    it("rejects empty output_matches array", () => {
-      expect(() => nodeVerifyZ.parse({ output_matches: [] })).toThrow();
+    it("rejects an empty output_matches array", () => {
+      expect(() => evaluatorRuleZ.parse({ output_matches: [] })).toThrow();
+    });
+
+    it("accepts a value evaluator and emits the correct kind", () => {
+      const e = evaluatorZ.parse({ name: "shape", kind: "value", rule: { output_required: ["x"] } });
+      expect(e.kind).toBe("value");
+      expect(e.name).toBe("shape");
+    });
+
+    it("accepts a function evaluator and emits the correct kind", () => {
+      const e = evaluatorZ.parse({ name: "called", kind: "function", rule: { any_tool_called: ["a"] } });
+      expect(e.kind).toBe("function");
+    });
+
+    it("accepts a judge evaluator with rubric", () => {
+      const e = evaluatorZ.parse({ name: "judged", kind: "judge", rubric: "is it good?", pass_when: "yes" });
+      expect(e.kind).toBe("judge");
+      expect(e.rubric).toBe("is it good?");
+    });
+
+    it("rejects a value evaluator missing a rule", () => {
+      expect(() => evaluatorZ.parse({ name: "x", kind: "value" })).toThrow(/must declare a rule/);
+    });
+
+    it("rejects a function evaluator missing a rule", () => {
+      expect(() => evaluatorZ.parse({ name: "x", kind: "function" })).toThrow(/must declare a rule/);
+    });
+
+    it("rejects a judge evaluator missing a rubric", () => {
+      expect(() => evaluatorZ.parse({ name: "x", kind: "judge" })).toThrow(/must declare a rubric/);
+    });
+
+    it("rejects a judge evaluator that also declares a rule", () => {
+      expect(() =>
+        evaluatorZ.parse({ name: "x", kind: "judge", rubric: "ok?", rule: { output_required: ["a"] } }),
+      ).toThrow(/must not declare a rule/);
+    });
+
+    it("rejects a value evaluator that also declares rubric/pass_when/model", () => {
+      expect(() =>
+        evaluatorZ.parse({
+          name: "x",
+          kind: "value",
+          rule: { output_required: ["a"] },
+          rubric: "stray",
+        }),
+      ).toThrow(/must not declare rubric/);
+    });
+
+    it("rejects an unknown kind", () => {
+      expect(() => evaluatorZ.parse({ name: "x", kind: "magic", rubric: "what?" })).toThrow();
+    });
+
+    it("rejects an empty evaluator name", () => {
+      expect(() => evaluatorZ.parse({ name: "", kind: "value", rule: { output_required: ["a"] } })).toThrow();
+    });
+
+    it("accepts eval_policy: all_pass on a node", () => {
+      const r = nodeZ.parse({
+        name: "S",
+        instruction: "I",
+        eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["a"] } }],
+        eval_policy: "all_pass",
+      });
+      expect(r.eval_policy).toBe("all_pass");
+    });
+
+    it("accepts eval_policy: any_pass and weighted (reserved values)", () => {
+      const r1 = nodeZ.parse({
+        name: "S",
+        instruction: "I",
+        eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["a"] } }],
+        eval_policy: "any_pass",
+      });
+      expect(r1.eval_policy).toBe("any_pass");
+      const r2 = nodeZ.parse({
+        name: "S",
+        instruction: "I",
+        eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["a"] } }],
+        eval_policy: "weighted",
+      });
+      expect(r2.eval_policy).toBe("weighted");
+    });
+
+    it("rejects an unknown eval_policy", () => {
+      expect(() =>
+        nodeZ.parse({
+          name: "S",
+          instruction: "I",
+          eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["a"] } }],
+          eval_policy: "majority",
+        }),
+      ).toThrow();
+    });
+
+    it("accepts judge_model on a node", () => {
+      const r = nodeZ.parse({
+        name: "S",
+        instruction: "I",
+        eval: [{ name: "x", kind: "judge", rubric: "ok?" }],
+        judge_model: "claude-haiku-4-5",
+      });
+      expect(r.judge_model).toBe("claude-haiku-4-5");
+    });
+  });
+
+  describe("parseWorkflow legacy verify migration", () => {
+    it("throws a clear migration error when a node uses the legacy verify: field", () => {
+      const raw = {
+        id: "wf",
+        name: "wf",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do",
+            verify: { any_tool_called: ["x"] },
+          },
+        },
+        edges: [],
+      };
+      expect(() => parseWorkflow(raw)).toThrow(/Node "a".*verify.*renamed to 'eval:'/);
+    });
+
+    it("includes a migration guide link in the error", () => {
+      const raw = {
+        id: "wf",
+        name: "wf",
+        entry: "a",
+        nodes: { a: { name: "A", instruction: "Do", verify: { output_required: ["x"] } } },
+        edges: [],
+      };
+      expect(() => parseWorkflow(raw)).toThrow(/spec\.sweny\.ai\/nodes/);
+    });
+
+    it("names the offending node when multiple nodes are present", () => {
+      const raw = {
+        id: "wf",
+        name: "wf",
+        entry: "good",
+        nodes: {
+          good: { name: "Good", instruction: "Do" },
+          bad: { name: "Bad", instruction: "Do", verify: { any_tool_called: ["x"] } },
+        },
+        edges: [{ from: "good", to: "bad" }],
+      };
+      expect(() => parseWorkflow(raw)).toThrow(/Node "bad"/);
+    });
+
+    it("does not trip on a workflow without verify", () => {
+      const raw = {
+        id: "wf",
+        name: "wf",
+        entry: "a",
+        nodes: {
+          a: {
+            name: "A",
+            instruction: "Do",
+            eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["t"] } }],
+          },
+        },
+        edges: [],
+      };
+      expect(() => parseWorkflow(raw)).not.toThrow();
     });
   });
 
@@ -695,7 +881,7 @@ describe("workflowJsonSchema", () => {
   it("has additionalProperties: true at top level (marketplace metadata is tolerated)", () => {
     // Round 2: relaxed from false to true. Marketplace workflows carry
     // author / category / tags alongside the schema-defined fields, read
-    // by publish.ts. Inner objects (nodes, edges, skills, verify, requires)
+    // by publish.ts. Inner objects (nodes, edges, skills, eval, requires)
     // stay strict — that's where drift actually matters.
     expect(workflowJsonSchema.additionalProperties).toBe(true);
   });

@@ -51,20 +51,20 @@ export interface Skill {
   /** External MCP server definition wired for nodes referencing this skill. */
   mcp?: McpServerConfig;
   /**
-   * Tool-name aliases recognized by `verify`.
+   * Tool-name aliases recognized by `function` evaluators.
    *
    * When a workflow references `any_tool_called: [linear_create_issue]` and
    * the agent instead calls the equivalent MCP tool exposed by this skill's
    * MCP server (e.g. `save_issue` on Linear's remote MCP), the two names
    * should count as equivalent. Each skill owns the mapping for its own
-   * domain — core stays vendor-neutral.
+   * domain. Core stays vendor-neutral.
    *
    * Key: a canonical tool name (usually one of this skill's `tools[].name`,
    * but any name the skill wants to equate is valid).
    * Value: list of equivalent names, typically tool names exposed by this
    * skill's external MCP server.
    *
-   * Aliases are symmetric: a verify rule naming either side matches a call
+   * Aliases are symmetric: a function rule naming either side matches a call
    * on either side. Omit names that are ambiguous across providers
    * (e.g. `get_issue` is exposed by both Linear and GitHub MCP servers).
    */
@@ -89,29 +89,77 @@ export interface Skill {
  */
 export type NodeSources = _Source[] | { only?: boolean; sources: _Source[] };
 
+/** Kind of evaluator. See {@link Evaluator}. */
+export type EvaluatorKind = "value" | "function" | "judge";
+
+/** Aggregation policy for a node's evaluator results. v1 implements `all_pass`. */
+export type EvalPolicy = "all_pass" | "any_pass" | "weighted";
+
 /**
- * Machine-checked post-condition for a node.
+ * The deterministic rule body for a `value` or `function` evaluator.
  *
- * Evaluated by the executor AFTER the LLM finishes. If any declared check
- * fails, the node is marked `failed` even if the LLM itself returned success.
- *
- * All declared checks are AND-ed. The executor runs every check (no fast-fail)
- * and concatenates failures into a single error string on `result.data.error`.
- *
- * Keep the shape small and declarative. Anything richer should be a skill or
- * a dedicated workflow node, not a verify clause.
+ * `value` rules use `output_required` and `output_matches` (data-shape).
+ * `function` rules use `any_tool_called` / `all_tools_called` / `no_tool_called`
+ * (trace-shape). Mixing the two on a single rule is allowed for compactness
+ * but discouraged: a single evaluator should test a single thing.
  */
-export interface NodeVerify {
-  /** At least one of these tools was called and succeeded during this node. */
+export interface EvaluatorRule {
+  /** At least one of these tools was called and succeeded. (`function` rules.) */
   any_tool_called?: string[];
-  /** Every named tool was called and succeeded at least once during this node. */
+  /** Every named tool was called and succeeded at least once. (`function` rules.) */
   all_tools_called?: string[];
-  /** None of these tools may have been invoked during this node. */
+  /** None of these tools may have been invoked. (`function` rules.) */
   no_tool_called?: string[];
-  /** Listed paths must be present and non-null in `result.data` (see Path resolution in the spec). */
+  /** Listed paths must be present and non-null in `result.data`. (`value` rules.) */
   output_required?: string[];
-  /** Each assertion must hold against `result.data`. */
+  /** Each assertion must hold against `result.data`. (`value` rules.) */
   output_matches?: OutputMatch[];
+}
+
+/**
+ * A single evaluator on a node.
+ *
+ * - `value` and `function` use `rule`.
+ * - `judge` uses `rubric` (and optional `pass_when`, `model`).
+ *
+ * Each evaluator produces an {@link EvalResult}. The executor aggregates
+ * the results per the node's `eval_policy` (default `all_pass`).
+ */
+export interface Evaluator {
+  /** Stable identifier. Used in EvalResult and retry preambles. */
+  name: string;
+  /** Discriminator. Determines which fields apply. */
+  kind: EvaluatorKind;
+  /** Required for `value` / `function`. */
+  rule?: EvaluatorRule;
+  /** Required for `judge`. Natural-language criterion. */
+  rubric?: string;
+  /** `judge` only. Verdict token that indicates pass. Default: `"yes"`. */
+  pass_when?: string;
+  /** `judge` only. Override the judge model for this evaluator. */
+  model?: string;
+}
+
+/**
+ * Per-evaluator result.
+ *
+ * The executor produces one EvalResult per declared evaluator. The list
+ * lands on {@link NodeResult.evals}.
+ */
+export interface EvalResult {
+  /** Echoes the evaluator's name. */
+  name: string;
+  /** Echoes the evaluator's kind. */
+  kind: EvaluatorKind;
+  /** Whether this evaluator passed. */
+  pass: boolean;
+  /**
+   * Failure detail for value/function (formatted by the executor) or judge
+   * (returned by the model). Capped at ~500 characters when emitted.
+   */
+  reasoning?: string;
+  /** Reserved for `weighted` policies. Not populated in v1. */
+  score?: number;
 }
 
 /**
@@ -124,7 +172,7 @@ export interface NodeVerify {
  * Path roots resolve against the cross-node context map:
  *   { input: <runtime input>, [priorNodeId]: <data of prior node>, ... }
  *
- * Reuses the same path grammar as `verify` (dotted segments, `[*]` wildcard,
+ * Reuses the same path grammar as `eval` (dotted segments, `[*]` wildcard,
  * optional `all:`/`any:` prefix).
  */
 export interface NodeRequires {
@@ -137,15 +185,15 @@ export interface NodeRequires {
 }
 
 /**
- * Node-local retry on verify failure.
+ * Node-local retry on eval failure.
  *
  * Re-runs the LLM up to `max` additional times, prepending feedback derived
- * from the verify failure. Triggered ONLY by verify failure — not by tool/API
- * errors and not by `requires` failure.
+ * from the failing evaluators. Triggered ONLY by eval failure, not by tool
+ * / API errors and not by `requires` failure.
  *
  * `instruction` shapes the feedback preamble:
- *   - omitted        → default "## Previous attempt failed verification..."
- *   - string         → static text + verify error
+ *   - omitted        → default "## Previous attempt failed evaluation..."
+ *   - string         → static text + structured eval failure list
  *   - { auto: true } → LLM-generated diagnosis from default reflection prompt
  *   - { reflect: s } → LLM-generated diagnosis from author-provided prompt
  */
@@ -188,11 +236,15 @@ export interface Node {
   rules?: NodeSources;
   /** Per-node background knowledge. Additive by default; set `{ only: true, sources: [...] }` to block cascade. */
   context?: NodeSources;
-  /** Machine-checked post-conditions. Enforced by the executor after the LLM finishes. */
-  verify?: NodeVerify;
+  /** Named evaluators run after the LLM finishes. Each produces an {@link EvalResult}. */
+  eval?: Evaluator[];
+  /** How evaluator results aggregate. Default `all_pass`. v1 implements only `all_pass`. */
+  eval_policy?: EvalPolicy;
+  /** Default model for judge evaluators on this node. Overrides workflow-level `judge_model`. */
+  judge_model?: string;
   /** Machine-checked pre-conditions. Enforced by the executor before the LLM runs. */
   requires?: NodeRequires;
-  /** Node-local retry on verify failure (with optional autonomous reflection). */
+  /** Node-local retry on eval failure (with optional autonomous reflection). */
   retry?: NodeRetry;
 }
 
@@ -200,13 +252,13 @@ export interface Node {
 export interface Edge {
   from: string;
   to: string;
-  /** Natural language condition — Claude evaluates at runtime */
+  /** Natural language condition. Claude evaluates at runtime. */
   when?: string;
   /** Max times this edge can be followed (enables retry loops). Default: unlimited. */
   max_iterations?: number;
 }
 
-/** A complete workflow definition — pure data, fully serializable */
+/** A complete workflow definition. Pure data, fully serializable. */
 export interface Workflow {
   id: string;
   name: string;
@@ -219,6 +271,10 @@ export interface Workflow {
   rules?: _Source[];
   /** Background knowledge prepended to every node's instruction. Cascade into per-node context. */
   context?: _Source[];
+  /** Default model for judge evaluators across the workflow. Overridable per-node and per-evaluator. */
+  judge_model?: string;
+  /** Soft cap on expected judge calls per workflow run. Warning at load time when exceeded. */
+  judge_budget?: number;
 }
 
 /**
@@ -242,6 +298,12 @@ export interface NodeResult {
   data: Record<string, unknown>;
   /** Tool calls made during this node's execution */
   toolCalls: ToolCall[];
+  /**
+   * Per-evaluator results from `node.eval` (one entry per declared evaluator,
+   * in declaration order). Absent when the node has no `eval` block or when
+   * eval was not run (e.g. node failed during execution).
+   */
+  evals?: EvalResult[];
 }
 
 export interface ToolCall {
@@ -251,13 +313,13 @@ export interface ToolCall {
   /**
    * Authoritative outcome of the tool invocation.
    *
-   * When present, this is the source of truth for `verify` checks — the
+   * When present, this is the source of truth for `function` evaluators. The
    * output-shape heuristic is a legacy fallback only. Set by the Claude
    * runtime on tool completion: "success" when the tool returned normally,
    * "error" when it threw or the MCP server returned is_error=true.
    *
-   * Absent status indicates a legacy or hand-constructed ToolCall — verify
-   * falls back to inspecting `output` for an `error` key.
+   * Absent status indicates a legacy or hand-constructed ToolCall. Function
+   * evaluators fall back to inspecting `output` for an `error` key.
    */
   status?: "success" | "error";
 }
@@ -348,9 +410,13 @@ export interface Claude {
 
   /**
    * Single-completion free-text query. No tools, no output schema.
-   * Used by the executor to generate retry strategies in autonomous reflection mode.
+   * Used by the executor to generate retry strategies in autonomous reflection mode
+   * and by judge evaluators to score node results against a rubric.
+   *
+   * `model` overrides the client's default for this call. Implementations
+   * SHOULD use it; mocks MAY ignore it.
    */
-  ask(opts: { instruction: string; context: Record<string, unknown> }): Promise<string>;
+  ask(opts: { instruction: string; context: Record<string, unknown>; model?: string }): Promise<string>;
 }
 
 // ─── MCP Auto-injection ──────────────────────────────────────────

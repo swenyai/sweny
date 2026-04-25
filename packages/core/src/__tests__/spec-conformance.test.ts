@@ -1089,15 +1089,27 @@ describe("spec: JSON Schema", () => {
     expect(errors).toHaveLength(0);
   });
 
-  it("workflowJsonSchema declares verify, requires, and retry on node properties", () => {
+  it("workflowJsonSchema declares eval, eval_policy, requires, and retry on node properties", () => {
     const nodeProps = (workflowJsonSchema.properties.nodes as any).additionalProperties.properties;
-    expect(nodeProps.verify).toBeDefined();
+    expect(nodeProps.eval).toBeDefined();
+    expect(nodeProps.eval_policy).toBeDefined();
+    expect(nodeProps.eval_policy.enum).toEqual(["all_pass", "any_pass", "weighted"]);
     expect(nodeProps.requires).toBeDefined();
     expect(nodeProps.retry).toBeDefined();
     expect(nodeProps.requires.properties.output_required).toBeDefined();
     expect(nodeProps.requires.properties.on_fail.enum).toEqual(["fail", "skip"]);
     expect(nodeProps.retry.properties.max.type).toBe("integer");
     expect(nodeProps.retry.properties.instruction.oneOf).toBeDefined();
+  });
+
+  it("workflowJsonSchema declares Evaluator def with the three kinds", () => {
+    const evaluator = (workflowJsonSchema as any).$defs.Evaluator;
+    expect(evaluator).toBeDefined();
+    expect(evaluator.properties.kind.enum).toEqual(["value", "function", "judge"]);
+    expect(evaluator.properties.name).toBeDefined();
+    expect(evaluator.properties.rule).toBeDefined();
+    expect(evaluator.properties.rubric).toBeDefined();
+    expect(evaluator.properties.pass_when).toBeDefined();
   });
 });
 
