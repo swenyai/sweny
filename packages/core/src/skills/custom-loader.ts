@@ -13,7 +13,8 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 
-import type { Skill, SkillCategory, McpServerConfig, ConfigField } from "../types.js";
+import type { Skill, McpServerConfig, ConfigField } from "../types.js";
+import { SKILL_CATEGORIES, type SkillCategory } from "../types.js";
 import { builtinSkills, isSkillConfigured } from "./index.js";
 
 /** Directories to scan, in ascending priority order. Last match wins. */
@@ -134,9 +135,8 @@ function parseSkillMd(content: string, path: string): ParseResult {
     mcp?: Record<string, unknown>;
   };
 
-  const VALID_CATEGORIES: SkillCategory[] = ["general", "git", "tasks", "notification", "observability", "data"];
   const category: SkillCategory =
-    typeof fm.category === "string" && (VALID_CATEGORIES as string[]).includes(fm.category)
+    typeof fm.category === "string" && (SKILL_CATEGORIES as readonly string[]).includes(fm.category)
       ? (fm.category as SkillCategory)
       : "general";
 

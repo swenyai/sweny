@@ -21,12 +21,10 @@ import chalk from "chalk";
 
 import { builtinSkills } from "../skills/index.js";
 import { configuredSkillsWithDiagnostics, discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
+import { SKILL_CATEGORIES, type SkillCategory } from "../types.js";
 
 // Mirror of the loader's regex so authoring-side validation matches discovery.
 const VALID_SKILL_ID = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
-
-const VALID_CATEGORIES = ["general", "git", "tasks", "notification", "observability", "data"] as const;
-type SkillCategory = (typeof VALID_CATEGORIES)[number];
 
 const HARNESS_DIRS = {
   claude: ".claude/skills",
@@ -120,8 +118,8 @@ export function runSkillNew(idArg: string, options: NewOptions, cwd: string = pr
 
   const description = (options.description ?? `Custom ${id} skill`).trim();
   const category = (options.category ?? "general") as SkillCategory;
-  if (!VALID_CATEGORIES.includes(category)) {
-    console.error(chalk.red(`  Invalid category "${category}".\n  Allowed: ${VALID_CATEGORIES.join(", ")}`));
+  if (!SKILL_CATEGORIES.includes(category)) {
+    console.error(chalk.red(`  Invalid category "${category}".\n  Allowed: ${SKILL_CATEGORIES.join(", ")}`));
     process.exit(2);
     return;
   }
@@ -240,7 +238,7 @@ export function registerSkillCommand(program: Command): void {
     .command("new <id>")
     .description("Scaffold a new SKILL.md in .claude/skills/<id>/")
     .option("-d, --description <text>", "One-line description (required field in frontmatter)")
-    .option("-c, --category <category>", `Skill category (${VALID_CATEGORIES.join("|")})`, "general")
+    .option("-c, --category <category>", `Skill category (${SKILL_CATEGORIES.join("|")})`, "general")
     .option("--harness <harness>", `Where to place the skill (${Object.keys(HARNESS_DIRS).join("|")})`, "claude")
     .option("--force", "Overwrite an existing SKILL.md")
     .action((id: string, options: NewOptions) => runSkillNew(id, options));
