@@ -129,9 +129,16 @@ function parseSkillMd(content: string, path: string): ParseResult {
   const fm = raw as {
     name: string;
     description?: string;
+    category?: string;
     config?: Record<string, unknown>;
     mcp?: Record<string, unknown>;
   };
+
+  const VALID_CATEGORIES: SkillCategory[] = ["general", "git", "tasks", "notification", "observability", "data"];
+  const category: SkillCategory =
+    typeof fm.category === "string" && (VALID_CATEGORIES as string[]).includes(fm.category)
+      ? (fm.category as SkillCategory)
+      : "general";
 
   const id = String(fm.name);
   if (!VALID_SKILL_ID.test(id) || id.includes("--") || id.length > 64) {
@@ -183,7 +190,7 @@ function parseSkillMd(content: string, path: string): ParseResult {
       id,
       name: id,
       description: typeof fm.description === "string" ? fm.description : `Custom skill: ${id}`,
-      category: "general" as SkillCategory,
+      category,
       config,
       tools: [],
       instruction: instruction || undefined,

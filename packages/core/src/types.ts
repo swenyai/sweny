@@ -36,7 +36,7 @@ export interface ConfigField {
 }
 
 /** Skill categories — used for validation and grouping */
-export type SkillCategory = "git" | "observability" | "tasks" | "notification" | "general";
+export type SkillCategory = "git" | "observability" | "tasks" | "notification" | "data" | "general";
 
 /** A skill groups related tools with shared config requirements */
 export interface Skill {

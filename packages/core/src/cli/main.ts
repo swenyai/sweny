@@ -59,6 +59,7 @@ import {
 import { checkProviderConnectivity } from "./check.js";
 import { registerSetupCommand } from "./setup.js";
 import { registerPublishCommand } from "./publish.js";
+import { registerSkillCommand } from "./skill.js";
 import { reportToCloud } from "./cloud-report.js";
 import { runUpgrade, fetchLatestFromNpm } from "./upgrade.js";
 import { maybeNudge, defaultCachePath } from "./version-check.js";
@@ -138,6 +139,7 @@ program
 
 registerSetupCommand(program);
 registerPublishCommand(program);
+registerSkillCommand(program);
 
 // ── Credential map builder ──────────────────────────────────────────
 // buildCredentialMap lives in ./credentials.ts so tests can import it
@@ -700,15 +702,27 @@ export async function workflowRunAction(
   if (validation.errors.length > 0) {
     console.error(chalk.red(`\n  Workflow cannot run — missing required skills:\n`));
     for (const err of validation.errors) console.error(chalk.red(`    \u2717 ${err}`));
-    if (validation.missing.length > 0) {
-      console.error(chalk.dim(`\n  Set the missing env vars and try again:`));
-      for (const m of validation.missing) {
-        if (m.missingEnv.length > 0) {
-          console.error(chalk.dim(`    - ${m.id}: ${m.missingEnv.join(", ")}`));
-        }
+
+    const unknown = validation.missing.filter((m) => m.category === "unknown");
+    const envGaps = validation.missing.filter((m) => m.category !== "unknown" && m.missingEnv.length > 0);
+
+    if (unknown.length > 0) {
+      console.error(
+        chalk.dim(
+          `\n  These skill IDs aren't built-in or discovered in .{claude,sweny,agents,gemini}/skills/.\n  Scaffold one with:\n`,
+        ),
+      );
+      for (const m of unknown) {
+        console.error(chalk.dim(`    sweny skill new ${m.id}`));
       }
     }
-    console.error("");
+    if (envGaps.length > 0) {
+      console.error(chalk.dim(`\n  These skills are built-in but their env vars aren't set:`));
+      for (const m of envGaps) {
+        console.error(chalk.dim(`    - ${m.id}: ${m.missingEnv.join(", ")}`));
+      }
+    }
+    console.error(chalk.dim(`\n  Run \`sweny skill list\` to see what's available.\n`));
     process.exit(1);
     return;
   }
