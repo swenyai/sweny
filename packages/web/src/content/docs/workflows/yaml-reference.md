@@ -26,6 +26,12 @@ Each key in the `nodes` object is a node ID (an arbitrary string you choose). Th
 | `instruction` | string | Yes | -- | Natural language instruction telling Claude what to do at this step. |
 | `skills` | string[] | No | `[]` | Skill IDs whose tools should be available at this node. |
 | `output` | object | No | -- | JSON Schema for structured output validation. |
+| `eval` | array | No | -- | Named evaluators run after the LLM finishes. See [Eval reference on spec.sweny.ai](https://spec.sweny.ai/nodes/#eval). |
+| `requires` | object | No | -- | Pre-conditions evaluated before the LLM runs. See [Requires reference](https://spec.sweny.ai/nodes/#requires). |
+| `retry` | object | No | -- | Node-local retry on eval failure. See [Retry reference](https://spec.sweny.ai/nodes/#retry). |
+| `rules` | array \| object | No | inherited | Per-node directives, cascading from workflow level. See [Rules & Context](https://spec.sweny.ai/nodes/#rules--context). |
+| `context` | array \| object | No | inherited | Per-node background knowledge, cascading from workflow level. See [Rules & Context](https://spec.sweny.ai/nodes/#rules--context). |
+| `max_turns` | integer | No | implementation-defined | Cap on AI model turns for this node. See [Max Turns Semantics](https://spec.sweny.ai/nodes/#max-turns-semantics). |
 
 ### Instructions
 
@@ -211,70 +217,13 @@ Validation runs in two phases. First, structural checks (entry exists, edges ref
 
 SWEny publishes a static JSON Schema for workflow files. Use it for editor autocomplete, CI validation, or integration with other tools:
 
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://spec.sweny.ai/schemas/workflow.json",
-  "title": "SWEny Workflow",
-  "description": "A DAG workflow definition for skill-based orchestration",
-  "type": "object",
-  "required": ["id", "name", "nodes", "edges", "entry"],
-  "additionalProperties": false,
-  "properties": {
-    "id": { "type": "string", "minLength": 1 },
-    "name": { "type": "string", "minLength": 1 },
-    "description": { "type": "string" },
-    "entry": {
-      "type": "string",
-      "minLength": 1,
-      "description": "ID of the entry node"
-    },
-    "nodes": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "required": ["name", "instruction"],
-        "additionalProperties": false,
-        "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "instruction": {
-            "type": "string",
-            "minLength": 1,
-            "description": "What Claude should do at this node"
-          },
-          "skills": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "Skill IDs available at this node"
-          },
-          "output": {
-            "type": "object",
-            "description": "Optional JSON Schema for structured output"
-          }
-        }
-      }
-    },
-    "edges": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["from", "to"],
-        "additionalProperties": false,
-        "properties": {
-          "from": { "type": "string", "minLength": 1 },
-          "to": { "type": "string", "minLength": 1 },
-          "when": {
-            "type": "string",
-            "description": "Natural language condition — Claude evaluates at runtime"
-          }
-        }
-      }
-    }
-  }
-}
+```
+https://spec.sweny.ai/schemas/workflow.json
 ```
 
-Reference it in your YAML editor by adding a schema comment:
+The schema is generated from the same Zod types the runtime uses, so it always reflects the current `@sweny-ai/core` release. The full field reference, with all node sub-objects (`eval`, `requires`, `retry`, etc.), lives at [spec.sweny.ai/nodes](https://spec.sweny.ai/nodes/).
+
+Reference the schema in your YAML editor by adding a schema comment:
 
 ```yaml
 # yaml-language-server: $schema=https://spec.sweny.ai/schemas/workflow.json
