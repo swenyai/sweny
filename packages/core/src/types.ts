@@ -35,8 +35,16 @@ export interface ConfigField {
   env?: string;
 }
 
-/** Skill categories — used for validation and grouping */
-export type SkillCategory = "git" | "observability" | "tasks" | "notification" | "data" | "general";
+/**
+ * Skill categories: used for per-node validation and grouping.
+ *
+ * Single source of truth for runtime + compile-time. The `as const` tuple
+ * lets the CLI iterate it for help text and the loader use it for runtime
+ * validation; `SkillCategory` is derived so adding a category requires
+ * only this line.
+ */
+export const SKILL_CATEGORIES = ["general", "git", "tasks", "notification", "observability", "data"] as const;
+export type SkillCategory = (typeof SKILL_CATEGORIES)[number];
 
 /** A skill groups related tools with shared config requirements */
 export interface Skill {

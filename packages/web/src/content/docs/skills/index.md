@@ -42,6 +42,8 @@ Every skill belongs to a category. Categories are used for validation — the ex
 | `observability` | Logs, errors, metrics, incidents | [Sentry](/skills/sentry/), [Datadog](/skills/datadog/), [BetterStack](/skills/betterstack/) |
 | `tasks` | Issue tracking | [Linear](/skills/linear/) |
 | `notification` | Alerting the team | [Slack](/skills/slack/), [Notification](/skills/notification/) |
+| `data` | Embeddings, vector stores, databases, ETL | (custom skills) |
+| `general` | Catch-all when no other category fits | (custom skills) |
 
 ## Built-in skills
 

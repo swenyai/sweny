@@ -30,6 +30,7 @@ The `category` field classifies a skill's function. Valid values:
 | `observability` | Error tracking, logs, metrics, incident management.    |
 | `tasks`         | Issue tracking and project management.                 |
 | `notification`  | Messaging and alerting.                                |
+| `data`          | Embeddings, vector stores, databases, ETL.             |
 | `general`       | Catch-all for skills that don't fit other categories.  |
 
 ## Config Field Object
@@ -133,7 +134,15 @@ When writing TypeScript code, follow these standards:
 - Use PascalCase for types and interfaces
 ```
 
-The markdown body becomes the skill's `instruction` — injected into the node prompt when the skill is referenced. The `mcp` frontmatter field is a SWEny-specific extension for declaring an MCP server.
+The markdown body becomes the skill's `instruction`, injected into the node prompt when the skill is referenced. The `mcp`, `category`, and `config` frontmatter fields are SWEny-specific extensions:
+
+| Frontmatter field | Required | Description                                                                                                 |
+| ----------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `name`            | REQUIRED | Skill ID. MUST satisfy [Skill ID Conventions](#skill-id-conventions).                                       |
+| `description`     | OPTIONAL | One-line summary. Defaults to `Custom skill: <name>` when omitted.                                          |
+| `category`        | OPTIONAL | One of the [Skill Categories](#skill-categories). Defaults to `general` when omitted or invalid.            |
+| `config`          | OPTIONAL | Map of env-var-backed config fields with the same shape as the [Config Field Object](#config-field-object). |
+| `mcp`             | OPTIONAL | External MCP server definition with the same shape as [McpServerConfig](#mcpserverconfig-object).           |
 
 ### Multi-Harness Discovery
 

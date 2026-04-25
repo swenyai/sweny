@@ -331,7 +331,7 @@ sweny workflow edit my-workflow.yml
 
 ### sweny workflow list
 
-List all available skills that can be used in workflow nodes.
+List the skills currently configured (required env vars present) and available to workflow nodes.
 
 ```bash
 sweny workflow list [options]
@@ -341,7 +341,7 @@ sweny workflow list [options]
 |--------|-------------|---------|
 | `--json` | Output as JSON array | `false` |
 
-Prints each skill's ID, category, and description. Skills are the building blocks that workflow nodes reference via the `skills` field.
+Prints each configured skill's ID, category, and description. For the full picture (built-in plus custom, configured plus unconfigured), use [`sweny skill list`](#sweny-skill-list) instead.
 
 ## sweny e2e
 
@@ -371,6 +371,56 @@ sweny e2e run [file] [options]
 | `--timeout <ms>` | Timeout per workflow in milliseconds | `900000` (15 min) |
 
 Without a file argument, runs all `.yml` files in `.sweny/e2e/` sequentially. Loads `.env`, resolves template variables (`{base_url}`, `{test_email}`, `{run_id}`, etc.), and executes each workflow. Exits `0` if all pass, `1` if any fail.
+
+## sweny skill
+
+Author and inspect skills. Skills are the unit of capability a workflow node references via its `skills:` array. The CLI ships built-ins (`github`, `linear`, `slack`, ...) and discovers custom skills from `.{sweny,claude,agents,gemini}/skills/<id>/SKILL.md`.
+
+### sweny skill new
+
+Scaffold a `SKILL.md` template for a new custom skill.
+
+```bash
+sweny skill new <id> [options]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-d, --description <text>` | One-line description (becomes the `description:` frontmatter field). | `Custom <id> skill` |
+| `-c, --category <category>` | One of `general`, `git`, `tasks`, `notification`, `observability`, `data`. | `general` |
+| `--harness <name>` | Where to place the skill: `claude`, `sweny`, `agents`, `gemini`. | `claude` |
+| `--force` | Overwrite an existing `SKILL.md` instead of refusing. | off |
+
+The scaffold writes frontmatter (with commented-out `config:` and `mcp:` blocks ready to uncomment) and a body skeleton documenting when to use the skill, what it provides, common failure modes, and an example invocation. See [Custom Skills](/skills/custom/) for the full format.
+
+```bash
+sweny skill new voyage-embeddings -d "Embed text via Voyage AI" -c data
+# Created .claude/skills/voyage-embeddings/SKILL.md
+```
+
+Exit codes: `0` on success, `1` when the target file already exists and `--force` is not set, `2` for invalid id, category, or harness.
+
+### sweny skill list
+
+List built-in and custom skills together with their configuration status.
+
+```bash
+sweny skill list [--json]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--json` | Output the full list as JSON (for scripting). | off |
+
+Each row shows `✓` (required env vars present) or `·` (skill is discoverable but not configured), plus the skill's category and a `builtin` or `custom` tag. Custom skills that override a built-in id appear once, marked `custom`.
+
+```bash
+sweny skill list --json
+# [
+#   { "id": "github", "kind": "builtin", "category": "git", "configured": true, ... },
+#   { "id": "voyage-embeddings", "kind": "custom", "category": "data", "configured": false, ... }
+# ]
+```
 
 ## sweny publish
 

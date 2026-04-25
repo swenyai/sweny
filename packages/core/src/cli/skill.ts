@@ -21,12 +21,10 @@ import chalk from "chalk";
 
 import { builtinSkills } from "../skills/index.js";
 import { configuredSkillsWithDiagnostics, discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
+import { SKILL_CATEGORIES, type SkillCategory } from "../types.js";
 
 // Mirror of the loader's regex so authoring-side validation matches discovery.
 const VALID_SKILL_ID = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
-
-const VALID_CATEGORIES = ["general", "git", "tasks", "notification", "observability", "data"] as const;
-type SkillCategory = (typeof VALID_CATEGORIES)[number];
 
 const HARNESS_DIRS = {
   claude: ".claude/skills",
@@ -101,7 +99,12 @@ interface NewOptions {
   force?: boolean;
 }
 
-function runSkillNew(idArg: string, options: NewOptions): void {
+/**
+ * Action handler for `sweny skill new`. Exported for unit tests; production
+ * code goes through `registerSkillCommand`. `cwd` defaults to `process.cwd()`
+ * so the CLI works as expected; tests pass a tmp dir for isolation.
+ */
+export function runSkillNew(idArg: string, options: NewOptions, cwd: string = process.cwd()): void {
   const id = idArg.toLowerCase();
   if (!VALID_SKILL_ID.test(id) || id.includes("--") || id.length > 64) {
     console.error(
@@ -115,8 +118,8 @@ function runSkillNew(idArg: string, options: NewOptions): void {
 
   const description = (options.description ?? `Custom ${id} skill`).trim();
   const category = (options.category ?? "general") as SkillCategory;
-  if (!VALID_CATEGORIES.includes(category)) {
-    console.error(chalk.red(`  Invalid category "${category}".\n  Allowed: ${VALID_CATEGORIES.join(", ")}`));
+  if (!SKILL_CATEGORIES.includes(category)) {
+    console.error(chalk.red(`  Invalid category "${category}".\n  Allowed: ${SKILL_CATEGORIES.join(", ")}`));
     process.exit(2);
     return;
   }
@@ -129,7 +132,6 @@ function runSkillNew(idArg: string, options: NewOptions): void {
     return;
   }
 
-  const cwd = process.cwd();
   const skillDir = path.join(cwd, baseDir, id);
   const skillFile = path.join(skillDir, "SKILL.md");
 
@@ -157,17 +159,25 @@ interface ListOptions {
   json?: boolean;
 }
 
-function runSkillList(options: ListOptions): void {
-  const cwd = process.cwd();
-  // We want the FULL list — built-in + custom — even when env vars
-  // aren't set. configuredSkills filters by env, which hides authoring-
-  // time skills the user just scaffolded. So combine sources directly.
+/**
+ * Action handler for `sweny skill list`. Exported for unit tests; production
+ * code goes through `registerSkillCommand`. `cwd` and `env` injection lets
+ * tests exercise the configured-badge logic without polluting global state.
+ */
+export function runSkillList(
+  options: ListOptions,
+  cwd: string = process.cwd(),
+  env: Record<string, string | undefined> = process.env,
+): void {
+  // We want the FULL list (built-in + custom) even when env vars aren't set.
+  // configuredSkills filters by env, which hides authoring-time skills the
+  // user just scaffolded, so combine sources directly.
   const { skills: customSkills, warnings: customWarnings } = discoverSkillsWithDiagnostics(cwd);
   const customIds = new Set(customSkills.map((s) => s.id));
   const builtinList = builtinSkills.filter((s) => !customIds.has(s.id));
 
-  // Configured map drives the "configured?" badge — required env vars present.
-  const configuredIds = new Set(configuredSkillsWithDiagnostics(process.env, cwd).skills.map((s) => s.id));
+  // Configured map drives the "configured?" badge: required env vars present.
+  const configuredIds = new Set(configuredSkillsWithDiagnostics(env, cwd).skills.map((s) => s.id));
 
   if (options.json) {
     const data = [
@@ -228,7 +238,7 @@ export function registerSkillCommand(program: Command): void {
     .command("new <id>")
     .description("Scaffold a new SKILL.md in .claude/skills/<id>/")
     .option("-d, --description <text>", "One-line description (required field in frontmatter)")
-    .option("-c, --category <category>", `Skill category (${VALID_CATEGORIES.join("|")})`, "general")
+    .option("-c, --category <category>", `Skill category (${SKILL_CATEGORIES.join("|")})`, "general")
     .option("--harness <harness>", `Where to place the skill (${Object.keys(HARNESS_DIRS).join("|")})`, "claude")
     .option("--force", "Overwrite an existing SKILL.md")
     .action((id: string, options: NewOptions) => runSkillNew(id, options));

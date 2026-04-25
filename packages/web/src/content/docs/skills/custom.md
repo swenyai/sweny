@@ -7,6 +7,17 @@ description: Create custom instruction and MCP-backed skills for SWEny workflows
 
 Custom skills let you extend SWEny workflows with domain-specific expertise and external tool integrations. There are two approaches: **instruction skills** (natural language guidance) and **MCP skills** (external tool servers).
 
+## Scaffold a skill
+
+The fastest way to start: `sweny skill new <id>`. It writes `.claude/skills/<id>/SKILL.md` with templated frontmatter and a body skeleton.
+
+```bash
+sweny skill new voyage-embeddings -d "Embed text via Voyage AI" -c data
+sweny skill list   # confirms it discovers
+```
+
+Flags: `-d/--description`, `-c/--category` (`general|git|tasks|notification|observability|data`), `--harness` (`claude|sweny|agents|gemini`), `--force`. See [`sweny skill`](/cli/commands/#sweny-skill) for the full reference.
+
 ## SKILL.md Format
 
 Create a directory with a `SKILL.md` file:
@@ -35,9 +46,31 @@ When writing or reviewing TypeScript code:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | Yes | Skill ID. Lowercase letters, numbers, hyphens. Must match directory name. |
-| `description` | No | What this skill provides. Falls back to "Custom skill: {name}" if omitted. |
-| `mcp` | No | MCP server config (see below). |
+| `name` | Yes | Skill ID. Lowercase letters, numbers, hyphens (no consecutive `--`), max 64 chars. Must match the directory name. |
+| `description` | No | One-line summary shown in `sweny skill list`. Falls back to `Custom skill: <name>` if omitted. |
+| `category` | No | One of `general`, `git`, `tasks`, `notification`, `observability`, `data`. Drives per-node category validation. Defaults to `general` (also when the value is invalid). |
+| `config` | No | Map of env-var-backed config fields the skill needs (see below). |
+| `mcp` | No | MCP server config (see [MCP Skills](#mcp-skills)). |
+
+### Declaring required env vars
+
+If your skill needs environment variables, declare them under `config:`. `sweny check` and the workflow pre-flight use this to verify the env is set before running:
+
+```markdown
+---
+name: voyage-embeddings
+description: Embed text via Voyage AI
+category: data
+config:
+  VOYAGE_API_KEY:
+    description: API key for the Voyage AI embeddings service
+    required: true
+---
+
+When embedding documents, use `voyage-3-large` for retrieval and `voyage-3-lite` when latency matters.
+```
+
+The map key is the env var name. `description` is shown by `sweny check`; `required: true` makes the skill unavailable when the var is missing.
 
 ## Instruction Skills
 
