@@ -25,7 +25,7 @@
     },
     "category": {
       "type": "string",
-      "enum": ["git", "observability", "tasks", "notification", "general"],
+      "enum": ["git", "observability", "tasks", "notification", "data", "general"],
       "description": "Functional category."
     },
     "config": {

@@ -101,7 +101,12 @@ interface NewOptions {
   force?: boolean;
 }
 
-function runSkillNew(idArg: string, options: NewOptions): void {
+/**
+ * Action handler for `sweny skill new`. Exported for unit tests; production
+ * code goes through `registerSkillCommand`. `cwd` defaults to `process.cwd()`
+ * so the CLI works as expected; tests pass a tmp dir for isolation.
+ */
+export function runSkillNew(idArg: string, options: NewOptions, cwd: string = process.cwd()): void {
   const id = idArg.toLowerCase();
   if (!VALID_SKILL_ID.test(id) || id.includes("--") || id.length > 64) {
     console.error(
@@ -129,7 +134,6 @@ function runSkillNew(idArg: string, options: NewOptions): void {
     return;
   }
 
-  const cwd = process.cwd();
   const skillDir = path.join(cwd, baseDir, id);
   const skillFile = path.join(skillDir, "SKILL.md");
 
@@ -157,17 +161,25 @@ interface ListOptions {
   json?: boolean;
 }
 
-function runSkillList(options: ListOptions): void {
-  const cwd = process.cwd();
-  // We want the FULL list — built-in + custom — even when env vars
-  // aren't set. configuredSkills filters by env, which hides authoring-
-  // time skills the user just scaffolded. So combine sources directly.
+/**
+ * Action handler for `sweny skill list`. Exported for unit tests; production
+ * code goes through `registerSkillCommand`. `cwd` and `env` injection lets
+ * tests exercise the configured-badge logic without polluting global state.
+ */
+export function runSkillList(
+  options: ListOptions,
+  cwd: string = process.cwd(),
+  env: Record<string, string | undefined> = process.env,
+): void {
+  // We want the FULL list (built-in + custom) even when env vars aren't set.
+  // configuredSkills filters by env, which hides authoring-time skills the
+  // user just scaffolded, so combine sources directly.
   const { skills: customSkills, warnings: customWarnings } = discoverSkillsWithDiagnostics(cwd);
   const customIds = new Set(customSkills.map((s) => s.id));
   const builtinList = builtinSkills.filter((s) => !customIds.has(s.id));
 
-  // Configured map drives the "configured?" badge — required env vars present.
-  const configuredIds = new Set(configuredSkillsWithDiagnostics(process.env, cwd).skills.map((s) => s.id));
+  // Configured map drives the "configured?" badge: required env vars present.
+  const configuredIds = new Set(configuredSkillsWithDiagnostics(env, cwd).skills.map((s) => s.id));
 
   if (options.json) {
     const data = [

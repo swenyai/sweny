@@ -149,6 +149,28 @@ describe("skills registry", () => {
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
+  // Contract test for the CLI workflow-run error formatter. main.ts splits
+  // `result.missing` into "unknown" (scaffold-it path) vs "env-gap" (set-env-
+  // vars path) by checking `m.category === "unknown"`. If this contract
+  // changes, the CLI message degrades silently. Catch it here, not in prod.
+  it("validateWorkflowSkills tags unknown ids with category='unknown' and built-in env-gaps with their real category", () => {
+    const workflow = {
+      nodes: {
+        gather: { skills: ["github", "totally-made-up-skill"] },
+      },
+    };
+    // No env vars set, so `github` is built-in but not configured.
+    const available = createSkillMap([]);
+    const result = validateWorkflowSkills(workflow, available);
+
+    const made = result.missing.find((m) => m.id === "totally-made-up-skill");
+    expect(made?.category).toBe("unknown");
+
+    const github = result.missing.find((m) => m.id === "github");
+    expect(github?.category).toBe("git");
+    expect(github?.missingEnv).toContain("GITHUB_TOKEN");
+  });
+
   it("validateWorkflowSkills passes when all categories covered", () => {
     const workflow = {
       nodes: {

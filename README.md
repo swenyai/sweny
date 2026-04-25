@@ -88,7 +88,14 @@ $ sweny workflow create "audit our repo for security issues, \
 
 ## Custom skills
 
-Extend any workflow with your own skills. Create a `SKILL.md` with instructions or wire up an MCP server:
+Extend any workflow with your own skills. Scaffold one in a single command:
+
+```bash
+sweny skill new code-standards -d "Team TypeScript conventions"
+sweny skill list
+```
+
+Or write the file by hand at `.sweny/skills/code-standards/SKILL.md`:
 
 ```
 .sweny/skills/code-standards/SKILL.md
