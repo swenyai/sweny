@@ -46,18 +46,35 @@ When a fact lives in two places, pick one in this order:
 The guiding rule: a single hardcoded fact in two places is debt. Pay it
 when you see it.
 
+### Resolving spec vs runtime conflicts
+
+When the spec and runtime already disagree (S1 is the live example), pick
+the canonical side before centralizing. Defaults:
+
+- **Runtime is canonical** when the spec was written aspirationally or
+  hand-maintained without enforcement. Update the spec to match. This
+  is almost always the right choice.
+- **Spec is canonical** only when changing it would break published
+  contracts (SemVer-meaningful API users depend on). Then update the
+  runtime to be at least as strict.
+
+Loosening (runtime accepts more than the spec) is the safer direction:
+existing data passes both. Tightening risks breaking installed users.
+When tightening is required, ship it behind a deprecation window.
+
 ## Surfaces
 
 Listed worst-first by blast radius. Each surface is one PR-sized task.
 
 ### S1. Skill ID regex (HIGH, currently broken)
 
-Two declarations of the runtime regex:
+Three declarations of the runtime regex:
 
 - `packages/core/src/cli/skill.ts:27`: `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
 - `packages/core/src/skills/custom-loader.ts:24`: same regex
+- `packages/core/src/cli/publish.ts:25`: same regex (used by `sweny publish` to validate marketplace submissions)
 
-Both do an additional `id.includes("--")` check and a `length > 64` cap.
+All three do an additional `id.includes("--")` check and a `length > 64` cap.
 The published spec is divergent:
 
 - `spec/public/schemas/skill.json:14`: `^[a-z][a-z0-9-]*$`
