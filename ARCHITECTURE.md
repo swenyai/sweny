@@ -43,7 +43,7 @@ Each node declares `skills`, and SWEny wires only those skills' MCP servers into
 
 What SWEny does **not** scope: the underlying Claude Code subprocess runs with `permissionMode: "bypassPermissions"`, which keeps the built-in Bash/Read/Write/Edit tools available without permission prompting. This is intentional — SWEny targets CI-style autonomous runs where interactive approval is not an option, and the agent needs these capabilities to do the work. If you need a stricter sandbox, run the Action in a container that constrains the filesystem and network instead of looking for a flag inside SWEny.
 
-`verify` post-conditions are the primary mechanism for making a node's behavior auditable: `any_tool_called`, `all_tools_called`, `no_tool_called`, and `output_matches` are all checked against the actual recorded tool outcomes.
+`eval` evaluators are the primary mechanism for making a node's behavior auditable. Each node declares a list of named evaluators with `kind: value | function | judge`. `function` rules (`any_tool_called`, `all_tools_called`, `no_tool_called`) and `value` rules (`output_required`, `output_matches`) are checked deterministically against the recorded tool outcomes and structured output. `judge` evaluators call a small Claude model with a rubric for the conditional and semantic cases the deterministic kinds can't express. See [spec.sweny.ai/nodes/#eval](https://spec.sweny.ai/nodes/#eval).
 
 ### Skills
 
@@ -86,72 +86,9 @@ Users can override any auto-injected server with a pre-installed binary by setti
 
 ---
 
-## Future: Managed Execution (aws-cloud)
+## Where to look next
 
-> **Status:** Not live. This architecture was designed and partially built in the
-> [aws-cloud repo](https://github.com/swenyai/aws-cloud) but is not the current
-> cloud product. It represents a possible future direction — managed execution for
-> teams who don't want to run their own CI.
-
-### Open-Core Split
-
-**Open (this repo):**
-
-- **engine** — recipe runner, step execution, cycle detection
-- **providers** — all integrations (Datadog, Linear, GitHub, etc.)
-- **action** — GitHub Action wrapper
-- **cli** — `sweny` CLI for local/CI use
-- **agent** — Claude Code subprocess management
-
-**Open (worker):**
-
-- **worker** — the BullMQ job executor (queue consumer + runRecipe)
-  The worker is the open-source engine running inside a BullMQ queue consumer.
-  Customers can audit and verify exactly what runs on their data, and optionally
-  run the worker in their own VPC (BYO Worker tier).
-
-**Closed (managed platform):**
-
-- **API** — multi-tenant orchestration, billing, auth, org management
-- **UI** — dashboard, settings, job history, analytics
-- **Infrastructure** — deployment, scaling, monitoring
-
-### Why this split?
-
-The value of managed execution is NOT in the code that executes jobs (that's open).
-The value is in: managed execution, team collaboration, result history, integrations
-UI, compliance features (BYOK, TEE), and operational reliability.
-
-You can run the engine yourself for free. The managed platform handles it at scale,
-keeps it running, and gives your team visibility.
-
-### Job Execution Flow
-
-When the managed platform runs a job:
-
-1. The API dispatches a `WorkerJobPayload` onto a BullMQ queue
-2. The worker (open-source) picks up the job
-3. The worker fetches the bundle encryption key (BEK) from the internal API using a one-time job token
-4. The worker decrypts credentials in memory, clones the repo, and runs `runRecipe()` from `@sweny-ai/engine`
-5. The worker submits a structured `JobOutcome` back to the internal API
-6. The API persists job metadata and notifies the UI
-
-Steps 3–5 are the open-source worker. Steps 1, 2, and 6 are the closed platform.
-No proprietary business logic lives in the worker — it is pure engine orchestration.
-
-### Audit Path
-
-Customers who want to verify what ran on their data can:
-
-1. Check the open-source worker source at `packages/worker/` in the aws-cloud repo
-2. Compare the published Docker image digest against the build attestation in GitHub Releases
-3. Use `verify-build.sh` to verify a specific image was built from a known commit
-4. Run the worker themselves in their own VPC (BYO Worker tier)
-
-The `WorkerJobPayload` type defines the exact public interface: no billing info, no
-internal org state, no platform secrets cross this boundary.
-
-### Self-Hosted Worker
-
-See [docs/self-hosted-worker.md](docs/self-hosted-worker.md) for instructions on running
-the worker in your own infrastructure (applies to the aws-cloud managed execution model).
+- [spec.sweny.ai](https://spec.sweny.ai) — the formal workflow specification (nodes, edges, eval, requires, retry, sources, skills).
+- [docs.sweny.ai](https://docs.sweny.ai) — narrative guides, getting-started flows, CLI reference.
+- [`packages/core/src/mcp-catalog.ts`](packages/core/src/mcp-catalog.ts) — single source of truth for skill ↔ MCP wiring.
+- [`docs/architecture.md`](docs/architecture.md) — archived design notes (predates the current workflow/skill model; preserved for historical context only).
