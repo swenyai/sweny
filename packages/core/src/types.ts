@@ -46,6 +46,44 @@ export interface ConfigField {
 export const SKILL_CATEGORIES = ["general", "git", "tasks", "notification", "observability", "data"] as const;
 export type SkillCategory = (typeof SKILL_CATEGORIES)[number];
 
+/**
+ * Skill harness directories, listed in ascending priority order.
+ *
+ * Both the loader (which scans these directories last-wins for ID
+ * collisions) and the CLI (which writes scaffolds into one of them)
+ * must agree on this list. A divergence means scaffolded skills land
+ * somewhere the loader doesn't read, or the loader reads from a
+ * directory the CLI can't target.
+ *
+ * Order matters: the loader treats later entries as higher priority,
+ * so `.sweny/skills/` overrides `.claude/skills/` on a name collision.
+ */
+export const SKILL_HARNESSES = [
+  { key: "gemini", path: ".gemini/skills" },
+  { key: "agents", path: ".agents/skills" },
+  { key: "claude", path: ".claude/skills" },
+  { key: "sweny", path: ".sweny/skills" },
+] as const;
+export type SkillHarnessKey = (typeof SKILL_HARNESSES)[number]["key"];
+
+/**
+ * Skill ID validation rules, declared once for runtime + spec.
+ *
+ * The pattern excludes consecutive hyphens via a negative lookahead so a
+ * single regex is the whole rule. JSON Schema regex follows ECMA 262, which
+ * supports lookaheads, so the spec can embed this string directly.
+ *
+ * Length cap is enforced separately because JSON Schema's `maxLength` is
+ * the canonical place to express it (vs. cramming `{1,64}` into the regex).
+ */
+export const SKILL_ID_PATTERN = /^(?!.*--)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+export const SKILL_ID_MAX_LENGTH = 64;
+
+/** True when `id` is a structurally valid skill ID under the rules above. */
+export function isValidSkillId(id: string): boolean {
+  return typeof id === "string" && id.length > 0 && id.length <= SKILL_ID_MAX_LENGTH && SKILL_ID_PATTERN.test(id);
+}
+
 /** A skill groups related tools with shared config requirements */
 export interface Skill {
   id: string;
@@ -98,10 +136,20 @@ export interface Skill {
 export type NodeSources = _Source[] | { only?: boolean; sources: _Source[] };
 
 /** Kind of evaluator. See {@link Evaluator}. */
-export type EvaluatorKind = "value" | "function" | "judge";
+export const EVALUATOR_KINDS = ["value", "function", "judge"] as const;
+export type EvaluatorKind = (typeof EVALUATOR_KINDS)[number];
 
 /** Aggregation policy for a node's evaluator results. v1 implements `all_pass`. */
-export type EvalPolicy = "all_pass" | "any_pass" | "weighted";
+export const EVAL_POLICIES = ["all_pass", "any_pass", "weighted"] as const;
+export type EvalPolicy = (typeof EVAL_POLICIES)[number];
+
+/** Action when a `requires` precondition fails. */
+export const REQUIRES_ON_FAIL = ["fail", "skip"] as const;
+export type RequiresOnFail = (typeof REQUIRES_ON_FAIL)[number];
+
+/** MCP server transport type. Inferred from command/url when omitted. */
+export const MCP_TRANSPORTS = ["stdio", "http"] as const;
+export type McpTransport = (typeof MCP_TRANSPORTS)[number];
 
 /**
  * The deterministic rule body for a `value` or `function` evaluator.

@@ -14,14 +14,16 @@ import { join } from "node:path";
 import YAML from "yaml";
 
 import type { Skill, McpServerConfig, ConfigField } from "../types.js";
-import { SKILL_CATEGORIES, type SkillCategory } from "../types.js";
+import { SKILL_CATEGORIES, SKILL_HARNESSES, isValidSkillId, type SkillCategory } from "../types.js";
 import { builtinSkills, isSkillConfigured } from "./index.js";
 
-/** Directories to scan, in ascending priority order. Last match wins. */
-const SKILL_DIRS = [".gemini/skills", ".agents/skills", ".claude/skills", ".sweny/skills"];
-
-/** Valid skill ID: lowercase alphanumeric + hyphens, no leading/trailing/consecutive hyphens, max 64 chars. */
-const VALID_SKILL_ID = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+/**
+ * Directories to scan, in ascending priority order. Last match wins.
+ *
+ * Derived from {@link SKILL_HARNESSES} so the loader and the CLI authoring
+ * side cannot disagree on what counts as a skill harness directory.
+ */
+const SKILL_DIRS: readonly string[] = SKILL_HARNESSES.map((h) => h.path);
 
 /**
  * Diagnostic emitted when a SKILL.md file is skipped or overridden during
@@ -141,7 +143,7 @@ function parseSkillMd(content: string, path: string): ParseResult {
       : "general";
 
   const id = String(fm.name);
-  if (!VALID_SKILL_ID.test(id) || id.includes("--") || id.length > 64) {
+  if (!isValidSkillId(id)) {
     return {
       kind: "err",
       diagnostic: {

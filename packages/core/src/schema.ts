@@ -9,6 +9,15 @@
 
 import { z } from "zod";
 import type { Workflow } from "./types.js";
+import {
+  EVALUATOR_KINDS,
+  EVAL_POLICIES,
+  MCP_TRANSPORTS,
+  REQUIRES_ON_FAIL,
+  SKILL_CATEGORIES,
+  SKILL_ID_MAX_LENGTH,
+  SKILL_ID_PATTERN,
+} from "./types.js";
 import { sourceZ } from "./sources.js";
 export { sourceZ };
 
@@ -33,11 +42,11 @@ export const toolZ = z.object({
   input_schema: jsonSchemaZ,
 });
 
-export const skillCategoryZ = z.enum(["git", "observability", "tasks", "notification", "general"]);
+export const skillCategoryZ = z.enum(SKILL_CATEGORIES);
 
 export const mcpServerConfigZ = z
   .object({
-    type: z.enum(["stdio", "http"]).optional(),
+    type: z.enum(MCP_TRANSPORTS).optional(),
     command: z.string().optional(),
     args: z.array(z.string()).optional(),
     url: z.string().optional(),
@@ -106,9 +115,9 @@ export const outputMatchZ = z
     { message: "output_matches entry must declare exactly one of: equals, in, matches" },
   );
 
-export const evaluatorKindZ = z.enum(["value", "function", "judge"]);
+export const evaluatorKindZ = z.enum(EVALUATOR_KINDS);
 
-export const evalPolicyZ = z.enum(["all_pass", "any_pass", "weighted"]);
+export const evalPolicyZ = z.enum(EVAL_POLICIES);
 
 export const evaluatorRuleZ = z
   .object({
@@ -194,7 +203,7 @@ export const nodeRequiresZ = z
   .object({
     output_required: z.array(z.string().min(1)).min(1).optional(),
     output_matches: z.array(outputMatchZ).min(1).optional(),
-    on_fail: z.enum(["fail", "skip"]).optional(),
+    on_fail: z.enum(REQUIRES_ON_FAIL).optional(),
   })
   .strict()
   .refine((r) => r.output_required !== undefined || r.output_matches !== undefined, {
@@ -546,7 +555,7 @@ export const workflowJsonSchema = {
           minLength: 1,
           description: "Stable identifier for this evaluator. Used in EvalResult and retry preambles.",
         },
-        kind: { type: "string", enum: ["value", "function", "judge"] },
+        kind: { type: "string", enum: [...EVALUATOR_KINDS] },
         rule: {
           type: "object",
           description: "Required for value and function kinds. Shape depends on kind.",
@@ -656,7 +665,7 @@ export const workflowJsonSchema = {
           },
           eval_policy: {
             type: "string",
-            enum: ["all_pass", "any_pass", "weighted"],
+            enum: [...EVAL_POLICIES],
             default: "all_pass",
             description: "How evaluator results aggregate. v1 implements all_pass; the others are reserved.",
           },
@@ -683,7 +692,7 @@ export const workflowJsonSchema = {
                 items: { $ref: "#/$defs/OutputMatch" },
                 minItems: 1,
               },
-              on_fail: { type: "string", enum: ["fail", "skip"] },
+              on_fail: { type: "string", enum: [...REQUIRES_ON_FAIL] },
             },
           },
           retry: {
@@ -754,7 +763,7 @@ export const workflowJsonSchema = {
             // Round 2: reject unknown keys to match Zod mcpServerConfigZ.strict().
             additionalProperties: false,
             properties: {
-              type: { type: "string", enum: ["stdio", "http"] },
+              type: { type: "string", enum: [...MCP_TRANSPORTS] },
               command: { type: "string" },
               args: { type: "array", items: { type: "string" } },
               url: { type: "string" },
@@ -762,6 +771,148 @@ export const workflowJsonSchema = {
               env: { type: "object", additionalProperties: { type: "string" } },
             },
           },
+        },
+      },
+    },
+  },
+} as const;
+
+/**
+ * Skill JSON Schema, generated from runtime constants.
+ *
+ * Companion to {@link workflowJsonSchema}: published at
+ * https://spec.sweny.ai/schemas/skill.json by the
+ * `write-public-schema.mjs` build step. Validates the structural shape
+ * of a Skill (id, name, description, category, config, plus optional
+ * tools/instruction/mcp).
+ *
+ * Every enum and the `id` pattern + maxLength are imported from
+ * `types.ts` so adding a category, harness, transport, or changing the
+ * id rule updates the published schema with no manual sync.
+ */
+export const skillJsonSchema = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "https://spec.sweny.ai/schemas/skill.json",
+  title: "SWEny Skill",
+  description: "A composable tool bundle that provides capabilities to workflow nodes.",
+  type: "object",
+  required: ["id", "name", "description", "category", "config"],
+  anyOf: [{ required: ["tools"] }, { required: ["instruction"] }, { required: ["mcp"] }],
+  additionalProperties: false,
+  properties: {
+    id: {
+      type: "string",
+      minLength: 1,
+      maxLength: SKILL_ID_MAX_LENGTH,
+      pattern: SKILL_ID_PATTERN.source,
+      description: "Unique skill identifier. Referenced by nodes' skills arrays. Lowercase kebab-case recommended.",
+    },
+    name: {
+      type: "string",
+      minLength: 1,
+      description: "Human-readable skill name.",
+    },
+    description: {
+      type: "string",
+      description: "What this skill provides.",
+    },
+    category: {
+      type: "string",
+      enum: [...SKILL_CATEGORIES],
+      description: "Functional category.",
+    },
+    config: {
+      type: "object",
+      description: "Configuration fields required by this skill.",
+      additionalProperties: { $ref: "#/$defs/ConfigField" },
+    },
+    tools: {
+      type: "array",
+      description: "Tools this skill provides to nodes.",
+      items: { $ref: "#/$defs/Tool" },
+    },
+    instruction: {
+      type: "string",
+      description: "Natural language expertise injected into the node prompt when this skill is referenced.",
+    },
+    mcp: {
+      $ref: "#/$defs/McpServerConfig",
+      description: "External MCP server definition wired for nodes referencing this skill.",
+    },
+  },
+  $defs: {
+    ConfigField: {
+      type: "object",
+      required: ["description"],
+      additionalProperties: false,
+      properties: {
+        description: {
+          type: "string",
+          description: "Human-readable description of this config field.",
+        },
+        required: {
+          type: "boolean",
+          default: false,
+          description: "Whether this field must be provided for the skill to function.",
+        },
+        env: {
+          type: "string",
+          description: "Default environment variable to read this value from.",
+        },
+      },
+    },
+    Tool: {
+      type: "object",
+      required: ["name", "description", "input_schema"],
+      additionalProperties: false,
+      properties: {
+        name: {
+          type: "string",
+          description: "Tool name. Must be unique within the skill.",
+        },
+        description: {
+          type: "string",
+          description: "What this tool does. Provided to the AI model for tool selection.",
+        },
+        input_schema: {
+          type: "object",
+          description: "JSON Schema defining the tool's input parameters.",
+        },
+      },
+    },
+    McpServerConfig: {
+      type: "object",
+      description: "External MCP server definition.",
+      additionalProperties: false,
+      properties: {
+        type: {
+          type: "string",
+          enum: [...MCP_TRANSPORTS],
+          description: "Transport type. Inferred from presence of command (stdio) or url (http) when omitted.",
+        },
+        command: {
+          type: "string",
+          description: "Spawn command (stdio transport).",
+        },
+        args: {
+          type: "array",
+          items: { type: "string" },
+          description: "Arguments for the command.",
+        },
+        url: {
+          type: "string",
+          format: "uri",
+          description: "HTTP endpoint (HTTP transport).",
+        },
+        headers: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: "HTTP headers (HTTP transport only).",
+        },
+        env: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: "Environment variable names the server needs. Values are descriptions, not secrets.",
         },
       },
     },
