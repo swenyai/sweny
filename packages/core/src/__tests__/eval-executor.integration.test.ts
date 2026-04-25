@@ -43,8 +43,8 @@ function fakeClaude(opts: {
   const claude: Claude = {
     async run(runOpts) {
       const nodeId = Object.keys(opts.results ?? {}).find((id) => runOpts.instruction.includes(id));
-      const result = nodeId ? opts.results![nodeId] : { status: "success", data: {}, toolCalls: [] };
-      return result;
+      const fallback: NodeResult = { status: "success", data: {}, toolCalls: [] };
+      return nodeId ? opts.results![nodeId]! : fallback;
     },
     async evaluate(evalOpts) {
       if (opts.evaluateChoice) return opts.evaluateChoice(evalOpts.choices);
