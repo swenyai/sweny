@@ -1,5 +1,6 @@
 id: implement
 name: Implement Fix
+workflow_type: pr_review
 description: Implement a code fix for an issue and open a pull request
 entry: analyze
 nodes:

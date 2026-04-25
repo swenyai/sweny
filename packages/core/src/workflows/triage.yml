@@ -1,5 +1,6 @@
 id: triage
 name: Alert Triage
+workflow_type: pr_review
 description: Investigate a production alert, determine root cause, create an issue, implement a fix, and notify the team
 entry: gather
 nodes:

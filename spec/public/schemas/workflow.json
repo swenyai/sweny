@@ -244,6 +244,11 @@
       },
       "description": "Background knowledge prepended to every node's instruction."
     },
+    "workflow_type": {
+      "type": "string",
+      "enum": ["pr_review", "e2e_test", "content_generation", "monitor", "data_sync", "generic"],
+      "description": "Workflow type discriminator. Cloud uses this to route runs to a type-specific renderer. Optional; absence defaults to 'generic'."
+    },
     "judge_model": {
       "type": "string",
       "minLength": 1,
