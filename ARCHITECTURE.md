@@ -91,4 +91,3 @@ Users can override any auto-injected server with a pre-installed binary by setti
 - [spec.sweny.ai](https://spec.sweny.ai) — the formal workflow specification (nodes, edges, eval, requires, retry, sources, skills).
 - [docs.sweny.ai](https://docs.sweny.ai) — narrative guides, getting-started flows, CLI reference.
 - [`packages/core/src/mcp-catalog.ts`](packages/core/src/mcp-catalog.ts) — single source of truth for skill ↔ MCP wiring.
-- [`docs/architecture.md`](docs/architecture.md) — archived design notes (predates the current workflow/skill model; preserved for historical context only).
