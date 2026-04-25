@@ -11,7 +11,7 @@
 
 ---
 
-> **Read `docs/architecture.md` before writing a new skill.**
+> **Read [docs.sweny.ai/advanced/architecture](https://docs.sweny.ai/advanced/architecture/) before writing a new skill.**
 > Most new integrations should be MCP server configs, not custom skills.
 > Only write a skill when a workflow node needs a typed return value from the operation.
 
