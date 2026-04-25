@@ -21,18 +21,20 @@ import chalk from "chalk";
 
 import { builtinSkills } from "../skills/index.js";
 import { configuredSkillsWithDiagnostics, discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
-import { SKILL_CATEGORIES, type SkillCategory } from "../types.js";
+import {
+  SKILL_CATEGORIES,
+  SKILL_HARNESSES,
+  isValidSkillId,
+  type SkillCategory,
+  type SkillHarnessKey,
+} from "../types.js";
 
-// Mirror of the loader's regex so authoring-side validation matches discovery.
-const VALID_SKILL_ID = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
-
-const HARNESS_DIRS = {
-  claude: ".claude/skills",
-  sweny: ".sweny/skills",
-  agents: ".agents/skills",
-  gemini: ".gemini/skills",
-} as const;
-type HarnessKey = keyof typeof HARNESS_DIRS;
+// Lookup table: harness key -> directory. Built once from SKILL_HARNESSES so
+// the CLI cannot drift from the loader's scan list.
+const HARNESS_DIRS: Record<SkillHarnessKey, string> = Object.fromEntries(
+  SKILL_HARNESSES.map((h) => [h.key, h.path]),
+) as Record<SkillHarnessKey, string>;
+const HARNESS_KEYS: readonly SkillHarnessKey[] = SKILL_HARNESSES.map((h) => h.key);
 
 /** Build the SKILL.md body for a fresh scaffold. Exported for tests. */
 export function renderSkillTemplate(opts: { id: string; description: string; category: SkillCategory }): string {
@@ -95,7 +97,7 @@ export function renderSkillTemplate(opts: { id: string; description: string; cat
 interface NewOptions {
   description?: string;
   category?: string;
-  harness?: HarnessKey;
+  harness?: SkillHarnessKey;
   force?: boolean;
 }
 
@@ -106,7 +108,7 @@ interface NewOptions {
  */
 export function runSkillNew(idArg: string, options: NewOptions, cwd: string = process.cwd()): void {
   const id = idArg.toLowerCase();
-  if (!VALID_SKILL_ID.test(id) || id.includes("--") || id.length > 64) {
+  if (!isValidSkillId(id)) {
     console.error(
       chalk.red(
         `  Invalid skill id "${idArg}".\n  Skill ids must be lowercase alphanumeric + hyphens (no consecutive hyphens), max 64 chars.`,
@@ -127,7 +129,7 @@ export function runSkillNew(idArg: string, options: NewOptions, cwd: string = pr
   const harness = options.harness ?? "claude";
   const baseDir = HARNESS_DIRS[harness];
   if (!baseDir) {
-    console.error(chalk.red(`  Unknown harness "${harness}". Allowed: ${Object.keys(HARNESS_DIRS).join(", ")}`));
+    console.error(chalk.red(`  Unknown harness "${harness}". Allowed: ${HARNESS_KEYS.join(", ")}`));
     process.exit(2);
     return;
   }
@@ -239,7 +241,7 @@ export function registerSkillCommand(program: Command): void {
     .description("Scaffold a new SKILL.md in .claude/skills/<id>/")
     .option("-d, --description <text>", "One-line description (required field in frontmatter)")
     .option("-c, --category <category>", `Skill category (${SKILL_CATEGORIES.join("|")})`, "general")
-    .option("--harness <harness>", `Where to place the skill (${Object.keys(HARNESS_DIRS).join("|")})`, "claude")
+    .option("--harness <harness>", `Where to place the skill (${HARNESS_KEYS.join("|")})`, "claude")
     .option("--force", "Overwrite an existing SKILL.md")
     .action((id: string, options: NewOptions) => runSkillNew(id, options));
 

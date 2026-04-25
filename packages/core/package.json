@@ -50,7 +50,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude 'src/__tests__/integration/**' --exclude 'dist/**'",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "check:schema-drift": "node scripts/write-public-schema.mjs && git diff --exit-code -- ../../spec/public/schemas/workflow.json"
+    "check:schema-drift": "node scripts/write-public-schema.mjs && git diff --exit-code -- ../../spec/public/schemas/workflow.json ../../spec/public/schemas/skill.json"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.114",

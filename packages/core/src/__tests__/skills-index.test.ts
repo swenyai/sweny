@@ -1,6 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   github,
   linear,
@@ -14,7 +12,6 @@ import {
   isSkillConfigured,
   validateWorkflowSkills,
 } from "../skills/index.js";
-import { SKILL_CATEGORIES } from "../types.js";
 
 describe("skills registry", () => {
   it("exports all builtin skills", () => {
@@ -188,15 +185,9 @@ describe("skills registry", () => {
     expect(result.configured).toHaveLength(2);
   });
 
-  // Drift catcher: the published JSON Schema's `category` enum MUST match the
-  // runtime SKILL_CATEGORIES list. The original `data` bug landed because
-  // these two sources diverged silently. This test fails loudly the next time.
-  it("SKILL_CATEGORIES matches the published spec schema enum", () => {
-    const schemaPath = join(__dirname, "../../../../spec/public/schemas/skill.json");
-    const schema = JSON.parse(readFileSync(schemaPath, "utf-8"));
-    const enumValues = schema.properties.category.enum as string[];
-    expect([...SKILL_CATEGORIES].sort()).toEqual([...enumValues].sort());
-  });
+  // Drift catcher for SKILL_CATEGORIES vs the published schema lives in
+  // contract-tests.test.ts alongside the rest of the cross-source-of-truth
+  // invariants. See docs/hardening/contract-tests.md.
 
   it("config fields have env vars matching canonical names", () => {
     // Datadog should use DD_* prefix

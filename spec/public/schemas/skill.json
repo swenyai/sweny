@@ -5,13 +5,24 @@
   "description": "A composable tool bundle that provides capabilities to workflow nodes.",
   "type": "object",
   "required": ["id", "name", "description", "category", "config"],
-  "anyOf": [{ "required": ["tools"] }, { "required": ["instruction"] }, { "required": ["mcp"] }],
+  "anyOf": [
+    {
+      "required": ["tools"]
+    },
+    {
+      "required": ["instruction"]
+    },
+    {
+      "required": ["mcp"]
+    }
+  ],
   "additionalProperties": false,
   "properties": {
     "id": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^[a-z][a-z0-9-]*$",
+      "maxLength": 64,
+      "pattern": "^(?!.*--)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
       "description": "Unique skill identifier. Referenced by nodes' skills arrays. Lowercase kebab-case recommended."
     },
     "name": {
@@ -25,7 +36,7 @@
     },
     "category": {
       "type": "string",
-      "enum": ["git", "observability", "tasks", "notification", "data", "general"],
+      "enum": ["general", "git", "tasks", "notification", "observability", "data"],
       "description": "Functional category."
     },
     "config": {
@@ -94,6 +105,7 @@
     "McpServerConfig": {
       "type": "object",
       "description": "External MCP server definition.",
+      "additionalProperties": false,
       "properties": {
         "type": {
           "type": "string",
@@ -106,7 +118,9 @@
         },
         "args": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Arguments for the command."
         },
         "url": {
@@ -116,16 +130,19 @@
         },
         "headers": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "HTTP headers (HTTP transport only)."
         },
         "env": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "Environment variable names the server needs. Values are descriptions, not secrets."
         }
-      },
-      "additionalProperties": false
+      }
     }
   }
 }

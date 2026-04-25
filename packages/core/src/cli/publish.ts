@@ -17,12 +17,11 @@ import type { Command } from "commander";
 import { parseWorkflow, validateWorkflow } from "../schema.js";
 import { builtinSkills } from "../skills/index.js";
 import { discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
+import { isValidSkillId } from "../types.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
 const VALID_CATEGORIES = ["triage", "security", "devops", "code-review", "testing", "content", "ops"] as const;
-
-const VALID_SKILL_ID = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 export interface PublishResult {
   type: "workflow" | "skill";
@@ -156,8 +155,10 @@ export function validateSkillDir(dirPath: string): {
   const id = String(fm.name ?? "");
   if (!id) {
     errors.push("Missing 'name' field in frontmatter");
-  } else if (!VALID_SKILL_ID.test(id) || id.includes("--") || id.length > 64) {
-    errors.push(`Invalid skill ID: "${id}" — must be lowercase, hyphens, no consecutive hyphens, max 64 chars`);
+  } else if (!isValidSkillId(id)) {
+    errors.push(
+      `Invalid skill ID: "${id}" (must be lowercase alphanumeric + hyphens, no consecutive hyphens, max 64 chars)`,
+    );
   }
 
   // Check directory name matches skill name
