@@ -76,6 +76,141 @@
           }
         }
       ]
+    },
+    "OutputMatch": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "equals": {},
+        "in": {
+          "type": "array"
+        },
+        "matches": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["equals"]
+        },
+        {
+          "required": ["in"]
+        },
+        {
+          "required": ["matches"]
+        }
+      ]
+    },
+    "Evaluator": {
+      "type": "object",
+      "required": ["name", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identifier for this evaluator. Used in EvalResult and retry preambles."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["value", "function", "judge"]
+        },
+        "rule": {
+          "type": "object",
+          "description": "Required for value and function kinds. Shape depends on kind.",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "any_tool_called": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "all_tools_called": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "no_tool_called": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "output_required": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "output_matches": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/OutputMatch"
+              },
+              "minItems": 1
+            }
+          }
+        },
+        "rubric": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required for judge kind. Natural-language criterion the judge model evaluates."
+        },
+        "pass_when": {
+          "type": "string",
+          "minLength": 1,
+          "default": "yes",
+          "description": "judge only. Verdict token that indicates pass. Default 'yes'."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "judge only. Override the judge model for this evaluator."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": ["value", "function"]
+              }
+            }
+          },
+          "then": {
+            "required": ["rule"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "judge"
+              }
+            }
+          },
+          "then": {
+            "required": ["rubric"]
+          }
+        }
+      ]
     }
   },
   "properties": {
@@ -108,6 +243,18 @@
         "$ref": "#/$defs/Source"
       },
       "description": "Background knowledge prepended to every node's instruction."
+    },
+    "judge_model": {
+      "type": "string",
+      "minLength": 1,
+      "default": "claude-haiku-4-5",
+      "description": "Default model for judge evaluators across the workflow. Overridable per-node and per-evaluator."
+    },
+    "judge_budget": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 50,
+      "description": "Soft cap on expected judge calls per workflow run. Executor warns at load time if exceeded; not a hard runtime cap in v1."
     },
     "nodes": {
       "type": "object",
@@ -148,79 +295,24 @@
             "$ref": "#/$defs/NodeSources",
             "description": "Per-node context. Additive by default; set { only: true } to block cascade."
           },
-          "verify": {
-            "type": "object",
-            "description": "Machine-checked post-conditions evaluated after the LLM finishes.",
-            "additionalProperties": false,
-            "minProperties": 1,
-            "properties": {
-              "any_tool_called": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "minItems": 1
-              },
-              "all_tools_called": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "minItems": 1
-              },
-              "no_tool_called": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "minItems": 1
-              },
-              "output_required": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "minItems": 1
-              },
-              "output_matches": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "required": ["path"],
-                  "additionalProperties": false,
-                  "properties": {
-                    "path": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "equals": {},
-                    "in": {
-                      "type": "array"
-                    },
-                    "matches": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "oneOf": [
-                    {
-                      "required": ["equals"]
-                    },
-                    {
-                      "required": ["in"]
-                    },
-                    {
-                      "required": ["matches"]
-                    }
-                  ]
-                },
-                "minItems": 1
-              }
-            }
+          "eval": {
+            "type": "array",
+            "description": "Named evaluators (value, function, judge) run after the LLM finishes the node.",
+            "items": {
+              "$ref": "#/$defs/Evaluator"
+            },
+            "minItems": 1
+          },
+          "eval_policy": {
+            "type": "string",
+            "enum": ["all_pass", "any_pass", "weighted"],
+            "default": "all_pass",
+            "description": "How evaluator results aggregate. v1 implements all_pass; the others are reserved."
+          },
+          "judge_model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Default model for judge evaluators on this node. Overrides workflow-level judge_model."
           },
           "requires": {
             "type": "object",
@@ -246,34 +338,7 @@
               "output_matches": {
                 "type": "array",
                 "items": {
-                  "type": "object",
-                  "required": ["path"],
-                  "additionalProperties": false,
-                  "properties": {
-                    "path": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "equals": {},
-                    "in": {
-                      "type": "array"
-                    },
-                    "matches": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "oneOf": [
-                    {
-                      "required": ["equals"]
-                    },
-                    {
-                      "required": ["in"]
-                    },
-                    {
-                      "required": ["matches"]
-                    }
-                  ]
+                  "$ref": "#/$defs/OutputMatch"
                 },
                 "minItems": 1
               },
@@ -285,7 +350,7 @@
           },
           "retry": {
             "type": "object",
-            "description": "Node-local retry on verify failure.",
+            "description": "Node-local retry on eval failure.",
             "required": ["max"],
             "additionalProperties": false,
             "properties": {
@@ -344,12 +409,12 @@
           },
           "when": {
             "type": "string",
-            "description": "Natural language condition — Claude evaluates at runtime"
+            "description": "Natural language condition. Claude evaluates at runtime."
           },
           "max_iterations": {
             "type": "integer",
             "minimum": 1,
-            "description": "Max times this edge can be followed — enables controlled retry loops"
+            "description": "Max times this edge can be followed. Enables controlled retry loops."
           }
         }
       }

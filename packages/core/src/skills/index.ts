@@ -238,7 +238,7 @@ export function buildToolAliases(skills: Iterable<Skill>, logger?: Logger): Read
     if (claimers.length > 1) {
       ambiguous.add(name);
       logger?.warn(
-        `Tool alias "${name}" is declared by multiple skills (${claimers.join(", ")}); dropping from verify alias table to avoid cross-provider false positives.`,
+        `Tool alias "${name}" is declared by multiple skills (${claimers.join(", ")}); dropping from eval alias table to avoid cross-provider false positives.`,
       );
     }
   }

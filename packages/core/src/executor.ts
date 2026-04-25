@@ -34,7 +34,7 @@ import type {
 } from "./types.js";
 import { consoleLogger } from "./types.js";
 import { resolveSources } from "./source-resolver.js";
-import { evaluateVerify } from "./verify.js";
+import { evaluateAll, aggregateEval } from "./eval/index.js";
 import { evaluateRequires } from "./requires.js";
 import { buildRetryPreamble } from "./retry.js";
 import { buildToolAliases } from "./skills/index.js";
@@ -84,10 +84,16 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
 
   validate(workflow, skills);
 
-  // Build a verify-time alias table from the loaded skills. Each skill owns
+  // Build an eval-time alias table from the loaded skills. Each skill owns
   // its own mapping between skill-tool names and equivalent MCP names. Core
-  // stays vendor-neutral — this call just unions what the skills declare.
+  // stays vendor-neutral; this call just unions what the skills declare.
   const toolAliases = buildToolAliases(skills.values(), logger);
+
+  // Soft-cap warning: count declared judge evaluators across all nodes and
+  // warn if the total exceeds workflow.judge_budget (default 50). Spec says
+  // this is informational, not a hard runtime cap; users hit the warning
+  // when they unintentionally fan out judges (e.g. 10 judges × 50 nodes).
+  warnOnJudgeBudget(workflow, logger);
 
   // ── Source resolution phase ─────────────────────────────────────
   // Resolve all Source values (node instructions + rules/context at every
@@ -158,10 +164,14 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       );
     }
 
-    // Build context: input + all prior node results
+    // Build context: input + all prior node results.
+    // Each prior node entry is the node's `data` augmented with `evals`
+    // (a Record<name, EvalResult> for downstream lookup like
+    // `priorNode.evals.tests_run_clean.pass`). When `data` already has an
+    // `evals` key, the data field wins (back-compat with existing workflows).
     const context: Record<string, unknown> = {
       input,
-      ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, v.data])),
+      ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, buildPriorNodeContext(v)])),
     };
 
     // Pre-condition gate: evaluate `requires` against the cross-node context
@@ -241,7 +251,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       skillInstructions,
     );
 
-    // Run Claude on this node, with optional verify-failure retry loop.
+    // Run Claude on this node, with optional eval-failure retry loop.
     let attempt = 0;
     let result: NodeResult;
     let currentInstruction = instruction;
@@ -259,28 +269,37 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         },
       });
 
-      // Retry only triggers on verify failure — bail on tool/API errors.
+      // Retry only triggers on eval failure. Bail on tool/API errors.
       if (result.status !== "success") break;
 
-      const verifyError = evaluateVerify(node.verify, result, toolAliases);
-      if (!verifyError) break;
+      const evalResults = await evaluateAll(node.eval, result, {
+        aliases: toolAliases,
+        claude,
+        node,
+        workflow,
+      });
+      result.evals = evalResults;
+      const outcome = aggregateEval(evalResults, node.eval_policy ?? "all_pass");
+      if (outcome.pass) break;
 
-      // Apply verify failure to the result.
+      // Apply eval failure to the result.
       result.status = "failed";
-      result.data = { ...result.data, error: verifyError };
+      result.data = { ...result.data, error: outcome.error };
 
       if (!retry || attempt >= retry.max) {
-        logger.warn(`  verify failed: ${verifyError}`, { node: currentId });
+        logger.warn(`  eval failed: ${outcome.error}`, { node: currentId });
         break;
       }
 
       // Build retry preamble + record attempt in trace.
       trace.steps.push({ node: currentId, status: "failed", iteration, retryAttempt: attempt });
-      logger.warn(`  verify failed (attempt ${attempt + 1}/${retry.max + 1}): ${verifyError}`, { node: currentId });
+      logger.warn(`  eval failed (attempt ${attempt + 1}/${retry.max + 1}): ${outcome.error}`, {
+        node: currentId,
+      });
 
       const preamble = await buildRetryPreamble({
         retry,
-        verifyError,
+        evalFailures: outcome.failures,
         toolCalls: result.toolCalls,
         nodeInstruction: resolvedInstruction,
         claude,
@@ -290,7 +309,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       currentInstruction = `${preamble}\n\n---\n\n${instruction}`;
       safeObserve(
         observer,
-        { type: "node:retry", node: currentId, attempt: attempt + 1, reason: verifyError, preamble },
+        { type: "node:retry", node: currentId, attempt: attempt + 1, reason: outcome.error ?? "eval failed", preamble },
         logger,
       );
       attempt++;
@@ -376,6 +395,59 @@ function buildNodeInstruction(
  * - Object form → use its `only` and `sources`
  * - undefined → empty additive
  */
+const DEFAULT_JUDGE_BUDGET = 50;
+
+/**
+ * Soft cap on judge calls per workflow run. Logs a warn when the count of
+ * declared `kind: judge` evaluators exceeds the configured budget. This is
+ * a load-time signal only; the executor does not refuse to run.
+ *
+ * Each judge counts once per node visit, but the executor counts judges
+ * once at declaration time (a fan-out of repeated visits via cycles is the
+ * author's responsibility, not core's).
+ */
+function warnOnJudgeBudget(workflow: Workflow, logger: Logger): void {
+  const budget = workflow.judge_budget ?? DEFAULT_JUDGE_BUDGET;
+  let total = 0;
+  for (const node of Object.values(workflow.nodes)) {
+    for (const evaluator of node.eval ?? []) {
+      if (evaluator.kind === "judge") total++;
+    }
+  }
+  if (total > budget) {
+    logger.warn(
+      `Workflow declares ${total} judge evaluators across all nodes (budget: ${budget}). ` +
+        `Consider reducing the count or raising 'judge_budget' on the workflow. ` +
+        `Each judge adds one model call per node attempt.`,
+      { judgeCount: total, judgeBudget: budget },
+    );
+  }
+}
+
+/**
+ * Build the context-map entry for a single prior node.
+ *
+ * Spec contract (https://spec.sweny.ai/nodes/#evalresult-type): downstream
+ * nodes can read `priorNode.evals.<name>.pass` via the natural lookup path.
+ * To honor this without breaking back-compat with workflows that read
+ * `priorNode.<dataField>` directly, we spread `data` first and then attach
+ * an `evals` namespace keyed by evaluator name. If the agent's structured
+ * output happens to include a literal `evals` field, that field wins (and
+ * the lookup degrades to "evals not available" for downstream readers).
+ */
+function buildPriorNodeContext(result: NodeResult): Record<string, unknown> {
+  const data = (result.data ?? {}) as Record<string, unknown>;
+  const evals = result.evals ?? [];
+  if (evals.length === 0) return data;
+
+  const evalsByName: Record<string, unknown> = {};
+  for (const e of evals) {
+    evalsByName[e.name] = e;
+  }
+  // Spread evals first so a data-side `evals` key shadows it (back-compat).
+  return { evals: evalsByName, ...data };
+}
+
 function nodeSourcesToArray(ns: NodeSources | undefined): { sources: Source[]; only: boolean } {
   if (!ns) return { sources: [], only: false };
   if (Array.isArray(ns)) return { sources: ns, only: false };
@@ -605,11 +677,12 @@ async function resolveNext(
   const defaultEdge = outEdges.find((e) => !e.when);
   const conditionalEdges = outEdges.filter((e) => e.when);
 
-  // Claude evaluates which condition matches — include input so conditions
-  // can reference workflow-level flags like dryRun
+  // Claude evaluates which condition matches. Include input so conditions
+  // can reference workflow-level flags like dryRun, and expose evals so
+  // routing edges can read `priorNode.evals.X.pass`.
   const context: Record<string, unknown> = {
     input,
-    ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, v.data])),
+    ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, buildPriorNodeContext(v)])),
   };
 
   const choices = conditionalEdges.map((e) => ({

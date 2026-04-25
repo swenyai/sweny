@@ -1,11 +1,11 @@
 // ─── Requires: pre-condition gate ───────────────────────────────────
 //
 // Evaluates `node.requires` BEFORE the LLM runs. Same path grammar and
-// resolver as verify — the only differences are the data root (cross-node
+// resolver as eval. The only differences are the data root (cross-node
 // context map instead of result.data) and the error prefix.
 
 import type { NodeRequires } from "./types.js";
-import { checkOutputRequired, checkOutputMatches } from "./verify.js";
+import { checkOutputRequired, checkOutputMatches } from "./eval/value.js";
 
 /**
  * Evaluate a node's `requires` block against the cross-node context map.

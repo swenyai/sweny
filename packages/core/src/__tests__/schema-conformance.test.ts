@@ -51,26 +51,45 @@ const fixtures: Fixture[] = [
     expected: true,
   },
   {
-    name: "node with valid verify (any_tool_called)",
+    name: "node with valid eval (function any_tool_called)",
     input: {
       id: "d",
       name: "D",
       entry: "a",
       nodes: {
-        a: { ...baseNode(), verify: { any_tool_called: ["github_create_issue"] } },
+        a: {
+          ...baseNode(),
+          eval: [{ name: "called", kind: "function", rule: { any_tool_called: ["github_create_issue"] } }],
+        },
       },
       edges: [],
     },
     expected: true,
   },
   {
-    name: "node with valid output_matches (single operator)",
+    name: "node with valid eval (value output_matches single operator)",
     input: {
       id: "d",
       name: "D",
       entry: "a",
       nodes: {
-        a: { ...baseNode(), verify: { output_matches: [{ path: "severity", equals: "high" }] } },
+        a: {
+          ...baseNode(),
+          eval: [{ name: "shape", kind: "value", rule: { output_matches: [{ path: "severity", equals: "high" }] } }],
+        },
+      },
+      edges: [],
+    },
+    expected: true,
+  },
+  {
+    name: "node with valid judge evaluator",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: { ...baseNode(), eval: [{ name: "judged", kind: "judge", rubric: "is it good?", pass_when: "yes" }] },
       },
       edges: [],
     },
@@ -109,7 +128,16 @@ const fixtures: Fixture[] = [
       name: "D",
       entry: "a",
       nodes: {
-        a: { ...baseNode(), verify: { output_matches: [{ path: "p", equals: "a", in: ["b"] }] } },
+        a: {
+          ...baseNode(),
+          eval: [
+            {
+              name: "shape",
+              kind: "value",
+              rule: { output_matches: [{ path: "p", equals: "a", in: ["b"] }] },
+            },
+          ],
+        },
       },
       edges: [],
     },
@@ -121,18 +149,58 @@ const fixtures: Fixture[] = [
       id: "d",
       name: "D",
       entry: "a",
-      nodes: { a: { ...baseNode(), verify: { output_matches: [{ path: "p" }] } } },
+      nodes: {
+        a: {
+          ...baseNode(),
+          eval: [{ name: "shape", kind: "value", rule: { output_matches: [{ path: "p" }] } }],
+        },
+      },
       edges: [],
     },
     expected: false,
   },
   {
-    name: "empty verify block (no checks declared)",
+    name: "empty eval array (rejected at the field level)",
     input: {
       id: "d",
       name: "D",
       entry: "a",
-      nodes: { a: { ...baseNode(), verify: {} } },
+      nodes: { a: { ...baseNode(), eval: [] } },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "value evaluator missing rule",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), eval: [{ name: "x", kind: "value" }] } },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "judge evaluator missing rubric",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), eval: [{ name: "x", kind: "judge" }] } },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "verify-shaped workflow is rejected (hard cut)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: { ...baseNode(), verify: { any_tool_called: ["x"] } },
+      },
       edges: [],
     },
     expected: false,
@@ -175,15 +243,47 @@ const fixtures: Fixture[] = [
 
   // Self-review gap: Zod strips unknown keys by default, JSON Schema
   // rejects them via additionalProperties: false. Both validators must
-  // agree, so nodeVerifyZ / nodeRequiresZ are now .strict().
+  // agree, so evaluatorZ / nodeRequiresZ are now .strict().
   {
-    name: "verify with unknown key (strict: both must reject)",
+    name: "evaluator rule with unknown key (strict: both must reject)",
     input: {
       id: "d",
       name: "D",
       entry: "a",
       nodes: {
-        a: { ...baseNode(), verify: { any_tool_called: ["x"], unknown_key: true } },
+        a: {
+          ...baseNode(),
+          eval: [
+            {
+              name: "x",
+              kind: "function",
+              rule: { any_tool_called: ["x"], unknown_key: true },
+            },
+          ],
+        },
+      },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "evaluator object with unknown key (strict: both must reject)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: {
+          ...baseNode(),
+          eval: [
+            {
+              name: "x",
+              kind: "function",
+              rule: { any_tool_called: ["x"] },
+              extra: "stray",
+            },
+          ],
+        },
       },
       edges: [],
     },
@@ -237,7 +337,7 @@ const fixtures: Fixture[] = [
       nodes: {
         a: {
           ...baseNode(),
-          verify: { any_tool_called: ["x"] },
+          eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["x"] } }],
           retry: { max: 3, extra: true },
         },
       },
@@ -254,7 +354,13 @@ const fixtures: Fixture[] = [
       nodes: {
         a: {
           ...baseNode(),
-          verify: { output_matches: [{ path: "p", equals: 1, rogue: true }] },
+          eval: [
+            {
+              name: "shape",
+              kind: "value",
+              rule: { output_matches: [{ path: "p", equals: 1, rogue: true }] },
+            },
+          ],
         },
       },
       edges: [],

@@ -49,7 +49,7 @@ nodes:
       `github_search_issues`) with multiple queries against the issue tracker (BOTH open AND closed): the
       affected file or module path, the error message or log string verbatim, the feature or service name,
       and the symptom family (e.g. "startup crash", "data dropped silently"). Do not rely on a single
-      keyword — a narrow search is how duplicates slip through. If you skip this search, the verify check
+      keyword — a narrow search is how duplicates slip through. If you skip this search, the eval check
       will fail.
 
       4b. **Read the full body of every promising candidate — do NOT match on title alone.** For each top match,
@@ -95,17 +95,20 @@ nodes:
       Downstream nodes handle all writes — issue creation, +1 comments, and PRs.
 
       - Your ONLY job is read, search, classify, and output. If you create an issue
-      or add a comment here, the downstream verify check will fail or duplicate work.
+      or add a comment here, the downstream eval check will fail or duplicate work.
     skills:
       - github
       - linear
-    verify:
+    eval:
       # The novelty check REQUIRES searching the issue tracker. If the node finishes
       # with 0 search tool calls, it means the agent skipped the novelty check entirely
       # and any "novel" classification is unreliable.
-      any_tool_called:
-        - linear_search_issues
-        - github_search_issues
+      - name: novelty_search_was_performed
+        kind: function
+        rule:
+          any_tool_called:
+            - linear_search_issues
+            - github_search_issues
     output:
       type: object
       properties:
@@ -187,7 +190,7 @@ nodes:
       synthesize an identifier from an alert ID, commit SHA, or your own imagination. If the
       tool errors, stop and report the failure; do not invent a fallback identifier.
       **Use the exact tool names above** — do NOT use generic alternatives like `create_issue`
-      or `create_pull_request` from ToolSearch. The verify check requires the specific tool
+      or `create_pull_request` from ToolSearch. The eval check requires the specific tool
       names listed here.
 
       3. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
@@ -232,18 +235,21 @@ nodes:
     skills:
       - linear
       - github
-    verify:
+    eval:
       # Require a real issue-tracker tool call. linear_create_issue / github_create_issue
       # for novel findings; linear_search_issues / github_search_issues for duplicate-check
       # when the issue already exists from a prior triage run. linear_add_comment covers
       # the +1 path for duplicates.
-      any_tool_called:
-        - linear_create_issue
-        - github_create_issue
-        - linear_search_issues
-        - github_search_issues
-        - linear_add_comment
-        - github_add_comment
+      - name: issue_tracker_tool_was_called
+        kind: function
+        rule:
+          any_tool_called:
+            - linear_create_issue
+            - github_create_issue
+            - linear_search_issues
+            - github_search_issues
+            - linear_add_comment
+            - github_add_comment
     output:
       type: object
       properties:
@@ -411,13 +417,13 @@ nodes:
       - **Lives in the right file** (next to the source under test, in the
          project's existing test layout).
 
-      The verify gate on this node REQUIRES `test_status` to be either
+      The eval gate on this node REQUIRES `test_status` to be either
       `pass` (tests ran and all passed) OR `no-framework` (the project
       genuinely has no test runner — not "I couldn't be bothered").
 
       If the project HAS a test framework, you must write tests and they
       must pass. Empty `test_files_changed` with `test_status: pass` is a
-      lie and verify will reject it via the schema's required-fields
+      lie and eval will reject it via the schema's required-fields
       contract; `not-run` and `fail` will retry once with reflection and
       then halt for human attention.
 
@@ -477,14 +483,45 @@ nodes:
         - files_changed
         - test_files_changed
         - test_status
-    verify:
+    eval:
       # `pass` and `no-framework` both clear the gate. `fail` and `not-run`
-      # trigger retry. The instruction text + schema's required-fields list
-      # are the contract that prevents `pass` with empty `test_files_changed`
-      # — verify cannot express that conditional declaratively.
-      output_matches:
-        - path: test_status
-          in: [pass, no-framework]
+      # trigger retry.
+      - name: test_status_is_pass_or_no_framework
+        kind: value
+        rule:
+          output_matches:
+            - path: test_status
+              in: [pass, no-framework]
+      # Conditional: when test_status is pass, test_files_changed MUST contain
+      # at least one real test file path. Empty array with status pass is a
+      # contract violation (the agent claimed it ran tests without actually
+      # writing any). value evaluators can't express the conditional
+      # declaratively; the judge absorbs it.
+      #
+      # Driving incident: PR #366, where the triage agent shipped a NestJS
+      # fix to letsoffload/offload without writing tests, even though
+      # *.spec.ts existed in the repo.
+      - name: tests_present_when_pass_claimed
+        kind: judge
+        rubric: |
+          You are checking the contract between test_status and test_files_changed.
+
+          Read result.data.test_status and result.data.test_files_changed.
+
+          Rules:
+          - If test_status is "pass": test_files_changed MUST contain at least
+            one real test file path (paths with extensions like .spec.ts,
+            .test.ts, .test.tsx, .test.py, _test.go, _spec.rb, .test.rs,
+            etc., or paths in a __tests__/, tests/, or spec/ directory).
+            An empty array, or paths that are clearly not test files
+            (README.md, package.json, source files), is a contract violation.
+          - If test_status is "no-framework": test_files_changed MAY be empty.
+            Pass vacuously.
+          - If test_status is "fail" or "not-run": this evaluator should not
+            run (the prior value evaluator catches that). Pass vacuously.
+
+          Respond yes if the contract is satisfied, no if it is violated.
+        pass_when: yes
     retry:
       max: 1
       instruction:
@@ -498,7 +535,7 @@ nodes:
       1. Push the branch to the remote.
 
       2. Create the PR using the `github_create_pr` tool. **Use this exact tool name** — do NOT
-      use `create_pull_request` or any other variant from ToolSearch. The verify check requires
+      use `create_pull_request` or any other variant from ToolSearch. The eval check requires
       `github_create_pr` specifically.
 
       3. PR title MUST start with the issue identifier in brackets.
@@ -522,9 +559,12 @@ nodes:
       Return the PR URL and number.
     skills:
       - github
-    verify:
-      any_tool_called:
-        - github_create_pr
+    eval:
+      - name: pr_was_created
+        kind: function
+        rule:
+          any_tool_called:
+            - github_create_pr
     retry:
       max: 1
       instruction:
