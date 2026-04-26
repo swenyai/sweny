@@ -2,5 +2,10 @@
   "buildCommand": "cd ../.. && npm run build --workspace=packages/core && npm run build:lib --workspace=packages/studio && npm run build --workspace=packages/web",
   "outputDirectory": "dist",
   "framework": "astro",
-  "installCommand": "cd ../.. && npm ci"
+  "installCommand": "cd ../.. && npm ci",
+  "git": {
+    "deploymentEnabled": {
+      "main": true
+    }
+  }
 }
