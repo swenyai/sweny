@@ -244,3 +244,63 @@ export function deriveGenericMetrics(results: Map<string, NodeResult>, durationM
     success_rate: nodeCount > 0 ? (nodeCount - failedNodes) / nodeCount : 0,
   };
 }
+
+export interface CloudLifecycleHandle {
+  runUuid: string;
+  runId: string;
+  dashboardUrl?: string;
+}
+
+/**
+ * Open a cloud lifecycle session for an upcoming workflow run.
+ *
+ * Returns a handle if the cloud token is set AND `startRun()` succeeds; null
+ * otherwise. Callers should ALWAYS handle the null case — cloud reporting
+ * is opt-in and best-effort, the workflow must run regardless.
+ *
+ * Pair every successful call with `finishCloudLifecycle(handle, …)` once the
+ * workflow completes (success or failure).
+ */
+export async function beginCloudLifecycle(
+  config: { cloudToken?: string; repository?: string },
+  workflow: Pick<Workflow, "id" | "workflow_type">,
+): Promise<CloudLifecycleHandle | null> {
+  if (!config.cloudToken) return null;
+  const runUuid = newRunUuid();
+  const payload = buildStartRunPayload(workflow, { runUuid });
+  const reportConfig: CloudReportConfig = {
+    cloudToken: config.cloudToken,
+    repository: config.repository,
+  };
+  const result = await startRun(reportConfig, payload);
+  if (!result) return null;
+  return {
+    runUuid,
+    runId: result.run_id,
+    dashboardUrl: result.dashboard_url,
+  };
+}
+
+/**
+ * Close a cloud lifecycle session opened by `beginCloudLifecycle`.
+ *
+ * No-op when handle is null (cloud reporting was disabled or startRun
+ * failed). Status maps the engine's `success | failed | partial` outcome
+ * onto the cloud's accepted enum. Failure is silent — the workflow's
+ * exit code already reflects the truth.
+ */
+export async function finishCloudLifecycle(
+  config: { cloudToken?: string },
+  handle: CloudLifecycleHandle | null,
+  results: Map<string, NodeResult>,
+  durationMs: number,
+  status: "success" | "failed" | "partial" = "success",
+): Promise<void> {
+  if (!handle || !config.cloudToken) return;
+  const reportConfig: CloudReportConfig = { cloudToken: config.cloudToken };
+  await finishRun(reportConfig, handle.runId, {
+    status,
+    duration_ms: durationMs,
+    metrics: deriveGenericMetrics(results, durationMs),
+  });
+}

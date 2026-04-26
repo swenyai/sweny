@@ -8,6 +8,8 @@ import {
   postNodeEvent,
   deriveGenericMetrics,
   newRunUuid,
+  beginCloudLifecycle,
+  finishCloudLifecycle,
 } from "../cloud-lifecycle.js";
 import type { NodeResult } from "../../types.js";
 
@@ -126,14 +128,12 @@ describe("startRun (HTTP)", () => {
   });
 
   it("posts to /api/runs with bearer auth and returns the run_id on success", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ run_id: "run-1", dashboard_url: "/d/1", idempotent_replay: false }), {
-          status: 201,
-          headers: { "content-type": "application/json" },
-        }),
-      );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ run_id: "run-1", dashboard_url: "/d/1", idempotent_replay: false }), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      }),
+    );
     const result = await startRun(config, payload);
     expect(result?.run_id).toBe("run-1");
     expect(fetchSpy).toHaveBeenCalledOnce();
@@ -213,6 +213,98 @@ describe("postNodeEvent (HTTP)", () => {
   it("never throws on network failure", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("offline"));
     await expect(postNodeEvent(config, "r1", { event: "exit", node: "x" })).resolves.toBeUndefined();
+  });
+});
+
+describe("beginCloudLifecycle / finishCloudLifecycle — CLI wire-up wrapper", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const workflow = { id: "triage", workflow_type: "pr_review" as const };
+
+  it("returns null when cloudToken is unset (cloud reporting opt-in)", async () => {
+    const handle = await beginCloudLifecycle({}, workflow);
+    expect(handle).toBeNull();
+  });
+
+  it("returns null when startRun() fails (network/auth error)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("", { status: 401 }));
+    const handle = await beginCloudLifecycle({ cloudToken: "sweny_pk_x" }, workflow);
+    expect(handle).toBeNull();
+  });
+
+  it("returns a handle with run_id + dashboard_url when startRun() succeeds", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ run_id: "r-123", dashboard_url: "https://cloud.sweny.ai/r-123" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const handle = await beginCloudLifecycle({ cloudToken: "sweny_pk_x" }, workflow);
+    expect(handle).toEqual({
+      runUuid: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      runId: "r-123",
+      dashboardUrl: "https://cloud.sweny.ai/r-123",
+    });
+  });
+
+  it("posts the workflow_id and workflow_type to /api/runs", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ run_id: "r-1" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await beginCloudLifecycle({ cloudToken: "tok" }, { id: "monitor-1", workflow_type: "monitor" as const });
+    const url = fetchSpy.mock.calls[0]![0] as string;
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    expect(url).toMatch(/\/api\/runs$/);
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body.workflow_id).toBe("monitor-1");
+    expect(body.workflow_type).toBe("monitor");
+  });
+
+  it("finishCloudLifecycle is a no-op when handle is null", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    await finishCloudLifecycle({ cloudToken: "tok" }, null, new Map(), 100);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("finishCloudLifecycle is a no-op when cloudToken is unset (defensive)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const handle = { runUuid: "u", runId: "r" };
+    await finishCloudLifecycle({}, handle, new Map(), 100);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("posts to /api/runs/:id/finish with status + metrics from results", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("", { status: 200 }));
+    const handle = { runUuid: "u", runId: "run-99" };
+    const results = new Map<string, NodeResult>([
+      ["a", { status: "success", data: {}, toolCalls: [] }],
+      ["b", { status: "failed", data: {}, toolCalls: [] }],
+    ]);
+    await finishCloudLifecycle({ cloudToken: "tok" }, handle, results, 5000, "failed");
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const url = fetchSpy.mock.calls[0]![0] as string;
+    expect(url).toMatch(/\/api\/runs\/run-99\/finish$/);
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const body = JSON.parse(init.body as string) as {
+      status: string;
+      duration_ms: number;
+      metrics: { node_count: number; failed_nodes: number };
+    };
+    expect(body.status).toBe("failed");
+    expect(body.duration_ms).toBe(5000);
+    expect(body.metrics.node_count).toBe(2);
+    expect(body.metrics.failed_nodes).toBe(1);
+  });
+
+  it("never throws when finishRun() returns false (silent failure)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("", { status: 500 }));
+    const handle = { runUuid: "u", runId: "r" };
+    await expect(finishCloudLifecycle({ cloudToken: "tok" }, handle, new Map(), 100)).resolves.toBeUndefined();
   });
 });
 
