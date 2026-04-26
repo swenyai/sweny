@@ -61,7 +61,7 @@ import { registerSetupCommand } from "./setup.js";
 import { registerPublishCommand } from "./publish.js";
 import { registerSkillCommand } from "./skill.js";
 import { reportToCloud } from "./cloud-report.js";
-import { beginCloudLifecycle, finishCloudLifecycle } from "./cloud-lifecycle.js";
+import { beginCloudLifecycle, finishCloudLifecycle, createCloudStreamObserver } from "./cloud-lifecycle.js";
 import { runUpgrade, fetchLatestFromNpm } from "./upgrade.js";
 import { maybeNudge, defaultCachePath } from "./version-check.js";
 import { spawnSync } from "node:child_process";
@@ -376,8 +376,6 @@ triageCmd.action(async (options: Record<string, unknown>) => {
         }
       };
 
-  const observer = composeObservers(progressObserver, config.stream ? createStreamObserver() : undefined);
-
   // ── Build workflow input from config ──────────────────────
   const providerCtx = buildProviderCtx(config, mcpServers);
   const { rules, context } = await resolveRulesAndContext(config);
@@ -414,14 +412,20 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     context: fullContext,
   };
 
-  // Open the cloud lifecycle session BEFORE execute() so the dashboard
-  // link can be printed early and node-streaming wire-up (a follow-up
-  // task) has a runId to attach events to. Null when token is unset or
-  // the call fails — cloud reporting must never block the workflow.
+  // Open the cloud lifecycle session BEFORE composing observers so the
+  // node-streaming observer can attach events to the correct runId.
+  // Null when the token is unset or startRun fails — cloud reporting
+  // must never block the workflow.
   const cloudHandle = await beginCloudLifecycle(config, triageWorkflow);
   if (cloudHandle?.dashboardUrl) {
     console.log(c.subtle(`  cloud: ${cloudHandle.dashboardUrl}`));
   }
+
+  const observer = composeObservers(
+    progressObserver,
+    config.stream ? createStreamObserver() : undefined,
+    createCloudStreamObserver(config, cloudHandle),
+  );
 
   try {
     const { results, trace } = await execute(triageWorkflow, workflowInput, {
@@ -583,11 +587,6 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     }
   };
 
-  const observer = composeObservers(
-    implProgressObserver,
-    Boolean(options.stream) ? createStreamObserver() : undefined,
-  )!;
-
   // Resolve rules/context from .sweny.yml (same as triage path)
   const providerCtx = buildProviderCtx(config, mcpServers);
   const { rules, context } = await resolveRulesAndContext(config);
@@ -609,11 +608,19 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     context: fullImplContext,
   };
 
-  // Open cloud lifecycle session. See triage path for rationale.
+  // Open cloud lifecycle session BEFORE composing observers so the
+  // node-streaming observer can attach to the correct runId. See
+  // triage path for rationale.
   const implCloudHandle = await beginCloudLifecycle(config, implementWorkflow);
   if (implCloudHandle?.dashboardUrl) {
     console.log(c.subtle(`  cloud: ${implCloudHandle.dashboardUrl}`));
   }
+
+  const observer = composeObservers(
+    implProgressObserver,
+    Boolean(options.stream) ? createStreamObserver() : undefined,
+    createCloudStreamObserver(config, implCloudHandle),
+  );
 
   try {
     const { results } = await execute(implementWorkflow, workflowInput, {
@@ -823,8 +830,6 @@ export async function workflowRunAction(
         }
       };
 
-  const observer = composeObservers(wfProgressObserver, options.stream ? createStreamObserver() : undefined);
-
   // Build workflow input — prefer --input JSON if provided, else fall back to config-derived input
   let workflowInput: Record<string, unknown>;
 
@@ -857,11 +862,19 @@ export async function workflowRunAction(
     };
   }
 
-  // Open cloud lifecycle session. See triage path for rationale.
+  // Open cloud lifecycle session BEFORE composing observers so the
+  // node-streaming observer can attach to the correct runId. See
+  // triage path for rationale.
   const wfCloudHandle = await beginCloudLifecycle(config, workflow);
   if (wfCloudHandle?.dashboardUrl && !isJson) {
     console.log(c.subtle(`  cloud: ${wfCloudHandle.dashboardUrl}`));
   }
+
+  const observer = composeObservers(
+    wfProgressObserver,
+    options.stream ? createStreamObserver() : undefined,
+    createCloudStreamObserver(config, wfCloudHandle),
+  );
 
   try {
     const { results, trace } = await execute(workflow, workflowInput, {

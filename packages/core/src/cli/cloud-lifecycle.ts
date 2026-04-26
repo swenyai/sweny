@@ -17,10 +17,15 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { NodeResult, Workflow } from "../types.js";
+import type { ExecutionEvent, NodeResult, Observer, Workflow } from "../types.js";
 
 const CLOUD_URL_DEFAULT = "https://cloud.sweny.ai";
 const TIMEOUT_MS = 10_000;
+// startRun runs on the critical path BEFORE execute(), so a slow cloud
+// would delay every workflow start. Cap it tighter than the general
+// timeout — if cloud can't accept the run-start in 3s, skip and run
+// uninstrumented rather than make the user wait.
+const START_TIMEOUT_MS = 3_000;
 
 export type TriggerSource =
   | "github_action"
@@ -161,7 +166,7 @@ export async function startRun(config: CloudReportConfig, payload: StartRunInput
         Authorization: `Bearer ${config.cloudToken}`,
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(START_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const data = (await res.json().catch(() => ({}))) as StartRunResult;
@@ -303,4 +308,92 @@ export async function finishCloudLifecycle(
     duration_ms: durationMs,
     metrics: deriveGenericMetrics(results, durationMs),
   });
+}
+
+/**
+ * Build an Observer that ships per-node lifecycle events to cloud.
+ *
+ * Maps the engine's ExecutionEvent stream onto `POST /api/runs/:id/node`:
+ *   node:enter   → { event: "enter",  node }
+ *   node:exit    → { event: "exit",   node, status, duration_ms }
+ *   node:progress → { event: "progress", node, data: { message } }
+ *   node:retry   → { event: "progress", node, data: { retry: true, attempt, reason } }
+ * Other events (workflow:start, tool:*, route, workflow:end) are dropped.
+ *
+ * Returns undefined when the handle is null (no cloud session) or the
+ * token is missing. The observer captures `node:enter` timestamps in a
+ * closure-scoped Map so it can compute duration_ms on the matching exit
+ * without depending on any external state.
+ *
+ * Hot-path safety contract:
+ *   1. The observer never throws synchronously. The whole body is
+ *      wrapped in try/catch — any future ExecutionEvent shape change
+ *      that breaks a field access cannot crash the engine.
+ *   2. The observer never awaits. postNodeEvent is fired with .catch
+ *      to swallow any rejection so node never sees an unhandledRejection.
+ *   3. The Map is keyed by node id; collisions only happen if the same
+ *      node id runs concurrently, which the engine does not do today.
+ */
+export function createCloudStreamObserver(
+  config: { cloudToken?: string },
+  handle: CloudLifecycleHandle | null,
+): Observer | undefined {
+  if (!handle || !config.cloudToken) return undefined;
+  const reportConfig: CloudReportConfig = { cloudToken: config.cloudToken };
+  // Single-threaded-per-node assumption: the engine doesn't run the
+  // same node id twice concurrently, so node id alone is enough as a
+  // key. A future parallelizing executor change would need to revisit.
+  const enterTimes = new Map<string, number>();
+  const fire = (event: Parameters<typeof postNodeEvent>[2]) => {
+    postNodeEvent(reportConfig, handle.runId, event).catch(() => {
+      // Cloud reporting must never bubble — postNodeEvent already
+      // swallows internally, but this is belt-and-suspenders.
+    });
+  };
+  return (event: ExecutionEvent) => {
+    try {
+      switch (event.type) {
+        case "node:enter": {
+          enterTimes.set(event.node, Date.now());
+          fire({ event: "enter", node: event.node });
+          break;
+        }
+        case "node:exit": {
+          const enter = enterTimes.get(event.node);
+          const duration_ms = typeof enter === "number" ? Date.now() - enter : undefined;
+          enterTimes.delete(event.node);
+          fire({
+            event: "exit",
+            node: event.node,
+            status: event.result.status,
+            duration_ms,
+          });
+          break;
+        }
+        case "node:progress": {
+          fire({
+            event: "progress",
+            node: event.node,
+            data: { message: event.message },
+          });
+          break;
+        }
+        case "node:retry": {
+          fire({
+            event: "progress",
+            node: event.node,
+            data: { retry: true, attempt: event.attempt, reason: event.reason },
+          });
+          break;
+        }
+        default:
+          // Drop workflow:start, sources:resolved, tool:*, route,
+          // workflow:end. Cloud only models the per-node lifecycle today.
+          break;
+      }
+    } catch {
+      // Hot-path defense: an unexpected event shape must not crash
+      // the engine. Silent swallow is the correct behavior here.
+    }
+  };
 }
