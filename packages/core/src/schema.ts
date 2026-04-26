@@ -246,6 +246,21 @@ export const edgeZ = z
   })
   .strict();
 
+/**
+ * Workflow type discriminator. Cloud uses this to route runs to a
+ * type-specific renderer (Caught/Calibration/Missed for `pr_review`, flake
+ * heatmap for `e2e_test`, source coverage delta for `monitor`, etc.).
+ *
+ * The field is optional on the workflow YAML; absence defaults to `generic`,
+ * which gets a baseline renderer. Marketplace templates published in v1+
+ * are required to declare it.
+ *
+ * Adding a new value here is a deliberate spec change: it requires a new
+ * cloud renderer + metric schema. Don't extend casually.
+ */
+export const workflowTypeZ = z.enum(["pr_review", "e2e_test", "content_generation", "monitor", "data_sync", "generic"]);
+export type WorkflowType = z.infer<typeof workflowTypeZ>;
+
 // Fix #4 gap — workflowZ is intentionally NOT .strict(). The published
 // JSON Schema's `additionalProperties: false` only scopes the properties
 // block, but marketplace workflows routinely carry top-level metadata
@@ -256,6 +271,7 @@ export const workflowZ = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().default(""),
+  workflow_type: workflowTypeZ.optional(),
   nodes: z.record(nodeZ),
   edges: z.array(edgeZ),
   entry: z.string().min(1),
@@ -612,6 +628,12 @@ export const workflowJsonSchema = {
       type: "array",
       items: { $ref: "#/$defs/Source" },
       description: "Background knowledge prepended to every node's instruction.",
+    },
+    workflow_type: {
+      type: "string",
+      enum: ["pr_review", "e2e_test", "content_generation", "monitor", "data_sync", "generic"],
+      description:
+        "Workflow type discriminator. Cloud uses this to route runs to a type-specific renderer. Optional; absence defaults to 'generic'.",
     },
     judge_model: {
       type: "string",

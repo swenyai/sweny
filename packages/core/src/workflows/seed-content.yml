@@ -1,5 +1,6 @@
 id: seed-content
 name: Content Generation Pipeline
+workflow_type: content_generation
 description: Audit content gaps, generate educational content, validate quality, and publish to Supabase
 entry: audit
 nodes:

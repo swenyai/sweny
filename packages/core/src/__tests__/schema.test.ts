@@ -683,6 +683,44 @@ describe("Zod schemas", () => {
     it("rejects empty id", () => {
       expect(() => workflowZ.parse({ id: "", name: "x", entry: "a", nodes: {}, edges: [] })).toThrow();
     });
+
+    it("accepts workflow_type as one of the v1 enum values", () => {
+      for (const t of ["pr_review", "e2e_test", "content_generation", "monitor", "data_sync", "generic"]) {
+        const result = workflowZ.parse({
+          id: "x",
+          name: "X",
+          entry: "a",
+          workflow_type: t,
+          nodes: { a: { name: "A", instruction: "Do A" } },
+          edges: [],
+        });
+        expect(result.workflow_type).toBe(t);
+      }
+    });
+
+    it("treats workflow_type as optional (no value when absent)", () => {
+      const result = workflowZ.parse({
+        id: "x",
+        name: "X",
+        entry: "a",
+        nodes: { a: { name: "A", instruction: "Do A" } },
+        edges: [],
+      });
+      expect(result.workflow_type).toBeUndefined();
+    });
+
+    it("rejects an unknown workflow_type", () => {
+      expect(() =>
+        workflowZ.parse({
+          id: "x",
+          name: "X",
+          entry: "a",
+          workflow_type: "magic",
+          nodes: { a: { name: "A", instruction: "Do A" } },
+          edges: [],
+        }),
+      ).toThrow();
+    });
   });
 
   describe("parseWorkflow", () => {

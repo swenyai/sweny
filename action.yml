@@ -38,6 +38,10 @@ inputs:
     required: false
     default: "false"
 
+  cloud-token:
+    description: "SWEny Cloud project token (sweny_pk_...) for reporting run results to cloud.sweny.ai. Optional. Equivalent to setting the SWENY_CLOUD_TOKEN env var; either form is accepted."
+    required: false
+
 runs:
   using: "composite"
   steps:
@@ -71,7 +75,15 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         WORKFLOW_PATH: ${{ inputs.workflow }}
         DRY_RUN: ${{ inputs.dry-run }}
+        INPUT_CLOUD_TOKEN: ${{ inputs.cloud-token }}
       run: |
+        # Forward the cloud token to the CLI. Prefer the explicit `cloud-token`
+        # input; otherwise honor whatever the caller put on the step env as
+        # SWENY_CLOUD_TOKEN. Never overwrite a non-empty inherited value with
+        # an empty input.
+        if [ -n "$INPUT_CLOUD_TOKEN" ]; then
+          export SWENY_CLOUD_TOKEN="$INPUT_CLOUD_TOKEN"
+        fi
         # Normalize so dry-run accepts true / TRUE / 1 / yes equivalently.
         # GitHub Actions usually passes the literal "true"/"false" string,
         # but workflow YAML can produce other truthy spellings.

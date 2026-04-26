@@ -61,6 +61,7 @@ import { registerSetupCommand } from "./setup.js";
 import { registerPublishCommand } from "./publish.js";
 import { registerSkillCommand } from "./skill.js";
 import { reportToCloud } from "./cloud-report.js";
+import { beginCloudLifecycle, finishCloudLifecycle, createCloudStreamObserver } from "./cloud-lifecycle.js";
 import { runUpgrade, fetchLatestFromNpm } from "./upgrade.js";
 import { maybeNudge, defaultCachePath } from "./version-check.js";
 import { spawnSync } from "node:child_process";
@@ -375,8 +376,6 @@ triageCmd.action(async (options: Record<string, unknown>) => {
         }
       };
 
-  const observer = composeObservers(progressObserver, config.stream ? createStreamObserver() : undefined);
-
   // ── Build workflow input from config ──────────────────────
   const providerCtx = buildProviderCtx(config, mcpServers);
   const { rules, context } = await resolveRulesAndContext(config);
@@ -413,6 +412,21 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     context: fullContext,
   };
 
+  // Open the cloud lifecycle session BEFORE composing observers so the
+  // node-streaming observer can attach events to the correct runId.
+  // Null when the token is unset or startRun fails — cloud reporting
+  // must never block the workflow.
+  const cloudHandle = await beginCloudLifecycle(config, triageWorkflow);
+  if (cloudHandle?.dashboardUrl) {
+    console.log(c.subtle(`  cloud: ${cloudHandle.dashboardUrl}`));
+  }
+
+  const observer = composeObservers(
+    progressObserver,
+    config.stream ? createStreamObserver() : undefined,
+    createCloudStreamObserver(config, cloudHandle),
+  );
+
   try {
     const { results, trace } = await execute(triageWorkflow, workflowInput, {
       skills,
@@ -448,7 +462,19 @@ triageCmd.action(async (options: Record<string, unknown>) => {
       }
     }
 
-    // Report to SWEny Cloud (best-effort, never block the run)
+    // Close the cloud lifecycle session opened above. Status reflects
+    // whether any node failed — cloud's runs.status enum accepts the
+    // same vocabulary the engine uses.
+    const triageHasFailed = [...results.values()].some((r) => r.status === "failed");
+    try {
+      await finishCloudLifecycle(config, cloudHandle, results, durationMs, triageHasFailed ? "failed" : "success");
+    } catch {
+      // silent
+    }
+
+    // Report to SWEny Cloud (best-effort, legacy /api/report path for
+    // back-compat with cloud builds that haven't deployed lifecycle
+    // endpoints yet — runs through both paths so neither side breaks).
     try {
       await reportToCloud(results, durationMs, config, "triage");
     } catch {
@@ -561,11 +587,6 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     }
   };
 
-  const observer = composeObservers(
-    implProgressObserver,
-    Boolean(options.stream) ? createStreamObserver() : undefined,
-  )!;
-
   // Resolve rules/context from .sweny.yml (same as triage path)
   const providerCtx = buildProviderCtx(config, mcpServers);
   const { rules, context } = await resolveRulesAndContext(config);
@@ -587,6 +608,20 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     context: fullImplContext,
   };
 
+  // Open cloud lifecycle session BEFORE composing observers so the
+  // node-streaming observer can attach to the correct runId. See
+  // triage path for rationale.
+  const implCloudHandle = await beginCloudLifecycle(config, implementWorkflow);
+  if (implCloudHandle?.dashboardUrl) {
+    console.log(c.subtle(`  cloud: ${implCloudHandle.dashboardUrl}`));
+  }
+
+  const observer = composeObservers(
+    implProgressObserver,
+    Boolean(options.stream) ? createStreamObserver() : undefined,
+    createCloudStreamObserver(config, implCloudHandle),
+  );
+
   try {
     const { results } = await execute(implementWorkflow, workflowInput, {
       skills,
@@ -600,6 +635,17 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     });
 
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
+    const implDurationMs = Date.now() - implRunStart;
+
+    // Close the cloud lifecycle session. We do this BEFORE the early
+    // process.exit(1) on failure so cloud sees the final status — a
+    // crashed-without-finish run would stay stuck at "started" forever.
+    try {
+      await finishCloudLifecycle(config, implCloudHandle, results, implDurationMs, hasFailed ? "failed" : "success");
+    } catch {
+      // silent
+    }
+
     if (hasFailed) {
       console.error(chalk.red(`\n  Implement workflow failed\n`));
       process.exit(1);
@@ -612,9 +658,9 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       console.log(chalk.green(`\n  Implement workflow completed\n`));
     }
 
-    // Report to SWEny Cloud (best-effort)
+    // Legacy /api/report back-compat — see triage path.
     try {
-      await reportToCloud(results, Date.now() - implRunStart, config, "implement");
+      await reportToCloud(results, implDurationMs, config, "implement");
     } catch {
       // silent
     }
@@ -784,8 +830,6 @@ export async function workflowRunAction(
         }
       };
 
-  const observer = composeObservers(wfProgressObserver, options.stream ? createStreamObserver() : undefined);
-
   // Build workflow input — prefer --input JSON if provided, else fall back to config-derived input
   let workflowInput: Record<string, unknown>;
 
@@ -818,6 +862,20 @@ export async function workflowRunAction(
     };
   }
 
+  // Open cloud lifecycle session BEFORE composing observers so the
+  // node-streaming observer can attach to the correct runId. See
+  // triage path for rationale.
+  const wfCloudHandle = await beginCloudLifecycle(config, workflow);
+  if (wfCloudHandle?.dashboardUrl && !isJson) {
+    console.log(c.subtle(`  cloud: ${wfCloudHandle.dashboardUrl}`));
+  }
+
+  const observer = composeObservers(
+    wfProgressObserver,
+    options.stream ? createStreamObserver() : undefined,
+    createCloudStreamObserver(config, wfCloudHandle),
+  );
+
   try {
     const { results, trace } = await execute(workflow, workflowInput, {
       skills,
@@ -830,10 +888,21 @@ export async function workflowRunAction(
       offline: config.offline,
     });
 
+    const wfDurationMs = Date.now() - runStart;
+    const wfHasFailed = [...results.values()].some((r) => r.status === "failed");
+
+    // Close the cloud lifecycle session BEFORE the JSON early-exit so
+    // every workflow run reports a terminal status, regardless of how
+    // the CLI returns (json, mermaid, or normal stdout).
+    try {
+      await finishCloudLifecycle(config, wfCloudHandle, results, wfDurationMs, wfHasFailed ? "failed" : "success");
+    } catch {
+      // silent
+    }
+
     if (isJson) {
       process.stdout.write(JSON.stringify(Object.fromEntries(results), null, 2) + "\n");
-      const hasFailed = [...results.values()].some((r) => r.status === "failed");
-      process.exit(hasFailed ? 1 : 0);
+      process.exit(wfHasFailed ? 1 : 0);
       return;
     }
 
@@ -846,16 +915,14 @@ export async function workflowRunAction(
       process.stdout.write(toMermaidBlock(workflow, { state, trace, title: workflow.name }) + "\n");
     }
 
-    // Report to SWEny Cloud (best-effort)
+    // Legacy /api/report back-compat — see triage path.
     try {
-      await reportToCloud(results, Date.now() - runStart, config, workflow.id);
+      await reportToCloud(results, wfDurationMs, config, workflow.id);
     } catch {
       // silent
     }
 
-    const hasFailed = [...results.values()].some((r) => r.status === "failed");
-
-    if (hasFailed) {
+    if (wfHasFailed) {
       console.error(chalk.red(`  Workflow failed\n`));
       process.exit(1);
       return;

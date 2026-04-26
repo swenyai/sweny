@@ -7,17 +7,55 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 
 ## Fields
 
-| Field         | Type                                                             | Required | Default | Description                                                                                     |
-| ------------- | ---------------------------------------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
-| `id`          | string                                                           | REQUIRED | —       | Unique identifier for this workflow. MUST be non-empty.                                         |
-| `name`        | string                                                           | REQUIRED | —       | Human-readable name. MUST be non-empty.                                                         |
-| `description` | string                                                           | OPTIONAL | `""`    | Purpose of the workflow.                                                                        |
-| `entry`       | string                                                           | REQUIRED | —       | Node ID where execution begins. MUST reference a key in `nodes`.                                |
-| `nodes`       | Record&lt;string, [Node](/nodes)&gt;                             | REQUIRED | —       | Map of node ID to Node definition. Keys are referenced by `entry` and edge `from`/`to` fields.  |
-| `edges`       | [Edge](/edges)[]                                                 | REQUIRED | —       | Directed edges defining execution flow and routing conditions.                                  |
-| `skills`      | Record&lt;string, [SkillDefinition](#skilldefinition-object)&gt; | OPTIONAL | `{}`    | Inline skill definitions scoped to this workflow.                                               |
-| `rules`       | [Source](/sources)[]                                             | OPTIONAL | `[]`    | Directives prepended to every node's instruction. Organization-wide policies, coding standards. |
-| `context`     | [Source](/sources)[]                                             | OPTIONAL | `[]`    | Background knowledge prepended to every node's instruction. Architecture docs, playbooks.       |
+| Field           | Type                                                             | Required | Default   | Description                                                                                                         |
+| --------------- | ---------------------------------------------------------------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------- |
+| `id`            | string                                                           | REQUIRED | —         | Unique identifier for this workflow. MUST be non-empty.                                                             |
+| `name`          | string                                                           | REQUIRED | —         | Human-readable name. MUST be non-empty.                                                                             |
+| `description`   | string                                                           | OPTIONAL | `""`      | Purpose of the workflow.                                                                                            |
+| `entry`         | string                                                           | REQUIRED | —         | Node ID where execution begins. MUST reference a key in `nodes`.                                                    |
+| `nodes`         | Record&lt;string, [Node](/nodes)&gt;                             | REQUIRED | —         | Map of node ID to Node definition. Keys are referenced by `entry` and edge `from`/`to` fields.                      |
+| `edges`         | [Edge](/edges)[]                                                 | REQUIRED | —         | Directed edges defining execution flow and routing conditions.                                                      |
+| `skills`        | Record&lt;string, [SkillDefinition](#skilldefinition-object)&gt; | OPTIONAL | `{}`      | Inline skill definitions scoped to this workflow.                                                                   |
+| `rules`         | [Source](/sources)[]                                             | OPTIONAL | `[]`      | Directives prepended to every node's instruction. Organization-wide policies, coding standards.                     |
+| `context`       | [Source](/sources)[]                                             | OPTIONAL | `[]`      | Background knowledge prepended to every node's instruction. Architecture docs, playbooks.                           |
+| `workflow_type` | string (enum)                                                    | OPTIONAL | `generic` | Workflow type discriminator. Routes runs to a type-specific renderer in cloud. See [Workflow type](#workflow-type). |
+
+## Workflow type
+
+The `workflow_type` field tells consumers (notably [cloud.sweny.ai](https://cloud.sweny.ai)) which kind of work this workflow does, so the run can be rendered with type-appropriate metrics. The field is optional. When absent, consumers MUST treat the workflow as type `generic`.
+
+### v1 enum values
+
+| Value                | What it produces                                | Typical metrics                                |
+| -------------------- | ----------------------------------------------- | ---------------------------------------------- |
+| `pr_review`          | A PR comment with risks and suggestions         | Caught / Calibration / Missed                  |
+| `e2e_test`           | Pass-fail per test, screenshots, traces         | Flake rate, step failure heatmap, run duration |
+| `content_generation` | Text or JSON artifacts (e.g. changelog drafts)  | Acceptance rate, regen rate, edit distance     |
+| `monitor`            | A delta report (e.g. weekly regulatory monitor) | Coverage, novel-finding rate, staleness        |
+| `data_sync`          | Records processed counts, errors, latency       | Throughput, error rate, drift                  |
+| `generic`            | Anything else                                   | Run duration, step status, edge routing health |
+
+A conforming consumer:
+
+- **MUST** accept any of the values above.
+- **MUST** treat absent `workflow_type` as `generic`.
+- **MUST** reject any value not in the enum at parse time.
+- **MAY** ignore the field entirely if it doesn't have type-specific rendering. Cloud renderers are an opt-in surface; the runtime executor doesn't change behavior based on `workflow_type`.
+
+Marketplace templates published in v1+ are required to declare `workflow_type` so cloud can render them correctly out of the box.
+
+### Example
+
+```yaml
+id: regulatory-monitor
+name: Regulatory Monitor
+workflow_type: monitor
+description: Weekly state-by-state regulation collection
+entry: gather
+nodes:
+  gather: { ... }
+edges: [...]
+```
 
 ## Rules & Context
 

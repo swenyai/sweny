@@ -314,11 +314,19 @@ export interface Edge {
   max_iterations?: number;
 }
 
+/**
+ * Workflow type discriminator. Cloud uses this to render runs in a
+ * type-specific way. Adding a value requires a corresponding renderer.
+ */
+export type WorkflowType = "pr_review" | "e2e_test" | "content_generation" | "monitor" | "data_sync" | "generic";
+
 /** A complete workflow definition. Pure data, fully serializable. */
 export interface Workflow {
   id: string;
   name: string;
   description: string;
+  /** Optional. Defaults to "generic" when absent. Required on marketplace templates. */
+  workflow_type?: WorkflowType;
   nodes: Record<string, Node>;
   edges: Edge[];
   entry: string;
