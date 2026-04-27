@@ -12,15 +12,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@astrojs/react": "^5.0.3",
-    "@astrojs/starlight": "^0.38.3",
+    "@astrojs/react": "^5.0.4",
+    "@astrojs/starlight": "^0.38.4",
     "@sweny-ai/core": "*",
     "@sweny-ai/studio": "^8.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
-    "astro": "^6.1.8",
+    "astro": "^6.1.9",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "sharp": "^0.34.2",
