@@ -45,6 +45,7 @@ export default defineConfig({
               "react/jsx-runtime",
               "@xyflow/react",
               "elkjs",
+              "elkjs/lib/elk.bundled.js",
               "@sweny-ai/core",
               "@sweny-ai/core/studio",
               "@sweny-ai/core/schema",
