@@ -53,11 +53,11 @@
     "check:schema-drift": "node scripts/write-public-schema.mjs && git diff --exit-code -- ../../spec/public/schemas/workflow.json ../../spec/public/schemas/skill.json"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.114",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.126",
     "@clack/prompts": "^1.2.0",
     "chalk": "^5",
     "commander": "^13",
-    "yaml": "^2",
+    "yaml": "^2.8.4",
     "zod": "^3.25.76"
   },
   "devDependencies": {

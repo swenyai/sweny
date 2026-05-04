@@ -21,7 +21,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@sweny-ai/core": "^0.1.0",
-    "yaml": "^2",
+    "yaml": "^2.8.4",
     "zod": "^3.25.76"
   },
   "devDependencies": {
