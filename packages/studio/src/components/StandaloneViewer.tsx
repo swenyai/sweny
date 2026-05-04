@@ -1,5 +1,16 @@
-import { useState, useEffect, useRef } from "react";
-import { ReactFlow, Background, Controls, MiniMap, useReactFlow, type NodeMouseHandler } from "@xyflow/react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  useReactFlow,
+  applyNodeChanges,
+  applyEdgeChanges,
+  type NodeChange,
+  type EdgeChange,
+  type NodeMouseHandler,
+} from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { Workflow } from "@sweny-ai/core";
 import { StateNode } from "./StateNode.js";
@@ -109,6 +120,15 @@ export function WorkflowViewer({
     onNodeClick?.(node.data.nodeId);
   };
 
+  const onNodesChange = useCallback(
+    (changes: NodeChange<StateNodeType>[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    [],
+  );
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange<Edge<TransitionEdgeData>>[]) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+    [],
+  );
+
   if (error) {
     return (
       <div
@@ -177,6 +197,8 @@ export function WorkflowViewer({
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         nodesDraggable={false}

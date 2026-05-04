@@ -80,8 +80,6 @@ When using the **GitHub Action or CLI**, SWEny runs entirely within your infrast
 
 The Action and CLI are standalone open-source tools with no phone-home behavior. Nothing is sent to SWEny servers.
 
-SWEny does not run a managed cloud service today — everything executes inside your CI runners or your local machine.
-
 ## Can I use a different LLM?
 
 The `coding-agent-provider` input on [`swenyai/triage@v1`](https://github.com/swenyai/triage) supports three options for the **Implement** workflow:

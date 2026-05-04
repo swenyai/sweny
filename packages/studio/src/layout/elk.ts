@@ -1,4 +1,5 @@
-import ELK, { type ElkNode, type ElkExtendedEdge } from "elkjs";
+import ELK from "elkjs/lib/elk.bundled.js";
+import type { ElkNode, ElkExtendedEdge } from "elkjs";
 import type { Edge } from "@xyflow/react";
 import type { Workflow } from "@sweny-ai/core";
 import { workflowToFlow } from "@sweny-ai/core/studio";
@@ -64,6 +65,8 @@ export async function layoutWorkflow(
         y: elkNode?.y ?? 0,
       },
       style: { width: nodeWidth, minHeight: nodeHeight },
+      initialWidth: nodeWidth,
+      initialHeight: nodeHeight,
       data: {
         nodeId: flowNode.data.nodeId,
         node: flowNode.data.node,
