@@ -10,9 +10,23 @@ nodes:
       Read the issue details and understand what needs to be fixed:
 
       1. Fetch the issue from the tracker (GitHub or Linear).
-      2. Read the relevant source files to understand the current code.
-      3. Identify the exact files and lines that need to change.
-      4. Plan the fix approach.
+      2. **Check for an existing open PR for this issue.** Call
+         `github_search_prs` with a query that includes the issue identifier
+         wrapped in brackets — e.g. `[OFF-1234] in:title state:open`. If you
+         find one or more open PRs whose title starts with
+         `[<issueIdentifier>]`, STOP analysis. Output `existing_pr_url`
+         (the URL of the open PR) and a short `issue_summary` noting the
+         skip; leave `fix_plan` set to a one-line "Skip: open PR
+         <url> already exists". The workflow will route to `notify` and
+         the team will be told the prior PR is still pending.
+         Rationale: re-implementing while an open PR exists produces a
+         duplicate (or worse, the agent closes its own prior PR mid-run
+         and opens a new one — exactly the thrash seen in
+         `letsoffload/permit-service` PR #81 → #82 and
+         `letsoffload/offload` PR #572 → #573).
+      3. Read the relevant source files to understand the current code.
+      4. Identify the exact files and lines that need to change.
+      5. Plan the fix approach.
 
       Output a clear analysis of what needs to change and why.
     skills:
@@ -35,6 +49,14 @@ nodes:
             - low
             - medium
             - high
+        existing_pr_url:
+          type: string
+          description: |
+            URL of an open PR found in step 2 whose title starts with the
+            issue identifier in brackets. Set ONLY when a prior PR exists
+            and the analyze node is short-circuiting. Triggers the
+            `analyze → notify` edge.
+          pattern: "^https?://"
       required:
         - issue_summary
         - fix_plan
@@ -96,6 +118,9 @@ nodes:
       - github
       - linear
 edges:
+  - from: analyze
+    to: notify
+    when: analyze.existing_pr_url is set (an open PR for this issue already exists; skip the implement and create_pr nodes)
   - from: analyze
     to: implement
     when: Fix risk level is low or medium and a clear plan exists
