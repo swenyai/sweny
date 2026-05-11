@@ -72,6 +72,10 @@ nodes:
       3. Ensure changes are minimal and focused — fix the bug, nothing more.
       4. Stage and commit with a clear commit message referencing the issue.
 
+      Stop after the commit. Do NOT push or open the PR — the dedicated `create_pr`
+      node handles that via `github_create_pr` and its eval gate is what unblocks
+      the rest of the workflow.
+
       If the fix is too risky or complex, explain why and skip.
     skills:
       - github

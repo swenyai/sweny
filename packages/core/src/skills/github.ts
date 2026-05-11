@@ -7,6 +7,17 @@
 
 import type { Skill, ToolContext, SkillCategory } from "../types.js";
 
+class GitHubApiError extends Error {
+  status: number;
+  body: string;
+  constructor(status: number, body: string) {
+    super(`[GitHub] API request failed (HTTP ${status}): ${body}`);
+    this.name = "GitHubApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function gh(path: string, ctx: ToolContext, init?: RequestInit): Promise<unknown> {
   const res = await fetch(`https://api.github.com${path}`, {
     ...init,
@@ -18,8 +29,13 @@ async function gh(path: string, ctx: ToolContext, init?: RequestInit): Promise<u
     },
     signal: AbortSignal.timeout(30_000),
   });
-  if (!res.ok) throw new Error(`[GitHub] API request failed (HTTP ${res.status}): ${await res.text()}`);
+  if (!res.ok) throw new GitHubApiError(res.status, await res.text());
   return res.json();
+}
+
+function isAlreadyExistsError(err: unknown): err is GitHubApiError {
+  if (!(err instanceof GitHubApiError) || err.status !== 422) return false;
+  return /pull request already exists/i.test(err.body);
 }
 
 export const github: Skill = {
@@ -131,17 +147,45 @@ export const github: Skill = {
         required: ["repo", "title", "head"],
       },
       handler: async (input: { repo: string; title: string; body?: string; head: string; base?: string }, ctx) => {
-        const pr = (await gh(`/repos/${input.repo}/pulls`, ctx, {
-          method: "POST",
-          body: JSON.stringify({
-            title: input.title,
-            body: input.body,
-            head: input.head,
-            base: input.base ?? "main",
-          }),
-        })) as { number?: number };
+        let pr: { number?: number; html_url?: string } & Record<string, unknown>;
+        let reused = false;
         try {
-          if (pr.number) {
+          pr = (await gh(`/repos/${input.repo}/pulls`, ctx, {
+            method: "POST",
+            body: JSON.stringify({
+              title: input.title,
+              body: input.body,
+              head: input.head,
+              base: input.base ?? "main",
+            }),
+          })) as { number?: number; html_url?: string };
+        } catch (err) {
+          // Recovery: GitHub rejects POST /pulls with 422 when an open PR
+          // already exists for the same head branch. Look up that PR and
+          // return it as if newly created. Without this the workflow's
+          // create_pr eval (`github_create_pr` must succeed) cannot pass
+          // on a re-run, and the agent will close the existing PR to
+          // satisfy the eval — observed in production as a self-close-
+          // and-recreate loop on the same branch.
+          if (!isAlreadyExistsError(err)) throw err;
+          const owner = input.repo.split("/")[0];
+          const headQ = encodeURIComponent(`${owner}:${input.head}`);
+          const open = (await gh(`/repos/${input.repo}/pulls?head=${headQ}&state=open&per_page=1`, ctx)) as Array<{
+            number?: number;
+          }>;
+          const existing =
+            open[0] ??
+            (
+              (await gh(`/repos/${input.repo}/pulls?head=${headQ}&state=all&per_page=1`, ctx)) as Array<{
+                number?: number;
+              }>
+            )[0];
+          if (!existing) throw err;
+          pr = existing as { number?: number };
+          reused = true;
+        }
+        try {
+          if (pr.number && !reused) {
             await gh(`/repos/${input.repo}/issues/${pr.number}/labels`, ctx, {
               method: "POST",
               body: JSON.stringify({ labels: ["sweny"] }),
@@ -150,7 +194,7 @@ export const github: Skill = {
         } catch {
           // Label failure is non-fatal
         }
-        return pr;
+        return reused ? { ...pr, reused: true } : pr;
       },
     },
     {
