@@ -89,6 +89,24 @@ describe("Zod schemas", () => {
       expect(() => nodeZ.parse({ name: "S", instruction: "I", eval: [] })).toThrow();
     });
 
+    it("accepts disallowed_tools as a string array", () => {
+      const result = nodeZ.parse({
+        name: "S",
+        instruction: "I",
+        disallowed_tools: ["WebFetch", "WebSearch"],
+      });
+      expect(result.disallowed_tools).toEqual(["WebFetch", "WebSearch"]);
+    });
+
+    it("rejects disallowed_tools with an empty-string entry", () => {
+      expect(() => nodeZ.parse({ name: "S", instruction: "I", disallowed_tools: ["WebFetch", ""] })).toThrow();
+    });
+
+    it("defaults disallowed_tools to undefined when omitted", () => {
+      const result = nodeZ.parse({ name: "S", instruction: "I" });
+      expect(result.disallowed_tools).toBeUndefined();
+    });
+
     it("rejects an evaluator missing a name", () => {
       expect(() =>
         nodeZ.parse({

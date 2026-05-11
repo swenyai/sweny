@@ -51,6 +51,12 @@ nodes:
       If the fix is too risky or complex, explain why and skip.
     skills:
       - github
+    # Same rationale as the triage workflow: keep the implement node focused
+    # on the repo. Bash stays available because `git add`/`git commit` and
+    # test runners are essential.
+    disallowed_tools:
+      - WebFetch
+      - WebSearch
   create_pr:
     name: Open Pull Request
     instruction: >-

@@ -302,6 +302,15 @@ export interface Node {
   requires?: NodeRequires;
   /** Node-local retry on eval failure (with optional autonomous reflection). */
   retry?: NodeRetry;
+  /**
+   * Built-in tool names the agent must NOT have access to during this node.
+   * Forwarded to the Claude Agent SDK's `disallowedTools` option, which
+   * removes the named tools from the model's context entirely (not just
+   * blocked-via-permission). Use this to scope a node — e.g. an implement
+   * node that should commit but must not shell out `gh pr create` or
+   * `git push`. Names follow the SDK's tool naming (e.g. `Bash`, `Write`).
+   */
+  disallowed_tools?: string[];
 }
 
 /** An edge connecting two nodes */
@@ -463,6 +472,8 @@ export interface Claude {
     onProgress?: (message: string) => void;
     /** Per-node turn limit. Overrides the client default when set. */
     maxTurns?: number;
+    /** Built-in SDK tool names to disallow for this node (e.g. ["Bash"]). */
+    disallowedTools?: string[];
   }): Promise<NodeResult>;
 
   /** Evaluate a routing condition — pick one of N choices */

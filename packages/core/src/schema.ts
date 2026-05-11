@@ -227,6 +227,7 @@ export const nodeZ = z
     skills: z.array(z.string()).default([]),
     output: jsonSchemaZ.optional(),
     max_turns: z.number().int().min(1).optional(),
+    disallowed_tools: z.array(z.string().min(1)).optional(),
     rules: nodeSourcesZ.optional(),
     context: nodeSourcesZ.optional(),
     eval: z.array(evaluatorZ).min(1).optional(),
@@ -670,6 +671,12 @@ export const workflowJsonSchema = {
             type: "integer",
             minimum: 1,
             description: "Max AI model turns for this node. When absent, the executor's default applies.",
+          },
+          disallowed_tools: {
+            type: "array",
+            items: { type: "string", minLength: 1 },
+            description:
+              "Built-in tool names the agent cannot use at this node (e.g. ['Bash']). Forwarded to the Claude Agent SDK's disallowedTools, which removes the tools from the model context entirely.",
           },
           rules: {
             $ref: "#/$defs/NodeSources",

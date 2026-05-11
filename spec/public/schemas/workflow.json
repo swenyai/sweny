@@ -292,6 +292,14 @@
             "minimum": 1,
             "description": "Max AI model turns for this node. When absent, the executor's default applies."
           },
+          "disallowed_tools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Built-in tool names the agent cannot use at this node (e.g. ['Bash']). Forwarded to the Claude Agent SDK's disallowedTools, which removes the tools from the model context entirely."
+          },
           "rules": {
             "$ref": "#/$defs/NodeSources",
             "description": "Per-node rules. Additive by default; set { only: true } to block cascade."
