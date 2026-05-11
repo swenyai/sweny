@@ -361,12 +361,44 @@ nodes:
 
       ## Steps
 
-      0. **Precondition — verify context.create_issue.issueIdentifier is well-formed.**
+      0a. **Precondition — verify context.create_issue.issueIdentifier is well-formed.**
          The identifier MUST match `^[A-Z][A-Z0-9]*-\d+$` (e.g. `OFF-1234`). If it
          is missing, empty, or matches a Sentry short-ID / slug / any other shape,
          STOP immediately — do NOT invent a branch name from the Sentry event,
          commit SHA, or alert payload. Return a failed status with a clear message
          instead; the workflow will route to notify and a human will pick it up.
+
+      0b. **Precondition — check for an existing open PR for this issue.** Call
+         `github_search_issues` (which hits GitHub's `/search/issues` endpoint
+         and returns both issues and PRs) with `type:pr state:open` and the
+         issue identifier wrapped in brackets — e.g. query
+         `[OFF-1234] in:title type:pr state:open` and pass `repo` for scoping.
+         If the response contains one or more PRs whose title starts with
+         `[<issueIdentifier>]`, STOP. Do NOT create a branch, commit, or any
+         new PR. Output:
+
+         ```
+         test_status: "skipped"
+         skipped_reason: "open-pr-exists"
+         existing_pr_url: "<url of the existing PR>"
+         test_files_changed: []
+         files_changed: []
+         branch: ""
+         commit_sha: ""
+         ```
+
+         The downstream `create_pr` node will be bypassed and the workflow will
+         route to `notify` so the team is told the prior PR is still pending.
+
+         Rationale: re-implementing a fix while an open PR already exists
+         produces a duplicate (or worse, the agent closes its own prior PR
+         mid-run and opens a new one with a different approach — exactly the
+         thrash observed in `letsoffload/permit-service` PR #81 → #82 and
+         `letsoffload/offload` PR #572 → #573, where two PRs for the same
+         identifier were opened-and-closed 12 to 16 seconds apart inside a
+         single workflow run).
+
+         Only proceed to Step 1 if no open PR exists for the identifier.
 
       1. Create a feature branch from the base branch (check context for
          baseBranch, default `main`). **Branch name MUST include the issue
@@ -460,7 +492,7 @@ nodes:
           description: Exact command run to validate (e.g. `npx nx test server`).
         test_status:
           type: string
-          enum: [pass, fail, no-framework, not-run]
+          enum: [pass, fail, no-framework, not-run, skipped]
           description: |
             Outcome of running the test suite.
             - `pass` — tests ran end-to-end and every assertion passed.
@@ -475,6 +507,26 @@ nodes:
               a broken fix. Return this status, retry will fire once.
             - `not-run` — tests exist but the environment couldn't
               execute them. Explain in `test_notes`. Retry will fire.
+            - `skipped` — the node short-circuited before running tests
+              because a precondition was not met. Today the only
+              accepted reason is `open-pr-exists` (Step 0b found an
+              open PR with the issue identifier in its title).
+              `skipped_reason` and `existing_pr_url` MUST be populated.
+              Downstream `create_pr` is bypassed and the workflow
+              routes to `notify`.
+        skipped_reason:
+          type: string
+          description: |
+            Why the node short-circuited. Only set when `test_status` is
+            `skipped`. Today the only valid value is `open-pr-exists`.
+          enum: [open-pr-exists]
+        existing_pr_url:
+          type: string
+          description: |
+            URL of the open PR that triggered the skip. Set when
+            `skipped_reason` is `open-pr-exists` so the notify node
+            can link to the prior PR.
+          pattern: "^https?://"
         test_notes:
           type: string
           description: One-paragraph explanation of which tests were added and what they assert.
@@ -485,14 +537,18 @@ nodes:
         - test_files_changed
         - test_status
     eval:
-      # `pass` and `no-framework` both clear the gate. `fail` and `not-run`
-      # trigger retry.
+      # `pass`, `no-framework`, and `skipped` clear the gate. `fail` and
+      # `not-run` trigger retry. `skipped` is the Step 0b short-circuit
+      # (open PR already exists for the issue identifier) — see the
+      # implement instruction for the driving incidents
+      # (letsoffload/permit-service #81 → #82,
+      # letsoffload/offload #572 → #573).
       - name: test_status_is_pass_or_no_framework
         kind: value
         rule:
           output_matches:
             - path: test_status
-              in: [pass, no-framework]
+              in: [pass, no-framework, skipped]
       # Conditional: when test_status is pass, test_files_changed MUST contain
       # at least one real test file path. Empty array with status pass is a
       # contract violation (the agent claimed it ran tests without actually
@@ -518,6 +574,11 @@ nodes:
             (README.md, package.json, source files), is a contract violation.
           - If test_status is "no-framework": test_files_changed MAY be empty.
             Pass vacuously.
+          - If test_status is "skipped": test_files_changed MAY be empty.
+            The node short-circuited before writing any code (Step 0b
+            found an open PR for the issue). `skipped_reason` and
+            `existing_pr_url` MUST be populated; if they are missing,
+            return no.
           - If test_status is "fail" or "not-run": this evaluator should not
             run (the prior value evaluator catches that). Pass vacuously.
 
@@ -601,6 +662,10 @@ edges:
   - from: skip
     to: notify
   - from: implement
+    to: notify
+    when: implement.test_status is "skipped" (Step 0b found an open PR already exists for the issue identifier)
+  - from: implement
     to: create_pr
+    when: implement.test_status is "pass" or "no-framework" (no existing PR; fix was implemented or there is no test framework)
   - from: create_pr
     to: notify

@@ -253,11 +253,32 @@ describe("triage implement node — fix-quality contract", () => {
       expect(required).toContain("test_status");
     });
 
-    it("declares test_status with exactly the four allowed values", () => {
+    it("declares test_status with exactly the five allowed values", () => {
       const props = output!.properties as Record<string, any>;
       expect(props.test_status).toBeDefined();
       // Order doesn't matter; set semantics for the enum.
-      expect(new Set(props.test_status.enum)).toEqual(new Set(["pass", "fail", "no-framework", "not-run"]));
+      // `skipped` was added to support the Step 0b open-PR precondition —
+      // when an open PR already exists for the issue identifier, implement
+      // short-circuits without running tests and the workflow routes to
+      // notify. See triage.yml implement instruction Step 0b.
+      expect(new Set(props.test_status.enum)).toEqual(new Set(["pass", "fail", "no-framework", "not-run", "skipped"]));
+    });
+
+    it("declares skipped_reason as an enum scoped to documented reasons", () => {
+      const props = output!.properties as Record<string, any>;
+      expect(props.skipped_reason).toBeDefined();
+      // Currently the only valid skip reason is open-pr-exists. Keeping
+      // this enum tight prevents drive-by additions; new reasons should
+      // come with a documented rationale and edge wiring.
+      expect(new Set(props.skipped_reason.enum)).toEqual(new Set(["open-pr-exists"]));
+    });
+
+    it("declares existing_pr_url as a URL string", () => {
+      const props = output!.properties as Record<string, any>;
+      expect(props.existing_pr_url).toBeDefined();
+      expect(props.existing_pr_url.type).toBe("string");
+      // Pattern guards against bare PR numbers or local paths.
+      expect(props.existing_pr_url.pattern).toBe("^https?://");
     });
 
     it("declares test_files_changed as an array of strings", () => {
@@ -278,13 +299,16 @@ describe("triage implement node — fix-quality contract", () => {
       expect(match).toBeDefined();
     });
 
-    it("allows pass and no-framework, and only those two", () => {
+    it("allows pass, no-framework, and skipped, and only those three", () => {
       const ev = evaluators!.find((e) => e.kind === "value" && e.rule?.output_matches !== undefined)!;
       const match = ev.rule!.output_matches!.find((m) => m.path === "test_status")!;
       // Behavior contract: pass is the happy path; no-framework is the
-      // documented escape valve for genuinely test-less repos. Anything
-      // else (fail, not-run) trips the gate and triggers retry.
-      expect(new Set(match.in as string[])).toEqual(new Set(["pass", "no-framework"]));
+      // documented escape valve for genuinely test-less repos; skipped is
+      // the Step 0b open-PR precondition that prevents the run-thrash
+      // observed in letsoffload/permit-service #81 → #82 and
+      // letsoffload/offload #572 → #573. Anything else (fail, not-run)
+      // trips the gate and triggers retry.
+      expect(new Set(match.in as string[])).toEqual(new Set(["pass", "no-framework", "skipped"]));
     });
   });
 
@@ -328,7 +352,7 @@ describe("triage implement node — fix-quality contract", () => {
       );
       expect(testStatusMatches.length).toBeGreaterThan(0);
       const allowedStatuses = testStatusMatches[0]!.in as string[];
-      expect(new Set(allowedStatuses)).toEqual(new Set(["pass", "no-framework"]));
+      expect(new Set(allowedStatuses)).toEqual(new Set(["pass", "no-framework", "skipped"]));
     });
 
     it("retains a single retry attempt with autonomous reflection", () => {
@@ -338,6 +362,97 @@ describe("triage implement node — fix-quality contract", () => {
       expect(node.retry!.max).toBe(1);
       expect(node.retry!.instruction).toEqual({ auto: true });
     });
+  });
+});
+
+// ─── Triage implement-node open-PR precondition (Step 0b) ───────
+//
+// Driving incident: in a single SWEny workflow run on 2026-04-26
+// (letsoffload/permit-service, run id 24958851295), PR #81 was opened
+// at 14:32:58, closed by github-actions[bot] at 14:47:57, and PR #82
+// was opened 12 seconds later — both for OFF-1481, different fix
+// approaches. Same pattern on 2026-05-11 in letsoffload/offload
+// (run id 25678132232): #572 closed and #573 opened 16 seconds apart
+// for OFF-1768. Cause: the implement node has no idempotency guard;
+// re-runs (and internal retries) re-implement a fix that already has
+// an open PR, then ad-hoc close the prior PR to land the new one.
+// The Step 0b check short-circuits before any branch is created.
+describe("triage implement node — Step 0b open-PR precondition", () => {
+  const node = triageWorkflow.nodes.implement;
+  const instruction = node.instruction as string;
+
+  it("instruction documents Step 0b PR-existence check", () => {
+    expect(instruction).toMatch(/Step 0b|0b\.|Precondition.*existing open PR/i);
+    // Must reference an actual tool the github skill exposes. `github_search_issues`
+    // hits GitHub's /search/issues endpoint which returns PRs too when filtered
+    // with `type:pr`. There is no `github_search_prs` tool; referencing it would
+    // tell the agent to call a non-existent function.
+    expect(instruction).toMatch(/github_search_issues/);
+    expect(instruction).not.toMatch(/github_search_prs/);
+    expect(instruction).toMatch(/type:pr/);
+    expect(instruction).toMatch(/state:open/);
+  });
+
+  it("instruction tells the agent to STOP without creating a branch when an open PR exists", () => {
+    // The whole point of the precondition: no new branch, no new commit,
+    // no new PR. Pin the prohibition explicitly so a future "improvement"
+    // doesn't relax it back to "but if the title is slightly different..."
+    expect(instruction).toMatch(/STOP\.\s+Do\s+NOT create a branch/);
+  });
+
+  it("instruction prescribes the exact skipped-output shape", () => {
+    expect(instruction).toMatch(/test_status:\s*"skipped"/);
+    expect(instruction).toMatch(/skipped_reason:\s*"open-pr-exists"/);
+    expect(instruction).toMatch(/existing_pr_url/);
+  });
+
+  it("cites the driving incidents so the rationale survives future edits", () => {
+    // These are not flair — they are the specific evidence the precondition
+    // is for. Stripping the citation invites a future contributor to
+    // remove the precondition as "unmotivated."
+    expect(instruction).toMatch(/permit-service.*PR #81/);
+    expect(instruction).toMatch(/offload.*PR #572/);
+  });
+
+  it("has an edge from implement to notify gated on test_status skipped", () => {
+    const implementToNotify = triageWorkflow.edges.find((e) => e.from === "implement" && e.to === "notify");
+    expect(implementToNotify).toBeDefined();
+    expect(implementToNotify!.when).toBeDefined();
+    expect(implementToNotify!.when!).toMatch(/skipped/);
+  });
+
+  it("the implement→create_pr edge is now conditional, not unconditional", () => {
+    // Before this fix, implement→create_pr had no `when:` and always fired,
+    // which is what made the skipped path unrouteable. Make sure the edge
+    // stays conditional so the engine can choose between create_pr and
+    // notify based on the implement node's output.
+    const implementToCreatePr = triageWorkflow.edges.find((e) => e.from === "implement" && e.to === "create_pr");
+    expect(implementToCreatePr).toBeDefined();
+    expect(implementToCreatePr!.when).toBeDefined();
+    expect(implementToCreatePr!.when!).toMatch(/pass|no-framework/);
+  });
+
+  it("the judge rubric still covers the skipped case", () => {
+    const evaluators = node.eval ?? [];
+    const judges = evaluators.filter((e) => e.kind === "judge");
+    const testFilesJudge = judges.find((e) => (e.rubric ?? "").includes("test_files_changed"));
+    expect(testFilesJudge).toBeDefined();
+    // The rubric must explicitly allow empty test_files_changed when
+    // test_status is "skipped" — otherwise the judge fails the contract
+    // on the Step 0b short-circuit and burns the retry budget.
+    expect(testFilesJudge!.rubric).toMatch(/"skipped"/);
+  });
+
+  it("fail and not-run still trigger retry (NOT added to the allow-list)", () => {
+    // Adding `skipped` to the value gate must not inadvertently relax the
+    // gate for `fail` or `not-run`. Both should remain outside `in` so the
+    // retry path keeps firing on real test failures.
+    const evaluators = node.eval ?? [];
+    const valueEv = evaluators.find((e) => e.kind === "value" && e.rule?.output_matches !== undefined)!;
+    const match = valueEv.rule!.output_matches!.find((m) => m.path === "test_status")!;
+    const allowed = match.in as string[];
+    expect(allowed).not.toContain("fail");
+    expect(allowed).not.toContain("not-run");
   });
 });
 
@@ -352,10 +467,38 @@ describe("implement workflow specifics", () => {
     expect(implementWorkflow.entry).toBe("analyze");
   });
 
-  it("has conditional edges from analyze", () => {
+  it("has three conditional edges from analyze (existing PR, fix, skip)", () => {
+    // analyze now branches three ways:
+    //   1. existing_pr_url is set → notify (no work to do)
+    //   2. risk low/medium with a clear plan → implement
+    //   3. too complex/risky/unclear → skip
     const analyzeEdges = implementWorkflow.edges.filter((e) => e.from === "analyze");
-    expect(analyzeEdges.length).toBe(2);
+    expect(analyzeEdges.length).toBe(3);
     expect(analyzeEdges.every((e) => e.when)).toBe(true);
+  });
+
+  it("analyze → notify edge mentions existing_pr_url", () => {
+    const analyzeToNotify = implementWorkflow.edges.find((e) => e.from === "analyze" && e.to === "notify");
+    expect(analyzeToNotify).toBeDefined();
+    expect(analyzeToNotify!.when!).toMatch(/existing_pr_url/);
+  });
+
+  it("analyze node instruction mentions the PR-existence check", () => {
+    const instr = implementWorkflow.nodes.analyze.instruction as string;
+    // Must reference a tool the github skill actually exposes — there is
+    // no `github_search_prs`. `github_search_issues` covers PRs via the
+    // /search/issues endpoint with a `type:pr` qualifier.
+    expect(instr).toMatch(/github_search_issues/);
+    expect(instr).not.toMatch(/github_search_prs/);
+    expect(instr).toMatch(/type:pr/);
+    expect(instr).toMatch(/existing open PR|open PR.*already exists/i);
+  });
+
+  it("analyze output schema declares existing_pr_url as a URL string", () => {
+    const props = implementWorkflow.nodes.analyze.output!.properties as Record<string, any>;
+    expect(props.existing_pr_url).toBeDefined();
+    expect(props.existing_pr_url.type).toBe("string");
+    expect(props.existing_pr_url.pattern).toBe("^https?://");
   });
 
   it("skip routes to notify (team always gets notified)", () => {
