@@ -431,6 +431,17 @@ nodes:
          issue identifier in brackets, e.g.
          `[OFF-1234] fix: guard null projectId before database lookup`.
 
+      ## Scope boundary — do NOT open the PR here
+
+      Stop after the commit. Do NOT push the branch, do NOT run `gh pr create`,
+      do NOT call any PR-creation tool. The dedicated `create_pr` node opens the
+      PR via `github_create_pr`. Opening it from this node bypasses the workflow's
+      eval gate and triggers a self-close-and-recreate workaround (PR opened via
+      shell, then `github_create_pr` returns 422 "already exists" against the same
+      branch, then the agent closes the first PR to satisfy the eval). The
+      idempotent fallback in `github_create_pr` will recover if you ignore this,
+      but the cleaner path is: commit only here, let `create_pr` push and open.
+
       ## Test Requirements
 
       A code change without a test is unfinished work. Every fix this node ships
@@ -599,6 +610,11 @@ nodes:
       2. Create the PR using the `github_create_pr` tool. **Use this exact tool name** — do NOT
       use `create_pull_request` or any other variant from ToolSearch. The eval check requires
       `github_create_pr` specifically.
+
+      **If `github_create_pr` returns a result with `reused: true`**, the implement
+      node (or a prior run) already opened a PR for this branch and the tool
+      recovered it instead of failing on 422. Treat this as success and return the
+      PR's URL and number — do NOT close it and call `github_create_pr` again.
 
       3. PR title MUST start with the issue identifier in brackets.
       Format: `[{context.create_issue.issueIdentifier}] fix: {short description}`.
