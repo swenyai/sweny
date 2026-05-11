@@ -11,10 +11,12 @@ nodes:
 
       1. Fetch the issue from the tracker (GitHub or Linear).
       2. **Check for an existing open PR for this issue.** Call
-         `github_search_prs` with a query that includes the issue identifier
-         wrapped in brackets — e.g. `[OFF-1234] in:title state:open`. If you
-         find one or more open PRs whose title starts with
-         `[<issueIdentifier>]`, STOP analysis. Output `existing_pr_url`
+         `github_search_issues` (GitHub's `/search/issues` endpoint returns
+         both issues and PRs) with `type:pr state:open` and the issue
+         identifier wrapped in brackets — e.g. query
+         `[OFF-1234] in:title type:pr state:open`. If the response contains
+         one or more PRs whose title starts with `[<issueIdentifier>]`,
+         STOP analysis. Output `existing_pr_url`
          (the URL of the open PR) and a short `issue_summary` noting the
          skip; leave `fix_plan` set to a one-line "Skip: open PR
          <url> already exists". The workflow will route to `notify` and

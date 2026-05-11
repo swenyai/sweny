@@ -383,7 +383,13 @@ describe("triage implement node — Step 0b open-PR precondition", () => {
 
   it("instruction documents Step 0b PR-existence check", () => {
     expect(instruction).toMatch(/Step 0b|0b\.|Precondition.*existing open PR/i);
-    expect(instruction).toMatch(/github_search_prs/);
+    // Must reference an actual tool the github skill exposes. `github_search_issues`
+    // hits GitHub's /search/issues endpoint which returns PRs too when filtered
+    // with `type:pr`. There is no `github_search_prs` tool; referencing it would
+    // tell the agent to call a non-existent function.
+    expect(instruction).toMatch(/github_search_issues/);
+    expect(instruction).not.toMatch(/github_search_prs/);
+    expect(instruction).toMatch(/type:pr/);
     expect(instruction).toMatch(/state:open/);
   });
 
@@ -436,6 +442,18 @@ describe("triage implement node — Step 0b open-PR precondition", () => {
     // on the Step 0b short-circuit and burns the retry budget.
     expect(testFilesJudge!.rubric).toMatch(/"skipped"/);
   });
+
+  it("fail and not-run still trigger retry (NOT added to the allow-list)", () => {
+    // Adding `skipped` to the value gate must not inadvertently relax the
+    // gate for `fail` or `not-run`. Both should remain outside `in` so the
+    // retry path keeps firing on real test failures.
+    const evaluators = node.eval ?? [];
+    const valueEv = evaluators.find((e) => e.kind === "value" && e.rule?.output_matches !== undefined)!;
+    const match = valueEv.rule!.output_matches!.find((m) => m.path === "test_status")!;
+    const allowed = match.in as string[];
+    expect(allowed).not.toContain("fail");
+    expect(allowed).not.toContain("not-run");
+  });
 });
 
 // ─── Implement workflow specifics ───────────────────────────────
@@ -467,7 +485,12 @@ describe("implement workflow specifics", () => {
 
   it("analyze node instruction mentions the PR-existence check", () => {
     const instr = implementWorkflow.nodes.analyze.instruction as string;
-    expect(instr).toMatch(/github_search_prs/);
+    // Must reference a tool the github skill actually exposes — there is
+    // no `github_search_prs`. `github_search_issues` covers PRs via the
+    // /search/issues endpoint with a `type:pr` qualifier.
+    expect(instr).toMatch(/github_search_issues/);
+    expect(instr).not.toMatch(/github_search_prs/);
+    expect(instr).toMatch(/type:pr/);
     expect(instr).toMatch(/existing open PR|open PR.*already exists/i);
   });
 

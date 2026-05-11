@@ -369,11 +369,13 @@ nodes:
          instead; the workflow will route to notify and a human will pick it up.
 
       0b. **Precondition — check for an existing open PR for this issue.** Call
-         `github_search_prs` (or the equivalent search-pull-requests tool) with a
-         query that includes the issue identifier wrapped in brackets — e.g.
-         `[OFF-1234] in:title state:open repo:<owner>/<repo>`. If you find one or
-         more open PRs whose title starts with `[<issueIdentifier>]`, STOP. Do
-         NOT create a branch, commit, or any new PR. Output:
+         `github_search_issues` (which hits GitHub's `/search/issues` endpoint
+         and returns both issues and PRs) with `type:pr state:open` and the
+         issue identifier wrapped in brackets — e.g. query
+         `[OFF-1234] in:title type:pr state:open` and pass `repo` for scoping.
+         If the response contains one or more PRs whose title starts with
+         `[<issueIdentifier>]`, STOP. Do NOT create a branch, commit, or any
+         new PR. Output:
 
          ```
          test_status: "skipped"
