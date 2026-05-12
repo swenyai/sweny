@@ -34,6 +34,7 @@ import { loadDotenv, loadConfigFile } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { runNew } from "./new.js";
 import { runE2eRun } from "./e2e.js";
+import { createVerboseToolObserver } from "./verbose-observer.js";
 import {
   registerTriageCommand,
   registerImplementCommand,
@@ -77,42 +78,8 @@ function createStreamObserver(): Observer {
   };
 }
 
-// ── Verbose observer (human-readable tool detail) ──────────────────
-/**
- * Create an observer that prints each tool call's input and output to stderr
- * inline, in a human-readable format. Useful when debugging a node that's
- * failing — the default human output only shows step transitions, leaving
- * "why" invisible. Inputs and outputs are truncated to keep the log readable;
- * use `--stream` for the full untruncated NDJSON.
- */
-function createVerboseToolObserver(): Observer {
-  const TRUNCATE = 1200;
-  const truncate = (s: string): string =>
-    s.length > TRUNCATE ? `${s.slice(0, TRUNCATE)}\n      ${chalk.dim(`… [${s.length - TRUNCATE} more chars]`)}` : s;
-  const fmt = (v: unknown): string => {
-    if (v === undefined) return "undefined";
-    if (v === null) return "null";
-    if (typeof v === "string") return v;
-    try {
-      return JSON.stringify(v, null, 2);
-    } catch {
-      return String(v);
-    }
-  };
-  const indent = (s: string): string => s.split("\n").join("\n      ");
-  return (event: ExecutionEvent) => {
-    switch (event.type) {
-      case "tool:call":
-        process.stderr.write(`    ${chalk.dim("→")} ${chalk.cyan(event.tool)} ${chalk.dim("(input)")}\n`);
-        process.stderr.write(`      ${chalk.dim(indent(truncate(fmt(event.input))))}\n`);
-        break;
-      case "tool:result":
-        process.stderr.write(`    ${chalk.dim("←")} ${chalk.cyan(event.tool)} ${chalk.dim("(output)")}\n`);
-        process.stderr.write(`      ${chalk.dim(indent(truncate(fmt(event.output))))}\n`);
-        break;
-    }
-  };
-}
+// Verbose tool-detail observer lives in ./verbose-observer.ts so tests can
+// import it without triggering main.ts's top-level CLI parser.
 
 /** Compose multiple observers into one. */
 function composeObservers(...observers: (Observer | undefined)[]): Observer | undefined {
