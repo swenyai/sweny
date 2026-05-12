@@ -34,6 +34,7 @@ import { loadDotenv, loadConfigFile } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { runNew } from "./new.js";
 import { runE2eRun } from "./e2e.js";
+import { createVerboseToolObserver } from "./verbose-observer.js";
 import {
   registerTriageCommand,
   registerImplementCommand,
@@ -76,6 +77,9 @@ function createStreamObserver(): Observer {
     process.stdout.write(JSON.stringify(event) + "\n");
   };
 }
+
+// Verbose tool-detail observer lives in ./verbose-observer.ts so tests can
+// import it without triggering main.ts's top-level CLI parser.
 
 /** Compose multiple observers into one. */
 function composeObservers(...observers: (Observer | undefined)[]): Observer | undefined {
@@ -696,7 +700,7 @@ export function loadWorkflowFile(filePath: string, knownSkills?: Set<string>): W
 
 export async function workflowRunAction(
   file: string,
-  options: Record<string, unknown> & { json?: boolean; stream?: boolean; mermaid?: boolean },
+  options: Record<string, unknown> & { json?: boolean; stream?: boolean; mermaid?: boolean; verbose?: boolean },
 ): Promise<void> {
   // Discover skills first so the loader can flag UNKNOWN_SKILL at parse
   // time. validateWorkflowSkills below still runs for richer category /
@@ -872,6 +876,7 @@ export async function workflowRunAction(
 
   const observer = composeObservers(
     wfProgressObserver,
+    options.verbose ? createVerboseToolObserver() : undefined,
     options.stream ? createStreamObserver() : undefined,
     createCloudStreamObserver(config, wfCloudHandle),
   );
@@ -991,6 +996,10 @@ workflowCmd
   )
   .option("--json", "Output result as JSON on stdout; suppress progress output")
   .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)")
+  .option(
+    "--verbose",
+    "Print each tool call's input and output inline (human-readable, truncated). Use --stream for full untruncated NDJSON.",
+  )
   .option("--mermaid", "Output a Mermaid diagram with execution state after run")
   .option("--input <json>", "JSON string of input data to pass to the workflow")
   .action(workflowRunAction);

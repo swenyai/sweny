@@ -38,6 +38,11 @@ inputs:
     required: false
     default: "false"
 
+  verbose:
+    description: "When 'true', print each tool call's input and output inline. Truncated for readability; use the CLI's --stream flag locally for full untruncated NDJSON. Helpful for debugging a node that halts or fails."
+    required: false
+    default: "false"
+
   cloud-token:
     description: "SWEny Cloud project token (sweny_pk_...) for reporting run results to cloud.sweny.ai. Optional. Equivalent to setting the SWENY_CLOUD_TOKEN env var; either form is accepted."
     required: false
@@ -75,6 +80,7 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         WORKFLOW_PATH: ${{ inputs.workflow }}
         DRY_RUN: ${{ inputs.dry-run }}
+        VERBOSE: ${{ inputs.verbose }}
         INPUT_CLOUD_TOKEN: ${{ inputs.cloud-token }}
       run: |
         # Forward the cloud token to the CLI. Prefer the explicit `cloud-token`
@@ -84,12 +90,17 @@ runs:
         if [ -n "$INPUT_CLOUD_TOKEN" ]; then
           export SWENY_CLOUD_TOKEN="$INPUT_CLOUD_TOKEN"
         fi
-        # Normalize so dry-run accepts true / TRUE / 1 / yes equivalently.
-        # GitHub Actions usually passes the literal "true"/"false" string,
-        # but workflow YAML can produce other truthy spellings.
-        DRY_NORM=$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')
-        if [ "$DRY_NORM" = "true" ] || [ "$DRY_NORM" = "1" ] || [ "$DRY_NORM" = "yes" ]; then
-          sweny workflow run "$WORKFLOW_PATH" --dry-run
-        else
-          sweny workflow run "$WORKFLOW_PATH"
-        fi
+        # Normalize boolean-ish inputs (true / TRUE / 1 / yes).
+        normalize() {
+          local v
+          v=$(echo "${1:-false}" | tr '[:upper:]' '[:lower:]')
+          case "$v" in true|1|yes) echo "true" ;; *) echo "false" ;; esac
+        }
+        DRY_NORM=$(normalize "$DRY_RUN")
+        VERBOSE_NORM=$(normalize "$VERBOSE")
+
+        FLAGS=()
+        [ "$DRY_NORM" = "true" ] && FLAGS+=("--dry-run")
+        [ "$VERBOSE_NORM" = "true" ] && FLAGS+=("--verbose")
+
+        sweny workflow run "$WORKFLOW_PATH" "${FLAGS[@]}"
