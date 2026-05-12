@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { createVerboseToolObserver } from "../verbose-observer.js";
-import type { ExecutionEvent } from "../../types.js";
+import type { ExecutionEvent, ToolCall } from "../../types.js";
 
 describe("createVerboseToolObserver", () => {
   let writeSpy: ReturnType<typeof vi.spyOn>;
@@ -18,48 +18,49 @@ describe("createVerboseToolObserver", () => {
     return writeSpy.mock.calls.map((c: unknown[]) => String(c[0])).join("");
   }
 
-  // ANSI color codes are noise for assertions — strip them.
+  // ANSI color codes are noise for assertions; strip them.
   function plain(): string {
     return output().replace(/\x1B\[[0-9;]*m/g, "");
   }
 
-  it("prints tool:call input to stderr with the tool name", () => {
-    const observe = createVerboseToolObserver();
-    const event: ExecutionEvent = {
-      type: "tool:call",
-      node: "draft",
-      tool: "Bash",
-      input: { command: "ls -la" },
+  function nodeExit(node: string, toolCalls: ToolCall[]): ExecutionEvent {
+    return {
+      type: "node:exit",
+      node,
+      result: { status: "success", data: {}, toolCalls },
     };
-    observe(event);
+  }
+
+  it("prints each tool call's input and output on node:exit", () => {
+    const observe = createVerboseToolObserver();
+    observe(
+      nodeExit("draft", [
+        { tool: "Bash", input: { command: "ls -la" }, output: "file1\nfile2\n", status: "success" },
+        { tool: "Read", input: { path: "/etc/hosts" }, output: "127.0.0.1 localhost", status: "success" },
+      ]),
+    );
     const out = plain();
+    expect(out).toContain("draft: 2 tool calls");
     expect(out).toContain("Bash");
-    expect(out).toContain("(input)");
     expect(out).toContain('"command": "ls -la"');
+    expect(out).toContain("file1");
+    expect(out).toContain("Read");
+    expect(out).toContain("/etc/hosts");
   });
 
-  it("prints tool:result output to stderr with the tool name", () => {
+  it("flags error outputs distinctly", () => {
     const observe = createVerboseToolObserver();
-    const event: ExecutionEvent = {
-      type: "tool:result",
-      node: "draft",
-      tool: "Read",
-      output: "file contents here",
-    };
-    observe(event);
-    const out = plain();
-    expect(out).toContain("Read");
-    expect(out).toContain("(output)");
-    expect(out).toContain("file contents here");
+    observe(
+      nodeExit("guardrails", [{ tool: "Bash", input: { command: "bad" }, output: { error: "boom" }, status: "error" }]),
+    );
+    expect(plain()).toContain("(output, error)");
   });
 
   it("truncates long payloads and reports how many chars were dropped", () => {
     const observe = createVerboseToolObserver();
     const long = "x".repeat(5_000);
-    observe({ type: "tool:result", node: "draft", tool: "Read", output: long });
+    observe(nodeExit("draft", [{ tool: "Read", input: { path: "/big" }, output: long, status: "success" }]));
     const out = plain();
-    // Truncation note format: "[3800 more chars]" — exact number isn't load-bearing,
-    // but the suffix should be present and the full 5000 chars should not.
     expect(out).toMatch(/\[\d+ more chars\]/);
     expect(out.length).toBeLessThan(long.length);
   });
@@ -70,28 +71,31 @@ describe("createVerboseToolObserver", () => {
     const circular: Cyc = { name: "loop" };
     circular.self = circular;
 
-    expect(() => observe({ type: "tool:call", node: "draft", tool: "X", input: circular })).not.toThrow();
-    expect(() => observe({ type: "tool:result", node: "draft", tool: "X", output: circular })).not.toThrow();
-
-    // Should fall back to a string representation, not blow up the stream.
+    expect(() => observe(nodeExit("draft", [{ tool: "X", input: circular, output: circular }]))).not.toThrow();
     expect(plain()).toContain("X");
   });
 
   it("renders null and undefined as readable tokens", () => {
     const observe = createVerboseToolObserver();
-    observe({ type: "tool:call", node: "draft", tool: "X", input: null });
-    observe({ type: "tool:result", node: "draft", tool: "X", output: undefined });
+    observe(nodeExit("draft", [{ tool: "X", input: null, output: undefined }]));
     const out = plain();
     expect(out).toContain("null");
     expect(out).toContain("undefined");
   });
 
-  it("ignores non-tool events", () => {
+  it("is silent for nodes that made no tool calls", () => {
+    const observe = createVerboseToolObserver();
+    observe(nodeExit("analyze", []));
+    expect(writeSpy).not.toHaveBeenCalled();
+  });
+
+  it("ignores non-node:exit events", () => {
     const observe = createVerboseToolObserver();
     observe({ type: "node:enter", node: "draft", instruction: "do a thing" });
-    observe({ type: "node:exit", node: "draft", result: { status: "success", data: {}, toolCalls: [] } });
     observe({ type: "workflow:start", workflow: "wf" });
     observe({ type: "workflow:end", results: {} });
+    observe({ type: "tool:call", node: "draft", tool: "Read", input: {} });
+    observe({ type: "tool:result", node: "draft", tool: "Read", output: "x" });
     expect(writeSpy).not.toHaveBeenCalled();
   });
 });

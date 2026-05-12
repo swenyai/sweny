@@ -1,6 +1,6 @@
 import chalk from "chalk";
 
-import type { ExecutionEvent, Observer } from "../types.js";
+import type { ExecutionEvent, Observer, ToolCall } from "../types.js";
 
 const TRUNCATE = 1200;
 
@@ -25,24 +25,41 @@ function indent(s: string): string {
   return s.split("\n").join("\n      ");
 }
 
+function printCall(call: ToolCall): void {
+  process.stderr.write(`    ${chalk.dim("→")} ${chalk.cyan(call.tool)} ${chalk.dim("(input)")}\n`);
+  process.stderr.write(`      ${chalk.dim(indent(truncate(fmt(call.input))))}\n`);
+  const status = call.status === "error" ? chalk.red("(output, error)") : chalk.dim("(output)");
+  process.stderr.write(`    ${chalk.dim("←")} ${chalk.cyan(call.tool)} ${status}\n`);
+  process.stderr.write(`      ${chalk.dim(indent(truncate(fmt(call.output))))}\n`);
+}
+
 /**
  * Create an observer that prints each tool call's input and output to stderr
- * inline, in a human-readable format. Useful when debugging a node that's
- * failing — the default human output only shows step transitions, leaving
- * "why" invisible. Inputs and outputs are truncated to keep the log readable;
- * use `--stream` for the full untruncated NDJSON.
+ * in a human-readable form. Useful when debugging a node that fails or routes
+ * unexpectedly — the default human output only shows step transitions,
+ * leaving "why" invisible.
+ *
+ * Emission strategy: print the full call list on `node:exit` rather than per
+ * `tool:call`/`tool:result` event. The reason: the executor's tool:call and
+ * tool:result events fire only for skill-registered tools, not for the
+ * Claude Code subprocess's built-in tools (Bash, Read, Edit, etc.). Those
+ * built-in tools — the ones agents actually use most — land in
+ * `result.toolCalls` only after the node completes. Walking result.toolCalls
+ * on node:exit covers both kinds and avoids partial visibility.
+ *
+ * Inputs and outputs are truncated; use `--stream` for full untruncated
+ * NDJSON.
  */
 export function createVerboseToolObserver(): Observer {
   return (event: ExecutionEvent) => {
-    switch (event.type) {
-      case "tool:call":
-        process.stderr.write(`    ${chalk.dim("→")} ${chalk.cyan(event.tool)} ${chalk.dim("(input)")}\n`);
-        process.stderr.write(`      ${chalk.dim(indent(truncate(fmt(event.input))))}\n`);
-        break;
-      case "tool:result":
-        process.stderr.write(`    ${chalk.dim("←")} ${chalk.cyan(event.tool)} ${chalk.dim("(output)")}\n`);
-        process.stderr.write(`      ${chalk.dim(indent(truncate(fmt(event.output))))}\n`);
-        break;
+    if (event.type !== "node:exit") return;
+    const calls = event.result.toolCalls;
+    if (calls.length === 0) return;
+    process.stderr.write(
+      `    ${chalk.bold.dim(`${event.node}: ${calls.length} tool call${calls.length === 1 ? "" : "s"}`)}\n`,
+    );
+    for (const call of calls) {
+      printCall(call);
     }
   };
 }
