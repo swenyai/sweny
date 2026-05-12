@@ -77,6 +77,43 @@ function createStreamObserver(): Observer {
   };
 }
 
+// ── Verbose observer (human-readable tool detail) ──────────────────
+/**
+ * Create an observer that prints each tool call's input and output to stderr
+ * inline, in a human-readable format. Useful when debugging a node that's
+ * failing — the default human output only shows step transitions, leaving
+ * "why" invisible. Inputs and outputs are truncated to keep the log readable;
+ * use `--stream` for the full untruncated NDJSON.
+ */
+function createVerboseToolObserver(): Observer {
+  const TRUNCATE = 1200;
+  const truncate = (s: string): string =>
+    s.length > TRUNCATE ? `${s.slice(0, TRUNCATE)}\n      ${chalk.dim(`… [${s.length - TRUNCATE} more chars]`)}` : s;
+  const fmt = (v: unknown): string => {
+    if (v === undefined) return "undefined";
+    if (v === null) return "null";
+    if (typeof v === "string") return v;
+    try {
+      return JSON.stringify(v, null, 2);
+    } catch {
+      return String(v);
+    }
+  };
+  const indent = (s: string): string => s.split("\n").join("\n      ");
+  return (event: ExecutionEvent) => {
+    switch (event.type) {
+      case "tool:call":
+        process.stderr.write(`    ${chalk.dim("→")} ${chalk.cyan(event.tool)} ${chalk.dim("(input)")}\n`);
+        process.stderr.write(`      ${chalk.dim(indent(truncate(fmt(event.input))))}\n`);
+        break;
+      case "tool:result":
+        process.stderr.write(`    ${chalk.dim("←")} ${chalk.cyan(event.tool)} ${chalk.dim("(output)")}\n`);
+        process.stderr.write(`      ${chalk.dim(indent(truncate(fmt(event.output))))}\n`);
+        break;
+    }
+  };
+}
+
 /** Compose multiple observers into one. */
 function composeObservers(...observers: (Observer | undefined)[]): Observer | undefined {
   const valid = observers.filter((o): o is Observer => o != null);
@@ -696,7 +733,7 @@ export function loadWorkflowFile(filePath: string, knownSkills?: Set<string>): W
 
 export async function workflowRunAction(
   file: string,
-  options: Record<string, unknown> & { json?: boolean; stream?: boolean; mermaid?: boolean },
+  options: Record<string, unknown> & { json?: boolean; stream?: boolean; mermaid?: boolean; verbose?: boolean },
 ): Promise<void> {
   // Discover skills first so the loader can flag UNKNOWN_SKILL at parse
   // time. validateWorkflowSkills below still runs for richer category /
@@ -872,6 +909,7 @@ export async function workflowRunAction(
 
   const observer = composeObservers(
     wfProgressObserver,
+    options.verbose ? createVerboseToolObserver() : undefined,
     options.stream ? createStreamObserver() : undefined,
     createCloudStreamObserver(config, wfCloudHandle),
   );
@@ -991,6 +1029,10 @@ workflowCmd
   )
   .option("--json", "Output result as JSON on stdout; suppress progress output")
   .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)")
+  .option(
+    "--verbose",
+    "Print each tool call's input and output inline (human-readable, truncated). Use --stream for full untruncated NDJSON.",
+  )
   .option("--mermaid", "Output a Mermaid diagram with execution state after run")
   .option("--input <json>", "JSON string of input data to pass to the workflow")
   .action(workflowRunAction);
