@@ -143,10 +143,18 @@ export const github: Skill = {
           body: { type: "string" },
           head: { type: "string", description: "Branch with changes" },
           base: { type: "string", description: "Target branch (default: main)" },
+          labels: {
+            type: "array",
+            items: { type: "string" },
+            description: 'Labels to apply (default: ["sweny", "agent"])',
+          },
         },
         required: ["repo", "title", "head"],
       },
-      handler: async (input: { repo: string; title: string; body?: string; head: string; base?: string }, ctx) => {
+      handler: async (
+        input: { repo: string; title: string; body?: string; head: string; base?: string; labels?: string[] },
+        ctx,
+      ) => {
         let pr: { number?: number; html_url?: string } & Record<string, unknown>;
         let reused = false;
         try {
@@ -188,7 +196,7 @@ export const github: Skill = {
           if (pr.number && !reused) {
             await gh(`/repos/${input.repo}/issues/${pr.number}/labels`, ctx, {
               method: "POST",
-              body: JSON.stringify({ labels: ["sweny"] }),
+              body: JSON.stringify({ labels: input.labels ?? ["sweny", "agent"] }),
             });
           }
         } catch {

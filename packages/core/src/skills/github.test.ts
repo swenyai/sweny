@@ -112,6 +112,45 @@ describe("github_create_pr", () => {
     );
   });
 
+  it("defaults the label set to [sweny, agent] when caller omits labels", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(201, { number: 7, html_url: "https://github.com/o/r/pull/7" }))
+      .mockResolvedValueOnce(jsonResponse(200, [{ name: "sweny" }, { name: "agent" }]));
+
+    await createPr.handler({ repo: "o/r", title: "[X-1] fix: y", head: "x-1-fix" }, ctx());
+
+    const labelCall = fetchMock.mock.calls[1];
+    expect(labelCall[0]).toBe("https://api.github.com/repos/o/r/issues/7/labels");
+    expect(JSON.parse(labelCall[1].body)).toEqual({ labels: ["sweny", "agent"] });
+  });
+
+  it("forwards an explicit labels array verbatim", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(201, { number: 8, html_url: "https://github.com/o/r/pull/8" }))
+      .mockResolvedValueOnce(jsonResponse(200, [{ name: "sweny" }, { name: "agent" }, { name: "triage" }]));
+
+    await createPr.handler(
+      { repo: "o/r", title: "[X-1] fix: y", head: "x-1-fix", labels: ["sweny", "agent", "triage"] },
+      ctx(),
+    );
+
+    const labelCall = fetchMock.mock.calls[1];
+    expect(JSON.parse(labelCall[1].body)).toEqual({ labels: ["sweny", "agent", "triage"] });
+  });
+
+  it("does not relabel a reused PR (idempotent path skips labeling)", async () => {
+    const existingPr = { number: 99, html_url: "https://github.com/o/r/pull/99", state: "open" };
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(422, ALREADY_EXISTS_422))
+      .mockResolvedValueOnce(jsonResponse(200, [existingPr]));
+
+    await createPr.handler({ repo: "o/r", title: "[X-1] fix: y", head: "x-1-fix" }, ctx());
+
+    // Exactly two calls: POST /pulls (422) + GET /pulls?head=... (lookup).
+    // No third call to /issues/:n/labels because reused === true.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("propagates the 422 if the existing-PR lookup itself fails", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(422, ALREADY_EXISTS_422))

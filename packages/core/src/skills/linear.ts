@@ -149,6 +149,29 @@ export const linear: Skill = {
         ),
     },
     {
+      name: "linear_list_labels",
+      description: "List issue labels for a Linear team — returns id, name, and color for each label",
+      input_schema: {
+        type: "object",
+        properties: {
+          teamId: {
+            type: "string",
+            description: "Linear team ID (optional — returns all workspace labels if omitted)",
+          },
+        },
+      },
+      handler: async (input: { teamId?: string }, ctx) => {
+        if (input.teamId) {
+          return linearGql(
+            `query($teamId: String!) { team(id: $teamId) { labels { nodes { id name color } } } }`,
+            { teamId: input.teamId },
+            ctx,
+          );
+        }
+        return linearGql(`query { issueLabels { nodes { id name color team { key } } } }`, {}, ctx);
+      },
+    },
+    {
       name: "linear_update_issue",
       description: "Update an existing Linear issue",
       input_schema: {
@@ -195,5 +218,6 @@ export const linear: Skill = {
     linear_search_issues: ["list_issues"],
     linear_add_comment: ["save_comment"],
     linear_list_teams: ["list_teams"],
+    linear_list_labels: ["list_issue_labels"],
   },
 };

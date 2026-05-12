@@ -196,7 +196,10 @@ nodes:
 
       3. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
 
-      4. Add appropriate labels (bug, severity level, affected service).
+      4. Apply the `sweny`, `agent`, and `triage` labels. For Linear: call `linear_list_labels` to find the
+      IDs for labels named `sweny`, `agent`, and `triage`, then pass those IDs in `labelIds` when calling
+      `linear_create_issue` (skip any that don't exist in the team — don't invent IDs). For GitHub: pass
+      `labels: ["sweny", "agent", "triage"]` to `github_create_issue`.
 
       5. Link to relevant commits, PRs, or existing issues.
 
@@ -623,7 +626,7 @@ nodes:
       (context.create_issue.issueUrl). If the investigation found a Sentry issue, include "Fixes {sentryShortId}"
       in the PR body so Sentry auto-resolves on merge.
 
-      5. Add appropriate labels if available.
+      5. Pass `labels: ["sweny", "agent", "triage"]` to `github_create_pr`.
 
 
       If context.prTemplate is provided, use it as the format for the PR body. Otherwise use a clear structure with:
