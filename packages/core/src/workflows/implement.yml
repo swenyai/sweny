@@ -91,7 +91,7 @@ nodes:
 
       3. Reference the original issue in the PR body.
 
-      4. Add appropriate reviewers or labels if possible.
+      4. Pass `labels: ["sweny", "agent", "task"]` to `github_create_pr` (or `["sweny", "agent", "feature"]` if the issue is a feature request).
 
 
       If context.prTemplate is provided, use it as the format for the PR body. Otherwise use a clear structure with:
