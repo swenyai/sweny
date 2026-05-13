@@ -254,10 +254,21 @@ export class ClaudeClient implements Claude {
     const { question, context, choices } = opts;
     const choiceList = choices.map((c) => `- "${c.id}": ${c.description}`).join("\n");
 
+    // The evaluator is doing one job: pick the choice whose condition the
+    // context literally satisfies. Prose narrative fields ("summary",
+    // "rationale", anything the model emitted as commentary) are NOT the
+    // contract. The structured fields are. The executor already filters
+    // declared `output` properties for routing (see buildRouteEvalEntry),
+    // and this prompt rule makes the model lean the same way when an
+    // output schema was not declared.
     const prompt = [
       question,
       `\nContext:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``,
       `\nChoices:\n${choiceList}`,
+      `\nEvaluation rules:`,
+      `1. Read each choice's condition literally and match against the structured fields in the context (e.g. status, counts, enum values, boolean flags).`,
+      `2. Ignore prose narrative fields ("summary", free-form rationale, conversational commentary). They are not the contract.`,
+      `3. When a field's value contradicts what a prose field claims, trust the field's value.`,
       `\nRespond with ONLY the choice ID, nothing else.`,
     ].join("\n");
 

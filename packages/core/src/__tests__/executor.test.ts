@@ -2028,3 +2028,303 @@ describe("executor", () => {
     });
   });
 });
+
+// ─── Route evaluator: schema-strict view of prior data ───────────
+//
+// Regression suite for the routing brittleness fix.
+//
+// Field run: https://github.com/letsoffload/offload/actions/runs/25775301135.
+// A `validate` node declared an output schema with
+// `{ status: "pass" | "fail", quality_retry_count, checks }`. The agent
+// emitted `status: "pass"` correctly AND added a non-schema `summary` prose
+// field like "the quality_retry_count from the draft node's context is 1".
+// The route evaluator pattern-matched the retry mention in `summary` and
+// chose the fail/retry edge across multiple iterations, halting the run
+// at notify_halt despite every actual check passing.
+//
+// Fix (see executor.ts buildRouteEvalEntry): when a node has an `output`
+// schema with declared properties, the route-evaluator's view of that
+// node's data is restricted to those declared properties. The downstream
+// node's `run()` context is untouched, so workflows that consume prose
+// narrative in later steps keep working.
+
+describe("route evaluator: schema-strict view of prior data", () => {
+  it("filters route-eval context to declared output properties when the prior node has an output schema", async () => {
+    // The exact field-run shape: status:"pass" is the routing field, but
+    // an unrelated prose field mentions retries.
+    const workflow: Workflow = {
+      id: "schema-strict-routing",
+      name: "Schema-Strict Routing",
+      description: "",
+      entry: "validate",
+      nodes: {
+        validate: {
+          name: "Validate",
+          instruction: "Validate the draft",
+          skills: [],
+          output: {
+            type: "object",
+            properties: {
+              status: { type: "string", enum: ["pass", "fail"] },
+              quality_retry_count: { type: "number" },
+            },
+            required: ["status"],
+          },
+        },
+        publish: { name: "Publish", instruction: "Publish", skills: [] },
+        retry_draft: { name: "Retry Draft", instruction: "Retry", skills: [] },
+      },
+      edges: [
+        { from: "validate", to: "publish", when: "status is pass" },
+        { from: "validate", to: "retry_draft", when: "status is fail" },
+      ],
+    };
+
+    let routeContext: Record<string, unknown> = {};
+    const claude: any = {
+      async run() {
+        return {
+          status: "success",
+          data: {
+            status: "pass",
+            quality_retry_count: 1,
+            // Non-schema fields. Before the fix, the prose summary leaked
+            // into the route evaluator and biased the decision.
+            summary: "The quality_retry_count from the draft node's context is 1, draft retries occurred.",
+            internal_notes: "had to retry the draft once before passing",
+          },
+          toolCalls: [],
+        };
+      },
+      async evaluate(opts: any) {
+        routeContext = opts.context;
+        // Pick the first choice whose description literally mentions "pass".
+        // This simulates a disciplined evaluator that follows the prompt
+        // rules. The fix is independent of this behavior; the assertions
+        // below pin the structural property.
+        const m = opts.choices.find((c: any) => /\bpass\b/i.test(c.description));
+        return (m ?? opts.choices[0]).id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    const { results } = await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    // Workflow took the pass branch and never executed retry_draft.
+    expect(results.has("publish")).toBe(true);
+    expect(results.has("retry_draft")).toBe(false);
+
+    // The validate entry in the route eval context only contains declared
+    // properties. The non-schema `summary` and `internal_notes` fields
+    // that triggered the field bug are absent.
+    const validateView = routeContext.validate as Record<string, unknown>;
+    expect(validateView).toBeDefined();
+    expect(validateView).toHaveProperty("status", "pass");
+    expect(validateView).toHaveProperty("quality_retry_count", 1);
+    expect(validateView).not.toHaveProperty("summary");
+    expect(validateView).not.toHaveProperty("internal_notes");
+  });
+
+  it("keeps the full prior data visible to downstream node run() (not just routing)", async () => {
+    // Workflows can rely on prose narrative fields for downstream node
+    // prompts even when those fields are not declared in the output
+    // schema. The fix is scoped to routing; run() must keep seeing
+    // everything.
+    const workflow: Workflow = {
+      id: "downstream-keeps-prose",
+      name: "Downstream Keeps Prose",
+      description: "",
+      entry: "first",
+      nodes: {
+        first: {
+          name: "First",
+          instruction: "First",
+          skills: [],
+          output: { type: "object", properties: { status: { type: "string" } } },
+        },
+        second: { name: "Second", instruction: "Second", skills: [] },
+      },
+      edges: [{ from: "first", to: "second" }],
+    };
+
+    let secondRunContext: Record<string, unknown> = {};
+    const claude: any = {
+      async run(opts: any) {
+        // The first node returns prose alongside the declared field. The
+        // second node's run() context must still see both.
+        if (opts.instruction.includes("First")) {
+          return {
+            status: "success",
+            data: { status: "ok", summary: "free-text narrative for the next step" },
+            toolCalls: [],
+          };
+        }
+        secondRunContext = opts.context;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0]?.id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    const firstView = secondRunContext.first as Record<string, unknown>;
+    expect(firstView).toHaveProperty("status", "ok");
+    expect(firstView).toHaveProperty("summary", "free-text narrative for the next step");
+  });
+
+  it("preserves current behavior when the prior node has no output schema", async () => {
+    // Back-compat: a node without `output` exposes its full data to the
+    // route evaluator exactly as before.
+    const workflow: Workflow = {
+      id: "no-schema-back-compat",
+      name: "No Schema Back-Compat",
+      description: "",
+      entry: "decide",
+      nodes: {
+        decide: { name: "Decide", instruction: "Decide", skills: [] },
+        a: { name: "A", instruction: "A", skills: [] },
+        b: { name: "B", instruction: "B", skills: [] },
+      },
+      edges: [
+        { from: "decide", to: "a", when: "choose A" },
+        { from: "decide", to: "b", when: "choose B" },
+      ],
+    };
+
+    let routeContext: Record<string, unknown> = {};
+    const claude: any = {
+      async run() {
+        return {
+          status: "success",
+          data: { freeform_decision: "go A", commentary: "nothing structured here" },
+          toolCalls: [],
+        };
+      },
+      async evaluate(opts: any) {
+        routeContext = opts.context;
+        return opts.choices[0].id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    const decideView = routeContext.decide as Record<string, unknown>;
+    expect(decideView).toHaveProperty("freeform_decision", "go A");
+    expect(decideView).toHaveProperty("commentary");
+  });
+
+  it("preserves evals on the routing view even under schema-strict filtering", async () => {
+    // priorNode.evals.<name>.pass is part of the public spec contract for
+    // routing. The strict filter must not strip it.
+    const workflow: Workflow = {
+      id: "evals-survive-strict",
+      name: "Evals Survive Strict",
+      description: "",
+      entry: "check",
+      nodes: {
+        check: {
+          name: "Check",
+          instruction: "Check",
+          skills: [],
+          output: { type: "object", properties: { status: { type: "string" } } },
+          eval: [
+            {
+              name: "well_formed",
+              kind: "value",
+              rule: { output_required: ["status"] },
+            },
+          ],
+        },
+        pass_path: { name: "Pass", instruction: "Pass", skills: [] },
+        fail_path: { name: "Fail", instruction: "Fail", skills: [] },
+      },
+      edges: [
+        { from: "check", to: "pass_path", when: "check.evals.well_formed.pass is true" },
+        { from: "check", to: "fail_path", when: "check.evals.well_formed.pass is false" },
+      ],
+    };
+
+    let routeContext: Record<string, unknown> = {};
+    const claude: any = {
+      async run() {
+        return {
+          status: "success",
+          data: { status: "ok", noise: "should be filtered" },
+          toolCalls: [],
+        };
+      },
+      async evaluate(opts: any) {
+        routeContext = opts.context;
+        return opts.choices[0].id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    const checkView = routeContext.check as Record<string, unknown>;
+    expect(checkView).toHaveProperty("status", "ok");
+    expect(checkView).not.toHaveProperty("noise");
+    expect(checkView).toHaveProperty("evals");
+    const evals = checkView.evals as Record<string, unknown>;
+    expect(evals).toHaveProperty("well_formed");
+    expect((evals.well_formed as any).pass).toBe(true);
+  });
+
+  it("falls back to full data when output schema has no properties block (e.g. boolean or empty schema)", async () => {
+    // `output: { type: "object" }` is a valid but non-restrictive schema.
+    // The author has not declared a contract, so the fallback matches the
+    // no-schema case.
+    const workflow: Workflow = {
+      id: "no-properties",
+      name: "No Properties",
+      description: "",
+      entry: "open",
+      nodes: {
+        open: {
+          name: "Open",
+          instruction: "Open",
+          skills: [],
+          output: { type: "object" }, // no properties block
+        },
+        done: { name: "Done", instruction: "Done", skills: [] },
+        retry: { name: "Retry", instruction: "Retry", skills: [] },
+      },
+      edges: [
+        { from: "open", to: "done", when: "all good" },
+        { from: "open", to: "retry", when: "any issue" },
+      ],
+    };
+
+    let routeContext: Record<string, unknown> = {};
+    const claude: any = {
+      async run() {
+        return { status: "success", data: { freeform: "all good here" }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        routeContext = opts.context;
+        return opts.choices[0].id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    const openView = routeContext.open as Record<string, unknown>;
+    expect(openView).toHaveProperty("freeform", "all good here");
+  });
+});
