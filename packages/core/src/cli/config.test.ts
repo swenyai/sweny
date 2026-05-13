@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { validateInputs, parseCliInputs, parsePositiveInt } from "./config.js";
+import { Command } from "commander";
+import {
+  validateInputs,
+  parseCliInputs,
+  parsePositiveInt,
+  registerTriageCommand,
+  registerImplementCommand,
+} from "./config.js";
 import type { CliConfig } from "./config.js";
 
 /**
@@ -329,5 +336,75 @@ describe("parseCliInputs — verbose flag", () => {
     expect(parseCliInputs({ verbose: 1 as unknown as boolean }).verbose).toBe(true);
     expect(parseCliInputs({ verbose: "" as unknown as boolean }).verbose).toBe(false);
     expect(parseCliInputs({ verbose: undefined }).verbose).toBe(false);
+  });
+});
+
+describe("verbose flag — registered on every long-running subcommand", () => {
+  // Public CLI contract. The swenyai/triage and swenyai/e2e GitHub Actions
+  // both append `--verbose` to the underlying CLI call when their `verbose`
+  // input is set. If the flag silently disappears from either subcommand,
+  // every consumer of those actions stops getting tool-call detail in CI
+  // logs the next time they bump their @sweny-ai/core version. The bug is
+  // invisible until someone tries to debug a halt. Lock the contract here.
+  //
+  // Approach: instantiate commander, register each command, and walk the
+  // registered options. Cheaper than scraping `--help` output and resilient
+  // to commander's formatting changes across versions.
+  function optionLongs(cmd: ReturnType<Command["command"]>): string[] {
+    return cmd.options.map((o) => o.long ?? "").filter(Boolean);
+  }
+
+  function findSubcommand(program: Command, name: string): Command {
+    const cmd = program.commands.find((c) => c.name() === name);
+    if (!cmd) throw new Error(`subcommand '${name}' not found in test fixture`);
+    return cmd;
+  }
+
+  it("triage exposes --verbose", () => {
+    const program = new Command();
+    registerTriageCommand(program);
+    const triage = findSubcommand(program, "triage");
+    expect(optionLongs(triage)).toContain("--verbose");
+  });
+
+  it("implement exposes --verbose", () => {
+    const program = new Command();
+    registerImplementCommand(program);
+    const implement = findSubcommand(program, "implement");
+    expect(optionLongs(implement)).toContain("--verbose");
+  });
+
+  it("triage's --verbose description tells users this is human-readable, truncated, and points at --stream for full output", () => {
+    // The wording is part of the public help. Users grep `sweny triage --help`
+    // for "verbose"; the description has to make the trade-off obvious so
+    // they reach for `--stream` when they need full NDJSON.
+    const program = new Command();
+    registerTriageCommand(program);
+    const verbose = findSubcommand(program, "triage").options.find((o) => o.long === "--verbose");
+    expect(verbose).toBeDefined();
+    expect(verbose!.description).toMatch(/human-readable/i);
+    expect(verbose!.description).toMatch(/truncated/i);
+    expect(verbose!.description).toMatch(/--stream/);
+  });
+
+  it("implement's --verbose description matches the triage wording (single source of truth)", () => {
+    // The two subcommands share the verbose semantics; their descriptions
+    // should be identical so users don't have to learn two trade-offs.
+    const program = new Command();
+    registerTriageCommand(program);
+    registerImplementCommand(program);
+    const triageDesc = findSubcommand(program, "triage").options.find((o) => o.long === "--verbose")?.description;
+    const implementDesc = findSubcommand(program, "implement").options.find((o) => o.long === "--verbose")?.description;
+    expect(triageDesc).toBe(implementDesc);
+  });
+
+  it("both subcommands default --verbose to false (no opt-out needed for callers that don't pass the flag)", () => {
+    const program = new Command();
+    registerTriageCommand(program);
+    registerImplementCommand(program);
+    for (const name of ["triage", "implement"]) {
+      const opt = findSubcommand(program, name).options.find((o) => o.long === "--verbose");
+      expect(opt?.defaultValue, `${name} --verbose default`).toBe(false);
+    }
   });
 });
