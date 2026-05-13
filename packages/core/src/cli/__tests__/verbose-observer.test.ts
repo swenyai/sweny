@@ -23,11 +23,11 @@ describe("createVerboseToolObserver", () => {
     return output().replace(/\x1B\[[0-9;]*m/g, "");
   }
 
-  function nodeExit(node: string, toolCalls: ToolCall[]): ExecutionEvent {
+  function nodeExit(node: string, toolCalls: ToolCall[], data: Record<string, unknown> = {}): ExecutionEvent {
     return {
       type: "node:exit",
       node,
-      result: { status: "success", data: {}, toolCalls },
+      result: { status: "success", data, toolCalls },
     };
   }
 
@@ -83,10 +83,35 @@ describe("createVerboseToolObserver", () => {
     expect(out).toContain("undefined");
   });
 
-  it("is silent for nodes that made no tool calls", () => {
+  it("is silent for nodes with no tool calls and no data", () => {
     const observe = createVerboseToolObserver();
     observe(nodeExit("analyze", []));
     expect(writeSpy).not.toHaveBeenCalled();
+  });
+
+  it("prints structured output (result.data) on node:exit", () => {
+    const observe = createVerboseToolObserver();
+    observe(nodeExit("validate", [], { status: "fail", checks: [{ name: "x", status: "pass" }], passed: 14 }));
+    const out = plain();
+    expect(out).toContain("validate: output");
+    expect(out).toContain('"status": "fail"');
+    expect(out).toContain('"passed": 14');
+  });
+
+  it("prints both tool calls and structured output when both are present", () => {
+    const observe = createVerboseToolObserver();
+    observe(
+      nodeExit(
+        "validate",
+        [{ tool: "Bash", input: { command: "node script.mjs" }, output: '{"failed":0}', status: "success" }],
+        { status: "pass" },
+      ),
+    );
+    const out = plain();
+    expect(out).toContain("validate: 1 tool call");
+    expect(out).toContain("Bash");
+    expect(out).toContain("validate: output");
+    expect(out).toContain('"status": "pass"');
   });
 
   it("ignores non-node:exit events", () => {
