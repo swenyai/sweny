@@ -2327,4 +2327,252 @@ describe("route evaluator: schema-strict view of prior data", () => {
     const openView = routeContext.open as Record<string, unknown>;
     expect(openView).toHaveProperty("freeform", "all good here");
   });
+
+  it("passes nested object values through unchanged (top-level routing contract only)", async () => {
+    // The strict filter is top-level only. If a declared property is itself
+    // an object, its inner fields ride along. This is by design: the
+    // routing contract is "the keys I declared", not "deep schema
+    // validation". Pin the behavior so a future refactor doesn't silently
+    // start deep-filtering and break workflows that route on nested data.
+    const workflow: Workflow = {
+      id: "nested-passthrough",
+      name: "Nested Passthrough",
+      description: "",
+      entry: "decide",
+      nodes: {
+        decide: {
+          name: "Decide",
+          instruction: "Decide",
+          skills: [],
+          output: {
+            type: "object",
+            properties: {
+              outcome: { type: "object" },
+              status: { type: "string" },
+            },
+          },
+        },
+        a: { name: "A", instruction: "A", skills: [] },
+        b: { name: "B", instruction: "B", skills: [] },
+      },
+      edges: [
+        { from: "decide", to: "a", when: "outcome.kind is approved" },
+        { from: "decide", to: "b", when: "outcome.kind is rejected" },
+      ],
+    };
+
+    let routeContext: Record<string, unknown> = {};
+    const claude: any = {
+      async run() {
+        return {
+          status: "success",
+          data: {
+            outcome: { kind: "approved", reviewer: "alice", notes: "free-form prose buried here" },
+            status: "ok",
+            stripped_top_level: "should not appear in routing view",
+          },
+          toolCalls: [],
+        };
+      },
+      async evaluate(opts: any) {
+        routeContext = opts.context;
+        return opts.choices[0].id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    const decideView = routeContext.decide as Record<string, unknown>;
+    expect(decideView).toHaveProperty("outcome");
+    expect(decideView).toHaveProperty("status", "ok");
+    expect(decideView).not.toHaveProperty("stripped_top_level");
+    // Nested fields under a declared property pass through intact.
+    const outcome = decideView.outcome as Record<string, unknown>;
+    expect(outcome).toHaveProperty("kind", "approved");
+    expect(outcome).toHaveProperty("reviewer", "alice");
+    expect(outcome).toHaveProperty("notes");
+  });
+
+  it("filters by `properties` keys regardless of whether they appear in `required`", async () => {
+    // `required` and `properties` are independent in JSON Schema. The
+    // routing contract uses `properties` keys (the field exists in the
+    // schema, even if optional). An optional-but-emitted field is
+    // present; an undeclared field is absent.
+    const workflow: Workflow = {
+      id: "required-vs-properties",
+      name: "Required vs Properties",
+      description: "",
+      entry: "check",
+      nodes: {
+        check: {
+          name: "Check",
+          instruction: "Check",
+          skills: [],
+          output: {
+            type: "object",
+            properties: {
+              status: { type: "string" },
+              note: { type: "string" },
+            },
+            required: ["status"], // note is optional
+          },
+        },
+        done: { name: "Done", instruction: "Done", skills: [] },
+        skip: { name: "Skip", instruction: "Skip", skills: [] },
+      },
+      // Two conditional edges so resolveNext actually calls evaluate()
+      // and we can inspect the route context.
+      edges: [
+        { from: "check", to: "done", when: "status is ok" },
+        { from: "check", to: "skip", when: "status is not ok" },
+      ],
+    };
+
+    let routeContext: Record<string, unknown> = {};
+    const claude: any = {
+      async run() {
+        return {
+          status: "success",
+          data: {
+            status: "ok",
+            note: "optional field, present", // declared as optional, emitted
+            extra: "undeclared, should be filtered out",
+          },
+          toolCalls: [],
+        };
+      },
+      async evaluate(opts: any) {
+        routeContext = opts.context;
+        return opts.choices[0].id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    const checkView = routeContext.check as Record<string, unknown>;
+    expect(checkView).toHaveProperty("status", "ok");
+    expect(checkView).toHaveProperty("note", "optional field, present");
+    expect(checkView).not.toHaveProperty("extra");
+  });
+
+  it("applies the routing-view filter per source node, not globally", async () => {
+    // Two prior nodes, each with its own output schema. When a later node
+    // fans out conditional edges, each prior must be filtered using THAT
+    // node's declared properties, not the union or any other node's schema.
+    const workflow: Workflow = {
+      id: "per-source-filtering",
+      name: "Per-Source Filtering",
+      description: "",
+      entry: "first",
+      nodes: {
+        first: {
+          name: "First",
+          instruction: "First",
+          skills: [],
+          output: { type: "object", properties: { a_status: { type: "string" } } },
+        },
+        second: {
+          name: "Second",
+          instruction: "Second",
+          skills: [],
+          output: { type: "object", properties: { b_count: { type: "number" } } },
+        },
+        a: { name: "A", instruction: "A", skills: [] },
+        b: { name: "B", instruction: "B", skills: [] },
+      },
+      edges: [
+        { from: "first", to: "second" },
+        { from: "second", to: "a", when: "b_count > 0" },
+        { from: "second", to: "b", when: "b_count is 0" },
+      ],
+    };
+
+    let routeContext: Record<string, unknown> = {};
+    const claude: any = {
+      async run(opts: any) {
+        if (opts.instruction.includes("First")) {
+          return {
+            status: "success",
+            data: { a_status: "ok", a_extra_prose: "should be filtered" },
+            toolCalls: [],
+          };
+        }
+        return {
+          status: "success",
+          data: { b_count: 3, b_extra_prose: "also filtered" },
+          toolCalls: [],
+        };
+      },
+      async evaluate(opts: any) {
+        routeContext = opts.context;
+        return opts.choices[0].id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    const firstView = routeContext.first as Record<string, unknown>;
+    const secondView = routeContext.second as Record<string, unknown>;
+    expect(firstView).toEqual({ a_status: "ok" });
+    expect(secondView).toEqual({ b_count: 3 });
+  });
+});
+
+// ─── Bundled workflows: routing contract invariants ──────────────
+//
+// Enforce the audit claim in PR #197 with a test: every conditional-edge
+// source node in the bundled workflows must declare an `output` schema
+// with a non-empty `properties` block, so the routing decision is driven
+// by an explicit contract rather than whatever the agent improvises.
+//
+// Without this test the audit is only as good as the moment it was done.
+// A future workflow author who adds a conditional edge but forgets the
+// output schema would silently fall back to the full-data routing view
+// and resurrect the field-bug class.
+
+describe("bundled workflows: routing contract invariants", () => {
+  it("every conditional-edge source node declares an output schema with properties", async () => {
+    const { triageWorkflow, implementWorkflow, seedContentWorkflow } = await import("../workflows/index.js");
+    const workflows: Array<[string, Workflow]> = [
+      ["triage", triageWorkflow],
+      ["implement", implementWorkflow],
+      ["seed-content", seedContentWorkflow],
+    ];
+
+    const violations: string[] = [];
+
+    for (const [name, wf] of workflows) {
+      const conditionalSources = new Set<string>();
+      for (const edge of wf.edges) {
+        if (edge.when) conditionalSources.add(edge.from);
+      }
+      for (const src of conditionalSources) {
+        const node = wf.nodes[src];
+        if (!node) {
+          violations.push(`${name}: edge references undefined node '${src}'`);
+          continue;
+        }
+        const out = (node as { output?: Record<string, unknown> }).output;
+        if (!out || typeof out !== "object") {
+          violations.push(`${name}: conditional-edge source '${src}' has no output schema`);
+          continue;
+        }
+        const props = out.properties as Record<string, unknown> | undefined;
+        if (!props || typeof props !== "object" || Object.keys(props).length === 0) {
+          violations.push(`${name}: conditional-edge source '${src}' output schema has no properties block`);
+        }
+      }
+    }
+
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
 });

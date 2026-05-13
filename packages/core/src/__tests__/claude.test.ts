@@ -885,3 +885,62 @@ describe("summarizeToolError", () => {
     expect(summarizeToolError(42)).toBe("42");
   });
 });
+
+// ─── buildEvaluatePrompt: route eval prompt body ─────────────────
+//
+// The routing brittleness fix has two halves. The structural half lives
+// in executor.ts (schema-strict filtering of the prior-data view). The
+// belt-and-suspenders half is the evaluate() prompt body, which the LLM
+// route evaluator sees on every routing decision. Without these tests,
+// the prompt rules could be deleted by accident and every routing test
+// in executor.test.ts would still pass (they stub `claude.evaluate` and
+// never exercise the prompt body).
+
+describe("buildEvaluatePrompt", () => {
+  it("includes the user question, context JSON, and choice list", async () => {
+    const { buildEvaluatePrompt } = await import("../claude.js");
+    const prompt = buildEvaluatePrompt("Which condition is true?", { validate: { status: "pass" } }, [
+      { id: "publish", description: "status is pass" },
+      { id: "retry", description: "status is fail" },
+    ]);
+    expect(prompt).toContain("Which condition is true?");
+    expect(prompt).toContain('"status": "pass"');
+    expect(prompt).toContain('- "publish": status is pass');
+    expect(prompt).toContain('- "retry": status is fail');
+  });
+
+  it("instructs the model to match against structured fields, not prose", async () => {
+    const { buildEvaluatePrompt } = await import("../claude.js");
+    const prompt = buildEvaluatePrompt("Q?", {}, [{ id: "a", description: "x" }]);
+    // The exact wording is part of the routing contract. If you change it,
+    // bump this assertion deliberately and explain why in the diff.
+    expect(prompt).toMatch(/match.*against the structured fields/i);
+    expect(prompt).toMatch(/ignore prose narrative fields/i);
+    expect(prompt).toMatch(/trust the field'?s value/i);
+  });
+
+  it("calls out 'summary' specifically so the model recognizes the common pollution case", async () => {
+    const { buildEvaluatePrompt } = await import("../claude.js");
+    // The reference ClaudeClient.run() always injects `summary: response`
+    // alongside parsed output. Naming `summary` in the rules anchors the
+    // model on the actual field that drove the field-run regression
+    // (https://github.com/letsoffload/offload/actions/runs/25775301135).
+    const prompt = buildEvaluatePrompt("Q?", {}, [{ id: "a", description: "x" }]);
+    expect(prompt).toContain('"summary"');
+  });
+
+  it("ends with a terminal directive to return only the choice ID", async () => {
+    const { buildEvaluatePrompt } = await import("../claude.js");
+    const prompt = buildEvaluatePrompt("Q?", {}, [{ id: "a", description: "x" }]);
+    expect(prompt.trim().endsWith("Respond with ONLY the choice ID, nothing else.")).toBe(true);
+  });
+
+  it("handles empty context and empty choice list without throwing", async () => {
+    const { buildEvaluatePrompt } = await import("../claude.js");
+    // Edge case: defensive. The executor never calls evaluate() with zero
+    // choices in practice (resolveNext short-circuits when there's a
+    // single outbound edge), but the pure builder shouldn't crash either.
+    expect(() => buildEvaluatePrompt("Q?", {}, [])).not.toThrow();
+    expect(() => buildEvaluatePrompt("Q?", { a: 1 }, [])).not.toThrow();
+  });
+});
