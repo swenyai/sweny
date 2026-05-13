@@ -81,6 +81,12 @@ export interface CliConfig {
   // CLI-specific
   json: boolean;
   stream: boolean;
+  /**
+   * When true, print each tool call's input and output inline (human-readable,
+   * truncated). Adds a verbose tool observer alongside the spinner/progress
+   * observer. Use `stream` if you need full untruncated NDJSON instead.
+   */
+  verbose: boolean;
   bell: boolean;
 
   // Cache
@@ -175,6 +181,11 @@ export function registerTriageCommand(program: Command): Command {
     .option("--gitlab-base-url <url>", "GitLab base URL (default: https://gitlab.com)")
     .option("--json", "Output results as JSON", false)
     .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)", false)
+    .option(
+      "--verbose",
+      "Print each tool call's input and output inline (human-readable, truncated). Use --stream for full untruncated NDJSON.",
+      false,
+    )
     .option("--bell", "Ring terminal bell on completion", false)
     .option("--cache-dir <path>", "Step cache directory (default: .sweny/cache)")
     .option("--cache-ttl <seconds>", "Cache TTL in seconds, 0 = infinite (default: 86400)")
@@ -309,6 +320,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     // Per-invocation flags: CLI only
     json: Boolean(options.json),
     stream: Boolean(options.stream),
+    verbose: Boolean(options.verbose),
     bell: Boolean(options.bell),
 
     cacheDir: (options.cacheDir as string) || env.SWENY_CACHE_DIR || f("cache-dir") || ".sweny/cache",
@@ -825,6 +837,11 @@ export function registerImplementCommand(program: Command): Command {
     )
     .option("--additional-instructions <text>", "Extra instructions for the coding agent")
     .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)", false)
+    .option(
+      "--verbose",
+      "Print each tool call's input and output inline (human-readable, truncated). Use --stream for full untruncated NDJSON.",
+      false,
+    )
     .option("--offline", "Skip URL Sources and fail fast if any are referenced", false);
 }
 

@@ -427,6 +427,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 
   const observer = composeObservers(
     progressObserver,
+    config.verbose ? createVerboseToolObserver() : undefined,
     config.stream ? createStreamObserver() : undefined,
     createCloudStreamObserver(config, cloudHandle),
   );
@@ -622,6 +623,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
 
   const observer = composeObservers(
     implProgressObserver,
+    config.verbose ? createVerboseToolObserver() : undefined,
     Boolean(options.stream) ? createStreamObserver() : undefined,
     createCloudStreamObserver(config, implCloudHandle),
   );

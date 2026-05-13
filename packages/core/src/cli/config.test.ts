@@ -59,6 +59,7 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
     repositoryOwner: "",
     json: false,
     stream: false,
+    verbose: false,
     bell: false,
     cacheDir: ".sweny/cache",
     cacheTtl: 86400,
@@ -304,5 +305,29 @@ describe("parseCliInputs — cloud token", () => {
     } finally {
       if (original !== undefined) process.env.SWENY_CLOUD_TOKEN = original;
     }
+  });
+});
+
+describe("parseCliInputs — verbose flag", () => {
+  // The verbose flag is registered on three CLI surfaces (triage, implement,
+  // workflow run). parseCliInputs is the shared gateway that turns commander's
+  // option bag into the config the executor uses to wire the verbose tool
+  // observer. Pin the wiring so a future refactor doesn't silently drop it.
+  it("defaults to false when the flag is omitted", () => {
+    const config = parseCliInputs({});
+    expect(config.verbose).toBe(false);
+  });
+
+  it("reads --verbose when passed", () => {
+    const config = parseCliInputs({ verbose: true });
+    expect(config.verbose).toBe(true);
+  });
+
+  it("coerces any truthy commander value to boolean (no implicit any leak)", () => {
+    // commander represents repeated --verbose or .option(..., false) differently
+    // across versions. The plumbing must coerce to a clean boolean.
+    expect(parseCliInputs({ verbose: 1 as unknown as boolean }).verbose).toBe(true);
+    expect(parseCliInputs({ verbose: "" as unknown as boolean }).verbose).toBe(false);
+    expect(parseCliInputs({ verbose: undefined }).verbose).toBe(false);
   });
 });

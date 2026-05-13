@@ -78,6 +78,7 @@ describe("reportToCloud", () => {
       repositoryOwner: "",
       json: false,
       stream: false,
+      verbose: false,
       bell: false,
       cacheDir: "",
       cacheTtl: 0,
