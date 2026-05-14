@@ -106,16 +106,18 @@ Each entry in `inputs` declares one parameter:
 | `default`     | matches `type` | OPTIONAL | Value applied when the caller omits the field. Type-checked at parse time against `type`. |
 | `enum`        | array          | OPTIONAL | Optional set of allowed values. Each entry MUST match the field's `type`.                 |
 
+An InputField MUST NOT declare both `required: true` and a `default`; the combination is incoherent (a default would either silently satisfy the required check, or never fire) and is rejected at workflow load time. Authors who want the required check to fire MUST omit the `default`. Authors who want a fallback value MUST omit `required: true`.
+
 Types are intentionally narrow. If you need richer shapes, model them as a flat object and let the receiving node parse the field. The contract MAY widen later without breaking existing YAML.
 
 ### Validation rules
 
 A conforming runtime MUST enforce:
 
-1. **Required check.** Each declared field with `required: true` MUST be present in the caller's input.
+1. **Required check.** Each declared field with `required: true` MUST be present in the caller's input. (A field with `required: true` cannot also declare a `default`; see [InputField](#inputfield).)
 2. **Type check.** Each declared field's value MUST match its `type`. `number` rejects `NaN` and `±Infinity`. `string[]` requires every element to be a string.
 3. **Enum check.** When `enum` is declared, the value MUST equal one of the listed entries.
-4. **Default fill.** When a field is absent or `null` AND has a `default`, the runtime MUST substitute the default before passing the input to the executor.
+4. **Default fill.** When a field is absent or `null` AND has a `default`, the runtime MUST substitute the default before passing the input to the executor. Because `required` and `default` are mutually exclusive, this rule only applies to optional fields.
 5. **Caller wins.** A caller-provided value MUST take precedence over a declared `default`.
 6. **Undeclared keys pass through.** Keys provided by the caller that aren't declared in `inputs` SHOULD pass through unchanged (so CLI-injected fields like `dryRun` and the runtime `rules`/`context` cascade keep working).
 7. **All errors at once.** A validator MUST surface every missing-required and type-mismatch in a single response, not one error per call.

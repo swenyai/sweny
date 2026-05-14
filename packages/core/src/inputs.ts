@@ -23,7 +23,11 @@
  *   4. `default` fills in the value when the caller omits it. The default
  *      is type-checked against the field's `type` at parse time, so
  *      authors can't ship a YAML that injects a string into a number
- *      field at run time.
+ *      field at run time. `required: true` and `default` are mutually
+ *      exclusive: declaring both is incoherent (the default either
+ *      satisfies the required check, making it vestigial, or it doesn't,
+ *      making the default dead code), so the schema rejects the
+ *      combination at parse time.
  *   5. Telemetry redaction: the executor only ever sees the resolved
  *      `input` map. Cloud observers see the *shape* (key names + types)
  *      via `summarizeInputShape`, never the values, so a workflow that
@@ -89,6 +93,19 @@ const workflowInputFieldZ = z
   })
   .strict()
   .superRefine((field, ctx) => {
+    // `required: true` together with a `default` is incoherent: if the
+    // default substitutes for an omitted value, the field is effectively
+    // optional; if the required check fires, the default is dead code.
+    // Reject the combination at parse time so authors fix the YAML
+    // instead of relying on undocumented runtime tie-breaking.
+    if (field.required === true && field.default !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "field cannot declare both `required: true` and `default`; pick one (a default makes the field optional)",
+        path: ["required"],
+      });
+    }
     if (field.default !== undefined) {
       const err = checkValueType(field.default, field.type);
       if (err) {

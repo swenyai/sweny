@@ -162,6 +162,35 @@ describe("workflowInputsZ", () => {
     expect(() => workflowInputsZ.parse({ x: { type: "string", randoKey: true } })).toThrow();
   });
 
+  it("rejects a field that declares both `required: true` and a `default`", () => {
+    // The combination is incoherent: a default would either satisfy the
+    // required check (making it vestigial) or never fire (making the
+    // default dead code). Reject at parse time so authors fix the YAML.
+    expect(() => workflowInputsZ.parse({ x: { type: "string", required: true, default: "fallback" } })).toThrow(
+      /required.*default|default.*required/i,
+    );
+  });
+
+  it("accepts `required: true` without a `default`", () => {
+    const parsed = workflowInputsZ.parse({ x: { type: "string", required: true } });
+    expect(parsed.x.required).toBe(true);
+    expect(parsed.x.default).toBeUndefined();
+  });
+
+  it("accepts a `default` without `required: true`", () => {
+    const parsed = workflowInputsZ.parse({ x: { type: "string", default: "fallback" } });
+    expect(parsed.x.default).toBe("fallback");
+    expect(parsed.x.required).toBeUndefined();
+  });
+
+  it("accepts `required: false` together with a `default` (false is the optional default)", () => {
+    // Explicit `required: false` is the same as omitting it; the default
+    // is permitted in that case because there's no conflict.
+    const parsed = workflowInputsZ.parse({ x: { type: "string", required: false, default: "x" } });
+    expect(parsed.x.required).toBe(false);
+    expect(parsed.x.default).toBe("x");
+  });
+
   it("covers every declared WORKFLOW_INPUT_TYPES value", () => {
     for (const t of WORKFLOW_INPUT_TYPES) {
       const parsed = workflowInputsZ.parse({ f: { type: t } });
