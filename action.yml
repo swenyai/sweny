@@ -43,6 +43,25 @@ inputs:
     required: false
     default: "false"
 
+  input:
+    description: |
+      JSON object of per-run inputs for the workflow. Forwarded verbatim to
+      `sweny workflow run --input '<json>'`. When the workflow declares an
+      `inputs` block, the CLI validates this string against the declaration
+      (type-check, required-field check, default-fill) and fails with a
+      readable diff when the shape doesn't match. When the workflow does NOT
+      declare `inputs`, the JSON is passed through unchanged for back-compat.
+
+      Example (release-notes-style):
+        input: |
+          {
+            "since_tag": "v1.41.12",
+            "until_tag": "v1.41.13",
+            "draft": true
+          }
+    required: false
+    default: ""
+
   cloud-token:
     description: "SWEny Cloud project token (sweny_pk_...) for reporting run results to cloud.sweny.ai. Optional. Equivalent to setting the SWENY_CLOUD_TOKEN env var; either form is accepted."
     required: false
@@ -81,6 +100,7 @@ runs:
         WORKFLOW_PATH: ${{ inputs.workflow }}
         DRY_RUN: ${{ inputs.dry-run }}
         VERBOSE: ${{ inputs.verbose }}
+        WORKFLOW_INPUT: ${{ inputs.input }}
         INPUT_CLOUD_TOKEN: ${{ inputs.cloud-token }}
       run: |
         # Forward the cloud token to the CLI. Prefer the explicit `cloud-token`
@@ -102,5 +122,12 @@ runs:
         FLAGS=()
         [ "$DRY_NORM" = "true" ] && FLAGS+=("--dry-run")
         [ "$VERBOSE_NORM" = "true" ] && FLAGS+=("--verbose")
+        # Forward per-run inputs verbatim. Pass through env to avoid shell
+        # quoting issues with nested JSON; the CLI parses and validates the
+        # string against the workflow's declared `inputs` block (if any) and
+        # fails with a readable error when the shape doesn't match.
+        if [ -n "$WORKFLOW_INPUT" ]; then
+          FLAGS+=("--input" "$WORKFLOW_INPUT")
+        fi
 
         sweny workflow run "$WORKFLOW_PATH" "${FLAGS[@]}"

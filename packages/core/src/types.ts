@@ -1,6 +1,16 @@
 // ─── Source re-exports ──────────────────────────────────────────
 export type { Source, ResolvedSource, SourceKind, SourceResolutionMap } from "./sources.js";
 
+// ─── Workflow input re-exports ──────────────────────────────────
+export type {
+  WorkflowInputs,
+  WorkflowInputField,
+  WorkflowInputType,
+  InputValidationError,
+  InputValidationResult,
+} from "./inputs.js";
+export { WORKFLOW_INPUT_TYPES } from "./inputs.js";
+
 // ─── Skill System ────────────────────────────────────────────────
 //
 // A Skill is a logical group of tools that share configuration.
@@ -339,6 +349,16 @@ export interface Workflow {
   judge_model?: string;
   /** Soft cap on expected judge calls per workflow run. Warning at load time when exceeded. */
   judge_budget?: number;
+  /**
+   * Declared per-run input contract. When present, the CLI validates the
+   * caller-provided `--input` JSON against this declaration, applies defaults
+   * for omitted optional fields, and rejects malformed input before the
+   * executor runs. Workflows without an `inputs` block accept any JSON
+   * object (back-compat).
+   *
+   * See `src/inputs.ts` for the field shape and validation rules.
+   */
+  inputs?: import("./inputs.js").WorkflowInputs;
 }
 
 /**

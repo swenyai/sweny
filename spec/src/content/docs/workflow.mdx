@@ -7,18 +7,19 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 
 ## Fields
 
-| Field           | Type                                                             | Required | Default   | Description                                                                                                |
-| --------------- | ---------------------------------------------------------------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------- |
-| `id`            | string                                                           | REQUIRED | —         | Unique identifier for this workflow. MUST be non-empty.                                                    |
-| `name`          | string                                                           | REQUIRED | —         | Human-readable name. MUST be non-empty.                                                                    |
-| `description`   | string                                                           | OPTIONAL | `""`      | Purpose of the workflow.                                                                                   |
-| `entry`         | string                                                           | REQUIRED | —         | Node ID where execution begins. MUST reference a key in `nodes`.                                           |
-| `nodes`         | Record&lt;string, [Node](/nodes)&gt;                             | REQUIRED | —         | Map of node ID to Node definition. Keys are referenced by `entry` and edge `from`/`to` fields.             |
-| `edges`         | [Edge](/edges)[]                                                 | REQUIRED | —         | Directed edges defining execution flow and routing conditions.                                             |
-| `skills`        | Record&lt;string, [SkillDefinition](#skilldefinition-object)&gt; | OPTIONAL | `{}`      | Inline skill definitions scoped to this workflow.                                                          |
-| `rules`         | [Source](/sources)[]                                             | OPTIONAL | `[]`      | Directives prepended to every node's instruction. Organization-wide policies, coding standards.            |
-| `context`       | [Source](/sources)[]                                             | OPTIONAL | `[]`      | Background knowledge prepended to every node's instruction. Architecture docs, playbooks.                  |
-| `workflow_type` | string (enum)                                                    | OPTIONAL | `generic` | Workflow type discriminator. Routes runs to a type-specific renderer. See [Workflow type](#workflow-type). |
+| Field           | Type                                                             | Required | Default   | Description                                                                                                            |
+| --------------- | ---------------------------------------------------------------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `id`            | string                                                           | REQUIRED | —         | Unique identifier for this workflow. MUST be non-empty.                                                                |
+| `name`          | string                                                           | REQUIRED | —         | Human-readable name. MUST be non-empty.                                                                                |
+| `description`   | string                                                           | OPTIONAL | `""`      | Purpose of the workflow.                                                                                               |
+| `entry`         | string                                                           | REQUIRED | —         | Node ID where execution begins. MUST reference a key in `nodes`.                                                       |
+| `nodes`         | Record&lt;string, [Node](/nodes)&gt;                             | REQUIRED | —         | Map of node ID to Node definition. Keys are referenced by `entry` and edge `from`/`to` fields.                         |
+| `edges`         | [Edge](/edges)[]                                                 | REQUIRED | —         | Directed edges defining execution flow and routing conditions.                                                         |
+| `skills`        | Record&lt;string, [SkillDefinition](#skilldefinition-object)&gt; | OPTIONAL | `{}`      | Inline skill definitions scoped to this workflow.                                                                      |
+| `rules`         | [Source](/sources)[]                                             | OPTIONAL | `[]`      | Directives prepended to every node's instruction. Organization-wide policies, coding standards.                        |
+| `context`       | [Source](/sources)[]                                             | OPTIONAL | `[]`      | Background knowledge prepended to every node's instruction. Architecture docs, playbooks.                              |
+| `workflow_type` | string (enum)                                                    | OPTIONAL | `generic` | Workflow type discriminator. Routes runs to a type-specific renderer. See [Workflow type](#workflow-type).             |
+| `inputs`        | Record&lt;string, [InputField](#inputs)&gt;                      | OPTIONAL | —         | Declared per-run input contract. The CLI validates `--input` against this and applies defaults. See [Inputs](#inputs). |
 
 ## Workflow type
 
@@ -86,6 +87,107 @@ When executing a workflow, you may pass runtime input parameters. Two special fi
 - **`context`** — A [Source](/sources) or array of Sources containing background information prepended to every node's instruction. These layer on top of workflow-level and node-level context.
 
 Runtime input rules and context resolve eagerly before any node executes. See [Nodes — Input Augmentation](/nodes#input-augmentation) for the full assembly order.
+
+## Inputs
+
+A workflow MAY declare a top-level `inputs` block describing the per-run parameters it accepts. When present, the CLI validates the caller-supplied `--input <json>` against this declaration before the executor runs, applies defaults for omitted optional fields, and rejects malformed input with a grouped error message.
+
+Workflows without an `inputs` block accept any JSON object (back-compat with every workflow shipped before this feature).
+
+### InputField
+
+Each entry in `inputs` declares one parameter:
+
+| Field         | Type           | Required | Description                                                                               |
+| ------------- | -------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `type`        | string (enum)  | REQUIRED | One of `string`, `number`, `boolean`, `string[]`.                                         |
+| `description` | string         | OPTIONAL | Human-readable purpose. Shown in CLI errors and cloud renderers.                          |
+| `required`    | boolean        | OPTIONAL | When `true`, the caller MUST provide a value. Default: `false`.                           |
+| `default`     | matches `type` | OPTIONAL | Value applied when the caller omits the field. Type-checked at parse time against `type`. |
+| `enum`        | array          | OPTIONAL | Optional set of allowed values. Each entry MUST match the field's `type`.                 |
+
+Types are intentionally narrow. If you need richer shapes, model them as a flat object and let the receiving node parse the field. The contract MAY widen later without breaking existing YAML.
+
+### Validation rules
+
+A conforming runtime MUST enforce:
+
+1. **Required check.** Each declared field with `required: true` MUST be present in the caller's input.
+2. **Type check.** Each declared field's value MUST match its `type`. `number` rejects `NaN` and `±Infinity`. `string[]` requires every element to be a string.
+3. **Enum check.** When `enum` is declared, the value MUST equal one of the listed entries.
+4. **Default fill.** When a field is absent or `null` AND has a `default`, the runtime MUST substitute the default before passing the input to the executor.
+5. **Caller wins.** A caller-provided value MUST take precedence over a declared `default`.
+6. **Undeclared keys pass through.** Keys provided by the caller that aren't declared in `inputs` SHOULD pass through unchanged (so CLI-injected fields like `dryRun` and the runtime `rules`/`context` cascade keep working).
+7. **All errors at once.** A validator MUST surface every missing-required and type-mismatch in a single response, not one error per call.
+
+### Telemetry shape
+
+Cloud renderers and run dashboards MAY display the input _shape_ a run was invoked with (key names plus their declared types), but MUST NOT ship the input values themselves. A workflow that accepts a token or other secret as input never leaks the value to telemetry.
+
+### Example
+
+```yaml
+id: release-notes
+name: Release Notes
+description: Draft release notes for the next tag
+entry: discover
+
+inputs:
+  since_tag:
+    type: string
+    description: Lower bound for the commit range. Default is the previous tag.
+    default: ""
+  until_tag:
+    type: string
+    description: Upper bound for the commit range.
+    default: HEAD
+  draft:
+    type: boolean
+    description: When true, post the notes as a draft instead of publishing.
+    default: true
+  audience:
+    type: string
+    description: Target audience for the notes.
+    enum: [drivers, dispatchers, engineering, all]
+    default: all
+  required_label:
+    type: string
+    required: true
+    description: Issue label to scope the changelog to.
+
+nodes:
+  discover:
+    name: Discover changes
+    instruction: >-
+      Compare commits between input.since_tag and input.until_tag.
+      Scope to PRs labeled input.required_label. Group by area.
+edges: []
+```
+
+### Invocation
+
+CLI:
+
+```bash
+sweny workflow run release-notes.yml \
+  --input '{"since_tag":"v1.41.12","until_tag":"v1.41.13","required_label":"release"}'
+```
+
+GitHub Action (composite):
+
+```yaml
+- uses: swenyai/sweny@v5
+  with:
+    workflow: .sweny/release-notes.yml
+    input: |
+      {
+        "since_tag": "${{ inputs.since_tag }}",
+        "until_tag": "${{ github.ref_name }}",
+        "required_label": "release"
+      }
+```
+
+Workflow authors reference inputs by name in node instructions and edge `when` conditions; the resolved bag is exposed to every node as `input` on the prompt context.
 
 ## Structural Validation
 
