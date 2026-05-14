@@ -23,7 +23,21 @@ validation rules.
 
 Telemetry contract: cloud observers receive the input *shape* (key names +
 declared types) via `summarizeInputShape`, never the values, so workflows
-that accept tokens or other secrets as input do not leak them.
+that accept tokens or other secrets as input do not leak them. The cloud
+run-start payload transmits the shape under the `inputs_shape` key and
+MUST NOT include a matching values bag; the runtime wires this through
+`beginCloudLifecycle`, guarded by a regression test that asserts a
+secret-bearing input never appears in the serialized payload.
+
+Schema hardening: an InputField MUST NOT declare both `required: true`
+and a `default`. The combination is incoherent (a default would either
+silently satisfy the required check, or never fire) and the schema
+rejects it at parse time.
+
+Composition with `workflow_type` is orthogonal and additive: any
+workflow type accepts an `inputs` block, no type reserves field names,
+and the runtime passes the resolved input bag uniformly regardless of
+type. See spec for the full five-rule contract.
 
 New public exports from `@sweny-ai/core`:
 
