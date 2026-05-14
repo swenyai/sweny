@@ -124,6 +124,8 @@ A conforming runtime MUST enforce:
 
 Cloud renderers and run dashboards MAY display the input _shape_ a run was invoked with (key names plus their declared types), but MUST NOT ship the input values themselves. A workflow that accepts a token or other secret as input never leaks the value to telemetry.
 
+A conforming runtime that posts run-start telemetry MUST transmit the shape under the payload key `inputs_shape` (key name → declared type, e.g. `{ "since_tag": "string", "draft": "boolean" }`) and MUST NOT include the matching `inputs` (or any equivalent values bag) in the same or any other telemetry payload. Runtimes that do not transmit input data at all trivially satisfy this rule and MAY omit `inputs_shape` entirely.
+
 ### Example
 
 ```yaml

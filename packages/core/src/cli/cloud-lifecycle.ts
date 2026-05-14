@@ -17,7 +17,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { ExecutionEvent, NodeResult, Observer, Workflow } from "../types.js";
+import { summarizeInputShape } from "../inputs.js";
+import type { ExecutionEvent, NodeResult, Observer, Workflow, WorkflowInputs } from "../types.js";
 
 const CLOUD_URL_DEFAULT = "https://cloud.sweny.ai";
 const TIMEOUT_MS = 10_000;
@@ -51,6 +52,17 @@ export interface StartRunInput {
   trigger_metadata?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   run_uuid?: string;
+  /**
+   * Declared input shape for this run: key name → declared (or observed)
+   * type. Values are intentionally NEVER included; per the workflow spec
+   * (Telemetry shape), cloud renderers may display the input contract a
+   * run was invoked with but must not receive the values themselves. A
+   * workflow that takes a token as input therefore never leaks it.
+   *
+   * Omitted when the caller didn't pass an inputs shape (e.g. legacy
+   * call sites pre-dating the inputs contract).
+   */
+  inputs_shape?: Record<string, string>;
 }
 
 export interface StartRunResult {
@@ -130,10 +142,21 @@ export function newRunUuid(): string {
 /**
  * Build a run-start payload from a Workflow + env. Pure function; the caller
  * is responsible for passing it to `startRun()`.
+ *
+ * `inputsShape` (when provided) ships the key-name → declared-type map for
+ * the run. Values are NEVER transmitted; callers compute the shape via
+ * `summarizeInputShape` (or pass the workflow's declared `inputs` block
+ * and resolved input bag and let this helper compute it). See the
+ * Telemetry shape rule in spec/src/content/docs/workflow.mdx.
  */
 export function buildStartRunPayload(
   workflow: Pick<Workflow, "id" | "workflow_type">,
-  options: { runUuid: string; env?: NodeJS.ProcessEnv },
+  options: {
+    runUuid: string;
+    env?: NodeJS.ProcessEnv;
+    declaredInputs?: WorkflowInputs;
+    resolvedInputs?: Record<string, unknown>;
+  },
 ): StartRunInput {
   const env = options.env ?? process.env;
   const trigger_source = detectTriggerSource(env);
@@ -142,7 +165,7 @@ export function buildStartRunPayload(
   if (env.GITHUB_REF) metadata.branch = env.GITHUB_REF.replace(/^refs\/heads\//, "");
   if (env.GITHUB_SHA) metadata.commit_sha = env.GITHUB_SHA;
   if (env.GITHUB_ACTOR) metadata.actor = env.GITHUB_ACTOR;
-  return {
+  const payload: StartRunInput = {
     workflow_id: workflow.id,
     workflow_type: workflow.workflow_type ?? "generic",
     trigger_source,
@@ -150,6 +173,17 @@ export function buildStartRunPayload(
     metadata,
     run_uuid: options.runUuid,
   };
+  // Compute the shape when caller provided either a declaration or a
+  // resolved bag. Omit the key entirely when there's nothing to summarize
+  // so old cloud builds that don't model `inputs_shape` aren't surprised
+  // by an empty object.
+  if (options.declaredInputs || options.resolvedInputs) {
+    const shape = summarizeInputShape(options.declaredInputs, options.resolvedInputs);
+    if (Object.keys(shape).length > 0) {
+      payload.inputs_shape = shape;
+    }
+  }
+  return payload;
 }
 
 /**
@@ -269,10 +303,15 @@ export interface CloudLifecycleHandle {
 export async function beginCloudLifecycle(
   config: { cloudToken?: string; repository?: string },
   workflow: Pick<Workflow, "id" | "workflow_type">,
+  options?: { declaredInputs?: WorkflowInputs; resolvedInputs?: Record<string, unknown> },
 ): Promise<CloudLifecycleHandle | null> {
   if (!config.cloudToken) return null;
   const runUuid = newRunUuid();
-  const payload = buildStartRunPayload(workflow, { runUuid });
+  const payload = buildStartRunPayload(workflow, {
+    runUuid,
+    declaredInputs: options?.declaredInputs,
+    resolvedInputs: options?.resolvedInputs,
+  });
   const reportConfig: CloudReportConfig = {
     cloudToken: config.cloudToken,
     repository: config.repository,

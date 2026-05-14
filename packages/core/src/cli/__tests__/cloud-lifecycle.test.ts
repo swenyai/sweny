@@ -102,6 +102,34 @@ describe("buildStartRunPayload", () => {
     const payload = buildStartRunPayload({ id: "x" }, { runUuid: "u" });
     expect(payload.workflow_type).toBe("generic");
   });
+
+  it("omits inputs_shape when neither declared nor resolved inputs are passed", () => {
+    const payload = buildStartRunPayload({ id: "x" }, { runUuid: "u" });
+    expect(payload.inputs_shape).toBeUndefined();
+  });
+
+  it("derives inputs_shape from the declared inputs (no values)", () => {
+    const payload = buildStartRunPayload(
+      { id: "release-notes", workflow_type: "content_generation" },
+      {
+        runUuid: "u",
+        declaredInputs: {
+          since_tag: { type: "string" },
+          draft: { type: "boolean", default: true },
+        },
+        resolvedInputs: { since_tag: "v1.41.0", draft: false },
+      },
+    );
+    expect(payload.inputs_shape).toEqual({ since_tag: "string", draft: "boolean" });
+  });
+
+  it("falls back to observed types when no declaration is provided", () => {
+    const payload = buildStartRunPayload(
+      { id: "x" },
+      { runUuid: "u", resolvedInputs: { repo: "owner/name", dryRun: true } },
+    );
+    expect(payload.inputs_shape).toEqual({ repo: "string", dryRun: "boolean" });
+  });
 });
 
 describe("newRunUuid", () => {
@@ -288,6 +316,37 @@ describe("beginCloudLifecycle / finishCloudLifecycle — CLI wire-up wrapper", (
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body.workflow_id).toBe("monitor-1");
     expect(body.workflow_type).toBe("monitor");
+  });
+
+  it("transmits the input shape but never the values, even when a secret is in the bag", async () => {
+    // Spec contract (workflow.mdx, Telemetry shape): cloud renderers MAY
+    // display the input shape (key → type) but MUST NOT ship the values.
+    // This test fails if the literal secret ever appears in any part of
+    // the cloud payload; the strongest possible regression guard.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ run_id: "r-secret" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const SECRET = "sk-test-secret-do-not-leak";
+    await beginCloudLifecycle(
+      { cloudToken: "tok" },
+      { id: "wf-with-secret", workflow_type: "generic" as const },
+      {
+        declaredInputs: { token: { type: "string" }, draft: { type: "boolean" } },
+        resolvedInputs: { token: SECRET, draft: true },
+      },
+    );
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const rawBody = init.body as string;
+    // Hard guarantee: the literal secret bytes do not appear anywhere in
+    // the serialized payload. No JSON-encoding, no parent key, nothing.
+    expect(rawBody).not.toContain(SECRET);
+    const body = JSON.parse(rawBody) as Record<string, unknown>;
+    expect(body.inputs_shape).toEqual({ token: "string", draft: "boolean" });
+    expect(body.inputs).toBeUndefined();
   });
 
   it("finishCloudLifecycle is a no-op when handle is null", async () => {

@@ -421,7 +421,14 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   // node-streaming observer can attach events to the correct runId.
   // Null when the token is unset or startRun fails — cloud reporting
   // must never block the workflow.
-  const cloudHandle = await beginCloudLifecycle(config, triageWorkflow);
+  //
+  // Cloud sees the input *shape* (key names + observed types), never
+  // the values. Per workflow spec Telemetry shape rule, a token in the
+  // bag never leaves the host.
+  const cloudHandle = await beginCloudLifecycle(config, triageWorkflow, {
+    declaredInputs: triageWorkflow.inputs,
+    resolvedInputs: workflowInput,
+  });
   if (cloudHandle?.dashboardUrl) {
     console.log(c.subtle(`  cloud: ${cloudHandle.dashboardUrl}`));
   }
@@ -616,8 +623,11 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
 
   // Open cloud lifecycle session BEFORE composing observers so the
   // node-streaming observer can attach to the correct runId. See
-  // triage path for rationale.
-  const implCloudHandle = await beginCloudLifecycle(config, implementWorkflow);
+  // triage path for rationale. Cloud sees the input *shape* only.
+  const implCloudHandle = await beginCloudLifecycle(config, implementWorkflow, {
+    declaredInputs: implementWorkflow.inputs,
+    resolvedInputs: workflowInput,
+  });
   if (implCloudHandle?.dashboardUrl) {
     console.log(c.subtle(`  cloud: ${implCloudHandle.dashboardUrl}`));
   }
@@ -916,8 +926,13 @@ export async function workflowRunAction(
 
   // Open cloud lifecycle session BEFORE composing observers so the
   // node-streaming observer can attach to the correct runId. See
-  // triage path for rationale.
-  const wfCloudHandle = await beginCloudLifecycle(config, workflow);
+  // triage path for rationale. Cloud sees the input *shape* only,
+  // never the values. Enforces the workflow spec Telemetry rule
+  // even when the workflow's declared inputs include secrets.
+  const wfCloudHandle = await beginCloudLifecycle(config, workflow, {
+    declaredInputs: workflow.inputs,
+    resolvedInputs: workflowInput,
+  });
   if (wfCloudHandle?.dashboardUrl && !isJson) {
     console.log(c.subtle(`  cloud: ${wfCloudHandle.dashboardUrl}`));
   }
