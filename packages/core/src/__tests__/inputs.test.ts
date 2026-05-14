@@ -6,8 +6,9 @@ import {
   WORKFLOW_INPUT_TYPES,
   type WorkflowInputs,
 } from "../inputs.js";
-import { workflowZ, parseWorkflow } from "../schema.js";
+import { workflowZ, parseWorkflow, workflowTypeZ } from "../schema.js";
 import { execute } from "../executor.js";
+import { buildStartRunPayload } from "../cli/cloud-lifecycle.js";
 import type { Claude, Tool, Workflow } from "../types.js";
 
 // ─── validateRuntimeInput ─────────────────────────────────────────
@@ -240,6 +241,109 @@ describe("workflowZ with inputs", () => {
       edges: [],
     });
     expect(parsed.inputs).toBeUndefined();
+  });
+});
+
+// ─── inputs × workflow_type composition ──────────────────────────
+//
+// Pins the contract documented in spec/src/content/docs/workflow.mdx
+// under "Composition with workflow_type":
+//
+//   1. Any workflow type can declare inputs.
+//   2. Inputs are additive, never inferred or replaced by the type.
+//   3. No reserved field names per type.
+//   4. Cloud renderers may display both surfaces; the runtime does not
+//      couple them. The cloud start-run payload carries workflow_type
+//      separately and never reads the declared inputs.
+
+describe("inputs composition with workflow_type", () => {
+  it("every workflow_type value accepts a declared inputs block", () => {
+    // Iterate the canonical enum so adding a new type forces a decision
+    // about whether the additive rule still applies.
+    for (const type of workflowTypeZ.options) {
+      const parsed = workflowZ.parse({
+        id: `wf-${type}`,
+        name: `WF ${type}`,
+        entry: "a",
+        workflow_type: type,
+        nodes: { a: { name: "A", instruction: "x" } },
+        edges: [],
+        inputs: {
+          since_tag: { type: "string", required: true },
+          dry_run: { type: "boolean", default: false },
+        },
+      });
+      expect(parsed.workflow_type).toBe(type);
+      expect(parsed.inputs?.since_tag.required).toBe(true);
+      expect(parsed.inputs?.dry_run.default).toBe(false);
+    }
+  });
+
+  it("pr_review with inputs does not reserve or auto-inject field names", () => {
+    // No input name (pull_request_url, repo, severity, etc.) is reserved
+    // by the pr_review type. Author-declared fields ride alongside,
+    // unchanged.
+    const wf = parseWorkflow({
+      id: "pr-review-with-inputs",
+      name: "PR Review",
+      entry: "review",
+      workflow_type: "pr_review",
+      nodes: { review: { name: "Review", instruction: "Review the diff" } },
+      edges: [],
+      inputs: {
+        pull_request_url: { type: "string", required: true },
+        severity_floor: { type: "string", enum: ["low", "medium", "high"], default: "low" },
+      },
+    });
+    expect(wf.workflow_type).toBe("pr_review");
+    expect(Object.keys(wf.inputs ?? {}).sort()).toEqual(["pull_request_url", "severity_floor"]);
+    // Nothing implicit was injected.
+    expect(Object.keys(wf.inputs ?? {})).not.toContain("pr_url");
+    expect(Object.keys(wf.inputs ?? {})).not.toContain("repository");
+  });
+
+  it("declared inputs validate independently of workflow_type", () => {
+    // Same caller input is validated identically whether the workflow is
+    // typed as pr_review, monitor, or generic. The type does not change
+    // required/default/enum semantics.
+    const declared: WorkflowInputs = {
+      target: { type: "string", required: true },
+      retries: { type: "number", default: 0 },
+    };
+    const callerInput = { target: "v1.0.0" };
+    const r = validateRuntimeInput(declared, callerInput);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value).toEqual({ target: "v1.0.0", retries: 0 });
+  });
+
+  it("cloud start-run payload carries workflow_type but never the declared inputs", () => {
+    // The cloud lifecycle ships workflow_type to route the renderer. It
+    // does NOT read or forward the declared inputs (the values would be
+    // sensitive; the shape is exposed elsewhere via summarizeInputShape).
+    const wf: Pick<Workflow, "id" | "workflow_type"> = {
+      id: "release-notes",
+      workflow_type: "content_generation",
+    };
+    const payload = buildStartRunPayload(wf, { runUuid: "abc-123", env: {} });
+    expect(payload.workflow_id).toBe("release-notes");
+    expect(payload.workflow_type).toBe("content_generation");
+    expect(payload).not.toHaveProperty("inputs");
+    expect(payload).not.toHaveProperty("input");
+  });
+
+  it("absent workflow_type still accepts inputs (treated as generic)", () => {
+    const wf = parseWorkflow({
+      id: "no-type-but-inputs",
+      name: "No Type",
+      entry: "a",
+      nodes: { a: { name: "A", instruction: "x" } },
+      edges: [],
+      inputs: {
+        since: { type: "string", default: "HEAD~10" },
+      },
+    });
+    expect(wf.workflow_type).toBeUndefined();
+    expect(wf.inputs?.since.default).toBe("HEAD~10");
   });
 });
 

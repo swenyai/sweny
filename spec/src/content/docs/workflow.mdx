@@ -45,6 +45,8 @@ A conforming consumer:
 
 Marketplace templates published in v1+ are required to declare `workflow_type` so they render correctly out of the box.
 
+`workflow_type` is independent of the [Inputs](#inputs) contract. A workflow of any type MAY declare `inputs`, and the type discriminator does not reserve any field names. The composition rules are spelled out under [Inputs and `workflow_type`](#composition-with-workflow_type).
+
 ### Example
 
 ```yaml
@@ -127,6 +129,18 @@ A conforming runtime MUST enforce:
 Cloud renderers and run dashboards MAY display the input _shape_ a run was invoked with (key names plus their declared types), but MUST NOT ship the input values themselves. A workflow that accepts a token or other secret as input never leaks the value to telemetry.
 
 A conforming runtime that posts run-start telemetry MUST transmit the shape under the payload key `inputs_shape` (key name → declared type, e.g. `{ "since_tag": "string", "draft": "boolean" }`) and MUST NOT include the matching `inputs` (or any equivalent values bag) in the same or any other telemetry payload. Runtimes that do not transmit input data at all trivially satisfy this rule and MAY omit `inputs_shape` entirely.
+
+### Composition with workflow_type
+
+The `inputs` contract and the [`workflow_type`](#workflow-type) discriminator are orthogonal. They do not introspect each other. Concretely:
+
+1. **Any workflow type can declare inputs.** `pr_review`, `e2e_test`, `content_generation`, `monitor`, `data_sync`, and `generic` workflows all accept an `inputs` block. There is no type for which `inputs` is illegal, and no type that requires `inputs`. The validator does not gate `inputs` on `workflow_type`.
+2. **Inputs are purely additive.** Declaring `inputs` does NOT replace, infer, or override anything the type's renderer might display. The author's declared parameters ride alongside the type's standard fields. Cloud renderers compose the two surfaces; they do not choose between them.
+3. **No reserved field names.** No type reserves an input name. A `pr_review` workflow MAY name a field `pull_request_url`, `pr`, `repo`, `severity`, anything. The renderer does not look inside the input bag to populate its own UI; the type's standard fields come from cloud-side trigger metadata (PR URL from the GitHub Action context, e.g.), not from `inputs`. If your workflow needs a value the renderer also displays, it is the author's job to wire it through.
+4. **Renderer scope.** When a typed workflow declares `inputs`, the cloud run dashboard MAY display BOTH the input shape (key names + declared types, never values; see [Telemetry shape](#telemetry-shape)) AND the type's standard fields. The two panes are independent. A renderer MUST NOT fail or warn if a typed workflow declares inputs.
+5. **No runtime coupling.** The executor passes the resolved `input` bag to every node regardless of `workflow_type`. Type-specific cloud renderers do not introspect the `input` bag's contents at runtime; they only see the declared shape via the telemetry surface.
+
+If a future workflow type needs to require named input fields (e.g. a hypothetical `scheduled_report` type that requires a `cadence` field), the spec will name those fields explicitly and the validator will enforce them. As of v1, no type does.
 
 ### Example
 
