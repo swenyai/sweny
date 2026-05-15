@@ -48,7 +48,14 @@ export type {
   ResolvedSource,
   SourceKind,
   SourceResolutionMap,
+  WorkflowInputs,
+  WorkflowInputField,
+  WorkflowInputType,
+  InputValidationError,
+  InputValidationResult,
 } from "./types.js";
+
+export { WORKFLOW_INPUT_TYPES } from "./types.js";
 
 export { consoleLogger } from "./types.js";
 
@@ -90,11 +97,15 @@ export {
   mcpServerConfigZ,
   skillDefinitionZ,
   sourceZ,
+  workflowInputsZ,
   parseWorkflow,
   validateWorkflow,
   workflowJsonSchema,
 } from "./schema.js";
 export type { WorkflowError } from "./schema.js";
+
+// Workflow input validation
+export { validateRuntimeInput, summarizeInputShape } from "./inputs.js";
 
 // MCP auto-injection
 export { buildAutoMcpServers, buildSkillMcpServers, buildProviderContext } from "./mcp.js";

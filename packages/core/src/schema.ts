@@ -19,7 +19,9 @@ import {
   SKILL_ID_PATTERN,
 } from "./types.js";
 import { sourceZ } from "./sources.js";
+import { workflowInputsZ, WORKFLOW_INPUT_TYPES } from "./inputs.js";
 export { sourceZ };
+export { workflowInputsZ };
 
 // ─── Zod Schemas ─────────────────────────────────────────────────
 
@@ -280,6 +282,7 @@ export const workflowZ = z.object({
   context: z.array(sourceZ).optional(),
   judge_model: z.string().min(1).optional(),
   judge_budget: z.number().int().min(0).optional(),
+  inputs: workflowInputsZ.optional(),
 });
 
 const LEGACY_VERIFY_MESSAGE =
@@ -647,6 +650,40 @@ export const workflowJsonSchema = {
       default: 50,
       description:
         "Soft cap on expected judge calls per workflow run. Executor warns at load time if exceeded; not a hard runtime cap in v1.",
+    },
+    inputs: {
+      type: "object",
+      description:
+        "Declared per-run input contract. Each entry names a parameter the caller may supply via --input. The CLI validates against this declaration, applies defaults for omitted optional fields, and rejects unknown types before the executor runs. Optional; workflows without an inputs block accept any JSON object (back-compat).",
+      additionalProperties: {
+        type: "object",
+        required: ["type"],
+        additionalProperties: false,
+        properties: {
+          type: {
+            type: "string",
+            enum: [...WORKFLOW_INPUT_TYPES],
+            description: "JSON-native type. Use a flat object if you need richer shapes.",
+          },
+          description: {
+            type: "string",
+            description: "Human-readable purpose. Shown in CLI help and cloud renderers.",
+          },
+          required: {
+            type: "boolean",
+            default: false,
+            description: "When true, the caller must provide a value.",
+          },
+          default: {
+            description: "Value applied when the caller omits the field. Type-checked at parse time against 'type'.",
+          },
+          enum: {
+            type: "array",
+            minItems: 1,
+            description: "Optional set of allowed values. Validated after the type check.",
+          },
+        },
+      },
     },
     nodes: {
       type: "object",

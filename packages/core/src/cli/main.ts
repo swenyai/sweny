@@ -20,6 +20,7 @@ import { buildAutoMcpServers, buildSkillMcpServers, buildProviderContext } from 
 import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
 import { loadAndValidateWorkflow } from "../loader.js";
+import { validateRuntimeInput } from "../inputs.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -420,7 +421,14 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   // node-streaming observer can attach events to the correct runId.
   // Null when the token is unset or startRun fails — cloud reporting
   // must never block the workflow.
-  const cloudHandle = await beginCloudLifecycle(config, triageWorkflow);
+  //
+  // Cloud sees the input *shape* (key names + observed types), never
+  // the values. Per workflow spec Telemetry shape rule, a token in the
+  // bag never leaves the host.
+  const cloudHandle = await beginCloudLifecycle(config, triageWorkflow, {
+    declaredInputs: triageWorkflow.inputs,
+    resolvedInputs: workflowInput,
+  });
   if (cloudHandle?.dashboardUrl) {
     console.log(c.subtle(`  cloud: ${cloudHandle.dashboardUrl}`));
   }
@@ -615,8 +623,11 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
 
   // Open cloud lifecycle session BEFORE composing observers so the
   // node-streaming observer can attach to the correct runId. See
-  // triage path for rationale.
-  const implCloudHandle = await beginCloudLifecycle(config, implementWorkflow);
+  // triage path for rationale. Cloud sees the input *shape* only.
+  const implCloudHandle = await beginCloudLifecycle(config, implementWorkflow, {
+    declaredInputs: implementWorkflow.inputs,
+    resolvedInputs: workflowInput,
+  });
   if (implCloudHandle?.dashboardUrl) {
     console.log(c.subtle(`  cloud: ${implCloudHandle.dashboardUrl}`));
   }
@@ -840,13 +851,38 @@ export async function workflowRunAction(
   let workflowInput: Record<string, unknown>;
 
   if (options.input && typeof options.input === "string") {
+    let parsed: unknown;
     try {
-      workflowInput = JSON.parse(options.input as string);
+      parsed = JSON.parse(options.input as string);
     } catch {
       console.error(chalk.red("  --input must be valid JSON"));
       process.exit(1);
       return;
     }
+    // Validate against the workflow's declared `inputs` contract (when present).
+    // Workflows without an `inputs` block pass through unchanged.
+    const validated = validateRuntimeInput(workflow.inputs, parsed);
+    if (!validated.ok) {
+      console.error(chalk.red(`\n  --input does not match workflow "${workflow.id}" inputs contract:\n`));
+      for (const err of validated.errors) {
+        console.error(chalk.red(`    ✗ ${err.field}: ${err.message}`));
+      }
+      if (workflow.inputs) {
+        console.error(chalk.dim(`\n  Declared inputs:`));
+        for (const [name, field] of Object.entries(workflow.inputs)) {
+          const flags: string[] = [field.type];
+          if (field.required) flags.push("required");
+          if (field.default !== undefined) flags.push(`default=${JSON.stringify(field.default)}`);
+          console.error(
+            chalk.dim(`    - ${name} (${flags.join(", ")})${field.description ? `: ${field.description}` : ""}`),
+          );
+        }
+      }
+      console.error("");
+      process.exit(1);
+      return;
+    }
+    workflowInput = validated.value;
   } else {
     workflowInput = {
       timeRange: config.timeRange,
@@ -866,12 +902,37 @@ export async function workflowRunAction(
       }),
       context: buildProviderCtx(config, mcpServers),
     };
+
+    // If the workflow declared `inputs`, apply defaults to the config-derived bag.
+    // This lets a CI caller omit --input entirely and still get the documented
+    // defaults filled in (e.g. since_tag/until_tag pulled from a release-notes
+    // workflow's declaration).
+    if (workflow.inputs) {
+      const validated = validateRuntimeInput(workflow.inputs, workflowInput);
+      if (!validated.ok) {
+        console.error(
+          chalk.red(`\n  Workflow "${workflow.id}" declares required inputs not satisfied by default config:\n`),
+        );
+        for (const err of validated.errors) {
+          console.error(chalk.red(`    ✗ ${err.field}: ${err.message}`));
+        }
+        console.error(chalk.dim(`\n  Pass them via --input '{ ... }'.\n`));
+        process.exit(1);
+        return;
+      }
+      workflowInput = validated.value;
+    }
   }
 
   // Open cloud lifecycle session BEFORE composing observers so the
   // node-streaming observer can attach to the correct runId. See
-  // triage path for rationale.
-  const wfCloudHandle = await beginCloudLifecycle(config, workflow);
+  // triage path for rationale. Cloud sees the input *shape* only,
+  // never the values. Enforces the workflow spec Telemetry rule
+  // even when the workflow's declared inputs include secrets.
+  const wfCloudHandle = await beginCloudLifecycle(config, workflow, {
+    declaredInputs: workflow.inputs,
+    resolvedInputs: workflowInput,
+  });
   if (wfCloudHandle?.dashboardUrl && !isJson) {
     console.log(c.subtle(`  cloud: ${wfCloudHandle.dashboardUrl}`));
   }
