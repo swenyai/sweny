@@ -25,9 +25,9 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/node": "^25.6.0",
+    "@types/node": "^25.8.0",
     "typescript": "^5",
-    "vitest": "^4.1.4"
+    "vitest": "^4.1.6"
   },
   "homepage": "https://sweny.ai",
   "bugs": {
