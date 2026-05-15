@@ -478,6 +478,18 @@ nodes:
       explain why — do not force a bad fix.
     skills:
       - github
+    # Defense-in-depth: the implement node should read repo files, edit
+    # them, run tests, and commit — not browse the web. Disallowing the
+    # built-in web tools removes them from the model context so the agent
+    # cannot drift off-task into external research mid-implementation.
+    # Note: Bash is intentionally NOT in this list because the agent needs
+    # it for `git add`/`git commit` and to run test commands. Restricting
+    # *which* Bash invocations are allowed (e.g. blocking `gh pr create`
+    # / `git push`) belongs to a follow-up that wires the SDK's
+    # canUseTool callback to a per-node Bash deny pattern list.
+    disallowed_tools:
+      - WebFetch
+      - WebSearch
     output:
       type: object
       properties:

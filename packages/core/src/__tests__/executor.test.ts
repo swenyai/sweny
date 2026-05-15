@@ -2027,6 +2027,71 @@ describe("executor", () => {
       });
     });
   });
+
+  describe("disallowed_tools", () => {
+    it("forwards Node.disallowed_tools to claude.run as disallowedTools", async () => {
+      const wf: Workflow = {
+        id: "wf",
+        name: "wf",
+        description: "",
+        entry: "implement",
+        nodes: {
+          implement: {
+            name: "Implement",
+            instruction: "Do the thing",
+            skills: [],
+            disallowed_tools: ["WebFetch", "WebSearch"],
+          },
+        },
+        edges: [],
+      };
+
+      const captured: { disallowedTools?: string[] }[] = [];
+      const claude: any = {
+        async run(opts: any) {
+          captured.push({ disallowedTools: opts.disallowedTools });
+          return { status: "success", data: {}, toolCalls: [] };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+
+      await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0].disallowedTools).toEqual(["WebFetch", "WebSearch"]);
+    });
+
+    it("forwards undefined when a node omits disallowed_tools", async () => {
+      const wf: Workflow = {
+        id: "wf",
+        name: "wf",
+        description: "",
+        entry: "implement",
+        nodes: {
+          implement: { name: "Implement", instruction: "Do the thing", skills: [] },
+        },
+        edges: [],
+      };
+
+      const captured: { disallowedTools?: string[] }[] = [];
+      const claude: any = {
+        async run(opts: any) {
+          captured.push({ disallowedTools: opts.disallowedTools });
+          return { status: "success", data: {}, toolCalls: [] };
+        },
+        async evaluate(opts: any) {
+          return opts.choices[0]?.id;
+        },
+      };
+
+      await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0].disallowedTools).toBeUndefined();
+    });
+  });
 });
 
 // ─── Route evaluator: schema-strict view of prior data ───────────

@@ -70,8 +70,9 @@ export class ClaudeClient implements Claude {
     outputSchema?: JSONSchema;
     onProgress?: (message: string) => void;
     maxTurns?: number;
+    disallowedTools?: string[];
   }): Promise<NodeResult> {
-    const { instruction, context, tools, outputSchema, onProgress, maxTurns } = opts;
+    const { instruction, context, tools, outputSchema, onProgress, maxTurns, disallowedTools } = opts;
 
     // Tool-call accounting (Fix #1).
     //
@@ -134,6 +135,7 @@ export class ClaudeClient implements Claude {
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
           ...(this.model ? { model: this.model } : {}),
           ...(Object.keys(allMcpServers).length > 0 ? { mcpServers: allMcpServers } : {}),
+          ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
         },
       });
 
