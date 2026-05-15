@@ -252,14 +252,7 @@ export class ClaudeClient implements Claude {
     choices: { id: string; description: string }[];
   }): Promise<string> {
     const { question, context, choices } = opts;
-    const choiceList = choices.map((c) => `- "${c.id}": ${c.description}`).join("\n");
-
-    const prompt = [
-      question,
-      `\nContext:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``,
-      `\nChoices:\n${choiceList}`,
-      `\nRespond with ONLY the choice ID, nothing else.`,
-    ].join("\n");
+    const prompt = buildEvaluatePrompt(question, context, choices);
 
     const env = this.buildEnv();
 
@@ -403,6 +396,40 @@ function coreToolToSdkTool(coreTool: Tool, defaultCtx: ToolContext) {
  * `"42"`) from a tool that returned the string "42" (wrapper also sends
  * `"42"`). Preserving the string is safer than guessing.
  */
+/**
+ * Build the prompt used by `ClaudeClient.evaluate()` to pick a routing edge.
+ *
+ * Extracted as a pure function so the prompt body can be unit tested without
+ * spinning up an SDK query. The body is part of the routing contract: workflow
+ * authors and downstream maintainers rely on the model leaning on structured
+ * fields rather than prose narrative when picking an edge, especially in the
+ * fallback case where a source node did not declare an `output` schema (the
+ * executor's schema-strict filter only kicks in when a schema is present;
+ * see `buildRouteEvalEntry` in executor.ts).
+ *
+ * Any change to this prompt should keep:
+ *   - The three "Evaluation rules" pointing the model at structured fields
+ *     and away from prose narrative.
+ *   - A terminal directive to return ONLY the choice ID.
+ */
+export function buildEvaluatePrompt(
+  question: string,
+  context: Record<string, unknown>,
+  choices: { id: string; description: string }[],
+): string {
+  const choiceList = choices.map((c) => `- "${c.id}": ${c.description}`).join("\n");
+  return [
+    question,
+    `\nContext:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``,
+    `\nChoices:\n${choiceList}`,
+    `\nEvaluation rules:`,
+    `1. Read each choice's condition literally and match against the structured fields in the context (e.g. status, counts, enum values, boolean flags).`,
+    `2. Ignore prose narrative fields ("summary", free-form rationale, conversational commentary). They are not the contract.`,
+    `3. When a field's value contradicts what a prose field claims, trust the field's value.`,
+    `\nRespond with ONLY the choice ID, nothing else.`,
+  ].join("\n");
+}
+
 export function parseToolResultContent(content: unknown): unknown {
   if (typeof content !== "string") return content;
   const trimmed = content.trim();

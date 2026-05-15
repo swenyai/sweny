@@ -29,6 +29,7 @@ import type {
   ExecutionEvent,
   ExecutionTrace,
   ExecutionResult,
+  JSONSchema,
   Source,
   ResolvedSource,
 } from "./types.js";
@@ -448,6 +449,74 @@ function buildPriorNodeContext(result: NodeResult): Record<string, unknown> {
   return { evals: evalsByName, ...data };
 }
 
+/**
+ * Build the prior-node entry shown to the LLM route evaluator.
+ *
+ * Differs from `buildPriorNodeContext` (which feeds downstream node `run()`
+ * calls) in one way: when the source node declared an `output` schema with
+ * a `properties` block, the data view is restricted to those declared
+ * properties. The `evals` namespace is always preserved when present.
+ *
+ * Why this exists. The route evaluator is a natural-language model. Anything
+ * it sees in the context can sway the decision, including prose narrative
+ * fields like the always-injected `summary` from the reference Claude
+ * client (claude.ts: `data: { summary: response, ...parsed }`). Real-world
+ * symptom: a node correctly emits `status: "pass"` but also adds a
+ * conversational `summary` like "the quality_retry_count is 1", and the
+ * evaluator pattern-matches the retry mention to flip the routing decision.
+ *
+ * The fix is to treat the `output` schema as the routing contract. If the
+ * author declared which fields matter, only those reach the route
+ * evaluator. When no schema is declared we fall back to the full data
+ * (back-compat for workflows without structured outputs).
+ *
+ * The downstream node prompt is untouched: nodes still see the full prior
+ * `data` including any prose `summary`, so workflows that consume the
+ * narrative in subsequent steps keep working.
+ */
+function buildRouteEvalEntry(result: NodeResult, sourceNode: Node | undefined): Record<string, unknown> {
+  const fullData = (result.data ?? {}) as Record<string, unknown>;
+  const declaredProps = getDeclaredOutputProperties(sourceNode?.output);
+
+  const dataView: Record<string, unknown> = declaredProps ? pickKeys(fullData, declaredProps) : fullData;
+
+  const evals = result.evals ?? [];
+  if (evals.length === 0) return dataView;
+
+  const evalsByName: Record<string, unknown> = {};
+  for (const e of evals) {
+    evalsByName[e.name] = e;
+  }
+  // Spread evals first so a data-side `evals` key shadows it (back-compat).
+  return { evals: evalsByName, ...dataView };
+}
+
+/**
+ * Return the declared output property names for a node, or null when the
+ * node has no `output` schema or its schema does not declare a `properties`
+ * block. Null signals "no contract" and routing falls back to the full
+ * data view.
+ *
+ * Tolerant of malformed schemas because `output` is `JSONSchema =
+ * Record<string, unknown>` and is not parsed further by the executor.
+ */
+function getDeclaredOutputProperties(output: JSONSchema | undefined): Set<string> | null {
+  if (!output || typeof output !== "object") return null;
+  const props = (output as Record<string, unknown>).properties;
+  if (!props || typeof props !== "object") return null;
+  const keys = Object.keys(props as Record<string, unknown>);
+  if (keys.length === 0) return null;
+  return new Set(keys);
+}
+
+function pickKeys(obj: Record<string, unknown>, keys: Set<string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    if (k in obj) out[k] = obj[k];
+  }
+  return out;
+}
+
 function nodeSourcesToArray(ns: NodeSources | undefined): { sources: Source[]; only: boolean } {
   if (!ns) return { sources: [], only: false };
   if (Array.isArray(ns)) return { sources: ns, only: false };
@@ -680,9 +749,16 @@ async function resolveNext(
   // Claude evaluates which condition matches. Include input so conditions
   // can reference workflow-level flags like dryRun, and expose evals so
   // routing edges can read `priorNode.evals.X.pass`.
+  //
+  // Crucial difference from the run() context: when a prior node declared
+  // an `output` schema, the routing view of its data is restricted to the
+  // declared properties. Without this, non-schema fields (notably the
+  // always-injected `summary` prose from the reference Claude client) can
+  // sway the natural-language route evaluator and override the actual
+  // structured result. See `buildRouteEvalEntry` for the full rationale.
   const context: Record<string, unknown> = {
     input,
-    ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, buildPriorNodeContext(v)])),
+    ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, buildRouteEvalEntry(v, workflow.nodes[k])])),
   };
 
   const choices = conditionalEdges.map((e) => ({
