@@ -30,7 +30,7 @@
     "@sweny-ai/core": "*",
     "@xyflow/react": "^12.10.2",
     "elkjs": "^0.9.0",
-    "immer": "^11.1.4",
+    "immer": "^11.1.8",
     "zundo": "^2.3.0"
   },
   "devDependencies": {
