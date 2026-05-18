@@ -428,6 +428,7 @@ export function buildEvaluatePrompt(
     `1. Read each choice's condition literally and match against the structured fields in the context (e.g. status, counts, enum values, boolean flags).`,
     `2. Ignore prose narrative fields ("summary", free-form rationale, conversational commentary). They are not the contract.`,
     `3. When a field's value contradicts what a prose field claims, trust the field's value.`,
+    `4. A field whose value is explicitly null means the source node DECLARED that field but did NOT emit a value. Treat null as "unknown" and do NOT match it against any specific value (do not match "is 0", "is N", "is true", "is false", or "is undefined" against a null field). Prefer a default/fallback edge when the field needed for a decision is null.`,
     `\nRespond with ONLY the choice ID, nothing else.`,
   ].join("\n");
 }

@@ -274,6 +274,28 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       // Retry only triggers on eval failure. Bail on tool/API errors.
       if (result.status !== "success") break;
 
+      // Required-field gate: if the source node's declared output schema
+      // marks fields as `required`, those fields are the routing contract.
+      // An agent that omits a required field has violated the contract; we
+      // fail the node loudly rather than letting routing guess against a
+      // half-built data view. See the offload release-notes field bug:
+      // an optional quality_retry_count was declared in the schema but
+      // omitted by the agent, the route view silently dropped the key,
+      // and an "is 0 OR is undefined" condition ghost-matched.
+      //
+      // We only check declared `required` fields, not full JSON Schema
+      // validation. Type mismatches, formats, additionalProperties, etc.
+      // stay the workflow author's problem and don't have the same
+      // routing-correctness blast radius.
+      const missingRequired = findMissingRequiredFields(result.data, node.output);
+      if (missingRequired.length > 0) {
+        const msg = `output schema violation: required field(s) missing from emitted data: ${missingRequired.join(", ")}`;
+        result.status = "failed";
+        result.data = { ...(result.data ?? {}), error: msg };
+        logger.warn(`  ${msg}`, { node: currentId });
+        break;
+      }
+
       const evalResults = await evaluateAll(node.eval, result, {
         aliases: toolAliases,
         claude,
@@ -475,21 +497,50 @@ function buildPriorNodeContext(result: NodeResult): Record<string, unknown> {
  * `data` including any prose `summary`, so workflows that consume the
  * narrative in subsequent steps keep working.
  */
-function buildRouteEvalEntry(result: NodeResult, sourceNode: Node | undefined): Record<string, unknown> {
+function buildRouteEvalEntry(
+  result: NodeResult,
+  sourceNode: Node | undefined,
+): { view: Record<string, unknown>; missing: string[] } {
   const fullData = (result.data ?? {}) as Record<string, unknown>;
   const declaredProps = getDeclaredOutputProperties(sourceNode?.output);
 
-  const dataView: Record<string, unknown> = declaredProps ? pickKeys(fullData, declaredProps) : fullData;
+  // When the source node declared an `output.properties` block, the routing
+  // view is contract-shaped: every declared property is present in the
+  // view, with an explicit `null` when the agent did not emit it. The
+  // alternative (silently dropping the key) lets the LLM evaluator
+  // ghost-match conditions like "is 0", "is N", or "is undefined" against
+  // a structurally-absent field. That was the offload release-notes field
+  // bug: an optional `quality_retry_count` declared in the schema but
+  // omitted by the agent, evaluated against a condition like
+  // `quality_retry_count is 0 OR is undefined`, took the wrong branch.
+  //
+  // Returning `missing` separately lets the caller emit a loud warning so
+  // operators see the contract violation in the log stream.
+  let dataView: Record<string, unknown>;
+  const missing: string[] = [];
+  if (declaredProps) {
+    dataView = {};
+    for (const k of declaredProps) {
+      if (k in fullData) {
+        dataView[k] = fullData[k];
+      } else {
+        dataView[k] = null;
+        missing.push(k);
+      }
+    }
+  } else {
+    dataView = fullData;
+  }
 
   const evals = result.evals ?? [];
-  if (evals.length === 0) return dataView;
+  if (evals.length === 0) return { view: dataView, missing };
 
   const evalsByName: Record<string, unknown> = {};
   for (const e of evals) {
     evalsByName[e.name] = e;
   }
   // Spread evals first so a data-side `evals` key shadows it (back-compat).
-  return { evals: evalsByName, ...dataView };
+  return { view: { evals: evalsByName, ...dataView }, missing };
 }
 
 /**
@@ -510,12 +561,32 @@ function getDeclaredOutputProperties(output: JSONSchema | undefined): Set<string
   return new Set(keys);
 }
 
-function pickKeys(obj: Record<string, unknown>, keys: Set<string>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const k of keys) {
-    if (k in obj) out[k] = obj[k];
-  }
-  return out;
+/**
+ * Return the declared `required` field names for a node's output schema,
+ * or an empty array when no required block is declared. Tolerant of
+ * malformed schemas (mirrors getDeclaredOutputProperties).
+ */
+function getDeclaredRequiredFields(output: JSONSchema | undefined): string[] {
+  if (!output || typeof output !== "object") return [];
+  const required = (output as Record<string, unknown>).required;
+  if (!Array.isArray(required)) return [];
+  return required.filter((r): r is string => typeof r === "string");
+}
+
+/**
+ * Validate a node's emitted data against the declared output schema's
+ * required fields. Returns the list of required-but-missing field names.
+ *
+ * This is intentionally narrow: we do NOT do full JSON Schema validation.
+ * The routing impact comes from required fields being absent, so that's
+ * what we check. Type mismatches, format violations, additionalProperties
+ * etc. stay the workflow author's problem.
+ */
+function findMissingRequiredFields(data: unknown, output: JSONSchema | undefined): string[] {
+  const required = getDeclaredRequiredFields(output);
+  if (required.length === 0) return [];
+  const obj = (data ?? {}) as Record<string, unknown>;
+  return required.filter((k) => !(k in obj));
 }
 
 function nodeSourcesToArray(ns: NodeSources | undefined): { sources: Source[]; only: boolean } {
@@ -757,10 +828,32 @@ async function resolveNext(
   // always-injected `summary` prose from the reference Claude client) can
   // sway the natural-language route evaluator and override the actual
   // structured result. See `buildRouteEvalEntry` for the full rationale.
-  const context: Record<string, unknown> = {
-    input,
-    ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, buildRouteEvalEntry(v, workflow.nodes[k])])),
-  };
+  const context: Record<string, unknown> = { input };
+  for (const [k, v] of results.entries()) {
+    const { view, missing } = buildRouteEvalEntry(v, workflow.nodes[k]);
+    context[k] = view;
+    if (missing.length > 0) {
+      // Loud signal for the operator. The view itself already replaces the
+      // missing keys with explicit `null`, so the LLM evaluator cannot
+      // ghost-match "is N" or "is undefined" against a structurally-absent
+      // field. The warning surfaces the contract violation in the log
+      // stream and to observer-based telemetry.
+      logger?.warn(`  route eval: source node '${k}' declared properties not in emitted data: ${missing.join(", ")}`, {
+        node: k,
+        fields: missing,
+      });
+      safeObserve(
+        observer,
+        {
+          type: "node:warning",
+          node: k,
+          reason: `declared output properties missing from emitted data; routing view filled them with null`,
+          fields: missing,
+        },
+        logger,
+      );
+    }
+  }
 
   const choices = conditionalEdges.map((e) => ({
     id: e.to,

@@ -935,6 +935,19 @@ describe("buildEvaluatePrompt", () => {
     expect(prompt.trim().endsWith("Respond with ONLY the choice ID, nothing else.")).toBe(true);
   });
 
+  it("instructs the model to treat explicit null as 'declared but unknown', not as 0/false/undefined/etc.", async () => {
+    const { buildEvaluatePrompt } = await import("../claude.js");
+    // The executor fills declared-but-missing output properties with
+    // explicit null. Without this rule, the LLM evaluator can match
+    // a null value against a literal-zero or "is undefined" condition
+    // and take the wrong branch. See executor.ts buildRouteEvalEntry
+    // and the offload release-notes field bug.
+    const prompt = buildEvaluatePrompt("Q?", {}, [{ id: "a", description: "x" }]);
+    expect(prompt.toLowerCase()).toContain("null");
+    expect(prompt).toMatch(/declared.*did NOT emit a value/i);
+    expect(prompt.toLowerCase()).toMatch(/do not match.*is 0/);
+  });
+
   it("handles empty context and empty choice list without throwing", async () => {
     const { buildEvaluatePrompt } = await import("../claude.js");
     // Edge case: defensive. The executor never calls evaluate() with zero

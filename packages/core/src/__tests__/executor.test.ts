@@ -2592,6 +2592,292 @@ describe("route evaluator: schema-strict view of prior data", () => {
   });
 });
 
+// ─── Route evaluator: declared-but-missing field handling ────────
+//
+// Second-order field bug from the offload release-notes workflow.
+//
+// A draft node declared `output.properties.quality_retry_count` (optional,
+// not in `required`). The agent omitted the field on the first pass. The
+// schema-strict filter (PR #197) correctly stripped non-schema noise from
+// the route eval view, but it ALSO quietly dropped declared-but-missing
+// keys via `if (k in obj)` in pickKeys. The route view ended up with no
+// quality_retry_count key at all.
+//
+// The edge condition `quality_retry_count is 0 OR is undefined` then
+// matched on "undefined" because the field was structurally absent from
+// the context, and the workflow took the wrong branch.
+//
+// Two failure modes, one root cause:
+//   1. Declared optional + omitted by agent → key missing → "is undefined"
+//      ghost-match.
+//   2. Declared required + omitted by agent → silent failure with the
+//      same routing impact, no signal to the operator.
+//
+// Fix: declared properties are part of the routing contract. They must
+// appear in the route eval view, with explicit `null` when the agent did
+// not emit them. Required-but-missing fields are a stronger contract
+// violation and fail the node loudly.
+
+describe("route evaluator: declared-but-missing field handling", () => {
+  it("surfaces declared optional fields as explicit null when the agent omits them", async () => {
+    // Exact downstream shape: draft node declared quality_retry_count as
+    // an optional property; agent omitted it; edge condition references
+    // it. The route view must include the key (with null) so the LLM
+    // evaluator cannot ghost-match "is undefined".
+    const workflow: Workflow = {
+      id: "declared-missing-null",
+      name: "Declared Missing Null",
+      description: "",
+      entry: "draft",
+      nodes: {
+        draft: {
+          name: "Draft",
+          instruction: "Draft",
+          skills: [],
+          output: {
+            type: "object",
+            properties: {
+              status: { type: "string" },
+              quality_retry_count: { type: "number" },
+            },
+            required: ["status"], // quality_retry_count is optional
+          },
+        },
+        publish: { name: "Publish", instruction: "Publish", skills: [] },
+        retry: { name: "Retry", instruction: "Retry", skills: [] },
+      },
+      edges: [
+        { from: "draft", to: "publish", when: "quality_retry_count is 0 or undefined" },
+        { from: "draft", to: "retry", when: "quality_retry_count is greater than 0" },
+      ],
+    };
+
+    let routeContext: Record<string, unknown> = {};
+    const claude: any = {
+      async run() {
+        return {
+          // Agent emits status but omits the optional quality_retry_count.
+          status: "success",
+          data: { status: "ok" },
+          toolCalls: [],
+        };
+      },
+      async evaluate(opts: any) {
+        routeContext = opts.context;
+        return opts.choices[0].id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    const draftView = routeContext.draft as Record<string, unknown>;
+    expect(draftView).toBeDefined();
+    expect(draftView).toHaveProperty("status", "ok");
+    // The key MUST be present. An absent key is the bug.
+    expect(draftView).toHaveProperty("quality_retry_count");
+    expect(draftView.quality_retry_count).toBeNull();
+  });
+
+  it("emits a node:warning observer event when a declared field is missing from emitted data", async () => {
+    // Loud signal: log streams and observers see the contract violation
+    // even when it's only an optional field. Without this, downstream
+    // tooling has no way to surface a misbehaving agent.
+    const workflow: Workflow = {
+      id: "declared-missing-warning",
+      name: "Declared Missing Warning",
+      description: "",
+      entry: "draft",
+      nodes: {
+        draft: {
+          name: "Draft",
+          instruction: "Draft",
+          skills: [],
+          output: {
+            type: "object",
+            properties: {
+              status: { type: "string" },
+              quality_retry_count: { type: "number" },
+            },
+            required: ["status"],
+          },
+        },
+        publish: { name: "Publish", instruction: "Publish", skills: [] },
+        retry: { name: "Retry", instruction: "Retry", skills: [] },
+      },
+      edges: [
+        { from: "draft", to: "publish", when: "quality_retry_count is 0 or undefined" },
+        { from: "draft", to: "retry", when: "quality_retry_count is greater than 0" },
+      ],
+    };
+
+    const events: ExecutionEvent[] = [];
+    const claude: any = {
+      async run() {
+        return { status: "success", data: { status: "ok" }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    await execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        config: {},
+        observer: (e) => events.push(e),
+      },
+    );
+
+    const warnings = events.filter((e) => e.type === "node:warning") as Array<
+      ExecutionEvent & { type: "node:warning" }
+    >;
+    expect(warnings.length).toBeGreaterThan(0);
+    const w = warnings.find((x) => x.node === "draft");
+    expect(w).toBeDefined();
+    expect(w!.fields).toContain("quality_retry_count");
+  });
+
+  it("fails the node when a required declared field is missing from emitted data", async () => {
+    // Loudest signal: the schema's required array is the workflow author's
+    // contract. If the agent skips a required field, the node is failed
+    // post-run. Routing then follows the failure path instead of guessing
+    // against a half-built data view.
+    const workflow: Workflow = {
+      id: "declared-required-missing",
+      name: "Declared Required Missing",
+      description: "",
+      entry: "draft",
+      nodes: {
+        draft: {
+          name: "Draft",
+          instruction: "Draft",
+          skills: [],
+          output: {
+            type: "object",
+            properties: {
+              status: { type: "string" },
+              quality_retry_count: { type: "number" },
+            },
+            required: ["status", "quality_retry_count"], // both required
+          },
+        },
+        publish: { name: "Publish", instruction: "Publish", skills: [] },
+        retry: { name: "Retry", instruction: "Retry", skills: [] },
+      },
+      edges: [
+        { from: "draft", to: "publish", when: "quality_retry_count is 0" },
+        { from: "draft", to: "retry", when: "quality_retry_count is greater than 0" },
+      ],
+    };
+
+    const claude: any = {
+      async run() {
+        // Agent emits status but omits the required quality_retry_count.
+        return { status: "success", data: { status: "ok" }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    const { results, trace } = await execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        config: {},
+      },
+    );
+
+    // The node ran but failed contract validation. routing keeps going
+    // through advanceFromNode, but the trace records a failed step.
+    const draftResult = results.get("draft");
+    expect(draftResult).toBeDefined();
+    expect(draftResult!.status).toBe("failed");
+    expect(String(draftResult!.data?.error ?? "")).toContain("quality_retry_count");
+
+    const draftStep = trace.steps.find((s) => s.node === "draft");
+    expect(draftStep?.status).toBe("failed");
+  });
+
+  it("does not warn or fail when every declared property is emitted", async () => {
+    // Negative control. The happy path is silent: no warning event, no
+    // failed step, no behavior change vs PR #197.
+    const workflow: Workflow = {
+      id: "declared-all-present",
+      name: "Declared All Present",
+      description: "",
+      entry: "draft",
+      nodes: {
+        draft: {
+          name: "Draft",
+          instruction: "Draft",
+          skills: [],
+          output: {
+            type: "object",
+            properties: {
+              status: { type: "string" },
+              quality_retry_count: { type: "number" },
+            },
+            required: ["status", "quality_retry_count"],
+          },
+        },
+        publish: { name: "Publish", instruction: "Publish", skills: [] },
+        retry: { name: "Retry", instruction: "Retry", skills: [] },
+      },
+      edges: [
+        { from: "draft", to: "publish", when: "quality_retry_count is 0" },
+        { from: "draft", to: "retry", when: "quality_retry_count is greater than 0" },
+      ],
+    };
+
+    const events: ExecutionEvent[] = [];
+    const claude: any = {
+      async run() {
+        return {
+          status: "success",
+          data: { status: "ok", quality_retry_count: 0 },
+          toolCalls: [],
+        };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+      async ask() {
+        return "";
+      },
+    };
+
+    const { results } = await execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        config: {},
+        observer: (e) => events.push(e),
+      },
+    );
+
+    const warnings = events.filter((e) => e.type === "node:warning");
+    expect(warnings).toEqual([]);
+    expect(results.get("draft")?.status).toBe("success");
+  });
+});
+
 // ─── Bundled workflows: routing contract invariants ──────────────
 //
 // Enforce the audit claim in PR #197 with a test: every conditional-edge
