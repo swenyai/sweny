@@ -426,6 +426,18 @@ export type ExecutionEvent =
   | { type: "node:exit"; node: string; result: NodeResult }
   | { type: "node:progress"; node: string; message: string }
   | { type: "node:retry"; node: string; attempt: number; reason: string; preamble: string }
+  /**
+   * Non-fatal contract violation surfaced during node execution. Currently
+   * emitted when a source node declares output properties that the agent
+   * did not emit. The route eval view fills the missing keys with `null`
+   * so the LLM evaluator can't ghost-match conditions like "is undefined"
+   * or "is 0", but the operator still wants a loud signal in the log
+   * stream.
+   *
+   * `fields` lists the declared property names that were missing from the
+   * emitted data. `reason` is a short human-readable summary.
+   */
+  | { type: "node:warning"; node: string; reason: string; fields: string[] }
   | { type: "route"; from: string; to: string; reason: string }
   | { type: "workflow:end"; results: Record<string, NodeResult> };
 
