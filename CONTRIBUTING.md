@@ -13,24 +13,16 @@ cd sweny
 npm install
 ```
 
-## Build order
+## Build
 
-Packages must be built in dependency order:
-
-```
-providers → engine → cli → agent → action
-```
+`npm run build` builds every workspace; npm resolves the dependency order.
 
 ```bash
-# Build all
+# Build everything
 npm run build
 
-# Or individually
-npm run build --workspace=packages/providers
-npm run build --workspace=packages/engine
-npm run build --workspace=packages/cli
-npm run build --workspace=packages/agent
-npm run build --workspace=packages/action
+# Or a single package
+npm run build --workspace=packages/core
 ```
 
 ## Testing
@@ -39,11 +31,12 @@ npm run build --workspace=packages/action
 # All packages
 npm test
 
-# Individual
-npm test --workspace=packages/engine
-npm test --workspace=packages/providers
-npm test --workspace=packages/agent
-npm test --workspace=packages/action
+# A single package
+npm test --workspace=packages/core
+npm test --workspace=packages/studio
+
+# A single test file
+npx vitest run packages/core/src/skills/linear.test.ts
 ```
 
 ## Running the CLI locally
@@ -52,35 +45,35 @@ The CLI auto-loads `.env` and `.sweny.yml` from your working directory:
 
 ```bash
 # Create a config file (if you don't have one)
-npx tsx packages/cli/src/main.ts init
+npx tsx packages/core/src/cli/main.ts init
 
 # Run a dry-run triage
-npx tsx packages/cli/src/main.ts triage --dry-run
+npx tsx packages/core/src/cli/main.ts triage --dry-run
 ```
 
 For quick iteration, step caching replays completed steps on re-run:
 
 ```bash
 # First run populates cache (~3 min for investigate)
-npx tsx packages/cli/src/main.ts triage --dry-run
+npx tsx packages/core/src/cli/main.ts triage --dry-run
 
 # Second run replays from cache (~0s)
-npx tsx packages/cli/src/main.ts triage --dry-run
+npx tsx packages/core/src/cli/main.ts triage --dry-run
 
 # Force fresh execution
-npx tsx packages/cli/src/main.ts triage --dry-run --no-cache
+npx tsx packages/core/src/cli/main.ts triage --dry-run --no-cache
 ```
 
-## Adding a new provider
+## Adding a new skill
 
-1. Create your implementation in `packages/providers/src/<category>/`:
-   - Define a Zod config schema
-   - Export a factory function (e.g., `export function myProvider(config: MyConfig): ProviderInterface`)
-   - Follow the existing pattern — see `packages/providers/src/observability/datadog.ts` for reference
-2. Re-export from the category's `index.ts`
-3. Add to the root barrel export in `packages/providers/src/index.ts`
-4. Add tests in `packages/providers/tests/`
-5. Update `packages/providers/README.md`
+Built-in skills live in `packages/core/src/skills/`.
+
+1. Create `packages/core/src/skills/<name>.ts`. Export a `Skill` object with
+   `id`, `name`, `description`, `category`, `config`, and `tools`. Follow an
+   existing skill; `packages/core/src/skills/linear.ts` is a good reference.
+2. Register it in `packages/core/src/skills/index.ts`: add the import, append
+   it to the `builtinSkills` array, and add it to the `export { ... }` line.
+3. Add a co-located test: `packages/core/src/skills/<name>.test.ts`.
 
 ## Pull requests
 
@@ -101,15 +94,14 @@ Any PR that modifies source files in a published package:
 
 | Package dir | npm name |
 |-------------|----------|
-| `packages/engine` | `@sweny-ai/engine` |
-| `packages/cli` | `@sweny-ai/cli` |
+| `packages/core` | `@sweny-ai/core` |
 | `packages/studio` | `@sweny-ai/studio` |
-| `packages/providers` | `@sweny-ai/providers` |
-| `packages/agent` | `@sweny-ai/agent` |
+| `packages/mcp` | `@sweny-ai/mcp` |
+| `packages/create-sweny` | `create-sweny` |
 
 You can skip a changeset for:
 
-- Changes to `packages/web` or `packages/action` (private, not published to npm)
+- Changes to `packages/web`, `packages/action`, or `packages/plugin` (not published to npm)
 - CI/workflow-only changes (`.github/`, `scripts/`)
 - Root-level config, docs, or task files
 
@@ -119,11 +111,10 @@ Create a file at `.changeset/<descriptive-slug>.md`:
 
 ```md
 ---
-"@sweny-ai/engine": minor
-"@sweny-ai/cli": patch
+"@sweny-ai/core": minor
 ---
 
-Brief description of what changed and why — written for package consumers.
+Brief description of what changed and why, written for package consumers.
 ```
 
 Or use the interactive CLI:
