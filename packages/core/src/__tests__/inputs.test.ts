@@ -132,6 +132,31 @@ describe("validateRuntimeInput", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.foo).toBe("fallback");
   });
+
+  it("treats explicit null on a required field with no default as missing → required error", () => {
+    // Spec contract (workflow.mdx Inputs §Validation rule 1): an explicit
+    // null is symmetric with absence for the required check, just as it is
+    // for the default-fill rule below. Pinning this so the spec/lib
+    // agreement is not implicit.
+    const declared: WorkflowInputs = { token: { type: "string", required: true } };
+    const r = validateRuntimeInput(declared, { token: null });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0].field).toBe("token");
+      expect(r.errors[0].message).toMatch(/required but not provided/);
+    }
+  });
+
+  it("treats explicit null on an optional field with no default as absent (key omitted from result)", () => {
+    // Symmetric to the null-applies-default case. With no default to
+    // substitute and no required check to fail, null should simply not
+    // surface in the resolved input (matches absence behavior).
+    const declared: WorkflowInputs = { foo: { type: "string" } };
+    const r = validateRuntimeInput(declared, { foo: null });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect("foo" in r.value).toBe(false);
+  });
 });
 
 // ─── workflowInputsZ schema ──────────────────────────────────────

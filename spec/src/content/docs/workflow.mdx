@@ -116,7 +116,7 @@ Types are intentionally narrow. If you need richer shapes, model them as a flat 
 
 A conforming runtime MUST enforce:
 
-1. **Required check.** Each declared field with `required: true` MUST be present in the caller's input. (A field with `required: true` cannot also declare a `default`; see [InputField](#inputfield).)
+1. **Required check.** Each declared field with `required: true` MUST be present in the caller's input. A field is "present" when the caller provides a non-`null` value; an explicit `null` (or absence of the key) MUST be treated as missing and surface the same required-field error. (A field with `required: true` cannot also declare a `default`; see [InputField](#inputfield).)
 2. **Type check.** Each declared field's value MUST match its `type`. `number` rejects `NaN` and `±Infinity`. `string[]` requires every element to be a string.
 3. **Enum check.** When `enum` is declared, the value MUST equal one of the listed entries.
 4. **Default fill.** When a field is absent or `null` AND has a `default`, the runtime MUST substitute the default before passing the input to the executor. Because `required` and `default` are mutually exclusive, this rule only applies to optional fields.

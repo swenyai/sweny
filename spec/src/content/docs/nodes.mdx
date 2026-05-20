@@ -7,19 +7,20 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 
 ## Fields
 
-| Field         | Type                             | Required | Default                      | Description                                                                    |
-| ------------- | -------------------------------- | -------- | ---------------------------- | ------------------------------------------------------------------------------ |
-| `name`        | string                           | REQUIRED | —                            | Display name for this node. MUST be non-empty.                                 |
-| `instruction` | [Source](/sources)               | REQUIRED | —                            | Natural language instruction for the AI model. MUST be non-empty.              |
-| `skills`      | string[]                         | OPTIONAL | `[]`                         | Skill IDs this node has access to.                                             |
-| `output`      | JSON Schema object               | OPTIONAL | —                            | Structured output schema for this node's result.                               |
-| `max_turns`   | integer &ge; 1                   | OPTIONAL | implementation&#8209;defined | Maximum AI model turns for this node's execution.                              |
-| `rules`       | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Rules for this node. Additive by default; see [cascade](#cascade-semantics).   |
-| `context`     | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Context for this node. Additive by default; see [cascade](#cascade-semantics). |
-| `eval`        | [Eval](#eval)                    | OPTIONAL | —                            | Named evaluators (value, function, judge) run after the AI finishes the node.  |
-| `eval_policy` | string                           | OPTIONAL | `all_pass`                   | How to aggregate evaluator results. v1 supports `all_pass`.                    |
-| `requires`    | [Requires](#requires)            | OPTIONAL | —                            | Machine-checked pre-conditions evaluated before the AI starts the node.        |
-| `retry`       | [Retry](#retry)                  | OPTIONAL | —                            | Node-local retry on eval failure with optional autonomous reflection.          |
+| Field              | Type                             | Required | Default                      | Description                                                                                                  |
+| ------------------ | -------------------------------- | -------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `name`             | string                           | REQUIRED | —                            | Display name for this node. MUST be non-empty.                                                               |
+| `instruction`      | [Source](/sources)               | REQUIRED | —                            | Natural language instruction for the AI model. MUST be non-empty.                                            |
+| `skills`           | string[]                         | OPTIONAL | `[]`                         | Skill IDs this node has access to.                                                                           |
+| `output`           | JSON Schema object               | OPTIONAL | —                            | Structured output schema for this node's result.                                                             |
+| `max_turns`        | integer &ge; 1                   | OPTIONAL | implementation&#8209;defined | Maximum AI model turns for this node's execution.                                                            |
+| `disallowed_tools` | string[]                         | OPTIONAL | `[]`                         | Built-in agent tools removed from the model context at this node. See [Disallowed Tools](#disallowed-tools). |
+| `rules`            | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Rules for this node. Additive by default; see [cascade](#cascade-semantics).                                 |
+| `context`          | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Context for this node. Additive by default; see [cascade](#cascade-semantics).                               |
+| `eval`             | [Eval](#eval)                    | OPTIONAL | —                            | Named evaluators (value, function, judge) run after the AI finishes the node.                                |
+| `eval_policy`      | string                           | OPTIONAL | `all_pass`                   | How to aggregate evaluator results. v1 supports `all_pass`.                                                  |
+| `requires`         | [Requires](#requires)            | OPTIONAL | —                            | Machine-checked pre-conditions evaluated before the AI starts the node.                                      |
+| `retry`            | [Retry](#retry)                  | OPTIONAL | —                            | Node-local retry on eval failure with optional autonomous reflection.                                        |
 
 ## Max Turns Semantics
 
@@ -32,6 +33,32 @@ A conforming executor:
 - When the limit is reached, the executor **SHOULD** capture whatever partial result is available and produce a `NodeResult` with `status: "failed"` and a descriptive error in `data`. The executor **MUST NOT** silently discard the node's work.
 
 Different nodes have vastly different compute needs. A context-gathering node that queries multiple APIs may need many turns, while a summarization node with no tools may need one. Per-node limits give workflow authors fine-grained control over the compute budget.
+
+## Disallowed Tools
+
+The `disallowed_tools` field names built-in agent tools the AI model MUST NOT have access to at this node. Names refer to the agent runtime's built-in tools (e.g. `Bash`, `Read`, `Edit`, `Write`, `WebFetch`, `WebSearch`), not to skill-provided tool names declared in [Skills](/skills).
+
+Typical use: keep an `implement` node focused on the repo by removing `WebFetch` and `WebSearch`, or harden a notification node by removing `Bash` so the agent cannot shell out.
+
+A conforming executor:
+
+- **MUST** prevent the model from invoking any tool listed in `disallowed_tools` for the duration of this node's run.
+- **SHOULD** remove the named tools from the model's context entirely, rather than rejecting calls after the fact, so the model does not waste turns attempting blocked tools.
+- **MUST NOT** apply `disallowed_tools` to skill-provided tools registered via `skills`. Skills are gated by their own declaration (only listed `skills` are available); `disallowed_tools` is exclusively for built-in agent tools.
+- When the field is absent or empty, the executor applies its default tool set with no removals.
+
+```yaml
+implement:
+  name: Implement Fix
+  instruction: Read the issue, write the fix, run tests, commit.
+  skills:
+    - github
+  disallowed_tools:
+    - WebFetch
+    - WebSearch
+```
+
+The exact set of names the runtime recognizes is **implementation-defined** and tracks the agent SDK in use. Workflow authors SHOULD verify a name is honored before relying on it; a typo silently no-ops because there is no built-in tool of that name to remove.
 
 ## Rules & Context
 

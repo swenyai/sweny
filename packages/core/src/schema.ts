@@ -684,6 +684,18 @@ export const workflowJsonSchema = {
             description: "Optional set of allowed values. Validated after the type check.",
           },
         },
+        // The combination `required: true` together with a `default` is incoherent:
+        // a default would either silently satisfy the required check (making it
+        // vestigial) or never fire (making the default dead code). Reject the
+        // combination at JSON-Schema validation time so external validators agree
+        // with the Zod parser. See workflowInputFieldZ.superRefine in inputs.ts.
+        not: {
+          type: "object",
+          required: ["required", "default"],
+          properties: {
+            required: { const: true },
+          },
+        },
       },
     },
     nodes: {

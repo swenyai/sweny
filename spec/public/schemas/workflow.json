@@ -291,6 +291,15 @@
             "minItems": 1,
             "description": "Optional set of allowed values. Validated after the type check."
           }
+        },
+        "not": {
+          "type": "object",
+          "required": ["required", "default"],
+          "properties": {
+            "required": {
+              "const": true
+            }
+          }
         }
       }
     },

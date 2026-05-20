@@ -406,6 +406,37 @@ const fixtures: Fixture[] = [
     expected: true,
   },
 
+  // ── Positive — new fields: inputs + disallowed_tools ─────────────
+  {
+    name: "workflow with a declared inputs block (string + boolean + default)",
+    input: {
+      id: "release-notes",
+      name: "Release Notes",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      inputs: {
+        since_tag: { type: "string", required: true },
+        draft: { type: "boolean", default: false },
+        labels: { type: "string[]", default: [] },
+      },
+    },
+    expected: true,
+  },
+  {
+    name: "node with disallowed_tools",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: { ...baseNode(), disallowed_tools: ["WebFetch", "WebSearch"] },
+      },
+      edges: [],
+    },
+    expected: true,
+  },
+
   // ── Negative — structural (shared by Zod schema parse + structural check) ──
   // These are rejected by Zod parse, so they should also be rejected by the
   // exported JSON Schema. (Structural checks like SELF_LOOP and UNREACHABLE
@@ -427,6 +458,64 @@ const fixtures: Fixture[] = [
       name: "D",
       entry: "a",
       nodes: "not an object",
+      edges: [],
+    },
+    expected: false,
+  },
+  // ── Negative — new fields ────────────────────────────────────────
+  {
+    // Spec contract (workflow.mdx Inputs: "An InputField MUST NOT declare
+    // both `required: true` and a `default`"). The Zod parser rejected this
+    // from day one; the JSON Schema needs the matching `not` constraint or
+    // editor/CI validators silently pass workflows the runtime will reject.
+    name: "inputs field declaring both required: true and a default",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      inputs: {
+        bad: { type: "string", required: true, default: "fallback" },
+      },
+    },
+    expected: false,
+  },
+  {
+    name: "inputs field with required: false plus default (legal: false is the default)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      inputs: {
+        ok: { type: "string", required: false, default: "fallback" },
+      },
+    },
+    expected: true,
+  },
+  {
+    name: "inputs field with unknown type",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      inputs: {
+        when: { type: "date" },
+      },
+    },
+    expected: false,
+  },
+  {
+    name: "disallowed_tools with an empty-string entry",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), disallowed_tools: [""] } },
       edges: [],
     },
     expected: false,

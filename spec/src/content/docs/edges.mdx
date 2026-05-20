@@ -58,6 +58,22 @@ A conforming executor:
 
 When a node has a mix of conditional and unconditional outgoing edges, the unconditional edge serves as a **default path**. The executor presents the conditional edges as choices, with the unconditional edge as a "none of the above" fallback.
 
+### Route-eval view of prior node results
+
+When a prior node declares an [`output`](/nodes#fields) JSON Schema with a non-empty `properties` block, a conforming executor:
+
+- **MUST** scope the routing view of that node's result data to the keys declared in `output.properties`. Non-schema fields (free-form `summary` prose, conversational rationale, debug commentary the model adds alongside the structured payload) MUST NOT reach the route evaluator.
+- **MUST** preserve the `evals` namespace on the routing view when present, so `when` conditions can reference `priorNode.evals.<name>.pass`.
+- **MUST** continue to expose the full prior-node `data` (including any non-schema fields) to **downstream node prompts** via context accumulation. The schema-strict filter is exclusively for route evaluation.
+
+When a prior node has no `output` schema, or the schema declares no `properties` block, the executor MUST expose the full `data` to the route evaluator (back-compatible behavior).
+
+Rationale: a natural-language route evaluator can be swayed by any prose it sees in the context. Declaring an `output` schema is the author's contract for "these are the fields that drive routing"; the runtime treats the schema as authoritative for routing without changing what downstream nodes can read.
+
+### Nested properties
+
+The schema-strict filter is top-level. If a declared property is itself an object (`type: "object"` with nested `properties`), the entire nested value passes through unchanged. The filter does not recurse. Authors who need to hide internal fields of a nested object MUST omit them from the parent object's output, not rely on this filter.
+
 ## Terminal Nodes
 
 A node with zero outgoing edges (after filtering exhausted edges) is a **terminal node**. Execution ends when a terminal node completes.
