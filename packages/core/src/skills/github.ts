@@ -199,8 +199,14 @@ export const github: Skill = {
               body: JSON.stringify({ labels: input.labels ?? ["sweny", "agent"] }),
             });
           }
-        } catch {
-          // Label failure is non-fatal
+        } catch (err) {
+          // Label failure is non-fatal: the PR is already created and labeling
+          // is a best-effort followup. Surface a single warn line naming the
+          // PR + failure so operators can tell a label-misconfigured run from
+          // a clean one. Without this log, a 5xx from /issues/:n/labels was
+          // indistinguishable from success in CI output.
+          const msg = err instanceof Error ? err.message : String(err);
+          ctx.logger?.warn?.(`  github_create_pr: label POST failed for ${pr.html_url ?? `#${pr.number}`} — ${msg}`);
         }
         return reused ? { ...pr, reused: true } : pr;
       },

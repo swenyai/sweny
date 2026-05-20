@@ -1,11 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { github } from "./github.js";
-import type { ToolContext } from "../types.js";
+import type { Logger, ToolContext } from "../types.js";
 
-const ctx = (): ToolContext => ({
+const ctx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
   config: { GITHUB_TOKEN: "test-token" },
   logger: console,
+  ...overrides,
 });
+
+function makeLogger(): Logger & { warnings: string[] } {
+  const warnings: string[] = [];
+  return {
+    info: () => undefined,
+    warn: (msg: string) => warnings.push(msg),
+    error: () => undefined,
+    debug: () => undefined,
+    warnings,
+  };
+}
 
 const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
 
@@ -160,5 +172,42 @@ describe("github_create_pr", () => {
     await expect(createPr.handler({ repo: "o/r", title: "[X-1] fix: y", head: "x-1-fix" }, ctx())).rejects.toThrow(
       /already exists/i,
     );
+  });
+
+  it("logs a warn when the label POST fails after a successful PR create", async () => {
+    // Closes the silent-failure path called out in the review of PR #189/#193:
+    // a label POST that returns 5xx (or any non-2xx) was caught and swallowed
+    // with zero log signal, so a label-misconfigured run looked indistinguishable
+    // from a successful one. The PR is still considered created (labeling is
+    // best-effort), but operators get a single line in the log naming the
+    // failure so they can investigate without grepping for ghosts.
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(201, { number: 7, html_url: "https://github.com/o/r/pull/7" }))
+      .mockResolvedValueOnce(jsonResponse(500, { message: "labels endpoint down" }));
+
+    const logger = makeLogger();
+    const result: any = await createPr.handler(
+      { repo: "o/r", title: "[X-1] fix: y", head: "x-1-fix" },
+      ctx({ logger }),
+    );
+
+    // PR creation still considered successful — labels are best-effort.
+    expect(result).toMatchObject({ number: 7 });
+    expect(result.reused).toBeFalsy();
+    // A single warn line names the PR and the failure shape.
+    expect(logger.warnings).toHaveLength(1);
+    expect(logger.warnings[0]).toMatch(/label/i);
+    expect(logger.warnings[0]).toMatch(/pull\/7|#7/);
+  });
+
+  it("does not warn when label POST succeeds (no false positives in CI logs)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(201, { number: 12, html_url: "https://github.com/o/r/pull/12" }))
+      .mockResolvedValueOnce(jsonResponse(200, [{ name: "sweny" }, { name: "agent" }]));
+
+    const logger = makeLogger();
+    await createPr.handler({ repo: "o/r", title: "[X-1] fix: y", head: "x-1-fix" }, ctx({ logger }));
+
+    expect(logger.warnings).toHaveLength(0);
   });
 });
