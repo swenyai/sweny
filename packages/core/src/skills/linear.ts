@@ -131,6 +131,37 @@ export const linear: Skill = {
         ),
     },
     {
+      name: "linear_list_comments",
+      description: "List comments on a Linear issue (returns id, body, author, and timestamp for each)",
+      input_schema: {
+        type: "object",
+        properties: {
+          issueId: { type: "string", description: "Linear issue ID (UUID) or identifier (e.g. 'OFF-1020')" },
+          limit: { type: "number", description: "Max comments to return (default: 50)" },
+        },
+        required: ["issueId"],
+      },
+      handler: async (input: { issueId: string; limit?: number }, ctx) => {
+        const data = await linearGql(
+          `query($id: String!, $first: Int) {
+            issue(id: $id) {
+              comments(first: $first) {
+                nodes { id body createdAt user { name } }
+              }
+            }
+          }`,
+          { id: input.issueId, first: input.limit ?? 50 },
+          ctx,
+        );
+        if (!data?.issue) {
+          throw new Error(
+            `[Linear] linear_list_comments found no issue "${input.issueId}". Raw response: ${JSON.stringify(data)}`,
+          );
+        }
+        return data;
+      },
+    },
+    {
       name: "linear_list_teams",
       description: "List Linear teams (needed for teamId when creating issues)",
       input_schema: {
@@ -217,6 +248,7 @@ export const linear: Skill = {
     linear_update_issue: ["save_issue"],
     linear_search_issues: ["list_issues"],
     linear_add_comment: ["save_comment"],
+    linear_list_comments: ["list_comments"],
     linear_list_teams: ["list_teams"],
     linear_list_labels: ["list_issue_labels"],
   },
