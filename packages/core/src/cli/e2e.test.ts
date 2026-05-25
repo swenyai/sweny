@@ -9,6 +9,7 @@ import {
   buildFlowNodes,
   buildFlowWorkflow,
   buildE2eEnvTemplate,
+  batchRunDecision,
 } from "./e2e.js";
 import type { FlowConfig, FlowType, E2eSelections } from "./e2e.js";
 import type { Workflow } from "../types.js";
@@ -786,5 +787,22 @@ describe("runE2eInit — skipIntro option", () => {
     await expect(runE2eInit({ skipIntro: true })).rejects.toThrow("__abort_test__");
     expect(introSpy).not.toHaveBeenCalled();
     expect(logStepSpy).toHaveBeenCalledWith("Setting up end-to-end browser testing");
+  });
+});
+
+describe("batchRunDecision — no-file `sweny workflow run` batch gate", () => {
+  it("runs without prompting when --yes is passed (CI)", () => {
+    expect(batchRunDecision({ yes: true, isTTY: true })).toBe("run");
+    expect(batchRunDecision({ yes: true, isTTY: false })).toBe("run");
+  });
+
+  it("prompts for confirmation in an interactive shell", () => {
+    expect(batchRunDecision({ yes: false, isTTY: true })).toBe("confirm");
+    expect(batchRunDecision({ isTTY: true })).toBe("confirm");
+  });
+
+  it("refuses to batch-run non-interactively without --yes", () => {
+    expect(batchRunDecision({ yes: false, isTTY: false })).toBe("refuse-noninteractive");
+    expect(batchRunDecision({ isTTY: false })).toBe("refuse-noninteractive");
   });
 });

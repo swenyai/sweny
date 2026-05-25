@@ -533,6 +533,14 @@ function cancel(): never {
 export async function runNew(options?: { marketplaceId?: string; skipIntro?: boolean }): Promise<void> {
   const cwd = process.cwd();
 
+  // ── E2E shortcut: `sweny new e2e` jumps straight into the e2e wizard ──
+  // `new` is the single entry for all workflow creation; this is a named
+  // shortcut into the same flow the interactive picker reaches via "__e2e".
+  if (options?.marketplaceId === "e2e") {
+    await runE2eInit({ skipIntro: options.skipIntro });
+    return;
+  }
+
   // ── Marketplace install fast path ───────────────────────────────────
   if (options?.marketplaceId) {
     const { installMarketplaceWorkflow } = await import("./marketplace.js");

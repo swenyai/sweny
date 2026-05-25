@@ -7,10 +7,12 @@ The `sweny` binary is provided by the `@sweny-ai/core` package. All commands aut
 
 ## sweny new
 
-Create a new SWEny workflow. Interactive picker offering templates, AI-generated workflows, end-to-end browser testing, or a blank start.
+Create a new SWEny workflow. Interactive picker offering templates, AI-generated workflows, end-to-end browser testing, or a blank start. `sweny new` is the single entry for all workflow creation.
 
 ```bash
-sweny new
+sweny new          # interactive picker
+sweny new e2e      # jump straight into the end-to-end browser-testing wizard
+sweny new <id>     # install a published workflow from the marketplace (swenyai/workflows)
 ```
 
 In a fresh repo, walks you through provider inference, credential collection, and writes `.sweny.yml` + `.env` + `.sweny/workflows/<id>.yml`. In a repo that already has `.sweny.yml`, adds the new workflow non-destructively — existing config is preserved and `.env` is append-only.
@@ -219,10 +221,11 @@ sweny workflow validate broken.yml
 
 ### sweny workflow run
 
-Execute a custom workflow file.
+Execute a workflow file. With no file argument, batch-runs every workflow in `.sweny/e2e/` (this is where end-to-end tests run, having replaced the old `sweny e2e run`).
 
 ```bash
-sweny workflow run <file> [options]
+sweny workflow run <file> [options]   # run one workflow
+sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 ```
 
 | Option | Description | Default |
@@ -231,8 +234,10 @@ sweny workflow run <file> [options]
 | `--json` | Output result as JSON to stdout; suppress progress rendering | `false` |
 | `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |
 | `--mermaid` | Print a Mermaid diagram with per-node execution state after the run finishes | `false` |
+| `--timeout <ms>` | Per-workflow timeout for batch (no-file) runs | `900000` (15 min) |
+| `-y, --yes` | Skip the batch confirmation prompt (use in CI) | `false` |
 
-Loads the workflow definition, validates its schema, then executes it with the same DAG renderer and skill infrastructure as the built-in `triage` and `implement` commands. Provider settings from `.sweny.yml` and `.env` apply.
+With a file, loads the definition, validates its schema, then executes it with the same DAG renderer and skill infrastructure as the built-in `triage` and `implement` commands. With no file, it lists every `.sweny/e2e/*.yml` workflow, asks you to confirm (skip with `--yes`), runs them sequentially with template variables (`{base_url}`, `{run_id}`, ...) resolved, and exits `0` if all pass, `1` if any fail. Provider settings from `.sweny.yml` and `.env` apply.
 
 ### sweny workflow diagram
 
@@ -343,34 +348,14 @@ sweny workflow list [options]
 
 Prints each configured skill's ID, category, and description. For the full picture (built-in plus custom, configured plus unconfigured), use [`sweny skill list`](#sweny-skill-list) instead.
 
-## sweny e2e
+## End-to-end browser testing
 
-Generate and run AI-driven end-to-end browser tests. See the [E2E Testing guide](/cli/e2e/) for the full walkthrough.
+E2E testing has no dedicated namespace — it uses the two commands above:
 
-### sweny e2e init
+- **Scaffold** with [`sweny new e2e`](#sweny-new) — the wizard generates `.sweny/e2e/<flow-name>.yml` files and appends env vars to `.env`.
+- **Run** with [`sweny workflow run`](#sweny-workflow-run) — no file argument batch-runs every workflow in `.sweny/e2e/`.
 
-Interactive wizard that generates workflow YAML files for testing your web app's flows.
-
-```bash
-sweny e2e init
-```
-
-Walks you through selecting flow types (registration, login, purchase, onboarding, upgrade, cancellation, custom), configuring per-flow details (URL paths, form fields, success criteria), setting the base URL, and optionally enabling cleanup. Outputs `.sweny/e2e/<flow-name>.yml` files and appends env vars to `.env`.
-
-### sweny e2e run
-
-Execute e2e workflow files.
-
-```bash
-sweny e2e run [file] [options]
-```
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `[file]` | Run a specific workflow file | All `.sweny/e2e/*.yml` |
-| `--timeout <ms>` | Timeout per workflow in milliseconds | `900000` (15 min) |
-
-Without a file argument, runs all `.yml` files in `.sweny/e2e/` sequentially. Loads `.env`, resolves template variables (`{base_url}`, `{test_email}`, `{run_id}`, etc.), and executes each workflow. Exits `0` if all pass, `1` if any fail.
+See the [E2E Testing guide](/cli/e2e/) for the full walkthrough.
 
 ## sweny skill
 

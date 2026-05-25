@@ -7,8 +7,8 @@ SWEny E2E generates workflow-based browser tests from a quick interactive wizard
 
 ## How it works
 
-1. `sweny e2e init` — interactive wizard asks about your app's flows (registration, login, purchase, etc.) and generates workflow YAML files
-2. `sweny e2e run` — loads the generated workflows, resolves template variables, and executes them with an AI agent driving `agent-browser`
+1. `sweny new e2e` — interactive wizard asks about your app's flows (registration, login, purchase, etc.) and generates workflow YAML files
+2. `sweny workflow run` — loads the generated workflows, resolves template variables, and executes them with an AI agent driving `agent-browser`
 
 Each generated workflow is a self-contained DAG:
 
@@ -22,17 +22,17 @@ The setup node installs and starts the browser daemon. Test nodes contain natura
 
 ```bash
 # 1. Run the wizard
-sweny e2e init
+sweny new e2e
 
 # 2. Fill in any .env values (base URL, cleanup credentials)
 
-# 3. Run all tests
-sweny e2e run
+# 3. Run all tests (lists them and asks to confirm first)
+sweny workflow run
 ```
 
 ## The wizard
 
-`sweny e2e init` walks you through 7 screens:
+`sweny new e2e` walks you through 7 screens:
 
 **Flow types** — pick which flows to test:
 
@@ -75,14 +75,16 @@ The naming convention `e2e-*@yourapp.test` makes cleanup safe — anything match
 ## Running tests
 
 ```bash
-# Run all .sweny/e2e/*.yml files sequentially
-sweny e2e run
+# Run all .sweny/e2e/*.yml files sequentially.
+# Lists them and asks to confirm first; --yes skips the prompt (use in CI).
+sweny workflow run
+sweny workflow run --yes
 
-# Run a specific workflow
-sweny e2e run registration.yml
+# Run a specific workflow (no prompt — the file is explicit)
+sweny workflow run .sweny/e2e/registration.yml
 
-# Custom timeout (default: 15 minutes per workflow)
-sweny e2e run --timeout 300000
+# Custom timeout for batch runs (default: 15 minutes per workflow)
+sweny workflow run --timeout 300000 --yes
 ```
 
 Output:
@@ -173,6 +175,6 @@ edges:
 
 ## What's next
 
-- [Commands Reference](/cli/commands/) — full flag reference for `sweny e2e`
+- [Commands Reference](/cli/commands/) — full flag reference for `sweny new` and `sweny workflow run`
 - [Custom Workflows](/workflows/custom/) — build non-E2E workflows from natural language
 - [GitHub Action](/action/) — run E2E workflows in CI

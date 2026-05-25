@@ -110,20 +110,6 @@ program
     await runNew(id ? { marketplaceId: id } : undefined);
   });
 
-// ── sweny e2e ────────────────────────────────────────────────────────
-const e2eCmd = program.command("e2e").description("End-to-end browser testing");
-
-e2eCmd
-  .command("run [file]")
-  .description("Run e2e workflow files from .sweny/e2e/")
-  .option("--timeout <ms>", "Timeout per workflow in milliseconds (default: 900000 = 15 min)")
-  .action(async (file: string | undefined, options: { timeout?: string }) => {
-    await runE2eRun({
-      file,
-      timeout: options.timeout ? parseInt(options.timeout, 10) : undefined,
-    });
-  });
-
 // ── sweny check ───────────────────────────────────────────────────────
 program
   .command("check")
@@ -712,9 +698,27 @@ export function loadWorkflowFile(filePath: string, knownSkills?: Set<string>): W
 }
 
 export async function workflowRunAction(
-  file: string,
-  options: Record<string, unknown> & { json?: boolean; stream?: boolean; mermaid?: boolean; verbose?: boolean },
+  file: string | undefined,
+  options: Record<string, unknown> & {
+    json?: boolean;
+    stream?: boolean;
+    mermaid?: boolean;
+    verbose?: boolean;
+    timeout?: string;
+    yes?: boolean;
+  },
 ): Promise<void> {
+  // No file given → batch-run the e2e workflows in .sweny/e2e/. This is the
+  // home for what used to be `sweny e2e run`; it lists what will run and
+  // confirms first (bypass with --yes).
+  if (!file) {
+    await runE2eRun({
+      timeout: options.timeout ? parseInt(options.timeout, 10) : undefined,
+      yes: Boolean(options.yes),
+    });
+    return;
+  }
+
   // Discover skills first so the loader can flag UNKNOWN_SKILL at parse
   // time. validateWorkflowSkills below still runs for richer category /
   // env-var diagnostics, but the loader's structural check fires earlier
@@ -1047,8 +1051,12 @@ workflowCmd
   .action(workflowValidateAction);
 
 workflowCmd
-  .command("run <file>")
-  .description("Run a workflow from a YAML or JSON file")
+  .command("run [file]")
+  .description(
+    "Run a workflow from a YAML or JSON file. With no file, batch-runs every workflow in .sweny/e2e/ (lists and confirms first; use --yes to skip the prompt).",
+  )
+  .option("--timeout <ms>", "Per-workflow timeout in ms for batch runs (default: 900000 = 15 min)")
+  .option("-y, --yes", "Skip the batch confirmation prompt (for CI)")
   .option(
     "--dry-run",
     "Execute until the first conditional routing decision, then stop (no side effects past that point). NOTE: behavior changed in this release — previously --dry-run only printed the node list. For that behavior use --list-nodes.",

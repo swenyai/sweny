@@ -1,5 +1,5 @@
 /**
- * sweny e2e — Generate and run agent-driven end-to-end browser tests.
+ * sweny e2e (now `sweny new e2e` + `sweny workflow run`) — generate and run agent-driven end-to-end browser tests.
  *
  * Pure functions for workflow generation + thin @clack/prompts interactive layer.
  * Tests cover the pure functions; the interactive wizard is thin glue.
@@ -594,7 +594,7 @@ const CLEANUP_ENV_VARS: Record<string, Array<{ key: string; hint?: string }>> = 
 export function buildE2eEnvTemplate(selections: E2eSelections): string {
   const lines: string[] = [];
   lines.push("# E2E Testing — SWEny");
-  lines.push("# Fill in values, then run: sweny e2e run");
+  lines.push("# Fill in values, then run: sweny workflow run");
   lines.push("");
 
   lines.push(`E2E_BASE_URL=${selections.baseUrl}`);
@@ -869,9 +869,9 @@ export async function runE2eInit(options: E2eInitOptions = {}): Promise<void> {
   console.log(chalk.dim("  1. Fill in your .env values"));
   if (selections.flows.some((f) => AUTH_REQUIRED_FLOWS.includes(f.type) || f.type === "login")) {
     console.log(chalk.dim("  2. Set E2E_EMAIL and E2E_PASSWORD to a test account"));
-    console.log(chalk.dim(`  3. Run: ${chalk.cyan("sweny e2e run")}\n`));
+    console.log(chalk.dim(`  3. Run: ${chalk.cyan("sweny workflow run")}\n`));
   } else {
-    console.log(chalk.dim(`  2. Run: ${chalk.cyan("sweny e2e run")}\n`));
+    console.log(chalk.dim(`  2. Run: ${chalk.cyan("sweny workflow run")}\n`));
   }
 }
 
@@ -892,6 +892,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 export interface E2eRunOptions {
   file?: string;
   timeout?: number;
+  /** Skip the batch confirmation prompt (CI). Only applies to no-file batch runs. */
+  yes?: boolean;
+}
+
+/**
+ * Policy for a no-file batch run. Pure so it can be unit-tested without
+ * touching the filesystem, stdin, or the engine.
+ * - `yes` → run without asking (CI).
+ * - non-interactive without `yes` → refuse (don't fire every workflow by accident).
+ * - interactive → ask for confirmation.
+ */
+export function batchRunDecision(opts: { yes?: boolean; isTTY: boolean }): "run" | "confirm" | "refuse-noninteractive" {
+  if (opts.yes) return "run";
+  if (!opts.isTTY) return "refuse-noninteractive";
+  return "confirm";
 }
 
 /**
@@ -914,7 +929,7 @@ export async function runE2eRun(options: E2eRunOptions): Promise<void> {
     const e2eDir = path.join(cwd, ".sweny", "e2e");
     if (!fs.existsSync(e2eDir)) {
       console.error(chalk.red("  No .sweny/e2e/ directory found."));
-      console.error(chalk.dim("  Run 'sweny e2e init' to set up e2e testing."));
+      console.error(chalk.dim("  Run 'sweny new e2e' to set up e2e testing."));
       process.exit(1);
     }
     files = fs
@@ -924,8 +939,30 @@ export async function runE2eRun(options: E2eRunOptions): Promise<void> {
       .map((f) => path.join(e2eDir, f));
     if (files.length === 0) {
       console.error(chalk.red("  No workflow files found in .sweny/e2e/"));
-      console.error(chalk.dim("  Run 'sweny e2e init' to set up e2e testing."));
+      console.error(chalk.dim("  Run 'sweny new e2e' to set up e2e testing."));
       process.exit(1);
+    }
+
+    // Batch run (no explicit file): list what will run and confirm, so an
+    // accidental `sweny workflow run` doesn't fire every e2e workflow.
+    // --yes bypasses for CI.
+    const decision = batchRunDecision({ yes: options.yes, isTTY: process.stdin.isTTY ?? false });
+    if (decision !== "run") {
+      console.log(chalk.bold(`\n  About to run ${files.length} e2e workflow(s) from .sweny/e2e/:`));
+      for (const f of files) console.log(chalk.dim(`    • ${path.basename(f)}`));
+      console.log("");
+
+      if (decision === "refuse-noninteractive") {
+        console.error(chalk.red("  Refusing to batch-run without confirmation in a non-interactive shell."));
+        console.error(chalk.dim("  Re-run with --yes to proceed (or pass a specific file)."));
+        process.exit(1);
+      }
+
+      const ok = await p.confirm({ message: `Run all ${files.length} e2e workflow(s)?` });
+      if (p.isCancel(ok) || !ok) {
+        p.cancel("Cancelled.");
+        process.exit(0);
+      }
     }
   }
 
