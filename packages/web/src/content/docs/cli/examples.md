@@ -421,7 +421,7 @@ Generate AI-driven end-to-end tests for any web app. No Playwright scripts — t
 ### Set up e2e tests with the wizard
 
 ```bash
-sweny e2e init
+sweny new e2e
 ```
 
 The wizard asks which flows to test (registration, login, purchase, onboarding, upgrade, cancellation, custom), per-flow details, and whether to auto-cleanup test data. It generates workflow YAML files in `.sweny/e2e/`.
@@ -429,21 +429,22 @@ The wizard asks which flows to test (registration, login, purchase, onboarding, 
 ### Run all e2e tests
 
 ```bash
-sweny e2e run
+sweny workflow run          # lists the workflows and asks to confirm
+sweny workflow run --yes    # skip the prompt (CI)
 ```
 
-Executes every `.yml` in `.sweny/e2e/` sequentially. Auto-generates test credentials (`e2e-{timestamp}@yourapp.test`), resolves template variables, and reports pass/fail per workflow.
+With no file, executes every `.yml` in `.sweny/e2e/` sequentially. Auto-generates test credentials (`e2e-{timestamp}@yourapp.test`), resolves template variables, and reports pass/fail per workflow.
 
 ### Run a specific test
 
 ```bash
-sweny e2e run registration.yml
+sweny workflow run .sweny/e2e/registration.yml
 ```
 
 ### Custom timeout for slow flows
 
 ```bash
-sweny e2e run --timeout 600000   # 10 minutes per workflow
+sweny workflow run --timeout 600000 --yes   # 10 minutes per workflow
 ```
 
 ### Test with a staging environment
@@ -456,7 +457,7 @@ E2E_PASSWORD=secret
 ```
 
 ```bash
-sweny e2e run
+sweny workflow run --yes
 ```
 
 **[Full E2E guide](/cli/e2e/)** — wizard details, template variables, cleanup backends, and generated workflow structure.

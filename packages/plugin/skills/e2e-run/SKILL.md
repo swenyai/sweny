@@ -11,26 +11,26 @@ argument-hint: "[file] [--timeout <ms>]"
 
 Run agent-driven browser end-to-end tests. Executes workflow files from `.sweny/e2e/`.
 
-**Prerequisites:** E2E workflows must exist in `.sweny/e2e/`. Run `/sweny:e2e-init` first if the directory is empty.
+**Prerequisites:** E2E workflows must exist in `.sweny/e2e/`. Run `/sweny:new` (and pick "End-to-end browser testing", i.e. `sweny new e2e`) first if the directory is empty.
 
 ## Usage
 
-Run all E2E tests:
+Run all E2E tests. `--yes` skips the batch confirmation prompt, which is required here since this runs non-interactively:
 
 ```bash
-sweny e2e run
+sweny workflow run --yes
 ```
 
-Run a specific test file:
+Run a specific test file (no prompt — the file is explicit):
 
 ```bash
-sweny e2e run $ARGUMENTS
+sweny workflow run $ARGUMENTS
 ```
 
 With a custom timeout (default is 15 minutes per workflow):
 
 ```bash
-sweny e2e run --timeout 300000
+sweny workflow run --yes --timeout 300000
 ```
 
 ## What to expect
