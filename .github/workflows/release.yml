@@ -94,7 +94,10 @@ jobs:
             if [ "$NEXT" != "$LOCAL_VER" ]; then
               npm version "$NEXT" --no-git-tag-version
             fi
-            npm publish
+            # Surface which package failed (the failure alert links the run, but
+            # the annotation names the package). bash runs with -eo pipefail, so
+            # a bare failure would still abort; this just makes it legible.
+            npm publish || { echo "::error::npm publish failed for $pkg_name@$(node -p "require('./package.json').version")"; return 1; }
             echo "Published $pkg_name@$(node -p "require('./package.json').version")"
             cd - > /dev/null
           }
@@ -185,7 +188,12 @@ jobs:
 
           CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
           VERSIONED_TAG="v5.${CORE_VERSION}"
-          if git tag "$VERSIONED_TAG" 2>/dev/null; then
+          # Only cut the immutable tag if it does not already exist (it will
+          # when publish was skipped/failed and core's version is unchanged).
+          if git rev-parse -q --verify "refs/tags/$VERSIONED_TAG" >/dev/null; then
+            echo "$VERSIONED_TAG already exists, leaving it untouched"
+          else
+            git tag "$VERSIONED_TAG"
             git push origin "$VERSIONED_TAG"
             echo "Pushed $VERSIONED_TAG"
           fi
