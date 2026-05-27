@@ -103,6 +103,75 @@ export interface ClaudeClientOptions {
   mcpServers?: Record<string, McpServerConfig>;
 }
 
+/**
+ * Wire an optional timeout + caller signal onto a single AbortController.
+ *
+ * Returns undefined when neither a timeout nor a signal is supplied so the
+ * default code path (no abortController, no timer) is byte-for-byte unchanged.
+ *
+ * `reason()` reports whether the abort came from the timeout timer or an
+ * external signal, so callers can log a distinct timeout message.
+ */
+export function makeAbort(
+  timeoutMs?: number,
+  signal?: AbortSignal,
+): { controller: AbortController; clear: () => void; reason: () => "timeout" | "signal" | undefined } | undefined {
+  if (!timeoutMs && !signal) return undefined;
+
+  const controller = new AbortController();
+  let reason: "timeout" | "signal" | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const onSignalAbort = () => {
+    if (controller.signal.aborted) return;
+    reason = "signal";
+    controller.abort();
+  };
+
+  if (signal) {
+    if (signal.aborted) {
+      reason = "signal";
+      controller.abort();
+    } else {
+      signal.addEventListener("abort", onSignalAbort, { once: true });
+    }
+  }
+
+  if (timeoutMs && timeoutMs > 0 && !controller.signal.aborted) {
+    timer = setTimeout(() => {
+      if (controller.signal.aborted) return;
+      reason = "timeout";
+      controller.abort();
+    }, timeoutMs);
+    // Don't keep the event loop alive just for the abort timer.
+    (timer as any)?.unref?.();
+  }
+
+  return {
+    controller,
+    reason: () => reason,
+    clear: () => {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", onSignalAbort);
+    },
+  };
+}
+
+/**
+ * Best-effort interrupt of an SDK query stream. Called from `finally` so an
+ * early return / timeout / throw does not leak the underlying subprocess.
+ * Swallows errors: the stream may already be done, and interrupt is only
+ * supported in streaming-input mode.
+ */
+async function interruptStream(stream: { interrupt?: () => Promise<void> } | undefined): Promise<void> {
+  if (!stream || typeof stream.interrupt !== "function") return;
+  try {
+    await stream.interrupt();
+  } catch {
+    /* already finished or not interruptible — nothing to clean up */
+  }
+}
+
 export class ClaudeClient implements Claude {
   private model: string | undefined;
   private maxTurns: number;
@@ -140,8 +209,23 @@ export class ClaudeClient implements Claude {
     maxTurns?: number;
     disallowedTools?: string[];
     model?: string;
+    /** Abort the query after this many ms. Default: no timeout (back-compat). */
+    timeoutMs?: number;
+    /** Caller-supplied abort signal. Aborting it interrupts the query. */
+    signal?: AbortSignal;
   }): Promise<NodeResult> {
-    const { instruction, context, tools, outputSchema, onProgress, maxTurns, disallowedTools, model } = opts;
+    const {
+      instruction,
+      context,
+      tools,
+      outputSchema,
+      onProgress,
+      maxTurns,
+      disallowedTools,
+      model,
+      timeoutMs,
+      signal,
+    } = opts;
     const effectiveModel = model ?? this.model;
 
     // Tool-call accounting (Fix #1).
@@ -189,11 +273,24 @@ export class ClaudeClient implements Claude {
 
     let response = "";
 
+    // Timeout / abort wiring (back-compat: only armed when requested).
+    // A single AbortController drives both an optional caller signal and an
+    // optional timeout timer. The SDK aborts the subprocess when this fires.
+    const abort = makeAbort(timeoutMs, signal);
+    let timedOut = false;
+    let stream: ReturnType<typeof query> | undefined;
+
     try {
       const allMcpServers: Record<string, any> = { ...this.mcpServers };
       if (sdkTools.length > 0) allMcpServers["sweny-core"] = mcpServer;
 
-      const stream = query({
+      if (abort) {
+        abort.controller.signal.addEventListener("abort", () => {
+          if (abort.reason() === "timeout") timedOut = true;
+        });
+      }
+
+      stream = query({
         prompt,
         options: {
           maxTurns: maxTurns ?? this.maxTurns,
@@ -203,6 +300,7 @@ export class ClaudeClient implements Claude {
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
+          ...(abort ? { abortController: abort.controller } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(Object.keys(allMcpServers).length > 0 ? { mcpServers: allMcpServers } : {}),
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
@@ -303,17 +401,28 @@ export class ClaudeClient implements Claude {
         }
       }
     } catch (err: any) {
+      if (timedOut) {
+        const msg = `Claude query timed out after ${timeoutMs}ms`;
+        this.logger.error(msg);
+        return { status: "failed", data: { error: msg }, toolCalls };
+      }
       this.logger.error(`Claude Code query failed: ${err.message}`);
       return {
         status: "failed",
         data: { error: err.message },
         toolCalls,
       };
+    } finally {
+      // Interrupt the subprocess on any exit (early return, throw, or normal
+      // completion) so a wedged agent does not leak, and clear the timer so
+      // it cannot fire after we are done.
+      abort?.clear();
+      await interruptStream(stream);
     }
 
     return {
       status: "success",
-      data: { summary: response, ...tryParseJSON(response) },
+      data: { summary: response, ...tryParseJSON(response, outputSchema, this.logger) },
       toolCalls,
     };
   }
@@ -322,16 +431,31 @@ export class ClaudeClient implements Claude {
     question: string;
     context: Record<string, unknown>;
     choices: { id: string; description: string }[];
+    /** Abort the query after this many ms. Default: no timeout (back-compat). */
+    timeoutMs?: number;
+    /** Caller-supplied abort signal. Aborting it interrupts the query. */
+    signal?: AbortSignal;
   }): Promise<string> {
-    const { question, context, choices } = opts;
+    const { question, context, choices, timeoutMs, signal } = opts;
     const prompt = buildEvaluatePrompt(question, context, choices);
 
     const env = this.buildEnv();
 
     let response = "";
 
+    const abort = makeAbort(timeoutMs, signal);
+    let timedOut = false;
+    let sdkFailed = false;
+    let stream: ReturnType<typeof query> | undefined;
+
     try {
-      const stream = query({
+      if (abort) {
+        abort.controller.signal.addEventListener("abort", () => {
+          if (abort.reason() === "timeout") timedOut = true;
+        });
+      }
+
+      stream = query({
         prompt,
         options: {
           maxTurns: 1,
@@ -340,6 +464,7 @@ export class ClaudeClient implements Claude {
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
+          ...(abort ? { abortController: abort.controller } : {}),
           ...(this.model ? { model: this.model } : {}),
         },
       });
@@ -349,13 +474,34 @@ export class ClaudeClient implements Claude {
           const resultMsg = message as SDKResultMessage;
           if (resultMsg.subtype === "success" && "result" in resultMsg) {
             response = resultMsg.result;
+          } else {
+            // Distinguish an SDK-level failure from a genuinely ambiguous
+            // model answer. Without this, both fall through to validIds[0]
+            // and log the same "Could not parse route choice" warning, so an
+            // operator cannot tell them apart. Short-circuit below so the
+            // ambiguous-answer warning never fires on top of this one.
+            sdkFailed = true;
+            this.logger.warn(
+              `claude.evaluate: SDK returned non-success subtype "${resultMsg.subtype}" — falling back to first choice.`,
+            );
           }
         }
       }
     } catch (err: any) {
-      this.logger.warn(`Evaluate query failed: ${err.message}. Falling back to first choice.`);
+      if (timedOut) {
+        this.logger.warn(`Evaluate query timed out after ${timeoutMs}ms. Falling back to first choice.`);
+      } else {
+        this.logger.warn(`Evaluate query failed: ${err.message}. Falling back to first choice.`);
+      }
       return choices[0].id;
+    } finally {
+      abort?.clear();
+      await interruptStream(stream);
     }
+
+    // An SDK-level failure already logged a distinct message; do not also emit
+    // the ambiguous-answer warning, which would misattribute the cause.
+    if (sdkFailed) return choices[0].id;
 
     const text = response.trim().replace(/^["']|["']$/g, "");
     const validIds = choices.map((c) => c.id);
@@ -372,8 +518,16 @@ export class ClaudeClient implements Claude {
     return validIds[0];
   }
 
-  async ask(opts: { instruction: string; context: Record<string, unknown>; model?: string }): Promise<string> {
-    const { instruction, context, model } = opts;
+  async ask(opts: {
+    instruction: string;
+    context: Record<string, unknown>;
+    model?: string;
+    /** Abort the query after this many ms. Default: no timeout (back-compat). */
+    timeoutMs?: number;
+    /** Caller-supplied abort signal. Aborting it interrupts the query. */
+    signal?: AbortSignal;
+  }): Promise<string> {
+    const { instruction, context, model, timeoutMs, signal } = opts;
     const prompt = [
       instruction,
       Object.keys(context).length > 0 ? `\nContext:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`` : "",
@@ -385,8 +539,18 @@ export class ClaudeClient implements Claude {
     let response = "";
     const effectiveModel = model ?? this.model;
 
+    const abort = makeAbort(timeoutMs, signal);
+    let timedOut = false;
+    let stream: ReturnType<typeof query> | undefined;
+
     try {
-      const stream = query({
+      if (abort) {
+        abort.controller.signal.addEventListener("abort", () => {
+          if (abort.reason() === "timeout") timedOut = true;
+        });
+      }
+
+      stream = query({
         prompt,
         options: {
           maxTurns: 1,
@@ -395,6 +559,7 @@ export class ClaudeClient implements Claude {
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
+          ...(abort ? { abortController: abort.controller } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
         },
       });
@@ -412,8 +577,15 @@ export class ClaudeClient implements Claude {
         }
       }
     } catch (err: any) {
-      this.logger.warn(`Ask query failed: ${err.message}`);
+      if (timedOut) {
+        this.logger.warn(`Ask query timed out after ${timeoutMs}ms — returning empty string`);
+      } else {
+        this.logger.warn(`Ask query failed: ${err.message}`);
+      }
       return "";
+    } finally {
+      abort?.clear();
+      await interruptStream(stream);
     }
 
     return response.trim();
@@ -504,18 +676,63 @@ export function buildEvaluatePrompt(
 }
 
 export function parseToolResultContent(content: unknown): unknown {
+  // The Anthropic tool_result `content` field can be a block array
+  // (e.g. [{type:"text",text:"..."}, ...]) rather than a string. When it is,
+  // concatenate the text of every {type:"text"} block (recursing through any
+  // nested content), then run the same object/array JSON-parse logic on the
+  // joined string. This keeps `call.output` the actual payload instead of the
+  // raw wrapper array that eval/route logic would otherwise have to walk.
+  if (Array.isArray(content)) {
+    const text = collectBlockText(content);
+    return parseJsonObjectOrArray(text);
+  }
   if (typeof content !== "string") return content;
+  return parseJsonObjectOrArray(content);
+}
+
+/**
+ * Parse a string only when it is an unambiguous JSON object or array.
+ *
+ * Strings, numbers, booleans, and null would all corrupt or discard
+ * information (we cannot distinguish the literal text `"42"` from the number
+ * 42), so non-object/array inputs are preserved verbatim.
+ */
+function parseJsonObjectOrArray(content: string): unknown {
   const trimmed = content.trim();
   if (trimmed.length === 0) return content;
   const first = trimmed[0];
-  // Only objects and arrays are unambiguous to parse. Strings, numbers,
-  // booleans, and null would all corrupt or discard information.
   if (first !== "{" && first !== "[") return content;
   try {
     return JSON.parse(trimmed);
   } catch {
     return content;
   }
+}
+
+/**
+ * Concatenate the text of an array of content blocks. Handles {type:"text"}
+ * blocks and recurses into any nested `content` array so deeply-wrapped tool
+ * results still flatten to their underlying text.
+ */
+function collectBlockText(blocks: unknown[]): string {
+  const parts: string[] = [];
+  for (const block of blocks) {
+    if (typeof block === "string") {
+      parts.push(block);
+      continue;
+    }
+    if (!block || typeof block !== "object") continue;
+    const b = block as Record<string, unknown>;
+    if (b.type === "text" && typeof b.text === "string") {
+      parts.push(b.text);
+    } else if (Array.isArray(b.content)) {
+      parts.push(collectBlockText(b.content));
+    } else if (typeof b.text === "string") {
+      // Some producers omit an explicit type but still carry text.
+      parts.push(b.text);
+    }
+  }
+  return parts.join("");
 }
 
 /**
@@ -623,22 +840,37 @@ function stripMcpPrefix(name: string): string {
  * Extract a JSON object from Claude's text response.
  *
  * Strategy (in order):
- * 1. ```json code block``` — most reliable, Claude often wraps JSON this way
+ * 1. LAST ```json code block``` — models put their real final answer last, so
+ *    a prompt-injected fake fenced block placed earlier must not win.
  * 2. Last brace-delimited `{...}` block — handles inline JSON at end of text
  * 3. Full text parse — for responses that are pure JSON
  * 4. Empty object — safe fallback
+ *
+ * When `outputSchema` is supplied, the parsed object is checked against it.
+ * A mismatch is logged (warning) rather than silently accepted, so a
+ * non-conforming model answer is at least attributable.
  */
-function tryParseJSON(text: string): Record<string, unknown> {
+function tryParseJSON(text: string, outputSchema?: JSONSchema, logger?: Pick<Logger, "warn">): Record<string, unknown> {
   if (!text) return {};
 
-  // 1. Code block
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlockMatch) {
+  const finalize = (parsed: Record<string, unknown>): Record<string, unknown> => {
+    if (outputSchema) {
+      const problems = schemaMismatches(parsed, outputSchema);
+      if (problems.length > 0) {
+        logger?.warn?.(`Claude output did not conform to outputSchema: ${problems.join("; ")}`);
+      }
+    }
+    return parsed;
+  };
+
+  // 1. Code block — scan ALL fenced blocks, prefer the LAST that parses.
+  const fences = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
+  for (let i = fences.length - 1; i >= 0; i--) {
     try {
-      const parsed = JSON.parse(codeBlockMatch[1].trim());
-      if (typeof parsed === "object" && parsed !== null) return parsed;
+      const parsed = JSON.parse(fences[i][1].trim());
+      if (typeof parsed === "object" && parsed !== null) return finalize(parsed);
     } catch {
-      /* try next strategy */
+      /* try the next-earlier fence, then fall through to brace scan */
     }
   }
 
@@ -652,7 +884,7 @@ function tryParseJSON(text: string): Record<string, unknown> {
       if (depth === 0) {
         try {
           const parsed = JSON.parse(text.slice(i, lastBrace + 1));
-          if (typeof parsed === "object" && parsed !== null) return parsed;
+          if (typeof parsed === "object" && parsed !== null) return finalize(parsed);
         } catch {
           /* try next strategy */
         }
@@ -664,10 +896,80 @@ function tryParseJSON(text: string): Record<string, unknown> {
   // 3. Full text parse
   try {
     const parsed = JSON.parse(text.trim());
-    if (typeof parsed === "object" && parsed !== null) return parsed;
+    if (typeof parsed === "object" && parsed !== null) return finalize(parsed);
   } catch {
     /* fall through */
   }
 
   return {};
+}
+
+/**
+ * Lightweight structural check of a parsed object against a JSON Schema.
+ *
+ * Deliberately shallow: it verifies `required` keys are present and that the
+ * top-level `type` and each declared property `type` match. It does NOT do
+ * full JSON Schema validation (no `$ref`, `oneOf`, formats, nested arrays).
+ * The contract here is "flag an obviously non-conforming object" so a mismatch
+ * is logged rather than silently accepted; it is not a validation gate.
+ *
+ * Returns a list of human-readable problems; empty means no detected mismatch.
+ */
+function schemaMismatches(value: unknown, schema: JSONSchema): string[] {
+  const problems: string[] = [];
+  const s = schema as Record<string, unknown>;
+
+  if (s.type === "object" || s.properties || s.required) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return [`expected an object, got ${Array.isArray(value) ? "array" : typeof value}`];
+    }
+    const obj = value as Record<string, unknown>;
+
+    const required = Array.isArray(s.required) ? (s.required as string[]) : [];
+    for (const key of required) {
+      if (!(key in obj) || obj[key] === undefined) {
+        problems.push(`missing required property "${key}"`);
+      }
+    }
+
+    const props = (s.properties as Record<string, unknown>) ?? {};
+    for (const [key, propSchema] of Object.entries(props)) {
+      if (!(key in obj) || obj[key] === undefined || obj[key] === null) continue;
+      const expected = (propSchema as Record<string, unknown>)?.type;
+      if (typeof expected === "string" && !jsonTypeMatches(obj[key], expected)) {
+        problems.push(`property "${key}" expected ${expected}, got ${jsonTypeOf(obj[key])}`);
+      }
+    }
+  } else if (typeof s.type === "string" && !jsonTypeMatches(value, s.type)) {
+    problems.push(`expected ${s.type}, got ${jsonTypeOf(value)}`);
+  }
+
+  return problems;
+}
+
+function jsonTypeOf(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function jsonTypeMatches(value: unknown, expected: string): boolean {
+  switch (expected) {
+    case "object":
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    case "array":
+      return Array.isArray(value);
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number";
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "null":
+      return value === null;
+    default:
+      return true; // unknown/unsupported type keyword — don't flag
+  }
 }
