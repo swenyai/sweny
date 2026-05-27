@@ -16,6 +16,78 @@ import { consoleLogger } from "./types.js";
 
 const SYSTEM_PROMPT = `You are a step in an automated workflow. Execute the instruction precisely using the tools available to you. Be thorough but concise. When you're done, summarize your findings and results.`;
 
+/** How sweny resolves which credentials reach the Claude Code subprocess. */
+export type SwenyAuthMode = "auto" | "api-key" | "oauth";
+
+export interface ResolveAuthEnvOpts {
+  /** Explicit override; when absent, read from `env.SWENY_AUTH`. Test seam. */
+  mode?: SwenyAuthMode;
+  /** Logger for the debug line + invalid-value warning. */
+  logger?: Pick<Logger, "debug" | "warn">;
+}
+
+/**
+ * Decide which auth credentials survive into the Claude Code subprocess env.
+ *
+ * sweny does not select the winning credential (the spawned agent and any
+ * on-disk `~/.claude/.credentials.json` do that). This function only controls
+ * what is *present* in the env we hand the agent.
+ *
+ * Modes (`SWENY_AUTH`, default `auto`):
+ *  - `auto`    — today's protective behavior: when an OAuth token is present,
+ *                strip `ANTHROPIC_API_KEY` so a stray `.env` key cannot
+ *                silently bill a metered API account. `ANTHROPIC_AUTH_TOKEN`
+ *                (a bearer token, not a console key) is never touched.
+ *  - `api-key` — user explicitly authenticates a gateway with a key/bearer:
+ *                preserve both even when an OAuth token is also present.
+ *  - `oauth`   — user explicitly wants subscription/OAuth: strip both
+ *                `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so a leftover
+ *                credential cannot win at the agent. Fails closed.
+ *
+ * Base-URL presence is deliberately NOT a signal here: pass-through proxies
+ * (corporate egress, observability) set `ANTHROPIC_BASE_URL` while still
+ * billing the real key, so inferring "use the key" from a base URL would
+ * re-introduce a surprise-billing path. Intent must be explicit.
+ *
+ * An unrecognized `SWENY_AUTH` value falls back to `auto` with a warning
+ * (never throws — an env typo must not crash a CI run).
+ *
+ * Pure: returns a copy, never mutates the input.
+ */
+export function resolveAuthEnv(env: Record<string, string>, opts: ResolveAuthEnvOpts = {}): Record<string, string> {
+  const out = { ...env };
+
+  const raw = opts.mode ?? env.SWENY_AUTH;
+  let mode: SwenyAuthMode = "auto";
+  if (raw === "auto" || raw === "api-key" || raw === "oauth") {
+    mode = raw;
+  } else if (raw) {
+    // truthy but unrecognized — empty string falls through silently to auto
+    opts.logger?.warn?.(`SWENY_AUTH="${raw}" is not one of auto|api-key|oauth; falling back to auto`);
+  }
+
+  // Truthy checks throughout: action.yml sets these to "" when an input is
+  // omitted, and empty string must read as unset.
+  const hasOauth = !!out.CLAUDE_CODE_OAUTH_TOKEN;
+
+  if (mode === "oauth") {
+    delete out.ANTHROPIC_API_KEY;
+    delete out.ANTHROPIC_AUTH_TOKEN;
+  } else if (mode === "api-key") {
+    // preserve key + bearer; do not strip even if an OAuth token is present
+  } else {
+    // auto — byte-for-byte the historical behavior
+    if (hasOauth) {
+      delete out.ANTHROPIC_API_KEY;
+    }
+  }
+
+  // Mode only, never credential values.
+  opts.logger?.debug?.(`[sweny] auth mode: ${mode}`);
+
+  return out;
+}
+
 export interface ClaudeClientOptions {
   /** Model override */
   model?: string;
@@ -49,18 +121,14 @@ export class ClaudeClient implements Claude {
   }
 
   /**
-   * Build env for the Claude Code subprocess.
-   * OAuth token takes priority over API key to prevent .env files from
-   * overriding the user's subscription-based auth.
+   * Build env for the Claude Code subprocess. Snapshots process.env (dropping
+   * nullish values) and applies auth precedence via {@link resolveAuthEnv}.
    */
   private buildEnv(): Record<string, string> {
     const env: Record<string, string> = Object.fromEntries(
       Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
     );
-    if (env.CLAUDE_CODE_OAUTH_TOKEN) {
-      delete env.ANTHROPIC_API_KEY;
-    }
-    return env;
+    return resolveAuthEnv(env, { logger: this.logger });
   }
 
   async run(opts: {
@@ -71,8 +139,10 @@ export class ClaudeClient implements Claude {
     onProgress?: (message: string) => void;
     maxTurns?: number;
     disallowedTools?: string[];
+    model?: string;
   }): Promise<NodeResult> {
-    const { instruction, context, tools, outputSchema, onProgress, maxTurns, disallowedTools } = opts;
+    const { instruction, context, tools, outputSchema, onProgress, maxTurns, disallowedTools, model } = opts;
+    const effectiveModel = model ?? this.model;
 
     // Tool-call accounting (Fix #1).
     //
@@ -133,7 +203,7 @@ export class ClaudeClient implements Claude {
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
-          ...(this.model ? { model: this.model } : {}),
+          ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(Object.keys(allMcpServers).length > 0 ? { mcpServers: allMcpServers } : {}),
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
         },

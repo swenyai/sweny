@@ -64,8 +64,11 @@ export { execute } from "./executor.js";
 export type { ExecuteOptions } from "./executor.js";
 
 // Claude client
-export { ClaudeClient } from "./claude.js";
-export type { ClaudeClientOptions } from "./claude.js";
+export { ClaudeClient, resolveAuthEnv } from "./claude.js";
+export type { ClaudeClientOptions, SwenyAuthMode, ResolveAuthEnvOpts } from "./claude.js";
+
+// Execution model resolution
+export { resolveExecutionModel } from "./model.js";
 
 // Skills
 export {
