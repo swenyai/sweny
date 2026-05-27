@@ -7,20 +7,21 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 
 ## Fields
 
-| Field              | Type                             | Required | Default                      | Description                                                                                                  |
-| ------------------ | -------------------------------- | -------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `name`             | string                           | REQUIRED | —                            | Display name for this node. MUST be non-empty.                                                               |
-| `instruction`      | [Source](/sources)               | REQUIRED | —                            | Natural language instruction for the AI model. MUST be non-empty.                                            |
-| `skills`           | string[]                         | OPTIONAL | `[]`                         | Skill IDs this node has access to.                                                                           |
-| `output`           | JSON Schema object               | OPTIONAL | —                            | Structured output schema for this node's result.                                                             |
-| `max_turns`        | integer &ge; 1                   | OPTIONAL | implementation&#8209;defined | Maximum AI model turns for this node's execution.                                                            |
-| `disallowed_tools` | string[]                         | OPTIONAL | `[]`                         | Built-in agent tools removed from the model context at this node. See [Disallowed Tools](#disallowed-tools). |
-| `rules`            | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Rules for this node. Additive by default; see [cascade](#cascade-semantics).                                 |
-| `context`          | [NodeSources](#nodesources-type) | OPTIONAL | inherited                    | Context for this node. Additive by default; see [cascade](#cascade-semantics).                               |
-| `eval`             | [Eval](#eval)                    | OPTIONAL | —                            | Named evaluators (value, function, judge) run after the AI finishes the node.                                |
-| `eval_policy`      | string                           | OPTIONAL | `all_pass`                   | How to aggregate evaluator results. v1 supports `all_pass`.                                                  |
-| `requires`         | [Requires](#requires)            | OPTIONAL | —                            | Machine-checked pre-conditions evaluated before the AI starts the node.                                      |
-| `retry`            | [Retry](#retry)                  | OPTIONAL | —                            | Node-local retry on eval failure with optional autonomous reflection.                                        |
+| Field              | Type                             | Required | Default                        | Description                                                                                                    |
+| ------------------ | -------------------------------- | -------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `name`             | string                           | REQUIRED | —                              | Display name for this node. MUST be non-empty.                                                                 |
+| `instruction`      | [Source](/sources)               | REQUIRED | —                              | Natural language instruction for the AI model. MUST be non-empty.                                              |
+| `skills`           | string[]                         | OPTIONAL | `[]`                           | Skill IDs this node has access to.                                                                             |
+| `output`           | JSON Schema object               | OPTIONAL | —                              | Structured output schema for this node's result.                                                               |
+| `max_turns`        | integer &ge; 1                   | OPTIONAL | implementation&#8209;defined   | Maximum AI model turns for this node's execution.                                                              |
+| `model`            | string                           | OPTIONAL | inherited / impl&#8209;defined | Execution model for this node's AI invocation. Free-text passthrough. See [Model Selection](#model-selection). |
+| `disallowed_tools` | string[]                         | OPTIONAL | `[]`                           | Built-in agent tools removed from the model context at this node. See [Disallowed Tools](#disallowed-tools).   |
+| `rules`            | [NodeSources](#nodesources-type) | OPTIONAL | inherited                      | Rules for this node. Additive by default; see [cascade](#cascade-semantics).                                   |
+| `context`          | [NodeSources](#nodesources-type) | OPTIONAL | inherited                      | Context for this node. Additive by default; see [cascade](#cascade-semantics).                                 |
+| `eval`             | [Eval](#eval)                    | OPTIONAL | —                              | Named evaluators (value, function, judge) run after the AI finishes the node.                                  |
+| `eval_policy`      | string                           | OPTIONAL | `all_pass`                     | How to aggregate evaluator results. v1 supports `all_pass`.                                                    |
+| `requires`         | [Requires](#requires)            | OPTIONAL | —                              | Machine-checked pre-conditions evaluated before the AI starts the node.                                        |
+| `retry`            | [Retry](#retry)                  | OPTIONAL | —                              | Node-local retry on eval failure with optional autonomous reflection.                                          |
 
 ## Max Turns Semantics
 
@@ -33,6 +34,24 @@ A conforming executor:
 - When the limit is reached, the executor **SHOULD** capture whatever partial result is available and produce a `NodeResult` with `status: "failed"` and a descriptive error in `data`. The executor **MUST NOT** silently discard the node's work.
 
 Different nodes have vastly different compute needs. A context-gathering node that queries multiple APIs may need many turns, while a summarization node with no tools may need one. Per-node limits give workflow authors fine-grained control over the compute budget.
+
+## Model Selection
+
+The optional `model` field selects which AI model executes a node. It is the execution-time counterpart to the judge `model` / `judge_model` fields, which select the model for [evaluation](#judge-mechanics).
+
+Resolution is a cascade, narrowest wins:
+
+1. Node-level `model`.
+2. Workflow-level `model`.
+3. The executor's implementation-defined default model.
+
+A conforming executor:
+
+- **MUST** forward the resolved model to the AI invocation (step 6 of the [Node Execution Sequence](/execution)) when any layer specifies one.
+- **MUST** fall back to its implementation-defined default model when no layer specifies one. The executor **MUST NOT** invent a hardcoded model name in the spec.
+- **MUST NOT** validate `model` against a registry or allowlist. The value is free-text passed through verbatim, consistent with `judge_model`. Model availability and naming are the responsibility of the backend (or gateway) the executor targets.
+
+`model` is independent of `judge_model`: one selects the execution model, the other the evaluation model. A node MAY set both. The common use is cost tiering: a cheap model on mechanical grunt nodes (lint, format, summarize) and a stronger model on the reasoning nodes.
 
 ## Disallowed Tools
 

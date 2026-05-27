@@ -35,7 +35,7 @@ For each node, a conforming executor MUST perform the following steps in order:
 3. **Collect MCP servers** from resolved skills that have `mcp`. Wire them for this node's execution session only (node-scoped, not global).
 4. **Build context** — the accumulated context object (input + all prior node results).
 5. **Build instruction** — the node's base instruction, augmented with input `rules` and `context` fields (see [Nodes — Input Augmentation](/nodes#input-augmentation)), then **skill instructions** from resolved skills that have `instruction`.
-6. **Invoke the AI model** with: instruction, context, tools (from step 2 + MCP tools from step 3), and output schema (if present).
+6. **Invoke the AI model** with: instruction, context, tools (from step 2 + MCP tools from step 3), and output schema (if present). The model is resolved per [Model Selection](/nodes#model-selection) (`node.model` → `workflow.model` → executor default); when none is specified the executor uses its implementation-defined default.
 7. **Capture the result** as a `NodeResult`.
 8. **Emit execution events** (see [Execution Events](#execution-events) below).
 9. **Resolve the next node** via [edge routing](/edges#routing-algorithm).

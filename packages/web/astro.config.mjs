@@ -114,6 +114,7 @@ export default defineConfig({
           collapsed: true,
           items: [
             { label: "Architecture", slug: "advanced/architecture" },
+            { label: "Model Gateway (LiteLLM)", slug: "advanced/model-gateway" },
             { label: "MCP Servers", slug: "advanced/mcp-servers" },
             { label: "Claude Code Plugin", slug: "advanced/mcp-plugin" },
             { label: "Troubleshooting", slug: "advanced/troubleshooting" },
