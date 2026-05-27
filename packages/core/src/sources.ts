@@ -76,12 +76,46 @@ export function normalizeSource(source: Source): [SourceKind, string] {
   throw new Error("source error: unrecognised Source shape");
 }
 
+/**
+ * Result of a DNS lookup: one or more resolved IP addresses for a hostname.
+ * Injectable via {@link SourceResolutionContext.dnsLookup} so SSRF host
+ * validation is deterministic in tests (no real network).
+ */
+export type DnsLookup = (hostname: string) => Promise<string[]>;
+
 export type SourceResolutionContext = {
   cwd: string;
   env: NodeJS.ProcessEnv;
   authConfig: Record<string, string>;
   offline: boolean;
   logger: Logger;
+  /**
+   * Hosts the per-host fetch token (`fetch.auth` mapping) or the
+   * `SWENY_FETCH_TOKEN` env var may be sent to. The token is ONLY attached to
+   * requests whose host (and every redirect hop's host) appears here. There is
+   * deliberately no blanket fallback: a credential is never sent to a host the
+   * operator did not explicitly allow. When omitted, the allowlist is derived
+   * from the keys of `authConfig`.
+   */
+  fetchTokenHosts?: string[];
+  /**
+   * Restrict `file:` source resolution to this directory tree (the repo root,
+   * typically `cwd`). Relative and absolute paths that escape it via `..` or
+   * symlinks are rejected. Defaults to `cwd`. Set
+   * {@link allowFileOutsideRoot} to opt out.
+   */
+  fileRoot?: string;
+  /**
+   * Opt out of the {@link fileRoot} sandbox, permitting `file:` sources to read
+   * anywhere on disk (legacy behavior). Defaults to `false`.
+   */
+  allowFileOutsideRoot?: boolean;
+  /**
+   * Injected DNS resolver for SSRF host validation. Defaults to a
+   * `node:dns`-backed lookup. Tests inject a stub to assert IP-blocking without
+   * touching the network.
+   */
+  dnsLookup?: DnsLookup;
 };
 
 // Runtime resolvers (hashContent, resolveSource, resolveSources) live in

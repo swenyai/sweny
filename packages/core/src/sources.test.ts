@@ -216,12 +216,27 @@ describe("fetch auth headers", () => {
     });
   });
 
-  it("falls back to SWENY_FETCH_TOKEN when no per-host match", async () => {
+  it("does NOT send SWENY_FETCH_TOKEN to a host that is not allowlisted", async () => {
+    // Security: no blanket fallback. SWENY_FETCH_TOKEN must only go to hosts on
+    // the fetch-token allowlist (here, the authConfig keys), never to arbitrary
+    // hosts like other.example.
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("ok", { status: 200 }));
     await resolveSource("https://other.example/x", "f", {
       ...baseCtx(),
       env: { SWENY_FETCH_TOKEN: "global_token" } as NodeJS.ProcessEnv,
       authConfig: { "raw.githubusercontent.com": "GITHUB_TOKEN" },
+    });
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("sends SWENY_FETCH_TOKEN to an explicitly allowlisted host", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("ok", { status: 200 }));
+    await resolveSource("https://allowed.example/x", "f", {
+      ...baseCtx(),
+      env: { SWENY_FETCH_TOKEN: "global_token" } as NodeJS.ProcessEnv,
+      fetchTokenHosts: ["allowed.example"],
     });
     const [, init] = fetchMock.mock.calls[0];
     expect((init as RequestInit).headers).toMatchObject({
