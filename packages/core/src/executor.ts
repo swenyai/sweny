@@ -38,6 +38,7 @@ import { resolveSources } from "./source-resolver.js";
 import { evaluateAll, aggregateEval } from "./eval/index.js";
 import { evaluateRequires } from "./requires.js";
 import { buildRetryPreamble } from "./retry.js";
+import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
 
 export interface ExecuteOptions {
@@ -257,6 +258,9 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     let result: NodeResult;
     let currentInstruction = instruction;
     const retry = node.retry;
+    // Per-node execution model: node.model ?? workflow.model. When undefined,
+    // claude.run falls back to its own client default (then Claude Code's).
+    const nodeModel = resolveExecutionModel(node, workflow);
 
     while (true) {
       result = await claude.run({
@@ -266,6 +270,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         outputSchema: node.output,
         maxTurns: node.max_turns,
         disallowedTools: node.disallowed_tools,
+        model: nodeModel,
         onProgress: (message) => {
           safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
         },
@@ -329,6 +334,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         claude,
         logger,
         context,
+        model: nodeModel,
       });
       currentInstruction = `${preamble}\n\n---\n\n${instruction}`;
       safeObserve(

@@ -316,6 +316,65 @@ describe("executor", () => {
     expect(capturedContext).toHaveProperty("input");
   });
 
+  it("threads the resolved per-node execution model into claude.run", async () => {
+    const seen: Record<string, string | undefined> = {};
+
+    const mockClaude: any = {
+      async run(opts: any) {
+        const nodeId = opts.instruction.includes("Cheap") ? "grunt" : "reason";
+        seen[nodeId] = opts.model;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+
+    const wf: Workflow = {
+      id: "tier",
+      name: "Tier",
+      description: "",
+      entry: "reason",
+      model: "claude-opus-4-6", // workflow default
+      nodes: {
+        reason: { name: "Reason", instruction: "Hard reasoning step", skills: [] }, // inherits workflow model
+        grunt: { name: "Grunt", instruction: "Cheap grunt step", skills: [], model: "claude-haiku-4-5" }, // node override
+      },
+      edges: [{ from: "reason", to: "grunt" }],
+    };
+
+    await execute(wf, {}, { skills: createSkillMap([]), claude: mockClaude, config: {} });
+
+    expect(seen.reason).toBe("claude-opus-4-6"); // workflow-level default
+    expect(seen.grunt).toBe("claude-haiku-4-5"); // per-node override wins
+  });
+
+  it("passes model undefined when neither node nor workflow specifies one", async () => {
+    let seen: string | undefined = "untouched";
+
+    const mockClaude: any = {
+      async run(opts: any) {
+        seen = opts.model;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+
+    const wf: Workflow = {
+      id: "plain",
+      name: "Plain",
+      description: "",
+      entry: "a",
+      nodes: { a: { name: "A", instruction: "Do A", skills: [] } },
+      edges: [],
+    };
+
+    await execute(wf, {}, { skills: createSkillMap([]), claude: mockClaude, config: {} });
+    expect(seen).toBeUndefined();
+  });
+
   it("resolves config from env vars and overrides", async () => {
     // This tests that config resolution works (skill with required config)
     const skillWithConfig: any = {

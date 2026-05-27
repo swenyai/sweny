@@ -27,6 +27,11 @@ export interface BuildRetryPreambleOptions {
   claude: Claude;
   logger: Logger;
   context: Record<string, unknown>;
+  /**
+   * Per-node execution model. The reflection reasons about this node, so it
+   * runs on the node's model. When undefined, the client default applies.
+   */
+  model?: string;
 }
 
 /**
@@ -42,7 +47,7 @@ export interface BuildRetryPreambleOptions {
  * default static preamble and logs a warning.
  */
 export async function buildRetryPreamble(opts: BuildRetryPreambleOptions): Promise<string> {
-  const { retry, evalFailures, toolCalls, nodeInstruction, claude, logger, context } = opts;
+  const { retry, evalFailures, toolCalls, nodeInstruction, claude, logger, context, model } = opts;
   const failureList = formatEvalFailures(evalFailures);
 
   const inst = retry.instruction;
@@ -56,7 +61,7 @@ export async function buildRetryPreamble(opts: BuildRetryPreambleOptions): Promi
       "reflect" in inst && typeof inst.reflect === "string" ? inst.reflect : DEFAULT_REFLECTION_PROMPT;
     const askInstruction = buildReflectionPrompt(reflectPrompt, nodeInstruction, failureList, toolCalls);
     try {
-      const diagnosis = await claude.ask({ instruction: askInstruction, context });
+      const diagnosis = await claude.ask({ instruction: askInstruction, context, model });
       const trimmed = diagnosis.trim();
       if (trimmed.length > 0) {
         return `## Reflection on previous attempt\n\n${trimmed}\n\n${DEFAULT_PREAMBLE_HEADER}\n\n${failureList}`;
