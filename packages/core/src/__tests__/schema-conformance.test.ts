@@ -40,6 +40,31 @@ const fixtures: Fixture[] = [
     expected: true,
   },
   {
+    name: "node and workflow with execution model",
+    input: {
+      id: "demo",
+      name: "Demo",
+      description: "d",
+      entry: "a",
+      model: "claude-opus-4-6",
+      nodes: { a: { ...baseNode(), model: "claude-haiku-4-5" } },
+      edges: [],
+    },
+    expected: true,
+  },
+  {
+    name: "node model empty string (rejected by minLength)",
+    input: {
+      id: "demo",
+      name: "Demo",
+      description: "d",
+      entry: "a",
+      nodes: { a: { ...baseNode(), model: "" } },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
     name: "workflow with bounded self-loop",
     input: {
       id: "d",

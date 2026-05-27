@@ -255,6 +255,11 @@
       "default": "claude-haiku-4-5",
       "description": "Default model for judge evaluators across the workflow. Overridable per-node and per-evaluator."
     },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Default execution model for every node. Overridable per-node. Free-text passthrough (no registry); resolved as node.model ?? workflow.model ?? executor default."
+    },
     "judge_budget": {
       "type": "integer",
       "minimum": 0,
@@ -368,6 +373,11 @@
             "type": "string",
             "minLength": 1,
             "description": "Default model for judge evaluators on this node. Overrides workflow-level judge_model."
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Execution model for this node's AI invocation. Overrides the workflow-level model. Free-text passthrough (no registry)."
           },
           "requires": {
             "type": "object",

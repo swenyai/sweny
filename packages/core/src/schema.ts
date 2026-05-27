@@ -235,6 +235,7 @@ export const nodeZ = z
     eval: z.array(evaluatorZ).min(1).optional(),
     eval_policy: evalPolicyZ.optional(),
     judge_model: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
     requires: nodeRequiresZ.optional(),
     retry: nodeRetryZ.optional(),
   })
@@ -282,6 +283,7 @@ export const workflowZ = z.object({
   rules: z.array(sourceZ).optional(),
   context: z.array(sourceZ).optional(),
   judge_model: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
   judge_budget: z.number().int().min(0).optional(),
   inputs: workflowInputsZ.optional(),
 });
@@ -645,6 +647,12 @@ export const workflowJsonSchema = {
       default: "claude-haiku-4-5",
       description: "Default model for judge evaluators across the workflow. Overridable per-node and per-evaluator.",
     },
+    model: {
+      type: "string",
+      minLength: 1,
+      description:
+        "Default execution model for every node. Overridable per-node. Free-text passthrough (no registry); resolved as node.model ?? workflow.model ?? executor default.",
+    },
     judge_budget: {
       type: "integer",
       minimum: 0,
@@ -751,6 +759,12 @@ export const workflowJsonSchema = {
             type: "string",
             minLength: 1,
             description: "Default model for judge evaluators on this node. Overrides workflow-level judge_model.",
+          },
+          model: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Execution model for this node's AI invocation. Overrides the workflow-level model. Free-text passthrough (no registry).",
           },
           requires: {
             type: "object",

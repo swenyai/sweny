@@ -311,6 +311,15 @@ describe("Zod schemas", () => {
       });
       expect(r.judge_model).toBe("claude-haiku-4-5");
     });
+
+    it("accepts model on a node", () => {
+      const r = nodeZ.parse({ name: "S", instruction: "I", model: "claude-haiku-4-5" });
+      expect(r.model).toBe("claude-haiku-4-5");
+    });
+
+    it("rejects empty-string model on a node", () => {
+      expect(() => nodeZ.parse({ name: "S", instruction: "I", model: "" })).toThrow();
+    });
   });
 
   describe("parseWorkflow legacy verify migration", () => {
@@ -688,6 +697,20 @@ describe("Zod schemas", () => {
       };
       const result = workflowZ.parse(raw);
       expect(result.description).toBe("");
+    });
+
+    it("accepts a workflow-level model and per-node model", () => {
+      const raw = {
+        id: "x",
+        name: "X",
+        entry: "a",
+        model: "claude-opus-4-6",
+        nodes: { a: { name: "A", instruction: "Do A", model: "claude-haiku-4-5" } },
+        edges: [],
+      };
+      const result = workflowZ.parse(raw);
+      expect(result.model).toBe("claude-opus-4-6");
+      expect(result.nodes.a.model).toBe("claude-haiku-4-5");
     });
 
     it("rejects missing id", () => {

@@ -308,6 +308,12 @@ export interface Node {
   eval_policy?: EvalPolicy;
   /** Default model for judge evaluators on this node. Overrides workflow-level `judge_model`. */
   judge_model?: string;
+  /**
+   * Execution model for this node's AI invocation. Resolves as
+   * `node.model ?? workflow.model ?? client default`. Free-text passthrough
+   * (no registry), consistent with `judge_model`.
+   */
+  model?: string;
   /** Machine-checked pre-conditions. Enforced by the executor before the LLM runs. */
   requires?: NodeRequires;
   /** Node-local retry on eval failure (with optional autonomous reflection). */
@@ -356,6 +362,8 @@ export interface Workflow {
   context?: _Source[];
   /** Default model for judge evaluators across the workflow. Overridable per-node and per-evaluator. */
   judge_model?: string;
+  /** Default execution model for every node. Overridable per-node. Free-text passthrough. */
+  model?: string;
   /** Soft cap on expected judge calls per workflow run. Warning at load time when exceeded. */
   judge_budget?: number;
   /**
@@ -506,6 +514,8 @@ export interface Claude {
     maxTurns?: number;
     /** Built-in SDK tool names to disallow for this node (e.g. ["Bash"]). */
     disallowedTools?: string[];
+    /** Per-node execution model. Overrides the client default when set. Absent = no SDK model option emitted. */
+    model?: string;
   }): Promise<NodeResult>;
 
   /** Evaluate a routing condition — pick one of N choices */
