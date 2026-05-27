@@ -9,13 +9,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Release
+  # Gate: build + test must pass before we publish OR move the v5 action tag.
+  # Kept as its own job so a publish-credential failure (which is NOT a code
+  # failure) does not block the v5 tag from advancing, and so tag-action can
+  # tell "code is good" from "publish failed".
+  verify:
+    name: Verify
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: |
+          npm run build --workspace=packages/core
+          npm run build:lib --workspace=packages/studio
+          npm run build --workspace=packages/mcp
+      - name: Test
+        run: npm run test
+
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: verify
     permissions:
       contents: write
       id-token: write
-
+      issues: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -35,9 +58,6 @@ jobs:
           npm run build --workspace=packages/core
           npm run build:lib --workspace=packages/studio
           npm run build --workspace=packages/mcp
-
-      - name: Test
-        run: npm run test
 
       - name: Configure git
         run: |
@@ -74,7 +94,10 @@ jobs:
             if [ "$NEXT" != "$LOCAL_VER" ]; then
               npm version "$NEXT" --no-git-tag-version
             fi
-            npm publish
+            # Surface which package failed (the failure alert links the run, but
+            # the annotation names the package). bash runs with -eo pipefail, so
+            # a bare failure would still abort; this just makes it legible.
+            npm publish || { echo "::error::npm publish failed for $pkg_name@$(node -p "require('./package.json').version")"; return 1; }
             echo "Published $pkg_name@$(node -p "require('./package.json').version")"
             cd - > /dev/null
           }
@@ -107,6 +130,53 @@ jobs:
             done
           fi
 
+      - name: Advance release-latest diff base
+        # release-latest is the diff base for change detection on the next run,
+        # so it MUST only move on a successful publish (default if: success()).
+        # If publish failed, the base stays put and the next run still sees the
+        # unpublished changes.
+        run: |
+          git tag -f "release-latest"
+          git push origin "release-latest" --force
+
+      - name: Alert on release failure
+        # The publish failure that motivated this job split went unnoticed for
+        # two weeks because nothing alerted. Open (or comment on) a GitHub issue
+        # so it is visible. No external secret required.
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+        run: |
+          TITLE="Release workflow failing"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          BODY="Release publish failed for commit ${{ github.sha }}. Run: ${RUN_URL}. Common cause: an expired or revoked NPM_TOKEN (npm publish returns E404 on an existing scoped package)."
+          NUM=$(gh issue list --state open --search "in:title \"${TITLE}\"" --json number --jq '.[0].number // empty')
+          if [ -n "$NUM" ]; then
+            gh issue comment "$NUM" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --body "$BODY"
+          fi
+
+  tag-action:
+    name: Tag v5 action pointer
+    runs-on: ubuntu-latest
+    # Runs after publish for ordering, but advances the v5 tag whether or not
+    # publish succeeded — the composite action.yml is independent of the npm
+    # publish. Skipped only if the build/test gate failed or the run was
+    # cancelled. This is what keeps a publish-credential blip from freezing
+    # every swenyai/sweny@v5 consumer.
+    needs: [verify, publish]
+    if: ${{ !cancelled() && needs.verify.result == 'success' }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Latest main, so we tag the publish bump commit when publish ran.
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT || github.token }}
+
       - name: Tag v5 moving tag and immutable v5.<core-version>
         run: |
           # The root action.yml is a composite action — no JS bundle to build.
@@ -118,10 +188,12 @@ jobs:
 
           CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
           VERSIONED_TAG="v5.${CORE_VERSION}"
-          if git tag "$VERSIONED_TAG" 2>/dev/null; then
+          # Only cut the immutable tag if it does not already exist (it will
+          # when publish was skipped/failed and core's version is unchanged).
+          if git rev-parse -q --verify "refs/tags/$VERSIONED_TAG" >/dev/null; then
+            echo "$VERSIONED_TAG already exists, leaving it untouched"
+          else
+            git tag "$VERSIONED_TAG"
             git push origin "$VERSIONED_TAG"
             echo "Pushed $VERSIONED_TAG"
           fi
-
-          git tag -f "release-latest"
-          git push origin "release-latest" --force
