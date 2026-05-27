@@ -132,9 +132,11 @@ async function checkAnthropic(apiKey: string): Promise<CheckResult> {
 }
 
 /** Which credential `sweny check` should validate, mirroring resolveAuthEnv intent. */
-type CheckAuthMode = "oauth" | "api-key" | "auth-token" | "none";
+export type CheckAuthMode = "oauth" | "api-key" | "auth-token" | "none";
 
-function resolveCheckAuthMode(config: CliConfig): CheckAuthMode {
+export function resolveCheckAuthMode(
+  config: Pick<CliConfig, "anthropicApiKey" | "anthropicAuthToken" | "claudeOauthToken" | "swenyAuth">,
+): CheckAuthMode {
   const hasKey = !!config.anthropicApiKey;
   const hasBearer = !!config.anthropicAuthToken;
   const hasOauth = !!config.claudeOauthToken;
@@ -148,7 +150,7 @@ function resolveCheckAuthMode(config: CliConfig): CheckAuthMode {
 }
 
 /** Redact a URL to scheme + host so userinfo / query (which can carry a key) never logs. */
-function redactUrl(raw: string): string {
+export function redactUrl(raw: string): string {
   try {
     const u = new URL(raw);
     return `${u.protocol}//${u.host}`;
@@ -157,7 +159,11 @@ function redactUrl(raw: string): string {
   }
 }
 
-async function checkAnthropicGateway(base: string, config: CliConfig, mode: CheckAuthMode): Promise<CheckResult> {
+export async function checkAnthropicGateway(
+  base: string,
+  config: Pick<CliConfig, "anthropicApiKey" | "anthropicAuthToken" | "claudeOauthToken">,
+  mode: CheckAuthMode,
+): Promise<CheckResult> {
   const name = "Anthropic (gateway)";
   const safeBase = redactUrl(base);
   const headers: Record<string, string> = { "anthropic-version": "2023-06-01" };

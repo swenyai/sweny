@@ -4,6 +4,7 @@ import {
   validateInputs,
   parseCliInputs,
   parsePositiveInt,
+  normalizeSwenyAuth,
   registerTriageCommand,
   registerImplementCommand,
 } from "./config.js";
@@ -408,6 +409,39 @@ describe("verbose flag — registered on every long-running subcommand", () => {
     for (const name of ["triage", "implement"]) {
       const opt = findSubcommand(program, name).options.find((o) => o.long === "--verbose");
       expect(opt?.defaultValue, `${name} --verbose default`).toBe(false);
+    }
+  });
+});
+
+describe("normalizeSwenyAuth", () => {
+  it("passes through valid modes", () => {
+    expect(normalizeSwenyAuth("api-key")).toBe("api-key");
+    expect(normalizeSwenyAuth("oauth")).toBe("oauth");
+    expect(normalizeSwenyAuth("auto")).toBe("auto");
+  });
+
+  it("is case-insensitive and trims", () => {
+    expect(normalizeSwenyAuth("  API-KEY ")).toBe("api-key");
+    expect(normalizeSwenyAuth("OAuth")).toBe("oauth");
+  });
+
+  it("falls back to auto for unknown / empty / nullish", () => {
+    expect(normalizeSwenyAuth("nonsense")).toBe("auto");
+    expect(normalizeSwenyAuth("")).toBe("auto");
+    expect(normalizeSwenyAuth(undefined)).toBe("auto");
+    expect(normalizeSwenyAuth(null)).toBe("auto");
+  });
+
+  it("parseCliInputs reads SWENY_AUTH from env and normalizes it", () => {
+    const prev = process.env.SWENY_AUTH;
+    try {
+      process.env.SWENY_AUTH = "api-key";
+      expect(parseCliInputs({}).swenyAuth).toBe("api-key");
+      process.env.SWENY_AUTH = "bogus";
+      expect(parseCliInputs({}).swenyAuth).toBe("auto");
+    } finally {
+      if (prev === undefined) delete process.env.SWENY_AUTH;
+      else process.env.SWENY_AUTH = prev;
     }
   });
 });
