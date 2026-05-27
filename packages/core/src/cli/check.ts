@@ -16,15 +16,21 @@ export async function checkProviderConnectivity(config: CliConfig): Promise<Chec
 
   // ── Coding agent ────────────────────────────────────────────────────────────
   if (config.codingAgentProvider === "claude") {
-    if (!config.anthropicApiKey && !config.claudeOauthToken) {
-      results.push({ name: "Anthropic (claude agent)", status: "skip", detail: "No key configured" });
-    } else if (config.anthropicApiKey) {
+    const mode = resolveCheckAuthMode(config);
+    const base = config.anthropicBaseUrl;
+    if (mode === "none") {
+      results.push({ name: "Anthropic (claude agent)", status: "skip", detail: "No credential configured" });
+    } else if (base) {
+      // Gateway: probe the gateway, never real Anthropic with a gateway-bound key.
+      results.push(await checkAnthropicGateway(base, config, mode));
+    } else if (mode === "api-key") {
       results.push(await checkAnthropic(config.anthropicApiKey));
     } else {
+      // oauth or auth-token, no base URL: nothing cheap to probe, report the mode.
       results.push({
         name: "Anthropic (claude agent)",
         status: "skip",
-        detail: "CLAUDE_CODE_OAUTH_TOKEN set — skipping API check",
+        detail: `auth mode: ${mode}, skipping upstream API check`,
       });
     }
   } else {
@@ -120,6 +126,58 @@ async function checkAnthropic(apiKey: string): Promise<CheckResult> {
       };
     }
     return { name, status: "fail", detail: `Unexpected HTTP ${res.status}` };
+  } catch (err) {
+    return { name, status: "fail", detail: networkErrorMessage(err) };
+  }
+}
+
+/** Which credential `sweny check` should validate, mirroring resolveAuthEnv intent. */
+type CheckAuthMode = "oauth" | "api-key" | "auth-token" | "none";
+
+function resolveCheckAuthMode(config: CliConfig): CheckAuthMode {
+  const hasKey = !!config.anthropicApiKey;
+  const hasBearer = !!config.anthropicAuthToken;
+  const hasOauth = !!config.claudeOauthToken;
+  if (config.swenyAuth === "oauth") return hasOauth ? "oauth" : "none";
+  if (config.swenyAuth === "api-key") return hasKey ? "api-key" : hasBearer ? "auth-token" : "none";
+  // auto: OAuth wins when present (today's protective behavior)
+  if (hasOauth) return "oauth";
+  if (hasKey) return "api-key";
+  if (hasBearer) return "auth-token";
+  return "none";
+}
+
+/** Redact a URL to scheme + host so userinfo / query (which can carry a key) never logs. */
+function redactUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return "(invalid URL)";
+  }
+}
+
+async function checkAnthropicGateway(base: string, config: CliConfig, mode: CheckAuthMode): Promise<CheckResult> {
+  const name = "Anthropic (gateway)";
+  const safeBase = redactUrl(base);
+  const headers: Record<string, string> = { "anthropic-version": "2023-06-01" };
+  if (mode === "api-key") {
+    headers["x-api-key"] = config.anthropicApiKey;
+  } else {
+    // auth-token or oauth against the gateway
+    headers.Authorization = `Bearer ${config.anthropicAuthToken || config.claudeOauthToken}`;
+  }
+  try {
+    const url = base.replace(/\/+$/, "") + "/v1/models";
+    const res = await fetch(url, { headers });
+    // Gateways vary on whether /v1/models exists; reachable + non-auth-error is good enough.
+    if (res.ok || res.status === 404) {
+      return { name, status: "ok", detail: `gateway reachable (${safeBase}), auth mode: ${mode}` };
+    }
+    if (res.status === 401 || res.status === 403) {
+      return { name, status: "fail", detail: `${res.status} from gateway ${safeBase}, check gateway credentials` };
+    }
+    return { name, status: "fail", detail: `Unexpected HTTP ${res.status} from gateway ${safeBase}` };
   } catch (err) {
     return { name, status: "fail", detail: networkErrorMessage(err) };
   }

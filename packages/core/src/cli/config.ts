@@ -10,7 +10,12 @@ export interface CliConfig {
 
   // Authentication
   anthropicApiKey: string;
+  anthropicAuthToken: string;
   claudeOauthToken: string;
+  /** Anthropic-compatible base URL (e.g. a LiteLLM gateway). */
+  anthropicBaseUrl: string;
+  /** Auth precedence mode: auto (default), api-key, or oauth. */
+  swenyAuth: "auto" | "api-key" | "oauth";
   openaiApiKey: string;
   geminiApiKey: string;
 
@@ -235,7 +240,11 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
 
     // Secrets: env only — never from config file
     anthropicApiKey: env.ANTHROPIC_API_KEY || "",
+    anthropicAuthToken: env.ANTHROPIC_AUTH_TOKEN || "",
     claudeOauthToken: env.CLAUDE_CODE_OAUTH_TOKEN || "",
+    // Non-secret config: env or .sweny config file (mirrors gitlabBaseUrl)
+    anthropicBaseUrl: env.ANTHROPIC_BASE_URL || f("anthropic-base-url") || "",
+    swenyAuth: normalizeSwenyAuth(env.SWENY_AUTH || f("sweny-auth")),
     openaiApiKey: env.OPENAI_API_KEY || "",
     geminiApiKey: env.GEMINI_API_KEY || env.GOOGLE_API_KEY || "",
 
@@ -619,6 +628,18 @@ function validateIntegerBound(errors: string[], flag: string, value: number, min
   if (value < min || value > max) {
     errors.push(`${flag} must be between ${min} and ${max}`);
   }
+}
+
+/**
+ * Normalize a SWENY_AUTH value. Unknown / empty values fall back to "auto"
+ * (the safe, billing-protective default). Never throws: an env typo must not
+ * crash a run, and `auto` only ever strips a key to protect a subscription.
+ */
+export function normalizeSwenyAuth(raw: unknown): "auto" | "api-key" | "oauth" {
+  const v = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  return v === "api-key" || v === "oauth" ? v : "auto";
 }
 
 /**

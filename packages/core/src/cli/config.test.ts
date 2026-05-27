@@ -19,7 +19,10 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
   return {
     codingAgentProvider: "claude",
     anthropicApiKey: "sk-ant-test",
+    anthropicAuthToken: "",
     claudeOauthToken: "",
+    anthropicBaseUrl: "",
+    swenyAuth: "auto",
     openaiApiKey: "",
     geminiApiKey: "",
     observabilityProviders: ["file"],

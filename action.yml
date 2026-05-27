@@ -15,8 +15,18 @@ inputs:
     description: "Claude Code OAuth token. Use this OR anthropic-api-key. OAuth tokens do not consume API credit."
     required: false
   anthropic-api-key:
-    description: "Anthropic API key for Claude. Use this OR claude-oauth-token."
+    description: "Anthropic API key for Claude (x-api-key). Use this OR claude-oauth-token."
     required: false
+  anthropic-auth-token:
+    description: "Bearer token (Authorization: Bearer) for gateways that expect it. Sets ANTHROPIC_AUTH_TOKEN. Distinct from anthropic-api-key (x-api-key)."
+    required: false
+  anthropic-base-url:
+    description: "Anthropic-compatible base URL (e.g. a LiteLLM gateway). Sets ANTHROPIC_BASE_URL. See docs: Using a model gateway."
+    required: false
+  sweny-auth:
+    description: "Auth mode: auto (default), api-key, or oauth. Set 'api-key' to authenticate a gateway with anthropic-api-key / anthropic-auth-token even when an OAuth token is also present."
+    required: false
+    default: "auto"
 
   cli-version:
     description: "Version of @sweny-ai/core to install (the package that ships the `sweny` CLI). Defaults to latest."
@@ -74,9 +84,10 @@ runs:
       env:
         HAS_OAUTH: ${{ inputs.claude-oauth-token != '' }}
         HAS_API_KEY: ${{ inputs.anthropic-api-key != '' }}
+        HAS_AUTH_TOKEN: ${{ inputs.anthropic-auth-token != '' }}
       run: |
-        if [ "$HAS_OAUTH" != "true" ] && [ "$HAS_API_KEY" != "true" ]; then
-          echo "::error::Either claude-oauth-token or anthropic-api-key must be provided"
+        if [ "$HAS_OAUTH" != "true" ] && [ "$HAS_API_KEY" != "true" ] && [ "$HAS_AUTH_TOKEN" != "true" ]; then
+          echo "::error::Provide one of: claude-oauth-token, anthropic-api-key, or anthropic-auth-token"
           exit 1
         fi
 
@@ -97,6 +108,9 @@ runs:
       env:
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-oauth-token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        ANTHROPIC_AUTH_TOKEN: ${{ inputs.anthropic-auth-token }}
+        ANTHROPIC_BASE_URL: ${{ inputs.anthropic-base-url }}
+        SWENY_AUTH: ${{ inputs.sweny-auth }}
         WORKFLOW_PATH: ${{ inputs.workflow }}
         DRY_RUN: ${{ inputs.dry-run }}
         VERBOSE: ${{ inputs.verbose }}
