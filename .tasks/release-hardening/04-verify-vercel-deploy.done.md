@@ -13,3 +13,11 @@
 ## Acceptance
 - Both URLs return 200 and contain the new content, OR a clear note of what is missing and the likely cause.
 - No code change in this task; record the result in the `.done.md`.
+
+## Result (verified 2026-05-27)
+
+- `https://docs.sweny.ai/advanced/model-gateway/` → HTTP 200, contains "Model gateway" + "SWENY_AUTH".
+- `https://spec.sweny.ai/nodes/` → HTTP 200, contains "Model Selection".
+- Sidebar nav includes the model-gateway link.
+
+Vercel deployed the #208 docs/spec normally; the broken npm Release did not affect it.
