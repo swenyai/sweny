@@ -616,6 +616,9 @@ export function validateInputs(config: CliConfig): string[] {
   // bounds check let junk through).
   validateIntegerBound(errors, "--max-investigate-turns", config.maxInvestigateTurns, 1, 500);
   validateIntegerBound(errors, "--max-implement-turns", config.maxImplementTurns, 1, 500);
+  // cacheTtl is parsed with parsePositiveInt (junk → NaN); bound it so a
+  // malformed --cache-ttl / cache-ttl: surfaces a field error instead of NaN.
+  validateIntegerBound(errors, "--cache-ttl", config.cacheTtl, 1, 31_536_000);
 
   return errors;
 }

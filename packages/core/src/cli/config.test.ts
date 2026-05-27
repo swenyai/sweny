@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { Command } from "commander";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   validateInputs,
   parseCliInputs,
@@ -8,6 +11,7 @@ import {
   registerTriageCommand,
   registerImplementCommand,
 } from "./config.js";
+import { loadConfigFile } from "./config-file.js";
 import type { CliConfig } from "./config.js";
 
 /**
@@ -264,6 +268,47 @@ describe("validateInputs — numeric bounds reject NaN", () => {
     const errors = validateInputs(baseConfig({ maxInvestigateTurns: Infinity }));
     expect(errors.some((e) => e.includes("max-investigate-turns"))).toBe(true);
   });
+
+  it("rejects NaN cache-ttl (malformed --cache-ttl / cache-ttl:)", () => {
+    const errors = validateInputs(baseConfig({ cacheTtl: Number.NaN }));
+    expect(errors.some((e) => e.includes("--cache-ttl"))).toBe(true);
+  });
+
+  it("rejects a zero cache-ttl (below the minimum bound)", () => {
+    const errors = validateInputs(baseConfig({ cacheTtl: 0 }));
+    expect(errors.some((e) => e.includes("--cache-ttl"))).toBe(true);
+  });
+
+  it("accepts a sane cache-ttl", () => {
+    const errors = validateInputs(baseConfig({ cacheTtl: 86400 }));
+    expect(errors.some((e) => e.includes("--cache-ttl"))).toBe(false);
+  });
+});
+
+describe("parseCliInputs — cache-ttl parsing rejects junk", () => {
+  it("rejects a non-numeric --cache-ttl via validateInputs", () => {
+    const config = parseCliInputs({ cacheTtl: "abc" }, {});
+    expect(Number.isNaN(config.cacheTtl)).toBe(true);
+    const errors = validateInputs(config);
+    expect(errors.some((e) => e.includes("--cache-ttl"))).toBe(true);
+  });
+});
+
+describe("validateInputs — implement path credential parity", () => {
+  // The implement action now runs validateInputs(config) before execution.
+  // A claude run with no key/oauth must surface the curated "Missing: ..."
+  // error rather than crashing deep in the executor.
+  it("surfaces the missing ANTHROPIC_API_KEY/OAuth error", () => {
+    const errors = validateInputs(baseConfig({ anthropicApiKey: "", claudeOauthToken: "", repository: "owner/repo" }));
+    expect(errors.some((e) => e.includes("ANTHROPIC_API_KEY") && e.includes("CLAUDE_CODE_OAUTH_TOKEN"))).toBe(true);
+  });
+
+  it("rejects a non-numeric --max-implement-turns (no NaN reaching execution)", () => {
+    const config = parseCliInputs({ maxImplementTurns: "abc" }, {});
+    expect(Number.isNaN(config.maxImplementTurns)).toBe(true);
+    const errors = validateInputs(config);
+    expect(errors.some((e) => e.includes("--max-implement-turns"))).toBe(true);
+  });
 });
 
 describe("parseCliInputs — numeric parsing rejects junk", () => {
@@ -443,5 +488,39 @@ describe("normalizeSwenyAuth", () => {
       if (prev === undefined) delete process.env.SWENY_AUTH;
       else process.env.SWENY_AUTH = prev;
     }
+  });
+});
+
+describe("loadConfigFile — malformed YAML", () => {
+  let dir: string;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("warns (naming the file) and returns {} instead of silently dropping config", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-cfg-"));
+    const filePath = path.join(dir, ".sweny.yml");
+    // Unbalanced brackets — invalid YAML that parseYaml throws on.
+    fs.writeFileSync(filePath, "time-range: [unterminated\n  bad: : :\n", "utf-8");
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = loadConfigFile(dir);
+
+    expect(result).toEqual({});
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toContain(filePath);
+  });
+
+  it("parses a well-formed file without warning", () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-cfg-"));
+    fs.writeFileSync(path.join(dir, ".sweny.yml"), "time-range: 4h\n", "utf-8");
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = loadConfigFile(dir);
+
+    expect(result["time-range"]).toBe("4h");
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });

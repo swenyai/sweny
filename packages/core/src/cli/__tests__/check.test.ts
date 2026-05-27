@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { resolveCheckAuthMode, redactUrl, checkAnthropicGateway } from "../check.js";
+import { resolveCheckAuthMode, redactUrl, checkAnthropicGateway, checkDatadog } from "../check.js";
 
 type AuthFields = Parameters<typeof resolveCheckAuthMode>[0];
 
@@ -121,5 +121,65 @@ describe("checkAnthropicGateway", () => {
     const spy = stubFetch(async () => ({ ok: true, status: 200 }));
     await checkAnthropicGateway("https://gw.example.com/", auth({ anthropicApiKey: "k" }), "api-key");
     expect(spy.mock.calls[0][0]).toBe("https://gw.example.com/v1/models");
+  });
+
+  it("passes an AbortSignal so a hung connect cannot hang the check", async () => {
+    const spy = stubFetch(async () => ({ ok: true, status: 200 }));
+    await checkAnthropicGateway("https://gw.example.com", auth({ anthropicApiKey: "k" }), "api-key");
+    expect(spy.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("reports a timeout (not a hang) when the abort signal fires", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const err = new Error("The operation was aborted due to timeout");
+        err.name = "TimeoutError";
+        throw err;
+      }),
+    );
+    const res = await checkAnthropicGateway("https://gw.example.com", auth({ anthropicApiKey: "k" }), "api-key");
+    expect(res.status).toBe("fail");
+    expect(res.detail).toMatch(/timed out/i);
+  });
+});
+
+describe("checkDatadog", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function stubFetch(impl: (url: string, init: any) => Promise<{ ok: boolean; status: number }>) {
+    const spy = vi.fn(impl);
+    vi.stubGlobal("fetch", spy);
+    return spy;
+  }
+
+  it("builds the api.<site> URL and passes an AbortSignal for a valid site", async () => {
+    const spy = stubFetch(async () => ({ ok: true, status: 200 }));
+    const res = await checkDatadog({ apiKey: "a", appKey: "b", site: "datadoghq.eu" });
+    expect(spy.mock.calls[0][0]).toBe("https://api.datadoghq.eu/api/v2/validate");
+    expect(spy.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    expect(res.status).toBe("ok");
+  });
+
+  it("rejects a site with a path/query before building the URL (no fetch)", async () => {
+    const spy = stubFetch(async () => ({ ok: true, status: 200 }));
+    const res = await checkDatadog({ apiKey: "a", appKey: "b", site: "evil.com/x?" });
+    expect(spy).not.toHaveBeenCalled();
+    expect(res.status).toBe("fail");
+    expect(res.detail).toMatch(/Invalid DD_SITE/i);
+  });
+
+  it("reports a timeout when the abort signal fires", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const err = new Error("timed out");
+        err.name = "TimeoutError";
+        throw err;
+      }),
+    );
+    const res = await checkDatadog({ apiKey: "a", appKey: "b" });
+    expect(res.status).toBe("fail");
+    expect(res.detail).toMatch(/timed out/i);
   });
 });
