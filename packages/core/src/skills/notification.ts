@@ -10,6 +10,62 @@
 
 import type { Skill, ToolContext, SkillCategory } from "../types.js";
 
+/**
+ * Resolve the destination URL for `notify_webhook`.
+ *
+ * Trust model: the LLM controls tool arguments at runtime, and resolved source
+ * content is attacker-influenceable (prompt injection). A free-form `url`
+ * override would turn `notify_webhook` into an arbitrary exfiltration sink, so
+ * the destination is locked to operator-configured values:
+ *
+ *   - With no override, the configured `NOTIFICATION_WEBHOOK_URL` is used.
+ *   - An `override` is only honored when its host matches the configured
+ *     webhook's host, or a host on the `NOTIFICATION_WEBHOOK_ALLOWED_HOSTS`
+ *     allowlist (comma-separated, host[:port], case-insensitive).
+ *   - Anything else is rejected with a clear error.
+ *
+ * Returns the URL to POST to, or throws an `Error` the caller surfaces.
+ */
+export function resolveWebhookUrl(override: string | undefined, config: Record<string, string | undefined>): string {
+  const configured = config.NOTIFICATION_WEBHOOK_URL;
+
+  if (override === undefined || override === "") {
+    if (!configured) {
+      throw new Error("[Notification] No webhook URL configured (set NOTIFICATION_WEBHOOK_URL)");
+    }
+    return configured;
+  }
+
+  // An override was supplied — only honor it if its host is allowlisted.
+  let overrideHost: string;
+  try {
+    overrideHost = new URL(override).host.toLowerCase();
+  } catch {
+    throw new Error(`[Notification] Invalid webhook url override: ${override}`);
+  }
+
+  const allowed = new Set<string>();
+  if (configured) {
+    try {
+      allowed.add(new URL(configured).host.toLowerCase());
+    } catch {
+      // Misconfigured NOTIFICATION_WEBHOOK_URL — ignore for allowlist purposes.
+    }
+  }
+  for (const host of (config.NOTIFICATION_WEBHOOK_ALLOWED_HOSTS ?? "").split(",")) {
+    const h = host.trim().toLowerCase();
+    if (h) allowed.add(h);
+  }
+
+  if (allowed.has(overrideHost)) return override;
+
+  throw new Error(
+    `[Notification] Refusing to POST to non-allowlisted host "${overrideHost}". ` +
+      `Destination is locked to NOTIFICATION_WEBHOOK_URL; ` +
+      `add the host to NOTIFICATION_WEBHOOK_ALLOWED_HOSTS to permit it.`,
+  );
+}
+
 export const notification: Skill = {
   id: "notification",
   name: "Notification",
@@ -20,6 +76,13 @@ export const notification: Skill = {
       description: "Generic webhook URL for notifications",
       required: false,
       env: "NOTIFICATION_WEBHOOK_URL",
+    },
+    NOTIFICATION_WEBHOOK_ALLOWED_HOSTS: {
+      description:
+        "Comma-separated host allowlist (host[:port]) for the notify_webhook url override. " +
+        "The configured NOTIFICATION_WEBHOOK_URL host is always allowed.",
+      required: false,
+      env: "NOTIFICATION_WEBHOOK_ALLOWED_HOSTS",
     },
     DISCORD_WEBHOOK_URL: {
       description: "Discord webhook URL",
@@ -40,18 +103,25 @@ export const notification: Skill = {
   tools: [
     {
       name: "notify_webhook",
-      description: "Send a JSON payload to a webhook URL",
+      description:
+        "Send a JSON payload to the configured notification webhook (NOTIFICATION_WEBHOOK_URL). " +
+        "The destination is fixed: an optional `url` is only honored when its host is on the " +
+        "NOTIFICATION_WEBHOOK_ALLOWED_HOSTS allowlist; arbitrary hosts are rejected.",
       input_schema: {
         type: "object",
         properties: {
-          url: { type: "string", description: "Webhook URL (overrides NOTIFICATION_WEBHOOK_URL)" },
+          url: {
+            type: "string",
+            description:
+              "Optional webhook URL. Only honored when its host matches NOTIFICATION_WEBHOOK_URL " +
+              "or an entry in NOTIFICATION_WEBHOOK_ALLOWED_HOSTS; otherwise rejected.",
+          },
           payload: { type: "object", description: "JSON payload to send" },
         },
         required: ["payload"],
       },
       handler: async (input: { url?: string; payload: Record<string, unknown> }, ctx) => {
-        const url = input.url ?? ctx.config.NOTIFICATION_WEBHOOK_URL;
-        if (!url) throw new Error("No webhook URL provided or configured");
+        const url = resolveWebhookUrl(input.url, ctx.config);
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

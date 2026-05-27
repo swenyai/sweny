@@ -31,9 +31,29 @@ const SKILL_DIRS: readonly string[] = SKILL_HARNESSES.map((h) => h.path);
  * can inspect `kind` to decide whether to surface, ignore, or fail.
  */
 export interface SkillDiagnostic {
-  kind: "invalid-frontmatter" | "missing-name" | "invalid-id" | "unreadable-file" | "duplicate-id";
+  kind:
+    | "invalid-frontmatter"
+    | "missing-name"
+    | "invalid-id"
+    | "unreadable-file"
+    | "duplicate-id"
+    | "stdio-command-declared";
   path: string;
   message: string;
+}
+
+/**
+ * Opt-in env flag that allows discovered SKILL.md files to wire a local stdio
+ * `mcp.command`. Defaults OFF: an unvetted discovered stdio command is a code
+ * execution sink (the harness runs with `permissionMode: "bypassPermissions"`),
+ * and SKILL.md files can arrive via a PR or supply-chain path that the workflow
+ * author never reviewed per run.
+ */
+const STDIO_OPT_IN_ENV = "SWENY_ALLOW_SKILL_STDIO_COMMAND";
+
+function stdioCommandAllowed(env: Record<string, string | undefined>): boolean {
+  const v = (env[STDIO_OPT_IN_ENV] ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
 }
 
 export interface SkillDiscoveryResult {
@@ -48,9 +68,13 @@ export interface SkillDiscoveryResult {
  * to users. `discoverSkills` stays as a backward-compatible wrapper for
  * callers that only want the happy-path skill list.
  */
-export function discoverSkillsWithDiagnostics(cwd: string = process.cwd()): SkillDiscoveryResult {
+export function discoverSkillsWithDiagnostics(
+  cwd: string = process.cwd(),
+  env: Record<string, string | undefined> = process.env,
+): SkillDiscoveryResult {
   const skillMap = new Map<string, Skill>();
   const warnings: SkillDiagnostic[] = [];
+  const allowStdio = stdioCommandAllowed(env);
 
   for (const relDir of SKILL_DIRS) {
     const skillsDir = join(cwd, relDir);
@@ -82,8 +106,9 @@ export function discoverSkillsWithDiagnostics(cwd: string = process.cwd()): Skil
         continue;
       }
 
-      const parsed = parseSkillMd(content, skillFile);
+      const parsed = parseSkillMd(content, skillFile, allowStdio);
       if (parsed.kind === "ok") {
+        if (parsed.diagnostics) warnings.push(...parsed.diagnostics);
         if (skillMap.has(parsed.skill.id)) {
           warnings.push({
             kind: "duplicate-id",
@@ -107,13 +132,18 @@ export function discoverSkillsWithDiagnostics(cwd: string = process.cwd()): Skil
  * Backwards-compatible wrapper that drops diagnostics. Use
  * `discoverSkillsWithDiagnostics` when you want to surface warnings.
  */
-export function discoverSkills(cwd: string = process.cwd()): Skill[] {
-  return discoverSkillsWithDiagnostics(cwd).skills;
+export function discoverSkills(
+  cwd: string = process.cwd(),
+  env: Record<string, string | undefined> = process.env,
+): Skill[] {
+  return discoverSkillsWithDiagnostics(cwd, env).skills;
 }
 
-type ParseResult = { kind: "ok"; skill: Skill } | { kind: "err"; diagnostic: SkillDiagnostic };
+type ParseResult =
+  | { kind: "ok"; skill: Skill; diagnostics?: SkillDiagnostic[] }
+  | { kind: "err"; diagnostic: SkillDiagnostic };
 
-function parseSkillMd(content: string, path: string): ParseResult {
+function parseSkillMd(content: string, path: string, allowStdio: boolean): ParseResult {
   const raw = parseFrontmatter(content);
   if (raw === "invalid") {
     return {
@@ -156,18 +186,41 @@ function parseSkillMd(content: string, path: string): ParseResult {
 
   const instruction = extractBody(content);
 
+  const diagnostics: SkillDiagnostic[] = [];
   let mcp: McpServerConfig | undefined;
   if (fm.mcp && typeof fm.mcp === "object") {
     const m = fm.mcp as Record<string, any>;
     if (m.command || m.url) {
-      mcp = {
-        type: m.type ?? (m.command ? "stdio" : "http"),
-        ...(m.command ? { command: m.command } : {}),
-        ...(m.args ? { args: m.args } : {}),
-        ...(m.url ? { url: m.url } : {}),
-        ...(m.headers ? { headers: m.headers } : {}),
-        ...(m.env ? { env: m.env } : {}),
-      };
+      const isStdio = (m.type ?? (m.command ? "stdio" : "http")) === "stdio";
+
+      // A discovered SKILL.md that declares a local stdio `command` is a code
+      // execution sink — the harness runs with bypassPermissions, so the
+      // command spawns with no interactive gate. Surface it loudly and, unless
+      // explicitly opted in via SWENY_ALLOW_SKILL_STDIO_COMMAND, do NOT wire it
+      // as a launchable server (drop the mcp config). HTTP-type skills and
+      // skills with no command are unaffected.
+      if (isStdio && m.command) {
+        diagnostics.push({
+          kind: "stdio-command-declared",
+          path,
+          message:
+            `Skill "${id}" declares a local stdio command (${String(m.command)}). ` +
+            (allowStdio
+              ? `Honoring it because ${STDIO_OPT_IN_ENV} is set — this spawns a local process with bypassPermissions.`
+              : `Refusing to wire it as a launchable MCP server. Set ${STDIO_OPT_IN_ENV}=1 to opt in (the command runs with bypassPermissions).`),
+        });
+      }
+
+      if (!isStdio || !m.command || allowStdio) {
+        mcp = {
+          type: m.type ?? (m.command ? "stdio" : "http"),
+          ...(m.command ? { command: m.command } : {}),
+          ...(m.args ? { args: m.args } : {}),
+          ...(m.url ? { url: m.url } : {}),
+          ...(m.headers ? { headers: m.headers } : {}),
+          ...(m.env ? { env: m.env } : {}),
+        };
+      }
     }
   }
 
@@ -198,6 +251,7 @@ function parseSkillMd(content: string, path: string): ParseResult {
       instruction: instruction || undefined,
       mcp,
     },
+    diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
   };
 }
 
@@ -251,7 +305,7 @@ export function configuredSkillsWithDiagnostics(
   cwd?: string,
 ): { skills: Skill[]; warnings: SkillDiagnostic[] } {
   const configured = builtinSkills.filter((s) => isSkillConfigured(s, env));
-  const { skills: custom, warnings } = discoverSkillsWithDiagnostics(cwd);
+  const { skills: custom, warnings } = discoverSkillsWithDiagnostics(cwd, env);
 
   // Custom skills can override built-in IDs. When overriding, merge:
   // keep the built-in's tools and config, add the custom instruction/mcp.

@@ -20,6 +20,7 @@ All config fields are optional. Set the ones for the channels you want to use.
 | Env var | Description |
 |---------|-------------|
 | `NOTIFICATION_WEBHOOK_URL` | Generic webhook URL — receives a JSON POST |
+| `NOTIFICATION_WEBHOOK_ALLOWED_HOSTS` | Comma-separated host allowlist (`host[:port]`) for the `notify_webhook` `url` override |
 | `DISCORD_WEBHOOK_URL` | Discord webhook URL |
 | `TEAMS_WEBHOOK_URL` | Microsoft Teams webhook URL |
 The skill activates when at least one of the above is set. If none are set, the skill will not appear in the available tool set.
@@ -38,7 +39,9 @@ Email notifications are available via the GitHub Action's `notification-provider
 
 ### notify_webhook
 
-Posts an arbitrary JSON payload to `NOTIFICATION_WEBHOOK_URL` (or a URL specified in the tool input). Useful for integrating with custom automation, PagerDuty, Opsgenie, or any service that accepts webhook POSTs.
+Posts a JSON payload to `NOTIFICATION_WEBHOOK_URL`. Useful for integrating with custom automation, PagerDuty, Opsgenie, or any service that accepts webhook POSTs.
+
+The destination is locked to operator-configured values. The model can pass a `url`, but it is only honored when its host matches `NOTIFICATION_WEBHOOK_URL` or an entry in `NOTIFICATION_WEBHOOK_ALLOWED_HOSTS`; any other host is rejected with a clear error. This keeps a prompt-injected run from POSTing context to an arbitrary host.
 
 ### notify_discord
 
@@ -78,7 +81,13 @@ Set the URL of any service that accepts JSON POST requests:
 export NOTIFICATION_WEBHOOK_URL="https://your-service.example.com/webhook"
 ```
 
-The `notify_webhook` tool also accepts a `url` parameter in its input, which overrides the environment variable. This lets Claude target different webhook endpoints dynamically.
+To let `notify_webhook` target additional hosts, add them to an allowlist:
+
+```bash
+export NOTIFICATION_WEBHOOK_ALLOWED_HOSTS="hooks.slack.com,events.pagerduty.com"
+```
+
+The tool's `url` argument is only honored when its host matches `NOTIFICATION_WEBHOOK_URL` or an allowlisted host. Arbitrary, model-chosen hosts are rejected, so the destination stays under operator control.
 
 ## Workflow usage
 

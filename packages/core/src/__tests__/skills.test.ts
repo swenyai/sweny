@@ -358,10 +358,32 @@ describe("notification skill", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("https://example.com/hook");
   });
 
-  it("notify_webhook allows URL override", async () => {
+  it("notify_webhook rejects an arbitrary non-allowlisted url override", async () => {
+    const tool = findTool(notification.tools, "notify_webhook");
+    const ctx = mockCtx({ NOTIFICATION_WEBHOOK_URL: "https://example.com/hook" });
+
+    await expect(tool.handler({ url: "https://attacker.example/steal", payload: { x: 1 } }, ctx)).rejects.toThrow(
+      /non-allowlisted host/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("notify_webhook honors an override whose host matches the configured URL", async () => {
     fetchMock.mockResolvedValueOnce(mockResponse("ok", true, 200));
     const tool = findTool(notification.tools, "notify_webhook");
-    const ctx = mockCtx({});
+    const ctx = mockCtx({ NOTIFICATION_WEBHOOK_URL: "https://example.com/hook" });
+    await tool.handler({ url: "https://example.com/other-path", payload: { x: 1 } }, ctx);
+
+    expect(fetchMock.mock.calls[0][0]).toBe("https://example.com/other-path");
+  });
+
+  it("notify_webhook honors an override on the allowlist", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse("ok", true, 200));
+    const tool = findTool(notification.tools, "notify_webhook");
+    const ctx = mockCtx({
+      NOTIFICATION_WEBHOOK_URL: "https://example.com/hook",
+      NOTIFICATION_WEBHOOK_ALLOWED_HOSTS: "hooks.slack.com, custom.com",
+    });
     await tool.handler({ url: "https://custom.com/hook", payload: { x: 1 } }, ctx);
 
     expect(fetchMock.mock.calls[0][0]).toBe("https://custom.com/hook");
@@ -369,7 +391,7 @@ describe("notification skill", () => {
 
   it("notify_webhook throws without URL", async () => {
     const tool = findTool(notification.tools, "notify_webhook");
-    await expect(tool.handler({ payload: {} }, mockCtx({}))).rejects.toThrow("No webhook URL");
+    await expect(tool.handler({ payload: {} }, mockCtx({}))).rejects.toThrow(/No webhook URL configured/);
   });
 
   it("notify_discord sends to Discord webhook", async () => {
@@ -630,7 +652,7 @@ When writing TypeScript:
     expect(skills[0].instruction).toContain("Use PascalCase for types");
   });
 
-  it("parses mcp from frontmatter", () => {
+  it("parses mcp from frontmatter (stdio wired only with explicit opt-in)", () => {
     writeSkillAt(
       ".sweny",
       "our-crm",
@@ -648,7 +670,8 @@ mcp:
 
 Use the CRM tools to look up customer data.`,
     );
-    const skills = discoverSkills(tmpDir);
+    // Discovered stdio commands are gated behind SWENY_ALLOW_SKILL_STDIO_COMMAND.
+    const skills = discoverSkills(tmpDir, { SWENY_ALLOW_SKILL_STDIO_COMMAND: "1" });
     expect(skills[0].mcp).toEqual({
       type: "stdio",
       command: "npx",

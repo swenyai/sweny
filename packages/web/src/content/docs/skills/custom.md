@@ -122,6 +122,12 @@ mcp:
     API_KEY: Description of the key
 ```
 
+:::caution[stdio commands are a trust boundary]
+A discovered `SKILL.md` with a stdio `mcp.command` spawns a local process when the skill is referenced, and SWEny runs the harness with permissions bypassed. A `SKILL.md` dropped via a PR or supply-chain dependency is therefore a code-execution sink.
+
+For safety, SWEny does **not** wire a discovered stdio command by default. It emits a `stdio-command-declared` diagnostic (surfaced as a warning in `sweny skill list` and run pre-flight) and skips launching the command. To opt in for a vetted skill, set `SWENY_ALLOW_SKILL_STDIO_COMMAND=1` in the environment. HTTP-type (`mcp.url`) skills and skills with no `mcp` are unaffected.
+:::
+
 **HTTP** (remote endpoint):
 ```yaml
 mcp:
