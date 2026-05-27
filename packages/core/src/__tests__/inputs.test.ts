@@ -157,6 +157,53 @@ describe("validateRuntimeInput", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect("foo" in r.value).toBe(false);
   });
+
+  // ─── Prototype-pollution hardening ──────────────────────────────
+
+  it("does not let a JSON.parse'd __proto__ key pollute the result prototype", () => {
+    // JSON.parse produces an enumerable OWN `__proto__` key, which the
+    // passthrough loop would otherwise reassign via out["__proto__"] = v.
+    const declared: WorkflowInputs = { foo: { type: "string" } };
+    const raw = JSON.parse('{"foo":"x","__proto__":{"polluted":true}}');
+    const r = validateRuntimeInput(declared, raw);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      // The result's prototype chain must be clean.
+      expect((Object.getPrototypeOf(r.value) as Record<string, unknown>).polluted).toBeUndefined();
+      // The declared field still resolves.
+      expect(r.value.foo).toBe("x");
+    }
+    // Global Object prototype must not have been touched.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("does not corrupt the prototype chain via constructor / prototype unknown keys", () => {
+    const declared: WorkflowInputs = { foo: { type: "string" } };
+    const raw = JSON.parse('{"foo":"x","constructor":{"bad":1},"prototype":{"bad":2}}');
+    const r = validateRuntimeInput(declared, raw);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      // The dangerous keys are dropped (skip-key fix), so the constructor
+      // is still the real Object constructor, not the attacker payload.
+      expect(r.value.constructor).toBe(Object);
+      expect((r.value as Record<string, unknown>).prototype).toBeUndefined();
+      // And nothing leaked onto the prototype.
+      const proto = Object.getPrototypeOf(r.value) as Record<string, unknown>;
+      expect(proto.bad).toBeUndefined();
+      expect(r.value.foo).toBe("x");
+    }
+  });
+
+  it("still passes a normal unknown key through unchanged (guard against over-filtering)", () => {
+    const declared: WorkflowInputs = { foo: { type: "string" } };
+    const r = validateRuntimeInput(declared, { foo: "x", timeRange: "7d", dryRun: true });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.timeRange).toBe("7d");
+      expect(r.value.dryRun).toBe(true);
+      expect(r.value.foo).toBe("x");
+    }
+  });
 });
 
 // ─── workflowInputsZ schema ──────────────────────────────────────
