@@ -294,9 +294,9 @@ describe("file-path sandbox", () => {
       return;
     }
     try {
-      await expect(
-        resolveSource("./link.md", "f", { ...baseCtx(), cwd: fileTmp, fileRoot: fileTmp }),
-      ).rejects.toThrow(/SOURCE_FILE_OUTSIDE_ROOT/);
+      await expect(resolveSource("./link.md", "f", { ...baseCtx(), cwd: fileTmp, fileRoot: fileTmp })).rejects.toThrow(
+        /SOURCE_FILE_OUTSIDE_ROOT/,
+      );
     } finally {
       rmSync(link, { force: true });
       rmSync(secret, { force: true });
