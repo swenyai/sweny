@@ -40,7 +40,7 @@ A conforming executor MUST resolve every Source in a workflow **before any node 
 
 - **Inline** — identity; the string is used as-is.
 - **File** — read via UTF-8 `readFile`. Relative paths resolve against the workflow file's directory or the CLI's cwd.
-- **URL** — `fetch()` with 10s timeout. Authorization header picked from `.sweny.yml` `fetch.auth` (per-host env-var-name mapping) or `SWENY_FETCH_TOKEN` (global fallback).
+- **URL** — `fetch()` with 10s timeout, `http`/`https` only. Hosts that resolve to private, loopback, or link-local addresses (including the cloud metadata endpoint) are rejected, and every redirect hop is re-validated. Authorization header picked from `.sweny.yml` `fetch.auth` (per-host env-var-name mapping); `SWENY_FETCH_TOKEN` supplies the value but is only sent to hosts you configure in `fetch.auth` (no blanket fallback to arbitrary hosts).
 
 ### In-run cache
 

@@ -76,6 +76,70 @@ describe("SSRF host validation (literal IPs)", () => {
       /SOURCE_URL_BLOCKED/,
     );
   });
+
+  it("blocks the IPv4-mapped IPv6 metadata endpoint in hex form", async () => {
+    // The WHATWG URL parser normalizes ::ffff:169.254.169.254 to ::ffff:a9fe:a9fe.
+    await expect(resolveSource("http://[::ffff:a9fe:a9fe]/x", "f", baseCtx())).rejects.toThrow(/SOURCE_URL_BLOCKED/);
+  });
+
+  it("blocks 0.0.0.0 (unspecified address)", async () => {
+    await expect(resolveSource("http://0.0.0.0/x", "f", baseCtx())).rejects.toThrow(/SOURCE_URL_BLOCKED/);
+  });
+
+  it("blocks CGNAT 100.64.0.0/10", async () => {
+    await expect(resolveSource("http://100.64.0.1/x", "f", baseCtx())).rejects.toThrow(/SOURCE_URL_BLOCKED/);
+  });
+});
+
+// ── SSRF: obfuscated IP literals (URL-parser normalization) ──────
+//
+// These hosts are NOT dotted-quad as written. The WHATWG URL parser (used by
+// both our guard's `new URL(...).hostname` and by `fetch`) normalizes them to
+// 127.0.0.1 / 0.0.0.0 BEFORE the IP check runs, so the literal-IP fast path
+// catches them with no DNS lookup. These are regression tests: if the resolver
+// ever stops reading the normalized `.hostname`, they fail loudly.
+
+describe("SSRF host validation (obfuscated IP literals)", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("blocks decimal IP literal http://2130706433/ (= 127.0.0.1)", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    await expect(resolveSource("http://2130706433/x", "f", baseCtx())).rejects.toThrow(/SOURCE_URL_BLOCKED/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks octal IP literal http://0177.0.0.1/ (= 127.0.0.1)", async () => {
+    await expect(resolveSource("http://0177.0.0.1/x", "f", baseCtx())).rejects.toThrow(/SOURCE_URL_BLOCKED/);
+  });
+
+  it("blocks hex IP literal http://0x7f.0.0.1/ (= 127.0.0.1)", async () => {
+    await expect(resolveSource("http://0x7f.0.0.1/x", "f", baseCtx())).rejects.toThrow(/SOURCE_URL_BLOCKED/);
+  });
+
+  it("blocks short-form IP literal http://127.1/ (= 127.0.0.1)", async () => {
+    await expect(resolveSource("http://127.1/x", "f", baseCtx())).rejects.toThrow(/SOURCE_URL_BLOCKED/);
+  });
+
+  it("blocks a trailing-dot loopback host http://127.0.0.1./", async () => {
+    await expect(resolveSource("http://127.0.0.1./x", "f", baseCtx())).rejects.toThrow(/SOURCE_URL_BLOCKED/);
+  });
+
+  it("blocks userinfo-prefixed metadata host http://x@169.254.169.254/", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    await expect(resolveSource("http://x@169.254.169.254/latest/", "f", baseCtx())).rejects.toThrow(
+      /SOURCE_URL_BLOCKED.*169\.254\.169\.254/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks an uppercase-scheme metadata URL (tagged form) HTTP://169.254.169.254/", async () => {
+    // Tagged {url} form so the string classifier (lowercase http:// only) does
+    // not misroute it to inline. assertAllowedScheme reads the URL-parser's
+    // lowercased protocol, then the host check rejects the metadata IP.
+    await expect(resolveSource({ url: "HTTP://169.254.169.254/latest/" }, "f", baseCtx())).rejects.toThrow(
+      /SOURCE_URL_BLOCKED/,
+    );
+  });
 });
 
 // ── SSRF: blocked via hostname DNS resolution ────────────────────

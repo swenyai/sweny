@@ -389,18 +389,26 @@ function isBlockedIpv6(raw: string): boolean {
 }
 
 /**
- * Extract the embedded IPv4 address from an IPv4-mapped / IPv4-compatible IPv6
- * literal. Handles both the dotted tail form (`::ffff:1.2.3.4`) and the hex
- * form the WHATWG URL parser normalizes to (`::ffff:0102:0304`).
+ * Extract the embedded IPv4 address from an IPv4-mapped IPv6 literal, handling
+ * both the dotted tail form (`::ffff:1.2.3.4`) and the hex form the WHATWG URL
+ * parser normalizes to (`::ffff:0102:0304`).
+ *
+ * Only `::ffff:`-prefixed (IPv4-mapped) addresses are unwrapped. A dotted tail
+ * on any other prefix (e.g. `fe80::1.2.3.4`) is NOT treated as an embedded
+ * IPv4: unwrapping it would skip the link-local / unique-local hextet checks
+ * below and let `fe80::1.2.3.4` masquerade as the public address 1.2.3.4. In
+ * practice the WHATWG URL parser already normalizes such inputs to hex form, so
+ * this is defense-in-depth, but the predicate must be correct on its own.
  */
 function embeddedIpv4(ip: string): number[] | null {
+  if (!ip.includes("::ffff:")) return null;
+
   // Dotted tail form: ::ffff:1.2.3.4
   const lastColon = ip.lastIndexOf(":");
   const tail = lastColon >= 0 ? ip.slice(lastColon + 1) : ip;
   if (tail.includes(".")) return ipv4Octets(tail);
 
   // Hex form: an IPv4-mapped address ends in two hextets after ::ffff:.
-  if (!ip.includes("::ffff:")) return null;
   const groups = ip.split(":").filter((g) => g.length > 0);
   if (groups.length < 2) return null;
   const hi = parseInt(groups[groups.length - 2], 16);
