@@ -85,6 +85,13 @@ export const skillZ = z
     mcp: mcpServerConfigZ.optional(),
     mcpAliases: z.record(z.array(z.string().min(1)).min(1)).optional(),
   })
+  // Strict to match the published skill JSON Schema's
+  // `additionalProperties: false`. Without this an unknown top-level key was
+  // silently STRIPPED by Zod but REJECTED by ajv (the one remaining
+  // Zod<->ajv skill divergence #214 flagged). custom-loader.ts builds Skill
+  // objects from frontmatter directly and never runs skillZ, so nothing
+  // downstream relies on extra keys passing through.
+  .strict()
   .refine((s) => s.tools.length > 0 || s.instruction || s.mcp, {
     message: "Skill must provide at least one of: tools, instruction, or mcp",
   });
@@ -816,7 +823,10 @@ export const workflowJsonSchema = {
           eval_policy: {
             type: "string",
             enum: [...EVAL_POLICIES],
-            default: "all_pass",
+            // No JSON `default` here: evalPolicyZ is `.optional()` with no
+            // `.default()`, so Zod leaves this undefined and the executor
+            // applies `?? "all_pass"` at use-time (executor.ts aggregateEval).
+            // Matches the judge_model / judge_budget treatment (issue #214 #6).
             description: "How evaluator results aggregate. v1 implements all_pass; the others are reserved.",
           },
           judge_model: {

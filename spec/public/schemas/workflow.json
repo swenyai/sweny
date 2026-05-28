@@ -472,7 +472,6 @@
           "eval_policy": {
             "type": "string",
             "enum": ["all_pass", "any_pass", "weighted"],
-            "default": "all_pass",
             "description": "How evaluator results aggregate. v1 implements all_pass; the others are reserved."
           },
           "judge_model": {

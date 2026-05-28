@@ -616,6 +616,54 @@ const fixtures: Fixture[] = [
     expected: false,
   },
   {
+    name: "value evaluator carrying pass_when (judge-only field)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: {
+          ...baseNode(),
+          eval: [{ name: "x", kind: "value", rule: { any_tool_called: ["t"] }, pass_when: "yes" }],
+        },
+      },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "function evaluator carrying a rubric (judge-only field)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: {
+          ...baseNode(),
+          eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["t"] }, rubric: "good?" }],
+        },
+      },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "function evaluator carrying model (judge-only field)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: {
+          ...baseNode(),
+          eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["t"] }, model: "claude-haiku-4-5" }],
+        },
+      },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
     name: "judge evaluator with rubric + model (model is judge-legal)",
     input: {
       id: "d",
@@ -721,6 +769,54 @@ const fixtures: Fixture[] = [
     },
     expected: true,
   },
+  {
+    name: "inputs number field with a string enum element (type mismatch)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      inputs: { count: { type: "number", enum: [1, "two", 3] } },
+    },
+    expected: false,
+  },
+  {
+    name: "inputs boolean field with a numeric enum element (type mismatch)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      inputs: { flag: { type: "boolean", enum: [true, 0] } },
+    },
+    expected: false,
+  },
+  {
+    name: "inputs string[] field with a non-array enum element (type mismatch)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      inputs: { labels: { type: "string[]", enum: [["a"], "b"] } },
+    },
+    expected: false,
+  },
+  {
+    name: "inputs string[] field with a string[] enum (ok)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      inputs: { labels: { type: "string[]", enum: [["a"], ["b", "c"]] } },
+    },
+    expected: true,
+  },
 ];
 
 describe("Zod ↔ JSON Schema conformance", () => {
@@ -800,6 +896,14 @@ const skillFixtures: Fixture[] = [
   {
     name: "skill missing required category (rejected by both)",
     input: { id: "x", name: "X", description: "d", config: {}, instruction: "y" },
+    expected: false,
+  },
+  {
+    name: "skill with an unknown top-level key (rejected by both)",
+    // skillZ is now .strict() to match the JSON Schema's
+    // additionalProperties: false. Before this, Zod silently stripped the
+    // unknown key (accept) while ajv rejected it — the last skill divergence.
+    input: { ...baseSkill(), instruction: "x", bogusKey: "value" },
     expected: false,
   },
 ];

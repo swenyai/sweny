@@ -1142,6 +1142,14 @@ describe("spec: JSON Schema", () => {
     expect((workflowJsonSchema.properties.judge_model as any).default).toBeUndefined();
     expect((workflowJsonSchema.properties.judge_budget as any).default).toBeUndefined();
   });
+
+  it("node eval_policy carries no misleading JSON default (issue #214 fix #6)", () => {
+    // evalPolicyZ is .optional() with no .default(); the executor applies
+    // `?? "all_pass"` at use-time. A JSON default Zod never writes back is
+    // misleading, same as judge_model / judge_budget above.
+    const nodeProps = (workflowJsonSchema.properties.nodes as any).additionalProperties.properties;
+    expect(nodeProps.eval_policy.default).toBeUndefined();
+  });
 });
 
 // ─── Spec Section: Source Types ──────────────────────────────────
