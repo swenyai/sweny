@@ -426,11 +426,21 @@ describe("runWorkflow custom workflows (file-run path)", () => {
   });
 
   // The custom path resolves the workflow file with several chained `await`s
-  // (readdir → readFile → parse) before spawning, so wait until spawn is
-  // actually called before driving the child's events.
-  async function waitForSpawn(): Promise<void> {
-    for (let i = 0; i < 50 && mockSpawn.mock.calls.length === 0; i++) {
-      await new Promise((r) => setImmediate(r));
+  // backed by real libuv fs I/O (readdir → readFile → parse) before spawning,
+  // so wait until spawn is actually called before driving the child's events.
+  //
+  // Poll on a macrotask (setTimeout, which yields through the libuv poll phase
+  // where fs callbacks land) with a wall-clock deadline rather than a fixed
+  // tick count. A fixed `setImmediate` cap can undershoot on a slow/loaded CI
+  // runner when the fs chain has not completed in N ticks, which surfaced as a
+  // flaky "Number of calls: 0" failure on the Node 20 job.
+  async function waitForSpawn(timeoutMs = 5000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (mockSpawn.mock.calls.length === 0) {
+      if (Date.now() > deadline) {
+        throw new Error("timed out waiting for sweny CLI spawn");
+      }
+      await new Promise((r) => setTimeout(r, 1));
     }
   }
 
