@@ -12,9 +12,8 @@ const mockedReaddirSync = vi.mocked(readdirSync);
 const mockedReadFileSync = vi.mocked(readFileSync);
 
 // Import after mocking
-const { discoverSkills, discoverSkillsWithDiagnostics, configuredSkillsWithDiagnostics } = await import(
-  "../skills/custom-loader.js"
-);
+const { discoverSkills, discoverSkillsWithDiagnostics, configuredSkillsWithDiagnostics } =
+  await import("../skills/custom-loader.js");
 const { github } = await import("../skills/github.js");
 
 describe("custom-loader", () => {
