@@ -516,6 +516,10 @@ export interface Claude {
     disallowedTools?: string[];
     /** Per-node execution model. Overrides the client default when set. Absent = no SDK model option emitted. */
     model?: string;
+    /** Abort the query after this many ms. Default: no timeout (back-compat). */
+    timeoutMs?: number;
+    /** Caller-supplied abort signal. Aborting it interrupts the query. */
+    signal?: AbortSignal;
   }): Promise<NodeResult>;
 
   /** Evaluate a routing condition — pick one of N choices */
@@ -523,6 +527,10 @@ export interface Claude {
     question: string;
     context: Record<string, unknown>;
     choices: { id: string; description: string }[];
+    /** Abort the query after this many ms. Default: no timeout (back-compat). */
+    timeoutMs?: number;
+    /** Caller-supplied abort signal. Aborting it interrupts the query. */
+    signal?: AbortSignal;
   }): Promise<string>;
 
   /**
@@ -533,7 +541,15 @@ export interface Claude {
    * `model` overrides the client's default for this call. Implementations
    * SHOULD use it; mocks MAY ignore it.
    */
-  ask(opts: { instruction: string; context: Record<string, unknown>; model?: string }): Promise<string>;
+  ask(opts: {
+    instruction: string;
+    context: Record<string, unknown>;
+    model?: string;
+    /** Abort the query after this many ms. Default: no timeout (back-compat). */
+    timeoutMs?: number;
+    /** Caller-supplied abort signal. Aborting it interrupts the query. */
+    signal?: AbortSignal;
+  }): Promise<string>;
 }
 
 // ─── MCP Auto-injection ──────────────────────────────────────────

@@ -977,6 +977,65 @@ describe("ClaudeClient", () => {
       expect(result.status).toBe("success");
       expect(interrupt).toHaveBeenCalled();
     });
+
+    it("run aborts on an externally-supplied signal and does NOT report it as a timeout", async () => {
+      // The caller's own signal composes with the timer on a single
+      // controller. A signal-driven abort must take the generic-error path,
+      // not the timeout path, so the failure is attributed correctly.
+      const external = new AbortController();
+      let captured: AbortController | undefined;
+      const { stream, interrupt } = makeHangingStream(() => captured);
+      mockQuery.mockImplementationOnce((args: any) => {
+        captured = args.options.abortController;
+        // Fire the external signal once the query is in flight.
+        setTimeout(() => external.abort(), 10);
+        return stream;
+      });
+
+      const errorSpy = vi.fn();
+      const logger = { info: () => undefined, warn: () => undefined, error: errorSpy, debug: () => undefined };
+      const client = new ClaudeClient({ logger });
+      // Generous timeout so the external signal, not the timer, wins.
+      const result = await client.run({
+        instruction: "x",
+        context: {},
+        tools: [],
+        timeoutMs: 5000,
+        signal: external.signal,
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.data.error).not.toMatch(/timed out/);
+      expect(interrupt).toHaveBeenCalled();
+      // Must not log the timeout message for a caller-driven abort.
+      expect(errorSpy).not.toHaveBeenCalledWith(expect.stringMatching(/timed out/));
+    });
+
+    it("run aborts immediately when handed an already-aborted signal", async () => {
+      const external = new AbortController();
+      external.abort();
+      let captured: AbortController | undefined;
+      const { stream, interrupt } = makeHangingStream(() => captured);
+      mockQuery.mockImplementationOnce((args: any) => {
+        captured = args.options.abortController;
+        return stream;
+      });
+
+      const client = new ClaudeClient();
+      const result = await client.run({
+        instruction: "x",
+        context: {},
+        tools: [],
+        signal: external.signal,
+      });
+
+      // The controller handed to the SDK is already aborted, the hanging
+      // stream rejects, and we surface a non-timeout failure with cleanup.
+      expect(captured?.signal.aborted).toBe(true);
+      expect(result.status).toBe("failed");
+      expect(result.data.error).not.toMatch(/timed out/);
+      expect(interrupt).toHaveBeenCalled();
+    });
   });
 
   // Issue #215, fix #4: evaluate must distinguish an SDK-level failure

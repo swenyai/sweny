@@ -277,18 +277,11 @@ export class ClaudeClient implements Claude {
     // A single AbortController drives both an optional caller signal and an
     // optional timeout timer. The SDK aborts the subprocess when this fires.
     const abort = makeAbort(timeoutMs, signal);
-    let timedOut = false;
     let stream: ReturnType<typeof query> | undefined;
 
     try {
       const allMcpServers: Record<string, any> = { ...this.mcpServers };
       if (sdkTools.length > 0) allMcpServers["sweny-core"] = mcpServer;
-
-      if (abort) {
-        abort.controller.signal.addEventListener("abort", () => {
-          if (abort.reason() === "timeout") timedOut = true;
-        });
-      }
 
       stream = query({
         prompt,
@@ -401,7 +394,7 @@ export class ClaudeClient implements Claude {
         }
       }
     } catch (err: any) {
-      if (timedOut) {
+      if (abort?.reason() === "timeout") {
         const msg = `Claude query timed out after ${timeoutMs}ms`;
         this.logger.error(msg);
         return { status: "failed", data: { error: msg }, toolCalls };
@@ -444,17 +437,10 @@ export class ClaudeClient implements Claude {
     let response = "";
 
     const abort = makeAbort(timeoutMs, signal);
-    let timedOut = false;
     let sdkFailed = false;
     let stream: ReturnType<typeof query> | undefined;
 
     try {
-      if (abort) {
-        abort.controller.signal.addEventListener("abort", () => {
-          if (abort.reason() === "timeout") timedOut = true;
-        });
-      }
-
       stream = query({
         prompt,
         options: {
@@ -488,7 +474,7 @@ export class ClaudeClient implements Claude {
         }
       }
     } catch (err: any) {
-      if (timedOut) {
+      if (abort?.reason() === "timeout") {
         this.logger.warn(`Evaluate query timed out after ${timeoutMs}ms. Falling back to first choice.`);
       } else {
         this.logger.warn(`Evaluate query failed: ${err.message}. Falling back to first choice.`);
@@ -540,16 +526,9 @@ export class ClaudeClient implements Claude {
     const effectiveModel = model ?? this.model;
 
     const abort = makeAbort(timeoutMs, signal);
-    let timedOut = false;
     let stream: ReturnType<typeof query> | undefined;
 
     try {
-      if (abort) {
-        abort.controller.signal.addEventListener("abort", () => {
-          if (abort.reason() === "timeout") timedOut = true;
-        });
-      }
-
       stream = query({
         prompt,
         options: {
@@ -577,7 +556,7 @@ export class ClaudeClient implements Claude {
         }
       }
     } catch (err: any) {
-      if (timedOut) {
+      if (abort?.reason() === "timeout") {
         this.logger.warn(`Ask query timed out after ${timeoutMs}ms — returning empty string`);
       } else {
         this.logger.warn(`Ask query failed: ${err.message}`);
