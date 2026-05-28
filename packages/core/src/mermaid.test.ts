@@ -187,6 +187,31 @@ describe("toMermaid", () => {
     expect(result).not.toContain('Say "hello"');
   });
 
+  it("escapes `|` in edge labels and node names so the -->|...| delimiter isn't broken (CC-07)", () => {
+    const wf: Workflow = {
+      id: "pipe",
+      name: "Pipe",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "high | critical", instruction: "x", skills: [] },
+        b: { name: "Done", instruction: "x", skills: [] },
+      },
+      edges: [{ from: "a", to: "b", when: "severity is high | critical" }],
+    };
+    const result = toMermaid(wf);
+
+    // The raw `|` is replaced by the HTML entity in both label contexts.
+    expect(result).toContain("&#124;");
+    // The only literal `|` characters left are the Mermaid edge-label
+    // delimiters in `-->|"..."|`. Strip those, then confirm no stray `|`
+    // survived from the user-supplied text.
+    const withoutDelimiters = result.replace(/-->\|"[^|]*"\|/g, "-->DELIM");
+    expect(withoutDelimiters).not.toContain("|");
+    // The edge label is delimited correctly and carries the full text.
+    expect(result).toContain('-->|"severity is high &#124; critical"|');
+  });
+
   it("groups multiple nodes with same status", () => {
     const result = toMermaid(simple, {
       state: { a: "success", b: "success", c: "current" },
