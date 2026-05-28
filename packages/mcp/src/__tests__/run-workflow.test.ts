@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
@@ -10,6 +10,8 @@ vi.mock("node:child_process", () => ({
 
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import * as fs from "node:fs";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { runWorkflow, resolveSwenyInvocation } from "../handlers/run-workflow.js";
 
@@ -389,5 +391,96 @@ describe("runWorkflow", () => {
     expect(JSON.parse(result.output)).toEqual({ partial: "data" });
 
     vi.useRealTimers();
+  });
+});
+
+describe("runWorkflow custom workflows (file-run path)", () => {
+  const tempDirs: string[] = [];
+
+  function freshProject(): string {
+    const dir = path.join(tmpdir(), `sweny-mcp-run-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const workflowDir = path.join(dir, ".sweny", "workflows");
+    fs.mkdirSync(workflowDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(workflowDir, "custom.yml"),
+      [
+        "id: my-custom",
+        "name: My Custom Workflow",
+        "description: A test custom workflow",
+        "entry: start",
+        "nodes:",
+        "  start:",
+        "    name: Start",
+        "    instruction: Do the thing",
+        "    skills: []",
+        "edges: []",
+      ].join("\n"),
+    );
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  afterEach(() => {
+    for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+    tempDirs.length = 0;
+  });
+
+  // The custom path resolves the workflow file with several chained `await`s
+  // (readdir → readFile → parse) before spawning, so wait until spawn is
+  // actually called before driving the child's events.
+  async function waitForSpawn(): Promise<void> {
+    for (let i = 0; i < 50 && mockSpawn.mock.calls.length === 0; i++) {
+      await new Promise((r) => setImmediate(r));
+    }
+  }
+
+  it("dispatches a custom workflow id via `workflow run <file>`", async () => {
+    const dir = freshProject();
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+
+    const promise = runWorkflow({ workflow: "my-custom", cwd: dir });
+    await waitForSpawn();
+
+    const expectedFile = path.join(dir, ".sweny", "workflows", "custom.yml");
+    expect(mockSpawn).toHaveBeenCalledWith(
+      cmd,
+      expectArgs("workflow", "run", expectedFile, "--json", "--stream"),
+      expect.objectContaining({ cwd: dir, stdio: ["ignore", "pipe", "pipe"] }),
+    );
+
+    proc.stdout!.emit("data", Buffer.from('{"ok": true}\n'));
+    proc._emit("close", 0);
+    const result = await promise;
+    expect(result.success).toBe(true);
+  });
+
+  it("passes optional input through as --input for a custom workflow", async () => {
+    const dir = freshProject();
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+
+    const promise = runWorkflow({ workflow: "my-custom", cwd: dir, input: '{"foo":"bar"}', dryRun: true });
+    await waitForSpawn();
+
+    const expectedFile = path.join(dir, ".sweny", "workflows", "custom.yml");
+    expect(mockSpawn).toHaveBeenCalledWith(
+      cmd,
+      expectArgs("workflow", "run", expectedFile, "--input", '{"foo":"bar"}', "--json", "--stream", "--dry-run"),
+      expect.any(Object),
+    );
+
+    proc._emit("close", 0);
+    await promise;
+  });
+
+  it("returns an error (no spawn) for an unknown custom workflow id", async () => {
+    const dir = freshProject();
+
+    const result = await runWorkflow({ workflow: "does-not-exist", cwd: dir });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("was not found in .sweny/workflows/");
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 });

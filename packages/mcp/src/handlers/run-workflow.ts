@@ -3,9 +3,16 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveCustomWorkflowFile } from "./list-workflows.js";
 
 export interface RunWorkflowInput {
-  workflow: "triage" | "implement";
+  /**
+   * Which workflow to run. The built-ins "triage" and "implement" dispatch via
+   * their dedicated CLI subcommands; any other value is treated as a custom
+   * workflow id and resolved to its file under `.sweny/workflows/`, then run
+   * via `sweny workflow run <file>`.
+   */
+  workflow: string;
   /** For implement: issue ID or URL. For triage: ignored (discovers alerts automatically). */
   input?: string;
   cwd?: string;
@@ -89,18 +96,32 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
     };
   }
 
+  const cwd = opts.cwd ?? process.cwd();
   const args: string[] = [];
 
-  if (opts.workflow === "implement") {
+  if (opts.workflow === "triage") {
+    args.push("triage");
+  } else if (opts.workflow === "implement") {
     args.push("implement", opts.input!.trim());
   } else {
-    args.push("triage");
+    // Custom workflow: resolve its id to a file under .sweny/workflows/ and run
+    // it via `sweny workflow run <file>`. Constraining resolution to that
+    // directory keeps the spawn surface narrow (no arbitrary paths).
+    const file = await resolveCustomWorkflowFile(cwd, opts.workflow);
+    if (!file) {
+      return {
+        success: false,
+        output: "",
+        error: `Workflow "${opts.workflow}" was not found in .sweny/workflows/. Use sweny_list_workflows to see runnable workflows.`,
+      };
+    }
+    args.push("workflow", "run", file);
+    if (opts.input?.trim()) args.push("--input", opts.input.trim());
   }
 
   args.push("--json", "--stream");
   if (opts.dryRun) args.push("--dry-run");
 
-  const cwd = opts.cwd ?? process.cwd();
   const { command, prefixArgs } = resolveSwenyInvocation();
 
   return new Promise((resolve) => {
