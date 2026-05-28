@@ -93,6 +93,7 @@ describe("reportToCloud", () => {
       context: [],
       offline: false,
       fetchAuth: {},
+      allowFileOutsideRoot: false,
       ...overrides,
     };
   }

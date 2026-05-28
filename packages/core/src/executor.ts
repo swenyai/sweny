@@ -63,6 +63,21 @@ export interface ExecuteOptions {
   /** When true, URL Sources throw instead of fetching */
   offline?: boolean;
   /**
+   * Root directory `file:` Sources are sandboxed to. A `file:` source that
+   * resolves outside this tree (via `..` traversal or an absolute path) is
+   * rejected with `SOURCE_FILE_OUTSIDE_ROOT`. Defaults to {@link cwd} (or
+   * `process.cwd()`), so the sandbox is ON by default. Set
+   * {@link allowFileOutsideRoot} to opt out.
+   */
+  fileRoot?: string;
+  /**
+   * Opt out of the {@link fileRoot} sandbox, permitting `file:` Sources to read
+   * anywhere on disk. Defaults to `false`. Wire this from a trusted config
+   * surface (e.g. a `.sweny.yml` `allowFileOutsideRoot: true`) for legacy
+   * workflows that reference absolute paths outside the repo.
+   */
+  allowFileOutsideRoot?: boolean;
+  /**
    * Workflow-level hard cap on total node executions (the number of times the
    * main loop visits a node). Guards against unbounded cycles, e.g. a back-edge
    * with no `max_iterations` or an LLM route evaluator that keeps choosing the
@@ -147,11 +162,17 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     nodeContext.forEach((s, i) => (sourceMap[`nodes.${nodeId}.context.${i}`] = s));
   }
 
+  const resolveCwd = options.cwd ?? process.cwd();
   const resolvedSources = await resolveSources(sourceMap, {
-    cwd: options.cwd ?? process.cwd(),
+    cwd: resolveCwd,
     env: options.env ?? process.env,
     authConfig: options.fetchAuth ?? {},
     offline: options.offline ?? false,
+    // Sandbox `file:` Sources to the workflow dir / cwd by default. Workflows
+    // that legitimately reference absolute paths outside the repo must opt out
+    // via `allowFileOutsideRoot`.
+    fileRoot: options.fileRoot ?? resolveCwd,
+    allowFileOutsideRoot: options.allowFileOutsideRoot ?? false,
     logger,
   });
   trace.sources = resolvedSources;

@@ -10,7 +10,7 @@
  *   - normal https URL + relative file paths still resolve (back-compat)
  */
 
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -280,11 +280,35 @@ describe("file-path sandbox", () => {
     }
   });
 
-  it("with no fileRoot configured, legacy read-anywhere behavior is preserved", async () => {
+  it("rejects a symlink inside the root that points outside it", async () => {
+    // A symlink that lives inside the sandbox but targets an external secret.
+    // The lexical check alone would pass it; realpath canonicalization catches it.
+    const secret = path.join(tmpdir(), `sweny-secret-${randomBytes(4).toString("hex")}.md`);
+    writeFileSync(secret, "TOP-SECRET-OUTSIDE-ROOT");
+    const link = path.join(fileTmp, "link.md");
+    try {
+      symlinkSync(secret, link);
+    } catch {
+      // Some CI environments disallow symlink creation; skip rather than fail.
+      rmSync(secret, { force: true });
+      return;
+    }
+    try {
+      await expect(
+        resolveSource("./link.md", "f", { ...baseCtx(), cwd: fileTmp, fileRoot: fileTmp }),
+      ).rejects.toThrow(/SOURCE_FILE_OUTSIDE_ROOT/);
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(secret, { force: true });
+    }
+  });
+
+  it("with allowFileOutsideRoot, legacy read-anywhere behavior is restored", async () => {
     const abs = path.join(fileTmp, "legacy.md");
     writeFileSync(abs, "legacy body");
-    // cwd is /tmp, abs is under tmpdir (not /tmp on macOS), no sandbox => allowed
-    const resolved = await resolveSource(abs, "f", baseCtx());
+    // fileRoot is /tmp (the sandbox is active), abs is under tmpdir (not /tmp on
+    // macOS): the explicit opt-out is what lets it through, not an unset root.
+    const resolved = await resolveSource(abs, "f", { ...baseCtx(), fileRoot: "/tmp", allowFileOutsideRoot: true });
     expect(resolved.content).toBe("legacy body");
   });
 });

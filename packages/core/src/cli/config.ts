@@ -118,6 +118,14 @@ export interface CliConfig {
   // Source resolution
   offline: boolean;
   fetchAuth: Record<string, string>;
+  /**
+   * Opt out of the `file:` Source sandbox (which defaults to the repo root /
+   * cwd). When true, `file:` Sources may read anywhere on disk — restoring the
+   * pre-sandbox read-anywhere behavior for legacy workflows that reference
+   * absolute paths outside the repo. Set via `--allow-file-outside-root` or a
+   * `.sweny.yml` `allow-file-outside-root: true`.
+   */
+  allowFileOutsideRoot: boolean;
 }
 
 export function registerTriageCommand(program: Command): Command {
@@ -200,7 +208,12 @@ export function registerTriageCommand(program: Command): Command {
       "--workspace-tools <tools>",
       "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday)",
     )
-    .option("--offline", "Skip URL Sources and fail fast if any are referenced", false);
+    .option("--offline", "Skip URL Sources and fail fast if any are referenced", false)
+    .option(
+      "--allow-file-outside-root",
+      "Allow file: Sources to read outside the repo root (disables the path-traversal sandbox)",
+      false,
+    );
 }
 
 export function parseCliInputs(options: Record<string, unknown>, fileConfig: FileConfig = {}): CliConfig {
@@ -350,7 +363,16 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
 
     offline: Boolean(options.offline),
     fetchAuth: parseFetchAuth(fileConfig),
+    // CLI flag wins; otherwise honor a `.sweny.yml` boolean. Default false:
+    // the file: sandbox is ON unless explicitly disabled.
+    allowFileOutsideRoot: Boolean(options.allowFileOutsideRoot) || fileBool(fileConfig, "allow-file-outside-root"),
   };
+}
+
+/** Read a boolean from file config, accepting `true`/`"true"` (and `1`). */
+function fileBool(fileConfig: FileConfig, key: string): boolean {
+  const v = (fileConfig as Record<string, unknown>)[key];
+  return v === true || v === "true" || v === 1 || v === "1";
 }
 
 function parseFetchAuth(fileConfig: FileConfig): Record<string, string> {
@@ -866,7 +888,12 @@ export function registerImplementCommand(program: Command): Command {
       "Print each tool call's input and output inline (human-readable, truncated). Use --stream for full untruncated NDJSON.",
       false,
     )
-    .option("--offline", "Skip URL Sources and fail fast if any are referenced", false);
+    .option("--offline", "Skip URL Sources and fail fast if any are referenced", false)
+    .option(
+      "--allow-file-outside-root",
+      "Allow file: Sources to read outside the repo root (disables the path-traversal sandbox)",
+      false,
+    );
 }
 
 /**

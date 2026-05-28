@@ -100,14 +100,17 @@ export type SourceResolutionContext = {
   fetchTokenHosts?: string[];
   /**
    * Restrict `file:` source resolution to this directory tree (the repo root,
-   * typically `cwd`). Relative and absolute paths that escape it via `..` or
-   * symlinks are rejected. Defaults to `cwd`. Set
-   * {@link allowFileOutsideRoot} to opt out.
+   * typically `cwd`). Relative and absolute paths that escape it via `..` or via
+   * a symlink pointing outside the root are rejected (the resolver canonicalizes
+   * with `realpath` before the containment check). When unset the sandbox is not
+   * engaged, but every production caller (executor `resolveSources`, CLI
+   * `loadTemplate`/`loadAdditionalContext`) defaults this to `cwd`, so the
+   * sandbox is ON by default. Set {@link allowFileOutsideRoot} to opt out.
    */
   fileRoot?: string;
   /**
    * Opt out of the {@link fileRoot} sandbox, permitting `file:` sources to read
-   * anywhere on disk (legacy behavior). Defaults to `false`.
+   * anywhere on disk (legacy read-anywhere behavior). Defaults to `false`.
    */
   allowFileOutsideRoot?: boolean;
   /**

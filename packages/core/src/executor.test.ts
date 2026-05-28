@@ -227,6 +227,71 @@ describe("executor", () => {
     expect(events[events.length - 1].type).toBe("workflow:end");
   });
 
+  // ── file: source sandbox (IO-01) ──────────────────────────────
+  // Regression guard at the production boundary: the sandbox must be ON by
+  // default for `execute()`, not just when a unit test hand-injects fileRoot.
+  describe("file: source sandbox", () => {
+    const sandboxWorkflow = (source: { file: string }): Workflow => ({
+      id: "test-sandbox",
+      name: "Sandbox Test",
+      description: "single node with a file: context source",
+      entry: "n1",
+      nodes: {
+        n1: { name: "N1", instruction: "do the thing", context: [source], skills: [] },
+      },
+      edges: [],
+    });
+
+    it("blocks an absolute file: source outside the default root (cwd)", async () => {
+      const skills = createSkillMap([]);
+      const claude = new MockClaude({ responses: { n1: { data: {} } } });
+      await expect(
+        execute(sandboxWorkflow({ file: "/etc/passwd" }), {}, { skills, claude, cwd: outputDir, config: {} }),
+      ).rejects.toThrow(/SOURCE_FILE_OUTSIDE_ROOT/);
+    });
+
+    it("blocks a ..-traversal file: source by default", async () => {
+      const skills = createSkillMap([]);
+      const claude = new MockClaude({ responses: { n1: { data: {} } } });
+      await expect(
+        execute(
+          sandboxWorkflow({ file: "../../../../../../../../etc/passwd" }),
+          {},
+          { skills, claude, cwd: outputDir, config: {} },
+        ),
+      ).rejects.toThrow(/SOURCE_FILE_OUTSIDE_ROOT/);
+    });
+
+    it("resolves an in-root relative file: source under the default sandbox", async () => {
+      writeFileSync(path.join(outputDir, "rules.md"), "in-repo rules");
+      const skills = createSkillMap([]);
+      const claude = new MockClaude({ responses: { n1: { data: {} } } });
+      const { trace } = await execute(
+        sandboxWorkflow({ file: "./rules.md" }),
+        {},
+        { skills, claude, cwd: outputDir, config: {} },
+      );
+      expect(trace.sources["nodes.n1.context.0"].content).toBe("in-repo rules");
+    });
+
+    it("allowFileOutsideRoot restores read-anywhere", async () => {
+      const outside = path.join(tmpdir(), `sweny-outside-${randomBytes(4).toString("hex")}.md`);
+      writeFileSync(outside, "outside body");
+      const skills = createSkillMap([]);
+      const claude = new MockClaude({ responses: { n1: { data: {} } } });
+      try {
+        const { trace } = await execute(
+          sandboxWorkflow({ file: outside }),
+          {},
+          { skills, claude, cwd: outputDir, allowFileOutsideRoot: true, config: {} },
+        );
+        expect(trace.sources["nodes.n1.context.0"].content).toBe("outside body");
+      } finally {
+        rmSync(outside, { force: true });
+      }
+    });
+  });
+
   it("executes conditional branches", async () => {
     const fileSkill = createFileSkill(outputDir);
     const skills = createSkillMap([fileSkill]);

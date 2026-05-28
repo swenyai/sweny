@@ -190,6 +190,7 @@ async function resolveRulesAndContext(config: CliConfig): Promise<{
     offline: config.offline,
     fetchAuth: config.fetchAuth,
     env: process.env,
+    allowFileOutsideRoot: config.allowFileOutsideRoot,
   };
   const [rulesResult, contextResult] = await Promise.all([
     loadAdditionalContext(config.rules, loadOptions),
@@ -437,6 +438,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
       env: process.env,
       fetchAuth: config.fetchAuth,
       offline: config.offline,
+      allowFileOutsideRoot: config.allowFileOutsideRoot,
     });
 
     const durationMs = Date.now() - runStart;
@@ -644,6 +646,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       env: process.env,
       fetchAuth: config.fetchAuth,
       offline: config.offline,
+      allowFileOutsideRoot: config.allowFileOutsideRoot,
     });
 
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
@@ -967,6 +970,7 @@ export async function workflowRunAction(
       env: process.env,
       fetchAuth: config.fetchAuth,
       offline: config.offline,
+      allowFileOutsideRoot: config.allowFileOutsideRoot,
     });
 
     const wfDurationMs = Date.now() - runStart;

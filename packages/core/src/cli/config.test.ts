@@ -86,6 +86,7 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
     context: [],
     offline: false,
     fetchAuth: {},
+    allowFileOutsideRoot: false,
     cloudToken: "",
     ...overrides,
   };
