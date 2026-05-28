@@ -58,7 +58,11 @@ export function loadConfigFile(cwd: string = process.cwd()): FileConfig {
   let raw: unknown;
   try {
     raw = parseYaml(content);
-  } catch {
+  } catch (err) {
+    // A malformed config file must not silently fall back to defaults — the
+    // user would get unexpected behavior with no clue their file was dropped.
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn(`⚠  Ignoring malformed config file ${filePath}: ${reason}`);
     return {};
   }
 

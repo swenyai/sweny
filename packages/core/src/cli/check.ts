@@ -7,6 +7,12 @@ export interface CheckResult {
 }
 
 /**
+ * Per-check network timeout. A hung connect must not make `sweny check` hang
+ * indefinitely — the whole point of the command is fast diagnostics.
+ */
+const CHECK_TIMEOUT_MS = 5000;
+
+/**
  * Run lightweight connectivity checks for all configured providers.
  * Uses raw fetch — does NOT import provider packages.
  */
@@ -114,6 +120,7 @@ async function checkAnthropic(apiKey: string): Promise<CheckResult> {
   try {
     const res = await fetch("https://api.anthropic.com/v1/models", {
       headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
     });
     if (res.status === 200) {
       return { name, status: "ok", detail: "API key is valid" };
@@ -175,7 +182,7 @@ export async function checkAnthropicGateway(
   }
   try {
     const url = base.replace(/\/+$/, "") + "/v1/models";
-    const res = await fetch(url, { headers });
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) });
     // Gateways vary on whether /v1/models exists; reachable + non-auth-error is good enough.
     if (res.ok || res.status === 404) {
       return { name, status: "ok", detail: `gateway reachable (${safeBase}), auth mode: ${mode}` };
@@ -189,15 +196,25 @@ export async function checkAnthropicGateway(
   }
 }
 
-async function checkDatadog(creds: Record<string, string>): Promise<CheckResult> {
+export async function checkDatadog(creds: Record<string, string>): Promise<CheckResult> {
   const name = "Observability (datadog)";
   const { apiKey, appKey, site = "datadoghq.com" } = creds;
   if (!apiKey || !appKey) {
     return { name, status: "skip", detail: "DD_API_KEY or DD_APP_KEY not configured" };
   }
+  // `site` (DD_SITE) is interpolated into the request URL — reject anything
+  // outside a hostname allowlist before it can smuggle a path/query/host.
+  if (!/^[a-z0-9.-]+$/.test(site)) {
+    return {
+      name,
+      status: "fail",
+      detail: `Invalid DD_SITE "${site}" — expected a hostname like datadoghq.com or datadoghq.eu`,
+    };
+  }
   try {
     const res = await fetch(`https://api.${site}/api/v2/validate`, {
       headers: { "DD-API-KEY": apiKey, "DD-APPLICATION-KEY": appKey },
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
     });
     if (res.status === 200) {
       return { name, status: "ok", detail: "API key is valid" };
@@ -225,6 +242,7 @@ async function checkSentry(creds: Record<string, string>): Promise<CheckResult> 
   try {
     const res = await fetch("https://sentry.io/api/0/", {
       headers: { Authorization: `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
     });
     if (res.status === 200) {
       return { name, status: "ok", detail: "Auth token is valid" };
@@ -252,6 +270,7 @@ async function checkLinear(apiKey: string): Promise<CheckResult> {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ query: "{ viewer { id name } }" }),
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
     });
     if (res.status === 200) {
       const body = (await res.json()) as { data?: { viewer?: { name?: string } }; errors?: unknown[] };
@@ -281,6 +300,7 @@ async function checkGitHub(token: string, name: string): Promise<CheckResult> {
   try {
     const res = await fetch("https://api.github.com/user", {
       headers: { Authorization: `token ${token}`, "User-Agent": "sweny-cli" },
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
     });
     if (res.status === 200) {
       const body = (await res.json()) as { login?: string };
@@ -300,6 +320,12 @@ async function checkGitHub(token: string, name: string): Promise<CheckResult> {
 }
 
 function networkErrorMessage(err: unknown): string {
+  // AbortSignal.timeout fires a DOMException with name "TimeoutError"; an
+  // explicit abort surfaces as "AbortError". Either means we gave up waiting.
+  const errName = err instanceof Error ? err.name : "";
+  if (errName === "TimeoutError" || errName === "AbortError") {
+    return `Connection timed out after ${CHECK_TIMEOUT_MS}ms — host unreachable or too slow`;
+  }
   const msg = err instanceof Error ? err.message : String(err);
   if (/ENOTFOUND|ETIMEDOUT|ECONNREFUSED/i.test(msg)) {
     return `Network error — check your internet connection (${msg})`;

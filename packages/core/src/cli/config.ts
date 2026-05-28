@@ -193,7 +193,7 @@ export function registerTriageCommand(program: Command): Command {
     )
     .option("--bell", "Ring terminal bell on completion", false)
     .option("--cache-dir <path>", "Step cache directory (default: .sweny/cache)")
-    .option("--cache-ttl <seconds>", "Cache TTL in seconds, 0 = infinite (default: 86400)")
+    .option("--cache-ttl <seconds>", "Cache TTL in seconds, 1 to 31536000 (default: 86400)")
     .option("--no-cache", "Disable step cache")
     .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
     .option(
@@ -616,6 +616,9 @@ export function validateInputs(config: CliConfig): string[] {
   // bounds check let junk through).
   validateIntegerBound(errors, "--max-investigate-turns", config.maxInvestigateTurns, 1, 500);
   validateIntegerBound(errors, "--max-implement-turns", config.maxImplementTurns, 1, 500);
+  // cacheTtl is parsed with parsePositiveInt (junk → NaN); bound it so a
+  // malformed --cache-ttl / cache-ttl: surfaces a field error instead of NaN.
+  validateIntegerBound(errors, "--cache-ttl", config.cacheTtl, 1, 31_536_000);
 
   return errors;
 }

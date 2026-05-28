@@ -42,6 +42,7 @@ import {
   parseCliInputs,
   validateInputs,
   validateWarnings,
+  parsePositiveInt,
 } from "./config.js";
 import type { CliConfig } from "./config.js";
 import {
@@ -526,10 +527,9 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     codingAgentProvider:
       (options.codingAgentProvider as string) || (fileConfig["coding-agent-provider"] as string) || "claude",
     dryRun: Boolean(options.dryRun),
-    maxImplementTurns: parseInt(
-      String(options.maxImplementTurns || (fileConfig["max-implement-turns"] as string) || "40"),
-      10,
-    ),
+    // parsePositiveInt mirrors the triage path: junk → NaN, which
+    // validateInputs rejects via validateIntegerBound below.
+    maxImplementTurns: parsePositiveInt(options.maxImplementTurns ?? (fileConfig["max-implement-turns"] as string), 40),
     baseBranch: (options.baseBranch as string) || (fileConfig["base-branch"] as string) || "main",
     repository: (options.repository as string) || process.env.GITHUB_REPOSITORY || "",
     outputDir:
@@ -538,6 +538,15 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       (fileConfig["output-dir"] as string) ||
       ".sweny/output",
   };
+
+  // Validate (parity with triage): surface the curated "Missing: ..." errors
+  // and reject malformed integer flags before any execution.
+  const implErrors = validateInputs(config);
+  if (implErrors.length > 0) {
+    console.error(formatValidationErrors(implErrors));
+    console.error(c.subtle("\n  Run sweny implement --help for usage information.\n"));
+    process.exit(1);
+  }
 
   const implementSkillDiscovery = configuredSkillsWithDiagnostics(process.env, process.cwd());
   for (const w of implementSkillDiscovery.warnings) {
