@@ -277,6 +277,69 @@ describe("editor-store", () => {
       useEditorStore.getState().deleteEdge(999);
       expect(useEditorStore.getState().workflow.edges).toHaveLength(before);
     });
+
+    it("clears a higher-indexed edge selection when a lower-indexed edge is deleted", () => {
+      // Select edge index 1 (step-b→step-c), then delete index 0 (step-a→step-b).
+      useEditorStore
+        .getState()
+        .setSelection({ kind: "edge", id: "edge-1", edgeIndex: 1, from: "step-b", to: "step-c" });
+      useEditorStore.getState().deleteEdge(0);
+      // Index 1 would now point at the wrong (or no) edge — must be cleared.
+      expect(useEditorStore.getState().selection).toBeNull();
+    });
+
+    it("does not clear selection when an out-of-bounds delete removes nothing", () => {
+      useEditorStore
+        .getState()
+        .setSelection({ kind: "edge", id: "edge-1", edgeIndex: 1, from: "step-b", to: "step-c" });
+      useEditorStore.getState().deleteEdge(999);
+      const sel = useEditorStore.getState().selection;
+      expect(sel?.kind).toBe("edge");
+    });
+  });
+
+  describe("edge selection cleanup on node mutations", () => {
+    it("clears edge selection when deleteNode removes a connected edge", () => {
+      // Select edge index 1 (step-b→step-c), then delete step-a which drops
+      // the lower-indexed edge 0 (step-a→step-b).
+      useEditorStore
+        .getState()
+        .setSelection({ kind: "edge", id: "edge-1", edgeIndex: 1, from: "step-b", to: "step-c" });
+      useEditorStore.getState().deleteNode("step-a");
+      expect(useEditorStore.getState().selection).toBeNull();
+    });
+
+    it("clears edge selection when disconnectNode removes a connected edge", () => {
+      useEditorStore
+        .getState()
+        .setSelection({ kind: "edge", id: "edge-1", edgeIndex: 1, from: "step-b", to: "step-c" });
+      useEditorStore.getState().disconnectNode("step-a");
+      expect(useEditorStore.getState().selection).toBeNull();
+    });
+
+    it("leaves edge selection intact when deleteNode removes no edges", () => {
+      // step-c has no outgoing edges; deleting it only removes edge index 1.
+      // Select edge index 0 (step-a→step-b) and delete an unrelated leaf.
+      useEditorStore.getState().setWorkflow({
+        id: "iso",
+        name: "iso",
+        description: "node with no edges",
+        entry: "step-a",
+        nodes: {
+          "step-a": { name: "A", instruction: "", skills: [] },
+          "step-b": { name: "B", instruction: "", skills: [] },
+          orphan: { name: "Orphan", instruction: "", skills: [] },
+        },
+        edges: [{ from: "step-a", to: "step-b" }],
+      });
+      useEditorStore
+        .getState()
+        .setSelection({ kind: "edge", id: "edge-0", edgeIndex: 0, from: "step-a", to: "step-b" });
+      useEditorStore.getState().deleteNode("orphan");
+      const sel = useEditorStore.getState().selection;
+      expect(sel?.kind).toBe("edge");
+      expect(sel?.kind === "edge" && sel.edgeIndex).toBe(0);
+    });
   });
 
   // ── Layout state ────────────────────────────────────────────────────────
