@@ -3200,12 +3200,16 @@ describe("resolveConfig env threading", () => {
     };
     const claude = new MockClaude({ responses: { a: { data: {} } } });
     await expect(
-      execute(oneNodeWith(skill), {}, {
-        skills: createSkillMap([skill]),
-        claude,
-        config: {},
-        env: { DEMO_KEY_EMPTY: "" },
-      }),
+      execute(
+        oneNodeWith(skill),
+        {},
+        {
+          skills: createSkillMap([skill]),
+          claude,
+          config: {},
+          env: { DEMO_KEY_EMPTY: "" },
+        },
+      ),
     ).rejects.toThrow(/set to empty/);
   });
 
@@ -3222,12 +3226,16 @@ describe("resolveConfig env threading", () => {
     const claude = new MockClaude({ responses: { a: { data: {} } } });
     let message = "";
     try {
-      await execute(oneNodeWith(skill), {}, {
-        skills: createSkillMap([skill]),
-        claude,
-        config: {},
-        env: {},
-      });
+      await execute(
+        oneNodeWith(skill),
+        {},
+        {
+          skills: createSkillMap([skill]),
+          claude,
+          config: {},
+          env: {},
+        },
+      );
     } catch (err) {
       message = err instanceof Error ? err.message : String(err);
     }
@@ -3246,12 +3254,16 @@ describe("resolveConfig env threading", () => {
       instruction: "ctx",
     };
     const claude = new MockClaude({ responses: { a: { data: {} } } });
-    const { results } = await execute(oneNodeWith(skill), {}, {
-      skills: createSkillMap([skill]),
-      claude,
-      config: {},
-      env: { DEMO_KEY_OPT: "" },
-    });
+    const { results } = await execute(
+      oneNodeWith(skill),
+      {},
+      {
+        skills: createSkillMap([skill]),
+        claude,
+        config: {},
+        env: { DEMO_KEY_OPT: "" },
+      },
+    );
     expect(results.get("a")?.status).toBe("success");
   });
 
@@ -3269,12 +3281,16 @@ describe("resolveConfig env threading", () => {
     };
     const claude = new MockClaude({ responses: { a: { data: {} } } });
     await expect(
-      execute(oneNodeWith(skill), {}, {
-        skills: createSkillMap([skill]),
-        claude,
-        config: { demo_token: "" }, // explicit empty override
-        env: { DEMO_KEY_OV: "would-be-used-if-fell-through" },
-      }),
+      execute(
+        oneNodeWith(skill),
+        {},
+        {
+          skills: createSkillMap([skill]),
+          claude,
+          config: { demo_token: "" }, // explicit empty override
+          env: { DEMO_KEY_OV: "would-be-used-if-fell-through" },
+        },
+      ),
     ).rejects.toThrow(/set to empty/);
   });
 });
