@@ -3267,3 +3267,104 @@ describe("missing-required-field retry", () => {
     expect(results.get("a")?.status).toBe("failed");
   });
 });
+
+describe("route-eval warnings for non-success nodes (CE-04)", () => {
+  function spyLogger() {
+    const warns: string[] = [];
+    return {
+      logger: {
+        info() {},
+        warn(msg: string) {
+          warns.push(msg);
+        },
+        error() {},
+        debug() {},
+      },
+      warns,
+    };
+  }
+
+  it("does not warn about declared properties for a requires-skipped node", async () => {
+    // gate is skipped (requires not met, on_fail: skip) but declares an
+    // output schema. When mid routes, the route-eval loop iterates over gate;
+    // it must NOT emit a "declared properties missing" warning or node:warning
+    // for a node that never ran.
+    const workflow: Workflow = {
+      id: "skip-route",
+      name: "Skip Route",
+      description: "",
+      entry: "gate",
+      nodes: {
+        gate: {
+          name: "Gate",
+          instruction: "Gate",
+          skills: [],
+          requires: { output_required: ["input.missing"], on_fail: "skip" },
+          output: { type: "object", properties: { score: { type: "number" }, label: { type: "string" } } },
+        },
+        mid: { name: "Mid", instruction: "Mid", skills: [] },
+        x: { name: "X", instruction: "X", skills: [] },
+        y: { name: "Y", instruction: "Y", skills: [] },
+      },
+      edges: [
+        { from: "gate", to: "mid" },
+        { from: "mid", to: "x", when: "go x" },
+        { from: "mid", to: "y", when: "go y" },
+      ],
+    };
+    const { logger, warns } = spyLogger();
+    const events: ExecutionEvent[] = [];
+    const claude = new MockClaude({ responses: { mid: { data: {} } }, workflow, routes: { mid: "x" } });
+    const { results } = await execute(workflow, {}, {
+      skills: createSkillMap([]),
+      claude,
+      logger,
+      observer: (e) => events.push(e),
+    });
+    expect(results.get("gate")?.status).toBe("skipped");
+    // No spurious "declared properties" warning and no node:warning for gate.
+    expect(warns.some((w) => /declared properties not in emitted data/.test(w))).toBe(false);
+    expect(events.some((e) => e.type === "node:warning" && e.node === "gate")).toBe(false);
+  });
+
+  it("still warns when a successful node omits a declared property", async () => {
+    const workflow: Workflow = {
+      id: "success-route",
+      name: "Success Route",
+      description: "",
+      entry: "src",
+      nodes: {
+        src: {
+          name: "Src",
+          instruction: "Src",
+          skills: [],
+          output: { type: "object", properties: { score: { type: "number" }, label: { type: "string" } } },
+        },
+        mid: { name: "Mid", instruction: "Mid", skills: [] },
+        x: { name: "X", instruction: "X", skills: [] },
+        y: { name: "Y", instruction: "Y", skills: [] },
+      },
+      edges: [
+        { from: "src", to: "mid" },
+        { from: "mid", to: "x", when: "go x" },
+        { from: "mid", to: "y", when: "go y" },
+      ],
+    };
+    const { logger, warns } = spyLogger();
+    const events: ExecutionEvent[] = [];
+    // src succeeds but emits only score, omitting the declared label.
+    const claude = new MockClaude({
+      responses: { src: { data: { score: 1 } }, mid: { data: {} } },
+      workflow,
+      routes: { mid: "x" },
+    });
+    await execute(workflow, {}, {
+      skills: createSkillMap([]),
+      claude,
+      logger,
+      observer: (e) => events.push(e),
+    });
+    expect(warns.some((w) => /declared properties not in emitted data/.test(w))).toBe(true);
+    expect(events.some((e) => e.type === "node:warning" && e.node === "src")).toBe(true);
+  });
+});
