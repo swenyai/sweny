@@ -763,6 +763,18 @@ function resolveSkillInstructions(
  * `options.env ?? process.env` so an explicit env map is honored consistently
  * with Source resolution (which reads the same map). Defaults to
  * `process.env` when omitted.
+ *
+ * Presence vs. truthiness: an explicitly-provided empty string is treated as
+ * present, not absent. Resolution rules:
+ *   - An override that is present (any string, including "") wins; the env
+ *     var is not consulted. An explicit "" override does NOT silently fall
+ *     through to env.
+ *   - Otherwise the env var (when declared) is used.
+ *   - A value that is `undefined` (no override, no env var) is absent: a
+ *     required field reports "not provided".
+ *   - A value that is "" is present-but-empty: a required field reports a
+ *     distinct "set to empty" message (you set it, but to an unusable value),
+ *     while an optional field passes the empty string through.
  */
 function resolveConfig(
   skills: Map<string, Skill>,
@@ -774,11 +786,30 @@ function resolveConfig(
 
   for (const skill of skills.values()) {
     for (const [key, field] of Object.entries(skill.config)) {
-      const value = overrides?.[key] ?? (field.env ? env[field.env] : undefined);
-      if (value) {
+      // Explicit override wins, including an empty string — `in` distinguishes
+      // a present "" from an absent key, so an override never falls through to
+      // env in a surprising way.
+      const hasOverride = overrides != null && key in overrides;
+      const value = hasOverride ? overrides![key] : field.env ? env[field.env] : undefined;
+      const source = field.env ? ` (env: ${field.env})` : "";
+
+      const label = `${skill.id}.${key}${source || " (env: none)"}`;
+      if (value === undefined) {
+        // Truly absent: no override and no env value.
+        if (field.required) {
+          missing.push(`${label}: not provided`);
+        }
+      } else if (value === "") {
+        // Present but empty. An empty credential is unusable for a required
+        // field; surface a distinct message so the user can tell "set to empty"
+        // from "forgot it". Optional empty values pass through unchanged.
+        if (field.required) {
+          missing.push(`${label}: set to empty`);
+        } else {
+          config[key] = value;
+        }
+      } else {
         config[key] = value;
-      } else if (field.required) {
-        missing.push(`${skill.id}.${key} (env: ${field.env ?? "none"})`);
       }
     }
   }
