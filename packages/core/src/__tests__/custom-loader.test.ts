@@ -12,7 +12,10 @@ const mockedReaddirSync = vi.mocked(readdirSync);
 const mockedReadFileSync = vi.mocked(readFileSync);
 
 // Import after mocking
-const { discoverSkills, discoverSkillsWithDiagnostics } = await import("../skills/custom-loader.js");
+const { discoverSkills, discoverSkillsWithDiagnostics, configuredSkillsWithDiagnostics } = await import(
+  "../skills/custom-loader.js"
+);
+const { github } = await import("../skills/github.js");
 
 describe("custom-loader", () => {
   beforeEach(() => {
@@ -323,6 +326,57 @@ Body.
         const { skills } = discoverSkillsWithDiagnostics("/fake", { SWENY_ALLOW_SKILL_STDIO_COMMAND: v });
         expect(skills[0].mcp, `value ${JSON.stringify(v)} should not opt in`).toBeUndefined();
       }
+    });
+  });
+
+  describe("custom override of a built-in preserves its tools (CC-05)", () => {
+    // An instruction-only custom github SKILL.md (no tools, no config).
+    const customGithubMd = `---
+name: github
+description: org-specific github guidance
+---
+Always open PRs against the develop branch.
+`;
+
+    function mountGithubOverride() {
+      mockedExistsSync.mockImplementation((p) => {
+        const s = String(p);
+        return s.endsWith(".sweny/skills") || s.endsWith("github/SKILL.md");
+      });
+      mockedReaddirSync.mockReturnValue([{ name: "github", isDirectory: () => true } as any]);
+      mockedReadFileSync.mockReturnValue(customGithubMd);
+    }
+
+    it("retains the built-in github tools and adopts the custom instruction when GITHUB_TOKEN is set", () => {
+      mountGithubOverride();
+      const { skills } = configuredSkillsWithDiagnostics({ GITHUB_TOKEN: "x" }, "/fake");
+      const merged = skills.find((s) => s.id === "github");
+      expect(merged).toBeDefined();
+      expect(merged!.tools).toHaveLength(github.tools.length);
+      expect(merged!.instruction).toBe("Always open PRs against the develop branch.");
+    });
+
+    it("retains the built-in github tools even when GITHUB_TOKEN is unset (CC-05 regression)", () => {
+      mountGithubOverride();
+      const { skills } = configuredSkillsWithDiagnostics({}, "/fake");
+      const merged = skills.find((s) => s.id === "github");
+      expect(merged).toBeDefined();
+      // Before the fix, an unconfigured built-in fell through to the
+      // "net-new custom" branch and was replaced with an instruction-only
+      // skill (tools: []), silently dropping all 8 github tools.
+      expect(merged!.tools).toHaveLength(github.tools.length);
+      expect(merged!.instruction).toBe("Always open PRs against the develop branch.");
+    });
+
+    it("tool count is identical across token-set and token-unset (the env check must not affect the tool surface)", () => {
+      mountGithubOverride();
+      const withToken = configuredSkillsWithDiagnostics({ GITHUB_TOKEN: "x" }, "/fake").skills.find(
+        (s) => s.id === "github",
+      );
+      mountGithubOverride();
+      const withoutToken = configuredSkillsWithDiagnostics({}, "/fake").skills.find((s) => s.id === "github");
+      expect(withoutToken!.tools.length).toBe(withToken!.tools.length);
+      expect(github.tools.length).toBeGreaterThan(0);
     });
   });
 });
