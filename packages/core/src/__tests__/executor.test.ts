@@ -3267,3 +3267,107 @@ describe("missing-required-field retry", () => {
     expect(results.get("a")?.status).toBe("failed");
   });
 });
+
+describe("abort / timeout (CE-01)", () => {
+  const threeNode: Workflow = {
+    id: "abortable",
+    name: "Abortable",
+    description: "a→b→c",
+    entry: "a",
+    nodes: {
+      a: { name: "A", instruction: "Do A", skills: [] },
+      b: { name: "B", instruction: "Do B", skills: [] },
+      c: { name: "C", instruction: "Do C", skills: [] },
+    },
+    edges: [
+      { from: "a", to: "b" },
+      { from: "b", to: "c" },
+    ],
+  };
+
+  it("forwards signal and timeoutMs to claude.run", async () => {
+    const controller = new AbortController();
+    let sawSignal: AbortSignal | undefined;
+    let sawTimeout: number | undefined;
+    const claude: any = {
+      async run(opts: any) {
+        sawSignal = opts.signal;
+        sawTimeout = opts.timeoutMs;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    await execute(
+      threeNode,
+      {},
+      { skills: createSkillMap([]), claude, config: {}, signal: controller.signal, timeoutMs: 1234 },
+    );
+    expect(sawSignal).toBe(controller.signal);
+    expect(sawTimeout).toBe(1234);
+  });
+
+  it("rejects promptly when the signal aborts mid-run and stops issuing further calls", async () => {
+    const controller = new AbortController();
+    let runCalls = 0;
+    const claude: any = {
+      async run() {
+        runCalls++;
+        // Abort during the first node so the loop should not advance to b/c.
+        controller.abort();
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    await expect(
+      execute(threeNode, {}, { skills: createSkillMap([]), claude, config: {}, signal: controller.signal }),
+    ).rejects.toThrow(/aborted/i);
+    // Only node "a" ran; the loop bailed before "b" and "c".
+    expect(runCalls).toBe(1);
+  });
+
+  it("does not advance past the deadline (no node:enter after abort)", async () => {
+    const controller = new AbortController();
+    const events: ExecutionEvent[] = [];
+    const claude: any = {
+      async run() {
+        controller.abort();
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    await expect(
+      execute(
+        threeNode,
+        {},
+        { skills: createSkillMap([]), claude, config: {}, signal: controller.signal, observer: (e) => events.push(e) },
+      ),
+    ).rejects.toThrow(/aborted/i);
+    // Exactly one node:enter (for "a"); no further nodes after the abort.
+    expect(events.filter((e) => e.type === "node:enter")).toHaveLength(1);
+  });
+
+  it("fails fast when the signal is already aborted before the run starts", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let runCalls = 0;
+    const claude: any = {
+      async run() {
+        runCalls++;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    await expect(
+      execute(threeNode, {}, { skills: createSkillMap([]), claude, config: {}, signal: controller.signal }),
+    ).rejects.toThrow(/aborted/i);
+    expect(runCalls).toBe(0);
+  });
+});

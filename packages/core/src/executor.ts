@@ -71,6 +71,20 @@ export interface ExecuteOptions {
    * Per-edge `max_iterations` behavior is unchanged.
    */
   max_steps?: number;
+  /**
+   * Caller-supplied abort signal. When it aborts, `execute()` rejects promptly
+   * and issues no further node / eval / route model calls. The signal is also
+   * threaded into every `claude.run` / `claude.evaluate` / `claude.ask` call so
+   * the underlying query is interrupted rather than left running detached.
+   * Default: no signal (back-compat).
+   */
+  signal?: AbortSignal;
+  /**
+   * Per-model-call wall-clock budget in ms, forwarded to every `claude.run` /
+   * `claude.evaluate` / `claude.ask` call. This is a per-call timeout, not a
+   * whole-run budget. Default: no timeout (back-compat).
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -81,6 +95,23 @@ export interface ExecuteOptions {
  */
 export const DEFAULT_MAX_STEPS = 200;
 
+/** Abort/timeout plumbing threaded into routing model calls. */
+interface AbortOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+/**
+ * Throw a clear "workflow aborted" error if the caller's signal has aborted.
+ * Used at the top of the run loop and before issuing any further model call so
+ * an aborted run stops promptly instead of advancing to the next node.
+ */
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new Error("workflow aborted");
+  }
+}
+
 /**
  * Execute a workflow from entry to completion.
  *
@@ -89,7 +120,10 @@ export const DEFAULT_MAX_STEPS = 200;
  * - `trace`: full ordered execution trace including loops and routing decisions
  */
 export async function execute(workflow: Workflow, input: unknown, options: ExecuteOptions): Promise<ExecutionResult> {
-  const { claude, observer } = options;
+  const { claude, observer, signal, timeoutMs } = options;
+
+  // If the caller already aborted before we started, fail fast.
+  throwIfAborted(signal);
 
   // Merge inline workflow skills into the skill map so they resolve at runtime.
   // Inline skills (instruction/mcp only) become Skill objects with empty tools/config.
@@ -161,6 +195,10 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   let currentId: string | null = workflow.entry;
 
   while (currentId) {
+    // Abort before issuing the next node/eval/route model call. Aborting the
+    // signal mid-run makes execute() reject promptly rather than advancing.
+    throwIfAborted(signal);
+
     const node = workflow.nodes[currentId];
     if (!node) throw new Error(`Unknown node: "${currentId}"`);
 
@@ -246,6 +284,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         edgeCounts,
         logger,
         trace,
+        { signal, timeoutMs },
       );
       currentId = next;
       continue;
@@ -306,6 +345,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         maxTurns: node.max_turns,
         disallowedTools: node.disallowed_tools,
         model: nodeModel,
+        signal,
+        timeoutMs,
         onProgress: (message) => {
           safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
         },
@@ -379,6 +420,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         logger,
         context,
         model: nodeModel,
+        signal,
+        timeoutMs,
       });
       currentInstruction = `${preamble}\n\n---\n\n${instruction}`;
       safeObserve(
@@ -399,7 +442,10 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     logger.info(`  ✓ ${result.status}`, { node: currentId, toolCalls: result.toolCalls.length });
 
     // Dry run gate + routing — shared with requires path via advanceFromNode helper.
-    currentId = await advanceFromNode(workflow, currentId, results, input, claude, observer, edgeCounts, logger, trace);
+    currentId = await advanceFromNode(workflow, currentId, results, input, claude, observer, edgeCounts, logger, trace, {
+      signal,
+      timeoutMs,
+    });
   }
 
   safeObserve(
@@ -808,6 +854,7 @@ async function advanceFromNode(
   edgeCounts: Map<string, number>,
   logger: Logger,
   trace: ExecutionTrace,
+  abort?: AbortOptions,
 ): Promise<string | null> {
   // Dry run hard gate — stop at the first conditional routing decision.
   // Unconditional edges are analysis flow (prepare→gather→investigate);
@@ -823,7 +870,7 @@ async function advanceFromNode(
   }
 
   const prevId = currentId;
-  const nextId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger);
+  const nextId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger, abort);
   if (nextId) {
     const reason = workflow.edges.find((e) => e.from === prevId && e.to === nextId)?.when ?? "only path";
     trace.edges.push({ from: prevId, to: nextId, reason });
@@ -849,6 +896,7 @@ async function resolveNext(
   observer?: Observer,
   edgeCounts?: Map<string, number>,
   logger?: Logger,
+  abort?: AbortOptions,
 ): Promise<string | null> {
   // Filter out edges that have exceeded their max_iterations
   const outEdges = workflow.edges.filter((e) => {
@@ -927,6 +975,8 @@ async function resolveNext(
     question: "Based on the results so far, which condition is true?",
     context,
     choices,
+    signal: abort?.signal,
+    timeoutMs: abort?.timeoutMs,
   });
 
   // Validate that Claude returned a valid target.
