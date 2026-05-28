@@ -13,7 +13,7 @@ export interface ExecutionSlice {
   // Results of nodes that have completed
   completedNodes: Record<string, NodeResult>;
   // Overall workflow status
-  executionStatus: "idle" | "running" | "completed" | "failed" | "partial";
+  executionStatus: "idle" | "running" | "completed" | "failed";
   // For live mode: connection info
   liveConnection: {
     url: string;

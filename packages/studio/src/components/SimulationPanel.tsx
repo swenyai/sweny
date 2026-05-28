@@ -42,7 +42,6 @@ export function SimulationPanel() {
     running: "text-blue-400",
     completed: "text-green-400",
     failed: "text-red-400",
-    partial: "text-yellow-400",
   }[executionStatus];
 
   return (
