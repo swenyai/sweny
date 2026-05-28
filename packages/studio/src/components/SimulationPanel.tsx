@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useEditorStore } from "../store/editor-store.js";
 import { execute, createSkillMap } from "@sweny-ai/core";
-import { MockClaude } from "@sweny-ai/core/testing";
 import type { NodeResult } from "@sweny-ai/core";
 
 export function SimulationPanel() {
@@ -12,7 +11,7 @@ export function SimulationPanel() {
   const currentNode = currentNodeId ? workflow.nodes[currentNodeId] : null;
   const completedList = Object.entries(completedNodes);
 
-  function handleAutoRun() {
+  async function handleAutoRun() {
     setSimError(null);
     setIsRunning(true);
 
@@ -25,16 +24,21 @@ export function SimulationPanel() {
       responses[id] = { status: "success" };
     }
 
-    const claude = new MockClaude({ responses, workflow: wf });
-    const skills = createSkillMap([]);
+    try {
+      // `@sweny-ai/core/testing` (MockClaude) transitively pulls `node:fs` /
+      // `node:path` via createFileSkill. Lazy-import it so `testing.js` is not
+      // in the eager SPA module graph — it loads only when the user actually
+      // runs the simulation, shrinking the initial bundle.
+      const { MockClaude } = await import("@sweny-ai/core/testing");
+      const claude = new MockClaude({ responses, workflow: wf });
+      const skills = createSkillMap([]);
 
-    execute(wf, {}, { skills, claude, observer: applyEvent })
-      .catch((err: unknown) => {
-        setSimError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        setIsRunning(false);
-      });
+      await execute(wf, {}, { skills, claude, observer: applyEvent });
+    } catch (err: unknown) {
+      setSimError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsRunning(false);
+    }
   }
 
   const statusColor = {
