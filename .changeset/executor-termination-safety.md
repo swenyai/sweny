@@ -1,0 +1,5 @@
+---
+"@sweny-ai/core": minor
+---
+
+Executor termination safety and eval-gate correctness. Adds a workflow-level `max_steps` execute option (default 200) that throws a clear "step budget exceeded" error instead of hanging on an unbounded cycle (a back-edge with no `max_iterations` or a route that keeps looping); per-edge `max_iterations` behavior is unchanged. An invalid route target with no default edge now ends the branch loudly (returns null and emits a terminal `route` event) rather than silently jumping to the first out-edge, and the `route` event no longer reports `reason: "default"` when no default edge exists. A missing required output field now flows through the same retry path as eval failures, so a node with `retry` configured can self-heal a one-off omission. `output_required` now FAILS on an empty wildcard expansion in "all" mode (e.g. `findings[*].severity` when `findings` is `[]`) instead of vacuously passing. `resolveConfig` honors `options.env` and falls back to `process.env`, matching Source resolution.

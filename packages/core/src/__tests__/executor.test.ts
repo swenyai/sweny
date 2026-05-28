@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { tmpdir } from "node:os";
 
 import { execute } from "../executor.js";
-import type { Workflow, ExecutionEvent } from "../types.js";
+import type { Workflow, ExecutionEvent, Skill } from "../types.js";
 import { MockClaude, createFileSkill } from "../testing.js";
 import { createSkillMap } from "../skills/index.js";
 
@@ -602,7 +602,7 @@ describe("executor", () => {
     expect(results.has("b")).toBe(false);
   });
 
-  it("validates route choice falls back on invalid Claude response", async () => {
+  it("terminates loudly on an invalid route target when no default edge exists", async () => {
     // Create a claude mock that returns an invalid route
     const badRouteClaude: any = {
       async run() {
@@ -613,6 +613,10 @@ describe("executor", () => {
       },
     };
 
+    const events: ExecutionEvent[] = [];
+    // branchingWorkflow has only conditional edges (high/low), no default
+    // unconditional edge. A garbage route target must NOT silently jump to
+    // outEdges[0] (which could be a loop-back); it ends the branch loudly.
     const { results } = await execute(
       branchingWorkflow,
       {},
@@ -620,11 +624,21 @@ describe("executor", () => {
         skills: createSkillMap([]),
         claude: badRouteClaude,
         config: {},
+        observer: (e) => events.push(e),
       },
     );
 
-    // Should still complete — falls back to first valid edge target
-    expect(results.size).toBe(2);
+    // Only the entry node ran; routing terminated instead of guessing an edge.
+    expect(results.size).toBe(1);
+    expect(results.has("check")).toBe(true);
+
+    // The route event reports a terminal stop with an explicit reason, never
+    // reason: "default" (there is no default edge).
+    const routeEvents = events.filter((e) => e.type === "route");
+    const last = routeEvents[routeEvents.length - 1] as Extract<ExecutionEvent, { type: "route" }>;
+    expect(last.to).toBe("(end)");
+    expect(last.reason).toMatch(/invalid route target/);
+    expect(routeEvents.every((e) => (e as { reason?: string }).reason !== "default")).toBe(true);
   });
 
   describe("node.verify", () => {
@@ -2984,5 +2998,223 @@ describe("bundled workflows: routing contract invariants", () => {
     }
 
     expect(violations, violations.join("\n")).toEqual([]);
+  });
+});
+
+// ─── Termination safety + eval-gate correctness (issue #212) ───────
+
+describe("executor termination safety", () => {
+  it("an unconditional self-loop with no max_iterations hits the step budget and throws", async () => {
+    // a → a forever (single unconditional edge, no max_iterations).
+    const selfLoop: Workflow = {
+      id: "self-loop",
+      name: "Self loop",
+      description: "a loops to itself with no bound",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Do A", skills: [] },
+      },
+      edges: [{ from: "a", to: "a" }],
+    };
+
+    const claude = new MockClaude({ responses: { a: { data: {} } } });
+
+    await expect(
+      execute(selfLoop, {}, { skills: createSkillMap([]), claude, config: {}, max_steps: 10 }),
+    ).rejects.toThrow(/step budget exceeded/);
+  });
+
+  it("a routed loop with no max_iterations hits the step budget and throws", async () => {
+    // a → b → a (conditional, no max_iterations); evaluator always loops back.
+    const routedLoop: Workflow = {
+      id: "routed-loop",
+      name: "Routed loop",
+      description: "a → b → a forever",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Step A", skills: [] },
+        b: { name: "B", instruction: "Step B", skills: [] },
+        done: { name: "Done", instruction: "Finish", skills: [] },
+      },
+      edges: [
+        { from: "a", to: "b" },
+        { from: "b", to: "a", when: "loop back" },
+        { from: "b", to: "done", when: "finish" },
+      ],
+    };
+
+    const loopClaude: any = {
+      async run() {
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        // Always choose the loop-back edge.
+        return opts.choices.find((c: any) => c.id === "a")?.id ?? opts.choices[0].id;
+      },
+    };
+
+    await expect(
+      execute(routedLoop, {}, { skills: createSkillMap([]), claude: loopClaude, config: {}, max_steps: 12 }),
+    ).rejects.toThrow(/step budget exceeded/);
+  });
+
+  it("a bounded workflow runs to completion under the default step budget", async () => {
+    const claude = new MockClaude({
+      workflow: skilllessWorkflow,
+      responses: { a: { data: {} }, b: { data: {} }, c: { data: {} } },
+    });
+    const { results } = await execute(skilllessWorkflow, {}, { skills: createSkillMap([]), claude, config: {} });
+    expect(results.size).toBe(3);
+  });
+});
+
+describe("resolveConfig env threading", () => {
+  it("reads skill config from options.env, not just process.env", async () => {
+    // A skill that declares one config field bound to an env var.
+    const skill: Skill = {
+      id: "demo",
+      name: "Demo",
+      description: "demo skill",
+      category: "general",
+      config: { demo_token: { env: "DEMO_TOKEN", required: true, description: "demo token" } },
+      tools: [],
+      // Instruction-only skill: valid with no tools, so the node passes the
+      // runtime skill guard. The point of the test is resolveConfig env reads.
+      instruction: "demo context",
+    };
+
+    const oneNode: Workflow = {
+      id: "cfg",
+      name: "Cfg",
+      description: "single node using a config-bearing skill",
+      entry: "a",
+      nodes: { a: { name: "A", instruction: "Do A", skills: ["demo"] } },
+      edges: [],
+    };
+
+    const claude = new MockClaude({ responses: { a: { data: {} } } });
+
+    // The value is ONLY present in options.env, never in process.env.
+    expect(process.env.DEMO_TOKEN).toBeUndefined();
+    const { results } = await execute(
+      oneNode,
+      {},
+      { skills: createSkillMap([skill]), claude, config: {}, env: { DEMO_TOKEN: "from-options-env" } },
+    );
+    expect(results.get("a")?.status).toBe("success");
+  });
+
+  it("throws for a required config field absent from options.env", async () => {
+    const skill: Skill = {
+      id: "demo2",
+      name: "Demo2",
+      description: "demo skill",
+      category: "general",
+      config: { demo_token: { env: "DEMO_TOKEN_MISSING", required: true, description: "demo token" } },
+      tools: [],
+    };
+    const oneNode: Workflow = {
+      id: "cfg2",
+      name: "Cfg2",
+      description: "single node",
+      entry: "a",
+      nodes: { a: { name: "A", instruction: "Do A", skills: ["demo2"] } },
+      edges: [],
+    };
+    const claude = new MockClaude({ responses: { a: { data: {} } } });
+    await expect(
+      execute(oneNode, {}, { skills: createSkillMap([skill]), claude, config: {}, env: {} }),
+    ).rejects.toThrow(/Missing required config/);
+  });
+});
+
+describe("missing-required-field retry", () => {
+  const schemaNode: Workflow = {
+    id: "required-retry",
+    name: "Required retry",
+    description: "single node with a required output field + retry",
+    entry: "a",
+    nodes: {
+      a: {
+        name: "A",
+        instruction: "Emit a severity",
+        skills: [],
+        output: { type: "object", properties: { severity: { type: "string" } }, required: ["severity"] },
+        retry: { max: 1 },
+      },
+    },
+    edges: [],
+  };
+
+  it("re-attempts on a missing required field when retry is configured, and self-heals", async () => {
+    let attempt = 0;
+    const healingClaude: any = {
+      async run() {
+        attempt++;
+        // First attempt omits the required `severity`; second attempt includes it.
+        return attempt === 1
+          ? { status: "success", data: { other: 1 }, toolCalls: [] }
+          : { status: "success", data: { severity: "high" }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+
+    const { results } = await execute(
+      schemaNode,
+      {},
+      { skills: createSkillMap([]), claude: healingClaude, config: {} },
+    );
+    expect(attempt).toBe(2);
+    expect(results.get("a")?.status).toBe("success");
+    expect(results.get("a")?.data.severity).toBe("high");
+  });
+
+  it("hard-fails after exhausting retries when the required field stays missing", async () => {
+    let attempt = 0;
+    const stubborn: any = {
+      async run() {
+        attempt++;
+        return { status: "success", data: { other: 1 }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+
+    const { results } = await execute(schemaNode, {}, { skills: createSkillMap([]), claude: stubborn, config: {} });
+    // initial + 1 retry = 2 attempts
+    expect(attempt).toBe(2);
+    expect(results.get("a")?.status).toBe("failed");
+    expect(String(results.get("a")?.data.error)).toMatch(/required field\(s\) missing/);
+  });
+
+  it("hard-fails without retry config (no retry path)", async () => {
+    const noRetryNode: Workflow = {
+      ...schemaNode,
+      id: "required-no-retry",
+      nodes: {
+        a: {
+          name: "A",
+          instruction: "Emit a severity",
+          skills: [],
+          output: { type: "object", properties: { severity: { type: "string" } }, required: ["severity"] },
+        },
+      },
+    };
+    let attempt = 0;
+    const claude: any = {
+      async run() {
+        attempt++;
+        return { status: "success", data: { other: 1 }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    const { results } = await execute(noRetryNode, {}, { skills: createSkillMap([]), claude, config: {} });
+    expect(attempt).toBe(1);
+    expect(results.get("a")?.status).toBe("failed");
   });
 });

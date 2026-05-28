@@ -117,7 +117,17 @@ export function checkOutputRequired(paths: string[], data: unknown): string | nu
       continue;
     }
     if (r.mode === "all") {
-      if (r.values.length > 0 && !r.values.every((v) => v !== null && v !== undefined)) {
+      // An empty wildcard expansion (e.g. `findings[*].severity` when
+      // `findings` is `[]`) resolves to zero values. That is a
+      // structurally-absent required output, not a satisfied gate: treat it
+      // as a failure rather than vacuously passing. A non-wildcard path always
+      // yields exactly one value, so this branch only ever sees an empty array
+      // for an empty wildcard expansion. Same class as the route-eval
+      // `missing` warning: a required field that is absent must not green-light
+      // the gate.
+      if (r.values.length === 0) {
+        failures.push(`'${path}' resolved to no elements (empty wildcard expansion)`);
+      } else if (!r.values.every((v) => v !== null && v !== undefined)) {
         failures.push(`'${path}' resolved to null/undefined value(s)`);
       }
     } else {

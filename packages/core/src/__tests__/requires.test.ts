@@ -51,6 +51,17 @@ describe("evaluateRequires", () => {
     expect(evaluateRequires(requires, ctx)).toBeNull();
   });
 
+  it("fails on an empty wildcard expansion in default (all) mode (issue #212)", () => {
+    // `requires` shares checkOutputRequired with value evals. An empty
+    // `findings` array must NOT vacuously satisfy a required wildcard path.
+    const requires: NodeRequires = {
+      output_required: ["scan.findings[*].severity"],
+    };
+    const err = evaluateRequires(requires, { input: {}, scan: { findings: [] } });
+    expect(err).not.toBeNull();
+    expect(err).toMatch(/no elements/);
+  });
+
   it("reports output_matches failure with operator description", () => {
     const requires: NodeRequires = {
       output_matches: [{ path: "triage.recommendation", equals: "implement" }],

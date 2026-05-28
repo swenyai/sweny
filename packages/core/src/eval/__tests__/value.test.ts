@@ -27,8 +27,9 @@ describe("checkOutputRequired", () => {
     expect(checkOutputRequired(["findings[*].severity"], data)).toBeNull();
   });
 
-  it("with default (all) wildcard over empty array, vacuously passes", () => {
-    expect(checkOutputRequired(["findings[*].severity"], { findings: [] })).toBeNull();
+  it("with default (all) wildcard over empty array, fails (no elements is a structurally-absent required output)", () => {
+    const err = checkOutputRequired(["findings[*].severity"], { findings: [] });
+    expect(err).toMatch(/output_required.*'findings\[\*\]\.severity'.*no elements/);
   });
 
   it("with `any` wildcard, passes when at least one element has non-null path", () => {
