@@ -442,10 +442,21 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     logger.info(`  ✓ ${result.status}`, { node: currentId, toolCalls: result.toolCalls.length });
 
     // Dry run gate + routing — shared with requires path via advanceFromNode helper.
-    currentId = await advanceFromNode(workflow, currentId, results, input, claude, observer, edgeCounts, logger, trace, {
-      signal,
-      timeoutMs,
-    });
+    currentId = await advanceFromNode(
+      workflow,
+      currentId,
+      results,
+      input,
+      claude,
+      observer,
+      edgeCounts,
+      logger,
+      trace,
+      {
+        signal,
+        timeoutMs,
+      },
+    );
   }
 
   safeObserve(
