@@ -42,7 +42,12 @@ export function renderSkillTemplate(opts: { id: string; description: string; cat
   const lines: string[] = [];
   lines.push("---");
   lines.push(`name: ${id}`);
-  lines.push(`description: ${description}`);
+  // JSON-quote the user-supplied description so YAML-special chars (`:`, a
+  // leading `[`/`{`/`@`/`>`/`|`, `#`, embedded quotes) round-trip cleanly
+  // through the loader's frontmatter parser. A JSON double-quoted string is a
+  // valid YAML double-quoted scalar. `id`/`category` are constrained elsewhere
+  // (isValidSkillId / SKILL_CATEGORIES) so they stay bare.
+  lines.push(`description: ${JSON.stringify(description)}`);
   lines.push(`category: ${category}`);
   lines.push("# config:");
   lines.push("#   EXAMPLE_ENV_VAR:");
