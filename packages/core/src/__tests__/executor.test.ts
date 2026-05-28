@@ -3066,6 +3066,55 @@ describe("executor termination safety", () => {
     const { results } = await execute(skilllessWorkflow, {}, { skills: createSkillMap([]), claude, config: {} });
     expect(results.size).toBe(3);
   });
+
+  it("eval retries do NOT count toward the step budget (only node visits do)", async () => {
+    // A single terminal node whose eval fails on every attempt, with a large
+    // retry budget. Retries re-run claude inside the node; they are bounded by
+    // retry.max and must NOT consume the workflow-level step budget, which
+    // counts node visits (cycle protection). With max_steps: 1 the node is
+    // visited exactly once, so the 1+10 attempts here must complete without
+    // tripping the budget. This pins the deliberate design: retries have their
+    // own bound (retry.max), the step cap guards cycles.
+    const node: Workflow = {
+      id: "retry-no-step",
+      name: "Retry no step",
+      description: "single terminal node that retries hard",
+      entry: "a",
+      nodes: {
+        a: {
+          name: "A",
+          instruction: "Emit ok",
+          skills: [],
+          eval: [{ name: "never", kind: "value", rule: { output_required: ["ok"] } }],
+          retry: { max: 10 },
+        },
+      },
+      edges: [],
+    };
+
+    let runs = 0;
+    const failingClaude: any = {
+      async run() {
+        runs++;
+        // Never emits `ok`, so the value eval fails every attempt.
+        return { status: "success", data: { other: 1 }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+
+    // max_steps: 1 allows a single node visit. If retries counted toward
+    // the budget, the 11 attempts would throw "step budget exceeded".
+    const { results } = await execute(
+      node,
+      {},
+      { skills: createSkillMap([]), claude: failingClaude, config: {}, max_steps: 1 },
+    );
+    // initial + 10 retries, all within one node visit
+    expect(runs).toBe(11);
+    expect(results.get("a")?.status).toBe("failed");
+  });
 });
 
 describe("resolveConfig env threading", () => {
