@@ -16,7 +16,7 @@ import { parse as parseYaml } from "yaml";
 import { ZodError } from "zod";
 
 import type { Workflow } from "./types.js";
-import { workflowZ, validateWorkflow, type WorkflowError } from "./schema.js";
+import { workflowZ, validateWorkflow, preflightLegacyVerify, type WorkflowError } from "./schema.js";
 
 /** Structural/schema error. `code` is present only for structural errors. */
 export interface LoaderError {
@@ -65,6 +65,20 @@ export function validateParsed(raw: unknown, options: LoaderOptions = {}): Loade
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     const kind = raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw;
     return { ok: false, errors: [{ message: `Expected a workflow object, got ${kind}`, code: "SCHEMA" }] };
+  }
+
+  // Detect legacy `verify:` blocks (renamed to `eval:` in v0.2.0) before the
+  // Zod parse. workflowZ is intentionally non-strict at the top level, so a
+  // top-level `verify:` would be silently STRIPPED instead of surfacing the
+  // migration message. parseWorkflow runs this preflight already; validateParsed
+  // (the entrypoint for loadAndValidateWorkflow / Studio import) must too. The
+  // loader contract is "return errors, do not throw", so map the throw to a
+  // SCHEMA LoaderError rather than letting it propagate.
+  try {
+    preflightLegacyVerify(raw);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, errors: [{ message: msg, code: "SCHEMA" }] };
   }
 
   let parsed: Workflow;

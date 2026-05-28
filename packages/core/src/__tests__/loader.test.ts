@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { loadAndValidateWorkflow } from "../loader.js";
+import { loadAndValidateWorkflow, validateParsed } from "../loader.js";
 
 function makeTempFile(name: string, content: string): { path: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "sweny-loader-test-"));
@@ -155,6 +155,68 @@ edges:
     try {
       const result = loadAndValidateWorkflow(f.path);
       expect(result.ok).toBe(true);
+    } finally {
+      f.cleanup();
+    }
+  });
+
+  // Issue #214 fix #4: validateParsed (the entrypoint for the file loader and
+  // Studio import) must run the legacy-`verify:` preflight. workflowZ is
+  // non-strict at the top level, so a top-level `verify:` would otherwise be
+  // silently stripped instead of surfacing the migration message.
+  it("surfaces the legacy-verify migration error for a top-level verify block", () => {
+    const result = validateParsed({
+      id: "x",
+      name: "X",
+      entry: "a",
+      nodes: { a: { name: "A", instruction: "x", skills: [] } },
+      edges: [],
+      verify: { any_tool_called: ["t"] },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors[0].code).toBe("SCHEMA");
+      expect(result.errors.some((e) => /legacy 'verify:' field/i.test(e.message))).toBe(true);
+    }
+  });
+
+  it("surfaces the legacy-verify migration error for a per-node verify block", () => {
+    const result = validateParsed({
+      id: "x",
+      name: "X",
+      entry: "a",
+      nodes: { a: { name: "A", instruction: "x", skills: [], verify: { any_tool_called: ["t"] } } },
+      edges: [],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors[0].code).toBe("SCHEMA");
+      expect(result.errors.some((e) => /Node "a".*legacy 'verify:'/i.test(e.message))).toBe(true);
+    }
+  });
+
+  it("surfaces the legacy-verify migration error when loading a YAML file with verify", () => {
+    const f = makeTempFile(
+      "legacy.yml",
+      `id: x
+name: X
+entry: a
+nodes:
+  a:
+    name: A
+    instruction: x
+    skills: []
+    verify:
+      any_tool_called: [t]
+edges: []
+`,
+    );
+    try {
+      const result = loadAndValidateWorkflow(f.path);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors.some((e) => /legacy 'verify:'/i.test(e.message))).toBe(true);
+      }
     } finally {
       f.cleanup();
     }

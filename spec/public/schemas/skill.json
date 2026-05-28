@@ -7,7 +7,12 @@
   "required": ["id", "name", "description", "category", "config"],
   "anyOf": [
     {
-      "required": ["tools"]
+      "required": ["tools"],
+      "properties": {
+        "tools": {
+          "minItems": 1
+        }
+      }
     },
     {
       "required": ["instruction"]
@@ -60,6 +65,18 @@
     "mcp": {
       "$ref": "#/$defs/McpServerConfig",
       "description": "External MCP server definition wired for nodes referencing this skill."
+    },
+    "mcpAliases": {
+      "type": "object",
+      "description": "Maps a logical MCP server name to the tool-name aliases nodes use to reference it. Each entry is a non-empty list of non-empty strings.",
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   },
   "$defs": {

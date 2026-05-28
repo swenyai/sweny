@@ -22,8 +22,10 @@ import {
   SKILL_HARNESSES,
   SKILL_ID_MAX_LENGTH,
   SKILL_ID_PATTERN,
+  WORKFLOW_TYPES,
   isValidSkillId,
 } from "../types.js";
+import { workflowTypeZ, workflowJsonSchema } from "../schema.js";
 
 const SPEC_DIR = join(__dirname, "../../../../spec/public/schemas");
 const skillSchema = JSON.parse(readFileSync(join(SPEC_DIR, "skill.json"), "utf-8"));
@@ -119,5 +121,24 @@ describe("S4: workflow JSON Schema enums match runtime tuples", () => {
   it("Inline skill McpServerConfig.type enum matches MCP_TRANSPORTS", () => {
     const transportEnum = workflowSchema.properties.skills.additionalProperties.properties.mcp.properties.type.enum;
     expect([...transportEnum].sort()).toEqual([...MCP_TRANSPORTS].sort());
+  });
+});
+
+describe("S5: WorkflowType is single-sourced (issue #214 fix #5)", () => {
+  // WorkflowType used to be defined three times (literal union in types.ts,
+  // z.infer of a hand-written enum in schema.ts, and a hand-written JSON
+  // enum). All three now derive from WORKFLOW_TYPES. This test fails the
+  // moment any of them drifts.
+  it("the Zod enum options match WORKFLOW_TYPES", () => {
+    expect([...workflowTypeZ.options].sort()).toEqual([...WORKFLOW_TYPES].sort());
+  });
+
+  it("the published JSON Schema workflow_type enum matches WORKFLOW_TYPES", () => {
+    const jsonEnum = workflowSchema.properties.workflow_type.enum;
+    expect([...jsonEnum].sort()).toEqual([...WORKFLOW_TYPES].sort());
+  });
+
+  it("the in-memory workflowJsonSchema enum matches WORKFLOW_TYPES", () => {
+    expect([...workflowJsonSchema.properties.workflow_type.enum].sort()).toEqual([...WORKFLOW_TYPES].sort());
   });
 });

@@ -342,8 +342,21 @@ export interface Edge {
 /**
  * Workflow type discriminator. Cloud uses this to render runs in a
  * type-specific way. Adding a value requires a corresponding renderer.
+ *
+ * Single source of truth: the Zod enum (`workflowTypeZ`), the published
+ * JSON-schema enum (`workflowJsonSchema.properties.workflow_type.enum`),
+ * and the `WorkflowType` TS type are all derived from this tuple. See the
+ * contract test in `__tests__/contract-tests.test.ts` asserting they agree.
  */
-export type WorkflowType = "pr_review" | "e2e_test" | "content_generation" | "monitor" | "data_sync" | "generic";
+export const WORKFLOW_TYPES = [
+  "pr_review",
+  "e2e_test",
+  "content_generation",
+  "monitor",
+  "data_sync",
+  "generic",
+] as const;
+export type WorkflowType = (typeof WORKFLOW_TYPES)[number];
 
 /** A complete workflow definition. Pure data, fully serializable. */
 export interface Workflow {

@@ -8,7 +8,7 @@
  */
 
 import { z } from "zod";
-import type { Workflow } from "./types.js";
+import type { Workflow, WorkflowType } from "./types.js";
 import {
   EVALUATOR_KINDS,
   EVAL_POLICIES,
@@ -17,6 +17,7 @@ import {
   SKILL_CATEGORIES,
   SKILL_ID_MAX_LENGTH,
   SKILL_ID_PATTERN,
+  WORKFLOW_TYPES,
 } from "./types.js";
 import { sourceZ } from "./sources.js";
 import { workflowInputsZ, WORKFLOW_INPUT_TYPES } from "./inputs.js";
@@ -262,8 +263,11 @@ export const edgeZ = z
  * Adding a new value here is a deliberate spec change: it requires a new
  * cloud renderer + metric schema. Don't extend casually.
  */
-export const workflowTypeZ = z.enum(["pr_review", "e2e_test", "content_generation", "monitor", "data_sync", "generic"]);
-export type WorkflowType = z.infer<typeof workflowTypeZ>;
+export const workflowTypeZ = z.enum(WORKFLOW_TYPES);
+// Re-export the single-sourced TS type (defined in types.ts as the
+// derived `WorkflowType`) so existing `import { WorkflowType } from
+// "./schema.js"` consumers keep working without a second definition.
+export type { WorkflowType };
 
 // Fix #4 gap — workflowZ is intentionally NOT .strict(). The published
 // JSON Schema's `additionalProperties: false` only scopes the properties
@@ -303,7 +307,7 @@ const LEGACY_VERIFY_MESSAGE =
  *   - Top-level `workflow.verify` (typo / wrong scope).
  *   - Per-node `nodes[*].verify` (the most common shape pre-rename).
  */
-function preflightLegacyVerify(raw: unknown): void {
+export function preflightLegacyVerify(raw: unknown): void {
   if (!raw || typeof raw !== "object") return;
   const wf = raw as Record<string, unknown>;
 
@@ -608,14 +612,28 @@ export const workflowJsonSchema = {
           description: "judge only. Override the judge model for this evaluator.",
         },
       },
+      // The `then` branches mirror evaluatorZ.superRefine exactly: each kind
+      // requires its own field AND forbids the other kind's fields. Without
+      // the `not` clauses ajv only checked presence, so a `value` evaluator
+      // carrying a `rubric` passed ajv but threw under Zod (cross-kind drift).
       allOf: [
         {
           if: { properties: { kind: { enum: ["value", "function"] } } },
-          then: { required: ["rule"] },
+          then: {
+            required: ["rule"],
+            // judge-only fields are illegal on value / function evaluators.
+            not: {
+              anyOf: [{ required: ["rubric"] }, { required: ["pass_when"] }, { required: ["model"] }],
+            },
+          },
         },
         {
           if: { properties: { kind: { const: "judge" } } },
-          then: { required: ["rubric"] },
+          then: {
+            required: ["rubric"],
+            // `rule` is value / function only.
+            not: { required: ["rule"] },
+          },
         },
       ],
     },
@@ -637,14 +655,16 @@ export const workflowJsonSchema = {
     },
     workflow_type: {
       type: "string",
-      enum: ["pr_review", "e2e_test", "content_generation", "monitor", "data_sync", "generic"],
+      enum: [...WORKFLOW_TYPES],
       description:
         "Workflow type discriminator. Cloud uses this to route runs to a type-specific renderer. Optional; absence defaults to 'generic'.",
     },
     judge_model: {
       type: "string",
       minLength: 1,
-      default: "claude-haiku-4-5",
+      // No JSON `default` here: the Zod parser leaves this undefined and the
+      // executor applies the effective judge-model default at use-time. A
+      // documented JSON default that Zod never writes back is misleading.
       description: "Default model for judge evaluators across the workflow. Overridable per-node and per-evaluator.",
     },
     model: {
@@ -656,7 +676,8 @@ export const workflowJsonSchema = {
     judge_budget: {
       type: "integer",
       minimum: 0,
-      default: 50,
+      // No JSON `default` here: Zod leaves this undefined; the executor
+      // applies the soft-cap default at use-time. See judge_model above.
       description:
         "Soft cap on expected judge calls per workflow run. Executor warns at load time if exceeded; not a hard runtime cap in v1.",
     },
@@ -704,6 +725,49 @@ export const workflowJsonSchema = {
             required: { const: true },
           },
         },
+        // Per-type checks on `default` and each `enum` element, mirroring
+        // workflowInputFieldZ.superRefine -> checkValueType in inputs.ts.
+        // Without these, a `type: number` field with `default: "x"` passed
+        // ajv but threw under Zod (default/enum type drift). One if/then per
+        // primitive in WORKFLOW_INPUT_TYPES.
+        allOf: [
+          {
+            if: { properties: { type: { const: "string" } } },
+            then: {
+              properties: {
+                default: { type: "string" },
+                enum: { items: { type: "string" } },
+              },
+            },
+          },
+          {
+            if: { properties: { type: { const: "number" } } },
+            then: {
+              properties: {
+                default: { type: "number" },
+                enum: { items: { type: "number" } },
+              },
+            },
+          },
+          {
+            if: { properties: { type: { const: "boolean" } } },
+            then: {
+              properties: {
+                default: { type: "boolean" },
+                enum: { items: { type: "boolean" } },
+              },
+            },
+          },
+          {
+            if: { properties: { type: { const: "string[]" } } },
+            then: {
+              properties: {
+                default: { type: "array", items: { type: "string" } },
+                enum: { items: { type: "array", items: { type: "string" } } },
+              },
+            },
+          },
+        ],
       },
     },
     nodes: {
@@ -889,7 +953,15 @@ export const skillJsonSchema = {
   description: "A composable tool bundle that provides capabilities to workflow nodes.",
   type: "object",
   required: ["id", "name", "description", "category", "config"],
-  anyOf: [{ required: ["tools"] }, { required: ["instruction"] }, { required: ["mcp"] }],
+  // Mirror skillZ.refine: a skill must provide at least one of NON-EMPTY
+  // tools, instruction, or mcp. `required: ["tools"]` alone is satisfied by
+  // `tools: []` (presence, not non-emptiness), so the tools branch pins
+  // minItems: 1 to match Zod (which checks `s.tools.length > 0`).
+  anyOf: [
+    { required: ["tools"], properties: { tools: { minItems: 1 } } },
+    { required: ["instruction"] },
+    { required: ["mcp"] },
+  ],
   additionalProperties: false,
   properties: {
     id: {
@@ -930,6 +1002,20 @@ export const skillJsonSchema = {
     mcp: {
       $ref: "#/$defs/McpServerConfig",
       description: "External MCP server definition wired for nodes referencing this skill.",
+    },
+    // Mirror skillZ.mcpAliases: a record mapping a logical MCP server name
+    // to a non-empty list of non-empty tool-name aliases. Omitting this from
+    // the published schema (which is additionalProperties: false) caused ajv
+    // to REJECT valid skills that Zod accepts.
+    mcpAliases: {
+      type: "object",
+      description:
+        "Maps a logical MCP server name to the tool-name aliases nodes use to reference it. Each entry is a non-empty list of non-empty strings.",
+      additionalProperties: {
+        type: "array",
+        minItems: 1,
+        items: { type: "string", minLength: 1 },
+      },
     },
   },
   $defs: {

@@ -1112,6 +1112,36 @@ describe("spec: JSON Schema", () => {
     expect(evaluator.properties.rubric).toBeDefined();
     expect(evaluator.properties.pass_when).toBeDefined();
   });
+
+  it("Evaluator def forbids wrong-kind fields, matching evaluatorZ.superRefine (issue #214 fix #1)", () => {
+    const evaluator = (workflowJsonSchema as any).$defs.Evaluator;
+    const [valueFn, judge] = evaluator.allOf;
+    // value / function must require a rule AND forbid judge-only fields.
+    expect(valueFn.then.required).toEqual(["rule"]);
+    expect(valueFn.then.not.anyOf).toEqual([
+      { required: ["rubric"] },
+      { required: ["pass_when"] },
+      { required: ["model"] },
+    ]);
+    // judge must require a rubric AND forbid a rule.
+    expect(judge.then.required).toEqual(["rubric"]);
+    expect(judge.then.not).toEqual({ required: ["rule"] });
+  });
+
+  it("inputs field encodes per-type default/enum constraints (issue #214 fix #2)", () => {
+    const field = (workflowJsonSchema.properties.inputs as any).additionalProperties;
+    const byType: Record<string, any> = {};
+    for (const branch of field.allOf) byType[branch.if.properties.type.const] = branch.then;
+    expect(byType.number.properties.default.type).toBe("number");
+    expect(byType.boolean.properties.default.type).toBe("boolean");
+    expect(byType.string.properties.enum.items.type).toBe("string");
+    expect(byType["string[]"].properties.default).toEqual({ type: "array", items: { type: "string" } });
+  });
+
+  it("judge_model / judge_budget carry no misleading JSON default (issue #214 fix #6)", () => {
+    expect((workflowJsonSchema.properties.judge_model as any).default).toBeUndefined();
+    expect((workflowJsonSchema.properties.judge_budget as any).default).toBeUndefined();
+  });
 });
 
 // ─── Spec Section: Source Types ──────────────────────────────────

@@ -195,7 +195,20 @@
             }
           },
           "then": {
-            "required": ["rule"]
+            "required": ["rule"],
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["rubric"]
+                },
+                {
+                  "required": ["pass_when"]
+                },
+                {
+                  "required": ["model"]
+                }
+              ]
+            }
           }
         },
         {
@@ -207,7 +220,10 @@
             }
           },
           "then": {
-            "required": ["rubric"]
+            "required": ["rubric"],
+            "not": {
+              "required": ["rule"]
+            }
           }
         }
       ]
@@ -252,7 +268,6 @@
     "judge_model": {
       "type": "string",
       "minLength": 1,
-      "default": "claude-haiku-4-5",
       "description": "Default model for judge evaluators across the workflow. Overridable per-node and per-evaluator."
     },
     "model": {
@@ -263,7 +278,6 @@
     "judge_budget": {
       "type": "integer",
       "minimum": 0,
-      "default": 50,
       "description": "Soft cap on expected judge calls per workflow run. Executor warns at load time if exceeded; not a hard runtime cap in v1."
     },
     "inputs": {
@@ -305,7 +319,99 @@
               "const": true
             }
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "string"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "default": {
+                  "type": "string"
+                },
+                "enum": {
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "number"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "default": {
+                  "type": "number"
+                },
+                "enum": {
+                  "items": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "boolean"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "default": {
+                  "type": "boolean"
+                },
+                "enum": {
+                  "items": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "string[]"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "default": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "enum": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
       }
     },
     "nodes": {
