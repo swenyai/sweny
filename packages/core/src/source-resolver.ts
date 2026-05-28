@@ -215,6 +215,10 @@ async function fetchFollowingRedirects(
   let currentUrl = startUrl;
   let headers = startHeaders;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    // NOTE (IO-06): this bare fetch() does its own DNS resolution, independent
+    // of the lookup assertSafeHost() just validated — a residual DNS-rebinding
+    // TOCTOU window. Closing it means pinning to the validated IP via a custom
+    // dispatcher. See the assertSafeHost() doc comment.
     const res = await fetch(currentUrl, {
       headers,
       redirect: "manual",
@@ -301,6 +305,25 @@ function assertAllowedScheme(url: string, fieldPath: string): void {
  * A hostname that fails to resolve is allowed through (the subsequent fetch
  * will simply fail) so that this guard does not turn DNS outages or unknown
  * test hosts into hard validation errors.
+ *
+ * KNOWN RESIDUAL — DNS-rebinding TOCTOU (IO-06). This guard resolves the
+ * hostname here, but `fetchFollowingRedirects` then calls bare `fetch()`, which
+ * performs its OWN independent DNS resolution. The validated address and the
+ * connected address are not pinned to be the same. An attacker-controlled
+ * domain with a short-TTL record can therefore return a public IP to this
+ * lookup and a private/metadata IP to `fetch`'s lookup, slipping past the guard
+ * (classic DNS rebinding). The window is small (the two lookups happen
+ * back-to-back and Node caches within a resolution) but non-zero.
+ *
+ * This is NOT fully closed. Closing it requires pinning the connection to the
+ * validated IP — e.g. an undici `Agent` with a custom `connect`/`lookup` that
+ * returns the pre-validated address while preserving the original `Host` header
+ * and TLS SNI (servername = original hostname), and re-pinning on every redirect
+ * hop. That interacts with TLS and the existing per-hop redirect re-validation,
+ * so it is deferred as a follow-up. Severity is low: it requires an
+ * attacker-controlled domain AND a precisely-timed TTL flip between the two
+ * resolutions. Do not treat the SSRF guard as airtight against rebinding until
+ * the connection is IP-pinned.
  */
 async function assertSafeHost(url: string, ctx: SourceResolutionContext, fieldPath: string): Promise<void> {
   const hostname = new URL(url).hostname;
