@@ -389,6 +389,59 @@ describe("notification skill", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("https://custom.com/hook");
   });
 
+  // Allowlist-bypass guards. These lock in that the host check uses real URL
+  // parsing (not naive string ops): userinfo can't smuggle a foreign host,
+  // matching is case-insensitive, and an allowlisted host is never a substring
+  // match for a longer attacker-controlled host.
+  it("notify_webhook rejects a userinfo-smuggled host (allowed@evil.com)", async () => {
+    const tool = findTool(notification.tools, "notify_webhook");
+    const ctx = mockCtx({ NOTIFICATION_WEBHOOK_URL: "https://example.com/hook" });
+
+    // The real host here is evil.com; "example.com" is only the userinfo.
+    await expect(tool.handler({ url: "https://example.com@evil.com/steal", payload: { x: 1 } }, ctx)).rejects.toThrow(
+      /non-allowlisted host "evil\.com"/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("notify_webhook matches the configured host case-insensitively", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse("ok", true, 200));
+    const tool = findTool(notification.tools, "notify_webhook");
+    const ctx = mockCtx({ NOTIFICATION_WEBHOOK_URL: "https://example.com/hook" });
+    await tool.handler({ url: "https://EXAMPLE.COM/other", payload: { x: 1 } }, ctx);
+
+    expect(fetchMock.mock.calls[0][0]).toBe("https://EXAMPLE.COM/other");
+  });
+
+  it("notify_webhook rejects a host that merely contains an allowlisted host as a prefix", async () => {
+    const tool = findTool(notification.tools, "notify_webhook");
+    const ctx = mockCtx({ NOTIFICATION_WEBHOOK_URL: "https://example.com/hook" });
+
+    // example.com.attacker.com is a different host, not a substring match.
+    await expect(
+      tool.handler({ url: "https://example.com.attacker.com/steal", payload: { x: 1 } }, ctx),
+    ).rejects.toThrow(/non-allowlisted host "example\.com\.attacker\.com"/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("notify_webhook rejects an override when nothing is configured (default-deny)", async () => {
+    const tool = findTool(notification.tools, "notify_webhook");
+    // No NOTIFICATION_WEBHOOK_URL and no allowlist: any override host is denied.
+    await expect(tool.handler({ url: "https://anywhere.example/x", payload: { x: 1 } }, mockCtx({}))).rejects.toThrow(
+      /non-allowlisted host/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("notify_webhook rejects a malformed override url", async () => {
+    const tool = findTool(notification.tools, "notify_webhook");
+    const ctx = mockCtx({ NOTIFICATION_WEBHOOK_URL: "https://example.com/hook" });
+    await expect(tool.handler({ url: "not a url", payload: { x: 1 } }, ctx)).rejects.toThrow(
+      /Invalid webhook url override/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("notify_webhook throws without URL", async () => {
     const tool = findTool(notification.tools, "notify_webhook");
     await expect(tool.handler({ payload: {} }, mockCtx({}))).rejects.toThrow(/No webhook URL configured/);

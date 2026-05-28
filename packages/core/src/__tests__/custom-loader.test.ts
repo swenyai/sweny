@@ -265,5 +265,64 @@ Body.
       expect(skills[0].mcp).toBeUndefined();
       expect(warnings.some((w) => w.kind === "stdio-command-declared")).toBe(false);
     });
+
+    it("gates an explicit type: stdio command the same as an inferred one", () => {
+      const skillMd = `---
+name: explicit-stdio
+description: explicit stdio type
+mcp:
+  type: stdio
+  command: ./run.sh
+---
+Body.
+`;
+      mountSkill("explicit-stdio", skillMd);
+
+      const { skills, warnings } = discoverSkillsWithDiagnostics("/fake", {});
+      expect(skills).toHaveLength(1);
+      expect(skills[0].mcp).toBeUndefined();
+      expect(warnings.some((w) => w.kind === "stdio-command-declared")).toBe(true);
+    });
+
+    it("the diagnostic fires whether or not the opt-in is set", () => {
+      const skillMd = `---
+name: dual-skill
+description: stdio command
+mcp:
+  command: npx
+  args: ["-y", "@x/server"]
+---
+Body.
+`;
+      mountSkill("dual-skill", skillMd);
+
+      const off = discoverSkillsWithDiagnostics("/fake", {});
+      const on = discoverSkillsWithDiagnostics("/fake", { SWENY_ALLOW_SKILL_STDIO_COMMAND: "1" });
+
+      const offDiag = off.warnings.find((w) => w.kind === "stdio-command-declared");
+      const onDiag = on.warnings.find((w) => w.kind === "stdio-command-declared");
+      expect(offDiag).toBeDefined();
+      expect(onDiag).toBeDefined();
+      // Off: refuses to wire and points at the opt-in. On: honors it but still warns.
+      expect(offDiag!.message).toMatch(/Refusing to wire/);
+      expect(onDiag!.message).toMatch(/Honoring it/);
+    });
+
+    it("treats falsy opt-in values as not-opted-in", () => {
+      const skillMd = `---
+name: falsy-optin
+description: stdio command
+mcp:
+  command: npx
+---
+Body.
+`;
+      mountSkill("falsy-optin", skillMd);
+
+      for (const v of ["0", "false", "no", "", " "]) {
+        const { skills } = discoverSkillsWithDiagnostics("/fake", { SWENY_ALLOW_SKILL_STDIO_COMMAND: v });
+        expect(skills[0].mcp, `value ${JSON.stringify(v)} should not opt in`).toBeUndefined();
+      }
+    });
   });
 });
