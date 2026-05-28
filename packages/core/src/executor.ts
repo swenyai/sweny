@@ -42,6 +42,7 @@ import { evaluateRequires } from "./requires.js";
 import { buildRetryPreamble } from "./retry.js";
 import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
+import { validateWorkflow } from "./schema.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -71,6 +72,21 @@ export interface ExecuteOptions {
    * Per-edge `max_iterations` behavior is unchanged.
    */
   max_steps?: number;
+  /**
+   * Run the full structural validator ({@link validateWorkflow}) before the
+   * first node and throw on any structural error (unreachable nodes, unbounded
+   * cycles, self-loops, etc.). Defaults to `false` for back-compat.
+   *
+   * `execute()`'s built-in `validate()` only checks entry/edge existence and a
+   * skill-availability warning. It does NOT detect unbounded cycles or
+   * unreachable nodes — for those the only backstop is `max_steps`, which
+   * degrades a structurally-invalid workflow to "ran N wasted steps then
+   * threw" instead of "rejected before any model call". The CLI path already
+   * pre-validates via `loadAndValidateWorkflow`; direct programmatic callers
+   * SHOULD either pre-validate with {@link validateWorkflow} /
+   * `loadAndValidateWorkflow`, or pass `validate: true` here to enforce it.
+   */
+  validate?: boolean;
 }
 
 /**
@@ -87,6 +103,15 @@ export const DEFAULT_MAX_STEPS = 200;
  * Returns an ExecutionResult with:
  * - `results`: map of node ID → final result (last execution if retried)
  * - `trace`: full ordered execution trace including loops and routing decisions
+ *
+ * Pre-validation contract: `execute()` runs only a lightweight built-in check
+ * (entry/edge existence + skill-availability warning). It does NOT detect
+ * unbounded cycles or unreachable nodes — `max_steps` is the only runtime
+ * backstop for a structurally-invalid graph. The CLI pre-validates via
+ * `loadAndValidateWorkflow`. Direct programmatic callers SHOULD pre-validate
+ * with {@link validateWorkflow} / `loadAndValidateWorkflow`, or pass
+ * `options.validate: true` to have `execute()` enforce the full validator and
+ * fail fast before the first node runs.
  */
 export async function execute(workflow: Workflow, input: unknown, options: ExecuteOptions): Promise<ExecutionResult> {
   const { claude, observer } = options;
@@ -104,6 +129,19 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   const maxSteps = options.max_steps ?? DEFAULT_MAX_STEPS;
   let stepCount = 0; // total node executions across the run (loop iterations included)
   const trace: ExecutionTrace = { steps: [], edges: [], sources: {} };
+
+  // Opt-in full structural validation (unbounded cycles, unreachable nodes,
+  // ambiguous routing, etc.). Off by default for back-compat; the CLI path
+  // already validates upstream. When enabled, fail fast before any node runs
+  // rather than degrading to a wasted run that trips the max_steps backstop.
+  if (options.validate) {
+    const knownSkills = new Set(skills.keys());
+    const errors = validateWorkflow(workflow, knownSkills);
+    if (errors.length > 0) {
+      const lines = errors.map((e) => `  - [${e.code}] ${e.message}`);
+      throw new Error(`Workflow validation failed:\n${lines.join("\n")}`);
+    }
+  }
 
   validate(workflow, skills);
 

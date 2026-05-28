@@ -3267,3 +3267,79 @@ describe("missing-required-field retry", () => {
     expect(results.get("a")?.status).toBe("failed");
   });
 });
+
+describe("execute() opt-in structural validation (CE-06)", () => {
+  const unboundedCycle: Workflow = {
+    id: "cycle",
+    name: "Cycle",
+    description: "a→b→a with no max_iterations",
+    entry: "a",
+    nodes: {
+      a: { name: "A", instruction: "Do A", skills: [] },
+      b: { name: "B", instruction: "Do B", skills: [] },
+    },
+    edges: [
+      { from: "a", to: "b" },
+      { from: "b", to: "a", when: "loop" },
+    ],
+  };
+
+  it("rejects an unbounded-cycle workflow before the first node when validate: true", async () => {
+    let runCalls = 0;
+    const claude: any = {
+      async run() {
+        runCalls++;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    await expect(
+      execute(unboundedCycle, {}, { skills: createSkillMap([]), claude, config: {}, validate: true }),
+    ).rejects.toThrow(/Workflow validation failed[\s\S]*UNBOUNDED_CYCLE/);
+    expect(runCalls).toBe(0); // failed fast, no model call
+  });
+
+  it("does not pre-validate by default (max_steps remains the backstop)", async () => {
+    const claude: any = {
+      async run() {
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        // Keep choosing the loop-back edge so the cycle runs until max_steps.
+        return opts.choices.find((c: any) => c.id === "a")?.id ?? opts.choices[0].id;
+      },
+    };
+    // Without validate, the unbounded cycle is NOT rejected up front; it runs
+    // until the max_steps backstop trips (existing behavior preserved).
+    await expect(
+      execute(unboundedCycle, {}, { skills: createSkillMap([]), claude, config: {}, max_steps: 3 }),
+    ).rejects.toThrow(/step budget exceeded/);
+  });
+
+  it("validate: true accepts a structurally-valid workflow", async () => {
+    const valid: Workflow = {
+      id: "valid",
+      name: "Valid",
+      description: "a→b",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Do A", skills: [] },
+        b: { name: "B", instruction: "Do B", skills: [] },
+      },
+      edges: [{ from: "a", to: "b" }],
+    };
+    const claude: any = {
+      async run() {
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    const { results } = await execute(valid, {}, { skills: createSkillMap([]), claude, config: {}, validate: true });
+    expect(results.get("a")?.status).toBe("success");
+    expect(results.get("b")?.status).toBe("success");
+  });
+});
