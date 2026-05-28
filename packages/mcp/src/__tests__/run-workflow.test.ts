@@ -9,7 +9,9 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { spawn } from "node:child_process";
-import { runWorkflow, resolveSwenyBin } from "../handlers/run-workflow.js";
+import { createRequire } from "node:module";
+import * as path from "node:path";
+import { runWorkflow, resolveSwenyInvocation } from "../handlers/run-workflow.js";
 
 const mockSpawn = vi.mocked(spawn);
 
@@ -24,17 +26,46 @@ function createMockProcess(): ChildProcess & { _emit: (event: string, ...args: u
   return proc;
 }
 
-const bin = resolveSwenyBin();
+const invocation = resolveSwenyInvocation();
+const { command: cmd, prefixArgs } = invocation;
+
+// The handler spawns `command` with `[...prefixArgs, ...cliArgs]`. Helper to
+// build the expected full argv regardless of which resolution strategy hit.
+const expectArgs = (...cli: string[]): string[] => [...prefixArgs, ...cli];
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("resolveSwenyBin", () => {
-  it("returns a path containing sweny", () => {
-    // In the monorepo this resolves to node_modules/.bin/sweny;
-    // outside, it falls back to bare "sweny". Either way the name is present.
-    expect(bin).toContain("sweny");
+describe("resolveSwenyInvocation", () => {
+  it("resolves a sweny invocation (command + prefix args)", () => {
+    // Primary strategy: { command: process.execPath, prefixArgs: [<core bin>] }.
+    // Fallbacks: monorepo node_modules/.bin/sweny, then bare "sweny". In every
+    // case the resolved argv must point at something named "sweny".
+    const joined = [invocation.command, ...invocation.prefixArgs].join(" ");
+    expect(joined).toContain("sweny");
+  });
+
+  it("when core resolves, runs the resolved @sweny-ai/core bin via process.execPath", () => {
+    // If @sweny-ai/core/package.json is resolvable from the test's module tree,
+    // the primary strategy must be chosen: command is the current Node binary
+    // and the single prefix arg points inside the installed @sweny-ai/core.
+    const require = createRequire(import.meta.url);
+    let corePkgPath: string | null = null;
+    try {
+      corePkgPath = require.resolve("@sweny-ai/core/package.json");
+    } catch {
+      corePkgPath = null;
+    }
+    if (corePkgPath) {
+      expect(invocation.command).toBe(process.execPath);
+      expect(invocation.prefixArgs).toHaveLength(1);
+      const coreRoot = path.dirname(corePkgPath);
+      expect(invocation.prefixArgs[0].startsWith(coreRoot)).toBe(true);
+    } else {
+      // No exported package.json (older core) → falls back to a sweny command.
+      expect([invocation.command, ...invocation.prefixArgs].join(" ")).toContain("sweny");
+    }
   });
 });
 
@@ -46,8 +77,8 @@ describe("runWorkflow", () => {
     const promise = runWorkflow({ workflow: "triage" });
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      bin,
-      ["triage", "--json", "--stream"],
+      cmd,
+      expectArgs("triage", "--json", "--stream"),
       expect.objectContaining({ cwd: expect.any(String), stdio: ["ignore", "pipe", "pipe"] }),
     );
 
@@ -65,8 +96,8 @@ describe("runWorkflow", () => {
     const promise = runWorkflow({ workflow: "implement", input: "ABC-123" });
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      bin,
-      ["implement", "ABC-123", "--json", "--stream"],
+      cmd,
+      expectArgs("implement", "ABC-123", "--json", "--stream"),
       expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
     );
 
@@ -83,7 +114,11 @@ describe("runWorkflow", () => {
 
     const promise = runWorkflow({ workflow: "triage", dryRun: true });
 
-    expect(mockSpawn).toHaveBeenCalledWith(bin, ["triage", "--json", "--stream", "--dry-run"], expect.any(Object));
+    expect(mockSpawn).toHaveBeenCalledWith(
+      cmd,
+      expectArgs("triage", "--json", "--stream", "--dry-run"),
+      expect.any(Object),
+    );
 
     proc._emit("close", 0);
     await promise;
@@ -273,7 +308,11 @@ describe("runWorkflow", () => {
 
     const promise = runWorkflow({ workflow: "implement", input: "  ABC-123  " });
 
-    expect(mockSpawn).toHaveBeenCalledWith(bin, ["implement", "ABC-123", "--json", "--stream"], expect.any(Object));
+    expect(mockSpawn).toHaveBeenCalledWith(
+      cmd,
+      expectArgs("implement", "ABC-123", "--json", "--stream"),
+      expect.any(Object),
+    );
 
     proc.stdout!.emit("data", Buffer.from('{"ok": true}\n'));
     proc._emit("close", 0);

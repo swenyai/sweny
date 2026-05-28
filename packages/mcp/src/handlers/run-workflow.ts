@@ -1,5 +1,6 @@
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,22 +24,59 @@ const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_STDERR_BUFFER = 10 * 1024 * 1024; // 10 MB — stderr is error output, not verbose logs
 
 /**
- * Resolve the path to the `sweny` CLI binary.
+ * How to invoke the `sweny` CLI: a command plus any leading args.
  *
- * In the monorepo, the workspace-linked bin at node_modules/.bin/sweny is
- * preferred for speed and version consistency. When installed standalone via
- * npm, that path won't exist — fall back to the bare command name so the OS
- * resolves it from PATH (which works because @sweny-ai/core declares a bin).
+ * The preferred form is `{ command: process.execPath, prefixArgs: [absBin] }`,
+ * i.e. run the resolved core CLI entry through the current Node binary. This
+ * does not depend on the file's executable bit, a shebang resolving, or `sweny`
+ * being on PATH — all of which are unreliable under `npx -y @sweny-ai/mcp`.
  */
-export function resolveSwenyBin(): string {
+export interface SwenyInvocation {
+  command: string;
+  prefixArgs: string[];
+}
+
+const requireFromHere = createRequire(import.meta.url);
+
+/**
+ * Resolve how to invoke the `sweny` CLI, most-robust strategy first:
+ *
+ *  1. Resolve `@sweny-ai/core/package.json` from this module's dependency tree
+ *     (createRequire), read `bin.sweny`, and run it via `process.execPath`.
+ *     This is the only path that works reliably under `npx -y @sweny-ai/mcp`,
+ *     where the bin is in an ephemeral cache not on the spawned child's PATH
+ *     and the monorepo-relative `.bin` arithmetic misses.
+ *  2. Monorepo workspace-linked bin at node_modules/.bin/sweny (dev/local).
+ *  3. Bare command name `sweny`, resolved from PATH (last resort, e.g. a global
+ *     install).
+ */
+export function resolveSwenyInvocation(): SwenyInvocation {
+  // (1) Resolve core's declared bin from the installed dependency tree.
+  try {
+    const corePkgPath = requireFromHere.resolve("@sweny-ai/core/package.json");
+    const corePkg = JSON.parse(readFileSync(corePkgPath, "utf-8")) as {
+      bin?: string | Record<string, string>;
+    };
+    const binRel = typeof corePkg.bin === "string" ? corePkg.bin : corePkg.bin?.sweny;
+    if (binRel) {
+      const absBin = path.resolve(path.dirname(corePkgPath), binRel);
+      accessSync(absBin, constants.R_OK);
+      return { command: process.execPath, prefixArgs: [absBin] };
+    }
+  } catch {
+    // Fall through to the monorepo / PATH fallbacks.
+  }
+
+  // (2) Monorepo workspace-linked bin.
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   // packages/mcp/dist/handlers/ → ../../../../node_modules/.bin/sweny
   const monorepo = path.resolve(__dirname, "..", "..", "..", "..", "node_modules", ".bin", "sweny");
   try {
     accessSync(monorepo, constants.X_OK);
-    return monorepo;
+    return { command: monorepo, prefixArgs: [] };
   } catch {
-    return "sweny";
+    // (3) Bare name from PATH.
+    return { command: "sweny", prefixArgs: [] };
   }
 }
 
@@ -63,10 +101,10 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
   if (opts.dryRun) args.push("--dry-run");
 
   const cwd = opts.cwd ?? process.cwd();
-  const bin = resolveSwenyBin();
+  const { command, prefixArgs } = resolveSwenyInvocation();
 
   return new Promise((resolve) => {
-    const child = spawn(bin, args, {
+    const child = spawn(command, [...prefixArgs, ...args], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       // Inherit env — sweny CLI needs API keys, .env vars, PATH, etc.

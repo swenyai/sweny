@@ -15,7 +15,8 @@
     "./workflows": "./dist/workflows/index.js",
     "./testing": "./dist/testing.js",
     "./schema": "./dist/schema.js",
-    "./new": "./dist/cli/new.js"
+    "./new": "./dist/cli/new.js",
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
