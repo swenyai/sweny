@@ -43,6 +43,7 @@ import {
   validateInputs,
   validateWarnings,
   parsePositiveInt,
+  DEFAULT_IMPLEMENT_TURNS,
 } from "./config.js";
 import type { CliConfig } from "./config.js";
 import {
@@ -236,7 +237,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({
-    maxTurns: config.maxInvestigateTurns || 50,
+    maxTurns: config.maxInvestigateTurns,
     cwd: process.cwd(),
     logger: consoleLogger,
     mcpServers,
@@ -529,7 +530,10 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     dryRun: Boolean(options.dryRun),
     // parsePositiveInt mirrors the triage path: junk → NaN, which
     // validateInputs rejects via validateIntegerBound below.
-    maxImplementTurns: parsePositiveInt(options.maxImplementTurns ?? (fileConfig["max-implement-turns"] as string), 40),
+    maxImplementTurns: parsePositiveInt(
+      options.maxImplementTurns ?? (fileConfig["max-implement-turns"] as string),
+      DEFAULT_IMPLEMENT_TURNS,
+    ),
     baseBranch: (options.baseBranch as string) || (fileConfig["base-branch"] as string) || "main",
     repository: (options.repository as string) || process.env.GITHUB_REPOSITORY || "",
     outputDir:
@@ -556,7 +560,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
   const claude = new ClaudeClient({
-    maxTurns: config.maxImplementTurns || 40,
+    maxTurns: config.maxImplementTurns,
     cwd: process.cwd(),
     logger: consoleLogger,
     mcpServers,
@@ -817,7 +821,7 @@ export async function workflowRunAction(
   });
 
   const claude = new ClaudeClient({
-    maxTurns: config.maxInvestigateTurns || 50,
+    maxTurns: config.maxInvestigateTurns,
     cwd: process.cwd(),
     logger: consoleLogger,
     mcpServers,

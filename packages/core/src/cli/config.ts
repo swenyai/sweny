@@ -4,6 +4,15 @@ import type { Command } from "commander";
 import type { McpServerConfig } from "../types.js";
 import type { FileConfig } from "./config-file.js";
 
+/**
+ * Single source of truth for per-turn-budget defaults. Both `parseCliInputs`
+ * and the implement-path override read these so the documented default and
+ * the value the client is constructed with cannot drift (they previously
+ * disagreed: implement used 40 while parseCliInputs documented 30).
+ */
+export const DEFAULT_INVESTIGATE_TURNS = 50;
+export const DEFAULT_IMPLEMENT_TURNS = 40;
+
 export interface CliConfig {
   // Coding agent
   codingAgentProvider: string;
@@ -269,8 +278,8 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     severityFocus: (options.severityFocus as string) || f("severity-focus") || "errors",
     serviceFilter: (options.serviceFilter as string) || f("service-filter") || "*",
     investigationDepth: (options.investigationDepth as string) || f("investigation-depth") || "standard",
-    maxInvestigateTurns: parsePositiveInt(options.maxInvestigateTurns ?? f("max-investigate-turns"), 50),
-    maxImplementTurns: parsePositiveInt(options.maxImplementTurns ?? f("max-implement-turns"), 30),
+    maxInvestigateTurns: parsePositiveInt(options.maxInvestigateTurns ?? f("max-investigate-turns"), DEFAULT_INVESTIGATE_TURNS),
+    maxImplementTurns: parsePositiveInt(options.maxImplementTurns ?? f("max-implement-turns"), DEFAULT_IMPLEMENT_TURNS),
 
     baseBranch: (options.baseBranch as string) || f("base-branch") || "main",
     prLabels: ((options.prLabels as string) || f("pr-labels") || "agent,triage,needs-review")

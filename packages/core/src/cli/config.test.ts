@@ -10,6 +10,8 @@ import {
   normalizeSwenyAuth,
   registerTriageCommand,
   registerImplementCommand,
+  DEFAULT_INVESTIGATE_TURNS,
+  DEFAULT_IMPLEMENT_TURNS,
 } from "./config.js";
 import { loadConfigFile } from "./config-file.js";
 import type { CliConfig } from "./config.js";
@@ -308,6 +310,26 @@ describe("validateInputs — implement path credential parity", () => {
     expect(Number.isNaN(config.maxImplementTurns)).toBe(true);
     const errors = validateInputs(config);
     expect(errors.some((e) => e.includes("--max-implement-turns"))).toBe(true);
+  });
+});
+
+describe("parseCliInputs — turn-budget defaults are single-sourced (CC-09)", () => {
+  // Before the fix, parseCliInputs documented maxImplementTurns=30 while the
+  // implement path overrode it to 40, so the documented default and the value
+  // the client constructed with disagreed. Both now read DEFAULT_IMPLEMENT_TURNS.
+  it("maxImplementTurns default equals the value the implement path constructs with", () => {
+    expect(parseCliInputs({}, {}).maxImplementTurns).toBe(DEFAULT_IMPLEMENT_TURNS);
+    // The implement override (main.ts) defaults to the same constant when no
+    // CLI/file value is supplied, so the spread in implement keeps this value.
+  });
+
+  it("maxInvestigateTurns default equals DEFAULT_INVESTIGATE_TURNS", () => {
+    expect(parseCliInputs({}, {}).maxInvestigateTurns).toBe(DEFAULT_INVESTIGATE_TURNS);
+  });
+
+  it("an explicit override still wins over the default", () => {
+    expect(parseCliInputs({ maxImplementTurns: "12" }, {}).maxImplementTurns).toBe(12);
+    expect(parseCliInputs({}, { "max-implement-turns": "99" } as never).maxImplementTurns).toBe(99);
   });
 });
 
