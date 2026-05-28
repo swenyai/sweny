@@ -51,6 +51,29 @@ export function toMermaid(workflow: Workflow, options: MermaidOptions = {}): str
 
   lines.push(`graph ${direction}`);
 
+  // Build an injective real-ID → Mermaid-alias map. `sanitizeId` is lossy
+  // (every non-alphanumeric char collapses to `_`), so distinct node IDs like
+  // `a.b` and `a_b` would otherwise sanitize to the same alias and render as a
+  // single merged node, silently corrupting the diagram. Resolve every alias
+  // through this map so node declarations, edge endpoints, and class styling
+  // all stay consistent and collision-free.
+  const idAlias = new Map<string, string>();
+  const usedAliases = new Set<string>();
+  const aliasFor = (id: string): string => {
+    const cached = idAlias.get(id);
+    if (cached) return cached;
+    const base = sanitizeId(id);
+    let alias = base;
+    let n = 2;
+    while (usedAliases.has(alias)) alias = `${base}_${n++}`;
+    usedAliases.add(alias);
+    idAlias.set(id, alias);
+    return alias;
+  };
+  // Seed aliases in node-declaration order so already-alphanumeric IDs keep
+  // their byte-identical alias (and stable suffixing for any collisions).
+  for (const id of Object.keys(workflow.nodes)) aliasFor(id);
+
   // Build node iteration counts from trace
   const nodeIterations = new Map<string, number>();
   if (trace) {
@@ -70,9 +93,9 @@ export function toMermaid(workflow: Workflow, options: MermaidOptions = {}): str
     const iterTag = iterations && iterations > 1 ? ` ×${iterations}` : "";
 
     if (isEntry) {
-      lines.push(`    ${sanitizeId(id)}([${label}${entryTag}${iterTag}])`);
+      lines.push(`    ${aliasFor(id)}([${label}${entryTag}${iterTag}])`);
     } else {
-      lines.push(`    ${sanitizeId(id)}[${label}${iterTag}]`);
+      lines.push(`    ${aliasFor(id)}[${label}${iterTag}]`);
     }
   }
 
@@ -95,8 +118,8 @@ export function toMermaid(workflow: Workflow, options: MermaidOptions = {}): str
   let edgeIndex = 0;
 
   for (const edge of workflow.edges) {
-    const from = sanitizeId(edge.from);
-    const to = sanitizeId(edge.to);
+    const from = aliasFor(edge.from);
+    const to = aliasFor(edge.to);
     const key = `${edge.from}→${edge.to}`;
     const taken = takenEdges.has(key);
     const takenCount = edgeTakenCounts.get(key) ?? 0;
@@ -137,7 +160,7 @@ export function toMermaid(workflow: Workflow, options: MermaidOptions = {}): str
     lines.push("    classDef skipped fill:#6b7280,stroke:#4b5563,color:#fff,stroke-dasharray:5 5");
 
     for (const [status, ids] of statusNodes) {
-      const sanitized = ids.map(sanitizeId).join(",");
+      const sanitized = ids.map(aliasFor).join(",");
       lines.push(`    class ${sanitized} ${status}`);
     }
   }
