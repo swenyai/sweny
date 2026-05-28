@@ -1,8 +1,14 @@
 name: Post-Release Docs Update
 
+# The release pipeline (release.yml tag-action) cuts git tags, not GitHub
+# Releases, so a `release: published` trigger never fired. Trigger on the
+# immutable v5.<core-version> tags instead. github.ref_name is then the tag
+# (e.g. v5.0.1.102), which the prompt and PR branch already interpolate.
+# The moving `v5` tag has no dot after "v5" so the `v5.*` glob skips it.
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v5.*"
 
 jobs:
   update-docs:
