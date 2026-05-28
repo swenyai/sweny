@@ -61,6 +61,11 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
     >
       {/* Inner wrapper — clips accent bar corners but not handles */}
       <div
+        // When current, the viewer's injected `.sweny-node-pulse` keyframes
+        // animate box-shadow. React Flow never projects `data.execStatus` onto
+        // a DOM attribute, so drive the pulse off a class on this element
+        // directly instead of a (never-set) `data-exec-status` selector.
+        className={execStatus === "current" ? "sweny-node-pulse" : undefined}
         style={{
           display: "flex",
           alignItems: "stretch",

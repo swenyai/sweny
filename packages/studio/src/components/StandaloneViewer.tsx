@@ -190,7 +190,7 @@ export function WorkflowViewer({
           0%, 100% { box-shadow: 0 0 0 2.5px #3b82f6, 0 0 20px rgba(59,130,246,0.4); }
           50%       { box-shadow: 0 0 0 2.5px #3b82f6, 0 0 30px rgba(59,130,246,0.65); }
         }
-        .react-flow__node[data-exec-status="current"] > div {
+        .sweny-node-pulse {
           animation: node-pulse 2s ease-in-out infinite;
         }
       `}</style>
