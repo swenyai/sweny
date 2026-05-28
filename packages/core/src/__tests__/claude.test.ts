@@ -268,9 +268,7 @@ describe("ClaudeClient", () => {
 
     it("falls back to the text heuristic when structured_output is absent", async () => {
       mockQuery.mockReturnValueOnce(
-        makeStream([
-          { type: "result", subtype: "success", result: 'Done.\n```json\n{"severity": "medium"}\n```' },
-        ]),
+        makeStream([{ type: "result", subtype: "success", result: 'Done.\n```json\n{"severity": "medium"}\n```' }]),
       );
 
       const client = new ClaudeClient();
