@@ -28,22 +28,33 @@ export { workflowInputsZ };
 
 export const jsonSchemaZ = z.record(z.unknown());
 
-export const configFieldZ = z.object({
-  description: z.string(),
-  required: z.boolean().optional(),
-  env: z.string().optional(),
-});
+// .strict() to match the published skill JSON Schema's ConfigField
+// `additionalProperties: false`. Without it Zod silently STRIPPED an unknown
+// nested key while ajv REJECTED it (the #214/#225 divergence class, missed for
+// configFieldZ/toolZ). custom-loader.ts builds Skill objects from frontmatter
+// and never runs these schemas, so tightening is safe downstream.
+export const configFieldZ = z
+  .object({
+    description: z.string(),
+    required: z.boolean().optional(),
+    env: z.string().optional(),
+  })
+  .strict();
 
 /**
  * Zod schema for tool metadata (name, description, input_schema).
  * Note: `handler` is intentionally omitted — Zod schemas validate
  * serializable data (JSON import/export), not runtime function refs.
+ *
+ * .strict() to match the published Tool `$def`'s `additionalProperties: false`.
  */
-export const toolZ = z.object({
-  name: z.string().min(1),
-  description: z.string(),
-  input_schema: jsonSchemaZ,
-});
+export const toolZ = z
+  .object({
+    name: z.string().min(1),
+    description: z.string(),
+    input_schema: jsonSchemaZ,
+  })
+  .strict();
 
 export const skillCategoryZ = z.enum(SKILL_CATEGORIES);
 
@@ -1071,6 +1082,11 @@ export const skillJsonSchema = {
     McpServerConfig: {
       type: "object",
       description: "External MCP server definition.",
+      // An MCP server must declare command (stdio) or url (http), mirroring
+      // mcpServerConfigZ.refine(c => c.command || c.url) and the workflow
+      // inline-skill mcp block. Without this the published skill.json accepted a
+      // transport-less mcp block the runtime parser rejects (Zod<->ajv drift).
+      anyOf: [{ required: ["command"] }, { required: ["url"] }],
       additionalProperties: false,
       properties: {
         type: {

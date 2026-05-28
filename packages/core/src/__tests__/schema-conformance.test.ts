@@ -906,6 +906,30 @@ const skillFixtures: Fixture[] = [
     input: { ...baseSkill(), instruction: "x", bogusKey: "value" },
     expected: false,
   },
+  {
+    // IO-02: the published McpServerConfig $def lacked anyOf[command|url], so
+    // ajv accepted a transport-less mcp block that Zod's
+    // refine(c => c.command || c.url) rejected.
+    name: "skill with a transport-less mcp block (rejected by both)",
+    input: { ...baseSkill(), instruction: "x", mcp: { env: { A: "b" } } },
+    expected: false,
+  },
+  {
+    // IO-03: configFieldZ was not .strict(), so Zod stripped an unknown nested
+    // key while the ConfigField $def's additionalProperties: false rejected it.
+    name: "skill with an unknown key inside a config field (rejected by both)",
+    input: { ...baseSkill(), instruction: "x", config: { F: { description: "d", extra: 1 } } },
+    expected: false,
+  },
+  {
+    // IO-03: same divergence for toolZ.
+    name: "skill with an unknown key inside a tool entry (rejected by both)",
+    input: {
+      ...baseSkill(),
+      tools: [{ name: "do_it", description: "does it", input_schema: { type: "object" }, extra: 1 }],
+    },
+    expected: false,
+  },
 ];
 
 describe("Skill Zod ↔ JSON Schema conformance", () => {
