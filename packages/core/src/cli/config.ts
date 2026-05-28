@@ -149,7 +149,7 @@ export function registerTriageCommand(program: Command): Command {
     .option("--service-filter <filter>", "Service filter pattern (default: *)")
     .option("--investigation-depth <depth>", "Investigation depth (default: standard)")
     .option("--max-investigate-turns <n>", "Max Claude turns for investigation (default: 50)")
-    .option("--max-implement-turns <n>", "Max Claude turns for implementation (default: 30)")
+    .option("--max-implement-turns <n>", "Max Claude turns for implementation (default: 40)")
     .option("--base-branch <branch>", "Base branch for PRs (default: main)")
     .option("--pr-labels <labels>", "Comma-separated PR labels (default: agent,triage,needs-review)")
     .option("--dry-run", "Analyze only, do not create issues or PRs", false)
@@ -278,7 +278,10 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     severityFocus: (options.severityFocus as string) || f("severity-focus") || "errors",
     serviceFilter: (options.serviceFilter as string) || f("service-filter") || "*",
     investigationDepth: (options.investigationDepth as string) || f("investigation-depth") || "standard",
-    maxInvestigateTurns: parsePositiveInt(options.maxInvestigateTurns ?? f("max-investigate-turns"), DEFAULT_INVESTIGATE_TURNS),
+    maxInvestigateTurns: parsePositiveInt(
+      options.maxInvestigateTurns ?? f("max-investigate-turns"),
+      DEFAULT_INVESTIGATE_TURNS,
+    ),
     maxImplementTurns: parsePositiveInt(options.maxImplementTurns ?? f("max-implement-turns"), DEFAULT_IMPLEMENT_TURNS),
 
     baseBranch: (options.baseBranch as string) || f("base-branch") || "main",
