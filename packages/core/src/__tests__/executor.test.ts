@@ -3315,12 +3315,16 @@ describe("route-eval warnings for non-success nodes (CE-04)", () => {
     const { logger, warns } = spyLogger();
     const events: ExecutionEvent[] = [];
     const claude = new MockClaude({ responses: { mid: { data: {} } }, workflow, routes: { mid: "x" } });
-    const { results } = await execute(workflow, {}, {
-      skills: createSkillMap([]),
-      claude,
-      logger,
-      observer: (e) => events.push(e),
-    });
+    const { results } = await execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        logger,
+        observer: (e) => events.push(e),
+      },
+    );
     expect(results.get("gate")?.status).toBe("skipped");
     // No spurious "declared properties" warning and no node:warning for gate.
     expect(warns.some((w) => /declared properties not in emitted data/.test(w))).toBe(false);
@@ -3358,12 +3362,16 @@ describe("route-eval warnings for non-success nodes (CE-04)", () => {
       workflow,
       routes: { mid: "x" },
     });
-    await execute(workflow, {}, {
-      skills: createSkillMap([]),
-      claude,
-      logger,
-      observer: (e) => events.push(e),
-    });
+    await execute(
+      workflow,
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        logger,
+        observer: (e) => events.push(e),
+      },
+    );
     expect(warns.some((w) => /declared properties not in emitted data/.test(w))).toBe(true);
     expect(events.some((e) => e.type === "node:warning" && e.node === "src")).toBe(true);
   });
