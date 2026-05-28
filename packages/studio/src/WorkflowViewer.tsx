@@ -63,8 +63,6 @@ function WorkflowCanvas() {
     selection,
     setSelection,
     addEdge: storeAddEdge,
-    addNode,
-    updateNode,
     isLayoutStale,
     markLayoutFresh,
     currentNodeId,
@@ -171,48 +169,6 @@ function WorkflowCanvas() {
     }
   }
 
-  // Toolbox drag-and-drop
-  const onDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-  }, []);
-
-  const onDrop = useCallback(
-    (event: React.DragEvent) => {
-      event.preventDefault();
-      const raw = event.dataTransfer.getData("application/sweny-node");
-      if (!raw) return;
-
-      const template = JSON.parse(raw) as {
-        name: string;
-        defaultId: string;
-        skills: string[];
-        instruction: string;
-      };
-
-      // Generate unique ID
-      const existing = new Set(Object.keys(workflow.nodes));
-      let id = template.defaultId;
-      let counter = 1;
-      while (existing.has(id)) {
-        id = `${template.defaultId}_${counter++}`;
-      }
-
-      // Add node to store
-      addNode(id);
-      // Apply template data
-      updateNode(id, {
-        name: template.name || id,
-        skills: template.skills ?? [],
-        instruction: template.instruction ?? "",
-      });
-
-      // Select the new node
-      setSelection({ kind: "node", id });
-    },
-    [workflow.nodes, addNode, updateNode, setSelection],
-  );
-
   const nodeCount = Object.keys(workflow.nodes).length;
 
   return (
@@ -220,7 +176,7 @@ function WorkflowCanvas() {
       {nodeCount === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-gray-400 pointer-events-none z-10">
           <p className="text-sm">No nodes yet.</p>
-          <p className="text-xs">Drag a node from the toolbox on the left</p>
+          <p className="text-xs">Use New or Import in the toolbar to start a workflow</p>
         </div>
       )}
       {error ? (
@@ -241,8 +197,6 @@ function WorkflowCanvas() {
           onEdgeClick={onEdgeClick}
           onPaneClick={onPaneClick}
           onConnect={onConnect}
-          onDragOver={onDragOver}
-          onDrop={onDrop}
           nodesDraggable
           snapToGrid
           snapGrid={[10, 10]}
