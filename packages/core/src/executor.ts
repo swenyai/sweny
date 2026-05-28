@@ -877,6 +877,27 @@ async function resolveNext(
   const defaultEdge = outEdges.find((e) => !e.when);
   const conditionalEdges = outEdges.filter((e) => e.when);
 
+  // Defense-in-depth for AMBIGUOUS_EDGES (rejected by validateWorkflow): with
+  // no conditional edges there is nothing for the route evaluator to decide.
+  // Follow the (first) unconditional edge directly and skip the no-op
+  // claude.evaluate call. validateWorkflow already rejects 2+ unconditional
+  // edges, so a well-formed workflow reaching here has exactly one default.
+  if (conditionalEdges.length === 0 && defaultEdge) {
+    if (outEdges.length > 1) {
+      logger?.warn(
+        `  route eval: node '${current}' has ${outEdges.length} unconditional out-edges; following '${defaultEdge.to}' ` +
+          `and ignoring the rest. Add 'when' clauses to make routing deterministic (see AMBIGUOUS_EDGES).`,
+        { node: current },
+      );
+    }
+    if (edgeCounts) {
+      const key = `${current}→${defaultEdge.to}`;
+      edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+    }
+    safeObserve(observer, { type: "route", from: current, to: defaultEdge.to, reason: "only path" }, logger);
+    return defaultEdge.to;
+  }
+
   // Claude evaluates which condition matches. Include input so conditions
   // can reference workflow-level flags like dryRun, and expose evals so
   // routing edges can read `priorNode.evals.X.pass`.

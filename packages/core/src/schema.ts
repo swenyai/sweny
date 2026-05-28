@@ -348,6 +348,7 @@ export interface WorkflowError {
     | "UNKNOWN_SKILL"
     | "SELF_LOOP"
     | "UNBOUNDED_CYCLE"
+    | "AMBIGUOUS_EDGES"
     | "INVALID_INLINE_SKILL";
   message: string;
   nodeId?: string;
@@ -403,6 +404,31 @@ export function validateWorkflow(
         code: "SELF_LOOP",
         message: `Edge from "${edge.from}" to itself (add max_iterations to allow)`,
         nodeId: edge.from,
+      });
+    }
+  }
+
+  // Edge determinism: a node with two or more out-edges that have no `when`
+  // clause is ambiguous. The executor's resolveNext picks the first such edge
+  // and silently drops the rest, wasting a route eval on a deterministic hop
+  // and leaving the other targets unreachable. Reject it at load time so the
+  // author sees the problem instead of getting a silent first-edge-wins.
+  // Only count edges whose source is a real node (broken sources are already
+  // reported above as UNKNOWN_EDGE_SOURCE).
+  const unconditionalByNode = new Map<string, string[]>();
+  for (const edge of workflow.edges) {
+    if (!nodeIds.has(edge.from)) continue;
+    if (edge.when) continue;
+    const list = unconditionalByNode.get(edge.from) ?? [];
+    list.push(edge.to);
+    unconditionalByNode.set(edge.from, list);
+  }
+  for (const [from, targets] of unconditionalByNode) {
+    if (targets.length > 1) {
+      errors.push({
+        code: "AMBIGUOUS_EDGES",
+        message: `Node "${from}" has ${targets.length} unconditional out-edges (to ${targets.join(", ")}); add a 'when' clause to all but one so routing is deterministic`,
+        nodeId: from,
       });
     }
   }
