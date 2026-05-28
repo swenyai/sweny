@@ -15,7 +15,7 @@
 import * as path from "node:path";
 
 import { classifySource, type SourceResolutionContext } from "./sources.js";
-import { resolveSource } from "./source-resolver.js";
+import { resolveSource, SOURCE_OFFLINE_REQUIRES_FETCH } from "./source-resolver.js";
 import { consoleLogger } from "./types.js";
 
 export const DEFAULT_ISSUE_TEMPLATE = `## Summary
@@ -98,7 +98,7 @@ function buildCtx(options: SourceLoadOptions): SourceResolutionContext {
  */
 function isOfflineSkip(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return msg.startsWith("SOURCE_OFFLINE_REQUIRES_FETCH");
+  return msg.startsWith(SOURCE_OFFLINE_REQUIRES_FETCH);
 }
 
 /**
