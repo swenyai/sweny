@@ -161,13 +161,31 @@ describe("checkDatadog", () => {
     expect(res.status).toBe("ok");
   });
 
-  it("rejects a site with a path/query before building the URL (no fetch)", async () => {
-    const spy = stubFetch(async () => ({ ok: true, status: 200 }));
-    const res = await checkDatadog({ apiKey: "a", appKey: "b", site: "evil.com/x?" });
-    expect(spy).not.toHaveBeenCalled();
-    expect(res.status).toBe("fail");
-    expect(res.detail).toMatch(/Invalid DD_SITE/i);
-  });
+  // Real Datadog sites the allowlist must NOT reject (multi-label hosts,
+  // numeric subdomains, hyphenated gov host). Guards against a future
+  // "tightening" of the regex that breaks legitimate sites.
+  it.each(["datadoghq.com", "datadoghq.eu", "us5.datadoghq.com", "us3.datadoghq.com", "ddog-gov.com"])(
+    "accepts the valid site %s and builds the expected URL",
+    async (site) => {
+      const spy = stubFetch(async () => ({ ok: true, status: 200 }));
+      const res = await checkDatadog({ apiKey: "a", appKey: "b", site });
+      expect(spy.mock.calls[0][0]).toBe(`https://api.${site}/api/v2/validate`);
+      expect(res.status).toBe("ok");
+    },
+  );
+
+  // Dangerous values that smuggle a path/query/host or credentials into the
+  // interpolated URL. All must fail before any fetch.
+  it.each(["evil.com/x?", "datadoghq.com/../../x", "datadoghq.com:9999@evil.com", "datadoghq.com ", "DATADOGHQ.COM"])(
+    "rejects the dangerous site %j before building the URL (no fetch)",
+    async (site) => {
+      const spy = stubFetch(async () => ({ ok: true, status: 200 }));
+      const res = await checkDatadog({ apiKey: "a", appKey: "b", site });
+      expect(spy).not.toHaveBeenCalled();
+      expect(res.status).toBe("fail");
+      expect(res.detail).toMatch(/Invalid DD_SITE/i);
+    },
+  );
 
   it("reports a timeout when the abort signal fires", async () => {
     vi.stubGlobal(

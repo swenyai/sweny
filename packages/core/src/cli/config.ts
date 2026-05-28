@@ -193,7 +193,7 @@ export function registerTriageCommand(program: Command): Command {
     )
     .option("--bell", "Ring terminal bell on completion", false)
     .option("--cache-dir <path>", "Step cache directory (default: .sweny/cache)")
-    .option("--cache-ttl <seconds>", "Cache TTL in seconds, 0 = infinite (default: 86400)")
+    .option("--cache-ttl <seconds>", "Cache TTL in seconds, 1 to 31536000 (default: 86400)")
     .option("--no-cache", "Disable step cache")
     .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
     .option(
