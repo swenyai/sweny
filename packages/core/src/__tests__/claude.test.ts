@@ -216,6 +216,109 @@ describe("ClaudeClient", () => {
     expect(result.data.severity).toBe("high");
   });
 
+  describe("structured output (CC-08)", () => {
+    const schema = {
+      type: "object" as const,
+      properties: { severity: { type: "string" } },
+      required: ["severity"],
+    };
+
+    it("passes outputFormat to query when an output schema is supplied", async () => {
+      mockQuery.mockReturnValueOnce(makeStream([{ type: "result", subtype: "success", result: "{}" }]));
+
+      const client = new ClaudeClient();
+      await client.run({ instruction: "x", context: {}, tools: [], outputSchema: schema });
+
+      const opts = mockQuery.mock.calls[0][0].options;
+      expect(opts.outputFormat).toEqual({ type: "json_schema", schema });
+    });
+
+    it("does not pass outputFormat when no schema is supplied", async () => {
+      mockQuery.mockReturnValueOnce(makeStream([{ type: "result", subtype: "success", result: "{}" }]));
+
+      const client = new ClaudeClient();
+      await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(mockQuery.mock.calls[0][0].options.outputFormat).toBeUndefined();
+    });
+
+    it("sources data from structured_output when the SDK provides it", async () => {
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "result",
+            subtype: "success",
+            // The free-text result deliberately disagrees with structured_output
+            // so the test proves the SDK value wins.
+            result: '```json\n{"severity": "low"}\n```',
+            structured_output: { severity: "high", confidence: 0.9 },
+          },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [], outputSchema: schema });
+
+      expect(result.status).toBe("success");
+      expect(result.data.severity).toBe("high");
+      expect(result.data.confidence).toBe(0.9);
+      // summary is preserved for trace/context.
+      expect(result.data.summary).toContain("low");
+    });
+
+    it("falls back to the text heuristic when structured_output is absent", async () => {
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          { type: "result", subtype: "success", result: 'Done.\n```json\n{"severity": "medium"}\n```' },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [], outputSchema: schema });
+
+      expect(result.status).toBe("success");
+      expect(result.data.severity).toBe("medium");
+    });
+
+    it("ignores a non-object structured_output and falls back to the heuristic", async () => {
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "result",
+            subtype: "success",
+            result: '{"severity": "medium"}',
+            structured_output: "not-an-object",
+          },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [], outputSchema: schema });
+
+      expect(result.data.severity).toBe("medium");
+    });
+
+    it("fails loudly on error_max_structured_output_retries", async () => {
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "result",
+            subtype: "error_max_structured_output_retries",
+            errors: ["max retries exceeded"],
+            is_error: true,
+          },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [], outputSchema: schema });
+
+      expect(result.status).toBe("failed");
+      expect(result.data.error).toContain("schema");
+      expect(result.data.error).toContain("max retries exceeded");
+    });
+  });
+
   it("creates MCP server with converted tools", async () => {
     mockQuery.mockReturnValueOnce(makeStream([{ type: "result", subtype: "success", result: "done" }]));
 

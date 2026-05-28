@@ -272,6 +272,11 @@ export class ClaudeClient implements Claude {
     const env = this.buildEnv();
 
     let response = "";
+    // CC-08: when the SDK populates typed structured output (because we passed
+    // an `outputFormat`), prefer it over re-parsing JSON out of the free-text
+    // result. Left undefined when the SDK didn't provide it, so the
+    // tryParseJSON heuristic remains the fallback (e.g. mocks, older results).
+    let structuredOutput: unknown;
 
     // Timeout / abort wiring (back-compat: only armed when requested).
     // A single AbortController drives both an optional caller signal and an
@@ -297,6 +302,11 @@ export class ClaudeClient implements Claude {
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(Object.keys(allMcpServers).length > 0 ? { mcpServers: allMcpServers } : {}),
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
+          // CC-08: ask the SDK to produce validated structured output when the
+          // node declares an output schema. The SDK then returns the parsed
+          // value on `result.structured_output`, which we prefer over the
+          // text-scan heuristic below.
+          ...(outputSchema ? { outputFormat: { type: "json_schema", schema: outputSchema } } : {}),
         },
       });
 
@@ -383,11 +393,22 @@ export class ClaudeClient implements Claude {
               };
             }
             response = resultMsg.result;
+            // CC-08: capture the SDK's typed structured output when present.
+            if ("structured_output" in resultMsg && resultMsg.structured_output !== undefined) {
+              structuredOutput = resultMsg.structured_output;
+            }
           } else if ("errors" in resultMsg) {
             const errors = (resultMsg as any).errors as string[] | undefined;
+            // CC-08: surface the structured-output failure subtype explicitly
+            // so a schema the model can't satisfy fails loudly instead of
+            // silently producing empty data.
+            const prefix =
+              (resultMsg as any).subtype === "error_max_structured_output_retries"
+                ? "Claude could not produce output matching the schema: "
+                : "";
             return {
               status: "failed",
-              data: { error: errors?.join("\n") ?? "Execution failed" },
+              data: { error: prefix + (errors?.join("\n") ?? "Execution failed") },
               toolCalls,
             };
           }
@@ -413,9 +434,17 @@ export class ClaudeClient implements Claude {
       await interruptStream(stream);
     }
 
+    // CC-08: prefer the SDK's validated structured output when it gave us an
+    // object. Fall back to the free-text JSON heuristic when it's absent
+    // (no schema requested, mocked result, or an older SDK that didn't set it).
+    const parsedData =
+      structuredOutput && typeof structuredOutput === "object" && !Array.isArray(structuredOutput)
+        ? (structuredOutput as Record<string, unknown>)
+        : tryParseJSON(response, outputSchema, this.logger);
+
     return {
       status: "success",
-      data: { summary: response, ...tryParseJSON(response, outputSchema, this.logger) },
+      data: { summary: response, ...parsedData },
       toolCalls,
     };
   }
