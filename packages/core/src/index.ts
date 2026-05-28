@@ -53,9 +53,36 @@ export type {
   WorkflowInputType,
   InputValidationError,
   InputValidationResult,
+  // Core public field types (the types of Node's own fields)
+  Evaluator,
+  EvaluatorRule,
+  EvalResult,
+  EvaluatorKind,
+  NodeRequires,
+  NodeRetry,
+  OutputMatch,
+  NodeSources,
+  EvalPolicy,
+  RequiresOnFail,
+  McpTransport,
+  WorkflowType,
+  SkillHarnessKey,
 } from "./types.js";
 
 export { WORKFLOW_INPUT_TYPES } from "./types.js";
+
+// Runtime enum constants + skill-id helpers
+export {
+  EVALUATOR_KINDS,
+  EVAL_POLICIES,
+  REQUIRES_ON_FAIL,
+  MCP_TRANSPORTS,
+  SKILL_CATEGORIES,
+  SKILL_HARNESSES,
+  SKILL_ID_PATTERN,
+  SKILL_ID_MAX_LENGTH,
+  isValidSkillId,
+} from "./types.js";
 
 export { consoleLogger } from "./types.js";
 
@@ -104,8 +131,15 @@ export {
   parseWorkflow,
   validateWorkflow,
   workflowJsonSchema,
+  skillJsonSchema,
 } from "./schema.js";
 export type { WorkflowError } from "./schema.js";
+
+// Loader — canonical read → parse → structural-validate pipeline (the path
+// the CLI uses for `workflow run`, `workflow validate`, and `publish`).
+// Node-only: loader.ts imports `node:fs`, so this is NOT mirrored in browser.ts.
+export { loadAndValidateWorkflow, validateParsed } from "./loader.js";
+export type { LoaderResult, LoaderError, LoaderOptions } from "./loader.js";
 
 // Workflow input validation
 export { validateRuntimeInput, summarizeInputShape } from "./inputs.js";

@@ -31,9 +31,41 @@ export type {
   Observer,
   Claude,
   Logger,
+  // Core public field types (the types of Node's own fields). Pure types,
+  // zero runtime, browser-safe. Studio builds/edits Node objects and needs
+  // to name node.eval / node.requires / node.retry field types.
+  Evaluator,
+  EvaluatorRule,
+  EvalResult,
+  EvaluatorKind,
+  NodeRequires,
+  NodeRetry,
+  OutputMatch,
+  NodeSources,
+  EvalPolicy,
+  RequiresOnFail,
+  McpTransport,
+  WorkflowType,
+  SkillHarnessKey,
 } from "./types.js";
 
 export { consoleLogger } from "./types.js";
+
+// Runtime enum constants + skill-id helpers. Pure data / regex / pure
+// function from types.ts, which is already proven browser-safe (schema.ts
+// imports it). A Studio dropdown rendering evaluator kinds, or validating a
+// skill id, needs these without hardcoding the members.
+export {
+  EVALUATOR_KINDS,
+  EVAL_POLICIES,
+  REQUIRES_ON_FAIL,
+  MCP_TRANSPORTS,
+  SKILL_CATEGORIES,
+  SKILL_HARNESSES,
+  SKILL_ID_PATTERN,
+  SKILL_ID_MAX_LENGTH,
+  isValidSkillId,
+} from "./types.js";
 
 // Skills (browser-safe — no filesystem access, no `process.env` reads)
 export {
@@ -53,7 +85,16 @@ export {
 export type { SkillValidationResult } from "./skills/index.js";
 
 // Schema & validation
-export { workflowZ, nodeZ, edgeZ, skillZ, parseWorkflow, validateWorkflow, workflowJsonSchema } from "./schema.js";
+export {
+  workflowZ,
+  nodeZ,
+  edgeZ,
+  skillZ,
+  parseWorkflow,
+  validateWorkflow,
+  workflowJsonSchema,
+  skillJsonSchema,
+} from "./schema.js";
 export type { WorkflowError } from "./schema.js";
 
 // Studio adapter

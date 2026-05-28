@@ -211,7 +211,15 @@ export function validateRuntimeInput(declared: WorkflowInputs | undefined, raw: 
   // and the cascade `rules`/`context` mechanism inject extra keys into
   // the input bag. The declaration narrows the contract for documented
   // fields without locking down the whole object.
+  //
+  // Prototype-pollution guard: `raw` is `unknown` and callers (Studio,
+  // programmatic scripts) may hand us hand-built objects, or `JSON.parse`
+  // output containing an enumerable own `__proto__` key. Writing such a
+  // key with `out[k] = v` would reassign the result's prototype. Skip the
+  // three dangerous keys so untrusted input can never touch the prototype
+  // chain. `out` stays a normal object literal for downstream consumers.
   for (const [k, v] of Object.entries(provided)) {
+    if (isUnsafeKey(k)) continue;
     if (!Object.prototype.hasOwnProperty.call(declared, k)) {
       out[k] = v;
     }
@@ -249,6 +257,16 @@ export function summarizeInputShape(
 }
 
 // ─── Internals ──────────────────────────────────────────────────
+
+/**
+ * Keys that must never be copied from untrusted input onto a plain object,
+ * because assigning them mutates the prototype chain rather than adding an
+ * own property. `JSON.parse('{"__proto__":{...}}')` produces an enumerable
+ * own `__proto__` key that `Object.entries` surfaces.
+ */
+function isUnsafeKey(key: string): boolean {
+  return key === "__proto__" || key === "constructor" || key === "prototype";
+}
 
 function checkValueType(value: unknown, type: WorkflowInputType): string | null {
   switch (type) {
