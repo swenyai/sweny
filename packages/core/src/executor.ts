@@ -32,10 +32,12 @@ import type {
   JSONSchema,
   Source,
   ResolvedSource,
+  EvalResult,
 } from "./types.js";
 import { consoleLogger } from "./types.js";
 import { resolveSources } from "./source-resolver.js";
 import { evaluateAll, aggregateEval } from "./eval/index.js";
+import type { AggregateOutcome } from "./eval/index.js";
 import { evaluateRequires } from "./requires.js";
 import { buildRetryPreamble } from "./retry.js";
 import { resolveExecutionModel } from "./model.js";
@@ -60,7 +62,24 @@ export interface ExecuteOptions {
   fetchAuth?: Record<string, string>;
   /** When true, URL Sources throw instead of fetching */
   offline?: boolean;
+  /**
+   * Workflow-level hard cap on total node executions (the number of times the
+   * main loop visits a node). Guards against unbounded cycles, e.g. a back-edge
+   * with no `max_iterations` or an LLM route evaluator that keeps choosing the
+   * loop-back edge. Defaults to {@link DEFAULT_MAX_STEPS}. When exceeded the
+   * executor throws a clear "step budget exceeded" error rather than hanging.
+   * Per-edge `max_iterations` behavior is unchanged.
+   */
+  max_steps?: number;
 }
+
+/**
+ * Default workflow-level step budget. Counts total node executions across the
+ * whole run (loop iterations included). Generous enough for legitimate deep
+ * workflows with controlled cycles, tight enough to terminate a runaway loop
+ * before it burns meaningful model spend.
+ */
+export const DEFAULT_MAX_STEPS = 200;
 
 /**
  * Execute a workflow from entry to completion.
@@ -77,11 +96,13 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   // The caller's skill map takes precedence — inline skills only fill gaps.
   const skills = mergeInlineSkills(options.skills, workflow.skills);
 
-  const config = resolveConfig(skills, options.config);
+  const config = resolveConfig(skills, options.config, options.env ?? process.env);
   const logger = options.logger ?? consoleLogger;
   const results = new Map<string, NodeResult>();
   const edgeCounts = new Map<string, number>(); // "from→to" → times followed
   const nodeRunCounts = new Map<string, number>(); // node → times executed
+  const maxSteps = options.max_steps ?? DEFAULT_MAX_STEPS;
+  let stepCount = 0; // total node executions across the run (loop iterations included)
   const trace: ExecutionTrace = { steps: [], edges: [], sources: {} };
 
   validate(workflow, skills);
@@ -142,6 +163,20 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   while (currentId) {
     const node = workflow.nodes[currentId];
     if (!node) throw new Error(`Unknown node: "${currentId}"`);
+
+    // Workflow-level hard cap. Per-edge max_iterations bounds individual
+    // back-edges, but a self-loop (or LLM route) with no max_iterations is
+    // otherwise unbounded. This budget terminates the run loudly instead of
+    // hanging CI / the action and burning model spend.
+    stepCount++;
+    if (stepCount > maxSteps) {
+      throw new Error(
+        `step budget exceeded: workflow '${workflow.id}' ran ${stepCount} steps (max_steps: ${maxSteps}). ` +
+          `This usually means an unbounded cycle, e.g. a back-edge with no 'max_iterations' or a route that keeps ` +
+          `looping. Add 'max_iterations' to the offending edge or raise 'max_steps' if the workflow legitimately ` +
+          `needs more steps.`,
+      );
+    }
 
     const iteration = (nodeRunCounts.get(currentId) ?? 0) + 1;
     nodeRunCounts.set(currentId, iteration);
@@ -292,26 +327,35 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       // validation. Type mismatches, formats, additionalProperties, etc.
       // stay the workflow author's problem and don't have the same
       // routing-correctness blast radius.
+      // A missing required field is a contract violation handled on the same
+      // footing as an eval failure: an otherwise-recoverable one-off omission
+      // should self-heal on a second attempt when the node has `retry`
+      // configured. We synthesize an eval-shaped failure so the retry preamble
+      // and trace bookkeeping below treat it identically. When no retry is
+      // configured (or the budget is exhausted), it still hard-fails the node.
       const missingRequired = findMissingRequiredFields(result.data, node.output);
+
+      let outcome: AggregateOutcome;
       if (missingRequired.length > 0) {
         const msg = `output schema violation: required field(s) missing from emitted data: ${missingRequired.join(", ")}`;
-        result.status = "failed";
-        result.data = { ...(result.data ?? {}), error: msg };
-        logger.warn(`  ${msg}`, { node: currentId });
-        break;
+        const failure: EvalResult = { name: "output_required", kind: "value", pass: false, reasoning: msg };
+        outcome = { pass: false, error: msg, failures: [failure] };
+        // Still record the synthesized failure as the node's eval result so
+        // observers and downstream context see the contract violation.
+        result.evals = [failure];
+      } else {
+        const evalResults = await evaluateAll(node.eval, result, {
+          aliases: toolAliases,
+          claude,
+          node,
+          workflow,
+        });
+        result.evals = evalResults;
+        outcome = aggregateEval(evalResults, node.eval_policy ?? "all_pass");
       }
-
-      const evalResults = await evaluateAll(node.eval, result, {
-        aliases: toolAliases,
-        claude,
-        node,
-        workflow,
-      });
-      result.evals = evalResults;
-      const outcome = aggregateEval(evalResults, node.eval_policy ?? "all_pass");
       if (outcome.pass) break;
 
-      // Apply eval failure to the result.
+      // Apply the failure to the result.
       result.status = "failed";
       result.data = { ...result.data, error: outcome.error };
 
@@ -714,14 +758,23 @@ function resolveSkillInstructions(
 /**
  * Resolve config values: check explicit overrides first, then env vars.
  * Throws if a required field is missing.
+ *
+ * `env` is the environment map to read `field.env` from. Callers thread
+ * `options.env ?? process.env` so an explicit env map is honored consistently
+ * with Source resolution (which reads the same map). Defaults to
+ * `process.env` when omitted.
  */
-function resolveConfig(skills: Map<string, Skill>, overrides?: Record<string, string>): Record<string, string> {
+function resolveConfig(
+  skills: Map<string, Skill>,
+  overrides?: Record<string, string>,
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
   const config: Record<string, string> = {};
   const missing: string[] = [];
 
   for (const skill of skills.values()) {
     for (const [key, field] of Object.entries(skill.config)) {
-      const value = overrides?.[key] ?? (field.env ? process.env[field.env] : undefined);
+      const value = overrides?.[key] ?? (field.env ? env[field.env] : undefined);
       if (value) {
         config[key] = value;
       } else if (field.required) {
@@ -876,9 +929,36 @@ async function resolveNext(
     choices,
   });
 
-  // Validate that Claude returned a valid target
+  // Validate that Claude returned a valid target.
   const validTargets = new Set(outEdges.map((e) => e.to));
-  const resolved = validTargets.has(chosen) ? chosen : (defaultEdge?.to ?? outEdges[0].to); // fall back to default or first edge
+  if (!validTargets.has(chosen)) {
+    // The evaluator returned a target that is not a live out-edge. If there's
+    // an explicit default (unconditional) edge, take it as the documented
+    // fallback. Otherwise this is a hard error: silently jumping to
+    // `outEdges[0]` (often the loop-back edge) launders garbage model output
+    // into a plausible-looking route and, combined with an unbounded cycle,
+    // produces an infinite loop. Stop loudly instead.
+    if (!defaultEdge) {
+      logger?.warn(
+        `  route eval: evaluator returned invalid target '${chosen}' for node '${current}' and there is no ` +
+          `default (unconditional) edge; terminating this branch. Valid targets: ${[...validTargets].join(", ")}`,
+        { node: current, chosen, validTargets: [...validTargets] },
+      );
+      safeObserve(
+        observer,
+        {
+          type: "route",
+          from: current,
+          to: "(end)",
+          reason: `invalid route target '${chosen}' with no default edge`,
+        },
+        logger,
+      );
+      return null;
+    }
+  }
+
+  const resolved = validTargets.has(chosen) ? chosen : defaultEdge!.to;
 
   // Track edge usage for max_iterations
   if (edgeCounts) {
@@ -886,6 +966,9 @@ async function resolveNext(
     edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
   }
 
+  // Report the matched choice's description. The `?? "default"` fallback now
+  // only fires when a default edge genuinely exists (the no-default invalid
+  // case returned null above), so it can no longer mislabel a garbage route.
   safeObserve(
     observer,
     {
