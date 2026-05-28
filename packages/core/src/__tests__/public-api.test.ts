@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import * as core from "../index.js";
+import * as browser from "../browser.js";
 
 // Issue #213: complete the public API surface. These tests pin the new
 // exports so a future refactor can't silently drop them from `index.ts`.
@@ -97,5 +98,30 @@ edges: []
     // new. Both must resolve without a duplicate-export build error (which
     // would have failed the build before this test ever ran).
     expect(core.SKILL_CATEGORIES).toContain("general");
+  });
+});
+
+describe("browser surface mirrors the safe constants (issue #213)", () => {
+  // The browser entry must mirror the pure-data constants + skill-id helper
+  // (no node:fs), so Studio and other browser consumers reach them without
+  // hardcoding members. The loader (node:fs) is intentionally NOT here.
+
+  it("mirrors the runtime enum constants + skill-id helpers", () => {
+    expect(browser.EVALUATOR_KINDS).toEqual(core.EVALUATOR_KINDS);
+    expect(browser.EVAL_POLICIES).toEqual(core.EVAL_POLICIES);
+    expect(browser.REQUIRES_ON_FAIL).toEqual(core.REQUIRES_ON_FAIL);
+    expect(browser.MCP_TRANSPORTS).toEqual(core.MCP_TRANSPORTS);
+    expect(browser.SKILL_CATEGORIES).toEqual(core.SKILL_CATEGORIES);
+    expect(browser.SKILL_HARNESSES).toEqual(core.SKILL_HARNESSES);
+    expect(browser.SKILL_ID_PATTERN).toEqual(core.SKILL_ID_PATTERN);
+    expect(browser.SKILL_ID_MAX_LENGTH).toBe(core.SKILL_ID_MAX_LENGTH);
+    expect(typeof browser.isValidSkillId).toBe("function");
+    expect(browser.skillJsonSchema).toBeDefined();
+  });
+
+  it("does NOT leak the node-only loader into the browser surface", () => {
+    // loader.ts imports node:fs; it must stay out of the browser entry.
+    expect((browser as Record<string, unknown>).loadAndValidateWorkflow).toBeUndefined();
+    expect((browser as Record<string, unknown>).validateParsed).toBeUndefined();
   });
 });

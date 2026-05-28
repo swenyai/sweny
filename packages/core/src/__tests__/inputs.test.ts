@@ -177,6 +177,35 @@ describe("validateRuntimeInput", () => {
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
+  it("does not let a hand-built enumerable own __proto__ key pollute the result", () => {
+    // The issue calls out the hand-built-object path explicitly, separate
+    // from JSON.parse: `raw` is `unknown`, so Studio / programmatic callers
+    // can hand us an object with an enumerable OWN `__proto__` key built via
+    // defineProperty (a literal `{ __proto__: {...} }` would instead set the
+    // prototype and never surface as an own key). Object.entries surfaces it,
+    // and the passthrough loop would reassign it without the guard.
+    const declared: WorkflowInputs = { foo: { type: "string" } };
+    const raw: Record<string, unknown> = { foo: "x" };
+    Object.defineProperty(raw, "__proto__", {
+      value: { polluted: true },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    // Sanity: the payload really does carry an own enumerable __proto__ key.
+    expect(Object.keys(raw)).toContain("__proto__");
+
+    const r = validateRuntimeInput(declared, raw);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect((Object.getPrototypeOf(r.value) as Record<string, unknown>).polluted).toBeUndefined();
+      // The dangerous key is dropped entirely, not copied as an own key.
+      expect(Object.prototype.hasOwnProperty.call(r.value, "__proto__")).toBe(false);
+      expect(r.value.foo).toBe("x");
+    }
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
   it("does not corrupt the prototype chain via constructor / prototype unknown keys", () => {
     const declared: WorkflowInputs = { foo: { type: "string" } };
     const raw = JSON.parse('{"foo":"x","constructor":{"bad":1},"prototype":{"bad":2}}');
