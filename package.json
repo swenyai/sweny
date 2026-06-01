@@ -54,7 +54,7 @@
   "devDependencies": {
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "zod": "^3.25.76",
+    "zod": "^4.4.3",
     "@typescript-eslint/eslint-plugin": "^8.59.4",
     "@typescript-eslint/parser": "^8.59.4",
     "eslint": "^10.4.0",

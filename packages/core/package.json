@@ -58,7 +58,7 @@
     "chalk": "^5",
     "commander": "^13",
     "yaml": "^2",
-    "zod": "^3.25.76"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@anthropic-ai/claude-code": "^2.1.150",

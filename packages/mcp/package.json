@@ -22,7 +22,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@sweny-ai/core": "^0.1.0",
     "yaml": "^2",
-    "zod": "^3.25.76"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
