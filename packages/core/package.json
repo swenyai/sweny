@@ -56,7 +56,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.114",
     "@clack/prompts": "^1.2.0",
     "chalk": "^5",
-    "commander": "^13",
+    "commander": "^15",
     "yaml": "^2",
     "zod": "^3.25.76"
   },
