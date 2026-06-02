@@ -981,7 +981,14 @@ async function resolveNext(
   for (const [k, v] of results.entries()) {
     const { view, missing } = buildRouteEvalEntry(v, workflow.nodes[k]);
     context[k] = view;
-    if (missing.length > 0) {
+    // Only a successful node has an output contract to violate. A node that
+    // was skipped (requires not met) or failed before producing output never
+    // emitted its declared properties; its data is { skipped_reason } / { error }.
+    // Warning that those nodes are "missing declared properties" is misleading
+    // noise — it alarms operators and pollutes telemetry on every skip. Still
+    // build the view above so routing can read the skipped/failed data; only
+    // suppress the warning + node:warning for non-success nodes.
+    if (missing.length > 0 && v.status === "success") {
       // Loud signal for the operator. The view itself already replaces the
       // missing keys with explicit `null`, so the LLM evaluator cannot
       // ghost-match "is N" or "is undefined" against a structurally-absent
