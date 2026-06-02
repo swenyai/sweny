@@ -12,17 +12,17 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@astrojs/react": "^5.0.5",
+    "@astrojs/react": "^5.0.7",
     "@astrojs/starlight": "^0.38.3",
     "@sweny-ai/core": "*",
     "@sweny-ai/studio": "^8.0.0",
-    "@types/react": "^19.2.15",
+    "@types/react": "^19.2.16",
     "@types/react-dom": "^19.2.3",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "astro": "^6.4.3",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "sharp": "^0.34.2",
     "zod": "^3.25.76"
   },
