@@ -80,7 +80,10 @@ const gitlab: McpCatalogEntry = {
   wire: (creds) => {
     if (!creds.GITLAB_TOKEN) return undefined;
     const env: Record<string, string> = { GITLAB_PERSONAL_ACCESS_TOKEN: creds.GITLAB_TOKEN };
-    const baseUrl = creds.GITLAB_URL || "https://gitlab.com";
+    // Normalize trailing slash(es) so a pasted "https://gl.corp.com/" (or even
+    // the canonical "https://gitlab.com/") does not produce a double-slash
+    // "//api/v4". The /+$ also collapses accidental multi-trailing-slash input.
+    const baseUrl = (creds.GITLAB_URL || "https://gitlab.com").replace(/\/+$/, "");
     if (baseUrl !== "https://gitlab.com") env.GITLAB_API_URL = `${baseUrl}/api/v4`;
     return {
       type: "stdio",

@@ -169,6 +169,51 @@ describe("toMermaid", () => {
     expect(result).not.toContain("step two");
   });
 
+  it("keeps distinct node IDs that sanitize to the same alias separate (CC-04)", () => {
+    // `a.b` and `a_b` both sanitize to `a_b`; before the fix they merged into
+    // one Mermaid node and the edge pointed at the wrong/merged target.
+    const wf: Workflow = {
+      id: "collision",
+      name: "Collision",
+      description: "",
+      entry: "a.b",
+      nodes: {
+        "a.b": { name: "Dotted", instruction: "x", skills: [] },
+        a_b: { name: "Underscored", instruction: "x", skills: [] },
+      },
+      edges: [{ from: "a.b", to: "a_b" }],
+    };
+    const result = toMermaid(wf);
+
+    // Two distinct node declarations.
+    expect(result).toContain("a_b([Dotted ▶])");
+    expect(result).toContain("a_b_2[Underscored]");
+    // The edge targets the correct (distinct) aliases, not a single merged node.
+    expect(result).toContain("a_b --> a_b_2");
+    // Exactly two node-declaration lines (one rounded entry, one rectangle).
+    const declLines = result.split("\n").filter((l) => /^\s+a_b(_2)?[([]/.test(l));
+    expect(declLines).toHaveLength(2);
+  });
+
+  it("collision aliasing also maps class-styling and entry order (CC-04)", () => {
+    const wf: Workflow = {
+      id: "collision-state",
+      name: "Collision State",
+      description: "",
+      entry: "x/y",
+      nodes: {
+        "x/y": { name: "Slashed", instruction: "x", skills: [] },
+        "x y": { name: "Spaced", instruction: "x", skills: [] },
+      },
+      edges: [{ from: "x/y", to: "x y" }],
+    };
+    const result = toMermaid(wf, { state: { "x/y": "success", "x y": "current" } });
+
+    // Distinct aliases flow through `class` directives too.
+    expect(result).toContain("class x_y success");
+    expect(result).toContain("class x_y_2 current");
+  });
+
   it("escapes special characters in labels", () => {
     const wf: Workflow = {
       id: "escape",
@@ -185,6 +230,31 @@ describe("toMermaid", () => {
 
     expect(result).toContain("&quot;");
     expect(result).not.toContain('Say "hello"');
+  });
+
+  it("escapes `|` in edge labels and node names so the -->|...| delimiter isn't broken (CC-07)", () => {
+    const wf: Workflow = {
+      id: "pipe",
+      name: "Pipe",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "high | critical", instruction: "x", skills: [] },
+        b: { name: "Done", instruction: "x", skills: [] },
+      },
+      edges: [{ from: "a", to: "b", when: "severity is high | critical" }],
+    };
+    const result = toMermaid(wf);
+
+    // The raw `|` is replaced by the HTML entity in both label contexts.
+    expect(result).toContain("&#124;");
+    // The only literal `|` characters left are the Mermaid edge-label
+    // delimiters in `-->|"..."|`. Strip those, then confirm no stray `|`
+    // survived from the user-supplied text.
+    const withoutDelimiters = result.replace(/-->\|"[^|]*"\|/g, "-->DELIM");
+    expect(withoutDelimiters).not.toContain("|");
+    // The edge label is delimited correctly and carries the full text.
+    expect(result).toContain('-->|"severity is high &#124; critical"|');
   });
 
   it("groups multiple nodes with same status", () => {

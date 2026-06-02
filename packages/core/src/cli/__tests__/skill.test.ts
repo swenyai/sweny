@@ -89,6 +89,44 @@ describe("scaffolded skill is round-trippable through discovery", () => {
     }
   });
 
+  it("descriptions with YAML-special characters round-trip through the loader (CC-02)", () => {
+    // Each of these used to produce invalid frontmatter (the loader rejected
+    // it with an invalid-frontmatter diagnostic) or silently corrupted the
+    // value (e.g. a leading `#` parsed as a comment → description: null).
+    const cases = [
+      "Handles A: B [c]",
+      "[beta] do the thing",
+      "@mention the bot",
+      "a > b",
+      "a | b",
+      "# hash heading",
+      'has "quotes"',
+      "Processes tax filings: state & federal",
+    ];
+    for (const description of cases) {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-skill-yaml-"));
+      try {
+        const skillDir = path.join(tmp, ".claude", "skills", "edge-skill");
+        fs.mkdirSync(skillDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(skillDir, "SKILL.md"),
+          renderSkillTemplate({ id: "edge-skill", description, category: "general" }),
+          "utf-8",
+        );
+        const result = discoverSkillsWithDiagnostics(tmp);
+        expect(
+          result.warnings.filter((w) => w.kind === "invalid-frontmatter"),
+          `no invalid-frontmatter diagnostic for ${JSON.stringify(description)}`,
+        ).toEqual([]);
+        const skill = result.skills.find((s) => s.id === "edge-skill");
+        expect(skill, `skill discovered for ${JSON.stringify(description)}`).toBeDefined();
+        expect(skill?.description, `description round-trips for ${JSON.stringify(description)}`).toBe(description);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    }
+  });
+
   it("invalid 'category' frontmatter falls back to 'general' rather than throwing", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-skill-cat-fallback-"));
     try {
@@ -198,7 +236,10 @@ describe("runSkillNew", () => {
     runSkillNew("existing", { description: "new desc", category: "general", force: true }, tmp);
     const updated = fs.readFileSync(path.join(skillDir, "SKILL.md"), "utf-8");
     expect(updated).toContain("name: existing");
-    expect(updated).toContain("description: new desc");
+    // Description is now JSON-quoted in the frontmatter (CC-02); assert the
+    // parsed value rather than the raw text.
+    const fm = parseYaml(updated.match(/^---\s*\n([\s\S]*?)\n---/)![1]) as Record<string, unknown>;
+    expect(fm.description).toBe("new desc");
     expect(updated).not.toContain("old contents");
   });
 

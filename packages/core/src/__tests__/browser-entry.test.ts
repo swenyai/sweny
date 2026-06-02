@@ -27,6 +27,17 @@ describe("browser entry surface (runtime-level)", () => {
     expect(browser.validateWorkflow).toBeDefined();
     expect(browser.parseWorkflow).toBeDefined();
   });
+
+  it("named-exports every builtin skill by id (parity with builtinSkills) — CC-03", async () => {
+    const browser = (await import("../browser.js")) as Record<string, unknown>;
+    const skills = browser.builtinSkills as Array<{ id: string }>;
+    for (const s of skills) {
+      expect(browser[s.id], `browser entry must named-export "${s.id}"`).toBeDefined();
+    }
+    // Pin the two that regressed previously so this can't silently drop again.
+    expect(browser.betterstack).toBeDefined();
+    expect(browser.supabase).toBeDefined();
+  });
 });
 
 // Real browser-bundling test. Catches transitive node:* leaks that the

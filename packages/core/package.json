@@ -1,12 +1,15 @@
 {
   "name": "@sweny-ai/core",
-  "version": "0.1.102",
+  "version": "0.1.107",
   "type": "module",
   "bin": {
     "sweny": "./dist/cli/main.js"
   },
   "description": "Skill library, DAG workflow orchestration, and E2E browser testing powered by Claude",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "exports": {
     ".": "./dist/index.js",
     "./browser": "./dist/browser.js",

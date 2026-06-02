@@ -17,6 +17,14 @@ import { normalizeSource } from "./sources.js";
 /** Schemes a `url:` source is allowed to use. Everything else is rejected. */
 const ALLOWED_URL_SCHEMES = new Set(["http:", "https:"]);
 
+/**
+ * Error-message prefix used when a `url:` source cannot be fetched in
+ * `--offline` mode. Exported so callers that intentionally degrade to a default
+ * on this one failure (e.g. `templates.ts`) can detect it without coupling to
+ * the full message text.
+ */
+export const SOURCE_OFFLINE_REQUIRES_FETCH = "SOURCE_OFFLINE_REQUIRES_FETCH";
+
 /** Default DNS resolver used when the context does not inject one. */
 const defaultDnsLookup: DnsLookup = async (hostname) => {
   const records = await dns.lookup(hostname, { all: true });
@@ -93,7 +101,7 @@ export async function resolveSource(
   if (kind === "url") {
     if (ctx.offline) {
       throw new Error(
-        `SOURCE_OFFLINE_REQUIRES_FETCH: cannot fetch ${value} in --offline mode (referenced by ${fieldPath}).`,
+        `${SOURCE_OFFLINE_REQUIRES_FETCH}: cannot fetch ${value} in --offline mode (referenced by ${fieldPath}).`,
       );
     }
     // Validate type field on tagged URL forms — v1 only accepts "fetch" (the default).

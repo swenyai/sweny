@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { Node, NodeResult, Source } from "@sweny-ai/core";
 import { validateWorkflow } from "@sweny-ai/core/schema";
 import { getSkillCatalog } from "@sweny-ai/core/studio";
@@ -8,6 +8,29 @@ import { InstructionEditor } from "./InstructionEditor.js";
 import { generateInstruction } from "../lib/generate-instruction.js";
 
 const skillCatalog = getSkillCatalog();
+
+// Derive the editable {sourceKind, value} pair from a node's `instruction`
+// Source (a plain string is inline; an object carries file/url/inline). Kept as
+// pure module-level helpers so both the initial seed and the sync effect agree.
+function deriveSourceKind(src: Node["instruction"]): "inline" | "file" | "url" {
+  if (typeof src === "string") {
+    const t = src.trim();
+    if (t.startsWith("http://") || t.startsWith("https://")) return "url";
+    if (t.startsWith("./") || t.startsWith("../") || t.startsWith("/")) return "file";
+    return "inline";
+  }
+  if ("url" in src) return "url";
+  if ("file" in src) return "file";
+  return "inline";
+}
+
+function deriveInstructionValue(src: Node["instruction"]): string {
+  if (typeof src === "string") return src;
+  if ("inline" in src) return src.inline;
+  if ("file" in src) return src.file;
+  if ("url" in src) return src.url;
+  return "";
+}
 
 export function PropertiesPanel() {
   const {
@@ -199,26 +222,31 @@ function NodePanel({
   const [name, setNodeName] = useState(node.name);
 
   // Source type state — track kind + value separately
-  const [sourceKind, setSourceKind] = useState<"inline" | "file" | "url">(() => {
-    const src = node.instruction;
-    if (typeof src === "string") {
-      const t = src.trim();
-      if (t.startsWith("http://") || t.startsWith("https://")) return "url";
-      if (t.startsWith("./") || t.startsWith("../") || t.startsWith("/")) return "file";
-      return "inline";
+  const [sourceKind, setSourceKind] = useState<"inline" | "file" | "url">(() => deriveSourceKind(node.instruction));
+  const [instruction, setInstruction] = useState(() => deriveInstructionValue(node.instruction));
+
+  // The panel is keyed by node `id`, so switching nodes remounts and re-seeds.
+  // But the *same* node's content can change underneath us without an id change
+  // (undo/redo via temporal, or an external rewrite). Re-seed local state when
+  // the node's committed values change. Guard against clobbering in-progress
+  // typing by tracking the last node values we synced from and only re-seeding
+  // when the incoming node value differs from that snapshot — typing only moves
+  // local state, not `node.*`, so it won't trip this.
+  const lastSyncedName = useRef(node.name);
+  const lastSyncedInstruction = useRef(node.instruction);
+  useEffect(() => {
+    if (node.name !== lastSyncedName.current) {
+      lastSyncedName.current = node.name;
+      setNodeName(node.name);
     }
-    if ("url" in src) return "url";
-    if ("file" in src) return "file";
-    return "inline";
-  });
-  const [instruction, setInstruction] = useState(() => {
-    const src = node.instruction;
-    if (typeof src === "string") return src;
-    if ("inline" in src) return src.inline;
-    if ("file" in src) return src.file;
-    if ("url" in src) return src.url;
-    return "";
-  });
+    if (node.instruction !== lastSyncedInstruction.current) {
+      lastSyncedInstruction.current = node.instruction;
+      setSourceKind(deriveSourceKind(node.instruction));
+      setInstruction(deriveInstructionValue(node.instruction));
+      setEditId(id);
+      setIdError(null);
+    }
+  }, [node.name, node.instruction, id]);
 
   const buildSource = useCallback((kind: "inline" | "file" | "url", value: string): Source => {
     if (kind === "file") return { file: value };

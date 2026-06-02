@@ -88,3 +88,68 @@ describe("loadTemplate honors offline + fetchAuth", () => {
     expect(result).toBe("FALLBACK");
   });
 });
+
+// IO-05: a CONFIGURED template/context source that fails to resolve must NOT
+// silently degrade to the default — it surfaces an error. Only the empty/unset
+// case (and the intentional --offline skip) returns the fallback.
+describe("loadTemplate surfaces configured-source failures (IO-05)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("throws when a configured template URL 403s instead of silently using the default", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("forbidden", { status: 403 }));
+
+    const { loadTemplate } = await import("../templates.js");
+    await expect(
+      loadTemplate("https://example.com/pr-template.md", "FALLBACK", {
+        fetchAuth: {},
+        env: {} as NodeJS.ProcessEnv,
+      }),
+    ).rejects.toThrow(/Failed to load configured template.*403/);
+  });
+
+  it("throws when a configured template URL is blocked by the SSRF guard", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { loadTemplate } = await import("../templates.js");
+    await expect(loadTemplate("http://169.254.169.254/latest/template.md", "FALLBACK", {})).rejects.toThrow(
+      /Failed to load configured template.*SOURCE_URL_BLOCKED/,
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns the default (no throw) when the source is empty/unset", async () => {
+    const { loadTemplate } = await import("../templates.js");
+    expect(await loadTemplate(undefined, "FALLBACK")).toBe("FALLBACK");
+    expect(await loadTemplate("", "FALLBACK")).toBe("FALLBACK");
+    expect(await loadTemplate("   ", "FALLBACK")).toBe("FALLBACK");
+  });
+});
+
+describe("loadAdditionalContext surfaces configured-source failures (IO-05)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("throws when a configured context URL 403s instead of silently dropping it", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("forbidden", { status: 403 }));
+
+    const { loadAdditionalContext } = await import("../templates.js");
+    await expect(loadAdditionalContext(["https://example.com/rules.md"], {})).rejects.toThrow(
+      /Failed to load configured context source.*403/,
+    );
+  });
+
+  it("still skips a URL source under --offline (warn, no throw)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const warns: string[] = [];
+    vi.spyOn(console, "warn").mockImplementation((m: unknown) => warns.push(String(m)));
+
+    const { loadAdditionalContext } = await import("../templates.js");
+    const { resolved } = await loadAdditionalContext(["https://example.com/rules.md"], { offline: true });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(resolved).toBe("");
+    expect(warns.some((w) => /offline/i.test(w))).toBe(true);
+  });
+});

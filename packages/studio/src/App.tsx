@@ -38,7 +38,7 @@ export function App() {
       setWorkflow(fromLink);
       useEditorStore.temporal.getState().clear();
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keep URL hash in sync as user edits
   useEffect(() => {
@@ -192,9 +192,9 @@ export function App() {
           <span className="text-amber-600 text-xs font-medium">
             {validationErrors.length} validation {validationErrors.length === 1 ? "error" : "errors"}:
           </span>
-          {validationErrors.map((e) => (
+          {validationErrors.map((e, i) => (
             <button
-              key={e.message}
+              key={`${e.code}:${e.nodeId ?? ""}:${i}`}
               onClick={() => (e.nodeId ? setSelection({ kind: "node", id: e.nodeId }) : undefined)}
               className={`text-amber-700 text-xs ${e.nodeId ? "hover:underline cursor-pointer" : "cursor-default"}`}
             >

@@ -13,7 +13,7 @@ export interface ExecutionSlice {
   // Results of nodes that have completed
   completedNodes: Record<string, NodeResult>;
   // Overall workflow status
-  executionStatus: "idle" | "running" | "completed" | "failed" | "partial";
+  executionStatus: "idle" | "running" | "completed" | "failed";
   // For live mode: connection info
   liveConnection: {
     url: string;
@@ -185,14 +185,20 @@ export const useEditorStore = create<EditorState>()(
           produce((s: EditorState) => {
             delete s.workflow.nodes[id];
             // Remove edges that reference this node
+            const edgesBefore = s.workflow.edges.length;
             s.workflow.edges = s.workflow.edges.filter((e) => e.from !== id && e.to !== id);
+            const edgesRemoved = s.workflow.edges.length !== edgesBefore;
             // Fix entry if needed
             if (s.workflow.entry === id) {
               const remaining = Object.keys(s.workflow.nodes);
               s.workflow.entry = remaining[0] ?? "";
             }
-            // Clear selection if this node was selected
+            // Clear selection if this node was selected, or if an edge is
+            // selected and we just dropped one (its positional index may now
+            // point at a different edge).
             if (s.selection?.kind === "node" && s.selection.id === id) {
+              s.selection = null;
+            } else if (edgesRemoved && s.selection?.kind === "edge") {
               s.selection = null;
             }
             s.isLayoutStale = true;
@@ -242,6 +248,10 @@ export const useEditorStore = create<EditorState>()(
             s.workflow.edges = s.workflow.edges.filter((e) => e.from !== id && e.to !== id);
             if (s.workflow.edges.length !== before) {
               s.isLayoutStale = true;
+              // An edge selection's positional index may now be stale.
+              if (s.selection?.kind === "edge") {
+                s.selection = null;
+              }
             }
           }),
         ),
@@ -325,10 +335,16 @@ export const useEditorStore = create<EditorState>()(
       deleteEdge: (edgeIndex: number) =>
         set(
           produce((s: EditorState) => {
+            let removed = false;
             if (edgeIndex >= 0 && edgeIndex < s.workflow.edges.length) {
               s.workflow.edges.splice(edgeIndex, 1);
+              removed = true;
             }
-            if (s.selection?.kind === "edge" && s.selection.edgeIndex === edgeIndex) {
+            // Selection carries a positional edgeIndex. Removing any edge can
+            // shift the indices of the others, so clear an edge selection on
+            // every successful removal — not just an exact-index match — or it
+            // can end up pointing at (and mutating) the wrong edge.
+            if (removed && s.selection?.kind === "edge") {
               s.selection = null;
             }
             s.isLayoutStale = true;
