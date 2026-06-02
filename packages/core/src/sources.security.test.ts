@@ -303,12 +303,11 @@ describe("file-path sandbox", () => {
     }
   });
 
-  it("with allowFileOutsideRoot, legacy read-anywhere behavior is restored", async () => {
+  it("with no fileRoot configured, legacy read-anywhere behavior is preserved", async () => {
     const abs = path.join(fileTmp, "legacy.md");
     writeFileSync(abs, "legacy body");
-    // fileRoot is /tmp (the sandbox is active), abs is under tmpdir (not /tmp on
-    // macOS): the explicit opt-out is what lets it through, not an unset root.
-    const resolved = await resolveSource(abs, "f", { ...baseCtx(), fileRoot: "/tmp", allowFileOutsideRoot: true });
+    // cwd is /tmp, abs is under tmpdir (not /tmp on macOS), no sandbox => allowed
+    const resolved = await resolveSource(abs, "f", baseCtx());
     expect(resolved.content).toBe("legacy body");
   });
 });

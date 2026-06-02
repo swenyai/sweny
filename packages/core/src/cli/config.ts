@@ -119,13 +119,14 @@ export interface CliConfig {
   offline: boolean;
   fetchAuth: Record<string, string>;
   /**
-   * Opt out of the `file:` Source sandbox (which defaults to the repo root /
-   * cwd). When true, `file:` Sources may read anywhere on disk — restoring the
-   * pre-sandbox read-anywhere behavior for legacy workflows that reference
-   * absolute paths outside the repo. Set via `--allow-file-outside-root` or a
-   * `.sweny.yml` `allow-file-outside-root: true`.
+   * When set, sandbox `file:` Sources to this directory tree: a `file:` source
+   * that escapes it (via `..`, an absolute path, or a symlink pointing out) is
+   * rejected. The sandbox is opt-in: empty string means no root configured, so
+   * `file:` Sources read anywhere on disk (default). Set via `--file-root [dir]`
+   * (the working directory when the flag is given without a value) or a
+   * `.sweny.yml` `file-root: <path>`.
    */
-  allowFileOutsideRoot: boolean;
+  fileRoot: string;
 }
 
 export function registerTriageCommand(program: Command): Command {
@@ -210,9 +211,8 @@ export function registerTriageCommand(program: Command): Command {
     )
     .option("--offline", "Skip URL Sources and fail fast if any are referenced", false)
     .option(
-      "--allow-file-outside-root",
-      "Allow file: Sources to read outside the repo root (disables the path-traversal sandbox)",
-      false,
+      "--file-root [dir]",
+      "Sandbox file: Sources to this directory tree (defaults to the working directory when the flag is given without a value)",
     );
 }
 
@@ -363,16 +363,22 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
 
     offline: Boolean(options.offline),
     fetchAuth: parseFetchAuth(fileConfig),
-    // CLI flag wins; otherwise honor a `.sweny.yml` boolean. Default false:
-    // the file: sandbox is ON unless explicitly disabled.
-    allowFileOutsideRoot: Boolean(options.allowFileOutsideRoot) || fileBool(fileConfig, "allow-file-outside-root"),
+    // Opt-in file: sandbox. `--file-root <dir>` sets the root; `--file-root`
+    // with no value defaults to cwd; otherwise honor a `.sweny.yml`
+    // `file-root: <path>`. Empty string = no root = read-anywhere (default).
+    fileRoot:
+      typeof options.fileRoot === "string"
+        ? options.fileRoot
+        : options.fileRoot === true
+          ? process.cwd()
+          : fileStr(fileConfig, "file-root"),
   };
 }
 
-/** Read a boolean from file config, accepting `true`/`"true"` (and `1`). */
-function fileBool(fileConfig: FileConfig, key: string): boolean {
+/** Read a string key from file config, returning "" when absent or non-string. */
+function fileStr(fileConfig: FileConfig, key: string): string {
   const v = (fileConfig as Record<string, unknown>)[key];
-  return v === true || v === "true" || v === 1 || v === "1";
+  return typeof v === "string" ? v : "";
 }
 
 function parseFetchAuth(fileConfig: FileConfig): Record<string, string> {
@@ -890,9 +896,8 @@ export function registerImplementCommand(program: Command): Command {
     )
     .option("--offline", "Skip URL Sources and fail fast if any are referenced", false)
     .option(
-      "--allow-file-outside-root",
-      "Allow file: Sources to read outside the repo root (disables the path-traversal sandbox)",
-      false,
+      "--file-root [dir]",
+      "Sandbox file: Sources to this directory tree (defaults to the working directory when the flag is given without a value)",
     );
 }
 

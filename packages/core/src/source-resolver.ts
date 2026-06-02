@@ -427,13 +427,13 @@ function embeddedIpv4(ip: string): number[] | null {
 }
 
 /**
- * Enforce the repo-root file sandbox. The sandbox is ON by default: callers
- * (executor / template loader) default `fileRoot` to the workflow dir / cwd, so
- * a `file:` source must resolve to a path inside `fileRoot`. `..` traversal and
- * absolute paths that escape the root are rejected with
- * `SOURCE_FILE_OUTSIDE_ROOT`. Set `allowFileOutsideRoot` to opt back out (legacy
- * read-anywhere). When `fileRoot` is unset (no caller configured a root) the
- * check is skipped — but every production caller now sets it.
+ * Enforce the optional repo-root file sandbox. The sandbox is opt-in: it only
+ * applies when `fileRoot` is set. When unset, legacy "read anywhere" behavior is
+ * preserved (a `file:` source may resolve to any path on disk). When a root is
+ * configured, a `file:` source must resolve to a path inside it; `..` traversal
+ * and absolute paths that escape the root are rejected with
+ * `SOURCE_FILE_OUTSIDE_ROOT`. Set `allowFileOutsideRoot` to opt back out even
+ * when a root is configured.
  *
  * Symlinks are resolved with `fs.realpathSync` before the containment check so
  * a symlink inside the root pointing at an external target cannot smuggle

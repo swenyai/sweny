@@ -63,20 +63,14 @@ export interface ExecuteOptions {
   /** When true, URL Sources throw instead of fetching */
   offline?: boolean;
   /**
-   * Root directory `file:` Sources are sandboxed to. A `file:` source that
-   * resolves outside this tree (via `..` traversal or an absolute path) is
-   * rejected with `SOURCE_FILE_OUTSIDE_ROOT`. Defaults to {@link cwd} (or
-   * `process.cwd()`), so the sandbox is ON by default. Set
-   * {@link allowFileOutsideRoot} to opt out.
+   * When set, `file:` Sources are sandboxed to this directory tree: a `file:`
+   * source that resolves outside it (via `..` traversal, an absolute path, or a
+   * symlink pointing out) is rejected with `SOURCE_FILE_OUTSIDE_ROOT`. The
+   * sandbox is opt-in: when unset, `file:` sources may read anywhere on disk
+   * (default), preserving the read-anywhere behavior workflow authors rely on
+   * for files elsewhere in their own repo / machine.
    */
   fileRoot?: string;
-  /**
-   * Opt out of the {@link fileRoot} sandbox, permitting `file:` Sources to read
-   * anywhere on disk. Defaults to `false`. Wire this from a trusted config
-   * surface (e.g. a `.sweny.yml` `allowFileOutsideRoot: true`) for legacy
-   * workflows that reference absolute paths outside the repo.
-   */
-  allowFileOutsideRoot?: boolean;
   /**
    * Workflow-level hard cap on total node executions (the number of times the
    * main loop visits a node). Guards against unbounded cycles, e.g. a back-edge
@@ -202,11 +196,9 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     env: options.env ?? process.env,
     authConfig: options.fetchAuth ?? {},
     offline: options.offline ?? false,
-    // Sandbox `file:` Sources to the workflow dir / cwd by default. Workflows
-    // that legitimately reference absolute paths outside the repo must opt out
-    // via `allowFileOutsideRoot`.
-    fileRoot: options.fileRoot ?? resolveCwd,
-    allowFileOutsideRoot: options.allowFileOutsideRoot ?? false,
+    // Opt-in `file:` sandbox: only engaged when the caller sets `fileRoot`.
+    // When unset, `file:` sources read anywhere on disk (default).
+    fileRoot: options.fileRoot,
     logger,
   });
   trace.sources = resolvedSources;
