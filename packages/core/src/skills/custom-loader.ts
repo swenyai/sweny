@@ -311,14 +311,21 @@ export function configuredSkillsWithDiagnostics(
   // keep the built-in's tools and config, add the custom instruction/mcp.
   const configuredMap = new Map(configured.map((s) => [s.id, s]));
 
+  // Resolve override targets against the FULL built-in set, not the
+  // env-filtered `configured` list. Otherwise a custom override of a built-in
+  // whose required env var happens to be unset falls through to the
+  // "net-new custom skill" branch and silently drops the built-in's tools.
+  // The tool surface of a built-in must not hinge on an unrelated env check.
+  const builtinById = new Map(builtinSkills.map((s) => [s.id, s]));
+
   for (const skill of custom) {
-    const existing = configuredMap.get(skill.id);
-    if (existing) {
+    const base = configuredMap.get(skill.id) ?? builtinById.get(skill.id);
+    if (base) {
       configuredMap.set(skill.id, {
-        ...existing,
-        config: { ...existing.config, ...skill.config },
-        instruction: skill.instruction ?? existing.instruction,
-        mcp: skill.mcp ?? existing.mcp,
+        ...base,
+        config: { ...base.config, ...skill.config },
+        instruction: skill.instruction ?? base.instruction,
+        mcp: skill.mcp ?? base.mcp,
       });
     } else {
       configuredMap.set(skill.id, skill);

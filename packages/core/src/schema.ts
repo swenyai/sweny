@@ -129,6 +129,14 @@ export const evaluatorKindZ = z.enum(EVALUATOR_KINDS);
 
 export const evalPolicyZ = z.enum(EVAL_POLICIES);
 
+/**
+ * Eval policies actually implemented at runtime. The Zod schema and published
+ * JSON schema accept the full {@link EVAL_POLICIES} vocabulary (the others are
+ * reserved), but `validateWorkflow` rejects any policy not in this set so a
+ * workflow fails at load time rather than throwing mid-run from `aggregateEval`.
+ */
+const SUPPORTED_EVAL_POLICIES = new Set<string>(["all_pass"]);
+
 export const evaluatorRuleZ = z
   .object({
     any_tool_called: z.array(z.string().min(1)).min(1).optional(),
@@ -349,6 +357,7 @@ export interface WorkflowError {
     | "SELF_LOOP"
     | "UNBOUNDED_CYCLE"
     | "AMBIGUOUS_EDGES"
+    | "UNSUPPORTED_EVAL_POLICY"
     | "INVALID_INLINE_SKILL";
   message: string;
   nodeId?: string;
@@ -495,6 +504,24 @@ export function validateWorkflow(
           nodeId: cycleNode,
         });
       }
+    }
+  }
+
+  // Reject eval policies that are reserved in the vocabulary but not yet
+  // implemented. The Zod schema accepts the whole EVAL_POLICIES enum (the
+  // published JSON schema advertises them as reserved), but only `all_pass`
+  // is implemented at runtime. Without this check a workflow declaring
+  // `eval_policy: "any_pass"` or `"weighted"` parses and validates cleanly,
+  // then `aggregateEval` throws uncaught mid-run — a validate-then-crash
+  // failure mode. Reject it at load time instead. The runtime throw in
+  // aggregateEval stays as a defense-in-depth backstop.
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    if (node.eval_policy != null && !SUPPORTED_EVAL_POLICIES.has(node.eval_policy)) {
+      errors.push({
+        code: "UNSUPPORTED_EVAL_POLICY",
+        message: `Node "${nodeId}" declares eval_policy "${node.eval_policy}", which is reserved but not yet implemented; use "all_pass" (the only supported policy in v1.0)`,
+        nodeId,
+      });
     }
   }
 
