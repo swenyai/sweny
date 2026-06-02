@@ -3386,6 +3386,73 @@ describe("missing-required-field retry", () => {
   });
 });
 
+describe("resolveNext deterministic routing (CE-03)", () => {
+  it("makes zero claude.evaluate calls when there are no conditional edges", async () => {
+    // Node "a" has two unconditional out-edges (a→b, a→c). resolveNext should
+    // follow the first default edge directly and never call claude.evaluate.
+    const wf: Workflow = {
+      id: "ambiguous-runtime",
+      name: "Ambiguous",
+      description: "a→b, a→c (both unconditional)",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Do A", skills: [] },
+        b: { name: "B", instruction: "Do B", skills: [] },
+        c: { name: "C", instruction: "Do C", skills: [] },
+      },
+      edges: [
+        { from: "a", to: "b" },
+        { from: "a", to: "c" },
+      ],
+    };
+    let evaluateCalls = 0;
+    const claude: any = {
+      async run() {
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        evaluateCalls++;
+        return opts.choices[0].id;
+      },
+    };
+    const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+    expect(evaluateCalls).toBe(0);
+    // First default edge followed: b ran, c did not.
+    expect(results.has("b")).toBe(true);
+    expect(results.has("c")).toBe(false);
+  });
+
+  it("still uses claude.evaluate when there is at least one conditional edge", async () => {
+    const wf: Workflow = {
+      id: "conditional-runtime",
+      name: "Conditional",
+      description: "a→b (when), a→c (default)",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Do A", skills: [] },
+        b: { name: "B", instruction: "Do B", skills: [] },
+        c: { name: "C", instruction: "Do C", skills: [] },
+      },
+      edges: [
+        { from: "a", to: "b", when: "needs work" },
+        { from: "a", to: "c" },
+      ],
+    };
+    let evaluateCalls = 0;
+    const claude: any = {
+      async run() {
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        evaluateCalls++;
+        return opts.choices[0].id; // pick "b"
+      },
+    };
+    await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+    expect(evaluateCalls).toBe(1);
+  });
+});
+
 describe("route-eval warnings for non-success nodes (CE-04)", () => {
   function spyLogger() {
     const warns: string[] = [];

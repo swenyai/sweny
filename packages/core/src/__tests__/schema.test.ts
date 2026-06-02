@@ -811,6 +811,30 @@ describe("validateWorkflow", () => {
     expect(errors).toContainEqual(expect.objectContaining({ code: "UNKNOWN_EDGE_TARGET" }));
   });
 
+  it("detects ambiguous edges (2+ unconditional out-edges from one node)", () => {
+    const ambiguous: Workflow = {
+      ...validWorkflow,
+      edges: [
+        { from: "a", to: "b" },
+        { from: "a", to: "c" }, // second unconditional edge from "a"
+      ],
+    };
+    const errors = validateWorkflow(ambiguous);
+    expect(errors).toContainEqual(expect.objectContaining({ code: "AMBIGUOUS_EDGES", nodeId: "a" }));
+  });
+
+  it("allows one unconditional edge alongside conditional edges", () => {
+    const wf: Workflow = {
+      ...validWorkflow,
+      edges: [
+        { from: "a", to: "b", when: "needs work" },
+        { from: "a", to: "c" }, // single default edge — fine
+      ],
+    };
+    const errors = validateWorkflow(wf, new Set(["github"]));
+    expect(errors.filter((e) => e.code === "AMBIGUOUS_EDGES")).toEqual([]);
+  });
+
   it("detects self-loops without max_iterations", () => {
     const loopy: Workflow = {
       ...validWorkflow,
