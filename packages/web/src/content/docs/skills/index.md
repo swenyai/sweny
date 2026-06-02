@@ -43,7 +43,7 @@ Every skill belongs to a category. Categories are used for validation — the ex
 | `tasks` | Issue tracking | [Linear](/skills/linear/) |
 | `notification` | Alerting the team | [Slack](/skills/slack/), [Notification](/skills/notification/) |
 | `data` | Embeddings, vector stores, databases, ETL | (custom skills) |
-| `general` | Catch-all when no other category fits | (custom skills) |
+| `general` | Catch-all when no other category fits | [Supabase](/skills/supabase/), (custom skills) |
 
 ## Built-in skills
 
@@ -53,7 +53,8 @@ Every skill belongs to a category. Categories are used for validation — the ex
 | `linear` | [Linear](/skills/linear/) | tasks | `LINEAR_API_KEY` |
 | `sentry` | [Sentry](/skills/sentry/) | observability | `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` |
 | `datadog` | [Datadog](/skills/datadog/) | observability | `DD_API_KEY`, `DD_APP_KEY` |
-| `betterstack` | [BetterStack](/skills/betterstack/) | observability | `BETTERSTACK_API_TOKEN` |
+| `betterstack` | [BetterStack](/skills/betterstack/) | observability | `BETTERSTACK_API_TOKEN`, `BETTERSTACK_QUERY_ENDPOINT`, `BETTERSTACK_QUERY_USERNAME`, `BETTERSTACK_QUERY_PASSWORD` |
+| `supabase` | [Supabase](/skills/supabase/) | general | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` |
 | `slack` | [Slack](/skills/slack/) | notification | `SLACK_WEBHOOK_URL` or `SLACK_BOT_TOKEN` |
 | `notification` | [Notification](/skills/notification/) | notification | `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`, `NOTIFICATION_WEBHOOK_URL`, or `SMTP_URL` |
 

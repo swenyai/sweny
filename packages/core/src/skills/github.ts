@@ -38,6 +38,33 @@ function isAlreadyExistsError(err: unknown): err is GitHubApiError {
   return /pull request already exists/i.test(err.body);
 }
 
+/**
+ * Encode an LLM-chosen repo file path for safe interpolation into a
+ * GitHub API request path.
+ *
+ * Trust model (issue #226): tool arguments are runtime-controlled by the
+ * model and can be steered by prompt-injected content. Without encoding,
+ * a `path` containing `?` or `#` rewrites the request (injects query
+ * params / truncates via fragment), and `..` segments walk out of the
+ * `/contents/` endpoint entirely.
+ *
+ * Each `/`-separated segment is percent-encoded (so `/` between segments
+ * is preserved); `.` and `..` segments are rejected outright because
+ * URL normalization resolves them server-side even when encoded.
+ */
+export function encodeRepoFilePath(path: string): string {
+  return path
+    .split("/")
+    .filter((segment) => segment !== "")
+    .map((segment) => {
+      if (segment === "." || segment === "..") {
+        throw new Error(`[GitHub] Invalid path segment "${segment}" — relative path segments are not allowed`);
+      }
+      return encodeURIComponent(segment);
+    })
+    .join("/");
+}
+
 export const github: Skill = {
   id: "github",
   name: "GitHub",
@@ -239,8 +266,8 @@ export const github: Skill = {
         required: ["repo", "path"],
       },
       handler: async (input: { repo: string; path: string; ref?: string }, ctx) => {
-        const ref = input.ref ? `?ref=${input.ref}` : "";
-        const data: any = await gh(`/repos/${input.repo}/contents/${input.path}${ref}`, ctx);
+        const ref = input.ref ? `?ref=${encodeURIComponent(input.ref)}` : "";
+        const data: any = await gh(`/repos/${input.repo}/contents/${encodeRepoFilePath(input.path)}${ref}`, ctx);
         if (data.content && data.encoding === "base64") {
           return { ...data, decoded_content: Buffer.from(data.content, "base64").toString("utf-8") };
         }

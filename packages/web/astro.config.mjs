@@ -105,6 +105,7 @@ export default defineConfig({
             { label: "Sentry", slug: "skills/sentry" },
             { label: "Datadog", slug: "skills/datadog" },
             { label: "BetterStack", slug: "skills/betterstack" },
+            { label: "Supabase", slug: "skills/supabase" },
             { label: "Slack", slug: "skills/slack" },
             { label: "Notification", slug: "skills/notification" },
           ],

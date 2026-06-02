@@ -42,6 +42,66 @@ async function bsQuery(sql: string, ctx: ToolContext): Promise<unknown[]> {
     .map((line) => JSON.parse(line));
 }
 
+// ─── Input hardening (issue #226) ──────────────────────────────
+//
+// Threat model: tool arguments are LLM-controlled at runtime and can be
+// steered by prompt-injected content (issue bodies, fetched logs). The
+// `table` argument reaches a ClickHouse query string, so it is strictly
+// validated as an identifier. The read-only query guard below is
+// best-effort UX — the real security boundary must be a read-only
+// ClickHouse role on the BETTERSTACK_QUERY_USERNAME connection.
+
+/**
+ * Validate an LLM-chosen table name as a bare ClickHouse identifier.
+ * Anything outside [A-Za-z0-9_] is rejected — table names from
+ * BetterStack are always of the form t<id>_<name>.
+ */
+export function assertClickHouseIdentifier(name: string): string {
+  if (!/^[A-Za-z0-9_]+$/.test(name)) {
+    throw new Error(`[BetterStack] Invalid table identifier "${name}" — only letters, digits, and _ are allowed`);
+  }
+  return name;
+}
+
+/** Blank out string literal contents so keyword checks don't match inside them. */
+function stripStringLiterals(sql: string): string {
+  // Handles both '' (SQL) and \' (ClickHouse) quote escaping.
+  return sql.replace(/'(?:[^'\\]|\\.|'')*'/g, "''");
+}
+
+/**
+ * Best-effort read-only guard for `betterstack_query`.
+ *
+ * Accepts SELECT / WITH / DESCRIBE statements, rejects everything else,
+ * rejects multi-statement input, and appends a LIMIT cap when the query
+ * has none. Keyword checks ignore string literal contents so a log
+ * message containing "LIMIT" doesn't skip the cap.
+ *
+ * This is UX, not a security boundary: a determined query can still do
+ * anything the ClickHouse connection's role allows. Use a read-only
+ * role for the configured credentials.
+ */
+export function prepareReadOnlyQuery(query: string): string {
+  let sql = query.trim().replace(/;\s*$/, "").trim();
+  const stripped = stripStringLiterals(sql);
+
+  if (stripped.includes(";")) {
+    throw new Error("[BetterStack] Multi-statement queries are not allowed — send a single statement");
+  }
+
+  if (!/^(SELECT|WITH|DESCRIBE)\b/i.test(stripped)) {
+    throw new Error("[BetterStack] Only read-only queries are allowed (SELECT, WITH, or DESCRIBE)");
+  }
+
+  // Append LIMIT if none present to prevent unbounded result sets.
+  // DESCRIBE output is already bounded by the column count.
+  if (!/^DESCRIBE\b/i.test(stripped) && !/\bLIMIT\b/i.test(stripped)) {
+    sql = `${sql} LIMIT 500`;
+  }
+
+  return sql;
+}
+
 // ─── Skill definition ──────────────────────────────────────────
 
 export const betterstack: Skill = {
@@ -61,7 +121,9 @@ export const betterstack: Skill = {
       env: "BETTERSTACK_QUERY_ENDPOINT",
     },
     BETTERSTACK_QUERY_USERNAME: {
-      description: "ClickHouse connection username",
+      description:
+        "ClickHouse connection username. Use a read-only role — the in-skill query guard is best-effort, " +
+        "not a security boundary",
       required: true,
       env: "BETTERSTACK_QUERY_USERNAME",
     },
@@ -119,7 +181,7 @@ export const betterstack: Skill = {
         required: ["table"],
       },
       handler: async (input: { table: string }, ctx) => {
-        return bsQuery(`DESCRIBE TABLE remote(${input.table}_logs)`, ctx);
+        return bsQuery(`DESCRIBE TABLE remote(${assertClickHouseIdentifier(input.table)}_logs)`, ctx);
       },
     },
     {
@@ -128,30 +190,19 @@ export const betterstack: Skill = {
 Tables: remote(TABLE_logs) for recent logs, s3Cluster(primary, TABLE_s3) for historical (add WHERE _row_type = 1).
 Key fields: dt (timestamp), raw (JSON blob with all log fields).
 Extract nested fields: JSONExtract(raw, 'field_name', 'Nullable(String)').
-Use betterstack_get_source_fields to discover available columns.`,
+Use betterstack_get_source_fields to discover available columns.
+Only single SELECT / WITH / DESCRIBE statements are accepted.`,
       input_schema: {
         type: "object",
         properties: {
-          query: { type: "string", description: "ClickHouse SQL query (SELECT only)" },
+          query: { type: "string", description: "ClickHouse SQL query (single SELECT, WITH, or DESCRIBE statement)" },
           source_id: { type: "number", description: "Source ID (for context)" },
           table: { type: "string", description: "Table name (e.g. t273774_offload_ecs_production)" },
         },
         required: ["query", "source_id", "table"],
       },
       handler: async (input: { query: string; source_id: number; table: string }, ctx) => {
-        const trimmed = input.query.trim();
-        const upper = trimmed.toUpperCase();
-        if (!upper.startsWith("SELECT") && !upper.startsWith("DESCRIBE")) {
-          throw new Error("[BetterStack] Only SELECT and DESCRIBE queries are allowed");
-        }
-
-        // Append LIMIT if none present to prevent unbounded result sets
-        let sql = trimmed;
-        if (!upper.includes("LIMIT")) {
-          sql = `${sql} LIMIT 500`;
-        }
-
-        return bsQuery(sql, ctx);
+        return bsQuery(prepareReadOnlyQuery(input.query), ctx);
       },
     },
   ],
