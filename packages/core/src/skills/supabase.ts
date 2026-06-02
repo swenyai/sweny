@@ -8,6 +8,85 @@
 
 import type { Skill, ToolContext } from "../types.js";
 
+// ─── Input hardening (issue #226) ──────────────────────────────
+//
+// Threat model: this skill runs with SUPABASE_SERVICE_ROLE_KEY, which
+// bypasses RLS entirely, and `table`, `filters[]`, and function names are
+// LLM-controlled at runtime (steerable by prompt-injected content).
+// Identifiers are validated before they reach the request path, filter
+// values are URL-encoded so one filter string cannot smuggle extra query
+// parameters, and the optional SUPABASE_ALLOWED_TABLES /
+// SUPABASE_ALLOWED_FUNCTIONS allowlists bound what the agent can touch.
+
+/** Validate an LLM-chosen table/column name as a bare PostgREST identifier. */
+export function assertSupabaseIdentifier(name: string, label = "table"): string {
+  if (!/^[A-Za-z0-9_]+$/.test(name)) {
+    throw new Error(`[Supabase] Invalid ${label} identifier "${name}" — only letters, digits, and _ are allowed`);
+  }
+  return name;
+}
+
+/** Validate an LLM-chosen RPC / edge function name (hyphens allowed for edge functions). */
+export function assertSupabaseFunctionName(name: string): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+    throw new Error(`[Supabase] Invalid function name "${name}" — only letters, digits, _ and - are allowed`);
+  }
+  return name;
+}
+
+/**
+ * Append PostgREST filter strings ("column=op.value") to query params.
+ * Each filter is split at its first `=`; the value side is appended as a
+ * single parameter value so `&`/`=` inside it are percent-encoded rather
+ * than interpreted as additional parameters.
+ */
+export function appendPostgrestFilters(params: URLSearchParams, filters: string[]): URLSearchParams {
+  for (const filter of filters) {
+    const eq = filter.indexOf("=");
+    if (eq <= 0) {
+      throw new Error(`[Supabase] Invalid filter "${filter}" — expected "column=operator.value" (e.g. "id=eq.1")`);
+    }
+    params.append(filter.slice(0, eq), filter.slice(eq + 1));
+  }
+  return params;
+}
+
+/** Parse an optional comma-separated allowlist config value. Returns null when unset (no restriction). */
+function resolveAllowlist(config: Record<string, string>, key: string): Set<string> | null {
+  const raw = config[key];
+  if (!raw || !raw.trim()) return null;
+  return new Set(
+    raw
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  );
+}
+
+/** Validate a table name and check it against SUPABASE_ALLOWED_TABLES (when configured). */
+function checkTable(table: string, ctx: ToolContext): string {
+  assertSupabaseIdentifier(table);
+  const allowlist = resolveAllowlist(ctx.config, "SUPABASE_ALLOWED_TABLES");
+  if (allowlist && !allowlist.has(table)) {
+    throw new Error(
+      `[Supabase] Table "${table}" is not on the SUPABASE_ALLOWED_TABLES allowlist (${[...allowlist].join(", ")})`,
+    );
+  }
+  return table;
+}
+
+/** Validate a function name and check it against SUPABASE_ALLOWED_FUNCTIONS (when configured). */
+function checkFunction(name: string, ctx: ToolContext): string {
+  assertSupabaseFunctionName(name);
+  const allowlist = resolveAllowlist(ctx.config, "SUPABASE_ALLOWED_FUNCTIONS");
+  if (allowlist && !allowlist.has(name)) {
+    throw new Error(
+      `[Supabase] Function "${name}" is not on the SUPABASE_ALLOWED_FUNCTIONS allowlist (${[...allowlist].join(", ")})`,
+    );
+  }
+  return name;
+}
+
 async function supabaseRest(path: string, ctx: ToolContext, init?: RequestInit): Promise<unknown> {
   const url = ctx.config.SUPABASE_URL;
   const key = ctx.config.SUPABASE_SERVICE_ROLE_KEY;
@@ -69,9 +148,26 @@ export const supabase: Skill = {
       env: "SUPABASE_URL",
     },
     SUPABASE_SERVICE_ROLE_KEY: {
-      description: "Supabase service role key (full access, server-side only)",
+      description:
+        "Supabase service role key (full access, bypasses RLS — high blast radius). " +
+        "Prefer a scoped key where possible, and bound exposure with SUPABASE_ALLOWED_TABLES / " +
+        "SUPABASE_ALLOWED_FUNCTIONS",
       required: true,
       env: "SUPABASE_SERVICE_ROLE_KEY",
+    },
+    SUPABASE_ALLOWED_TABLES: {
+      description:
+        "Optional comma-separated table allowlist. When set, data tools (query/count/insert/update/delete) " +
+        "are restricted to these tables",
+      required: false,
+      env: "SUPABASE_ALLOWED_TABLES",
+    },
+    SUPABASE_ALLOWED_FUNCTIONS: {
+      description:
+        "Optional comma-separated function allowlist. When set, supabase_rpc and supabase_invoke_function " +
+        "are restricted to these RPC / edge function names",
+      required: false,
+      env: "SUPABASE_ALLOWED_FUNCTIONS",
     },
   },
   tools: [
@@ -110,19 +206,14 @@ export const supabase: Skill = {
         input: { table: string; select?: string; filters?: string[]; order?: string; limit?: number },
         ctx,
       ) => {
+        const table = checkTable(input.table, ctx);
         const params = new URLSearchParams();
         params.set("select", input.select || "*");
         if (input.order) params.set("order", input.order);
         params.set("limit", String(input.limit || 100));
+        appendPostgrestFilters(params, input.filters ?? []);
 
-        let path = `/${input.table}?${params}`;
-        if (input.filters) {
-          for (const f of input.filters) {
-            path += `&${f}`;
-          }
-        }
-
-        return supabaseRest(path, ctx);
+        return supabaseRest(`/${table}?${params}`, ctx);
       },
     },
 
@@ -144,13 +235,11 @@ export const supabase: Skill = {
       handler: async (input: { table: string; filters?: string[] }, ctx) => {
         const url = ctx.config.SUPABASE_URL;
         const key = ctx.config.SUPABASE_SERVICE_ROLE_KEY;
+        const table = checkTable(input.table, ctx);
 
-        let path = `${url}/rest/v1/${input.table}?select=count`;
-        if (input.filters) {
-          for (const f of input.filters) {
-            path += `&${f}`;
-          }
-        }
+        const params = new URLSearchParams({ select: "count" });
+        appendPostgrestFilters(params, input.filters ?? []);
+        const path = `${url}/rest/v1/${table}?${params}`;
 
         const res = await fetch(path, {
           headers: {
@@ -194,12 +283,13 @@ export const supabase: Skill = {
         required: ["table", "rows"],
       },
       handler: async (input: { table: string; rows: Record<string, unknown>[]; upsert?: boolean }, ctx) => {
+        const table = checkTable(input.table, ctx);
         const headers: Record<string, string> = {};
         if (input.upsert) {
           headers["Prefer"] = "resolution=merge-duplicates,return=representation";
         }
 
-        return supabaseRest(`/${input.table}`, ctx, {
+        return supabaseRest(`/${table}`, ctx, {
           method: "POST",
           headers,
           body: JSON.stringify(input.rows),
@@ -231,11 +321,10 @@ export const supabase: Skill = {
           throw new Error("Filters are required for update operations to prevent accidental full-table updates");
         }
 
-        let path = `/${input.table}`;
-        const filterParts = input.filters.map((f) => f);
-        path += `?${filterParts.join("&")}`;
+        const table = checkTable(input.table, ctx);
+        const params = appendPostgrestFilters(new URLSearchParams(), input.filters);
 
-        return supabaseRest(path, ctx, {
+        return supabaseRest(`/${table}?${params}`, ctx, {
           method: "PATCH",
           body: JSON.stringify(input.data),
         });
@@ -262,8 +351,9 @@ export const supabase: Skill = {
           throw new Error("Filters are required for delete operations");
         }
 
-        const path = `/${input.table}?${input.filters.join("&")}`;
-        return supabaseRest(path, ctx, { method: "DELETE" });
+        const table = checkTable(input.table, ctx);
+        const params = appendPostgrestFilters(new URLSearchParams(), input.filters);
+        return supabaseRest(`/${table}?${params}`, ctx, { method: "DELETE" });
       },
     },
 
@@ -283,7 +373,7 @@ export const supabase: Skill = {
         required: ["function_name"],
       },
       handler: async (input: { function_name: string; params?: Record<string, unknown> }, ctx) => {
-        return supabaseRest(`/rpc/${input.function_name}`, ctx, {
+        return supabaseRest(`/rpc/${checkFunction(input.function_name, ctx)}`, ctx, {
           method: "POST",
           body: JSON.stringify(input.params || {}),
         });
@@ -309,7 +399,7 @@ export const supabase: Skill = {
         required: ["function_name", "body"],
       },
       handler: async (input: { function_name: string; body: Record<string, unknown> }, ctx) => {
-        return supabaseEdgeFunction(input.function_name, input.body, ctx);
+        return supabaseEdgeFunction(checkFunction(input.function_name, ctx), input.body, ctx);
       },
     },
 

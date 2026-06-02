@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { github } from "./github.js";
+import { github, encodeRepoFilePath } from "./github.js";
 import type { Logger, ToolContext } from "../types.js";
 
 const ctx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
@@ -209,5 +209,84 @@ describe("github_create_pr", () => {
     await createPr.handler({ repo: "o/r", title: "[X-1] fix: y", head: "x-1-fix" }, ctx({ logger }));
 
     expect(logger.warnings).toHaveLength(0);
+  });
+});
+
+// ─── Input hardening (issue #226) ─────────────────────────────────
+//
+// Threat model: tool arguments are LLM-controlled at runtime and can be
+// steered by prompt-injected content. A `path` containing `?`, `#`, or `..`
+// must not be able to alter the request target.
+
+describe("encodeRepoFilePath", () => {
+  it("preserves / between segments and leaves normal paths readable", () => {
+    expect(encodeRepoFilePath("src/lib/file.ts")).toBe("src/lib/file.ts");
+  });
+
+  it("percent-encodes ? so the path cannot inject query parameters", () => {
+    expect(encodeRepoFilePath("file.ts?ref=evil")).toBe("file.ts%3Fref%3Devil");
+  });
+
+  it("percent-encodes # so the path cannot truncate the request via a fragment", () => {
+    expect(encodeRepoFilePath("file#.ts")).toBe("file%23.ts");
+  });
+
+  it("rejects .. segments (path traversal out of the contents endpoint)", () => {
+    expect(() => encodeRepoFilePath("../../../repos/other/secrets")).toThrow(/path segment/i);
+  });
+
+  it("rejects . segments", () => {
+    expect(() => encodeRepoFilePath("./src/file.ts")).toThrow(/path segment/i);
+  });
+
+  it("encodes spaces and unicode within segments", () => {
+    expect(encodeRepoFilePath("docs/my file.md")).toBe("docs/my%20file.md");
+  });
+});
+
+describe("github_get_file input hardening", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const getFile = github.tools.find((t) => t.name === "github_get_file")!;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("requests the encoded path, not the raw one", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { content: "", encoding: "none" }));
+
+    await getFile.handler({ repo: "o/r", path: "src/a b.ts?x=1" }, ctx());
+
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toBe("https://api.github.com/repos/o/r/contents/src/a%20b.ts%3Fx%3D1");
+  });
+
+  it("rejects a path containing .. without making any request", async () => {
+    await expect(getFile.handler({ repo: "o/r", path: "../../meta" }, ctx())).rejects.toThrow(/path segment/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("URL-encodes the ref query parameter", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { content: "", encoding: "none" }));
+
+    await getFile.handler({ repo: "o/r", path: "README.md", ref: "main&per_page=100" }, ctx());
+
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toBe("https://api.github.com/repos/o/r/contents/README.md?ref=main%26per_page%3D100");
+  });
+
+  it("still decodes base64 content on the happy path", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { content: Buffer.from("hello").toString("base64"), encoding: "base64" }),
+    );
+
+    const result: any = await getFile.handler({ repo: "o/r", path: "README.md" }, ctx());
+
+    expect(result.decoded_content).toBe("hello");
   });
 });
