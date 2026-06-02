@@ -63,6 +63,15 @@ export interface ExecuteOptions {
   /** When true, URL Sources throw instead of fetching */
   offline?: boolean;
   /**
+   * When set, `file:` Sources are sandboxed to this directory tree: a `file:`
+   * source that resolves outside it (via `..` traversal, an absolute path, or a
+   * symlink pointing out) is rejected with `SOURCE_FILE_OUTSIDE_ROOT`. The
+   * sandbox is opt-in: when unset, `file:` sources may read anywhere on disk
+   * (default), preserving the read-anywhere behavior workflow authors rely on
+   * for files elsewhere in their own repo / machine.
+   */
+  fileRoot?: string;
+  /**
    * Workflow-level hard cap on total node executions (the number of times the
    * main loop visits a node). Guards against unbounded cycles, e.g. a back-edge
    * with no `max_iterations` or an LLM route evaluator that keeps choosing the
@@ -181,11 +190,15 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     nodeContext.forEach((s, i) => (sourceMap[`nodes.${nodeId}.context.${i}`] = s));
   }
 
+  const resolveCwd = options.cwd ?? process.cwd();
   const resolvedSources = await resolveSources(sourceMap, {
-    cwd: options.cwd ?? process.cwd(),
+    cwd: resolveCwd,
     env: options.env ?? process.env,
     authConfig: options.fetchAuth ?? {},
     offline: options.offline ?? false,
+    // Opt-in `file:` sandbox: only engaged when the caller sets `fileRoot`.
+    // When unset, `file:` sources read anywhere on disk (default).
+    fileRoot: options.fileRoot,
     logger,
   });
   trace.sources = resolvedSources;

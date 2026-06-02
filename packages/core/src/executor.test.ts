@@ -227,6 +227,82 @@ describe("executor", () => {
     expect(events[events.length - 1].type).toBe("workflow:end");
   });
 
+  // ── file: source sandbox (IO-01) ──────────────────────────────
+  // The sandbox is OPT-IN: `execute()` only restricts `file:` Sources when the
+  // caller sets `fileRoot`. With no root, `file:` reads anywhere on disk so a
+  // workflow author can reference files elsewhere in their own repo / machine.
+  describe("file: source sandbox", () => {
+    const sandboxWorkflow = (source: { file: string }): Workflow => ({
+      id: "test-sandbox",
+      name: "Sandbox Test",
+      description: "single node with a file: context source",
+      entry: "n1",
+      nodes: {
+        n1: { name: "N1", instruction: "do the thing", context: [source], skills: [] },
+      },
+      edges: [],
+    });
+
+    it("by default (no fileRoot), an absolute file: source outside cwd resolves", async () => {
+      const outside = path.join(tmpdir(), `sweny-outside-${randomBytes(4).toString("hex")}.md`);
+      writeFileSync(outside, "outside body");
+      const skills = createSkillMap([]);
+      const claude = new MockClaude({ responses: { n1: { data: {} } } });
+      try {
+        const { trace } = await execute(
+          sandboxWorkflow({ file: outside }),
+          {},
+          { skills, claude, cwd: outputDir, config: {} },
+        );
+        expect(trace.sources["nodes.n1.context.0"].content).toBe("outside body");
+      } finally {
+        rmSync(outside, { force: true });
+      }
+    });
+
+    it("with fileRoot set, an absolute path outside the root is rejected", async () => {
+      const outside = path.join(tmpdir(), `sweny-outside-${randomBytes(4).toString("hex")}.md`);
+      writeFileSync(outside, "outside body");
+      const skills = createSkillMap([]);
+      const claude = new MockClaude({ responses: { n1: { data: {} } } });
+      try {
+        await expect(
+          execute(
+            sandboxWorkflow({ file: outside }),
+            {},
+            { skills, claude, cwd: outputDir, fileRoot: outputDir, config: {} },
+          ),
+        ).rejects.toThrow(/SOURCE_FILE_OUTSIDE_ROOT/);
+      } finally {
+        rmSync(outside, { force: true });
+      }
+    });
+
+    it("with fileRoot set, a ..-traversal path is rejected", async () => {
+      const skills = createSkillMap([]);
+      const claude = new MockClaude({ responses: { n1: { data: {} } } });
+      await expect(
+        execute(
+          sandboxWorkflow({ file: "../../../../../../../../etc/passwd" }),
+          {},
+          { skills, claude, cwd: outputDir, fileRoot: outputDir, config: {} },
+        ),
+      ).rejects.toThrow(/SOURCE_FILE_OUTSIDE_ROOT/);
+    });
+
+    it("with fileRoot set, an in-root relative path resolves", async () => {
+      writeFileSync(path.join(outputDir, "rules.md"), "in-repo rules");
+      const skills = createSkillMap([]);
+      const claude = new MockClaude({ responses: { n1: { data: {} } } });
+      const { trace } = await execute(
+        sandboxWorkflow({ file: "./rules.md" }),
+        {},
+        { skills, claude, cwd: outputDir, fileRoot: outputDir, config: {} },
+      );
+      expect(trace.sources["nodes.n1.context.0"].content).toBe("in-repo rules");
+    });
+  });
+
   it("executes conditional branches", async () => {
     const fileSkill = createFileSkill(outputDir);
     const skills = createSkillMap([fileSkill]);

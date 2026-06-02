@@ -118,6 +118,15 @@ export interface CliConfig {
   // Source resolution
   offline: boolean;
   fetchAuth: Record<string, string>;
+  /**
+   * When set, sandbox `file:` Sources to this directory tree: a `file:` source
+   * that escapes it (via `..`, an absolute path, or a symlink pointing out) is
+   * rejected. The sandbox is opt-in: empty string means no root configured, so
+   * `file:` Sources read anywhere on disk (default). Set via `--file-root [dir]`
+   * (the working directory when the flag is given without a value) or a
+   * `.sweny.yml` `file-root: <path>`.
+   */
+  fileRoot: string;
 }
 
 export function registerTriageCommand(program: Command): Command {
@@ -200,7 +209,11 @@ export function registerTriageCommand(program: Command): Command {
       "--workspace-tools <tools>",
       "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday)",
     )
-    .option("--offline", "Skip URL Sources and fail fast if any are referenced", false);
+    .option("--offline", "Skip URL Sources and fail fast if any are referenced", false)
+    .option(
+      "--file-root [dir]",
+      "Sandbox file: Sources to this directory tree (defaults to the working directory when the flag is given without a value)",
+    );
 }
 
 export function parseCliInputs(options: Record<string, unknown>, fileConfig: FileConfig = {}): CliConfig {
@@ -350,7 +363,22 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
 
     offline: Boolean(options.offline),
     fetchAuth: parseFetchAuth(fileConfig),
+    // Opt-in file: sandbox. `--file-root <dir>` sets the root; `--file-root`
+    // with no value defaults to cwd; otherwise honor a `.sweny.yml`
+    // `file-root: <path>`. Empty string = no root = read-anywhere (default).
+    fileRoot:
+      typeof options.fileRoot === "string"
+        ? options.fileRoot
+        : options.fileRoot === true
+          ? process.cwd()
+          : fileStr(fileConfig, "file-root"),
   };
+}
+
+/** Read a string key from file config, returning "" when absent or non-string. */
+function fileStr(fileConfig: FileConfig, key: string): string {
+  const v = (fileConfig as Record<string, unknown>)[key];
+  return typeof v === "string" ? v : "";
 }
 
 function parseFetchAuth(fileConfig: FileConfig): Record<string, string> {
@@ -866,7 +894,11 @@ export function registerImplementCommand(program: Command): Command {
       "Print each tool call's input and output inline (human-readable, truncated). Use --stream for full untruncated NDJSON.",
       false,
     )
-    .option("--offline", "Skip URL Sources and fail fast if any are referenced", false);
+    .option("--offline", "Skip URL Sources and fail fast if any are referenced", false)
+    .option(
+      "--file-root [dir]",
+      "Sandbox file: Sources to this directory tree (defaults to the working directory when the flag is given without a value)",
+    );
 }
 
 /**

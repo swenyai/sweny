@@ -10,7 +10,7 @@
  *   - normal https URL + relative file paths still resolve (back-compat)
  */
 
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -277,6 +277,29 @@ describe("file-path sandbox", () => {
       expect(resolved.content).toBe("outside body");
     } finally {
       rmSync(outside, { force: true });
+    }
+  });
+
+  it("rejects a symlink inside the root that points outside it", async () => {
+    // A symlink that lives inside the sandbox but targets an external secret.
+    // The lexical check alone would pass it; realpath canonicalization catches it.
+    const secret = path.join(tmpdir(), `sweny-secret-${randomBytes(4).toString("hex")}.md`);
+    writeFileSync(secret, "TOP-SECRET-OUTSIDE-ROOT");
+    const link = path.join(fileTmp, "link.md");
+    try {
+      symlinkSync(secret, link);
+    } catch {
+      // Some CI environments disallow symlink creation; skip rather than fail.
+      rmSync(secret, { force: true });
+      return;
+    }
+    try {
+      await expect(resolveSource("./link.md", "f", { ...baseCtx(), cwd: fileTmp, fileRoot: fileTmp })).rejects.toThrow(
+        /SOURCE_FILE_OUTSIDE_ROOT/,
+      );
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(secret, { force: true });
     }
   });
 

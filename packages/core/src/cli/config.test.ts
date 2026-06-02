@@ -86,6 +86,7 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
     context: [],
     offline: false,
     fetchAuth: {},
+    fileRoot: "",
     cloudToken: "",
     ...overrides,
   };
@@ -186,6 +187,28 @@ describe("fetch.auth + offline parsing", () => {
   it("parses fetch.auth from file config", () => {
     const config = parseCliInputs({}, { "fetch.auth": { "api.example.com": "MY_TOKEN" } as any });
     expect(config.fetchAuth).toEqual({ "api.example.com": "MY_TOKEN" });
+  });
+});
+
+describe("parseCliInputs — file-root (opt-in file: sandbox)", () => {
+  it("defaults fileRoot to '' (no sandbox) when the flag is absent", () => {
+    const config = parseCliInputs({}, {});
+    expect(config.fileRoot).toBe("");
+  });
+
+  it("sets fileRoot from --file-root <dir>", () => {
+    const config = parseCliInputs({ fileRoot: "/some/repo/root" }, {});
+    expect(config.fileRoot).toBe("/some/repo/root");
+  });
+
+  it("defaults fileRoot to cwd when --file-root is given with no value", () => {
+    const config = parseCliInputs({ fileRoot: true }, {});
+    expect(config.fileRoot).toBe(process.cwd());
+  });
+
+  it("reads file-root from .sweny.yml when the flag is absent", () => {
+    const config = parseCliInputs({}, { "file-root": "/from/file" } as any);
+    expect(config.fileRoot).toBe("/from/file");
   });
 });
 

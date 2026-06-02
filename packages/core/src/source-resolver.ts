@@ -8,6 +8,7 @@
  */
 
 import * as dns from "node:dns/promises";
+import { realpathSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -427,22 +428,49 @@ function embeddedIpv4(ip: string): number[] | null {
 
 /**
  * Enforce the optional repo-root file sandbox. The sandbox is opt-in: it only
- * applies when `fileRoot` is set (preserving legacy "read anywhere" behavior
- * for callers that don't configure a root). When active, a `file:` source must
- * resolve to a path inside `fileRoot`; `..` traversal and absolute paths that
- * escape the root are rejected. Set `allowFileOutsideRoot` to opt back out even
+ * applies when `fileRoot` is set. When unset, legacy "read anywhere" behavior is
+ * preserved (a `file:` source may resolve to any path on disk). When a root is
+ * configured, a `file:` source must resolve to a path inside it; `..` traversal
+ * and absolute paths that escape the root are rejected with
+ * `SOURCE_FILE_OUTSIDE_ROOT`. Set `allowFileOutsideRoot` to opt back out even
  * when a root is configured.
+ *
+ * Symlinks are resolved with `fs.realpathSync` before the containment check so
+ * a symlink inside the root pointing at an external target cannot smuggle
+ * out-of-root content. `realpath` throws `ENOENT` on a not-yet-existing file; in
+ * that case we resolve the nearest existing ancestor (so a symlinked parent dir
+ * is still caught) and re-append the missing tail, preserving the downstream
+ * `SOURCE_FILE_NOT_FOUND` error for genuinely missing files.
  */
 function assertFileWithinRoot(absolute: string, ctx: SourceResolutionContext, fieldPath: string): void {
   if (ctx.allowFileOutsideRoot) return;
-  if (!ctx.fileRoot) return; // sandbox not configured — legacy behavior
-  const root = path.resolve(ctx.fileRoot);
-  const normalized = path.resolve(absolute);
+  if (!ctx.fileRoot) return; // no root configured — sandbox not engaged
+  const root = realpathOrLexical(path.resolve(ctx.fileRoot));
+  const normalized = realpathOrLexical(path.resolve(absolute));
   const rel = path.relative(root, normalized);
   const escapes = rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
   if (escapes) {
     throw new Error(
       `SOURCE_FILE_OUTSIDE_ROOT: ${absolute} is outside the allowed root ${root} (referenced by ${fieldPath}). Set allowFileOutsideRoot to permit reads outside the repo.`,
     );
+  }
+}
+
+/**
+ * Canonicalize `target` via `fs.realpathSync` (resolving symlinks). If the path
+ * does not yet exist, walk up to the nearest existing ancestor, canonicalize
+ * that, and re-append the non-existent tail. This keeps symlink resolution
+ * meaningful for the directory portion (catching a symlinked parent that
+ * escapes the root) while not throwing on a file that simply isn't there — that
+ * case is surfaced later as `SOURCE_FILE_NOT_FOUND` by the read.
+ */
+function realpathOrLexical(target: string): string {
+  try {
+    return realpathSync(target);
+  } catch {
+    const parent = path.dirname(target);
+    if (parent === target) return target; // reached filesystem root
+    const base = path.basename(target);
+    return path.join(realpathOrLexical(parent), base);
   }
 }

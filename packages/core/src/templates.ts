@@ -76,14 +76,24 @@ export interface SourceLoadOptions {
   fetchAuth?: Record<string, string>;
   /** Environment used to resolve `fetchAuth` env-var names. Defaults to process.env. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * When set, `file:` template/context Sources are sandboxed to this directory
+   * tree: a path that escapes it via `..`, an absolute path, or a symlink
+   * pointing out is rejected. The sandbox is opt-in: when unset, `file:` sources
+   * may read anywhere on disk (default).
+   */
+  fileRoot?: string;
 }
 
 function buildCtx(options: SourceLoadOptions): SourceResolutionContext {
+  const cwd = options.cwd ?? process.cwd();
   return {
-    cwd: options.cwd ?? process.cwd(),
+    cwd,
     env: options.env ?? process.env,
     authConfig: options.fetchAuth ?? {},
     offline: options.offline ?? false,
+    // Opt-in `file:` sandbox: only engaged when the caller sets `fileRoot`.
+    fileRoot: options.fileRoot,
     logger: consoleLogger,
   };
 }
