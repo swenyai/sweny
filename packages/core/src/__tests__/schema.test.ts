@@ -883,6 +883,60 @@ describe("validateWorkflow", () => {
     expect(errors).toEqual([]);
   });
 
+  it("rejects unimplemented eval_policy at load time (any_pass)", () => {
+    const wf: Workflow = {
+      ...validWorkflow,
+      nodes: {
+        ...validWorkflow.nodes,
+        b: { ...validWorkflow.nodes.b, eval_policy: "any_pass" },
+      },
+    };
+    const errors = validateWorkflow(wf);
+    expect(errors).toContainEqual(expect.objectContaining({ code: "UNSUPPORTED_EVAL_POLICY", nodeId: "b" }));
+  });
+
+  it("rejects unimplemented eval_policy at load time (weighted)", () => {
+    const wf: Workflow = {
+      ...validWorkflow,
+      nodes: {
+        ...validWorkflow.nodes,
+        c: { ...validWorkflow.nodes.c, eval_policy: "weighted" },
+      },
+    };
+    const errors = validateWorkflow(wf);
+    expect(errors).toContainEqual(expect.objectContaining({ code: "UNSUPPORTED_EVAL_POLICY", nodeId: "c" }));
+  });
+
+  it("accepts eval_policy all_pass", () => {
+    const wf: Workflow = {
+      ...validWorkflow,
+      nodes: {
+        ...validWorkflow.nodes,
+        b: { ...validWorkflow.nodes.b, eval_policy: "all_pass" },
+      },
+    };
+    expect(validateWorkflow(wf, new Set(["github"]))).toEqual([]);
+  });
+
+  it("accepts an absent eval_policy", () => {
+    expect(validateWorkflow(validWorkflow, new Set(["github"]))).toEqual([]);
+  });
+
+  it("flags unimplemented eval_policy on a parsed workflow", () => {
+    const parsed = parseWorkflow({
+      id: "p",
+      name: "P",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Do A", skills: [], eval_policy: "weighted" },
+      },
+      edges: [],
+    });
+    const errors = validateWorkflow(parsed);
+    expect(errors).toContainEqual(expect.objectContaining({ code: "UNSUPPORTED_EVAL_POLICY", nodeId: "a" }));
+  });
+
   it("validates triage workflow", () => {
     expect(validateWorkflow(triageWorkflow)).toEqual([]);
   });
