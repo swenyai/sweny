@@ -97,7 +97,6 @@ Any PR that modifies source files in a published package:
 | `packages/core` | `@sweny-ai/core` |
 | `packages/studio` | `@sweny-ai/studio` |
 | `packages/mcp` | `@sweny-ai/mcp` |
-| `packages/create-sweny` | `create-sweny` |
 
 You can skip a changeset for:
 
