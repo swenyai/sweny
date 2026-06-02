@@ -28,7 +28,6 @@ jobs:
           npm run build --workspace=packages/core
           npm run build:lib --workspace=packages/studio
           npm run build --workspace=packages/mcp
-          npm run build --workspace=packages/create-sweny
       - name: Test
         run: npm run test
 
@@ -59,7 +58,6 @@ jobs:
           npm run build --workspace=packages/core
           npm run build:lib --workspace=packages/studio
           npm run build --workspace=packages/mcp
-          npm run build --workspace=packages/create-sweny
 
       - name: Configure git
         run: |
@@ -76,7 +74,6 @@ jobs:
           CHANGED_CORE=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/core/ | head -1)
           CHANGED_STUDIO=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/studio/ | head -1)
           CHANGED_MCP=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/mcp/ | head -1)
-          CHANGED_CREATE_SWENY=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/create-sweny/ | head -1)
 
           PUBLISHED=false
 
@@ -125,16 +122,6 @@ jobs:
 
           if [ -n "$CHANGED_MCP" ]; then
             bump_and_publish packages/mcp "@sweny-ai/mcp"
-            PUBLISHED=true
-          fi
-
-          # create-sweny is a published public package (npx create-sweny). Its
-          # only runtime change is a bumped @sweny-ai/core floor. We publish on
-          # its own source changes and keep the "^" core range, which floats to
-          # the latest core on a fresh install. (Follow-up if the floor must
-          # track core minors: rewrite the dep to the just-published core ver.)
-          if [ -n "$CHANGED_CREATE_SWENY" ]; then
-            bump_and_publish packages/create-sweny "create-sweny"
             PUBLISHED=true
           fi
 

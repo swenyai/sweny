@@ -23,7 +23,7 @@
 ## Quickstart
 
 ```bash
-npx create-sweny            # pick a workflow → auto-detects providers → done
+npx @sweny-ai/core new      # pick a workflow → auto-detects providers → done
 sweny workflow run .sweny/workflows/pr-review.yml
 ```
 
@@ -194,7 +194,6 @@ sweny publish   # interactive CLI — publish a workflow or skill
 | Package | Description |
 |---------|-------------|
 | [`@sweny-ai/core`](packages/core) | Skills, DAG executor, CLI, workflows |
-| [`create-sweny`](packages/create-sweny) | `npx create-sweny` — thin wrapper around `sweny new` |
 | [`@sweny-ai/studio`](packages/studio) | Visual DAG editor and execution monitor |
 | [`@sweny-ai/mcp`](packages/mcp) | MCP server for Claude Code / Desktop |
 

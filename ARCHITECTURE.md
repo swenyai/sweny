@@ -17,7 +17,6 @@ Cloud is to SWEny what Codecov is to testing: the Action does the work, Cloud sh
 | Package | Dir | Published | What it does |
 |---------|-----|-----------|--------------|
 | `@sweny-ai/core` | `packages/core` | npm | Skills, DAG executor, CLI |
-| `create-sweny` | `packages/create-sweny` | npm | `npx create-sweny` — thin wrapper around `sweny new` |
 | `@sweny-ai/studio` | `packages/studio` | npm | Visual DAG editor and execution monitor |
 | `@sweny-ai/mcp` | `packages/mcp` | npm | MCP server for Claude Code / Desktop |
 | — | `packages/plugin` | no (marketplace) | Claude Code plugin: skills, MCP tools, agent, hooks |

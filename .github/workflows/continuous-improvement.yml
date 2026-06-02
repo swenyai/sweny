@@ -105,7 +105,6 @@ jobs:
                                        Built-in workflows live here; key exports include the DAG executor and schema.
               packages/studio        - React component library + SPA: WorkflowViewer/editor DAG visualization
               packages/mcp           - MCP server for Claude Code / Desktop (sweny_list_workflows, sweny_run_workflow)
-              packages/create-sweny  - npx create-sweny, a thin wrapper around `sweny new`
               packages/plugin        - Claude Code plugin (skills, MCP tools, agent, hooks); marketplace, not published to npm
               packages/web           - docs site (Astro), deploys to docs.sweny.ai via Vercel
 
