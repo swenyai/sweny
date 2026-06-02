@@ -31,15 +31,42 @@ describe("create-sweny", () => {
   });
 
   describe("module structure", () => {
-    it("calls runNew on load", async () => {
-      const mockRunNew = vi.fn().mockResolvedValue(undefined);
-      vi.doMock("@sweny-ai/core/new", () => ({ runNew: mockRunNew }));
+    const originalArgv = process.argv;
 
+    afterEach(() => {
+      process.argv = originalArgv;
+      vi.doUnmock("@sweny-ai/core/new");
+      vi.resetModules();
+    });
+
+    async function loadWithArgv(argv: string[]): Promise<ReturnType<typeof vi.fn>> {
+      const mockRunNew = vi.fn().mockResolvedValue(undefined);
+      vi.resetModules();
+      vi.doMock("@sweny-ai/core/new", () => ({ runNew: mockRunNew }));
+      process.argv = ["node", "create-sweny", ...argv];
       await import("./index.js");
       await new Promise((r) => setTimeout(r, 10));
+      return mockRunNew;
+    }
 
+    it("calls runNew on load", async () => {
+      const mockRunNew = await loadWithArgv([]);
       expect(mockRunNew).toHaveBeenCalledOnce();
-      vi.doUnmock("@sweny-ai/core/new");
+    });
+
+    it("threads the workflow id arg into runNew as marketplaceId", async () => {
+      const mockRunNew = await loadWithArgv(["release-notes"]);
+      expect(mockRunNew).toHaveBeenCalledWith({ marketplaceId: "release-notes" });
+    });
+
+    it("passes the e2e arg through (matches `sweny new e2e`)", async () => {
+      const mockRunNew = await loadWithArgv(["e2e"]);
+      expect(mockRunNew).toHaveBeenCalledWith({ marketplaceId: "e2e" });
+    });
+
+    it("calls runNew with undefined when no arg is given (interactive picker)", async () => {
+      const mockRunNew = await loadWithArgv([]);
+      expect(mockRunNew).toHaveBeenCalledWith(undefined);
     });
   });
 
