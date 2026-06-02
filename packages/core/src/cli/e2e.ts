@@ -877,9 +877,15 @@ export async function runE2eInit(options: E2eInitOptions = {}): Promise<void> {
 
 // ── Timeout helper ─────────────────────────────────────────────────────
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string, onTimeout?: () => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+    const timer = setTimeout(() => {
+      // Abort the underlying work first so it stops advancing and the in-flight
+      // model query is interrupted, then reject the wrapper. Without the abort
+      // the execute() promise is abandoned but its model query keeps running.
+      onTimeout?.();
+      reject(new Error(`${label} timed out after ${ms / 1000}s`));
+    }, ms);
     promise
       .then(resolve)
       .catch(reject)
@@ -1042,15 +1048,17 @@ export async function runE2eRun(options: E2eRunOptions): Promise<void> {
       }
     };
 
+    const controller = new AbortController();
     try {
       const { results } = await withTimeout(
         execute(
           workflow,
           { run_id: vars.run_id, base_url: vars.base_url },
-          { skills, claude, observer, logger: consoleLogger },
+          { skills, claude, observer, logger: consoleLogger, signal: controller.signal },
         ),
         timeoutMs,
         `Workflow ${workflow.name}`,
+        () => controller.abort(),
       );
 
       // Extract report

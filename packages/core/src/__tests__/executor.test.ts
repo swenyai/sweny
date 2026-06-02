@@ -3175,6 +3175,124 @@ describe("resolveConfig env threading", () => {
       execute(oneNode, {}, { skills: createSkillMap([skill]), claude, config: {}, env: {} }),
     ).rejects.toThrow(/Missing required config/);
   });
+
+  // ── CE-05: empty-string config handling ──────────────────────────
+  function oneNodeWith(skill: Skill): Workflow {
+    return {
+      id: "cfg-empty",
+      name: "Cfg Empty",
+      description: "single node using a config-bearing skill",
+      entry: "a",
+      nodes: { a: { name: "A", instruction: "Do A", skills: [skill.id] } },
+      edges: [],
+    };
+  }
+
+  it("required env var set to empty string reports 'set to empty', distinct from 'not provided'", async () => {
+    const skill: Skill = {
+      id: "demoE",
+      name: "DemoE",
+      description: "demo",
+      category: "general",
+      config: { demo_token: { env: "DEMO_KEY_EMPTY", required: true, description: "demo token" } },
+      tools: [],
+      instruction: "ctx",
+    };
+    const claude = new MockClaude({ responses: { a: { data: {} } } });
+    await expect(
+      execute(
+        oneNodeWith(skill),
+        {},
+        {
+          skills: createSkillMap([skill]),
+          claude,
+          config: {},
+          env: { DEMO_KEY_EMPTY: "" },
+        },
+      ),
+    ).rejects.toThrow(/set to empty/);
+  });
+
+  it("required env var absent reports 'not provided', not 'set to empty'", async () => {
+    const skill: Skill = {
+      id: "demoA",
+      name: "DemoA",
+      description: "demo",
+      category: "general",
+      config: { demo_token: { env: "DEMO_KEY_ABSENT", required: true, description: "demo token" } },
+      tools: [],
+      instruction: "ctx",
+    };
+    const claude = new MockClaude({ responses: { a: { data: {} } } });
+    let message = "";
+    try {
+      await execute(
+        oneNodeWith(skill),
+        {},
+        {
+          skills: createSkillMap([skill]),
+          claude,
+          config: {},
+          env: {},
+        },
+      );
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).toMatch(/not provided/);
+    expect(message).not.toMatch(/set to empty/);
+  });
+
+  it("optional env var set to empty string passes through (does not throw)", async () => {
+    const skill: Skill = {
+      id: "demoO",
+      name: "DemoO",
+      description: "demo",
+      category: "general",
+      config: { demo_token: { env: "DEMO_KEY_OPT", required: false, description: "demo token" } },
+      tools: [],
+      instruction: "ctx",
+    };
+    const claude = new MockClaude({ responses: { a: { data: {} } } });
+    const { results } = await execute(
+      oneNodeWith(skill),
+      {},
+      {
+        skills: createSkillMap([skill]),
+        claude,
+        config: {},
+        env: { DEMO_KEY_OPT: "" },
+      },
+    );
+    expect(results.get("a")?.status).toBe("success");
+  });
+
+  it("an explicit empty-string override wins and does not fall through to env", async () => {
+    // Required field: an explicit "" override is present (not absent), so env
+    // is never consulted. Required + present-but-empty → "set to empty".
+    const skill: Skill = {
+      id: "demoOv",
+      name: "DemoOv",
+      description: "demo",
+      category: "general",
+      config: { demo_token: { env: "DEMO_KEY_OV", required: true, description: "demo token" } },
+      tools: [],
+      instruction: "ctx",
+    };
+    const claude = new MockClaude({ responses: { a: { data: {} } } });
+    await expect(
+      execute(
+        oneNodeWith(skill),
+        {},
+        {
+          skills: createSkillMap([skill]),
+          claude,
+          config: { demo_token: "" }, // explicit empty override
+          env: { DEMO_KEY_OV: "would-be-used-if-fell-through" },
+        },
+      ),
+    ).rejects.toThrow(/set to empty/);
+  });
 });
 
 describe("missing-required-field retry", () => {
@@ -3374,5 +3492,109 @@ describe("route-eval warnings for non-success nodes (CE-04)", () => {
     );
     expect(warns.some((w) => /declared properties not in emitted data/.test(w))).toBe(true);
     expect(events.some((e) => e.type === "node:warning" && e.node === "src")).toBe(true);
+  });
+});
+
+describe("abort / timeout (CE-01)", () => {
+  const threeNode: Workflow = {
+    id: "abortable",
+    name: "Abortable",
+    description: "a→b→c",
+    entry: "a",
+    nodes: {
+      a: { name: "A", instruction: "Do A", skills: [] },
+      b: { name: "B", instruction: "Do B", skills: [] },
+      c: { name: "C", instruction: "Do C", skills: [] },
+    },
+    edges: [
+      { from: "a", to: "b" },
+      { from: "b", to: "c" },
+    ],
+  };
+
+  it("forwards signal and timeoutMs to claude.run", async () => {
+    const controller = new AbortController();
+    let sawSignal: AbortSignal | undefined;
+    let sawTimeout: number | undefined;
+    const claude: any = {
+      async run(opts: any) {
+        sawSignal = opts.signal;
+        sawTimeout = opts.timeoutMs;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    await execute(
+      threeNode,
+      {},
+      { skills: createSkillMap([]), claude, config: {}, signal: controller.signal, timeoutMs: 1234 },
+    );
+    expect(sawSignal).toBe(controller.signal);
+    expect(sawTimeout).toBe(1234);
+  });
+
+  it("rejects promptly when the signal aborts mid-run and stops issuing further calls", async () => {
+    const controller = new AbortController();
+    let runCalls = 0;
+    const claude: any = {
+      async run() {
+        runCalls++;
+        // Abort during the first node so the loop should not advance to b/c.
+        controller.abort();
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    await expect(
+      execute(threeNode, {}, { skills: createSkillMap([]), claude, config: {}, signal: controller.signal }),
+    ).rejects.toThrow(/aborted/i);
+    // Only node "a" ran; the loop bailed before "b" and "c".
+    expect(runCalls).toBe(1);
+  });
+
+  it("does not advance past the deadline (no node:enter after abort)", async () => {
+    const controller = new AbortController();
+    const events: ExecutionEvent[] = [];
+    const claude: any = {
+      async run() {
+        controller.abort();
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    await expect(
+      execute(
+        threeNode,
+        {},
+        { skills: createSkillMap([]), claude, config: {}, signal: controller.signal, observer: (e) => events.push(e) },
+      ),
+    ).rejects.toThrow(/aborted/i);
+    // Exactly one node:enter (for "a"); no further nodes after the abort.
+    expect(events.filter((e) => e.type === "node:enter")).toHaveLength(1);
+  });
+
+  it("fails fast when the signal is already aborted before the run starts", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let runCalls = 0;
+    const claude: any = {
+      async run() {
+        runCalls++;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    await expect(
+      execute(threeNode, {}, { skills: createSkillMap([]), claude, config: {}, signal: controller.signal }),
+    ).rejects.toThrow(/aborted/i);
+    expect(runCalls).toBe(0);
   });
 });
