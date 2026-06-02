@@ -173,7 +173,11 @@ function sanitizeId(id: string): string {
 
 /** Escape characters that break Mermaid labels */
 function escapeLabel(text: string): string {
-  return text.replace(/"/g, "&quot;").replace(/\[/g, "&#91;").replace(/\]/g, "&#93;");
+  // `|` must be escaped too: edge labels are emitted as `-->|"label"|`, so a
+  // literal `|` inside the label (e.g. an edge `when` of "high | critical")
+  // terminates Mermaid's edge-label token and corrupts the edge. `&#124;`
+  // renders as a literal `|`, consistent with the existing `&#91;`/`&#93;`.
+  return text.replace(/"/g, "&quot;").replace(/\[/g, "&#91;").replace(/\]/g, "&#93;").replace(/\|/g, "&#124;");
 }
 
 /** Group node IDs by their status */
