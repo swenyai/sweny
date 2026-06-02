@@ -166,6 +166,37 @@ describe("buildAutoMcpServers", () => {
     });
   });
 
+  it("normalizes a trailing slash on self-hosted GITLAB_URL (no double slash)", () => {
+    const result = buildAutoMcpServers(
+      cfg({
+        sourceControlProvider: "gitlab",
+        credentials: {
+          GITLAB_TOKEN: "glpat_abc",
+          GITLAB_URL: "https://gl.corp.com/",
+        },
+      }),
+    );
+    expect(result["gitlab"]?.env).toEqual({
+      GITLAB_PERSONAL_ACCESS_TOKEN: "glpat_abc",
+      GITLAB_API_URL: "https://gl.corp.com/api/v4",
+    });
+  });
+
+  it("does not set GITLAB_API_URL for gitlab.com with a trailing slash", () => {
+    // "https://gitlab.com/" normalizes to the canonical host, so no API URL is
+    // emitted (and certainly not a double-slash one).
+    const result = buildAutoMcpServers(
+      cfg({
+        sourceControlProvider: "gitlab",
+        credentials: {
+          GITLAB_TOKEN: "glpat_abc",
+          GITLAB_URL: "https://gitlab.com/",
+        },
+      }),
+    );
+    expect(result["gitlab"]?.env).toEqual({ GITLAB_PERSONAL_ACCESS_TOKEN: "glpat_abc" });
+  });
+
   it("injects GitLab MCP without GITLAB_API_URL for gitlab.com", () => {
     const result = buildAutoMcpServers(
       cfg({

@@ -12,13 +12,19 @@ export default [
       "**/.next/",
       "**/coverage/",
       "packages/web/.astro/**",
+      "spec/.astro/**",
       ".claude/**",
+      "**/*.d.ts",
+      // Local git worktrees (gitignored). Without this, `eslint .` lints
+      // every checkout under .worktrees/ and inflates the warning count.
+      ".worktrees/**",
     ],
   },
 
-  // TypeScript files
+  // TypeScript files (incl. .tsx — studio React source was previously unlinted
+  // because a flat-config block matching no files is skipped).
   {
-    files: ["**/*.ts"],
+    files: ["**/*.{ts,tsx}"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -48,11 +54,35 @@ export default [
     },
   },
 
-  // CLI — console output is intentional in a CLI tool
+  // CLI — console output is intentional in a CLI tool. The CLI moved from the
+  // removed packages/cli into packages/core/src/cli; this override was dead.
   {
-    files: ["packages/cli/src/**/*.ts"],
+    files: ["packages/core/src/cli/**/*.ts"],
     rules: {
       "no-console": "off",
+    },
+  },
+
+  // Studio React source. Now that .tsx is linted, the existing
+  // `// eslint-disable react-hooks/exhaustive-deps` directives in studio
+  // reference rules that aren't registered, which ESLint reports as an error
+  // ("Definition for rule ... was not found"). Register the react-hooks rule
+  // ids as no-ops (off) so those directives resolve cleanly without pulling in
+  // eslint-plugin-react-hooks or surfacing a wave of new warnings. Swap these
+  // for the real plugin if/when studio adopts full hooks linting.
+  {
+    files: ["packages/studio/src/**/*.{ts,tsx}"],
+    plugins: {
+      "react-hooks": {
+        rules: {
+          "exhaustive-deps": { create: () => ({}) },
+          "rules-of-hooks": { create: () => ({}) },
+        },
+      },
+    },
+    rules: {
+      "react-hooks/exhaustive-deps": "off",
+      "react-hooks/rules-of-hooks": "off",
     },
   },
 

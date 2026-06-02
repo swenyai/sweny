@@ -28,6 +28,7 @@ jobs:
           npm run build --workspace=packages/core
           npm run build:lib --workspace=packages/studio
           npm run build --workspace=packages/mcp
+          npm run build --workspace=packages/create-sweny
       - name: Test
         run: npm run test
 
@@ -58,6 +59,7 @@ jobs:
           npm run build --workspace=packages/core
           npm run build:lib --workspace=packages/studio
           npm run build --workspace=packages/mcp
+          npm run build --workspace=packages/create-sweny
 
       - name: Configure git
         run: |
@@ -74,14 +76,18 @@ jobs:
           CHANGED_CORE=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/core/ | head -1)
           CHANGED_STUDIO=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/studio/ | head -1)
           CHANGED_MCP=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/mcp/ | head -1)
+          CHANGED_CREATE_SWENY=$(git diff --name-only "$DIFF_BASE"..HEAD -- packages/create-sweny/ | head -1)
 
           PUBLISHED=false
 
-          # Bump from whichever is higher (LOCAL or NPM) +1 patch.
-          # Guards against the race where a prior Release run published to npm
-          # but its post-publish git push lost to a concurrent merge — leaving
-          # main's package.json behind npm. Without this max(), the next run
-          # would retry the same already-published version and 403.
+          # Version selection:
+          #  - local strictly ahead of npm  -> publish LOCAL as-is (honors a
+          #    deliberate minor/major bump set in package.json).
+          #  - local behind-or-equal to npm -> cut npm+1 patch. This is the
+          #    stale/already-taken case and also the race where a prior Release
+          #    run published to npm but its post-publish git push lost to a
+          #    concurrent merge, leaving main's package.json behind npm. Without
+          #    it the next run would retry an already-published version and 403.
           bump_and_publish() {
             local pkg_dir="$1"
             local pkg_name="$2"
@@ -90,8 +96,13 @@ jobs:
             LOCAL_VER=$(node -p "require('./package.json').version")
             NPM_VER=$(npm view "$pkg_name" version 2>/dev/null || echo "0.0.0")
             HIGHER=$(printf '%s\n%s\n' "$LOCAL_VER" "$NPM_VER" | sort -V | tail -1)
-            NEXT=$(echo "$HIGHER" | awk -F. '{$NF=$NF+1; print}' OFS=.)
-            if [ "$NEXT" != "$LOCAL_VER" ]; then
+            if [ "$LOCAL_VER" = "$HIGHER" ] && [ "$LOCAL_VER" != "$NPM_VER" ]; then
+              # local > npm: a deliberate version; publish exactly what is set.
+              echo "Publishing local version $LOCAL_VER for $pkg_name (ahead of npm $NPM_VER)"
+            else
+              # local <= npm: stale/taken; cut npm+1 patch so we never 403 a
+              # version already on the registry nor republish a behind version.
+              NEXT=$(echo "$NPM_VER" | awk -F. '{$NF=$NF+1; print}' OFS=.)
               npm version "$NEXT" --no-git-tag-version
             fi
             # Surface which package failed (the failure alert links the run, but
@@ -114,6 +125,16 @@ jobs:
 
           if [ -n "$CHANGED_MCP" ]; then
             bump_and_publish packages/mcp "@sweny-ai/mcp"
+            PUBLISHED=true
+          fi
+
+          # create-sweny is a published public package (npx create-sweny). Its
+          # only runtime change is a bumped @sweny-ai/core floor. We publish on
+          # its own source changes and keep the "^" core range, which floats to
+          # the latest core on a fresh install. (Follow-up if the floor must
+          # track core minors: rewrite the dep to the just-published core ver.)
+          if [ -n "$CHANGED_CREATE_SWENY" ]; then
+            bump_and_publish packages/create-sweny "create-sweny"
             PUBLISHED=true
           fi
 

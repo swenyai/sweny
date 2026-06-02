@@ -60,7 +60,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20, 22]
+        # 24 is the action default (action.yml node-version), so the version
+        # most consumers run the action on is exercised in CI.
+        node-version: [20, 22, 24]
     steps:
       - uses: actions/checkout@v6
 

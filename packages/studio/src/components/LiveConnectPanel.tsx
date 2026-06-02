@@ -61,6 +61,10 @@ export function LiveConnectPanel() {
       };
 
       es.onerror = () => {
+        // EventSource auto-reconnects on a transient error. Close it before
+        // nulling the ref so the failed stream stops retrying in the
+        // background (and disconnect() can't reach it once the ref is gone).
+        es.close();
         evsRef.current = null;
         setLiveConnection({ url: connUrl, transport: connTransport, status: "error", error: "SSE error" });
       };

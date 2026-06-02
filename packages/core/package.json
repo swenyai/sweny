@@ -1,12 +1,15 @@
 {
   "name": "@sweny-ai/core",
-  "version": "0.1.102",
+  "version": "0.1.109",
   "type": "module",
   "bin": {
     "sweny": "./dist/cli/main.js"
   },
   "description": "Skill library, DAG workflow orchestration, and E2E browser testing powered by Claude",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "exports": {
     ".": "./dist/index.js",
     "./browser": "./dist/browser.js",
@@ -15,7 +18,8 @@
     "./workflows": "./dist/workflows/index.js",
     "./testing": "./dist/testing.js",
     "./schema": "./dist/schema.js",
-    "./new": "./dist/cli/new.js"
+    "./new": "./dist/cli/new.js",
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
@@ -61,11 +65,11 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "^2.1.150",
+    "@anthropic-ai/claude-code": "^2.1.160",
     "ajv": "^8.20.0",
     "esbuild": "^0.28.0",
     "prettier": "^3.8.3",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.8"
   },
   "publishConfig": {
     "access": "public"

@@ -28,22 +28,33 @@ export { workflowInputsZ };
 
 export const jsonSchemaZ = z.record(z.unknown());
 
-export const configFieldZ = z.object({
-  description: z.string(),
-  required: z.boolean().optional(),
-  env: z.string().optional(),
-});
+// .strict() to match the published skill JSON Schema's ConfigField
+// `additionalProperties: false`. Without it Zod silently STRIPPED an unknown
+// nested key while ajv REJECTED it (the #214/#225 divergence class, missed for
+// configFieldZ/toolZ). custom-loader.ts builds Skill objects from frontmatter
+// and never runs these schemas, so tightening is safe downstream.
+export const configFieldZ = z
+  .object({
+    description: z.string(),
+    required: z.boolean().optional(),
+    env: z.string().optional(),
+  })
+  .strict();
 
 /**
  * Zod schema for tool metadata (name, description, input_schema).
  * Note: `handler` is intentionally omitted — Zod schemas validate
  * serializable data (JSON import/export), not runtime function refs.
+ *
+ * .strict() to match the published Tool `$def`'s `additionalProperties: false`.
  */
-export const toolZ = z.object({
-  name: z.string().min(1),
-  description: z.string(),
-  input_schema: jsonSchemaZ,
-});
+export const toolZ = z
+  .object({
+    name: z.string().min(1),
+    description: z.string(),
+    input_schema: jsonSchemaZ,
+  })
+  .strict();
 
 export const skillCategoryZ = z.enum(SKILL_CATEGORIES);
 
@@ -128,6 +139,14 @@ export const outputMatchZ = z
 export const evaluatorKindZ = z.enum(EVALUATOR_KINDS);
 
 export const evalPolicyZ = z.enum(EVAL_POLICIES);
+
+/**
+ * Eval policies actually implemented at runtime. The Zod schema and published
+ * JSON schema accept the full {@link EVAL_POLICIES} vocabulary (the others are
+ * reserved), but `validateWorkflow` rejects any policy not in this set so a
+ * workflow fails at load time rather than throwing mid-run from `aggregateEval`.
+ */
+const SUPPORTED_EVAL_POLICIES = new Set<string>(["all_pass"]);
 
 export const evaluatorRuleZ = z
   .object({
@@ -348,6 +367,8 @@ export interface WorkflowError {
     | "UNKNOWN_SKILL"
     | "SELF_LOOP"
     | "UNBOUNDED_CYCLE"
+    | "AMBIGUOUS_EDGES"
+    | "UNSUPPORTED_EVAL_POLICY"
     | "INVALID_INLINE_SKILL";
   message: string;
   nodeId?: string;
@@ -403,6 +424,31 @@ export function validateWorkflow(
         code: "SELF_LOOP",
         message: `Edge from "${edge.from}" to itself (add max_iterations to allow)`,
         nodeId: edge.from,
+      });
+    }
+  }
+
+  // Edge determinism: a node with two or more out-edges that have no `when`
+  // clause is ambiguous. The executor's resolveNext picks the first such edge
+  // and silently drops the rest, wasting a route eval on a deterministic hop
+  // and leaving the other targets unreachable. Reject it at load time so the
+  // author sees the problem instead of getting a silent first-edge-wins.
+  // Only count edges whose source is a real node (broken sources are already
+  // reported above as UNKNOWN_EDGE_SOURCE).
+  const unconditionalByNode = new Map<string, string[]>();
+  for (const edge of workflow.edges) {
+    if (!nodeIds.has(edge.from)) continue;
+    if (edge.when) continue;
+    const list = unconditionalByNode.get(edge.from) ?? [];
+    list.push(edge.to);
+    unconditionalByNode.set(edge.from, list);
+  }
+  for (const [from, targets] of unconditionalByNode) {
+    if (targets.length > 1) {
+      errors.push({
+        code: "AMBIGUOUS_EDGES",
+        message: `Node "${from}" has ${targets.length} unconditional out-edges (to ${targets.join(", ")}); add a 'when' clause to all but one so routing is deterministic`,
+        nodeId: from,
       });
     }
   }
@@ -469,6 +515,24 @@ export function validateWorkflow(
           nodeId: cycleNode,
         });
       }
+    }
+  }
+
+  // Reject eval policies that are reserved in the vocabulary but not yet
+  // implemented. The Zod schema accepts the whole EVAL_POLICIES enum (the
+  // published JSON schema advertises them as reserved), but only `all_pass`
+  // is implemented at runtime. Without this check a workflow declaring
+  // `eval_policy: "any_pass"` or `"weighted"` parses and validates cleanly,
+  // then `aggregateEval` throws uncaught mid-run — a validate-then-crash
+  // failure mode. Reject it at load time instead. The runtime throw in
+  // aggregateEval stays as a defense-in-depth backstop.
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    if (node.eval_policy != null && !SUPPORTED_EVAL_POLICIES.has(node.eval_policy)) {
+      errors.push({
+        code: "UNSUPPORTED_EVAL_POLICY",
+        message: `Node "${nodeId}" declares eval_policy "${node.eval_policy}", which is reserved but not yet implemented; use "all_pass" (the only supported policy in v1.0)`,
+        nodeId,
+      });
     }
   }
 
@@ -1071,6 +1135,11 @@ export const skillJsonSchema = {
     McpServerConfig: {
       type: "object",
       description: "External MCP server definition.",
+      // An MCP server must declare command (stdio) or url (http), mirroring
+      // mcpServerConfigZ.refine(c => c.command || c.url) and the workflow
+      // inline-skill mcp block. Without this the published skill.json accepted a
+      // transport-less mcp block the runtime parser rejects (Zod<->ajv drift).
+      anyOf: [{ required: ["command"] }, { required: ["url"] }],
       additionalProperties: false,
       properties: {
         type: {

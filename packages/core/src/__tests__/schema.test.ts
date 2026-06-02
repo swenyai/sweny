@@ -811,6 +811,30 @@ describe("validateWorkflow", () => {
     expect(errors).toContainEqual(expect.objectContaining({ code: "UNKNOWN_EDGE_TARGET" }));
   });
 
+  it("detects ambiguous edges (2+ unconditional out-edges from one node)", () => {
+    const ambiguous: Workflow = {
+      ...validWorkflow,
+      edges: [
+        { from: "a", to: "b" },
+        { from: "a", to: "c" }, // second unconditional edge from "a"
+      ],
+    };
+    const errors = validateWorkflow(ambiguous);
+    expect(errors).toContainEqual(expect.objectContaining({ code: "AMBIGUOUS_EDGES", nodeId: "a" }));
+  });
+
+  it("allows one unconditional edge alongside conditional edges", () => {
+    const wf: Workflow = {
+      ...validWorkflow,
+      edges: [
+        { from: "a", to: "b", when: "needs work" },
+        { from: "a", to: "c" }, // single default edge — fine
+      ],
+    };
+    const errors = validateWorkflow(wf, new Set(["github"]));
+    expect(errors.filter((e) => e.code === "AMBIGUOUS_EDGES")).toEqual([]);
+  });
+
   it("detects self-loops without max_iterations", () => {
     const loopy: Workflow = {
       ...validWorkflow,
@@ -881,6 +905,60 @@ describe("validateWorkflow", () => {
   it("passes when known skills match", () => {
     const errors = validateWorkflow(validWorkflow, new Set(["github"]));
     expect(errors).toEqual([]);
+  });
+
+  it("rejects unimplemented eval_policy at load time (any_pass)", () => {
+    const wf: Workflow = {
+      ...validWorkflow,
+      nodes: {
+        ...validWorkflow.nodes,
+        b: { ...validWorkflow.nodes.b, eval_policy: "any_pass" },
+      },
+    };
+    const errors = validateWorkflow(wf);
+    expect(errors).toContainEqual(expect.objectContaining({ code: "UNSUPPORTED_EVAL_POLICY", nodeId: "b" }));
+  });
+
+  it("rejects unimplemented eval_policy at load time (weighted)", () => {
+    const wf: Workflow = {
+      ...validWorkflow,
+      nodes: {
+        ...validWorkflow.nodes,
+        c: { ...validWorkflow.nodes.c, eval_policy: "weighted" },
+      },
+    };
+    const errors = validateWorkflow(wf);
+    expect(errors).toContainEqual(expect.objectContaining({ code: "UNSUPPORTED_EVAL_POLICY", nodeId: "c" }));
+  });
+
+  it("accepts eval_policy all_pass", () => {
+    const wf: Workflow = {
+      ...validWorkflow,
+      nodes: {
+        ...validWorkflow.nodes,
+        b: { ...validWorkflow.nodes.b, eval_policy: "all_pass" },
+      },
+    };
+    expect(validateWorkflow(wf, new Set(["github"]))).toEqual([]);
+  });
+
+  it("accepts an absent eval_policy", () => {
+    expect(validateWorkflow(validWorkflow, new Set(["github"]))).toEqual([]);
+  });
+
+  it("flags unimplemented eval_policy on a parsed workflow", () => {
+    const parsed = parseWorkflow({
+      id: "p",
+      name: "P",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Do A", skills: [], eval_policy: "weighted" },
+      },
+      edges: [],
+    });
+    const errors = validateWorkflow(parsed);
+    expect(errors).toContainEqual(expect.objectContaining({ code: "UNSUPPORTED_EVAL_POLICY", nodeId: "a" }));
   });
 
   it("validates triage workflow", () => {

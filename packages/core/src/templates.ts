@@ -15,7 +15,7 @@
 import * as path from "node:path";
 
 import { classifySource, type SourceResolutionContext } from "./sources.js";
-import { resolveSource } from "./source-resolver.js";
+import { resolveSource, SOURCE_OFFLINE_REQUIRES_FETCH } from "./source-resolver.js";
 import { consoleLogger } from "./types.js";
 
 export const DEFAULT_ISSUE_TEMPLATE = `## Summary
@@ -104,8 +104,26 @@ function buildCtx(options: SourceLoadOptions): SourceResolutionContext {
 }
 
 /**
+ * True when a resolution error is the intentional `--offline` skip of a URL
+ * source. Offline mode is the one failure we deliberately swallow into the
+ * fallback: the operator explicitly asked to skip URL Sources. Every other
+ * failure (404/403/SSRF block/read error/unreachable) is a real
+ * misconfiguration and must surface, matching the executor's per-node Source
+ * resolution which hard-throws on all of these.
+ */
+function isOfflineSkip(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.startsWith(SOURCE_OFFLINE_REQUIRES_FETCH);
+}
+
+/**
  * Load a template from a file path or URL.
- * Returns the default if source is empty or loading fails.
+ *
+ * Returns the default only when the source is empty/unset, or when a URL source
+ * is intentionally skipped under `--offline`. A CONFIGURED source that fails to
+ * resolve (404, 403, SSRF block, read error) now THROWS instead of silently
+ * degrading to the built-in default — a typo'd or unauthorized template URL is
+ * a misconfiguration, not a no-op. This matches the executor's Source handling.
  *
  * Accepts the legacy `cwd?: string` signature for backward compat.
  */
@@ -121,9 +139,12 @@ export async function loadTemplate(
     const resolved = await resolveSource(source.trim(), "template", buildCtx(opts));
     return resolved.content;
   } catch (err: unknown) {
+    if (isOfflineSkip(err)) {
+      console.warn(`[templates] Skipping URL template in --offline mode, using default.`);
+      return fallback;
+    }
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[templates] Failed to load template: ${msg}, using default`);
-    return fallback;
+    throw new Error(`Failed to load configured template "${source.trim()}": ${msg}`);
   }
 }
 
@@ -147,6 +168,9 @@ export async function resolveTemplates(
  * Each source is resolved eagerly (including URLs) and wrapped with a header.
  * Returns { resolved, urls } — resolved text for all sources; urls is kept
  * for API compat but will be empty since URLs now resolve eagerly.
+ *
+ * A configured source that fails to resolve THROWS (matching the executor and
+ * `loadTemplate`); only the intentional `--offline` URL skip is swallowed.
  *
  * Accepts the legacy `cwd?: string` signature for backward compat.
  */
@@ -175,8 +199,15 @@ export async function loadAdditionalContext(
           parts.push(`### ${label}\n\n${resolved.content}`);
         }
       } catch (err: unknown) {
+        // Offline skip of a URL source is intentional; everything else (404,
+        // 403, SSRF block, read error) is a misconfiguration and must surface
+        // rather than silently dropping the configured context document.
+        if (isOfflineSkip(err)) {
+          console.warn(`[templates] Skipping URL context source "${trimmed}" in --offline mode.`);
+          continue;
+        }
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[templates] Failed to load context source: ${msg}`);
+        throw new Error(`Failed to load configured context source "${trimmed}": ${msg}`);
       }
     }
   }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useEditorStore } from "../store/editor-store.js";
-import { execute, createSkillMap } from "@sweny-ai/core";
+import { createSkillMap } from "@sweny-ai/core";
 import { MockClaude } from "@sweny-ai/core/testing";
 import type { NodeResult } from "@sweny-ai/core";
 
@@ -12,7 +12,7 @@ export function SimulationPanel() {
   const currentNode = currentNodeId ? workflow.nodes[currentNodeId] : null;
   const completedList = Object.entries(completedNodes);
 
-  function handleAutoRun() {
+  async function handleAutoRun() {
     setSimError(null);
     setIsRunning(true);
 
@@ -28,13 +28,17 @@ export function SimulationPanel() {
     const claude = new MockClaude({ responses, workflow: wf });
     const skills = createSkillMap([]);
 
-    execute(wf, {}, { skills, claude, observer: applyEvent })
-      .catch((err: unknown) => {
-        setSimError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        setIsRunning(false);
-      });
+    try {
+      // `execute` is Node-only (it pulls `node:fs` via source-resolver) and is
+      // not part of the browser entry, so load it lazily — this keeps it out of
+      // the eager SPA bundle and lets the build resolve the export.
+      const { execute } = await import("@sweny-ai/core-exec");
+      await execute(wf, {}, { skills, claude, observer: applyEvent });
+    } catch (err: unknown) {
+      setSimError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsRunning(false);
+    }
   }
 
   const statusColor = {
@@ -42,7 +46,6 @@ export function SimulationPanel() {
     running: "text-blue-400",
     completed: "text-green-400",
     failed: "text-red-400",
-    partial: "text-yellow-400",
   }[executionStatus];
 
   return (

@@ -12,10 +12,16 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc",
-    "test": "echo 'create-sweny is a thin wrapper around @sweny-ai/core new — covered by the core test suite' && exit 0"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --exclude 'dist/**'"
   },
   "dependencies": {
     "@sweny-ai/core": "^0.1.51"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
   },
   "publishConfig": {
     "access": "public"

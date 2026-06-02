@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
@@ -9,7 +9,11 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { spawn } from "node:child_process";
-import { runWorkflow, resolveSwenyBin } from "../handlers/run-workflow.js";
+import { createRequire } from "node:module";
+import * as fs from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+import { runWorkflow, resolveSwenyInvocation } from "../handlers/run-workflow.js";
 
 const mockSpawn = vi.mocked(spawn);
 
@@ -24,17 +28,46 @@ function createMockProcess(): ChildProcess & { _emit: (event: string, ...args: u
   return proc;
 }
 
-const bin = resolveSwenyBin();
+const invocation = resolveSwenyInvocation();
+const { command: cmd, prefixArgs } = invocation;
+
+// The handler spawns `command` with `[...prefixArgs, ...cliArgs]`. Helper to
+// build the expected full argv regardless of which resolution strategy hit.
+const expectArgs = (...cli: string[]): string[] => [...prefixArgs, ...cli];
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("resolveSwenyBin", () => {
-  it("returns a path containing sweny", () => {
-    // In the monorepo this resolves to node_modules/.bin/sweny;
-    // outside, it falls back to bare "sweny". Either way the name is present.
-    expect(bin).toContain("sweny");
+describe("resolveSwenyInvocation", () => {
+  it("resolves a sweny invocation (command + prefix args)", () => {
+    // Primary strategy: { command: process.execPath, prefixArgs: [<core bin>] }.
+    // Fallbacks: monorepo node_modules/.bin/sweny, then bare "sweny". In every
+    // case the resolved argv must point at something named "sweny".
+    const joined = [invocation.command, ...invocation.prefixArgs].join(" ");
+    expect(joined).toContain("sweny");
+  });
+
+  it("when core resolves, runs the resolved @sweny-ai/core bin via process.execPath", () => {
+    // If @sweny-ai/core/package.json is resolvable from the test's module tree,
+    // the primary strategy must be chosen: command is the current Node binary
+    // and the single prefix arg points inside the installed @sweny-ai/core.
+    const require = createRequire(import.meta.url);
+    let corePkgPath: string | null = null;
+    try {
+      corePkgPath = require.resolve("@sweny-ai/core/package.json");
+    } catch {
+      corePkgPath = null;
+    }
+    if (corePkgPath) {
+      expect(invocation.command).toBe(process.execPath);
+      expect(invocation.prefixArgs).toHaveLength(1);
+      const coreRoot = path.dirname(corePkgPath);
+      expect(invocation.prefixArgs[0].startsWith(coreRoot)).toBe(true);
+    } else {
+      // No exported package.json (older core) → falls back to a sweny command.
+      expect([invocation.command, ...invocation.prefixArgs].join(" ")).toContain("sweny");
+    }
   });
 });
 
@@ -46,8 +79,8 @@ describe("runWorkflow", () => {
     const promise = runWorkflow({ workflow: "triage" });
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      bin,
-      ["triage", "--json", "--stream"],
+      cmd,
+      expectArgs("triage", "--json", "--stream"),
       expect.objectContaining({ cwd: expect.any(String), stdio: ["ignore", "pipe", "pipe"] }),
     );
 
@@ -65,8 +98,8 @@ describe("runWorkflow", () => {
     const promise = runWorkflow({ workflow: "implement", input: "ABC-123" });
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      bin,
-      ["implement", "ABC-123", "--json", "--stream"],
+      cmd,
+      expectArgs("implement", "ABC-123", "--json", "--stream"),
       expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
     );
 
@@ -83,7 +116,11 @@ describe("runWorkflow", () => {
 
     const promise = runWorkflow({ workflow: "triage", dryRun: true });
 
-    expect(mockSpawn).toHaveBeenCalledWith(bin, ["triage", "--json", "--stream", "--dry-run"], expect.any(Object));
+    expect(mockSpawn).toHaveBeenCalledWith(
+      cmd,
+      expectArgs("triage", "--json", "--stream", "--dry-run"),
+      expect.any(Object),
+    );
 
     proc._emit("close", 0);
     await promise;
@@ -273,7 +310,11 @@ describe("runWorkflow", () => {
 
     const promise = runWorkflow({ workflow: "implement", input: "  ABC-123  " });
 
-    expect(mockSpawn).toHaveBeenCalledWith(bin, ["implement", "ABC-123", "--json", "--stream"], expect.any(Object));
+    expect(mockSpawn).toHaveBeenCalledWith(
+      cmd,
+      expectArgs("implement", "ABC-123", "--json", "--stream"),
+      expect.any(Object),
+    );
 
     proc.stdout!.emit("data", Buffer.from('{"ok": true}\n'));
     proc._emit("close", 0);
@@ -350,5 +391,106 @@ describe("runWorkflow", () => {
     expect(JSON.parse(result.output)).toEqual({ partial: "data" });
 
     vi.useRealTimers();
+  });
+});
+
+describe("runWorkflow custom workflows (file-run path)", () => {
+  const tempDirs: string[] = [];
+
+  function freshProject(): string {
+    const dir = path.join(tmpdir(), `sweny-mcp-run-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const workflowDir = path.join(dir, ".sweny", "workflows");
+    fs.mkdirSync(workflowDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(workflowDir, "custom.yml"),
+      [
+        "id: my-custom",
+        "name: My Custom Workflow",
+        "description: A test custom workflow",
+        "entry: start",
+        "nodes:",
+        "  start:",
+        "    name: Start",
+        "    instruction: Do the thing",
+        "    skills: []",
+        "edges: []",
+      ].join("\n"),
+    );
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  afterEach(() => {
+    for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+    tempDirs.length = 0;
+  });
+
+  // The custom path resolves the workflow file with several chained `await`s
+  // backed by real libuv fs I/O (readdir → readFile → parse) before spawning,
+  // so wait until spawn is actually called before driving the child's events.
+  //
+  // Poll on a macrotask (setTimeout, which yields through the libuv poll phase
+  // where fs callbacks land) with a wall-clock deadline rather than a fixed
+  // tick count. A fixed `setImmediate` cap can undershoot on a slow/loaded CI
+  // runner when the fs chain has not completed in N ticks, which surfaced as a
+  // flaky "Number of calls: 0" failure on the Node 20 job.
+  async function waitForSpawn(timeoutMs = 5000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (mockSpawn.mock.calls.length === 0) {
+      if (Date.now() > deadline) {
+        throw new Error("timed out waiting for sweny CLI spawn");
+      }
+      await new Promise((r) => setTimeout(r, 1));
+    }
+  }
+
+  it("dispatches a custom workflow id via `workflow run <file>`", async () => {
+    const dir = freshProject();
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+
+    const promise = runWorkflow({ workflow: "my-custom", cwd: dir });
+    await waitForSpawn();
+
+    const expectedFile = path.join(dir, ".sweny", "workflows", "custom.yml");
+    expect(mockSpawn).toHaveBeenCalledWith(
+      cmd,
+      expectArgs("workflow", "run", expectedFile, "--json", "--stream"),
+      expect.objectContaining({ cwd: dir, stdio: ["ignore", "pipe", "pipe"] }),
+    );
+
+    proc.stdout!.emit("data", Buffer.from('{"ok": true}\n'));
+    proc._emit("close", 0);
+    const result = await promise;
+    expect(result.success).toBe(true);
+  });
+
+  it("passes optional input through as --input for a custom workflow", async () => {
+    const dir = freshProject();
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+
+    const promise = runWorkflow({ workflow: "my-custom", cwd: dir, input: '{"foo":"bar"}', dryRun: true });
+    await waitForSpawn();
+
+    const expectedFile = path.join(dir, ".sweny", "workflows", "custom.yml");
+    expect(mockSpawn).toHaveBeenCalledWith(
+      cmd,
+      expectArgs("workflow", "run", expectedFile, "--input", '{"foo":"bar"}', "--json", "--stream", "--dry-run"),
+      expect.any(Object),
+    );
+
+    proc._emit("close", 0);
+    await promise;
+  });
+
+  it("returns an error (no spawn) for an unknown custom workflow id", async () => {
+    const dir = freshProject();
+
+    const result = await runWorkflow({ workflow: "does-not-exist", cwd: dir });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("was not found in .sweny/workflows/");
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 });

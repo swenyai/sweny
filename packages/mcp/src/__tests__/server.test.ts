@@ -46,12 +46,15 @@ describe("MCP server integration", () => {
     const runTool = tools.find((t) => t.name === "sweny_run_workflow")!;
     expect(runTool.description).toContain("Execute a SWEny workflow");
 
-    const props = runTool.inputSchema.properties as Record<string, { enum?: string[] }>;
+    const props = runTool.inputSchema.properties as Record<string, { enum?: string[]; type?: string }>;
     expect(props).toHaveProperty("workflow");
     expect(props).toHaveProperty("input");
     expect(props).toHaveProperty("cwd");
     expect(props).toHaveProperty("dryRun");
-    expect(props.workflow.enum).toEqual(["triage", "implement"]);
+    // workflow is now a free string (built-in id or custom workflow id), not a
+    // closed enum, so custom workflows from sweny_list_workflows are runnable.
+    expect(props.workflow.type).toBe("string");
+    expect(props.workflow.enum).toBeUndefined();
   });
 
   it("sweny_run_workflow returns error for implement without input", async () => {
@@ -88,8 +91,17 @@ describe("MCP server integration", () => {
       expect(wf).toHaveProperty("description");
       expect(wf).toHaveProperty("nodeCount");
       expect(wf).toHaveProperty("source");
+      expect(wf).toHaveProperty("runnable");
+      expect(typeof wf.runnable).toBe("boolean");
       expect(typeof wf.nodeCount).toBe("number");
       expect(wf.nodeCount).toBeGreaterThan(0);
     }
+
+    // triage/implement are runnable via dedicated subcommands; seed-content has
+    // no CLI run path so it is listed but flagged not-runnable.
+    const byId = Object.fromEntries(workflows.map((w: { id: string; runnable: boolean }) => [w.id, w.runnable]));
+    expect(byId.triage).toBe(true);
+    expect(byId.implement).toBe(true);
+    expect(byId["seed-content"]).toBe(false);
   });
 });

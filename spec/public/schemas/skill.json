@@ -122,6 +122,14 @@
     "McpServerConfig": {
       "type": "object",
       "description": "External MCP server definition.",
+      "anyOf": [
+        {
+          "required": ["command"]
+        },
+        {
+          "required": ["url"]
+        }
+      ],
       "additionalProperties": false,
       "properties": {
         "type": {

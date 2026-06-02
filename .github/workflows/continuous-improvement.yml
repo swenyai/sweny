@@ -100,17 +100,20 @@ jobs:
             - Performance: slow build steps, redundant work in the action entrypoint
 
             The codebase is a TypeScript ESM monorepo (Node 22, Vitest 4):
-              packages/providers  — 30+ provider implementations (observability, issue tracking,
-                                    source control, notification, coding-agent, MCP, storage)
-              packages/engine     — workflow runner (WorkflowDefinition DAG, Learn → Act → Report)
-                                    Key exports: runWorkflow, createWorkflow, validateWorkflow
-              packages/action     — GitHub Action entrypoint (dist/index.js via ncc)
-              packages/agent      — Slack bot + CLI AI assistant (Claude Code SDK)
-              packages/cli        — sweny CLI: triage, implement, check, workflow run/validate/list/export
-              packages/studio     — React component library: WorkflowViewer DAG visualization
+              packages/core          - the engine: skill library, DAG workflow executor, and the
+                                       sweny CLI (triage, implement, check, workflow run/validate/list/export).
+                                       Built-in workflows live here; key exports include the DAG executor and schema.
+              packages/studio        - React component library + SPA: WorkflowViewer/editor DAG visualization
+              packages/mcp           - MCP server for Claude Code / Desktop (sweny_list_workflows, sweny_run_workflow)
+              packages/create-sweny  - npx create-sweny, a thin wrapper around `sweny new`
+              packages/plugin        - Claude Code plugin (skills, MCP tools, agent, hooks); marketplace, not published to npm
+              packages/web           - docs site (Astro), deploys to docs.sweny.ai via Vercel
 
-            Build order matters: providers must build before engine, engine before cli/agent/action.
-            Run `npm run build --workspace=packages/providers` before typechecking engine.
+            The GitHub Action is the composite root action.yml (it forwards to `sweny workflow run`).
+            There is no packages/action JS bundle (no ncc, no dist/index.js) and no packages/{providers,engine,agent,cli}.
+
+            Build order: build packages/core before typechecking studio/mcp, which import from @sweny-ai/core.
+            Run `npm run build --workspace=packages/core` first.
 
             Security: the last push reported 8 Dependabot vulnerabilities (3 high, 4 moderate, 1 low).
             If CI logs don't show a clear target, investigate the security advisories via GitHub MCP

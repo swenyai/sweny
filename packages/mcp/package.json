@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/mcp",
-  "version": "0.1.4",
+  "version": "0.1.10",
   "type": "module",
   "description": "MCP server exposing SWEny workflows to Claude Code and Claude Desktop",
   "license": "MIT",
@@ -27,7 +27,7 @@
   "devDependencies": {
     "@types/node": "^25.9.1",
     "typescript": "^5",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.8"
   },
   "homepage": "https://sweny.ai",
   "bugs": {
