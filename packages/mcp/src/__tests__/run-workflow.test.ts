@@ -13,7 +13,7 @@ import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { runWorkflow, resolveSwenyInvocation } from "../handlers/run-workflow.js";
+import { runWorkflow, resolveSwenyInvocation, terminateActiveWorkflows } from "../handlers/run-workflow.js";
 
 const mockSpawn = vi.mocked(spawn);
 
@@ -492,5 +492,30 @@ describe("runWorkflow custom workflows (file-run path)", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("was not found in .sweny/workflows/");
     expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  describe("terminateActiveWorkflows", () => {
+    it("signals an in-flight child and stops tracking it once it closes", async () => {
+      const proc = createMockProcess();
+      mockSpawn.mockReturnValue(proc);
+
+      const promise = runWorkflow({ workflow: "triage" });
+
+      // Child is in flight: terminate should signal it.
+      terminateActiveWorkflows();
+      expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+
+      // After it settles it must be untracked, so a later shutdown is a no-op.
+      proc._emit("close", 0);
+      await promise;
+
+      (proc.kill as ReturnType<typeof vi.fn>).mockClear();
+      terminateActiveWorkflows();
+      expect(proc.kill).not.toHaveBeenCalled();
+    });
+
+    it("is a no-op when no workflow is running", () => {
+      expect(() => terminateActiveWorkflows()).not.toThrow();
+    });
   });
 });

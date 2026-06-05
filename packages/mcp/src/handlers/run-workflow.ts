@@ -1,5 +1,5 @@
 import { accessSync, constants, readFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,30 @@ export interface RunWorkflowResult {
 
 const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_STDERR_BUFFER = 10 * 1024 * 1024; // 10 MB — stderr is error output, not verbose logs
+
+/**
+ * In-flight `sweny` CLI subprocesses, tracked so the MCP server can terminate
+ * them during shutdown. A workflow run can hold a child for up to 10 minutes;
+ * without this registry, a client that exits or is killed mid-run would orphan
+ * that child (re-parented to launchd/init), leaking a process that keeps
+ * running long after the server it served is gone.
+ */
+const activeChildren = new Set<ChildProcess>();
+
+/**
+ * Send a signal to every in-flight workflow child. Called by the server on
+ * shutdown (SIGINT/SIGTERM, or stdin EOF when the client disconnects).
+ * Best-effort: a child that has already exited is a harmless no-op.
+ */
+export function terminateActiveWorkflows(signal: NodeJS.Signals = "SIGTERM"): void {
+  for (const child of activeChildren) {
+    try {
+      child.kill(signal);
+    } catch {
+      // Already gone — nothing to terminate.
+    }
+  }
+}
 
 /**
  * How to invoke the `sweny` CLI: a command plus any leading args.
@@ -131,6 +155,9 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
       // Inherit env — sweny CLI needs API keys, .env vars, PATH, etc.
     });
 
+    // Track for shutdown-time termination; removed when the child settles below.
+    activeChildren.add(child);
+
     let stderr = "";
     let lineBuf = "";
     let lastJsonLine = "";
@@ -175,6 +202,7 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
     }, TIMEOUT_MS);
 
     child.on("error", (err) => {
+      activeChildren.delete(child);
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -182,6 +210,7 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
     });
 
     child.on("close", (code) => {
+      activeChildren.delete(child);
       if (settled) return;
       settled = true;
       clearTimeout(timer);
