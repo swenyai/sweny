@@ -453,6 +453,41 @@
             },
             "description": "Built-in tool names the agent cannot use at this node (e.g. ['Bash']). Forwarded to the Claude Agent SDK's disallowedTools, which removes the tools from the model context entirely."
           },
+          "tools": {
+            "type": "object",
+            "description": "Per-node filter over skill-provided tools. 'allow' keeps only the listed skill tools; 'deny' removes the listed skill tools (applied after 'allow'). Filtered tools are never registered for the node's run. Absent field = all skill tools exposed. Complements disallowed_tools, which covers built-in agent tools only.",
+            "additionalProperties": false,
+            "anyOf": [
+              {
+                "required": ["allow"]
+              },
+              {
+                "required": ["deny"]
+              }
+            ],
+            "properties": {
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1
+              },
+              "deny": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1
+              }
+            }
+          },
+          "fail_soft": {
+            "type": "boolean",
+            "description": "When true, an agent-level failure at this node (max turns, early termination, SDK error) is downgraded to success with fail_soft: true and the error preserved in data; routing proceeds with partial output. Eval failures are not softened. Default false."
+          },
           "rules": {
             "$ref": "#/$defs/NodeSources",
             "description": "Per-node rules. Additive by default; set { only: true } to block cascade."

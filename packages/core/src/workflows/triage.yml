@@ -18,13 +18,53 @@ nodes:
       3. **Issue tracker**: Search for similar past issues or known problems.
 
 
-      Be thorough — the investigation step depends on complete context. Use every tool available to you.
+      Be thorough, but stay in scope: read, search, and summarize. The investigation step depends on
+      complete context, not on fixes.
+
+
+      **Scope boundary (this node is READ-ONLY):**
+
+      - DO NOT create issues, comments, branches, commits, or pull requests, and DO NOT implement
+      fixes. Downstream nodes (`create_issue`, `implement`, `create_pr`) handle ALL writes.
+
+      - Your ONLY job is to collect context and report it, then stop. Doing downstream work here
+      burns your turn budget and duplicates what later nodes will do.
     skills:
       - github
       - sentry
       - datadog
       - betterstack
       - linear
+    # Structural enforcement of the read-only scope above: write tools from
+    # the github/linear skills are never registered for this node, so the
+    # model cannot call them no matter what the prompt fails to prevent.
+    # Driving incident: the 2026-06-08 letsoffload/permit-service scheduled
+    # run, where gather created Linear issues OFF-2332/OFF-2333 and PRs
+    # #101/#102 from inside this node and then died at the 50-turn cap.
+    tools:
+      deny:
+        - linear_create_issue
+        - linear_add_comment
+        - linear_update_issue
+        - github_create_issue
+        - github_add_comment
+        - github_create_pr
+    # Same incident: gather authored code changes mid-gather. Write/Edit are
+    # removed from the model context entirely. Bash stays available because
+    # read-side investigation legitimately uses it (git log, grep); blocking
+    # specific Bash invocations (git commit, gh pr create) needs the SDK's
+    # canUseTool callback and is tracked as follow-up work (see the implement
+    # node's note below).
+    disallowed_tools:
+      - Write
+      - Edit
+      - NotebookEdit
+    # When gather still dies early (turn cap, SDK error), proceed with the
+    # partial context instead of failing the whole workflow: investigate has
+    # its own tools and can re-derive what gather missed. The 2026-06-08 run
+    # proved this empirically: after gather "failed", investigate completed
+    # fine and produced a correct no-novel-issues verdict.
+    fail_soft: true
   investigate:
     name: Root Cause Analysis
     instruction: >-
@@ -100,6 +140,16 @@ nodes:
     skills:
       - github
       - linear
+    # Structural enforcement of the scope boundaries above: the write tools
+    # this node is told not to call are not registered for it at all.
+    tools:
+      deny:
+        - linear_create_issue
+        - linear_add_comment
+        - linear_update_issue
+        - github_create_issue
+        - github_add_comment
+        - github_create_pr
     eval:
       # The novelty check REQUIRES searching the issue tracker. If the node finishes
       # with 0 search tool calls, it means the agent skipped the novelty check entirely
@@ -239,6 +289,10 @@ nodes:
     skills:
       - linear
       - github
+    # Structural enforcement: this node manages issues, never PRs.
+    tools:
+      deny:
+        - github_create_pr
     eval:
       # Require a real issue-tracker tool call. linear_create_issue / github_create_issue
       # for novel findings; linear_search_issues / github_search_issues for duplicate-check
@@ -326,6 +380,13 @@ nodes:
     skills:
       - linear
       - github
+    # Structural enforcement: this node comments on and reopens existing
+    # issues only. It never creates issues or PRs.
+    tools:
+      deny:
+        - linear_create_issue
+        - github_create_issue
+        - github_create_pr
   implement:
     name: Implement Fix
     instruction: |-
@@ -490,6 +551,12 @@ nodes:
     disallowed_tools:
       - WebFetch
       - WebSearch
+    # Structural enforcement of the "do NOT open the PR here" boundary: the
+    # PR tool is not registered for this node. The dedicated create_pr node
+    # is the only place github_create_pr exists.
+    tools:
+      deny:
+        - github_create_pr
     output:
       type: object
       properties:
@@ -636,7 +703,9 @@ nodes:
 
       4. In the PR body, include: summary of the bug, what the fix does, and a link to the issue
       (context.create_issue.issueUrl). If the investigation found a Sentry issue, include "Fixes {sentryShortId}"
-      in the PR body so Sentry auto-resolves on merge.
+      in the PR body so Sentry auto-resolves on merge. If the issue tracker is Linear, also include the line
+      "Fixes {context.create_issue.issueIdentifier}" (e.g. "Fixes OFF-1234") so Linear links the PR and moves
+      the issue to Done on merge.
 
       5. Pass `labels: ["sweny", "agent", "triage"]` to `github_create_pr`.
 

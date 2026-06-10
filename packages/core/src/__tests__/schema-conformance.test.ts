@@ -461,6 +461,58 @@ const fixtures: Fixture[] = [
     },
     expected: true,
   },
+  {
+    name: "node with a skill-tool deny filter",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: { ...baseNode(), tools: { deny: ["linear_create_issue", "github_create_pr"] } },
+      },
+      edges: [],
+    },
+    expected: true,
+  },
+  {
+    name: "node with a skill-tool allow filter",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: { ...baseNode(), tools: { allow: ["linear_search_issues"] } },
+      },
+      edges: [],
+    },
+    expected: true,
+  },
+  {
+    name: "node with both allow and deny in the skill-tool filter",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: { ...baseNode(), tools: { allow: ["a", "b"], deny: ["b"] } },
+      },
+      edges: [],
+    },
+    expected: true,
+  },
+  {
+    name: "node with fail_soft true",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: { ...baseNode(), fail_soft: true },
+      },
+      edges: [],
+    },
+    expected: true,
+  },
 
   // ── Negative — structural (shared by Zod schema parse + structural check) ──
   // These are rejected by Zod parse, so they should also be rejected by the
@@ -541,6 +593,61 @@ const fixtures: Fixture[] = [
       name: "D",
       entry: "a",
       nodes: { a: { ...baseNode(), disallowed_tools: [""] } },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "empty skill-tool filter object (must declare allow or deny)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), tools: {} } },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "skill-tool filter with an empty deny array",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), tools: { deny: [] } } },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "skill-tool filter with an empty-string allow entry",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), tools: { allow: [""] } } },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "skill-tool filter with an unknown key",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), tools: { block: ["x"] } } },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "fail_soft with a non-boolean value",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), fail_soft: "yes" } },
       edges: [],
     },
     expected: false,

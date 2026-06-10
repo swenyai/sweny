@@ -386,9 +386,17 @@ export class ClaudeClient implements Claude {
             // incomplete output.
             const terminalReason = (resultMsg as any).terminal_reason as string | undefined;
             if (terminalReason && terminalReason !== "completed") {
+              // Preserve whatever partial text the agent produced before the
+              // early termination. Callers that fail hard ignore it; a node
+              // with `fail_soft: true` passes it downstream as the partial
+              // gather/work product instead of dropping it on the floor.
+              const partial = typeof resultMsg.result === "string" ? resultMsg.result.trim() : "";
               return {
                 status: "failed",
-                data: { error: `Claude query terminated early: ${terminalReason}` },
+                data: {
+                  error: `Claude query terminated early: ${terminalReason}`,
+                  ...(partial !== "" ? { summary: partial } : {}),
+                },
                 toolCalls,
               };
             }

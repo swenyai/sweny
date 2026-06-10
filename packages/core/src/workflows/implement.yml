@@ -67,10 +67,13 @@ nodes:
     instruction: |-
       Implement the planned fix:
 
-      1. Create a feature branch.
+      1. Create a feature branch. The branch name MUST start with the issue
+         identifier from `context.input.issueIdentifier`, lowercased, followed
+         by a short kebab-case description: e.g. `off-1234-fix-null-check`.
       2. Make the necessary code changes.
       3. Ensure changes are minimal and focused — fix the bug, nothing more.
-      4. Stage and commit with a clear commit message referencing the issue.
+      4. Stage and commit. Start the commit message with the issue identifier
+         in brackets, e.g. `[OFF-1234] fix: guard null projectId`.
 
       Stop after the commit. Do NOT push or open the PR — the dedicated `create_pr`
       node handles that via `github_create_pr` and its eval gate is what unblocks
@@ -93,9 +96,13 @@ nodes:
 
       1. Push the branch to the remote.
 
-      2. Create a PR with a clear title and description.
+      2. Create the PR using `github_create_pr`. The PR title MUST start with the issue identifier in
+      brackets: `[{context.input.issueIdentifier}] type: short description` (e.g. `[OFF-1234] fix: guard
+      null projectId`).
 
-      3. Reference the original issue in the PR body.
+      3. Reference the original issue in the PR body. If the issue tracker is Linear, include the line
+      "Fixes {context.input.issueIdentifier}" (e.g. "Fixes OFF-1234") so Linear links the PR and moves
+      the issue to Done on merge.
 
       4. Pass `labels: ["sweny", "agent", "task"]` to `github_create_pr` (or `["sweny", "agent", "feature"]` if the issue is a feature request).
 

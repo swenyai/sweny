@@ -17,6 +17,7 @@ import type {
   Workflow,
   Node,
   NodeSources,
+  NodeToolFilter,
   Skill,
   SkillDefinition,
   Tool,
@@ -236,8 +237,11 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     safeObserve(observer, { type: "node:enter", node: currentId, instruction: resolvedInstruction }, logger);
     logger.info(`→ ${node.name}`, { node: currentId });
 
-    // Gather tools from the node's skills
-    const tools = resolveTools(node.skills, skills);
+    // Gather tools from the node's skills, then apply the node's optional
+    // skill-tool filter (`tools.allow` / `tools.deny`). Filtered tools are
+    // never registered for the run, so the model cannot see or call them.
+    const resolvedSkillTools = resolveTools(node.skills, skills);
+    const tools = filterNodeTools(resolvedSkillTools, node.tools, currentId, logger);
     const skillInstructions = resolveSkillInstructions(node.skills, skills);
 
     // Runtime guard: if this node declares skills but none resolved, the node
@@ -245,7 +249,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // The startup validate() warns about this possibility, but only throw when
     // the node is actually reached — unreachable nodes with missing skills are fine.
     // Instruction-only skills (no tools) are valid — they inject context into the prompt.
-    if (node.skills.length > 0 && tools.length === 0 && skillInstructions.length === 0) {
+    if (node.skills.length > 0 && resolvedSkillTools.length === 0 && skillInstructions.length === 0) {
       throw new Error(
         `Node "${currentId}" requires skills [${node.skills.join(", ")}] but none are configured. ` +
           `Set the required environment variables and try again.`,
@@ -343,6 +347,11 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // Run Claude on this node, with optional eval-failure retry loop.
     let attempt = 0;
     let result: NodeResult;
+    // Distinguishes an agent-level failure (claude.run returned non-success:
+    // max turns, early termination, SDK error) from an eval failure. Only
+    // agent-level failures are eligible for fail_soft below; evals are
+    // correctness gates and are never softened.
+    let agentRunFailed = false;
     let currentInstruction = instruction;
     const retry = node.retry;
     // Per-node execution model: node.model ?? workflow.model. When undefined,
@@ -366,7 +375,10 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       });
 
       // Retry only triggers on eval failure. Bail on tool/API errors.
-      if (result.status !== "success") break;
+      if (result.status !== "success") {
+        agentRunFailed = true;
+        break;
+      }
 
       // Required-field gate: if the source node's declared output schema
       // marks fields as `required`, those fields are the routing contract.
@@ -443,6 +455,27 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         logger,
       );
       attempt++;
+    }
+
+    // Fail-soft: when the node declares `fail_soft: true` and the failure was
+    // agent-level (max turns, early termination, SDK error), downgrade to
+    // success so the workflow proceeds with whatever partial output exists
+    // instead of failing outright. The original error stays in `data.error`
+    // and `data.fail_soft` marks the downgrade for downstream nodes and
+    // observers. Eval failures never take this path (agentRunFailed guards it).
+    if (agentRunFailed && result.status === "failed" && node.fail_soft === true) {
+      const failError = (result.data as Record<string, unknown> | undefined)?.error;
+      logger.warn(
+        `  fail_soft: node failed (${String(failError ?? "unknown error")}); continuing with partial output`,
+        {
+          node: currentId,
+        },
+      );
+      result = {
+        ...result,
+        status: "success",
+        data: { ...((result.data as Record<string, unknown> | undefined) ?? {}), fail_soft: true },
+      };
     }
 
     results.set(currentId, result);
@@ -812,6 +845,36 @@ function resolveTools(skillIds: string[], skills: Map<string, Skill>): Tool[] {
     .map((id) => skills.get(id))
     .filter((s): s is Skill => s != null)
     .flatMap((s) => s.tools);
+}
+
+/**
+ * Apply a node's optional skill-tool filter (`tools.allow` / `tools.deny`).
+ *
+ * - No filter declared: all resolved tools pass through (back-compat).
+ * - `allow` present: only tools whose name is in `allow` survive.
+ * - `deny` present: tools whose name is in `deny` are removed. Applied
+ *   after `allow` when both are declared, so deny always wins.
+ *
+ * Filter entries that match no resolved tool get a warn (typo detection;
+ * also fires legitimately when a skill is unconfigured and its tools are
+ * absent, which is informational rather than fatal).
+ */
+function filterNodeTools(tools: Tool[], filter: NodeToolFilter | undefined, nodeId: string, logger: Logger): Tool[] {
+  if (!filter) return tools;
+
+  const resolvedNames = new Set(tools.map((t) => t.name));
+  for (const name of [...(filter.allow ?? []), ...(filter.deny ?? [])]) {
+    if (!resolvedNames.has(name)) {
+      logger.warn(`  tools filter: '${name}' does not match any tool resolved for node '${nodeId}'`, {
+        node: nodeId,
+        tool: name,
+      });
+    }
+  }
+
+  const allow = filter.allow ? new Set(filter.allow) : null;
+  const deny = new Set(filter.deny ?? []);
+  return tools.filter((t) => (allow ? allow.has(t.name) : true) && !deny.has(t.name));
 }
 
 /** Collect instruction strings from skills that have them, in array order. */

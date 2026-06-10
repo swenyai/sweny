@@ -239,6 +239,22 @@ export const nodeRequiresZ = z
     message: "requires must declare at least one check (output_required or output_matches)",
   });
 
+/**
+ * Per-node skill-tool filter. `allow` keeps only the listed skill tools;
+ * `deny` removes the listed skill tools (applied after `allow`). At least
+ * one of the two must be declared. Complements `disallowed_tools`, which
+ * covers built-in agent tools only.
+ */
+export const nodeToolsZ = z
+  .object({
+    allow: z.array(z.string().min(1)).min(1).optional(),
+    deny: z.array(z.string().min(1)).min(1).optional(),
+  })
+  .strict()
+  .refine((t) => t.allow !== undefined || t.deny !== undefined, {
+    message: "tools must declare at least one of allow or deny",
+  });
+
 const retryInstructionAutoZ = z.object({ auto: z.literal(true) }).strict();
 const retryInstructionReflectZ = z.object({ reflect: z.string().min(1) }).strict();
 
@@ -257,6 +273,8 @@ export const nodeZ = z
     output: jsonSchemaZ.optional(),
     max_turns: z.number().int().min(1).optional(),
     disallowed_tools: z.array(z.string().min(1)).optional(),
+    tools: nodeToolsZ.optional(),
+    fail_soft: z.boolean().optional(),
     rules: nodeSourcesZ.optional(),
     context: nodeSourcesZ.optional(),
     eval: z.array(evaluatorZ).min(1).optional(),
@@ -869,6 +887,30 @@ export const workflowJsonSchema = {
             items: { type: "string", minLength: 1 },
             description:
               "Built-in tool names the agent cannot use at this node (e.g. ['Bash']). Forwarded to the Claude Agent SDK's disallowedTools, which removes the tools from the model context entirely.",
+          },
+          tools: {
+            type: "object",
+            description:
+              "Per-node filter over skill-provided tools. 'allow' keeps only the listed skill tools; 'deny' removes the listed skill tools (applied after 'allow'). Filtered tools are never registered for the node's run. Absent field = all skill tools exposed. Complements disallowed_tools, which covers built-in agent tools only.",
+            additionalProperties: false,
+            anyOf: [{ required: ["allow"] }, { required: ["deny"] }],
+            properties: {
+              allow: {
+                type: "array",
+                items: { type: "string", minLength: 1 },
+                minItems: 1,
+              },
+              deny: {
+                type: "array",
+                items: { type: "string", minLength: 1 },
+                minItems: 1,
+              },
+            },
+          },
+          fail_soft: {
+            type: "boolean",
+            description:
+              "When true, an agent-level failure at this node (max turns, early termination, SDK error) is downgraded to success with fail_soft: true and the error preserved in data; routing proceeds with partial output. Eval failures are not softened. Default false.",
           },
           rules: {
             $ref: "#/$defs/NodeSources",
