@@ -560,3 +560,131 @@ describe("runtime Zod validation in loader", () => {
     }
   });
 });
+
+// ─── Triage gather node: read-only scope enforcement ────────────
+// Driving incident: the 2026-06-08 letsoffload/permit-service scheduled run,
+// where gather created Linear issues OFF-2332/OFF-2333 and PRs #101/#102
+// from inside the gather node and then died at the 50-turn cap.
+
+describe("triage gather node: read-only scope enforcement", () => {
+  const gather = triageWorkflow.nodes.gather;
+
+  it("denies every issue/PR/comment write tool from its skills", () => {
+    expect(gather.tools).toBeDefined();
+    expect(gather.tools!.deny).toEqual(
+      expect.arrayContaining([
+        "linear_create_issue",
+        "linear_add_comment",
+        "linear_update_issue",
+        "github_create_issue",
+        "github_add_comment",
+        "github_create_pr",
+      ]),
+    );
+  });
+
+  it("does not declare an allow list (deny-only keeps new read tools available)", () => {
+    expect(gather.tools!.allow).toBeUndefined();
+  });
+
+  it("disallows the built-in file-editing tools (no code authoring mid-gather)", () => {
+    expect(gather.disallowed_tools).toEqual(expect.arrayContaining(["Write", "Edit", "NotebookEdit"]));
+  });
+
+  it("is fail-soft: a turn-cap death proceeds with partial context", () => {
+    expect(gather.fail_soft).toBe(true);
+  });
+
+  it("instruction declares the read-only scope boundary", () => {
+    const instr = gather.instruction as string;
+    expect(instr).toMatch(/READ-ONLY/);
+    expect(instr).toMatch(/DO NOT create issues, comments, branches, commits, or pull requests/);
+  });
+
+  it("instruction no longer invites using every tool available", () => {
+    const instr = gather.instruction as string;
+    expect(instr).not.toMatch(/Use every tool available/i);
+  });
+
+  it("downstream write nodes keep their write tools", () => {
+    // create_issue must still be able to create issues and comment.
+    const createIssueDeny = triageWorkflow.nodes.create_issue.tools?.deny ?? [];
+    expect(createIssueDeny).not.toContain("linear_create_issue");
+    expect(createIssueDeny).not.toContain("linear_add_comment");
+    // but never PRs
+    expect(createIssueDeny).toContain("github_create_pr");
+
+    // create_pr must still be able to open PRs.
+    const createPrDeny = triageWorkflow.nodes.create_pr.tools?.deny ?? [];
+    expect(createPrDeny).not.toContain("github_create_pr");
+
+    // skip must still be able to +1 and reopen.
+    const skipDeny = triageWorkflow.nodes.skip.tools?.deny ?? [];
+    expect(skipDeny).not.toContain("linear_add_comment");
+    expect(skipDeny).not.toContain("linear_update_issue");
+    expect(skipDeny).toContain("github_create_pr");
+  });
+
+  it("investigate denies the same write tools its instruction forbids", () => {
+    const deny = triageWorkflow.nodes.investigate.tools?.deny ?? [];
+    for (const tool of [
+      "linear_create_issue",
+      "linear_add_comment",
+      "github_create_issue",
+      "github_add_comment",
+      "github_create_pr",
+    ]) {
+      expect(deny).toContain(tool);
+    }
+  });
+
+  it("implement denies the PR tool (create_pr is the only PR-opening node)", () => {
+    const deny = triageWorkflow.nodes.implement.tools?.deny ?? [];
+    expect(deny).toContain("github_create_pr");
+  });
+});
+
+// ─── Linear magic words: triage create_pr ────────────────────────
+
+describe("triage create_pr node: Linear magic words", () => {
+  const instr = triageWorkflow.nodes.create_pr.instruction as string;
+
+  it("keeps the Sentry Fixes line", () => {
+    expect(instr).toMatch(/Fixes \{sentryShortId\}/);
+  });
+
+  it("adds the Linear Fixes line keyed to the created issue identifier", () => {
+    expect(instr).toMatch(/Fixes \{context\.create_issue\.issueIdentifier\}/);
+    expect(instr).toMatch(/Fixes OF{2}-1234/);
+    expect(instr).toMatch(/Linear/);
+  });
+});
+
+// ─── Linear magic words: implement workflow full treatment ───────
+
+describe("implement workflow: identifier branch/title/Fixes treatment", () => {
+  it("implement node mandates identifier-prefixed lowercase branch naming", () => {
+    const instr = implementWorkflow.nodes.implement.instruction as string;
+    expect(instr).toMatch(/context\.input\.issueIdentifier/);
+    expect(instr).toMatch(/lowercased/);
+    expect(instr).toMatch(/off-1234-fix-null-check/);
+  });
+
+  it("implement node mandates identifier-prefixed commit messages", () => {
+    const instr = implementWorkflow.nodes.implement.instruction as string;
+    expect(instr).toMatch(/\[OFF-1234\] fix:/);
+  });
+
+  it("create_pr node mandates the identifier PR title format", () => {
+    const instr = implementWorkflow.nodes.create_pr.instruction as string;
+    expect(instr).toMatch(/\[\{context\.input\.issueIdentifier\}\]/);
+    expect(instr).toMatch(/github_create_pr/);
+  });
+
+  it("create_pr node adds the Linear Fixes line", () => {
+    const instr = implementWorkflow.nodes.create_pr.instruction as string;
+    expect(instr).toMatch(/Fixes \{context\.input\.issueIdentifier\}/);
+    expect(instr).toMatch(/Fixes OF{2}-1234/);
+    expect(instr).toMatch(/Linear/);
+  });
+});

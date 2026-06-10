@@ -327,6 +327,44 @@ export interface Node {
    * `git push`. Names follow the SDK's tool naming (e.g. `Bash`, `Write`).
    */
   disallowed_tools?: string[];
+  /**
+   * Per-node filter over skill-provided tools. Complements
+   * `disallowed_tools` (which covers built-in agent tools only): this field
+   * restricts which of the node's skill tools are registered for the run.
+   * Filtered tools are never exposed to the model at all. Structural
+   * enforcement, not prompt-begging.
+   *
+   * - `allow`: when present, ONLY these skill tool names are exposed.
+   * - `deny`: these skill tool names are removed (applied after `allow`).
+   *
+   * Absent field = all skill tools exposed (previous behavior, back-compat).
+   * Driving incident: the triage `gather` node, scoped to read-only context
+   * gathering, created Linear issues and GitHub PRs mid-gather because every
+   * write tool from its skills was in context (letsoffload/permit-service
+   * scheduled run on 2026-06-08, PRs #101/#102).
+   */
+  tools?: NodeToolFilter;
+  /**
+   * When true, an agent-level failure at this node (max turns reached,
+   * early termination, SDK error) does not fail the workflow: the node's
+   * result is downgraded to `success` with `fail_soft: true` set and the
+   * original `error` preserved in `data`, and routing proceeds so
+   * downstream nodes can work with whatever partial output exists.
+   * Eval failures are NOT softened; evals are correctness gates.
+   * Default false (previous behavior, back-compat).
+   */
+  fail_soft?: boolean;
+}
+
+/**
+ * Per-node skill-tool filter. See {@link Node.tools}.
+ * At least one of `allow` / `deny` must be declared (schema-enforced).
+ */
+export interface NodeToolFilter {
+  /** When present, only these skill tool names are exposed at the node. */
+  allow?: string[];
+  /** Skill tool names removed from the node (applied after `allow`). */
+  deny?: string[];
 }
 
 /** An edge connecting two nodes */

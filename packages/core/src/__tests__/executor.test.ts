@@ -3665,3 +3665,261 @@ describe("abort / timeout (CE-01)", () => {
     expect(runCalls).toBe(0);
   });
 });
+
+// ─── Per-node skill-tool filter (Node.tools allow/deny) ──────────
+
+describe("per-node skill-tool filter (tools allow/deny)", () => {
+  function wfWithFilter(tools?: { allow?: string[]; deny?: string[] }): Workflow {
+    return {
+      id: "wf-tool-filter",
+      name: "Tool filter",
+      description: "",
+      entry: "gather",
+      nodes: {
+        gather: {
+          name: "Gather",
+          instruction: "Collect context",
+          skills: ["filesystem"],
+          ...(tools ? { tools } : {}),
+        },
+      },
+      edges: [],
+    };
+  }
+
+  function capturingClaude(captured: string[][]): any {
+    return {
+      async run(opts: any) {
+        captured.push(opts.tools.map((t: any) => t.name));
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0]?.id;
+      },
+    };
+  }
+
+  it("exposes all skill tools when the node declares no filter (back-compat)", async () => {
+    const dir = freshDir("tool-filter-absent");
+    const captured: string[][] = [];
+    await execute(
+      wfWithFilter(),
+      {},
+      { skills: createSkillMap([createFileSkill(dir)]), claude: capturingClaude(captured), config: {} },
+    );
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toEqual(
+      expect.arrayContaining(["fs_read_json", "fs_read_text", "fs_write_json", "fs_write_markdown", "fs_list_dir"]),
+    );
+    expect(captured[0]).toHaveLength(5);
+  });
+
+  it("deny removes the listed tools and keeps the rest", async () => {
+    const dir = freshDir("tool-filter-deny");
+    const captured: string[][] = [];
+    await execute(
+      wfWithFilter({ deny: ["fs_write_json", "fs_write_markdown"] }),
+      {},
+      { skills: createSkillMap([createFileSkill(dir)]), claude: capturingClaude(captured), config: {} },
+    );
+    expect(captured[0]).toEqual(expect.arrayContaining(["fs_read_json", "fs_read_text", "fs_list_dir"]));
+    expect(captured[0]).not.toContain("fs_write_json");
+    expect(captured[0]).not.toContain("fs_write_markdown");
+    expect(captured[0]).toHaveLength(3);
+  });
+
+  it("allow keeps only the listed tools", async () => {
+    const dir = freshDir("tool-filter-allow");
+    const captured: string[][] = [];
+    await execute(
+      wfWithFilter({ allow: ["fs_read_json", "fs_list_dir"] }),
+      {},
+      { skills: createSkillMap([createFileSkill(dir)]), claude: capturingClaude(captured), config: {} },
+    );
+    expect(captured[0]!.sort()).toEqual(["fs_list_dir", "fs_read_json"]);
+  });
+
+  it("deny wins over allow when both list the same tool", async () => {
+    const dir = freshDir("tool-filter-both");
+    const captured: string[][] = [];
+    await execute(
+      wfWithFilter({ allow: ["fs_read_json", "fs_write_json"], deny: ["fs_write_json"] }),
+      {},
+      { skills: createSkillMap([createFileSkill(dir)]), claude: capturingClaude(captured), config: {} },
+    );
+    expect(captured[0]).toEqual(["fs_read_json"]);
+  });
+
+  it("warns on a filter entry that matches no resolved tool", async () => {
+    const dir = freshDir("tool-filter-typo");
+    const captured: string[][] = [];
+    const warnings: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (msg: string) => warnings.push(msg),
+      error: () => {},
+    };
+    await execute(
+      wfWithFilter({ deny: ["fs_wirte_json"] }),
+      {},
+      { skills: createSkillMap([createFileSkill(dir)]), claude: capturingClaude(captured), config: {}, logger },
+    );
+    expect(warnings.some((w) => w.includes("fs_wirte_json"))).toBe(true);
+    // The typo'd entry removes nothing.
+    expect(captured[0]).toHaveLength(5);
+  });
+
+  it("does not trip the missing-skills guard when a filter removes every tool", async () => {
+    const dir = freshDir("tool-filter-all-denied");
+    const captured: string[][] = [];
+    await execute(
+      wfWithFilter({ deny: ["fs_read_json", "fs_read_text", "fs_write_json", "fs_write_markdown", "fs_list_dir"] }),
+      {},
+      { skills: createSkillMap([createFileSkill(dir)]), claude: capturingClaude(captured), config: {} },
+    );
+    // The node still runs (the guard checks pre-filter tools); it just has
+    // no skill tools in context.
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toEqual([]);
+  });
+});
+
+// ─── Fail-soft (Node.fail_soft) ──────────────────────────────────
+
+describe("fail_soft", () => {
+  function wfFailSoft(failSoft: boolean): Workflow {
+    return {
+      id: "wf-fail-soft",
+      name: "Fail soft",
+      description: "",
+      entry: "gather",
+      nodes: {
+        gather: {
+          name: "Gather",
+          instruction: "Collect context",
+          skills: [],
+          ...(failSoft ? { fail_soft: true } : {}),
+        },
+        investigate: { name: "Investigate", instruction: "Analyze", skills: [] },
+      },
+      edges: [{ from: "gather", to: "investigate" }],
+    };
+  }
+
+  it("downgrades an agent-level failure to success and routes onward with partial output", async () => {
+    const runs: string[] = [];
+    const claude: any = {
+      async run(opts: any) {
+        runs.push(opts.instruction);
+        if (runs.length === 1) {
+          return {
+            status: "failed",
+            data: { error: "Reached maximum number of turns (50)", summary: "partial gather notes" },
+            toolCalls: [{ tool: "x", input: {} }],
+          };
+        }
+        return { status: "success", data: { verdict: "ok" }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0]?.id;
+      },
+    };
+
+    const { results } = await execute(wfFailSoft(true), {}, { skills: createSkillMap([]), claude, config: {} });
+
+    const gather = results.get("gather")!;
+    expect(gather.status).toBe("success");
+    expect(gather.data).toMatchObject({
+      fail_soft: true,
+      error: "Reached maximum number of turns (50)",
+      summary: "partial gather notes",
+    });
+    // The workflow proceeded to the downstream node.
+    expect(results.get("investigate")?.status).toBe("success");
+    expect(runs).toHaveLength(2);
+  });
+
+  it("leaves the failure intact when fail_soft is not declared", async () => {
+    const claude: any = {
+      async run() {
+        return { status: "failed", data: { error: "Reached maximum number of turns (50)" }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0]?.id;
+      },
+    };
+
+    const { results } = await execute(wfFailSoft(false), {}, { skills: createSkillMap([]), claude, config: {} });
+
+    expect(results.get("gather")?.status).toBe("failed");
+    expect(results.get("gather")?.data).not.toHaveProperty("fail_soft");
+  });
+
+  it("does NOT soften an eval failure (evals are correctness gates)", async () => {
+    const wf: Workflow = {
+      id: "wf-fail-soft-eval",
+      name: "Fail soft eval",
+      description: "",
+      entry: "gather",
+      nodes: {
+        gather: {
+          name: "Gather",
+          instruction: "Collect context",
+          skills: [],
+          fail_soft: true,
+          eval: [{ name: "searched", kind: "function", rule: { any_tool_called: ["search_tool"] } }],
+        },
+      },
+      edges: [],
+    };
+
+    const claude: any = {
+      async run() {
+        // The agent run itself succeeds but never calls the required tool.
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0]?.id;
+      },
+    };
+
+    const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    expect(results.get("gather")?.status).toBe("failed");
+    expect(results.get("gather")?.data).not.toHaveProperty("fail_soft");
+  });
+
+  it("does NOT soften a required-output-field contract violation", async () => {
+    const wf: Workflow = {
+      id: "wf-fail-soft-required",
+      name: "Fail soft required",
+      description: "",
+      entry: "gather",
+      nodes: {
+        gather: {
+          name: "Gather",
+          instruction: "Collect context",
+          skills: [],
+          fail_soft: true,
+          output: { type: "object", properties: { verdict: { type: "string" } }, required: ["verdict"] },
+        },
+      },
+      edges: [],
+    };
+
+    const claude: any = {
+      async run() {
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0]?.id;
+      },
+    };
+
+    const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    expect(results.get("gather")?.status).toBe("failed");
+    expect(results.get("gather")?.data).not.toHaveProperty("fail_soft");
+  });
+});

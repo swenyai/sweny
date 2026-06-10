@@ -107,6 +107,68 @@ describe("Zod schemas", () => {
       expect(result.disallowed_tools).toBeUndefined();
     });
 
+    it("accepts tools with a deny list", () => {
+      const result = nodeZ.parse({
+        name: "S",
+        instruction: "I",
+        tools: { deny: ["linear_create_issue", "github_create_pr"] },
+      });
+      expect(result.tools).toEqual({ deny: ["linear_create_issue", "github_create_pr"] });
+    });
+
+    it("accepts tools with an allow list", () => {
+      const result = nodeZ.parse({
+        name: "S",
+        instruction: "I",
+        tools: { allow: ["linear_search_issues"] },
+      });
+      expect(result.tools).toEqual({ allow: ["linear_search_issues"] });
+    });
+
+    it("accepts tools with both allow and deny", () => {
+      const result = nodeZ.parse({
+        name: "S",
+        instruction: "I",
+        tools: { allow: ["a", "b"], deny: ["b"] },
+      });
+      expect(result.tools).toEqual({ allow: ["a", "b"], deny: ["b"] });
+    });
+
+    it("rejects an empty tools object (must declare allow or deny)", () => {
+      expect(() => nodeZ.parse({ name: "S", instruction: "I", tools: {} })).toThrow();
+    });
+
+    it("rejects tools with an empty allow array", () => {
+      expect(() => nodeZ.parse({ name: "S", instruction: "I", tools: { allow: [] } })).toThrow();
+    });
+
+    it("rejects tools with an empty-string deny entry", () => {
+      expect(() => nodeZ.parse({ name: "S", instruction: "I", tools: { deny: [""] } })).toThrow();
+    });
+
+    it("rejects tools with unknown keys", () => {
+      expect(() => nodeZ.parse({ name: "S", instruction: "I", tools: { block: ["x"] } })).toThrow();
+    });
+
+    it("defaults tools to undefined when omitted", () => {
+      const result = nodeZ.parse({ name: "S", instruction: "I" });
+      expect(result.tools).toBeUndefined();
+    });
+
+    it("accepts fail_soft as a boolean", () => {
+      const result = nodeZ.parse({ name: "S", instruction: "I", fail_soft: true });
+      expect(result.fail_soft).toBe(true);
+    });
+
+    it("rejects a non-boolean fail_soft", () => {
+      expect(() => nodeZ.parse({ name: "S", instruction: "I", fail_soft: "yes" })).toThrow();
+    });
+
+    it("defaults fail_soft to undefined when omitted", () => {
+      const result = nodeZ.parse({ name: "S", instruction: "I" });
+      expect(result.fail_soft).toBeUndefined();
+    });
+
     it("rejects an evaluator missing a name", () => {
       expect(() =>
         nodeZ.parse({
