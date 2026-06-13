@@ -458,6 +458,46 @@ describe("ClaudeClient", () => {
       expect(result.data.error).toContain("terminated early");
     });
 
+    it("preserves the partial result text in data.summary on early termination", async () => {
+      // A fail_soft node downgrades this failure and passes data downstream;
+      // the partial text is the gathered work product and must survive.
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "result",
+            subtype: "success",
+            result: "partial gather notes",
+            terminal_reason: "max_turns",
+          },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.status).toBe("failed");
+      expect(result.data.summary).toBe("partial gather notes");
+    });
+
+    it("omits data.summary when the early-terminated result has no text", async () => {
+      mockQuery.mockReturnValueOnce(
+        makeStream([
+          {
+            type: "result",
+            subtype: "success",
+            result: "   ",
+            terminal_reason: "max_turns",
+          },
+        ]),
+      );
+
+      const client = new ClaudeClient();
+      const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+      expect(result.status).toBe("failed");
+      expect(result.data).not.toHaveProperty("summary");
+    });
+
     it("returns failed for any non-completed terminal_reason", async () => {
       // Future SDK versions may add new terminal reasons (aborted_tools,
       // blocking_limit, etc.) — treat anything that isn't 'completed' as a

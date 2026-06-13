@@ -60,6 +60,7 @@ export type {
   EvaluatorKind,
   NodeRequires,
   NodeRetry,
+  NodeToolFilter,
   OutputMatch,
   NodeSources,
   EvalPolicy,

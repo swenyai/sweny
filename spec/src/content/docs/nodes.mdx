@@ -16,6 +16,8 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 | `max_turns`        | integer &ge; 1                   | OPTIONAL | implementation&#8209;defined   | Maximum AI model turns for this node's execution.                                                              |
 | `model`            | string                           | OPTIONAL | inherited / impl&#8209;defined | Execution model for this node's AI invocation. Free-text passthrough. See [Model Selection](#model-selection). |
 | `disallowed_tools` | string[]                         | OPTIONAL | `[]`                           | Built-in agent tools removed from the model context at this node. See [Disallowed Tools](#disallowed-tools).   |
+| `tools`            | [ToolFilter](#tool-filter)       | OPTIONAL | all skill tools                | Allowlist/denylist over skill-provided tools at this node. See [Tool Filter](#tool-filter).                    |
+| `fail_soft`        | boolean                          | OPTIONAL | `false`                        | Downgrade an agent-level failure to success and proceed with partial output. See [Fail Soft](#fail-soft).      |
 | `rules`            | [NodeSources](#nodesources-type) | OPTIONAL | inherited                      | Rules for this node. Additive by default; see [cascade](#cascade-semantics).                                   |
 | `context`          | [NodeSources](#nodesources-type) | OPTIONAL | inherited                      | Context for this node. Additive by default; see [cascade](#cascade-semantics).                                 |
 | `eval`             | [Eval](#eval)                    | OPTIONAL | —                              | Named evaluators (value, function, judge) run after the AI finishes the node.                                  |
@@ -78,6 +80,52 @@ implement:
 ```
 
 The exact set of names the runtime recognizes is **implementation-defined** and tracks the agent SDK in use. Workflow authors SHOULD verify a name is honored before relying on it; a typo silently no-ops because there is no built-in tool of that name to remove.
+
+## Tool Filter
+
+The `tools` field restricts which skill-provided tools are exposed at this node. It is the skill-tool counterpart to [`disallowed_tools`](#disallowed-tools), which covers built-in agent tools only.
+
+| Field   | Type     | Required | Description                                                              |
+| ------- | -------- | -------- | ------------------------------------------------------------------------ |
+| `allow` | string[] | OPTIONAL | When present, ONLY these skill tool names are exposed at this node.      |
+| `deny`  | string[] | OPTIONAL | These skill tool names are removed. Applied after `allow` when both set. |
+
+At least one of `allow` / `deny` MUST be declared when the field is present.
+
+A conforming executor:
+
+- **MUST NOT** register a filtered-out tool for the node's run. The model never sees the tool; this is structural enforcement, not call-time rejection.
+- **MUST** expose all skill tools unchanged when the field is absent (back-compat).
+- **SHOULD** warn when a filter entry matches no tool resolved for the node (typo detection; also fires when a skill is unconfigured).
+
+Typical use: a read-only context-gathering node that declares the `github` and `linear` skills for their search tools but must never create issues or pull requests:
+
+```yaml
+gather:
+  name: Gather Context
+  instruction: Collect context about the alert. Read-only.
+  skills:
+    - github
+    - linear
+  tools:
+    deny:
+      - linear_create_issue
+      - github_create_issue
+      - github_create_pr
+```
+
+## Fail Soft
+
+When `fail_soft: true` and the node fails at the agent level (turn cap reached, early termination, runtime error), the executor downgrades the result to `status: "success"`, sets `fail_soft: true` in the result data, preserves the original error under `data.error`, and proceeds with routing so downstream nodes can work with whatever partial output exists.
+
+A conforming executor:
+
+- **MUST** apply `fail_soft` only to agent-level failures. Eval failures are correctness gates and **MUST NOT** be softened.
+- **MUST** preserve the original error message in the result data.
+- **MUST** mark the downgrade (`fail_soft: true` in result data) so downstream nodes and observers can distinguish a soft-failed node from a genuinely successful one.
+- When the field is absent or `false`, a failed node fails the workflow as before.
+
+Typical use: a best-effort context-gathering node whose downstream consumer has its own tools and can compensate for incomplete context.
 
 ## Rules & Context
 
