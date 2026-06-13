@@ -824,6 +824,7 @@ export async function workflowRunAction(
     cwd: process.cwd(),
     logger: consoleLogger,
     mcpServers,
+    model: workflow.model,
   });
 
   // Track per-node entry time to compute elapsed on exit
