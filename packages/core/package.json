@@ -65,11 +65,11 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "^2.1.160",
+    "@anthropic-ai/claude-code": "^2.1.185",
     "ajv": "^8.20.0",
-    "esbuild": "^0.28.0",
-    "prettier": "^3.8.3",
-    "vitest": "^4.1.8"
+    "esbuild": "^0.28.1",
+    "prettier": "^3.8.4",
+    "vitest": "^4.1.9"
   },
   "publishConfig": {
     "access": "public"
