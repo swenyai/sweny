@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/core",
-  "version": "0.1.115",
+  "version": "0.1.116",
   "type": "module",
   "bin": {
     "sweny": "./dist/cli/main.js"
