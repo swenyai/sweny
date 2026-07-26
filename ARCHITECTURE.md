@@ -6,12 +6,6 @@ SWEny is an open-source framework for building and running AI agent workflows as
 
 The Action and CLI are free and run in **your** environment — your CI runner, your terminal, your compute. SWEny never executes code on our infrastructure.
 
-### What SWEny Cloud is (today)
-
-[cloud.sweny.ai](https://cloud.sweny.ai) is the **analytics and intelligence dashboard**. It collects metadata from Action runs and GitHub webhooks, then shows you what matters: trends, activity, AI-powered insights. It stores metadata only — never source code, diffs, or agent output.
-
-Cloud is to SWEny what Codecov is to testing: the Action does the work, Cloud shows the results.
-
 ### Packages
 
 | Package | Dir | Published | What it does |
@@ -34,7 +28,7 @@ When a workflow runs (via CLI or GitHub Action):
 5. Edges are evaluated — unconditional edges follow deterministically, conditional edges are routed by the AI model
 6. The trace (ordered steps + routing decisions) is emitted as events throughout
 
-All execution happens locally. If `SWENY_CLOUD_TOKEN` is set, a structured summary (status, duration, recommendations) is sent to cloud.sweny.ai — no code, no diffs, no secrets.
+All execution happens locally. The executor has an opt-in reporting path that emits a structured summary (status, duration, recommendations) when `SWENY_CLOUD_TOKEN` is set. No code, no diffs, no secrets. Token minting is not currently exposed, so this path is dormant by default; the hosted service behind it is in active development.
 
 ### What "scoped tools" means
 
