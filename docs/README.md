@@ -14,7 +14,7 @@ If you're looking for one of the older root-level docs (`mcp-servers.md`, `provi
 | `docs/provider-authoring.md` | [docs.sweny.ai/skills](https://docs.sweny.ai/skills/) and [docs.sweny.ai/skills/custom](https://docs.sweny.ai/skills/custom/) |
 | `docs/recipe-authoring.md` | [docs.sweny.ai/workflows](https://docs.sweny.ai/workflows/) and [docs.sweny.ai/workflows/custom](https://docs.sweny.ai/workflows/custom/) |
 | `docs/recipes/*` | [docs.sweny.ai/action/examples](https://docs.sweny.ai/action/examples/) |
-| `docs/self-hosted-worker.md` | (the aws-cloud managed-execution architecture is not the current cloud product; see [`ARCHITECTURE.md`](../ARCHITECTURE.md) for what cloud.sweny.ai actually is) |
+| `docs/self-hosted-worker.md` | (the aws-cloud managed-execution architecture; exploratory, not a shipped product. See [`ARCHITECTURE.md`](../ARCHITECTURE.md)) |
 | `docs/studio.md` | [docs.sweny.ai/studio](https://docs.sweny.ai/studio/) |
 
 What does live in this directory:
