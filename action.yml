@@ -73,7 +73,7 @@ inputs:
     default: ""
 
   cloud-token:
-    description: "SWEny Cloud project token (sweny_pk_...) for reporting run results to cloud.sweny.ai. Optional. Equivalent to setting the SWENY_CLOUD_TOKEN env var; either form is accepted."
+    description: "Project token (sweny_pk_...) enabling opt-in run reporting. Optional, and not currently available. Token minting is not yet exposed, so leaving this unset (the default) means no outbound reporting request is made. Equivalent to setting the SWENY_CLOUD_TOKEN env var; either form is accepted."
     required: false
 
 runs:

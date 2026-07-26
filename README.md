@@ -159,27 +159,13 @@ Focused actions for common use cases:
 | [`swenyai/triage@v1`](https://github.com/swenyai/triage) | SRE triage — observability + issue tracker |
 | [`swenyai/e2e@v1`](https://github.com/swenyai/e2e) | Agentic E2E browser tests |
 
-### Cloud reporting (optional)
+### Run reporting (optional, not yet available)
 
-SWEny runs locally or in CI with zero phone-home behavior by default. To enable the cloud dashboard at [cloud.sweny.ai](https://cloud.sweny.ai):
+SWEny runs locally or in CI with **zero phone-home behavior**. No anonymous telemetry, no pings, nothing.
 
-1. Sign up and link your repo — the GitHub App handles this in one click.
-2. Copy the **CI reporting token** from your project page (starts with `sweny_pk_`).
-3. Add it as a GitHub Actions secret named `SWENY_CLOUD_TOKEN`.
-4. Expose it to the Action:
+The CLI contains an opt-in run reporting path, gated entirely on a `SWENY_CLOUD_TOKEN` project token. Unless you set that variable yourself, every reporting entry point returns before making a request, so a default install sends nothing.
 
-```yaml
-- uses: swenyai/sweny@v5
-  with:
-    workflow: .sweny/workflows/security-audit.yml
-    claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-  env:
-    SWENY_CLOUD_TOKEN: ${{ secrets.SWENY_CLOUD_TOKEN }}
-```
-
-Without `SWENY_CLOUD_TOKEN`, the Action performs **no network calls to sweny.ai**. No anonymous telemetry, no pings, nothing.
-
-See [PRIVACY.md](./PRIVACY.md) for the full data policy.
+The hosted service behind it is in active development and **not open for sign-ups**, so there is no token to obtain today. See [PRIVACY.md](./PRIVACY.md) for the exact payload if you point it at your own endpoint.
 
 ## Publish to the marketplace
 
@@ -202,7 +188,6 @@ sweny publish   # interactive CLI — publish a workflow or skill
 - [Documentation](https://docs.sweny.ai) — full docs, guides, and reference
 - [Workflow Spec](https://spec.sweny.ai) — formal YAML specification
 - [Marketplace](https://marketplace.sweny.ai) — browse and share workflows
-- [Cloud Dashboard](https://cloud.sweny.ai) — analytics and scheduling
 
 ## Development
 
