@@ -6,6 +6,19 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    ignore:
+      # zustand 5 removed StoreApi.destroy(), which @xyflow/react still calls
+      # in its shipped bundle. Every published @xyflow/react (through 12.11.2)
+      # depends on zustand ^4.4.0, so upgrading studio to v5 leaves two copies
+      # installed: xyflow resolves v4 at the root while studio gets v5 nested,
+      # and zundo dedupes to the root v4. That mismatch is what surfaces as
+      # "Property 'temporal' does not exist" at typecheck.
+      #
+      # Forcing v5 with an override would break the flow canvas at runtime,
+      # not just the types. Revisit when @xyflow/react supports zustand 5.
+      - dependency-name: zustand
+        update-types:
+          - version-update:semver-major
     groups:
       dev-dependencies:
         dependency-type: development
