@@ -163,7 +163,11 @@ export function makeAbort(
  * Swallows errors: the stream may already be done, and interrupt is only
  * supported in streaming-input mode.
  */
-async function interruptStream(stream: { interrupt?: () => Promise<void> } | undefined): Promise<void> {
+// The return type is deliberately `Promise<unknown>`, not `Promise<void>`:
+// agent-sdk 0.3 changed `Query.interrupt()` to resolve with an
+// SDKControlInterruptResponse. We discard the value either way, and a `void`
+// parameter type would reject any SDK that resolves with something.
+async function interruptStream(stream: { interrupt?: () => Promise<unknown> } | undefined): Promise<void> {
   if (!stream || typeof stream.interrupt !== "function") return;
   try {
     await stream.interrupt();
