@@ -29,15 +29,7 @@ const TIMEOUT_MS = 10_000;
 const START_TIMEOUT_MS = 3_000;
 
 export type TriggerSource =
-  | "github_action"
-  | "gitlab_ci"
-  | "circleci"
-  | "buildkite"
-  | "other_ci"
-  | "manual"
-  | "cron"
-  | "mcp"
-  | "unknown";
+  "github_action" | "gitlab_ci" | "circleci" | "buildkite" | "other_ci" | "manual" | "cron" | "mcp" | "unknown";
 
 export interface CloudReportConfig {
   cloudToken: string;

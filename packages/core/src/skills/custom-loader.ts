@@ -140,8 +140,7 @@ export function discoverSkills(
 }
 
 type ParseResult =
-  | { kind: "ok"; skill: Skill; diagnostics?: SkillDiagnostic[] }
-  | { kind: "err"; diagnostic: SkillDiagnostic };
+  { kind: "ok"; skill: Skill; diagnostics?: SkillDiagnostic[] } | { kind: "err"; diagnostic: SkillDiagnostic };
 
 function parseSkillMd(content: string, path: string, allowStdio: boolean): ParseResult {
   const raw = parseFrontmatter(content);

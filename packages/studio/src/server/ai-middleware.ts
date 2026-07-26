@@ -23,8 +23,7 @@ import type { Claude, Skill, Workflow } from "@sweny-ai/core";
 let _claude: Claude | null = null;
 let _buildWorkflow: ((desc: string, opts: { claude: Claude; skills: Skill[] }) => Promise<Workflow>) | null = null;
 let _refineWorkflow:
-  | ((wf: Workflow, instr: string, opts: { claude: Claude; skills: Skill[] }) => Promise<Workflow>)
-  | null = null;
+  ((wf: Workflow, instr: string, opts: { claude: Claude; skills: Skill[] }) => Promise<Workflow>) | null = null;
 let _allSkills: Skill[] = [];
 let _initPromise: Promise<void> | null = null;
 
