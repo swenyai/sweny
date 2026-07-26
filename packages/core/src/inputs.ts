@@ -142,8 +142,7 @@ export interface InputValidationError {
 
 /** Tagged result of validating raw runtime input against a declared contract. */
 export type InputValidationResult =
-  | { ok: true; value: Record<string, unknown> }
-  | { ok: false; errors: InputValidationError[] };
+  { ok: true; value: Record<string, unknown> } | { ok: false; errors: InputValidationError[] };
 
 /**
  * Validate the caller's raw input object against the workflow's declared

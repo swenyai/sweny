@@ -31,9 +31,7 @@ export interface ExecutionSlice {
 
 // What the user has selected on the canvas
 export type Selection =
-  | { kind: "node"; id: string }
-  | { kind: "edge"; id: string; edgeIndex: number; from: string; to: string }
-  | null;
+  { kind: "node"; id: string } | { kind: "edge"; id: string; edgeIndex: number; from: string; to: string } | null;
 
 export interface EditorState extends ExecutionSlice {
   workflow: Workflow;

@@ -36,20 +36,16 @@ export async function layoutWorkflow(
       "elk.layered.spacing.edgeNodeBetweenLayers": "50",
       "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
     },
-    children: flowNodes.map(
-      (node): ElkNode => ({
-        id: node.id,
-        width: nodeWidth,
-        height: nodeHeight,
-      }),
-    ),
-    edges: flowEdges.map(
-      (edge): ElkExtendedEdge => ({
-        id: edge.id,
-        sources: [edge.source],
-        targets: [edge.target],
-      }),
-    ),
+    children: flowNodes.map((node): ElkNode => ({
+      id: node.id,
+      width: nodeWidth,
+      height: nodeHeight,
+    })),
+    edges: flowEdges.map((edge): ElkExtendedEdge => ({
+      id: edge.id,
+      sources: [edge.source],
+      targets: [edge.target],
+    })),
   };
 
   const layout = await elk.layout(elkGraph);
