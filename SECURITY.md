@@ -31,7 +31,9 @@ SWEny never stores credentials in code. All secrets are read from environment va
 
 ## Execution Model
 
-SWEny runs entirely in your environment — your terminal, your CI runner, your compute. The cloud dashboard ([cloud.sweny.ai](https://cloud.sweny.ai)) receives only structured metadata (run status, duration, recommendations) when explicitly opted in via `SWENY_CLOUD_TOKEN`. No source code, diffs, or secrets are ever sent.
+SWEny runs entirely in your environment: your terminal, your CI runner, your compute.
+
+The CLI ships an opt-in run reporting path that sends structured metadata only (run status, duration, recommendations) and never source code, diffs, or secrets. It is gated on `SWENY_CLOUD_TOKEN` and returns immediately when that variable is unset, so a default install makes no outbound request. Token minting is not currently exposed; the hosted service is in active development. See [PRIVACY.md](./PRIVACY.md) for the exact payload.
 
 ## Open-Source Worker Audit Path (aws-cloud — not yet live)
 
