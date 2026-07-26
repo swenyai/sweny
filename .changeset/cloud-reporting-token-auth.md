@@ -2,15 +2,17 @@
 "@sweny-ai/core": minor
 ---
 
-Add opt-in cloud reporting via `SWENY_CLOUD_TOKEN`. When set, run summaries
-(status, duration, findings, PR/issue URLs) are sent to cloud.sweny.ai using
-a project-scoped Bearer token. Without the token, the CLI makes zero network
-calls to sweny.ai — no anonymous telemetry, no phone-home.
+Add opt-in run reporting via `SWENY_CLOUD_TOKEN`. When set, run summaries
+(status, duration, findings, PR/issue URLs) are sent to the configured
+reporting endpoint using a project-scoped Bearer token. Without the token, the
+CLI makes zero network calls to sweny.ai. No anonymous telemetry, no
+phone-home. Token minting is not currently exposed, so this path is dormant by
+default; the hosted service is in active development.
 
-**Breaking (security):** The CLI no longer forwards `GITHUB_TOKEN` to
-cloud.sweny.ai for authentication. The only auth paths are `SWENY_CLOUD_TOKEN`
-(project token from cloud.sweny.ai) and GitHub App installation. The deprecated
-`Authorization: token <github-token>` path on the cloud `/api/report` endpoint
-has been removed.
+**Breaking (security):** The CLI no longer forwards `GITHUB_TOKEN` to the
+reporting endpoint for authentication. The only auth paths are
+`SWENY_CLOUD_TOKEN` and GitHub App installation. The deprecated
+`Authorization: token <github-token>` path on the `/api/report` endpoint has
+been removed.
 
 New config: `SWENY_CLOUD_TOKEN` env var or `cloud-token` in `.sweny.yml`.

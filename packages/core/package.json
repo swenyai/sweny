@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/core",
-  "version": "0.1.114",
+  "version": "0.1.117",
   "type": "module",
   "bin": {
     "sweny": "./dist/cli/main.js"
@@ -58,7 +58,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.114",
-    "@clack/prompts": "^1.2.0",
+    "@clack/prompts": "^1.5.1",
     "chalk": "^5",
     "commander": "^13",
     "yaml": "^2.9.0",
