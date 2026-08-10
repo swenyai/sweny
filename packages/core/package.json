@@ -65,7 +65,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "^2.1.220",
+    "@anthropic-ai/claude-code": "^2.1.224",
     "ajv": "^8.20.0",
     "esbuild": "^0.28.1",
     "prettier": "^3.9.6",
