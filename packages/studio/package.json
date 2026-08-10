@@ -33,14 +33,14 @@
     "@sweny-ai/core": "*",
     "@xyflow/react": "^12.11.2",
     "elkjs": "^0.9.0",
-    "immer": "^11.1.15",
+    "immer": "^11.1.16",
     "yaml": "^2.9.0",
     "zundo": "^2.3.0",
     "zustand": "^4.5.7"
   },
   "devDependencies": {
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.5.4",
     "postcss": "^8.5.23",
