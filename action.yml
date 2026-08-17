@@ -44,7 +44,7 @@ inputs:
     default: "."
 
   dry-run:
-    description: "When 'true', execute until the first conditional routing decision and stop. Validates the workflow end-to-end without triggering downstream actions."
+    description: "When 'true', execute until the first conditional routing decision, then stop (no side effects past that point). Analysis nodes before that point run normally with their real tools; it does not validate the full workflow end-to-end."
     required: false
     default: "false"
 

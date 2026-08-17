@@ -22,25 +22,34 @@
 
 ## Quickstart
 
+Requires an `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` (SWEny runs its nodes on the Claude Code agent).
+
 ```bash
-npx @sweny-ai/core new      # pick a workflow → auto-detects providers → done
+npx @sweny-ai/core new      # pick a workflow → writes .sweny.yml, .env, and the workflow file
+```
+
+`sweny new` auto-detects your source control and issue tracker, but it writes blank values for any
+credential it can't infer, so fill those in before running:
+
+```bash
+$EDITOR .env                # fill in the printed API keys (ANTHROPIC_API_KEY, GITHUB_TOKEN, etc.)
+sweny check                 # verify provider credentials and connectivity
 sweny workflow run .sweny/workflows/pr-review.yml
 ```
 
-Or if you already have `@sweny-ai/core` installed:
+Already have `@sweny-ai/core` installed? Run `sweny new` directly. Already have a `.sweny.yml`?
+`sweny new` adds additional workflows to it non-destructively.
+
+No credentials configured yet? [`examples/file-ops.yml`](./examples/file-ops.yml) is a local
+file-I/O workflow that needs nothing beyond your Claude Code auth, good for a first smoke test:
 
 ```bash
-sweny new
+sweny workflow run examples/file-ops.yml
 ```
 
-Already have a `.sweny.yml`? `sweny new` adds additional workflows non-destructively.
-
-Build a workflow from scratch — pick "Describe your own" in the `sweny new` picker, or:
+Build a workflow from scratch — pick "Describe your own" in the `sweny new` picker.
 
 ```bash
-sweny workflow create "review PRs for security issues and code quality"
-sweny workflow run .sweny/workflows/pr-review.yml
-
 # Visualize any workflow as a Mermaid diagram — drop it into a PR or README
 sweny workflow diagram .sweny/workflows/pr-review.yml -o pr-review.mmd
 ```
