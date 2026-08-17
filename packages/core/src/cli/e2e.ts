@@ -877,7 +877,15 @@ export async function runE2eInit(options: E2eInitOptions = {}): Promise<void> {
 
 // ── Timeout helper ─────────────────────────────────────────────────────
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string, onTimeout?: () => void): Promise<T> {
+/**
+ * Default wall-clock budget for a single workflow run when the caller
+ * doesn't pass `--timeout`. Shared by the e2e batch runner and the primary
+ * `sweny workflow run <file>` path (see main.ts workflowRunAction) so both
+ * fail loudly on a wedged node instead of hanging CI indefinitely. See #325.
+ */
+export const DEFAULT_WORKFLOW_TIMEOUT_MS = 15 * 60 * 1000;
+
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string, onTimeout?: () => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       // Abort the underlying work first so it stops advancing and the in-flight
@@ -891,6 +899,28 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string, onTimeou
       .catch(reject)
       .finally(() => clearTimeout(timer));
   });
+}
+
+/**
+ * Run a workflow execution under a whole-run wall-clock budget, aborting the
+ * in-flight run via `AbortSignal` when the budget is exceeded.
+ *
+ * Shared by the `.sweny/e2e/` batch runner (below) and the primary
+ * `sweny workflow run <file>` path (main.ts `workflowRunAction`) so both
+ * paths get the same abort/timeout behavior from one implementation instead
+ * of main.ts re-deriving it. Before #325, `workflowRunAction` never wired
+ * `--timeout` or an abort signal into `execute()` at all: a wedged node
+ * (hung tool call, runaway model turn) could hang the primary run path
+ * indefinitely even though the abort/timeout plumbing already existed in
+ * the executor and `claude.run`.
+ */
+export async function runWithWallClockBudget<T>(
+  run: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  const controller = new AbortController();
+  return withTimeout(run(controller.signal), timeoutMs, label, () => controller.abort());
 }
 
 // ── E2E Run ────────────────────────────────────────────────────────────
@@ -920,7 +950,7 @@ export function batchRunDecision(opts: { yes?: boolean; isTTY: boolean }): "run"
  */
 export async function runE2eRun(options: E2eRunOptions): Promise<void> {
   const cwd = process.cwd();
-  const timeoutMs = options.timeout || 15 * 60 * 1000;
+  const timeoutMs = options.timeout || DEFAULT_WORKFLOW_TIMEOUT_MS;
 
   // 1. Discover workflow files
   let files: string[];

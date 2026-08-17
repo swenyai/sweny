@@ -3067,17 +3067,17 @@ describe("executor termination safety", () => {
     expect(results.size).toBe(3);
   });
 
-  it("eval retries do NOT count toward the step budget (only node visits do)", async () => {
+  it("eval retries DO count toward the step budget (#325: retries can no longer bypass max_steps)", async () => {
     // A single terminal node whose eval fails on every attempt, with a large
-    // retry budget. Retries re-run claude inside the node; they are bounded by
-    // retry.max and must NOT consume the workflow-level step budget, which
-    // counts node visits (cycle protection). With max_steps: 1 the node is
-    // visited exactly once, so the 1+10 attempts here must complete without
-    // tripping the budget. This pins the deliberate design: retries have their
-    // own bound (retry.max), the step cap guards cycles.
+    // retry budget. Retries re-run claude inside the node at full model spend,
+    // so they must consume the same workflow-level step budget as ordinary
+    // node visits: otherwise a node with a generous retry.max is an unbounded
+    // spend multiplier the step cap can never catch. With max_steps: 1 the
+    // initial attempt exactly exhausts the budget, so the first retry attempt
+    // must trip "step budget exceeded" instead of silently proceeding.
     const node: Workflow = {
-      id: "retry-no-step",
-      name: "Retry no step",
+      id: "retry-counts-as-step",
+      name: "Retry counts as step",
       description: "single terminal node that retries hard",
       entry: "a",
       nodes: {
@@ -3104,14 +3104,53 @@ describe("executor termination safety", () => {
       },
     };
 
-    // max_steps: 1 allows a single node visit. If retries counted toward
-    // the budget, the 11 attempts would throw "step budget exceeded".
+    // max_steps: 1 allows only the initial attempt; the first retry attempt
+    // must trip the budget rather than the old "1 + 10 attempts, no throw".
+    await expect(
+      execute(node, {}, { skills: createSkillMap([]), claude: failingClaude, config: {}, max_steps: 1 }),
+    ).rejects.toThrow(/step budget exceeded/);
+    // Only the initial attempt ran before the budget check stopped the retry loop.
+    expect(runs).toBe(1);
+  });
+
+  it("eval retries run to exhaustion when the step budget comfortably covers them", async () => {
+    // Same node/retry shape as above, but with headroom in max_steps: all
+    // 1 + retry.max attempts should complete normally and the node should
+    // still fail (eval never passes) without tripping the budget.
+    const node: Workflow = {
+      id: "retry-within-budget",
+      name: "Retry within budget",
+      description: "single terminal node that retries hard, budget allows it",
+      entry: "a",
+      nodes: {
+        a: {
+          name: "A",
+          instruction: "Emit ok",
+          skills: [],
+          eval: [{ name: "never", kind: "value", rule: { output_required: ["ok"] } }],
+          retry: { max: 10 },
+        },
+      },
+      edges: [],
+    };
+
+    let runs = 0;
+    const failingClaude: any = {
+      async run() {
+        runs++;
+        return { status: "success", data: { other: 1 }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+
     const { results } = await execute(
       node,
       {},
-      { skills: createSkillMap([]), claude: failingClaude, config: {}, max_steps: 1 },
+      { skills: createSkillMap([]), claude: failingClaude, config: {}, max_steps: 20 },
     );
-    // initial + 10 retries, all within one node visit
+    // initial + 10 retries, all within budget (1 node visit + 10 retry steps = 11 <= 20)
     expect(runs).toBe(11);
     expect(results.get("a")?.status).toBe("failed");
   });

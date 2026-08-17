@@ -10,6 +10,7 @@ import {
   buildFlowWorkflow,
   buildE2eEnvTemplate,
   batchRunDecision,
+  runWithWallClockBudget,
 } from "./e2e.js";
 import type { FlowConfig, FlowType, E2eSelections } from "./e2e.js";
 import type { Workflow } from "../types.js";
@@ -804,5 +805,56 @@ describe("batchRunDecision — no-file `sweny workflow run` batch gate", () => {
   it("refuses to batch-run non-interactively without --yes", () => {
     expect(batchRunDecision({ yes: false, isTTY: false })).toBe("refuse-noninteractive");
     expect(batchRunDecision({ isTTY: false })).toBe("refuse-noninteractive");
+  });
+});
+
+// #325: this is the exact function `sweny workflow run <file>` (main.ts
+// workflowRunAction) now wraps its execute() call in, so a wedged node
+// cannot hang the primary run path forever. Before this fix, workflowRunAction
+// never passed a signal or timeout to execute() at all.
+describe("runWithWallClockBudget (#325: --timeout aborts a wedged node)", () => {
+  it("aborts and rejects when the run never settles (a wedged node)", async () => {
+    let sawSignal: AbortSignal | undefined;
+    let abortedWhenRejected = false;
+
+    const wedged = (signal: AbortSignal): Promise<never> => {
+      sawSignal = signal;
+      // Simulate a hung tool call / stuck model turn: this promise never
+      // resolves or rejects on its own. Only the abort signal firing (which
+      // runWithWallClockBudget triggers on timeout) tells the caller.
+      return new Promise<never>(() => {});
+    };
+
+    const start = Date.now();
+    await expect(runWithWallClockBudget(wedged, 50, "Workflow wedged-test")).rejects.toThrow(
+      /wedged-test timed out after/,
+    );
+    const elapsed = Date.now() - start;
+
+    // Rejects close to the budget, not left hanging (generous margin for CI jitter).
+    expect(elapsed).toBeLessThan(2000);
+    expect(sawSignal).toBeInstanceOf(AbortSignal);
+    if (sawSignal?.aborted) abortedWhenRejected = true;
+    expect(abortedWhenRejected).toBe(true);
+  });
+
+  it("resolves normally when the run finishes inside the budget", async () => {
+    const fast = async (signal: AbortSignal) => {
+      expect(signal.aborted).toBe(false);
+      return { results: new Map([["a", { status: "success" }]]) };
+    };
+
+    const result = await runWithWallClockBudget(fast, 5000, "Workflow fast-test");
+    expect(result.results.get("a")).toEqual({ status: "success" });
+  });
+
+  it("propagates a real error from the run without waiting for the timeout", async () => {
+    const failing = async () => {
+      throw new Error("node blew up");
+    };
+
+    const start = Date.now();
+    await expect(runWithWallClockBudget(failing, 5000, "Workflow failing-test")).rejects.toThrow("node blew up");
+    expect(Date.now() - start).toBeLessThan(500);
   });
 });
