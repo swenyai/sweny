@@ -641,7 +641,12 @@ describe("ClaudeClient", () => {
     expect(result).toBe("handle_low");
   });
 
-  it("evaluate falls back to first choice", async () => {
+  // Fail closed. An unparseable model answer is NOT a routing decision.
+  // Previously this returned the first choice (validIds[0]); on a node with
+  // one conditional out-edge that IS the conditional edge, so a garbled answer
+  // always took it. evaluate() now returns null so the executor can take an
+  // explicit default edge or terminate instead of failing open.
+  it("evaluate returns null on an unparseable answer (fails closed)", async () => {
     mockQuery.mockReturnValueOnce(makeStream([{ type: "result", subtype: "success", result: "I'm not sure" }]));
 
     const client = new ClaudeClient();
@@ -654,10 +659,13 @@ describe("ClaudeClient", () => {
       ],
     });
 
-    expect(result).toBe("a");
+    expect(result).toBeNull();
   });
 
-  it("evaluate falls back on query error", async () => {
+  // Fail closed. An SDK-level error is an outage, not a decision. Previously
+  // this returned choices[0].id, silently routing an outage down the first
+  // conditional edge. evaluate() now returns null.
+  it("evaluate returns null on a query error (fails closed)", async () => {
     mockQuery.mockReturnValueOnce(
       (async function* () {
         throw new Error("offline");
@@ -674,7 +682,38 @@ describe("ClaudeClient", () => {
       ],
     });
 
-    expect(result).toBe("fallback");
+    expect(result).toBeNull();
+  });
+
+  // Change #3: route evaluation and reflection/judge calls are pure
+  // classification over possibly-attacker-influenceable prior-node data. They
+  // must never be able to shell out or mutate, regardless of a node's own
+  // tool policy. Assert the powerful built-ins are disallowed structurally.
+  it("evaluate disallows Bash/Write/edit tools", async () => {
+    mockQuery.mockReturnValueOnce(makeStream([{ type: "result", subtype: "success", result: "a" }]));
+
+    const client = new ClaudeClient();
+    await client.evaluate({
+      question: "Which?",
+      context: {},
+      choices: [
+        { id: "a", description: "A" },
+        { id: "b", description: "B" },
+      ],
+    });
+
+    const disallowed: string[] = mockQuery.mock.calls[0][0].options.disallowedTools;
+    expect(disallowed).toEqual(expect.arrayContaining(["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"]));
+  });
+
+  it("ask (reflection/judge) disallows Bash/Write/edit tools", async () => {
+    mockQuery.mockReturnValueOnce(makeStream([{ type: "result", subtype: "success", result: "reflection" }]));
+
+    const client = new ClaudeClient();
+    await client.ask({ instruction: "reflect on the failure", context: {} });
+
+    const disallowed: string[] = mockQuery.mock.calls[0][0].options.disallowedTools;
+    expect(disallowed).toEqual(expect.arrayContaining(["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"]));
   });
 
   it("includes output schema in prompt when provided", async () => {
@@ -1080,7 +1119,9 @@ describe("ClaudeClient", () => {
       expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/Ask query timed out after 20ms/));
     });
 
-    it("evaluate times out: distinct log + first-choice fallback", async () => {
+    // Fail closed on timeout. A timed-out route call is an outage, not a
+    // decision — evaluate() returns null instead of the first choice.
+    it("evaluate times out: distinct log + null (fails closed)", async () => {
       let captured: AbortController | undefined;
       const { stream, interrupt } = makeHangingStream(() => captured);
       mockQuery.mockImplementationOnce((args: any) => {
@@ -1101,7 +1142,7 @@ describe("ClaudeClient", () => {
         timeoutMs: 20,
       });
 
-      expect(out).toBe("first");
+      expect(out).toBeNull();
       expect(interrupt).toHaveBeenCalled();
       expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/Evaluate query timed out after 20ms/));
     });
@@ -1182,7 +1223,11 @@ describe("ClaudeClient", () => {
   // Issue #215, fix #4: evaluate must distinguish an SDK-level failure
   // (non-success result subtype) from a genuinely ambiguous model answer.
   describe("evaluate non-success subtype", () => {
-    it("logs a distinct message and falls back to the first choice", async () => {
+    // Fail closed. A non-success result subtype is an SDK-level failure, not a
+    // decision — evaluate() returns null (previously the first choice) and
+    // logs a distinct message so an operator can tell it from an ambiguous
+    // answer.
+    it("logs a distinct message and returns null (fails closed)", async () => {
       mockQuery.mockReturnValueOnce(makeStream([{ type: "result", subtype: "error_during_execution" }]));
 
       const warnSpy = vi.fn();
@@ -1197,7 +1242,7 @@ describe("ClaudeClient", () => {
         ],
       });
 
-      expect(out).toBe("first");
+      expect(out).toBeNull();
       expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/non-success subtype "error_during_execution"/));
       // Must NOT be confused with the ambiguous-answer warning.
       const messages = warnSpy.mock.calls.map((c) => String(c[0]));

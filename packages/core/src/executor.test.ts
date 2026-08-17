@@ -5,8 +5,8 @@ import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
 
-import { execute } from "./executor.js";
-import type { Workflow, ExecutionEvent, Skill, Claude } from "./types.js";
+import { execute, RouteEvaluationError } from "./executor.js";
+import type { Workflow, ExecutionEvent, Skill, Claude, NodeResult } from "./types.js";
 import { MockClaude, createFileSkill } from "./testing.js";
 import { createSkillMap } from "./skills/index.js";
 import { validateWorkflow, parseWorkflow } from "./schema.js";
@@ -817,5 +817,151 @@ describe("executor: Source resolution phase", () => {
     const result = await execute(workflow, {}, { skills: createSkillMap([]), claude });
     expect(result.trace.sources["nodes.only.instruction"].content).toBe("Hello from inline");
     expect(result.trace.sources["nodes.only.instruction"].kind).toBe("inline");
+  });
+});
+
+// ─── Fail-closed execution (issue #323) ──────────────────────────
+//
+// The engine used to fail OPEN: a route-evaluation failure fell through to the
+// first conditional edge, and a failed node advanced anyway. Both let an LLM
+// outage silently drive real side effects (file an issue/PR instead of skip).
+// These lock the fail-closed contract.
+describe("fail-closed execution", () => {
+  /**
+   * Minimal Claude stub. `runByNode` maps a substring of the node instruction
+   * to its NodeResult; `evaluateResult` is what `evaluate` returns (null models
+   * the real client's fail-closed signal). Records which node instructions ran.
+   */
+  function stubClaude(opts: {
+    runByNode: Array<{ match: string; result: NodeResult }>;
+    evaluateResult: string | null;
+    ran: string[];
+  }): Claude {
+    return {
+      async run(runOpts) {
+        opts.ran.push(runOpts.instruction);
+        const hit = opts.runByNode.find((r) => runOpts.instruction.includes(r.match));
+        return hit?.result ?? { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate() {
+        return opts.evaluateResult;
+      },
+      async ask() {
+        return "";
+      },
+    };
+  }
+
+  it("does NOT take a single conditional out-edge when route evaluation fails", async () => {
+    // `check` has exactly one conditional out-edge and no default. A real
+    // client returns null from evaluate() on failure; the executor must refuse
+    // to take the only edge (the fail-open bug) and terminate loudly instead.
+    const workflow: Workflow = {
+      id: "wf-single-cond",
+      name: "Single conditional edge",
+      description: "",
+      entry: "check",
+      nodes: {
+        check: { name: "Check", instruction: "CHECK node: inspect input", skills: [] },
+        act: { name: "Act", instruction: "ACT node: file an issue", skills: [] },
+      },
+      edges: [{ from: "check", to: "act", when: "an issue should be filed" }],
+    };
+
+    const ran: string[] = [];
+    const claude = stubClaude({ runByNode: [], evaluateResult: null, ran });
+
+    await expect(execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} })).rejects.toBeInstanceOf(
+      RouteEvaluationError,
+    );
+
+    // The conditional target must never have executed.
+    expect(ran.some((i) => i.includes("ACT node"))).toBe(false);
+  });
+
+  it("takes the explicit default edge when route evaluation fails", async () => {
+    // Same shape but with a default (unconditional) edge to `safe`. A failed
+    // route evaluation takes the author's default, never the conditional edge.
+    const workflow: Workflow = {
+      id: "wf-default-edge",
+      name: "Default edge fallback",
+      description: "",
+      entry: "check",
+      nodes: {
+        check: { name: "Check", instruction: "CHECK node: inspect input", skills: [] },
+        act: { name: "Act", instruction: "ACT node: file an issue", skills: [] },
+        safe: { name: "Safe", instruction: "SAFE node: do nothing", skills: [] },
+      },
+      edges: [
+        { from: "check", to: "act", when: "an issue should be filed" },
+        { from: "check", to: "safe" },
+      ],
+    };
+
+    const ran: string[] = [];
+    const claude = stubClaude({ runByNode: [], evaluateResult: null, ran });
+
+    const { results } = await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    expect(ran.some((i) => i.includes("SAFE node"))).toBe(true);
+    expect(ran.some((i) => i.includes("ACT node"))).toBe(false);
+    expect(results.get("safe")?.status).toBe("success");
+    expect(results.has("act")).toBe(false);
+  });
+
+  it("halts the workflow by default when a node fails", async () => {
+    const workflow: Workflow = {
+      id: "wf-halt",
+      name: "Halt on failure",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "NODE A: do work", skills: [] },
+        b: { name: "B", instruction: "NODE B: downstream work", skills: [] },
+      },
+      edges: [{ from: "a", to: "b" }],
+    };
+
+    const ran: string[] = [];
+    const claude = stubClaude({
+      runByNode: [{ match: "NODE A", result: { status: "failed", data: { error: "boom" }, toolCalls: [] } }],
+      evaluateResult: null,
+      ran,
+    });
+
+    const { results } = await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    // A failed, and the workflow halted before advancing to B.
+    expect(results.get("a")?.status).toBe("failed");
+    expect(results.has("b")).toBe(false);
+    expect(ran.some((i) => i.includes("NODE B"))).toBe(false);
+  });
+
+  it("on_fail: 'continue' restores fall-through past a failed node", async () => {
+    const workflow: Workflow = {
+      id: "wf-continue",
+      name: "Continue on failure",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "NODE A: do work", skills: [], on_fail: "continue" },
+        b: { name: "B", instruction: "NODE B: downstream work", skills: [] },
+      },
+      edges: [{ from: "a", to: "b" }],
+    };
+
+    const ran: string[] = [];
+    const claude = stubClaude({
+      runByNode: [{ match: "NODE A", result: { status: "failed", data: { error: "boom" }, toolCalls: [] } }],
+      evaluateResult: null,
+      ran,
+    });
+
+    const { results } = await execute(workflow, {}, { skills: createSkillMap([]), claude, config: {} });
+
+    // A failed but 'continue' let routing proceed to B (legacy fall-through).
+    expect(results.get("a")?.status).toBe("failed");
+    expect(results.get("b")?.status).toBe("success");
+    expect(ran.some((i) => i.includes("NODE B"))).toBe(true);
   });
 });
