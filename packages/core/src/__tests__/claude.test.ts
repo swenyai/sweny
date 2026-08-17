@@ -216,6 +216,49 @@ describe("ClaudeClient", () => {
     expect(result.data.severity).toBe("high");
   });
 
+  it("captures token counts + cost from the SDK result message", async () => {
+    mockQuery.mockReturnValueOnce(
+      makeStream([
+        {
+          type: "result",
+          subtype: "success",
+          result: "done",
+          total_cost_usd: 0.1234,
+          num_turns: 4,
+          usage: {
+            input_tokens: 1500,
+            output_tokens: 350,
+            cache_read_input_tokens: 200,
+            cache_creation_input_tokens: 40,
+          },
+        },
+      ]),
+    );
+
+    const client = new ClaudeClient();
+    const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+    expect(result.status).toBe("success");
+    expect(result.usage).toEqual({
+      costUsd: 0.1234,
+      inputTokens: 1500,
+      outputTokens: 350,
+      cacheReadTokens: 200,
+      cacheCreationTokens: 40,
+      numTurns: 4,
+    });
+  });
+
+  it("leaves usage absent when the SDK result carries no cost/token fields (mock/legacy)", async () => {
+    mockQuery.mockReturnValueOnce(makeStream([{ type: "result", subtype: "success", result: "ok" }]));
+
+    const client = new ClaudeClient();
+    const result = await client.run({ instruction: "x", context: {}, tools: [] });
+
+    expect(result.status).toBe("success");
+    expect(result.usage).toBeUndefined();
+  });
+
   describe("structured output (CC-08)", () => {
     const schema = {
       type: "object" as const,

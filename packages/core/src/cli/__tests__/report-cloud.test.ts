@@ -193,4 +193,99 @@ describe("reportToCloud", () => {
     expect(Array.isArray(body.findings)).toBe(true);
     expect(Array.isArray(body.nodes)).toBe(true);
   });
+
+  // ── Privacy: the report is shape-only, never raw agent prose ──────────
+  //
+  // The triage `investigate` node emits findings that carry `title`,
+  // `root_cause`, and `fix_approach` — free LLM prose about the customer's
+  // private bug and the proposed fix. That MUST NEVER leave the host. These
+  // tests pin the leak closed: the serialized POST body may not contain any
+  // of those fields or their prose values.
+  function makeResultsWithProse(): Map<string, NodeResult> {
+    return new Map([
+      [
+        "investigate",
+        {
+          status: "success" as const,
+          data: {
+            recommendation: "implement",
+            highest_severity: "high",
+            novel_count: 1,
+            findings: [
+              {
+                title: "SECRET_BUG_TITLE null deref in checkout",
+                root_cause: "SECRET_ROOT_CAUSE the session token is read before auth resolves",
+                fix_approach: "SECRET_FIX_APPROACH guard the token read behind the auth promise",
+                severity: "high",
+                is_duplicate: false,
+                duplicate_of: "OFF-9999",
+                fix_complexity: "moderate",
+                affected_services: ["checkout-api", "auth-service"],
+              },
+              {
+                title: "SECRET_DUP_TITLE",
+                root_cause: "SECRET_DUP_ROOT_CAUSE",
+                severity: "low",
+                is_duplicate: true,
+                fix_complexity: "simple",
+                affected_services: ["billing"],
+              },
+            ],
+          },
+          toolCalls: [],
+        },
+      ],
+    ]);
+  }
+
+  it("does NOT ship root_cause / fix_approach / title or any raw prose", async () => {
+    await reportToCloud(makeResultsWithProse(), 1000, makeConfig({ cloudToken: "sweny_pk_abc" }), "triage");
+    const [, init] = fetchMock.mock.calls[0];
+    const raw = init.body as string;
+
+    // Prose field values must be absent from the wire entirely.
+    for (const secret of [
+      "SECRET_BUG_TITLE",
+      "SECRET_ROOT_CAUSE",
+      "SECRET_FIX_APPROACH",
+      "SECRET_DUP_TITLE",
+      "SECRET_DUP_ROOT_CAUSE",
+      "OFF-9999",
+    ]) {
+      expect(raw).not.toContain(secret);
+    }
+
+    // And no finding object may carry the prose keys, even empty.
+    const body = JSON.parse(raw);
+    for (const f of body.findings) {
+      expect(f).not.toHaveProperty("title");
+      expect(f).not.toHaveProperty("root_cause");
+      expect(f).not.toHaveProperty("fix_approach");
+      expect(f).not.toHaveProperty("duplicate_of");
+    }
+  });
+
+  it("ships shape-only finding classification: severity, novel/dup, complexity, service names", async () => {
+    await reportToCloud(makeResultsWithProse(), 1000, makeConfig({ cloudToken: "sweny_pk_abc" }), "triage");
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body as string);
+
+    expect(body.findings).toEqual([
+      {
+        severity: "high",
+        is_duplicate: false,
+        fix_complexity: "moderate",
+        affected_services: ["checkout-api", "auth-service"],
+      },
+      {
+        severity: "low",
+        is_duplicate: true,
+        fix_complexity: "simple",
+        affected_services: ["billing"],
+      },
+    ]);
+    expect(body.findings_count).toBe(2);
+    expect(body.duplicate_count).toBe(1);
+    expect(body.severity_counts).toEqual({ high: 1, low: 1 });
+  });
 });

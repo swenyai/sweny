@@ -11,7 +11,17 @@
 
 import { query, createSdkMcpServer, tool as sdkTool, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import type { Claude, Tool, ToolContext, NodeResult, ToolCall, JSONSchema, Logger, McpServerConfig } from "./types.js";
+import type {
+  Claude,
+  Tool,
+  ToolContext,
+  NodeResult,
+  NodeUsage,
+  ToolCall,
+  JSONSchema,
+  Logger,
+  McpServerConfig,
+} from "./types.js";
 import { consoleLogger } from "./types.js";
 
 const SYSTEM_PROMPT = `You are a step in an automated workflow. Execute the instruction precisely using the tools available to you. Be thorough but concise. When you're done, summarize your findings and results.`;
@@ -176,6 +186,40 @@ async function interruptStream(stream: { interrupt?: () => Promise<unknown> } | 
   }
 }
 
+/**
+ * Extract shape-only usage/cost from an SDK `result` message.
+ *
+ * Reads `total_cost_usd`, `usage` (in/out/cache tokens), and `num_turns` off
+ * the terminal result. Returns undefined when the message carries none of
+ * them (mocks, older SDKs) so callers leave `NodeResult.usage` absent rather
+ * than shipping an all-zero object. NEVER touches `result`/prompt text.
+ */
+function extractUsage(resultMsg: unknown): NodeUsage | undefined {
+  const m = resultMsg as {
+    total_cost_usd?: unknown;
+    num_turns?: unknown;
+    usage?: {
+      input_tokens?: unknown;
+      output_tokens?: unknown;
+      cache_read_input_tokens?: unknown;
+      cache_creation_input_tokens?: unknown;
+    };
+  };
+  const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  const u = m.usage;
+  const usage: NodeUsage = {
+    costUsd: num(m.total_cost_usd),
+    inputTokens: num(u?.input_tokens),
+    outputTokens: num(u?.output_tokens),
+    cacheReadTokens: num(u?.cache_read_input_tokens),
+    cacheCreationTokens: num(u?.cache_creation_input_tokens),
+    numTurns: num(m.num_turns),
+  };
+  // Drop the object entirely when the SDK gave us nothing usable, so a
+  // mocked/legacy run reports no usage instead of a misleading zero-cost run.
+  return Object.values(usage).some((v) => v !== undefined) ? usage : undefined;
+}
+
 export class ClaudeClient implements Claude {
   private model: string | undefined;
   private maxTurns: number;
@@ -281,6 +325,12 @@ export class ClaudeClient implements Claude {
     // result. Left undefined when the SDK didn't provide it, so the
     // tryParseJSON heuristic remains the fallback (e.g. mocks, older results).
     let structuredOutput: unknown;
+    // Token + cost accounting. Read off the SDK's terminal `result` message
+    // (present on both success and error subtypes). Shape-only: counts and
+    // cost, never any prompt/response text. Left undefined when the SDK
+    // emitted no usage (mocks, older SDKs), so `usage` stays absent rather
+    // than shipping zeroes that read as a real (free) run.
+    let usage: NodeUsage | undefined;
 
     // Timeout / abort wiring (back-compat: only armed when requested).
     // A single AbortController drives both an optional caller signal and an
@@ -382,6 +432,10 @@ export class ClaudeClient implements Claude {
           }
         } else if (message.type === "result") {
           const resultMsg = message as SDKResultMessage;
+          // Capture token/cost accounting off the terminal result. Present on
+          // both success and error subtypes; shape-only. Attached to every
+          // return below (including early-termination and error paths).
+          usage = extractUsage(resultMsg);
           if (resultMsg.subtype === "success" && "result" in resultMsg) {
             // terminal_reason was added in @anthropic-ai/claude-agent-sdk v0.2.91.
             // When the turn budget is exhausted the SDK still emits subtype='success'
@@ -402,6 +456,7 @@ export class ClaudeClient implements Claude {
                   ...(partial !== "" ? { summary: partial } : {}),
                 },
                 toolCalls,
+                ...(usage ? { usage } : {}),
               };
             }
             response = resultMsg.result;
@@ -422,6 +477,7 @@ export class ClaudeClient implements Claude {
               status: "failed",
               data: { error: prefix + (errors?.join("\n") ?? "Execution failed") },
               toolCalls,
+              ...(usage ? { usage } : {}),
             };
           }
         }
@@ -458,6 +514,7 @@ export class ClaudeClient implements Claude {
       status: "success",
       data: { summary: response, ...parsedData },
       toolCalls,
+      ...(usage ? { usage } : {}),
     };
   }
 

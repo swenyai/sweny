@@ -10,6 +10,52 @@ const { version } = _require("../../package.json") as { version: string };
 const CLOUD_URL_DEFAULT = "https://cloud.sweny.ai";
 
 /**
+ * The raw finding shape emitted by the triage `investigate` node. The
+ * `title`, `root_cause`, and `fix_approach` fields are free LLM prose about
+ * the customer's private bug — they are read here only so `shapeFinding` can
+ * DROP them. They must never be forwarded to cloud.
+ */
+interface RawFinding {
+  title?: string;
+  root_cause?: string;
+  fix_approach?: string;
+  severity?: string;
+  is_duplicate?: boolean;
+  duplicate_of?: string;
+  fix_complexity?: string;
+  affected_services?: string[];
+}
+
+/** Shape-only finding: classification metadata, no prose. See {@link shapeFinding}. */
+interface ShapedFinding {
+  severity?: string;
+  is_duplicate: boolean;
+  fix_complexity?: string;
+  affected_services?: string[];
+}
+
+/**
+ * Reduce a raw finding to its shape-only classification. Keeps severity,
+ * novel-vs-duplicate, fix complexity, and affected-service NAMES. Drops
+ * `title`, `root_cause`, `fix_approach`, and `duplicate_of` — the fields that
+ * would leak the customer's private bug description, the raw root-cause
+ * analysis, the proposed fix prose, or a linkable existing-issue id.
+ */
+function shapeFinding(f: RawFinding): ShapedFinding {
+  const shaped: ShapedFinding = {
+    severity: typeof f.severity === "string" ? f.severity : undefined,
+    is_duplicate: f.is_duplicate === true,
+  };
+  if (typeof f.fix_complexity === "string") shaped.fix_complexity = f.fix_complexity;
+  if (Array.isArray(f.affected_services)) {
+    // NAMES only. These are service identifiers (e.g. "checkout-api"), not
+    // bug detail. Coerce to strings and drop anything non-string.
+    shaped.affected_services = f.affected_services.filter((s): s is string => typeof s === "string");
+  }
+  return shaped;
+}
+
+/**
  * Opt-in run reporting to SWEny Cloud.
  *
  * Fires only when `config.cloudToken` (from SWENY_CLOUD_TOKEN or .sweny.yml)
@@ -35,8 +81,22 @@ export async function reportToCloud(
   const createPrData = results.get("create_pr")?.data;
   const createIssueData = results.get("create_issue")?.data ?? results.get("create-issue")?.data;
 
-  const findings = (investigateData?.findings as unknown[]) ?? [];
+  const rawFindings = (investigateData?.findings as RawFinding[]) ?? [];
+  // SHAPE-ONLY findings. The raw finding carries `title`, `root_cause`, and
+  // `fix_approach` — free LLM prose about the customer's private bug and the
+  // proposed fix. That MUST NEVER leave the host (product rule: show don't
+  // store code). We ship only the classification metadata: severity, novel vs
+  // duplicate, fix complexity, and affected-service NAMES. Mirrors the
+  // `inputs_shape` precedent in cloud-lifecycle.ts (key shape, never values).
+  const findings = rawFindings.map(shapeFinding);
   const hasFailed = [...results.values()].some((r) => r.status === "failed");
+
+  // Severity histogram — counts only, derived from the shape-only findings.
+  const severityCounts: Record<string, number> = {};
+  for (const f of findings) {
+    if (f.severity) severityCounts[f.severity] = (severityCounts[f.severity] ?? 0) + 1;
+  }
+  const duplicateCount = findings.filter((f) => f.is_duplicate).length;
 
   const nodes = [...results.entries()].map(([id, r]) => ({
     id,
@@ -58,6 +118,9 @@ export async function reportToCloud(
     duration_ms: durationMs,
     recommendation: investigateData?.recommendation as string | undefined,
     findings,
+    findings_count: findings.length,
+    duplicate_count: duplicateCount,
+    severity_counts: severityCounts,
     highest_severity: investigateData?.highest_severity as string | undefined,
     novel_count: investigateData?.novel_count as number | undefined,
     pr_url: createPrData?.prUrl as string | undefined,

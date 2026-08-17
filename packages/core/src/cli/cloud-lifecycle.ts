@@ -258,21 +258,104 @@ export async function postNodeEvent(
 }
 
 /**
+ * Aggregate SHAPE-ONLY telemetry off the executor's NodeResult map for the
+ * finish payload: token/cost totals, eval verdict counts, and tool-call
+ * NAME + STATUS counts. Never any prompt, response, tool input, or tool
+ * output. This is the substrate the paid cloud "brain" derives type-specific
+ * metrics from; the engine just ships the counts it has.
+ *
+ * Returns undefined when there is nothing to report (no usage, no evals, no
+ * tool calls) so the finish payload stays lean for trivial runs.
+ */
+export function deriveTypeMetricSubstrate(results: Map<string, NodeResult>) {
+  let costUsd = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheCreationTokens = 0;
+  let numTurns = 0;
+  let sawUsage = false;
+
+  let evalsTotal = 0;
+  let evalsPassed = 0;
+  let evalsFailed = 0;
+
+  let toolCallsTotal = 0;
+  let toolCallsError = 0;
+  // NAME → count. Names only (e.g. "Bash", "create_pr"); never tool input
+  // or output, which can carry source, diffs, or customer data.
+  const toolCallsByName: Record<string, number> = {};
+
+  const add = (v: number | undefined) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
+  for (const r of results.values()) {
+    if (r.usage) {
+      sawUsage = true;
+      costUsd += add(r.usage.costUsd);
+      inputTokens += add(r.usage.inputTokens);
+      outputTokens += add(r.usage.outputTokens);
+      cacheReadTokens += add(r.usage.cacheReadTokens);
+      cacheCreationTokens += add(r.usage.cacheCreationTokens);
+      numTurns += add(r.usage.numTurns);
+    }
+    if (r.evals && r.evals.length > 0) {
+      for (const e of r.evals) {
+        evalsTotal++;
+        if (e.pass) evalsPassed++;
+        else evalsFailed++;
+      }
+    }
+    for (const call of r.toolCalls ?? []) {
+      toolCallsTotal++;
+      if (call.status === "error") toolCallsError++;
+      const name = call.tool || "unknown";
+      toolCallsByName[name] = (toolCallsByName[name] ?? 0) + 1;
+    }
+  }
+
+  const substrate: Record<string, unknown> = {};
+  if (sawUsage) {
+    substrate.cost = {
+      total_cost_usd: costUsd,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      cache_read_tokens: cacheReadTokens,
+      cache_creation_tokens: cacheCreationTokens,
+      num_turns: numTurns,
+    };
+  }
+  if (evalsTotal > 0) {
+    substrate.evals = { total: evalsTotal, passed: evalsPassed, failed: evalsFailed };
+  }
+  if (toolCallsTotal > 0) {
+    substrate.tool_calls = {
+      total: toolCallsTotal,
+      error: toolCallsError,
+      by_name: toolCallsByName,
+    };
+  }
+  return Object.keys(substrate).length > 0 ? substrate : undefined;
+}
+
+/**
  * Derive a `metrics` blob from the executor's NodeResult map.
  *
- * For now this is intentionally minimal: total node count, failed-node
- * count, success rate. Per-workflow-type metric extraction (Caught /
- * Calibration / Missed for pr_review, flake rate for e2e_test, etc.) is
- * the renderer's job; the engine just ships what it has.
+ * Ships node counts + success rate, plus the shape-only type-metric
+ * substrate (token/cost totals, eval verdict counts, tool-call name+status
+ * counts) when present. Per-workflow-type metric extraction (Caught /
+ * Calibration / Missed for pr_review, flake rate for e2e_test, etc.) is the
+ * renderer's job; the engine just ships what it has.
  */
 export function deriveGenericMetrics(results: Map<string, NodeResult>, durationMs: number) {
   const nodeCount = results.size;
   const failedNodes = [...results.values()].filter((r) => r.status === "failed").length;
+  const substrate = deriveTypeMetricSubstrate(results);
   return {
     duration_ms: durationMs,
     node_count: nodeCount,
     failed_nodes: failedNodes,
     success_rate: nodeCount > 0 ? (nodeCount - failedNodes) / nodeCount : 0,
+    ...(substrate ?? {}),
   };
 }
 
@@ -331,6 +414,7 @@ export async function finishCloudLifecycle(
   results: Map<string, NodeResult>,
   durationMs: number,
   status: "success" | "failed" | "partial" = "success",
+  error?: string,
 ): Promise<void> {
   if (!handle || !config.cloudToken) return;
   const reportConfig: CloudReportConfig = { cloudToken: config.cloudToken };
@@ -338,6 +422,10 @@ export async function finishCloudLifecycle(
     status,
     duration_ms: durationMs,
     metrics: deriveGenericMetrics(results, durationMs),
+    // `error` is a short failure summary (an Error message), not raw agent
+    // prose. Only forwarded on the crash/throw path where the executor never
+    // returned a results map.
+    ...(error ? { error } : {}),
   });
 }
 
@@ -346,10 +434,18 @@ export async function finishCloudLifecycle(
  *
  * Maps the engine's ExecutionEvent stream onto `POST /api/runs/:id/node`:
  *   node:enter   → { event: "enter",  node }
- *   node:exit    → { event: "exit",   node, status, duration_ms }
+ *   node:exit    → { event: "exit",   node, status, duration_ms, data: { evals, tool_calls } }
  *   node:progress → { event: "progress", node, data: { message } }
  *   node:retry   → { event: "progress", node, data: { retry: true, attempt, reason } }
- * Other events (workflow:start, tool:*, route, workflow:end) are dropped.
+ *   node:warning → { event: "progress", node, data: { warning: true, reason, fields } }
+ *   route        → { event: "progress", node: from, data: { route: { to, reason } } }
+ * Other events (workflow:start, tool:*, workflow:end) are dropped.
+ *
+ * The node:exit `data` carries the SHAPE-ONLY type-metric substrate for the
+ * node: eval verdicts (name + pass, never reasoning prose) and tool-call
+ * NAME + STATUS counts (never tool input/output). This is the same substrate
+ * the finish payload aggregates; streaming it per-node lets the cloud render
+ * progress without waiting for finish.
  *
  * Returns undefined when the handle is null (no cloud session) or the
  * token is missing. The observer captures `node:enter` timestamps in a
@@ -365,6 +461,49 @@ export async function finishCloudLifecycle(
  *   3. The Map is keyed by node id; collisions only happen if the same
  *      node id runs concurrently, which the engine does not do today.
  */
+/**
+ * Build the SHAPE-ONLY per-node substrate for a `node:exit` event's `data`.
+ *
+ * Emits eval verdicts (name + kind + pass, and reasoning only when the
+ * evaluator's reasoning is itself a machine verdict, which it is NOT here, so
+ * reasoning is omitted), tool-call NAME + STATUS counts, and usage totals.
+ * NEVER emits tool input/output, response text, or eval reasoning prose.
+ * Returns undefined when the node carries none of it.
+ */
+function summarizeNodeResult(result: NodeResult): Record<string, unknown> | undefined {
+  const data: Record<string, unknown> = {};
+
+  if (result.evals && result.evals.length > 0) {
+    // name + kind + pass only. `reasoning` can quote agent output or bug
+    // detail, so it is deliberately dropped.
+    data.evals = result.evals.map((e) => ({ name: e.name, kind: e.kind, pass: e.pass }));
+  }
+
+  if (result.toolCalls && result.toolCalls.length > 0) {
+    let error = 0;
+    const byName: Record<string, number> = {};
+    for (const call of result.toolCalls) {
+      if (call.status === "error") error++;
+      const name = call.tool || "unknown";
+      byName[name] = (byName[name] ?? 0) + 1;
+    }
+    data.tool_calls = { total: result.toolCalls.length, error, by_name: byName };
+  }
+
+  if (result.usage) {
+    data.usage = {
+      total_cost_usd: result.usage.costUsd,
+      input_tokens: result.usage.inputTokens,
+      output_tokens: result.usage.outputTokens,
+      cache_read_tokens: result.usage.cacheReadTokens,
+      cache_creation_tokens: result.usage.cacheCreationTokens,
+      num_turns: result.usage.numTurns,
+    };
+  }
+
+  return Object.keys(data).length > 0 ? data : undefined;
+}
+
 export function createCloudStreamObserver(
   config: { cloudToken?: string },
   handle: CloudLifecycleHandle | null,
@@ -393,11 +532,13 @@ export function createCloudStreamObserver(
           const enter = enterTimes.get(event.node);
           const duration_ms = typeof enter === "number" ? Date.now() - enter : undefined;
           enterTimes.delete(event.node);
+          const data = summarizeNodeResult(event.result);
           fire({
             event: "exit",
             node: event.node,
             status: event.result.status,
             duration_ms,
+            ...(data ? { data } : {}),
           });
           break;
         }
@@ -417,9 +558,30 @@ export function createCloudStreamObserver(
           });
           break;
         }
+        case "node:warning": {
+          // Shape-only: reason is a short summary and fields are declared
+          // property NAMES, never values. See the node:warning docs in types.ts.
+          fire({
+            event: "progress",
+            node: event.node,
+            data: { warning: true, reason: event.reason, fields: event.fields },
+          });
+          break;
+        }
+        case "route": {
+          // Routing decision. `reason` is the LLM's short edge-condition
+          // verdict, not agent work product; ship it so the cloud can render
+          // the path taken. Attributed to the `from` node.
+          fire({
+            event: "progress",
+            node: event.from,
+            data: { route: { to: event.to, reason: event.reason } },
+          });
+          break;
+        }
         default:
-          // Drop workflow:start, sources:resolved, tool:*, route,
-          // workflow:end. Cloud only models the per-node lifecycle today.
+          // Drop workflow:start, sources:resolved, tool:*, workflow:end.
+          // Cloud only models the per-node lifecycle today.
           break;
       }
     } catch {

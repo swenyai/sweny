@@ -390,6 +390,39 @@ describe("beginCloudLifecycle / finishCloudLifecycle — CLI wire-up wrapper", (
     const handle = { runUuid: "u", runId: "r" };
     await expect(finishCloudLifecycle({ cloudToken: "tok" }, handle, new Map(), 100)).resolves.toBeUndefined();
   });
+
+  it("finalizes a crashed run as failed with an error summary (thrown-error path)", async () => {
+    // Mirrors the main.ts catch: execute() threw (incl. RouteEvaluationError),
+    // so there is no results map — finalize with an empty one, status failed,
+    // and the error message so the run does not stay stuck at "running".
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("", { status: 200 }));
+    const handle = { runUuid: "u", runId: "run-crash" };
+    await finishCloudLifecycle(
+      { cloudToken: "tok" },
+      handle,
+      new Map(),
+      250,
+      "failed",
+      "RouteEvaluationError: no edge matched",
+    );
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const url = fetchSpy.mock.calls[0]![0] as string;
+    expect(url).toMatch(/\/api\/runs\/run-crash\/finish$/);
+    const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string) as {
+      status: string;
+      error: string;
+    };
+    expect(body.status).toBe("failed");
+    expect(body.error).toBe("RouteEvaluationError: no edge matched");
+  });
+
+  it("omits the error field when none is passed (normal finish)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("", { status: 200 }));
+    const handle = { runUuid: "u", runId: "r" };
+    await finishCloudLifecycle({ cloudToken: "tok" }, handle, new Map(), 100, "success");
+    const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("error");
+  });
 });
 
 describe("createCloudStreamObserver — per-node event streaming", () => {
@@ -482,15 +515,95 @@ describe("createCloudStreamObserver — per-node event streaming", () => {
     expect(body.data.message).toBe("running pytest");
   });
 
-  it("drops events the cloud node API doesn't model (workflow:start, tool:*, route, workflow:end)", () => {
+  it("drops events the cloud node API doesn't model (workflow:start, tool:*, workflow:end)", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 200 }));
     const observer = createCloudStreamObserver(config, handle)!;
     observer({ type: "workflow:start", workflow: "x" });
     observer({ type: "tool:call", node: "n", tool: "github", input: {} });
     observer({ type: "tool:result", node: "n", tool: "github", output: {} });
-    observer({ type: "route", from: "a", to: "b", reason: "" });
     observer({ type: "workflow:end", results: {} });
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("forwards a route decision as a progress event on the 'from' node", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 200 }));
+    const observer = createCloudStreamObserver(config, handle)!;
+    observer({ type: "route", from: "triage", to: "implement", reason: "novel high-sev bug" });
+    await new Promise((r) => setImmediate(r));
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string) as {
+      event: string;
+      node: string;
+      data: { route: { to: string; reason: string } };
+    };
+    expect(body.event).toBe("progress");
+    expect(body.node).toBe("triage");
+    expect(body.data.route).toEqual({ to: "implement", reason: "novel high-sev bug" });
+  });
+
+  it("forwards a node:warning as a progress event with reason + field names", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 200 }));
+    const observer = createCloudStreamObserver(config, handle)!;
+    observer({
+      type: "node:warning",
+      node: "gather",
+      reason: "missing declared outputs",
+      fields: ["severity", "count"],
+    });
+    await new Promise((r) => setImmediate(r));
+    const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string) as {
+      event: string;
+      node: string;
+      data: { warning: boolean; reason: string; fields: string[] };
+    };
+    expect(body.event).toBe("progress");
+    expect(body.node).toBe("gather");
+    expect(body.data.warning).toBe(true);
+    expect(body.data.fields).toEqual(["severity", "count"]);
+  });
+
+  it("streams shape-only substrate on node:exit: eval verdicts + tool NAME/STATUS, never input/output", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 200 }));
+    const observer = createCloudStreamObserver(config, handle)!;
+    observer({ type: "node:enter", node: "verify", instruction: "" });
+    await new Promise((r) => setImmediate(r));
+    observer({
+      type: "node:exit",
+      node: "verify",
+      result: {
+        status: "success",
+        data: {},
+        toolCalls: [
+          { tool: "Bash", input: { command: "rm -rf SECRET_INPUT" }, output: "SECRET_OUTPUT", status: "success" },
+          { tool: "Bash", input: {}, status: "error" },
+        ],
+        evals: [
+          { name: "tests_green", kind: "function", pass: true, reasoning: "SECRET_REASONING prose" },
+          { name: "no_regressions", kind: "judge", pass: false, reasoning: "SECRET_JUDGE prose" },
+        ],
+        usage: { costUsd: 0.42, inputTokens: 100, outputTokens: 20, numTurns: 3 },
+      },
+    });
+    await new Promise((r) => setImmediate(r));
+    const raw = (fetchSpy.mock.calls[1]![1] as RequestInit).body as string;
+    // No tool input/output or eval reasoning prose on the wire.
+    for (const secret of ["SECRET_INPUT", "SECRET_OUTPUT", "SECRET_REASONING", "SECRET_JUDGE"]) {
+      expect(raw).not.toContain(secret);
+    }
+    const body = JSON.parse(raw) as {
+      data: {
+        evals: { name: string; kind: string; pass: boolean }[];
+        tool_calls: { total: number; error: number; by_name: Record<string, number> };
+        usage: { total_cost_usd: number; num_turns: number };
+      };
+    };
+    expect(body.data.evals).toEqual([
+      { name: "tests_green", kind: "function", pass: true },
+      { name: "no_regressions", kind: "judge", pass: false },
+    ]);
+    expect(body.data.tool_calls).toEqual({ total: 2, error: 1, by_name: { Bash: 2 } });
+    expect(body.data.usage.total_cost_usd).toBe(0.42);
+    expect(body.data.usage.num_turns).toBe(3);
   });
 
   it("never throws synchronously, even when fetch rejects (engine hot path)", async () => {
@@ -609,5 +722,73 @@ describe("deriveGenericMetrics", () => {
 
   it("returns 0 success_rate on empty result map", () => {
     expect(deriveGenericMetrics(new Map(), 0).success_rate).toBe(0);
+  });
+
+  it("aggregates token counts + cost across nodes into the metrics blob", () => {
+    const results = new Map<string, NodeResult>([
+      [
+        "investigate",
+        {
+          status: "success",
+          data: {},
+          toolCalls: [],
+          usage: { costUsd: 0.1, inputTokens: 1000, outputTokens: 200, cacheReadTokens: 50, numTurns: 2 },
+        },
+      ],
+      [
+        "implement",
+        {
+          status: "success",
+          data: {},
+          toolCalls: [],
+          usage: { costUsd: 0.25, inputTokens: 3000, outputTokens: 800, cacheReadTokens: 10, numTurns: 5 },
+        },
+      ],
+    ]);
+    const m = deriveGenericMetrics(results, 3000) as unknown as {
+      cost: {
+        total_cost_usd: number;
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_tokens: number;
+        num_turns: number;
+      };
+    };
+    expect(m.cost.total_cost_usd).toBeCloseTo(0.35);
+    expect(m.cost.input_tokens).toBe(4000);
+    expect(m.cost.output_tokens).toBe(1000);
+    expect(m.cost.cache_read_tokens).toBe(60);
+    expect(m.cost.num_turns).toBe(7);
+  });
+
+  it("omits the cost block entirely when no node reported usage", () => {
+    const results = new Map<string, NodeResult>([["a", { status: "success", data: {}, toolCalls: [] }]]);
+    expect(deriveGenericMetrics(results, 1)).not.toHaveProperty("cost");
+  });
+
+  it("aggregates eval verdicts and tool-call name/status counts (shape only)", () => {
+    const results = new Map<string, NodeResult>([
+      [
+        "verify",
+        {
+          status: "success",
+          data: {},
+          toolCalls: [
+            { tool: "Bash", input: {}, status: "success" },
+            { tool: "Read", input: {}, status: "error" },
+          ],
+          evals: [
+            { name: "green", kind: "function", pass: true },
+            { name: "clean", kind: "judge", pass: false },
+          ],
+        },
+      ],
+    ]);
+    const m = deriveGenericMetrics(results, 1) as unknown as {
+      evals: { total: number; passed: number; failed: number };
+      tool_calls: { total: number; error: number; by_name: Record<string, number> };
+    };
+    expect(m.evals).toEqual({ total: 2, passed: 1, failed: 1 });
+    expect(m.tool_calls).toEqual({ total: 2, error: 1, by_name: { Bash: 1, Read: 1 } });
   });
 });

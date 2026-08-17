@@ -490,17 +490,31 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
     process.exit(hasFailed ? 1 : 0);
   } catch (error) {
+    const crashMsg = error instanceof Error ? error.message : "Unknown error";
     if (config.json) {
-      console.log(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }));
+      console.log(JSON.stringify({ error: crashMsg }));
     } else {
       console.error(formatCrashError(error));
+    }
+
+    // Finalize the cloud run as failed. execute() threw (including the
+    // RouteEvaluationError the executor raises on route-eval failure), so
+    // the in-try finish never ran and the run would otherwise stay stuck at
+    // "running" forever. No results map exists on this path, so pass an empty
+    // one; the error summary is a short message, never raw agent prose.
+    try {
+      await finishCloudLifecycle(config, cloudHandle, new Map(), Date.now() - runStart, "failed", crashMsg);
+    } catch {
+      // silent — cloud reporting must never block or mask the crash
     }
 
     // Best-effort GitHub Actions step summary on crash
     if (config.notificationProvider === "github-summary" && process.env.GITHUB_STEP_SUMMARY) {
       try {
-        const msg = error instanceof Error ? error.message : "Unknown error";
-        fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## ❌ SWEny Triage Crashed\n\n\`\`\`\n${msg}\n\`\`\`\n`);
+        fs.appendFileSync(
+          process.env.GITHUB_STEP_SUMMARY,
+          `## ❌ SWEny Triage Crashed\n\n\`\`\`\n${crashMsg}\n\`\`\`\n`,
+        );
       } catch {
         // ignore
       }
@@ -682,7 +696,16 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
 
     process.exit(0);
   } catch (err) {
-    console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+    const crashMsg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
+    // Finalize the cloud run as failed (covers thrown errors, incl.
+    // RouteEvaluationError). Without this a crashed implement run stays
+    // "running" in cloud forever.
+    try {
+      await finishCloudLifecycle(config, implCloudHandle, new Map(), Date.now() - implRunStart, "failed", crashMsg);
+    } catch {
+      // silent
+    }
     process.exit(1);
   }
 });
@@ -1016,7 +1039,16 @@ export async function workflowRunAction(
     console.log(chalk.green(`  Workflow completed\n`));
     process.exit(0);
   } catch (err) {
-    console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+    const crashMsg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
+    // Finalize the cloud run as failed (covers thrown errors, incl.
+    // RouteEvaluationError). Without this a crashed workflow run stays
+    // "running" in cloud forever.
+    try {
+      await finishCloudLifecycle(config, wfCloudHandle, new Map(), Date.now() - runStart, "failed", crashMsg);
+    } catch {
+      // silent
+    }
     process.exit(1);
   }
 }

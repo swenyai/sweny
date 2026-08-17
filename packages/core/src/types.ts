@@ -444,6 +444,30 @@ export interface SkillDefinition {
 
 // ─── Execution ───────────────────────────────────────────────────
 
+/**
+ * Model usage + cost accounting for a single node's AI invocation.
+ *
+ * SHAPE-ONLY telemetry: counts, cost, and turn totals. Never any prompt,
+ * response, or tool payload. Populated from the Claude Agent SDK's terminal
+ * `result` message (`total_cost_usd`, `usage`, `num_turns`). Absent when the
+ * node made no AI call (e.g. a deterministic node) or when running against a
+ * mock/older SDK that doesn't emit the fields.
+ */
+export interface NodeUsage {
+  /** Aggregate USD cost the SDK billed for this node's turn(s). */
+  costUsd?: number;
+  /** Input (prompt) tokens across the node's turns. */
+  inputTokens?: number;
+  /** Output (completion) tokens across the node's turns. */
+  outputTokens?: number;
+  /** Cache-read input tokens (prompt-cache hits). */
+  cacheReadTokens?: number;
+  /** Cache-creation input tokens (prompt-cache writes). */
+  cacheCreationTokens?: number;
+  /** Number of model turns the SDK ran for this node. */
+  numTurns?: number;
+}
+
 export interface NodeResult {
   status: "success" | "skipped" | "failed";
   /** Arbitrary data produced by this node */
@@ -456,6 +480,11 @@ export interface NodeResult {
    * eval was not run (e.g. node failed during execution).
    */
   evals?: EvalResult[];
+  /**
+   * Token + cost accounting for this node's AI invocation. Shape-only
+   * telemetry; see {@link NodeUsage}. Absent for nodes that made no AI call.
+   */
+  usage?: NodeUsage;
 }
 
 export interface ToolCall {
