@@ -52,11 +52,11 @@ See [spec.sweny.ai/skills](https://spec.sweny.ai/skills/) for the formal specifi
 
 ### Skill-declared MCP execution (#328)
 
-Skill MCP declarations are supported through the library executor, so CLI and library runs use the same path. `execute()` passes each node's resolved skill servers through `Claude.run({ mcpServers })`; custom implementations of `Claude` must honor that optional field. Caller-provided skills take precedence over inline definitions. Explicit client MCP configuration wins on server-name conflicts. An omitted transport is inferred from `command` (stdio) or `url` (HTTP).
+Skill MCP declarations are supported through the library executor, so CLI and library runs use the same path. `execute()` passes each node's resolved skill servers through `Claude.run({ mcpServers })`; custom implementations of `Claude` must honor that optional field. Caller-provided skills take precedence over inline definitions. Catalog defaults have lowest precedence, followed by node skill declarations, then explicit client MCP configuration. An omitted transport is inferred from `command` (stdio) or `url` (HTTP).
 
-MCP-only inline skills are rejected during workflow validation with an instruction-specific diagnostic. Add `instruction` describing how to use the server. The executor also checks resolved MCP skills before any node runs; a resolved skill needs instructions or in-process tools.
+MCP-only inline skills are rejected during workflow validation with an instruction-specific diagnostic. Add `instruction` describing how to use the server. Resolved caller-provided and discovered MCP-only skills remain supported. The MCP skill ID `sweny-core` is reserved for the engine; validation rejects external declarations using it before any node runs.
 
-Discovered `SKILL.md` stdio commands still require `SWENY_ALLOW_SKILL_STDIO_COMMAND=1`; discovery strips them otherwise. Inline workflow declarations and caller-provided skills are explicit configuration and do not use that discovery opt-in. Dry-run execution withholds all external MCP servers, including skill declarations and client overrides.
+Discovered `SKILL.md` stdio commands still require `SWENY_ALLOW_SKILL_STDIO_COMMAND=1`; discovery strips them otherwise. Inline workflow declarations and caller-provided skills are explicit configuration and do not use that discovery opt-in. Dry-run execution withholds all external MCP servers, including skill declarations and client overrides. The node `tools.allow`/`tools.deny` filter applies to in-process skill tools only; external MCP tools are not filtered by it.
 
 The regression test launches a local stdio fixture and calls its tool through the configs produced by `execute()` and `ClaudeClient`. The SDK/model boundary is deterministic; this test does not exercise a live Claude session.
 

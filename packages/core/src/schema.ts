@@ -568,18 +568,18 @@ export function validateWorkflow(
     }
   }
 
-  // Inline MCP skills need usage instructions before execution.
+  // Inline skills need usage instructions; the engine server name is reserved.
   for (const [skillId, def] of Object.entries(workflow.skills ?? {})) {
-    if (def.mcp && !def.instruction?.trim()) {
+    if (!def.instruction?.trim()) {
       errors.push({
         code: "INVALID_INLINE_SKILL",
-        message: `Inline skill "${skillId}" declares an MCP server but has no instruction. Add an instruction describing how to use its MCP tools`,
+        message: `Inline skill "${skillId}" must provide a non-empty instruction`,
       });
     }
-    if (!def.instruction && !def.mcp) {
+    if (skillId === "sweny-core" && def.mcp) {
       errors.push({
         code: "INVALID_INLINE_SKILL",
-        message: `Inline skill "${skillId}" must provide at least instruction or mcp`,
+        message: `Skill "sweny-core" is reserved for the engine MCP server; use a different skill ID`,
       });
     }
   }

@@ -268,7 +268,8 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: consoleLogger,
-    mcpServers,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
   });
 
   // ── Progress display state ─────────────────────────────────
@@ -608,7 +609,8 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     maxTurns: config.maxImplementTurns || 40,
     cwd: process.cwd(),
     logger: consoleLogger,
-    mcpServers,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
   });
 
   console.log(chalk.cyan(`\n  sweny implement ${issueId}\n`));
@@ -892,7 +894,8 @@ export async function workflowRunAction(
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: runLogger,
-    mcpServers,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
     model: workflow.model,
   });
 

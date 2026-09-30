@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execute } from "../executor.js";
+import { buildSkillMcpServers } from "../mcp.js";
 import { validateWorkflow } from "../schema.js";
 import { discoverSkillsWithDiagnostics } from "../skills/custom-loader.js";
 import type { McpServerConfig, Skill, Workflow } from "../types.js";
@@ -183,8 +184,109 @@ describe("skill-declared MCP execution (#328)", () => {
     expect(results.get("read")?.data.setting).toBe("explicit-server-value");
   });
 
+  it("keeps catalog defaults below a skill declaration and explicit config above it", async () => {
+    const defaults = buildSkillMcpServers({
+      referencedSkills: new Set(["github"]),
+      credentials: { GITHUB_TOKEN: "fixture" },
+    });
+    const custom = { type: "http" as const, url: "https://custom.invalid/mcp" };
+    const wf = workflow(custom);
+    wf.skills = { github: { instruction: "Use custom GitHub", mcp: custom } };
+    wf.nodes.read.skills = ["github"];
+    await run(
+      wf,
+      new Map(),
+      false,
+      new ClaudeClient({ logger: quiet, sandbox: "off", envScope: false, defaultMcpServers: defaults }),
+    );
+    expect(query.mock.calls[0][0].options.mcpServers.github).toEqual(custom);
+    expect(query.mock.calls[1][0].options.mcpServers.github).toEqual(defaults.github);
+    query.mockClear();
+    const explicit = { type: "http" as const, url: "https://explicit.invalid/mcp" };
+    await run(
+      wf,
+      new Map(),
+      false,
+      new ClaudeClient({
+        logger: quiet,
+        sandbox: "off",
+        envScope: false,
+        defaultMcpServers: defaults,
+        mcpServers: { github: explicit },
+      }),
+    );
+    expect(query.mock.calls[0][0].options.mcpServers.github).toEqual(explicit);
+  });
+
+  it("accepts a resolved MCP-only skill without imposing the inline instruction requirement", async () => {
+    const wf = workflow(mcp);
+    delete wf.skills;
+    const skill: Skill = {
+      id: "external",
+      name: "External",
+      description: "",
+      category: "general",
+      config: {},
+      tools: [],
+      mcp,
+    };
+    await run(wf, new Map([[skill.id, skill]]));
+    expect(query.mock.calls[0][0].options.mcpServers.external).toEqual({ ...mcp, type: "stdio" });
+  });
+
+  it.each(["inline", "resolved"])("rejects a %s MCP declaration using the engine server name", async (source) => {
+    const wf = workflow(mcp);
+    wf.nodes.read.skills = ["sweny-core", "local"];
+    const local: Skill = {
+      id: "local",
+      name: "Local",
+      description: "",
+      category: "general",
+      config: {},
+      tools: [{ name: "read", description: "Read", input_schema: { type: "object" }, handler: async () => "ok" }],
+    };
+    const skills = new Map([[local.id, local]]);
+    if (source === "inline") {
+      wf.skills = { "sweny-core": { instruction: "Use external", mcp } };
+      expect(validateWorkflow(wf)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "INVALID_INLINE_SKILL",
+            message: expect.stringMatching(/sweny-core.*reserved/i),
+          }),
+        ]),
+      );
+    } else {
+      delete wf.skills;
+      skills.set("sweny-core", { ...local, id: "sweny-core", tools: [], instruction: "Use external", mcp });
+    }
+    await expect(run(wf, skills)).rejects.toThrow(/sweny-core.*reserved/i);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it("rejects whitespace-only inline instructions consistently before execution", async () => {
+    const wf = workflow(mcp);
+    wf.skills = { external: { instruction: "  " } };
+    expect(validateWorkflow(wf)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "INVALID_INLINE_SKILL" })]),
+    );
+    await expect(run(wf)).rejects.toThrow(/instruction/i);
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it("withholds skill and explicit external servers in dry-run", async () => {
-    await run(workflow(mcp), new Map(), true, client({ explicit: mcp }));
+    await run(
+      workflow(mcp),
+      new Map(),
+      true,
+      new ClaudeClient({
+        logger: quiet,
+        sandbox: "off",
+        envScope: false,
+        defaultMcpServers: { catalog: mcp },
+        mcpServers: { explicit: mcp },
+      }),
+    );
     for (const [{ options }] of query.mock.calls) {
       expect(options.mcpServers).toBeUndefined();
       expect(options.strictMcpConfig).toBe(true);

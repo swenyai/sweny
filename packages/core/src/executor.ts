@@ -256,13 +256,19 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       logger.info(`  dry run: withheld write tools: ${skippedWrites.join(", ")}`, { node: currentId });
     }
     const skillInstructions = resolveSkillInstructions(node.skills, skills);
+    const skillMcpServers = resolveSkillMcpServers(node.skills, skills);
 
     // Runtime guard: if this node declares skills but none resolved, the node
     // cannot do its job (e.g. "create a Linear issue" with no linear skill).
     // The startup validate() warns about this possibility, but only throw when
     // the node is actually reached — unreachable nodes with missing skills are fine.
-    // Instruction-only skills (no tools) are valid — they inject context into the prompt.
-    if (node.skills.length > 0 && resolvedSkillTools.length === 0 && skillInstructions.length === 0) {
+    // Instruction-only and resolved MCP-only skills are valid capabilities.
+    if (
+      node.skills.length > 0 &&
+      resolvedSkillTools.length === 0 &&
+      skillInstructions.length === 0 &&
+      Object.keys(skillMcpServers).length === 0
+    ) {
       throw new Error(
         `Node "${currentId}" requires skills [${node.skills.join(", ")}] but none are configured. ` +
           `Set the required environment variables and try again.`,
@@ -396,7 +402,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         signal,
         timeoutMs,
         agentAccess: resolveAgentAccess(node.skills, skills),
-        ...(dryRun ? {} : { mcpServers: resolveSkillMcpServers(node.skills, skills) }),
+        ...(dryRun ? {} : { mcpServers: skillMcpServers }),
         ...(dryRun ? { readOnly: true } : {}),
         onProgress: (message) => {
           safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
@@ -1343,6 +1349,15 @@ async function resolveNext(
  * Validate a workflow definition before execution.
  */
 function validate(workflow: Workflow, skills: Map<string, Skill>): void {
+  for (const [id, def] of Object.entries(workflow.skills ?? {})) {
+    if (!def.instruction?.trim()) {
+      throw new Error(`Inline skill "${id}" must provide a non-empty instruction`);
+    }
+    if (id === "sweny-core" && def.mcp) {
+      throw new Error(`Skill "sweny-core" is reserved for the engine MCP server; use a different skill ID`);
+    }
+  }
+
   if (!workflow.nodes[workflow.entry]) {
     throw new Error(`Entry node "${workflow.entry}" not found`);
   }
@@ -1357,9 +1372,9 @@ function validate(workflow: Workflow, skills: Map<string, Skill>): void {
     if (node.skills.length === 0) continue;
     for (const id of node.skills) {
       const skill = skills.get(id);
-      if (skill?.mcp && skill.tools.length === 0 && !skill.instruction?.trim()) {
+      if (id === "sweny-core" && skill?.mcp) {
         throw new Error(
-          `Skill "${id}" declares an MCP server but has no instruction or tools. Add an instruction describing how to use its MCP tools (node "${nodeId}").`,
+          `Skill "sweny-core" is reserved for the engine MCP server; use a different skill ID (node "${nodeId}")`,
         );
       }
     }
