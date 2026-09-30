@@ -53,11 +53,13 @@ if [ -n "$EXPECT" ]; then
   # shellcheck disable=SC2086
   v=$(printf '%s\n' $published | grep '^@sweny-ai/core@' | sed 's/.*@//' | tail -1)
   [ -n "$v" ] || v=$(npm view @sweny-ai/core version --prefer-online)
-  # Run from an empty dir: inside the monorepo npx resolves the workspace package, not npm.
-  # --prefer-online skips a stale cached packument that does not list the new version yet.
+  # Install into an empty prefix and run that exact binary. npx can resolve a
+  # globally installed @sweny-ai/core (or the monorepo workspace) instead.
   tmp=$(mktemp -d)
+  npm install --prefix "$tmp" --no-audit --no-fund --loglevel=error --prefer-online "@sweny-ai/core@$v" >/dev/null 2>&1 \
+    || { echo "could not install @sweny-ai/core@$v"; exit 3; }
   # shellcheck disable=SC2086
-  if (cd "$tmp" && npx -y --prefer-online "@sweny-ai/core@$v" $HELP_ARGS --help 2>&1) | grep -qF -- "$EXPECT"; then
+  if "$tmp/node_modules/.bin/sweny" $HELP_ARGS --help 2>&1 | grep -qF -- "$EXPECT"; then
     echo "@sweny-ai/core@$v contains: $EXPECT"
   else
     echo "@sweny-ai/core@$v does NOT contain: $EXPECT"
