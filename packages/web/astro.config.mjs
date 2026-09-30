@@ -67,6 +67,7 @@ export default defineConfig({
             { label: "Custom Workflows", slug: "workflows/custom" },
             { label: "Triage", slug: "workflows/triage" },
             { label: "Implement", slug: "workflows/implement" },
+            { label: "Recurring Packs", slug: "workflows/packs" },
             { label: "YAML Reference", slug: "workflows/yaml-reference" },
           ],
         },

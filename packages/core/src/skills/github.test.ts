@@ -290,3 +290,69 @@ describe("github_get_file input hardening", () => {
     expect(result.decoded_content).toBe("hello");
   });
 });
+
+describe("github_list_pr_files", () => {
+  const tool = github.tools.find((t) => t.name === "github_list_pr_files")!;
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is a read tool and trims patch bodies", async () => {
+    expect(tool.access).toBe("read");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(200, [
+          { filename: "src/a.ts", status: "modified", additions: 3, deletions: 1, changes: 4, patch: "@@ body" },
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const out: any = await tool.handler({ repo: "o/r", number: 7 }, ctx());
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.github.com/repos/o/r/pulls/7/files?per_page=100");
+    expect(out.count).toBe(1);
+    expect(out.truncated).toBe(false);
+    expect(out.files[0]).toEqual({ filename: "src/a.ts", status: "modified", additions: 3, deletions: 1, changes: 4 });
+  });
+});
+
+describe("github_list_dependabot_alerts", () => {
+  const tool = github.tools.find((t) => t.name === "github_list_dependabot_alerts")!;
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is a read tool and maps alerts to a compact shape", async () => {
+    expect(tool.access).toBe("read");
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, [
+        {
+          number: 5,
+          html_url: "https://github.com/o/r/security/dependabot/5",
+          dependency: { package: { name: "lodash", ecosystem: "npm" }, manifest_path: "package-lock.json" },
+          security_advisory: {
+            severity: "high",
+            ghsa_id: "GHSA-xxxx",
+            cve_id: "CVE-1",
+            summary: "Prototype pollution",
+          },
+          security_vulnerability: {
+            vulnerable_version_range: "< 4.17.21",
+            first_patched_version: { identifier: "4.17.21" },
+          },
+        },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const out: any = await tool.handler({ repo: "o/r", severity: "high" }, ctx());
+    expect(fetchMock.mock.calls[0][0]).toContain("/repos/o/r/dependabot/alerts?state=open&per_page=50&severity=high");
+    expect(out.unavailable).toBe(false);
+    expect(out.alerts[0]).toMatchObject({ package: "lodash", severity: "high", patched_version: "4.17.21" });
+  });
+
+  it("returns unavailable instead of throwing on 403", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(403, { message: "Resource not accessible" })));
+    const out: any = await tool.handler({ repo: "o/r" }, ctx());
+    expect(out).toEqual({ unavailable: true, status: 403, alerts: [] });
+  });
+
+  it("still throws on other errors", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(500, { message: "boom" })));
+    await expect(tool.handler({ repo: "o/r" }, ctx())).rejects.toThrow(/HTTP 500/);
+  });
+});
