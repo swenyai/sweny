@@ -141,7 +141,8 @@ export interface ClaudeClientOptions {
    */
   envPassthrough?: string[];
   /**
-   * SDK sandbox for agent commands: `auto` (on when CI is truthy), `on`, `off`.
+   * SDK sandbox for agent commands: `auto` (sandbox when the host supports
+   * it, else warn and run unsandboxed), `strict` (sandbox or fail), `off`.
    * Default: `SWENY_SANDBOX`, else `auto`.
    */
   sandbox?: SandboxMode;
@@ -269,6 +270,7 @@ export class ClaudeClient implements Claude {
   private sandboxMode: SandboxMode | undefined;
   private sandboxAllowedDomains: string[] | undefined;
   private sandboxProbe: (() => string | undefined) | undefined;
+  private sandboxWarned = false;
 
   constructor(opts: ClaudeClientOptions = {}) {
     this.model = opts.model;
@@ -333,9 +335,9 @@ export class ClaudeClient implements Claude {
     } = opts;
     const effectiveModel = model ?? this.model;
 
-    // #360: in CI (or when forced on) run agent commands in the SDK sandbox.
-    // Fail closed: when the sandbox is required but cannot start, the node
-    // fails here instead of running the agent unsandboxed.
+    // #360: run agent commands in the SDK sandbox. `auto` (default) falls
+    // back to unsandboxed with one loud warning when the host cannot sandbox;
+    // `strict` fails the node here instead.
     const sandbox = resolveAgentSandbox({
       env: process.env,
       mode: this.sandboxMode,
@@ -347,6 +349,12 @@ export class ClaudeClient implements Claude {
     if (sandbox.error) {
       this.logger.error(sandbox.error);
       return { status: "failed", data: { error: sandbox.error }, toolCalls: [] };
+    }
+    if (sandbox.warning && !this.sandboxWarned) {
+      this.sandboxWarned = true;
+      // GitHub Actions renders `::warning::` as a run annotation.
+      const prefix = process.env.GITHUB_ACTIONS === "true" ? "::warning title=SWEny agent sandbox::" : "";
+      this.logger.warn(`${prefix}${sandbox.warning}`);
     }
 
     // Tool-call accounting (Fix #1).

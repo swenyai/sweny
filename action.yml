@@ -112,6 +112,34 @@ runs:
         CLI_VERSION: ${{ inputs.cli-version }}
       run: npm install -g "@sweny-ai/core@${CLI_VERSION}"
 
+    # Agent sandbox deps (#360). SWENY_SANDBOX=auto (default) sandboxes agent
+    # shell commands when bubblewrap + socat work and otherwise warns and runs
+    # unsandboxed, so this step is best-effort and never fails the job.
+    - name: Install agent sandbox dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        SUDO=""
+        if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo -n"; fi
+        if ! command -v bwrap >/dev/null 2>&1 || ! command -v socat >/dev/null 2>&1; then
+          if command -v apt-get >/dev/null 2>&1; then
+            if ! { $SUDO apt-get update -qq && $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bubblewrap socat; } >/dev/null 2>&1; then
+              echo "::warning title=SWEny agent sandbox::Could not install bubblewrap/socat with apt; agent commands will run unsandboxed (SWENY_SANDBOX=auto)."
+            fi
+          else
+            echo "::notice title=SWEny agent sandbox::apt-get not found; install bubblewrap and socat to sandbox agent commands."
+          fi
+        fi
+        # Ubuntu 23.10+ restricts unprivileged user namespaces via AppArmor,
+        # which bubblewrap needs. Only relax the host kernel setting when the
+        # caller explicitly asked for SWENY_SANDBOX=strict.
+        if command -v bwrap >/dev/null 2>&1 && ! bwrap --ro-bind / / --dev /dev --proc /proc true >/dev/null 2>&1; then
+          if [ "${SWENY_SANDBOX:-}" = "strict" ]; then
+            $SUDO sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+          fi
+        fi
+        exit 0
+
     - name: Run workflow
       shell: bash
       working-directory: ${{ inputs.working-directory }}

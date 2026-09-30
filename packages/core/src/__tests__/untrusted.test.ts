@@ -72,8 +72,7 @@ describe("ClaudeClient prompts fence untrusted context", () => {
       tool: vi.fn(),
     }));
     mod = await import("../claude.js");
-    vi.stubEnv("CI", "");
-    vi.stubEnv("SWENY_SANDBOX", "");
+    vi.stubEnv("SWENY_SANDBOX", "off");
   });
 
   afterEach(() => {

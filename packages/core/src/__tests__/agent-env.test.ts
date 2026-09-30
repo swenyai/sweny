@@ -1,5 +1,5 @@
 /**
- * #360 step 1: scoped agent env + CI sandbox.
+ * #360 step 1: scoped agent env + sandbox (auto / strict / off).
  *
  * Pure helpers are tested directly; the ClaudeClient wiring is tested with
  * the SDK `query` mocked, asserting on the exact options it receives. No
@@ -109,23 +109,22 @@ describe("resolveAgentAccess", () => {
 });
 
 describe("resolveSandboxMode", () => {
-  it("auto: on in CI, off locally", () => {
-    expect(resolveSandboxMode({ CI: "true" }).enabled).toBe(true);
-    expect(resolveSandboxMode({}).enabled).toBe(false);
-    expect(resolveSandboxMode({ CI: "false" }).enabled).toBe(false);
+  it("defaults to auto everywhere, CI included", () => {
+    expect(resolveSandboxMode({})).toBe("auto");
+    expect(resolveSandboxMode({ CI: "true" })).toBe("auto");
   });
 
-  it("SWENY_SANDBOX overrides both ways", () => {
-    expect(resolveSandboxMode({ CI: "true", SWENY_SANDBOX: "off" }).enabled).toBe(false);
-    expect(resolveSandboxMode({ SWENY_SANDBOX: "on" }).enabled).toBe(true);
+  it("parses off / strict and the on alias", () => {
+    expect(resolveSandboxMode({ SWENY_SANDBOX: "off" })).toBe("off");
+    expect(resolveSandboxMode({ SWENY_SANDBOX: "false" })).toBe("off");
+    expect(resolveSandboxMode({ SWENY_SANDBOX: "strict" })).toBe("strict");
+    expect(resolveSandboxMode({ SWENY_SANDBOX: "on" })).toBe("strict");
+    expect(resolveSandboxMode({ SWENY_SANDBOX: "off" }, "strict")).toBe("strict");
   });
 
   it("unknown value warns and falls back to auto", () => {
     const warn = vi.fn();
-    expect(resolveSandboxMode({ CI: "true", SWENY_SANDBOX: "maybe" }, undefined, { warn })).toEqual({
-      mode: "auto",
-      enabled: true,
-    });
+    expect(resolveSandboxMode({ SWENY_SANDBOX: "maybe" }, undefined, { warn })).toBe("auto");
     expect(warn).toHaveBeenCalledOnce();
   });
 });
@@ -137,28 +136,42 @@ describe("checkSandboxSupport", () => {
   it("Windows is not", () => {
     expect(checkSandboxSupport("win32", "", () => true)).toMatch(/does not support platform "win32"/);
   });
-  it("Linux needs bwrap and socat on PATH", () => {
-    expect(checkSandboxSupport("linux", "/usr/bin", () => false)).toMatch(/missing bwrap and socat/);
-    expect(checkSandboxSupport("linux", "/usr/bin", (p) => p.endsWith("bwrap"))).toMatch(/missing socat/);
-    expect(checkSandboxSupport("linux", "/usr/bin", () => true)).toBeUndefined();
+  it("Linux needs bwrap and socat on PATH, with the install command", () => {
+    const works = () => undefined;
+    expect(checkSandboxSupport("linux", "/usr/bin", () => false, works)).toMatch(
+      /missing bwrap and socat on PATH \(install: sudo apt-get install -y bubblewrap socat\)/,
+    );
+    expect(checkSandboxSupport("linux", "/usr/bin", (p) => p.endsWith("bwrap"), works)).toMatch(/missing socat/);
+    expect(checkSandboxSupport("linux", "/usr/bin", () => true, works)).toBeUndefined();
+  });
+  it("Linux with binaries present still fails when bwrap cannot create a sandbox", () => {
+    expect(
+      checkSandboxSupport(
+        "linux",
+        "/usr/bin",
+        () => true,
+        () => "bwrap cannot create a sandbox (x)",
+      ),
+    ).toMatch(/bwrap cannot create a sandbox/);
   });
 });
 
 describe("resolveAgentSandbox", () => {
-  it("off locally: no settings, no error", () => {
-    expect(resolveAgentSandbox({ env: {}, probe: () => undefined })).toEqual({});
+  it("off: no settings, no error, no warning", () => {
+    expect(resolveAgentSandbox({ env: { SWENY_SANDBOX: "off" }, probe: () => undefined })).toEqual({ mode: "off" });
   });
 
-  it("CI: strict settings with default + node + configured hosts", () => {
-    const { settings, error } = resolveAgentSandbox({
-      env: { CI: "true", SWENY_SANDBOX_ALLOWED_DOMAINS: "internal.example.com, *.corp.example" },
+  it("auto on a supported host: settings with default + node + configured hosts, degrade not fail", () => {
+    const { settings, error, warning } = resolveAgentSandbox({
+      env: { SWENY_SANDBOX_ALLOWED_DOMAINS: "internal.example.com, *.corp.example" },
       nodeDomains: ["api.linear.app"],
       probe: () => undefined,
     });
     expect(error).toBeUndefined();
+    expect(warning).toBeUndefined();
     expect(settings).toMatchObject({
       enabled: true,
-      failIfUnavailable: true,
+      failIfUnavailable: false,
       allowUnsandboxedCommands: false,
       network: { strictAllowlist: true },
     });
@@ -171,18 +184,31 @@ describe("resolveAgentSandbox", () => {
     );
   });
 
-  it("CI + unsupported host: fails closed with the opt-out named", () => {
-    const r = resolveAgentSandbox({ env: { CI: "true" }, probe: () => "missing bwrap on PATH" });
+  it("strict on a supported host: failIfUnavailable true", () => {
+    const r = resolveAgentSandbox({ env: { SWENY_SANDBOX: "strict" }, probe: () => undefined });
+    expect(r.settings?.failIfUnavailable).toBe(true);
+  });
+
+  it("auto on an unsupported host: falls back unsandboxed with an actionable warning", () => {
+    const r = resolveAgentSandbox({ env: { CI: "true" }, probe: () => "missing bwrap on PATH (install: x)" });
     expect(r.settings).toBeUndefined();
-    expect(r.error).toMatch(/required \(running in CI \(CI=true\)\) but unavailable: missing bwrap/);
-    expect(r.error).toMatch(/SWENY_SANDBOX=off/);
+    expect(r.error).toBeUndefined();
+    expect(r.warning).toMatch(/unavailable: missing bwrap on PATH \(install: x\)/);
+    expect(r.warning).toMatch(/UNSANDBOXED/);
+    expect(r.warning).toMatch(/SWENY_SANDBOX=strict/);
+  });
+
+  it("strict on an unsupported host: fails closed", () => {
+    const r = resolveAgentSandbox({ env: { SWENY_SANDBOX: "strict" }, probe: () => "missing bwrap on PATH" });
+    expect(r.settings).toBeUndefined();
+    expect(r.error).toMatch(/required \(SWENY_SANDBOX=strict\) but unavailable: missing bwrap/);
   });
 });
 
 describe("applyAgentFileConfig (.sweny.yml -> SWENY_* env)", () => {
   it("maps sandbox / env-passthrough / sandbox-allowed-domains; real env wins", async () => {
     const { applyAgentFileConfig } = await import("../cli/config-file.js");
-    const env: NodeJS.ProcessEnv = { SWENY_SANDBOX: "on" };
+    const env: NodeJS.ProcessEnv = { SWENY_SANDBOX: "strict" };
     applyAgentFileConfig(
       {
         sandbox: "off",
@@ -191,7 +217,7 @@ describe("applyAgentFileConfig (.sweny.yml -> SWENY_* env)", () => {
       },
       env,
     );
-    expect(env.SWENY_SANDBOX).toBe("on");
+    expect(env.SWENY_SANDBOX).toBe("strict");
     expect(env.SWENY_ENV_PASSTHROUGH).toBe("NPM_TOKEN,FOO");
     expect(env.SWENY_SANDBOX_ALLOWED_DOMAINS).toBe("internal.example.com");
   });
@@ -201,7 +227,7 @@ describe("applyAgentFileConfig (.sweny.yml -> SWENY_* env)", () => {
     const env: NodeJS.ProcessEnv = {};
     applyAgentFileConfig({ env_passthrough: ["BAR"], sandbox: "false" }, env);
     expect(env.SWENY_ENV_PASSTHROUGH).toBe("BAR");
-    expect(resolveSandboxMode({ ...env, CI: "true" }).enabled).toBe(false);
+    expect(resolveSandboxMode(env)).toBe("off");
   });
 });
 
@@ -224,7 +250,8 @@ describe("ClaudeClient scoped env + sandbox wiring", () => {
       tool: vi.fn(),
     }));
     ClaudeClient = (await import("../claude.js")).ClaudeClient;
-    vi.stubEnv("CI", "");
+    vi.stubEnv("CI", "true");
+    vi.stubEnv("GITHUB_ACTIONS", "");
     vi.stubEnv("SWENY_SANDBOX", "");
     vi.stubEnv("SWENY_ENV_PASSTHROUGH", "");
     vi.stubEnv("SWENY_SANDBOX_ALLOWED_DOMAINS", "");
@@ -241,9 +268,11 @@ describe("ClaudeClient scoped env + sandbox wiring", () => {
   });
 
   const opts = () => mockQuery.mock.calls[0][0].options;
+  const supported = () => undefined;
+  const logger = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() });
 
   it("run: env excludes a random unlisted var; declared skill vars are present", async () => {
-    const client = new ClaudeClient({ sandboxProbe: () => undefined });
+    const client = new ClaudeClient({ sandboxProbe: supported });
     await client.run({
       instruction: "x",
       context: {},
@@ -257,75 +286,104 @@ describe("ClaudeClient scoped env + sandbox wiring", () => {
   });
 
   it("run: a skill var the node did not declare is absent", async () => {
-    await new ClaudeClient({ sandboxProbe: () => undefined }).run({ instruction: "x", context: {}, tools: [] });
+    await new ClaudeClient({ sandboxProbe: supported }).run({ instruction: "x", context: {}, tools: [] });
     expect(opts().env.GITHUB_TOKEN).toBeUndefined();
   });
 
   it("run: SWENY_ENV_PASSTHROUGH and the envPassthrough option add names", async () => {
     vi.stubEnv("SWENY_ENV_PASSTHROUGH", "SWENY_RANDOM_UNLISTED_7f3a");
-    await new ClaudeClient().run({ instruction: "x", context: {}, tools: [] });
+    await new ClaudeClient({ sandboxProbe: supported }).run({ instruction: "x", context: {}, tools: [] });
     expect(opts().env.SWENY_RANDOM_UNLISTED_7f3a).toBe("leak-me");
 
     mockQuery.mockClear();
     vi.stubEnv("SWENY_ENV_PASSTHROUGH", "");
-    await new ClaudeClient({ envPassthrough: ["GITHUB_TOKEN"] }).run({ instruction: "x", context: {}, tools: [] });
+    await new ClaudeClient({ envPassthrough: ["GITHUB_TOKEN"], sandboxProbe: supported }).run({
+      instruction: "x",
+      context: {},
+      tools: [],
+    });
     expect(opts().env.GITHUB_TOKEN).toBe("ghp_secret");
   });
 
   it("run: auth precedence still applies after scoping (OAuth strips the API key)", async () => {
     vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-x");
-    await new ClaudeClient().run({ instruction: "x", context: {}, tools: [] });
+    await new ClaudeClient({ sandboxProbe: supported }).run({ instruction: "x", context: {}, tools: [] });
     expect(opts().env.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth-x");
     expect(opts().env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
-  it("run: no sandbox option locally by default", async () => {
-    await new ClaudeClient({ sandboxProbe: () => undefined }).run({ instruction: "x", context: {}, tools: [] });
-    expect(opts().sandbox).toBeUndefined();
-  });
-
-  it("run: sandbox option passed in CI, with node hosts", async () => {
-    vi.stubEnv("CI", "true");
-    await new ClaudeClient({ sandboxProbe: () => undefined }).run({
+  it("run: auto on a supported host passes the sandbox option with node hosts (CI and local)", async () => {
+    await new ClaudeClient({ sandboxProbe: supported }).run({
       instruction: "x",
       context: {},
       tools: [],
       agentAccess: { envVars: [], domains: ["api.linear.app"] },
     });
-    expect(opts().sandbox).toMatchObject({ enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false });
+    expect(opts().sandbox).toMatchObject({ enabled: true, failIfUnavailable: false, allowUnsandboxedCommands: false });
     expect(opts().sandbox.network.allowedDomains).toContain("api.linear.app");
+
+    mockQuery.mockClear();
+    vi.stubEnv("CI", "");
+    await new ClaudeClient({ sandboxProbe: supported }).run({ instruction: "x", context: {}, tools: [] });
+    expect(opts().sandbox?.enabled).toBe(true);
   });
 
-  it("run: sandbox forced on locally via option; off in CI via SWENY_SANDBOX=off", async () => {
-    await new ClaudeClient({ sandbox: "on", sandboxProbe: () => undefined }).run({
+  it("run: auto on an unsupported host warns once and runs unsandboxed", async () => {
+    const log = logger();
+    const client = new ClaudeClient({ sandboxProbe: () => "missing bwrap and socat on PATH", logger: log });
+    const r1 = await client.run({ instruction: "x", context: {}, tools: [] });
+    await client.run({ instruction: "y", context: {}, tools: [] });
+    expect(r1.status).toBe("success");
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(opts().sandbox).toBeUndefined();
+    // Env scoping still applies when unsandboxed.
+    expect(opts().env.SWENY_RANDOM_UNLISTED_7f3a).toBeUndefined();
+    const sandboxWarns = log.warn.mock.calls.filter((c: unknown[]) => /Agent sandbox unavailable/.test(String(c[0])));
+    expect(sandboxWarns).toHaveLength(1);
+    expect(sandboxWarns[0][0]).toMatch(/missing bwrap and socat on PATH/);
+    expect(sandboxWarns[0][0]).toMatch(/SWENY_SANDBOX=strict/);
+  });
+
+  it("run: the fallback warning is a GitHub annotation under Actions", async () => {
+    vi.stubEnv("GITHUB_ACTIONS", "true");
+    const log = logger();
+    await new ClaudeClient({ sandboxProbe: () => "missing bwrap", logger: log }).run({
       instruction: "x",
       context: {},
       tools: [],
     });
-    expect(opts().sandbox?.enabled).toBe(true);
+    expect(
+      log.warn.mock.calls.some((c: unknown[]) => String(c[0]).startsWith("::warning title=SWEny agent sandbox::")),
+    ).toBe(true);
+  });
+
+  it("run: strict on an unsupported host fails closed without calling the SDK", async () => {
+    vi.stubEnv("SWENY_SANDBOX", "strict");
+    const result = await new ClaudeClient({
+      sandboxProbe: () => "missing bwrap and socat on PATH",
+      logger: logger(),
+    }).run({ instruction: "x", context: {}, tools: [] });
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+    expect(result.data.error).toMatch(/Agent sandbox is required \(SWENY_SANDBOX=strict\)/);
+  });
+
+  it("run: strict via the client option passes failIfUnavailable true; off passes nothing", async () => {
+    await new ClaudeClient({ sandbox: "strict", sandboxProbe: supported }).run({
+      instruction: "x",
+      context: {},
+      tools: [],
+    });
+    expect(opts().sandbox?.failIfUnavailable).toBe(true);
 
     mockQuery.mockClear();
-    vi.stubEnv("CI", "true");
     vi.stubEnv("SWENY_SANDBOX", "off");
-    await new ClaudeClient({ sandboxProbe: () => "missing bwrap" }).run({ instruction: "x", context: {}, tools: [] });
+    await new ClaudeClient({ sandboxProbe: supported }).run({ instruction: "x", context: {}, tools: [] });
     expect(opts().sandbox).toBeUndefined();
   });
 
-  it("run: CI + unsupported sandbox fails closed without calling the SDK", async () => {
-    vi.stubEnv("CI", "true");
-    const result = await new ClaudeClient({ sandboxProbe: () => "missing bwrap and socat on PATH" }).run({
-      instruction: "x",
-      context: {},
-      tools: [],
-    });
-    expect(mockQuery).not.toHaveBeenCalled();
-    expect(result.status).toBe("failed");
-    expect(result.data.error).toMatch(/Agent sandbox is required/);
-    expect(result.data.error).toMatch(/SWENY_SANDBOX=off/);
-  });
-
   it("evaluate/ask: scoped env, no sandbox (no tools to sandbox)", async () => {
-    vi.stubEnv("CI", "true");
+    vi.stubEnv("SWENY_SANDBOX", "strict");
     const client = new ClaudeClient({ sandboxProbe: () => "unsupported" });
     await client.evaluate({ question: "q", context: {}, choices: [{ id: "a", description: "a" }] });
     expect(opts().env.SWENY_RANDOM_UNLISTED_7f3a).toBeUndefined();

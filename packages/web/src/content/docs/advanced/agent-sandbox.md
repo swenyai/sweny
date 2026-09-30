@@ -1,6 +1,6 @@
 ---
 title: Agent sandbox
-description: What the agent subprocess can see and reach, the CI sandbox default, and how to override both.
+description: What the agent subprocess can see and reach, the sandbox modes, and how to override them.
 ---
 
 Every node runs headless Claude Code over input that may be attacker-controlled: issue bodies, alert payloads, fetched pages, earlier steps' output. SWEny bounds what that agent can see and reach in three ways.
@@ -28,23 +28,31 @@ Everything else is dropped. A node without the `linear` skill never sees `LINEAR
 
 MCP servers that SWEny wires for a skill get their credentials explicitly, so they keep working.
 
-## CI sandbox
+## Sandbox
 
-When `CI` is truthy (GitHub Actions, GitLab CI, and most runners set it), the agent's shell commands run in the Claude Code sandbox:
+By default (`sandbox: auto`, locally and in CI), the agent's shell commands run in the Claude Code sandbox whenever the host supports it:
 
 - Network egress is limited to an allowlist: source hosting and package registries (`github.com`, `api.github.com`, `*.githubusercontent.com`, `registry.npmjs.org`, `pypi.org`, `proxy.golang.org`, `crates.io`, `rubygems.org`, ...), plus the provider hosts of the node's skills (`api.linear.app` for `linear`, `*.sentry.io` for `sentry`, `*.datadoghq.com` for `datadog`, ...), plus your `sandbox-allowed-domains`.
 - Commands cannot opt out of the sandbox.
 - The agent's own Anthropic credentials are unset inside sandboxed commands, and `~/.claude/.credentials.json` is unreadable.
 
-Locally the sandbox is off by default, so the agent keeps full access to your machine and repo. Turn it on with `sandbox: on`.
+The sandbox needs macOS, or Linux with `bubblewrap` and `socat` installed and able to create user namespaces. The `swenyai/sweny` Action installs both on Linux runners for you. Elsewhere:
 
-The sandbox needs macOS, or Linux with `bubblewrap` and `socat` installed:
-
-```yaml
-- run: sudo apt-get install -y bubblewrap socat
+```bash
+sudo apt-get install -y bubblewrap socat
 ```
 
-If the sandbox is required and cannot start, the node **fails closed** with a message naming the fix. It never falls back to running unsandboxed. To opt out, set `SWENY_SANDBOX=off` (or `sandbox: off`).
+Three modes:
+
+| Mode | Host supports the sandbox | Host does not |
+|------|---------------------------|---------------|
+| `auto` (default) | Sandboxed | One loud warning naming what is missing, then runs **unsandboxed**. Unattended CI never breaks on a missing dependency. |
+| `strict` | Sandboxed | The node **fails closed** with the same message. Never runs unsandboxed. |
+| `off` | Not sandboxed | Not sandboxed |
+
+Env scoping and untrusted-input fencing apply in every mode.
+
+On Ubuntu 23.10 and later, AppArmor can block the unprivileged user namespaces bubblewrap needs. SWEny reports this in the warning. The fix is `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, which changes a host kernel setting, so the Action only applies it when you set `SWENY_SANDBOX: strict` in the step's `env`.
 
 :::note[Scope]
 The sandbox covers the agent's shell commands. SWEny's own skill tools run in the SWEny process, and MCP servers run outside the sandbox; both only receive the credentials wired for them.
@@ -60,7 +68,7 @@ Workflow input (issues, alerts, tickets), earlier steps' output, and `context:` 
 
 | `.sweny.yml` | Env var | Values | Default |
 |--------------|---------|--------|---------|
-| `sandbox` | `SWENY_SANDBOX` | `auto` (on when `CI` is set), `on`, `off` | `auto` |
+| `sandbox` | `SWENY_SANDBOX` | `auto`, `strict`, `off` (see [Sandbox](#sandbox)) | `auto` |
 | `sandbox-allowed-domains` | `SWENY_SANDBOX_ALLOWED_DOMAINS` | List of hosts; `*.example.com` wildcards allowed | none |
 | `env-passthrough` | `SWENY_ENV_PASSTHROUGH` | List of env var names; `"*"` inherits everything (not recommended) | none |
 

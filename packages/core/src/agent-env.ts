@@ -7,17 +7,19 @@
  * Bash with unrestricted network egress. Two controls live here:
  *
  *  1. {@link buildAgentEnv}: the subprocess env is an allowlist, not a copy.
- *  2. {@link resolveAgentSandbox}: in CI the SDK `sandbox` option is enabled
- *     with a network allowlist and the agent's own credentials denied to
- *     sandboxed commands. Fails closed when the sandbox cannot start.
+ *  2. {@link resolveAgentSandbox}: the SDK `sandbox` option is enabled with a
+ *     network allowlist and the agent's own credentials denied to sandboxed
+ *     commands. `auto` (default) falls back to unsandboxed with one loud
+ *     warning when the host cannot sandbox; `strict` fails closed.
  *
  * Configuration (env wins over `.sweny.yml`, see `applyAgentFileConfig` in
  * cli/config-file.ts):
  *   SWENY_ENV_PASSTHROUGH          / env-passthrough          extra var names ("*" = inherit all)
- *   SWENY_SANDBOX                  / sandbox                  auto (default) | on | off
+ *   SWENY_SANDBOX                  / sandbox                  auto (default) | strict | off
  *   SWENY_SANDBOX_ALLOWED_DOMAINS  / sandbox-allowed-domains  extra hosts for sandboxed commands
  */
 
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
@@ -242,27 +244,48 @@ export function resolveAgentAccess(skillIds: readonly string[], skills: Map<stri
 
 // ─── SDK sandbox ─────────────────────────────────────────────────
 
-export type SandboxMode = "auto" | "on" | "off";
+/**
+ * `off`: never sandbox. `auto` (default, CI included): sandbox when the host
+ * supports it, otherwise warn once and run unsandboxed so unattended CI never
+ * breaks on a missing dependency. `strict`: sandbox or fail closed.
+ */
+export type SandboxMode = "off" | "auto" | "strict";
 
 /**
- * Decide whether the sandbox is on. `SWENY_SANDBOX` (or the explicit
- * `mode`): `on`/`off` force it; `auto` (default) turns it on when `CI` is
- * truthy, so CI gets the strict default and local runs keep full access to
- * the developer's machine.
+ * Parse the sandbox mode from the explicit `mode` or `SWENY_SANDBOX`.
+ * Accepts `off|false|0`, `auto|""`, `strict|on|true|1` (`on` is an alias for
+ * `strict`). Unknown values warn and fall back to `auto`.
  */
 export function resolveSandboxMode(
   env: Record<string, string | undefined>,
-  mode?: SandboxMode,
+  mode?: string,
   logger?: Pick<Logger, "warn">,
-): { mode: SandboxMode; enabled: boolean } {
-  let m: SandboxMode = "auto";
+): SandboxMode {
   const raw = (mode ?? env.SWENY_SANDBOX ?? "").trim().toLowerCase();
-  if (raw === "on" || raw === "true" || raw === "1") m = "on";
-  else if (raw === "off" || raw === "false" || raw === "0") m = "off";
-  else if (raw === "auto" || raw === "") m = "auto";
-  else logger?.warn(`SWENY_SANDBOX="${raw}" is not one of auto|on|off; using auto`);
-  const enabled = m === "on" || (m === "auto" && truthy(env.CI));
-  return { mode: m, enabled };
+  if (raw === "off" || raw === "false" || raw === "0") return "off";
+  if (raw === "strict" || raw === "on" || raw === "true" || raw === "1") return "strict";
+  if (raw !== "auto" && raw !== "") logger?.warn(`SWENY_SANDBOX="${raw}" is not one of off|auto|strict; using auto`);
+  return "auto";
+}
+
+/** Functional bubblewrap check: can it actually create a sandbox on this host? */
+function bwrapWorks(): string | undefined {
+  try {
+    execFileSync("bwrap", ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "true"], {
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: 10_000,
+    });
+    return undefined;
+  } catch (err) {
+    const stderr = String((err as { stderr?: unknown }).stderr ?? (err as Error).message ?? "").trim();
+    const userns = /user namespace|uid map|setting up uid|Operation not permitted|Permission denied/i.test(stderr);
+    return (
+      `bwrap cannot create a sandbox (${stderr.split("\n")[0] || "unknown error"})` +
+      (userns
+        ? "; unprivileged user namespaces look restricted (Ubuntu 23.10+: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)"
+        : "")
+    );
+  }
 }
 
 /**
@@ -270,29 +293,39 @@ export function resolveSandboxMode(
  * string when it cannot, undefined when it looks supported.
  *
  * macOS uses the built-in `sandbox-exec`. Linux needs `bwrap` (bubblewrap)
- * and `socat` on PATH. Anything else is unsupported. This is a preflight:
- * the SDK is also told `failIfUnavailable: true`, so a host that passes this
- * check but still cannot start the sandbox fails in the SDK, not open.
+ * and `socat` on PATH, and bwrap must be able to create a namespace
+ * (`bwrapCheck`, a real `bwrap ... true` run by default). Anything else is
+ * unsupported.
  */
 export function checkSandboxSupport(
   platform: NodeJS.Platform = process.platform,
   pathEnv: string = process.env.PATH ?? "",
   exists: (p: string) => boolean = existsSync,
+  bwrapCheck: () => string | undefined = bwrapWorks,
 ): string | undefined {
   if (platform === "darwin") return undefined;
   if (platform !== "linux") return `the Claude Code sandbox does not support platform "${platform}"`;
   const dirs = pathEnv.split(path.delimiter).filter(Boolean);
   const missing = ["bwrap", "socat"].filter((bin) => !dirs.some((d) => exists(path.join(d, bin))));
   if (missing.length > 0) {
-    return `missing ${missing.join(" and ")} on PATH (install: apt-get install -y bubblewrap socat)`;
+    return `missing ${missing.join(" and ")} on PATH (install: sudo apt-get install -y bubblewrap socat)`;
   }
-  return undefined;
+  return bwrapCheck();
+}
+
+let cachedProbe: { result: string | undefined } | undefined;
+/** {@link checkSandboxSupport} for this host, computed once per process. */
+function defaultProbe(): string | undefined {
+  if (!cachedProbe) cachedProbe = { result: checkSandboxSupport() };
+  return cachedProbe.result;
 }
 
 /**
  * The SDK sandbox settings used when the sandbox is on.
  *
- * - `failIfUnavailable: true`: the SDK errors instead of running unsandboxed.
+ * - `failIfUnavailable`: true under `strict` (the SDK errors instead of
+ *   running unsandboxed); false under `auto`, so a host that passes the
+ *   preflight but still cannot start the sandbox degrades instead of failing.
  * - `allowUnsandboxedCommands: false`: the model cannot escape via the
  *   `dangerouslyDisableSandbox` parameter. Required, because nodes run under
  *   `bypassPermissions` (#365) which would otherwise auto-approve the escape.
@@ -301,10 +334,13 @@ export function checkSandboxSupport(
  * - `credentials`: the agent's own Anthropic credentials are unset for
  *   sandboxed commands, and the Claude Code credentials file is unreadable.
  */
-export function buildSandboxSettings(domains: readonly string[], home: string = homedir()): SandboxSettings {
+export function buildSandboxSettings(
+  domains: readonly string[],
+  opts: { failIfUnavailable?: boolean; home?: string } = {},
+): SandboxSettings {
   return {
     enabled: true,
-    failIfUnavailable: true,
+    failIfUnavailable: opts.failIfUnavailable ?? true,
     autoAllowBashIfSandboxed: true,
     allowUnsandboxedCommands: false,
     network: {
@@ -313,7 +349,7 @@ export function buildSandboxSettings(domains: readonly string[], home: string = 
     },
     credentials: {
       envVars: AGENT_AUTH_VARS.map((name) => ({ name, mode: "deny" as const })),
-      files: [{ path: path.join(home, ".claude", ".credentials.json"), mode: "deny" as const }],
+      files: [{ path: path.join(opts.home ?? homedir(), ".claude", ".credentials.json"), mode: "deny" as const }],
     },
   };
 }
@@ -326,33 +362,59 @@ export interface ResolveAgentSandboxOpts {
   allowedDomains?: readonly string[];
   /** Per-node hosts from {@link resolveAgentAccess}. */
   nodeDomains?: readonly string[];
-  /** Preflight probe; test seam. Defaults to {@link checkSandboxSupport}. */
+  /** Preflight probe; test seam. Defaults to {@link checkSandboxSupport}, cached per process. */
   probe?: () => string | undefined;
   logger?: Pick<Logger, "warn">;
+}
+
+export interface AgentSandboxResolution {
+  mode: SandboxMode;
+  /** SDK `sandbox` option; absent when running unsandboxed. */
+  settings?: SandboxSettings;
+  /** `strict` only: the host cannot sandbox. Callers must fail the call. */
+  error?: string;
+  /** `auto` only: the host cannot sandbox, running unsandboxed. Log it loudly, once. */
+  warning?: string;
 }
 
 /**
  * Resolve the `sandbox` query option for one agent call.
  *
- * Returns `{}` when the sandbox is off, `{ settings }` when on, and
- * `{ error }` when it is on but the host cannot run it. Callers must fail the
- * call on `error` (fail closed), never fall back to running unsandboxed.
+ * - `off`: no settings.
+ * - supported host: `{ settings }`.
+ * - unsupported host under `auto`: `{ warning }`, run unsandboxed (back-compat:
+ *   unattended CI must not break on a missing dependency).
+ * - unsupported host under `strict`: `{ error }`, fail closed.
  */
-export function resolveAgentSandbox(opts: ResolveAgentSandboxOpts): { settings?: SandboxSettings; error?: string } {
-  const { enabled, mode } = resolveSandboxMode(opts.env, opts.mode, opts.logger);
-  if (!enabled) return {};
+export function resolveAgentSandbox(opts: ResolveAgentSandboxOpts): AgentSandboxResolution {
+  const mode = resolveSandboxMode(opts.env, opts.mode, opts.logger);
+  if (mode === "off") return { mode };
 
-  const reason = (opts.probe ?? (() => checkSandboxSupport()))();
+  const reason = (opts.probe ?? defaultProbe)();
   if (reason) {
-    const why = mode === "on" ? "sandbox is set to on" : "running in CI (CI=true)";
+    if (mode === "strict") {
+      return {
+        mode,
+        error:
+          `Agent sandbox is required (SWENY_SANDBOX=strict) but unavailable: ${reason}. ` +
+          `Refusing to run the agent unsandboxed. Fix the host, or set SWENY_SANDBOX=auto to fall back with a warning.`,
+      };
+    }
     return {
-      error:
-        `Agent sandbox is required (${why}) but unavailable: ${reason}. ` +
-        `Refusing to run the agent unsandboxed. To opt out, set SWENY_SANDBOX=off ` +
-        `(or \`sandbox: off\` in .sweny.yml).`,
+      mode,
+      warning:
+        `Agent sandbox unavailable: ${reason}. Running agent shell commands UNSANDBOXED ` +
+        `(network and filesystem unrestricted; env scoping and untrusted-input fencing still apply). ` +
+        `Fix the host to sandbox, set SWENY_SANDBOX=strict (or \`sandbox: strict\` in .sweny.yml) to fail instead, ` +
+        `or SWENY_SANDBOX=off to silence this.`,
     };
   }
 
   const extra = opts.allowedDomains ?? parseList(opts.env.SWENY_SANDBOX_ALLOWED_DOMAINS);
-  return { settings: buildSandboxSettings([...DEFAULT_SANDBOX_DOMAINS, ...(opts.nodeDomains ?? []), ...extra]) };
+  return {
+    mode,
+    settings: buildSandboxSettings([...DEFAULT_SANDBOX_DOMAINS, ...(opts.nodeDomains ?? []), ...extra], {
+      failIfUnavailable: mode === "strict",
+    }),
+  };
 }
