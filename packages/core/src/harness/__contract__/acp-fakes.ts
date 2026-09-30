@@ -76,8 +76,23 @@ export function createAcpProcessFake(): AcpProcessFake {
       .readdirSync(dir)
       .filter((f) => /^capture-\d+\.json$/.test(f))
       .sort((a, b) => parseInt(a.slice(8), 10) - parseInt(b.slice(8), 10));
-  const raw = (): AcpFakeCapture[] =>
-    captureFiles().map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as AcpFakeCapture);
+  /**
+   * Read one capture. The fake renames each save into place, so this should
+   * parse first try; the bounded retry (50 x 10 ms, then the real error) covers
+   * a file the filesystem shows mid-replace, and never waits past 0.5 s.
+   */
+  const readCapture = (f: string): AcpFakeCapture => {
+    const wait = new Int32Array(new SharedArrayBuffer(4));
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as AcpFakeCapture;
+      } catch (err) {
+        if (attempt >= 49) throw err;
+        Atomics.wait(wait, 0, 0, 10);
+      }
+    }
+  };
+  const raw = (): AcpFakeCapture[] => captureFiles().map(readCapture);
   const writeScript = (value: unknown) => fs.writeFileSync(path.join(dir, "script.json"), JSON.stringify(value));
 
   const emptyCapture = (): FakeCapture => ({
