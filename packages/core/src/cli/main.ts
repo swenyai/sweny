@@ -23,7 +23,7 @@ import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
 import { loadAndValidateWorkflow } from "../loader.js";
 import { validateRuntimeInput } from "../inputs.js";
-import { mergeDryRunIntoInput, parseRunBudgetFlags } from "./workflow-input.js";
+import { mergeDryRunIntoInput, parseInputFlag, parseRunBudgetFlags } from "./workflow-input.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -119,7 +119,7 @@ applyAgentFileConfig(loadConfigFile());
 
 const program = new Command()
   .name("sweny")
-  .description("SWEny CLI \u2014 autonomous engineering workflows")
+  .description("Workflows for coding agents. One set of rules, a receipt for every run.")
   .version(version);
 
 // ── sweny new ─────────────────────────────────────────────────────────
@@ -762,8 +762,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
 
     process.exit(0);
   } catch (err) {
-    const crashMsg = err instanceof Error ? err.message : String(err);
-    console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
+    console.error(formatCrashError(err));
     // Finalize the cloud run as failed (covers thrown errors, incl.
     // RouteEvaluationError). Without this a crashed implement run stays
     // "running" in cloud forever.
@@ -978,14 +977,13 @@ export async function workflowRunAction(
   let workflowInput: Record<string, unknown>;
 
   if (options.input && typeof options.input === "string") {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(options.input as string);
-    } catch {
-      console.error(chalk.red("  --input must be valid JSON"));
+    const parsedInput = parseInputFlag(options.input);
+    if (!parsedInput.ok) {
+      for (const line of parsedInput.lines) console.error(chalk.red(`  ${line}`));
       process.exit(1);
       return;
     }
+    const parsed = parsedInput.value;
     // Validate against the workflow's declared `inputs` contract (when present).
     // Workflows without an `inputs` block pass through unchanged.
     const validated = validateRuntimeInput(workflow.inputs, parsed);
@@ -1185,8 +1183,7 @@ export async function workflowRunAction(
     console.log(`  ${renderReceiptLine(receipt, isTTY)}\n`);
     process.exit(0);
   } catch (err) {
-    const crashMsg = err instanceof Error ? err.message : String(err);
-    console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
+    console.error(formatCrashError(err));
     runLogger.flush();
     recordHistory(nodeTimer.lastResults, undefined, true);
     console.error(`  ${renderReceiptLine(summarizeRun(new Map(), Date.now() - runStart, true), isTTY)}\n`);
@@ -1346,7 +1343,7 @@ workflowCmd
         }
       }
     } catch (err) {
-      console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+      console.error(formatCrashError(err));
       process.exit(1);
     }
   });
@@ -1419,7 +1416,7 @@ workflowCmd
         }
       }
     } catch (err) {
-      console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+      console.error(formatCrashError(err));
       process.exit(1);
     }
   });

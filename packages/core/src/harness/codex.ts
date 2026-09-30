@@ -58,6 +58,13 @@ import { buildNodePrompt } from "./prompts.js";
 import { makeAbort } from "./abort.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
+import {
+  defaultSandboxWrapper,
+  prepareAgentSpawn,
+  wrappersFrom,
+  type AgentSpawn,
+  type SandboxWrapper,
+} from "./sandbox-wrapper.js";
 import { TOKEN_ENV } from "./tool-bridge/protocol.js";
 
 export { CODEX_CAPABILITIES };
@@ -109,6 +116,22 @@ const DENY_NAME_TO_CLASSES: Readonly<Record<string, readonly ToolClass[]>> = {
   spawn_agent: ["subagent"],
 };
 
+/**
+ * Hosts Codex itself needs (its model API and ChatGPT sign-in), always allowed
+ * through the sandbox wrapper, plus the host of `OPENAI_BASE_URL` when set.
+ */
+export function codexBackendHosts(env: Record<string, string | undefined> = process.env): string[] {
+  const hosts = ["api.openai.com", "chatgpt.com", "auth.openai.com"];
+  if (env.OPENAI_BASE_URL) {
+    try {
+      hosts.push(new URL(env.OPENAI_BASE_URL).host);
+    } catch {
+      // not a URL: nothing to add
+    }
+  }
+  return hosts;
+}
+
 /** Codex item kinds that are tool calls; the turn watchdog counts these. */
 const TOOL_ITEM_KINDS = new Set([
   "command_execution",
@@ -144,6 +167,11 @@ export interface CodexHarnessOptions {
   sandbox?: SandboxMode;
   /** Sandbox preflight probe (test seam). Returns a reason when the host cannot sandbox. */
   sandboxProbe?: () => string | undefined;
+  /**
+   * The host's process sandbox wrapper (#360 step 2). `undefined` = detect
+   * srt once per process; `null` = none (test seam).
+   */
+  sandboxWrapper?: SandboxWrapper | null;
   /** `strict` refuses a node with unenforceable opinions. Default: {@link resolveHarnessPolicy}. */
   policy?: HarnessPolicyMode;
   /** The Codex CLI. Default: `SWENY_CODEX_PATH`, else `codex` on PATH. Test seam for the fake. */
@@ -325,6 +353,8 @@ export class CodexHarness implements AgentHarness {
   private sandboxMode: SandboxMode | undefined;
   private sandboxProbe: (() => string | undefined) | undefined;
   private sandboxWarned = false;
+  private sandboxWrapper: SandboxWrapper | null | undefined;
+  private loginWarned = false;
   private policyMode: HarnessPolicyMode;
   private codexCommand: { command: string; args: string[] };
   private toolBridgeShim: { command: string; args: string[] } | undefined;
@@ -344,6 +374,7 @@ export class CodexHarness implements AgentHarness {
     this.envScope = opts.envScope;
     this.sandboxMode = opts.sandbox;
     this.sandboxProbe = opts.sandboxProbe;
+    this.sandboxWrapper = opts.sandboxWrapper;
     this.policyMode = opts.policy ?? resolveHarnessPolicy(process.env, undefined, this.logger);
     this.codexCommand = opts.codexCommand ?? { command: process.env.SWENY_CODEX_PATH || "codex", args: [] };
     this.toolBridgeShim = opts.toolBridgeShim;
@@ -423,8 +454,7 @@ export class CodexHarness implements AgentHarness {
   }
 
   /** Resolve the Codex `--sandbox` value for a normal (not read-only) run. */
-  private resolveSandbox(): { mode: "workspace-write" | "danger-full-access"; error?: string } {
-    const mode = resolveSandboxMode(process.env, this.sandboxMode, this.logger);
+  private resolveSandbox(mode: SandboxMode): { mode: "workspace-write" | "danger-full-access"; error?: string } {
     if (mode === "off") return { mode: "danger-full-access" };
     const reason = (this.sandboxProbe ?? (() => checkSandboxSupport()))();
     if (!reason) return { mode: "workspace-write" };
@@ -510,8 +540,8 @@ export class CodexHarness implements AgentHarness {
 
   /** Spawn codex exec, feed the prompt on stdin, and read JSONL until it exits. */
   private async exec(opts: {
-    args: string[];
-    env: Record<string, string>;
+    /** What to spawn: `codex exec ...`, or the sandbox wrapper around it. */
+    spawn: AgentSpawn;
     prompt: string;
     timeoutMs?: number;
     signal?: AbortSignal;
@@ -539,9 +569,9 @@ export class CodexHarness implements AgentHarness {
     }
     let child: ChildProcess;
     try {
-      child = spawn(this.codexCommand.command, opts.args, {
-        cwd: this.cwd,
-        env: opts.env,
+      child = spawn(opts.spawn.command, opts.spawn.args, {
+        cwd: opts.spawn.cwd,
+        env: opts.spawn.env,
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch (err) {
@@ -724,24 +754,37 @@ export class CodexHarness implements AgentHarness {
 
   /**
    * Run a node. The gate runs first: in strict mode a node whose opinions
-   * Codex cannot honor is refused before Codex starts.
+   * Codex cannot honor is refused before Codex starts. With a sandbox mode
+   * other than off, the whole Codex process runs inside the host's process
+   * sandbox wrapper (#360 step 2) when there is one, which also keeps the
+   * node's per-host egress allowlist that Codex cannot keep itself.
    */
   async run(req: HarnessRunRequest): Promise<HarnessRunResult> {
     const maxTurns = req.maxTurns ?? this.maxTurns;
-    const policy = this.compilePolicy(req, maxTurns);
-    const gate = policyGate(this.capabilities, policy);
+    const mode: SandboxMode = req.policy?.sandbox ?? resolveSandboxMode(process.env, this.sandboxMode, this.logger);
+    const policy: NodePolicy = { ...this.compilePolicy(req, maxTurns), sandbox: mode };
+    // Codex's network is one switch, not a host list, so any sandbox mode but
+    // off needs the process wrapper for full containment.
+    const needsWrapper = mode !== "off" && !(this.capabilities.sandbox.fs && this.capabilities.sandbox.network);
+    const wrapper =
+      needsWrapper && this.sandboxWrapper !== null
+        ? (this.sandboxWrapper ?? (await defaultSandboxWrapper()).wrapper)
+        : undefined;
+    const gate = policyGate(this.capabilities, policy, wrappersFrom(wrapper));
+    let degraded = gate.degraded;
     const tag = (r: NodeResult, extra: string[] = []): HarnessRunResult => ({
       ...r,
       harness: this.info(),
-      degraded: [...gate.degraded, ...extra],
+      degraded: [...degraded, ...extra],
     });
-
-    if (gate.refuse) {
-      const msg = `codex refused this node: ${gate.refuse}`;
+    const refused = (why: string): HarnessRunResult => {
+      const msg = `codex refused this node: ${why}`;
       this.logger.error(msg);
       // `refused` keeps fail_soft from softening a policy refusal (executor.ts).
       return tag({ status: "failed", data: { error: msg, refused: true }, toolCalls: [] });
-    }
+    };
+
+    if (gate.refuse) return refused(gate.refuse);
 
     const pre = await this.preflight();
     if (!pre.ok) {
@@ -755,15 +798,27 @@ export class CodexHarness implements AgentHarness {
 
     let sandbox: "read-only" | "workspace-write" | "danger-full-access" = "read-only";
     if (!readOnly) {
-      const s = this.resolveSandbox();
-      if (s.error) {
-        this.logger.error(s.error);
-        return tag({ status: "failed", data: { error: s.error }, toolCalls: [] });
+      if (wrapper) {
+        // The wrapper contains the whole process; Codex's own sandbox nested
+        // inside it would only get in the way.
+        sandbox = "danger-full-access";
+      } else {
+        const s = this.resolveSandbox(mode);
+        if (s.error) {
+          this.logger.error(s.error);
+          return tag({ status: "failed", data: { error: s.error }, toolCalls: [] });
+        }
+        sandbox = s.mode;
       }
-      sandbox = s.mode;
     }
 
     const env = this.buildEnv(req.agentAccess?.envVars);
+    if (wrapper && !env.CODEX_API_KEY && !env.CODEX_ACCESS_TOKEN && !this.loginWarned) {
+      this.loginWarned = true;
+      this.logger.warn(
+        "Codex runs inside the sandbox wrapper, where a stored `codex login` is not readable; set CODEX_API_KEY or OPENAI_API_KEY.",
+      );
+    }
     const extraDegraded: string[] = [];
     let bridge: ToolBridge | undefined;
     let scratch: string | undefined;
@@ -825,18 +880,37 @@ export class CodexHarness implements AgentHarness {
         "-",
       ];
 
-      const execOnce = (withSchema: boolean) =>
-        this.exec({
-          args: argsFor(withSchema),
-          env,
-          prompt,
-          timeoutMs: req.timeoutMs,
-          signal: req.signal,
-          maxToolCalls: maxTurns,
-          onProgress: req.onProgress,
+      // Gate and (maybe) wrap each spawn; the wrapper's scratch goes away with the process.
+      const execOnce = async (withSchema: boolean): Promise<ExecOutcome | { refuse: string }> => {
+        const prep = await prepareAgentSpawn({
+          caps: this.capabilities,
+          policy,
+          spawn: { command: this.codexCommand.command, args: argsFor(withSchema), env, cwd: this.cwd },
+          wrapper: wrapper ?? null,
+          harnessEgress: codexBackendHosts(),
+          env: process.env,
         });
+        degraded = prep.degraded;
+        if (prep.refuse) {
+          await prep.cleanup();
+          return { refuse: prep.refuse };
+        }
+        try {
+          return await this.exec({
+            spawn: prep.spawn,
+            prompt,
+            timeoutMs: req.timeoutMs,
+            signal: req.signal,
+            maxToolCalls: maxTurns,
+            onProgress: req.onProgress,
+          });
+        } finally {
+          await prep.cleanup();
+        }
+      };
 
       let out = await execOnce(schemaArgs.length > 0);
+      if ("refuse" in out) return refused(out.refuse);
       // OpenAI strict structured outputs reject some JSON schemas. When Codex
       // fails on the schema before doing anything, run once more without the
       // native schema: sweny still asks for it in the prompt and checks it.
@@ -852,7 +926,9 @@ export class CodexHarness implements AgentHarness {
           : "the output schema is not OpenAI strict-compatible";
         extraDegraded.push(`structured_output: ${why}; sweny parsed and checked the output instead`);
         this.logger.warn(`  codex: ${why}; retrying without --output-schema`);
-        out = await execOnce(false);
+        const again = await execOnce(false);
+        if ("refuse" in again) return refused(again.refuse);
+        out = again;
       }
 
       return tag(this.toResult(out, req.outputSchema, req.timeoutMs), extraDegraded);
@@ -938,8 +1014,7 @@ export class CodexHarness implements AgentHarness {
       "-",
     ];
     const out = await this.exec({
-      args,
-      env: this.buildEnv(),
+      spawn: { command: this.codexCommand.command, args, env: this.buildEnv(), cwd: this.cwd },
       prompt: req.prompt,
       timeoutMs: req.timeoutMs,
       signal: req.signal,

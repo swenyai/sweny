@@ -9,7 +9,7 @@
  *
  * Each case passes, or is skipped only where the adapter's declared
  * `capabilities` say the opinion is not native (the skip must match the
- * declaration). Fourteen cases, one `it` each, so a report reads "14 passed".
+ * declaration). Fifteen cases, one `it` each, so a report reads "15 passed".
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -19,7 +19,9 @@ import { UNTRUSTED_DATA_NOTICE } from "../../untrusted.js";
 import { ask as coreAsk, evaluate as coreEvaluate } from "../prompts.js";
 import { nativeDenyClasses, policyGate } from "../policy.js";
 import type { AgentHarness, HarnessRunRequest, NodePolicy, ToolClass } from "../types.js";
+import type { SandboxWrapper } from "../sandbox-wrapper.js";
 import { AMBIENT_MCP_CANARY, type HarnessFakes } from "./fakes.js";
+import { sandboxWrapperCase } from "./sandbox.js";
 import {
   EXIT_CASES,
   FULL_USAGE,
@@ -36,6 +38,11 @@ export interface MakeOptions {
   logger: Logger;
   /** Turn the harness's native sandbox on (default off, so cases never depend on the host). */
   sandbox?: boolean;
+  /**
+   * The host's process sandbox wrapper (#360 step 2). `null` = none available;
+   * `undefined` = the adapter's default. Only case 15 sets it.
+   */
+  sandboxWrapper?: SandboxWrapper | null;
 }
 
 /**
@@ -88,6 +95,7 @@ export const CONTRACT_CASE_NAMES = [
   "12 complete(): no tools, no MCP, null on failure, evaluate fails closed",
   "13 capabilities honesty: every native declaration reaches the agent",
   "14 cleanup: nothing is left running or on disk after success, failure and abort",
+  "15 sandbox wrapper: no native sandbox means the agent runs only inside the wrapper, and strict refuses without one",
 ] as const;
 
 export interface ContractSuiteOptions {
@@ -190,7 +198,7 @@ export function runContractSuite(
       },
 
       // 4
-      async (skip) => {
+      async () => {
         const { h } = await fresh();
         const caps = h.capabilities;
         const native = nativeDenyClasses(caps);
@@ -212,8 +220,9 @@ export function runContractSuite(
             expect(strict.refuse, `${c} strict`).toBeTypeOf("string");
           }
         }
-        // The legacy native-name passthrough reaches the agent.
-        if (caps.builtinDeny !== "by-name") return skip("builtinDeny is not by-name");
+        // The legacy native-name passthrough reaches the agent. Only a by-name
+        // harness takes names verbatim; the class checks above ran for every harness.
+        if (caps.builtinDeny !== "by-name") return;
         fakes.script(DONE);
         await h.run(
           req({ disallowedTools: ["Bash"], policy: { readOnly: false, deny: [], egress: [], strict: false } }),
@@ -536,6 +545,11 @@ export function runContractSuite(
         clearTimeout(timer);
         expect(fakes.captured().stopped, "abort: stopped").toBe(true);
         expect(fakes.leftovers(), "abort: leftovers").toEqual([]);
+      },
+
+      // 15
+      async (skip) => {
+        await sandboxWrapperCase(make, fakes, skip);
       },
     ];
 

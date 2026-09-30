@@ -1,9 +1,10 @@
 ---
-title: SWEny
-description: Turn natural language into reliable AI workflows — describe a task, get a DAG, run it
+title: Workflows for coding agents
+description: SWEny runs DAG workflows on coding agents under one set of rules, and ends every run with a receipt.
 template: splash
 hero:
-  tagline: "Describe a task. Get a workflow. Run it."
+  title: SWEny
+  tagline: "Workflows for coding agents. One set of rules, a receipt for every run."
   actions:
     - text: Get Started
       link: /getting-started/quick-start/
@@ -85,7 +86,7 @@ SWEny ships two production-ready workflows you can run immediately:
 <CardGrid>
   <Card title="Triage" icon="warning">
     Monitors your observability platform for errors, investigates root causes, creates issues, writes fixes, and opens
-    PRs — automatically. [Learn more](/workflows/triage/)
+    PRs, automatically. [Learn more](/workflows/triage/)
   </Card>
   <Card title="Implement" icon="rocket">
     Takes an existing issue, analyzes the codebase, writes a fix, opens a PR, and notifies your team. Trigger it
@@ -102,14 +103,14 @@ Or [build your own](/workflows/custom/) from a single sentence with `sweny workf
 
 ## E2E browser testing
 
-Generate AI-driven end-to-end tests for any web app — no test scripts to write:
+Generate AI-driven end-to-end tests for any web app, no test scripts to write:
 
 ```bash
 sweny new e2e        # wizard asks about your flows → generates workflow YAML
 sweny workflow run   # AI agent drives a real browser to test your app
 ```
 
-The wizard supports 7 flow types — registration, login, purchase, onboarding, upgrade, cancellation, and custom. Each generates a self-contained workflow with auto-generated test credentials and optional cleanup. [Get started with E2E testing](/cli/e2e/)
+The wizard supports 7 flow types: registration, login, purchase, onboarding, upgrade, cancellation, and custom. Each generates a self-contained workflow with auto-generated test credentials and optional cleanup. [Get started with E2E testing](/cli/e2e/)
 
 ## Beyond DevOps
 
@@ -143,11 +144,11 @@ Deploy any workflow to GitHub Actions with three secrets and a cron schedule. SW
     sentry-auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
 ```
 
-[Full Action guide](/action/) — setup, scheduling, and service maps.
+[Full Action guide](/action/): setup, scheduling, and service maps.
 
 ## Use it from Claude Code
 
-Install the [Claude Code plugin](/advanced/mcp-plugin/) and get slash commands, MCP tools, and a startup hook — without leaving your conversation:
+Install the [Claude Code plugin](/advanced/mcp-plugin/) and get slash commands, MCP tools, and a startup hook, without leaving your conversation:
 
 ```
 /plugin marketplace add swenyai/sweny
@@ -158,7 +159,7 @@ Then type `/sweny:triage`, `/sweny:implement ENG-123`, `/sweny:e2e-run`, or any 
 
 ## Connect to your stack
 
-SWEny connects to the tools you already use — GitHub, Linear, Sentry, Datadog, BetterStack, Slack, and more — through built-in [skills](/skills/) and [MCP servers](/advanced/mcp-servers/). Set an API key and the skill is ready. Bring your own MCP servers to connect anything else.
+SWEny connects to the tools you already use (GitHub, Linear, Sentry, Datadog, BetterStack, Slack, and more) through built-in [skills](/skills/) and [MCP servers](/advanced/mcp-servers/). Set an API key and the skill is ready. Bring your own MCP servers to connect anything else.
 
 ## Studio
 
@@ -166,4 +167,4 @@ SWEny connects to the tools you already use — GitHub, Linear, Sentry, Datadog,
 
 ## Workflow Marketplace
 
-**[marketplace.sweny.ai](https://marketplace.sweny.ai)** — a community catalog of ready-to-run SWEny workflows. Browse by category, copy a workflow into `.sweny/workflows/`, customize the steps, and run it. The CLI and Action are free and always will be.
+**[marketplace.sweny.ai](https://marketplace.sweny.ai)**: a community catalog of ready-to-run SWEny workflows. Browse by category, copy a workflow into `.sweny/workflows/`, customize the steps, and run it. The CLI and Action are free and always will be.

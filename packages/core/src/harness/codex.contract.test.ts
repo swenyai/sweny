@@ -14,13 +14,15 @@ const fakes = createCodexProcessFake();
 afterAll(() => fakes.destroy());
 
 runContractSuite(
-  ({ logger, sandbox }) =>
+  ({ logger, sandbox, sandboxWrapper }) =>
     new CodexHarness({
       logger,
       envScope: true,
       policy: "warn",
       codexCommand: fakes.command,
       killGraceMs: 500,
+      // No host srt probe in tests: case 15 hands in its recording wrapper, every other case has none.
+      sandboxWrapper: sandboxWrapper ?? null,
       ...(sandbox ? { sandbox: "auto" as const, sandboxProbe: () => undefined } : { sandbox: "off" as const }),
     }),
   fakes,

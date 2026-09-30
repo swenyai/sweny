@@ -50,6 +50,7 @@ function harness(over: Partial<CodexHarnessOptions> = {}) {
     policy: "warn",
     codexCommand: fakes.command,
     killGraceMs: 500,
+    sandboxWrapper: null,
     ...over,
   });
   return { h, log };
