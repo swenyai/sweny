@@ -16,6 +16,7 @@
 
 import type { Connect } from "vite";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
 import type { TLSSocket } from "node:tls";
 import type { IncomingMessage, ServerResponse } from "http";
 import type { Claude, Skill, Workflow } from "@sweny-ai/core";
@@ -48,6 +49,14 @@ async function ensureInitialized(): Promise<void> {
 // ─── Helpers ─────────────────────────────────────────────────────
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
+
+function isLoopbackPeer(address: string | undefined): boolean {
+  if (!address) return false;
+  if (address === "::1") return true;
+  // Dual-stack listeners expose IPv4 peers as IPv4-mapped IPv6 addresses.
+  const ipv4 = address.startsWith("::ffff:") ? address.slice(7) : address;
+  return isIP(ipv4) === 4 && ipv4.startsWith("127.");
+}
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -202,6 +211,14 @@ export function aiMiddlewarePlugin() {
           )
         )
           return next();
+
+        // Host/Origin can be forged by non-browser clients. Check the transport
+        // peer too, including when Vite listens on all interfaces with --host.
+        // A local reverse proxy is a trusted local peer; it must not expose these
+        // endpoints remotely. Forwarded headers cannot authenticate its clients.
+        if (!isLoopbackPeer(req.socket.remoteAddress)) {
+          return sendJson(res, 403, { error: "Local connections only" });
+        }
 
         // Do not trust forwarded headers. These endpoints execute local agents,
         // so only the local Studio origin may bootstrap or use a session.

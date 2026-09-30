@@ -1,5 +1,6 @@
 import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { networkInterfaces } from "node:os";
 import type { Connect } from "vite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { aiMiddlewarePlugin } from "./ai-middleware.js";
@@ -32,16 +33,16 @@ beforeEach(async () => {
       res.end();
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, "::", resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 afterEach(async () => {
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
 
-function send(path: string, headers: Record<string, string> = {}, body = "{}", method = "POST") {
+function send(path: string, headers: Record<string, string> = {}, body = "{}", method = "POST", target = origin) {
   return new Promise<{ status: number; body: string; headers: Record<string, unknown> }>((resolve, reject) => {
-    const req = request(`${origin}${path}`, { method, headers }, (res) => {
+    const req = request(`${target}${path}`, { method, headers }, (res) => {
       let data = "";
       res.setEncoding("utf8");
       res.on("data", (chunk) => (data += chunk));
@@ -181,5 +182,47 @@ describe("development session", () => {
         })
       ).status,
     ).toBe(403);
+  });
+});
+
+describe("transport peer boundary", () => {
+  it("rejects non-loopback peers spoofing local headers on bootstrap and every AI route", async () => {
+    const remoteAddress = Object.values(networkInterfaces())
+      .flat()
+      .find((address) => address?.family === "IPv4" && !address.internal)?.address;
+    expect(remoteAddress, "CI must have a non-loopback IPv4 interface for this HTTP regression").toBeDefined();
+    const target = `http://${remoteAddress}:${(server.address() as AddressInfo).port}`;
+    const token = await session();
+    const headers = {
+      Host: new URL(origin).host,
+      Origin: origin,
+      "Content-Type": "application/json",
+      "Sec-Fetch-Site": "same-origin",
+      "X-Sweny-Dev-Token": token,
+      "X-Forwarded-For": "127.0.0.1",
+    };
+    expect((await send("/api/ai-session", headers, "{}", "POST", target)).status).toBe(403);
+    for (const [path, body] of routes) {
+      expect((await send(path, headers, JSON.stringify(body), "POST", target)).status).toBe(403);
+    }
+    expectNoAgentCalls();
+  });
+  it("accepts native IPv6 loopback peers", async () => {
+    const target = `http://[::1]:${(server.address() as AddressInfo).port}`;
+    const headers = { Origin: target, "Content-Type": "application/json" };
+    const response = await send("/api/ai-session", headers, "{}", "POST", target);
+    expect(response.status).toBe(200);
+    const { token } = JSON.parse(response.body);
+    expect(
+      (
+        await send(
+          routes[0][0],
+          { ...headers, "X-Sweny-Dev-Token": token },
+          JSON.stringify(routes[0][1]),
+          "POST",
+          target,
+        )
+      ).status,
+    ).toBe(200);
   });
 });
