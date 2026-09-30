@@ -649,6 +649,12 @@ export interface Claude {
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
     /**
+     * What this node's agent may see (#360): env var names declared by the
+     * node's skills (added to the scoped subprocess env) and the provider
+     * hosts its sandboxed commands may reach. Absent = allowlist only.
+     */
+    agentAccess?: { envVars: string[]; domains: string[] };
+    /**
      * Dry-run: the node must not change anything. `tools` is already filtered
      * to reads; implementations MUST NOT add any other write-capable tool
      * (external MCP servers, shell, file-edit built-ins).

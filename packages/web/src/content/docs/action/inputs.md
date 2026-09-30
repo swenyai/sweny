@@ -51,9 +51,7 @@ You must provide either `anthropic-api-key` or `claude-oauth-token`. The `github
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `agent` | Agent to use for implementation: `claude`, `codex`, or `gemini` | `claude` |
-| `openai-api-key` | OpenAI API key (required when `agent` is `codex`) | -- |
-| `gemini-api-key` | Google Gemini API key (required when `agent` is `gemini`) | -- |
+| `agent` | Agent backend. Only `claude` (headless Claude Code) is supported; other values are rejected. | `claude` |
 
 ### Observability
 

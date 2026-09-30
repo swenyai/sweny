@@ -33,7 +33,7 @@ import { runWorkflowDiagram } from "./diagram.js";
 import { DagRenderer } from "./renderer.js";
 import * as readline from "node:readline";
 
-import { loadDotenv, loadConfigFile } from "./config-file.js";
+import { loadDotenv, loadConfigFile, applyAgentFileConfig } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { nonInteractiveUsage, runNew } from "./new.js";
 import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "./e2e.js";
@@ -110,6 +110,8 @@ function composeObservers(...observers: (Observer | undefined)[]): Observer | un
 
 // Auto-load .env before Commander parses (so env vars are available for defaults)
 loadDotenv();
+// Agent sandbox / env-passthrough keys from .sweny.yml -> SWENY_* env (#360).
+applyAgentFileConfig(loadConfigFile());
 
 const program = new Command()
   .name("sweny")
