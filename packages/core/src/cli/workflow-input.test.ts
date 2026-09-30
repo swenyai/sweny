@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeDryRunIntoInput } from "./workflow-input.js";
+import { mergeDryRunIntoInput, parseRunBudgetFlags } from "./workflow-input.js";
 import { validateRuntimeInput } from "../inputs.js";
 
 // #324: --dry-run must survive when --input replaces the config-derived
@@ -77,5 +77,23 @@ describe("--input branch: validateRuntimeInput + mergeDryRunIntoInput (#324)", (
     const workflowInput = mergeDryRunIntoInput(validated.value, false);
     expect(workflowInput).toEqual({ issueIdentifier: "ISS-1" });
     expect("dryRun" in workflowInput).toBe(false);
+  });
+});
+
+describe("parseRunBudgetFlags", () => {
+  it("uses the default timeout and no max-steps when flags are absent", () => {
+    expect(parseRunBudgetFlags(undefined, undefined, 123)).toEqual({ timeoutMs: 123, maxSteps: undefined });
+  });
+  it("parses numeric values, and --timeout 0 means no budget", () => {
+    expect(parseRunBudgetFlags("5000", "50", 123)).toEqual({ timeoutMs: 5000, maxSteps: 50 });
+    expect(parseRunBudgetFlags("0", undefined, 123).timeoutMs).toBe(0);
+  });
+  it("rejects non-numeric or out-of-range values with a clear error", () => {
+    expect(() => parseRunBudgetFlags("15m", undefined, 123)).toThrow(/--timeout must be/);
+    expect(() => parseRunBudgetFlags("-1", undefined, 123)).toThrow(/--timeout must be/);
+    expect(() => parseRunBudgetFlags("", undefined, 123)).toThrow(/--timeout must be/);
+    expect(() => parseRunBudgetFlags(undefined, "abc", 123)).toThrow(/--max-steps must be/);
+    expect(() => parseRunBudgetFlags(undefined, "0", 123)).toThrow(/--max-steps must be/);
+    expect(() => parseRunBudgetFlags(undefined, "1.5", 123)).toThrow(/--max-steps must be/);
   });
 });

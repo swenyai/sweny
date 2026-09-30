@@ -21,7 +21,7 @@ import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
 import { loadAndValidateWorkflow } from "../loader.js";
 import { validateRuntimeInput } from "../inputs.js";
-import { mergeDryRunIntoInput } from "./workflow-input.js";
+import { mergeDryRunIntoInput, parseRunBudgetFlags } from "./workflow-input.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -722,12 +722,22 @@ export async function workflowRunAction(
     yes?: boolean;
   },
 ): Promise<void> {
+  // Reject junk --timeout/--max-steps up front (both paths) instead of
+  // silently falling back to a default.
+  let budget: ReturnType<typeof parseRunBudgetFlags>;
+  try {
+    budget = parseRunBudgetFlags(options.timeout, options.maxSteps, DEFAULT_WORKFLOW_TIMEOUT_MS);
+  } catch (err) {
+    console.error(chalk.red(`\n  ${err instanceof Error ? err.message : String(err)}\n`));
+    process.exit(1);
+  }
+
   // No file given → batch-run the e2e workflows in .sweny/e2e/. This is the
   // home for what used to be `sweny e2e run`; it lists what will run and
   // confirms first (bypass with --yes).
   if (!file) {
     await runE2eRun({
-      timeout: options.timeout ? parseInt(options.timeout, 10) : undefined,
+      timeout: options.timeout === undefined ? undefined : budget.timeoutMs,
       yes: Boolean(options.yes),
     });
     return;
@@ -969,13 +979,11 @@ export async function workflowRunAction(
   // could hang the run indefinitely despite the abort/timeout plumbing
   // existing in the executor. --timeout is a whole-run wall-clock budget,
   // enforced by runWithWallClockBudget (shared with the .sweny/e2e/ batch
-  // runner in e2e.ts): junk/absent values fall back to
-  // DEFAULT_WORKFLOW_TIMEOUT_MS rather than disabling it, so every run has a
-  // finite ceiling by default. --max-steps overrides the executor's own
-  // DEFAULT_MAX_STEPS when set.
-  const wfTimeoutMs = parsePositiveInt(options.timeout, DEFAULT_WORKFLOW_TIMEOUT_MS) || DEFAULT_WORKFLOW_TIMEOUT_MS;
-  const wfMaxStepsParsed = parsePositiveInt(options.maxSteps, Number.NaN);
-  const wfMaxSteps = Number.isFinite(wfMaxStepsParsed) ? wfMaxStepsParsed : undefined;
+  // runner in e2e.ts). Absent = DEFAULT_WORKFLOW_TIMEOUT_MS (60 min);
+  // `--timeout 0` = no wall-clock budget; junk is rejected above.
+  // --max-steps overrides the executor's own DEFAULT_MAX_STEPS when set.
+  const wfTimeoutMs = budget.timeoutMs;
+  const wfMaxSteps = budget.maxSteps;
 
   try {
     const { results, trace } = await runWithWallClockBudget(
@@ -1094,7 +1102,7 @@ workflowCmd
   )
   .option(
     "--timeout <ms>",
-    "Whole-run wall-clock timeout in ms. Applies to batch runs (.sweny/e2e/) and to a single workflow file (default: 900000 = 15 min)",
+    "Whole-run wall-clock timeout in ms. Applies to batch runs (.sweny/e2e/) and to a single workflow file (default: 3600000 = 60 min; 0 = no wall-clock budget)",
   )
   .option(
     "--max-steps <n>",

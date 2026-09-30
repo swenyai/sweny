@@ -436,6 +436,25 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         node: currentId,
       });
 
+      // #325: a retry attempt re-invokes the agent on this node (full model
+      // spend) exactly like a fresh node visit, so it counts against the same
+      // `stepCount`/`maxSteps` budget. Checked BEFORE buildRetryPreamble so no
+      // paid reflection call happens once the budget is exhausted. On
+      // exhaustion, record a failed result and emit node:exit so observers
+      // never see node:enter without a matching node:exit.
+      stepCount++;
+      if (stepCount > maxSteps) {
+        const budgetError =
+          `step budget exceeded: workflow '${workflow.id}' ran ${stepCount} steps (max_steps: ${maxSteps}) ` +
+          `while retrying node '${currentId}' (attempt ${attempt + 1}/${retry.max}). Lower 'retry.max' on the ` +
+          `offending node or raise 'max_steps' if the workflow legitimately needs more steps.`;
+        result = { ...result, status: "failed", data: { ...result.data, error: budgetError } };
+        results.set(currentId, result);
+        trace.steps.push({ node: currentId, status: "failed", iteration, retryAttempt: attempt });
+        safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
+        throw new Error(budgetError);
+      }
+
       const preamble = await buildRetryPreamble({
         retry,
         evalFailures: outcome.failures,
@@ -455,21 +474,6 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         logger,
       );
       attempt++;
-
-      // #325: a retry attempt re-invokes the agent on this node (full model
-      // spend) exactly like a fresh node visit, but previously ran entirely
-      // outside the outer loop's `stepCount`/`maxSteps` accounting: a node
-      // with `retry.max` set could burn well past the workflow's step budget
-      // without ever tripping it. Count each retry attempt as a step so the
-      // same budget bounds both normal node visits and eval-failure retries.
-      stepCount++;
-      if (stepCount > maxSteps) {
-        throw new Error(
-          `step budget exceeded: workflow '${workflow.id}' ran ${stepCount} steps (max_steps: ${maxSteps}) ` +
-            `while retrying node '${currentId}' (attempt ${attempt}/${retry.max}). Lower 'retry.max' on the ` +
-            `offending node or raise 'max_steps' if the workflow legitimately needs more steps.`,
-        );
-      }
     }
 
     // Fail-soft: when the node declares `fail_soft: true` and the failure was

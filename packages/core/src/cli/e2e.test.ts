@@ -848,6 +848,15 @@ describe("runWithWallClockBudget (#325: --timeout aborts a wedged node)", () => 
     expect(result.results.get("a")).toEqual({ status: "success" });
   });
 
+  it("timeoutMs 0 means no wall-clock budget", async () => {
+    const slow = async (signal: AbortSignal) => {
+      await new Promise((r) => setTimeout(r, 30));
+      expect(signal.aborted).toBe(false);
+      return "done";
+    };
+    await expect(runWithWallClockBudget(slow, 0, "Workflow no-budget")).resolves.toBe("done");
+  });
+
   it("propagates a real error from the run without waiting for the timeout", async () => {
     const failing = async () => {
       throw new Error("node blew up");

@@ -3154,6 +3154,92 @@ describe("executor termination safety", () => {
     expect(runs).toBe(11);
     expect(results.get("a")?.status).toBe("failed");
   });
+
+  it("no paid reflection call happens once the step budget is exhausted, and node:exit is emitted (#325)", async () => {
+    const wf: Workflow = {
+      id: "retry-budget-reflect",
+      name: "Retry budget reflect",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: {
+          name: "A",
+          instruction: "Emit ok",
+          skills: [],
+          eval: [{ name: "never", kind: "value", rule: { output_required: ["ok"] } }],
+          retry: { max: 3, instruction: { auto: true } },
+        },
+      },
+      edges: [],
+    };
+    let runs = 0;
+    let asks = 0;
+    const claude: any = {
+      async run() {
+        runs++;
+        return { status: "success", data: { other: 1 }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+      async ask() {
+        asks++;
+        return "diagnosis";
+      },
+    };
+    const events: ExecutionEvent[] = [];
+    await expect(
+      execute(
+        wf,
+        {},
+        { skills: createSkillMap([]), claude, config: {}, max_steps: 1, observer: (e) => events.push(e) },
+      ),
+    ).rejects.toThrow(/step budget exceeded/);
+    expect(runs).toBe(1);
+    expect(asks).toBe(0); // budget checked before buildRetryPreamble
+
+    const enters = events.filter((e) => e.type === "node:enter");
+    const exits = events.filter((e) => e.type === "node:exit");
+    expect(enters).toHaveLength(1);
+    expect(exits).toHaveLength(1);
+    const exit = exits[0] as Extract<ExecutionEvent, { type: "node:exit" }>;
+    expect(exit.node).toBe("a");
+    expect(exit.result.status).toBe("failed");
+    expect(String((exit.result.data as Record<string, unknown>).error)).toMatch(/step budget exceeded/);
+  });
+
+  it("dry run stops at the first conditional edge; the downstream node never runs (#324)", async () => {
+    const wf: Workflow = {
+      id: "dry-run-conditional",
+      name: "Dry run conditional",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Analyze", skills: [] },
+        b: { name: "B", instruction: "Side effect", skills: [] },
+      },
+      edges: [{ from: "a", to: "b", when: "analysis found a problem" }],
+    };
+    const ran: string[] = [];
+    const claude: any = {
+      async run(opts: { instruction: string }) {
+        ran.push(opts.instruction);
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    const validatedInput = { alert: "x" };
+    const { results } = await execute(
+      wf,
+      { ...validatedInput, dryRun: true },
+      { skills: createSkillMap([]), claude, config: {} },
+    );
+    expect(results.has("a")).toBe(true);
+    expect(results.has("b")).toBe(false);
+    expect(ran).toEqual(["Analyze"]);
+  });
 });
 
 describe("resolveConfig env threading", () => {

@@ -878,12 +878,12 @@ export async function runE2eInit(options: E2eInitOptions = {}): Promise<void> {
 // ── Timeout helper ─────────────────────────────────────────────────────
 
 /**
- * Default wall-clock budget for a single workflow run when the caller
- * doesn't pass `--timeout`. Shared by the e2e batch runner and the primary
+ * Default wall-clock budget (60 min) for a single workflow run when the
+ * caller doesn't pass `--timeout`. `--timeout 0` disables it. Shared by the e2e batch runner and the primary
  * `sweny workflow run <file>` path (see main.ts workflowRunAction) so both
  * fail loudly on a wedged node instead of hanging CI indefinitely. See #325.
  */
-export const DEFAULT_WORKFLOW_TIMEOUT_MS = 15 * 60 * 1000;
+export const DEFAULT_WORKFLOW_TIMEOUT_MS = 60 * 60 * 1000;
 
 export function withTimeout<T>(promise: Promise<T>, ms: number, label: string, onTimeout?: () => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -920,6 +920,8 @@ export async function runWithWallClockBudget<T>(
   label: string,
 ): Promise<T> {
   const controller = new AbortController();
+  // timeoutMs <= 0 means no wall-clock budget (`--timeout 0`).
+  if (!(timeoutMs > 0)) return run(controller.signal);
   return withTimeout(run(controller.signal), timeoutMs, label, () => controller.abort());
 }
 
@@ -950,7 +952,7 @@ export function batchRunDecision(opts: { yes?: boolean; isTTY: boolean }): "run"
  */
 export async function runE2eRun(options: E2eRunOptions): Promise<void> {
   const cwd = process.cwd();
-  const timeoutMs = options.timeout || DEFAULT_WORKFLOW_TIMEOUT_MS;
+  const timeoutMs = options.timeout ?? DEFAULT_WORKFLOW_TIMEOUT_MS;
 
   // 1. Discover workflow files
   let files: string[];
@@ -1078,17 +1080,16 @@ export async function runE2eRun(options: E2eRunOptions): Promise<void> {
       }
     };
 
-    const controller = new AbortController();
     try {
-      const { results } = await withTimeout(
-        execute(
-          workflow,
-          { run_id: vars.run_id, base_url: vars.base_url },
-          { skills, claude, observer, logger: consoleLogger, signal: controller.signal },
-        ),
+      const { results } = await runWithWallClockBudget(
+        (signal) =>
+          execute(
+            workflow,
+            { run_id: vars.run_id, base_url: vars.base_url },
+            { skills, claude, observer, logger: consoleLogger, signal },
+          ),
         timeoutMs,
         `Workflow ${workflow.name}`,
-        () => controller.abort(),
       );
 
       // Extract report
