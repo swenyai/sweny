@@ -415,7 +415,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
       strictMcp: readOnly || policy.strict,
       sandboxMode: policy.sandbox,
-      agentAccess: { ...req.agentAccess, domains: policy.egress },
+      agentAccess: { envVars: req.agentAccess?.envVars ?? [], domains: policy.egress },
     });
     return { ...result, harness: this.info(), degraded: gate.degraded };
   }
