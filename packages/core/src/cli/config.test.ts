@@ -160,7 +160,8 @@ describe("validateInputs: coding agent (honest --agent, #330)", () => {
       const opt = cmd.options.find((o) => o.long === "--agent");
       expect(opt?.description).toMatch(/claude/);
       expect(opt?.description).toMatch(/codex/);
-      expect(opt?.description).not.toMatch(/gemini|pi\b/i);
+      expect(opt?.description).toMatch(/pi \(experimental\)/);
+      expect(opt?.description).not.toMatch(/gemini/i);
     }
   });
 });
