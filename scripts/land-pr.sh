@@ -27,7 +27,15 @@ while :; do
   case "$ms" in
     clean) break ;;
     dirty) echo "PR #$PR conflicts with main: rebase the branch, then rerun"; exit 2 ;;
-    unstable) echo "PR #$PR has failing non-required checks:"; gh pr checks "$PR" -R "$REPO" | grep -v pass || true; exit 3 ;;
+    unstable)
+      # GitHub also reports "unstable" while non-required checks are still pending.
+      # Stop only on an actual failure; otherwise keep waiting.
+      if gh pr checks "$PR" -R "$REPO" 2>/dev/null | awk -F'\t' '$2=="fail"{f=1} END{exit !f}'; then
+        echo "PR #$PR has failing checks:"
+        gh pr checks "$PR" -R "$REPO" | awk -F'\t' '$2=="fail"'
+        exit 3
+      fi
+      ;;
     behind) gh pr update-branch "$PR" -R "$REPO" >/dev/null 2>&1 || true ;;
   esac
   if [ "$(date +%s)" -ge "$deadline" ]; then
