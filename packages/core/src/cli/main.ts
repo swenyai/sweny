@@ -11,7 +11,7 @@ import chalk from "chalk";
 import { execute } from "../executor.js";
 import type { ExecuteOptions } from "../executor.js";
 import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workflows/index.js";
-import type { ExecutionEvent, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
+import type { ExecutionEvent, ExecutionTrace, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
 import { builtinSkills, createSkillMap, validateWorkflowSkills } from "../skills/index.js";
@@ -36,6 +36,8 @@ import * as readline from "node:readline";
 import { loadDotenv, loadConfigFile } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { nonInteractiveUsage, runNew } from "./new.js";
+import { buildRunRecord, createNodeTimer, historyDisabled, newRunId, recordRun } from "./run-history.js";
+import { registerRunsCommand } from "./runs.js";
 import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "./e2e.js";
 import { createVerboseToolObserver } from "./verbose-observer.js";
 import {
@@ -1022,8 +1024,34 @@ export async function workflowRunAction(
     console.log(c.subtle(`  cloud: ${wfCloudHandle.dashboardUrl}`));
   }
 
+  // Run history (#388): metadata-only record under .sweny/runs/, written once at run end.
+  const nodeTimer = createNodeTimer();
+  const runId = newRunId(runStart);
+  let historyRecorded = false;
+  const recordHistory = (results: Map<string, NodeResult>, trace: ExecutionTrace | undefined, crashed: boolean) => {
+    if (historyRecorded || historyDisabled(options.history, fileConfig["history"])) return;
+    historyRecorded = true;
+    try {
+      recordRun(
+        buildRunRecord({
+          runId,
+          workflow,
+          startedAtMs: runStart,
+          durationMs: Date.now() - runStart,
+          results,
+          trace,
+          nodeDurations: nodeTimer.durations,
+          crashed,
+        }),
+      );
+    } catch {
+      // history must never fail a run
+    }
+  };
+
   const observer = composeObservers(
     wfProgressObserver,
+    nodeTimer.observer,
     options.verbose ? createVerboseToolObserver() : undefined,
     options.stream ? createStreamObserver() : undefined,
     createCloudStreamObserver(config, wfCloudHandle),
@@ -1063,6 +1091,7 @@ export async function workflowRunAction(
 
     const wfDurationMs = Date.now() - runStart;
     const wfHasFailed = [...results.values()].some((r) => r.status === "failed");
+    recordHistory(results, trace, false);
 
     // Close the cloud lifecycle session BEFORE the JSON early-exit so
     // every workflow run reports a terminal status, regardless of how
@@ -1110,6 +1139,7 @@ export async function workflowRunAction(
     const crashMsg = err instanceof Error ? err.message : String(err);
     console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
     runLogger.flush();
+    recordHistory(nodeTimer.lastResults, undefined, true);
     console.error(`  ${renderReceiptLine(summarizeRun(new Map(), Date.now() - runStart, true), isTTY)}\n`);
     // Finalize the cloud run as failed (covers thrown errors, incl.
     // RouteEvaluationError). Without this a crashed workflow run stays
@@ -1185,6 +1215,8 @@ const workflowRunCmd = workflowCmd
 for (const [flags, description] of WORKFLOW_RUN_OPTIONS) {
   workflowRunCmd.option(flags, description);
 }
+workflowRunCmd.option("--no-history", "Do not record this run in .sweny/runs/ (or set `history: off` in .sweny.yml)");
+registerRunsCommand(program);
 
 workflowCmd
   .command("diagram <file>")

@@ -507,20 +507,30 @@ export function writeWorkflowFile(
 }
 
 /**
- * Make sure `.env` is gitignored: create `.gitignore` if missing, append
- * `.env` if absent. Returns what happened.
+ * Make sure `line` is in `.gitignore`: create the file if missing, append the
+ * line if absent. Returns what happened.
  */
-export function ensureGitignoreEnv(cwd: string): "created" | "appended" | "present" {
+function ensureGitignoreLine(cwd: string, line: string): "created" | "appended" | "present" {
   const gitignorePath = path.join(cwd, ".gitignore");
   if (!fs.existsSync(gitignorePath)) {
-    fs.writeFileSync(gitignorePath, ".env\n", "utf-8");
+    fs.writeFileSync(gitignorePath, `${line}\n`, "utf-8");
     return "created";
   }
   const content = fs.readFileSync(gitignorePath, "utf-8");
-  if (content.split(/\r?\n/).some((line) => line.trim() === ".env")) return "present";
+  if (content.split(/\r?\n/).some((l) => l.trim() === line)) return "present";
   const sep = content.length === 0 || content.endsWith("\n") ? "" : "\n";
-  fs.appendFileSync(gitignorePath, `${sep}.env\n`, "utf-8");
+  fs.appendFileSync(gitignorePath, `${sep}${line}\n`, "utf-8");
   return "appended";
+}
+
+/** Make sure `.env` is gitignored. */
+export function ensureGitignoreEnv(cwd: string): "created" | "appended" | "present" {
+  return ensureGitignoreLine(cwd, ".env");
+}
+
+/** Make sure local run history (`.sweny/runs/`) is gitignored. */
+export function ensureGitignoreRuns(cwd: string): "created" | "appended" | "present" {
+  return ensureGitignoreLine(cwd, ".sweny/runs/");
 }
 
 /** The command to show in next steps: `npx` users have no `sweny` on PATH. */
@@ -883,6 +893,7 @@ export async function runNew(options?: {
   const ignoreResult = ensureGitignoreEnv(cwd);
   if (ignoreResult === "created") p.log.success("Created .gitignore with .env");
   else if (ignoreResult === "appended") p.log.success("Added .env to .gitignore");
+  ensureGitignoreRuns(cwd);
 
   // 5. Next steps
   const requiredCreds = credentials.filter((c) => !c.optional);
