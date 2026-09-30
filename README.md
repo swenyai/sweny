@@ -28,7 +28,7 @@ Requires an `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` (SWEny runs its nod
 npx @sweny-ai/core new      # pick a workflow → writes .sweny.yml, .env, and the workflow file
 ```
 
-`sweny new` auto-detects your source control and issue tracker, but it writes blank values for any
+`sweny new` picks providers from the skills your workflow uses, but it writes blank values for any
 credential it can't infer, so fill those in before running:
 
 ```bash
@@ -47,7 +47,7 @@ file-I/O workflow that needs nothing beyond your Claude Code auth, good for a fi
 sweny workflow run examples/file-ops.yml
 ```
 
-Build a workflow from scratch — pick "Describe your own" in the `sweny new` picker.
+Build a workflow from scratch: pick "Describe your own" in the `sweny new` picker.
 
 ```bash
 # Visualize any workflow as a Mermaid diagram — drop it into a PR or README
