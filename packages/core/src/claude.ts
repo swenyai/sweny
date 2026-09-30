@@ -360,6 +360,8 @@ export class ClaudeClient implements Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
+    /** MCP servers declared by the current node's skills. */
+    mcpServers?: Record<string, McpServerConfig>;
     /** Dry run (#380): no external MCP servers, no write-capable built-ins. */
     readOnly?: boolean;
     /** Env var names + sandbox hosts this node's skills need (#360). */
@@ -472,7 +474,7 @@ export class ClaudeClient implements Claude {
     let stream: ReturnType<typeof query> | undefined;
 
     try {
-      const allMcpServers: Record<string, any> = readOnly ? {} : { ...this.mcpServers };
+      const allMcpServers: Record<string, any> = readOnly ? {} : { ...opts.mcpServers, ...this.mcpServers };
       if (sdkTools.length > 0) allMcpServers["sweny-core"] = mcpServer;
 
       stream = query({

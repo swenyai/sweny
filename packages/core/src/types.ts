@@ -638,6 +638,8 @@ export interface Claude {
     outputSchema?: JSONSchema;
     /** Called with status messages while Claude is working (tool name, etc.) */
     onProgress?: (message: string) => void;
+    /** MCP servers declared by this node's resolved skills. Explicit client configs win. */
+    mcpServers?: Record<string, McpServerConfig>;
     /** Per-node turn limit. Overrides the client default when set. */
     maxTurns?: number;
     /** Built-in SDK tool names to disallow for this node (e.g. ["Bash"]). */

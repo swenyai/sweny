@@ -20,6 +20,7 @@ import type {
   NodeToolFilter,
   Skill,
   SkillDefinition,
+  McpServerConfig,
   Tool,
   Claude,
   Observer,
@@ -395,6 +396,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         signal,
         timeoutMs,
         agentAccess: resolveAgentAccess(node.skills, skills),
+        ...(dryRun ? {} : { mcpServers: resolveSkillMcpServers(node.skills, skills) }),
         ...(dryRun ? { readOnly: true } : {}),
         onProgress: (message) => {
           safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
@@ -946,6 +948,16 @@ function dryRunNotice(skippedWrites: string[]): string {
   );
 }
 
+/** Only this node's resolved skills contribute external servers. */
+function resolveSkillMcpServers(skillIds: string[], skills: Map<string, Skill>): Record<string, McpServerConfig> {
+  return Object.fromEntries(
+    skillIds.flatMap((id) => {
+      const mcp = skills.get(id)?.mcp;
+      return mcp ? [[id, { ...mcp, type: mcp.type ?? (mcp.command ? "stdio" : "http") }]] : [];
+    }),
+  );
+}
+
 function resolveTools(skillIds: string[], skills: Map<string, Skill>): Tool[] {
   return skillIds
     .map((id) => skills.get(id))
@@ -1343,6 +1355,14 @@ function validate(workflow: Workflow, skills: Map<string, Skill>): void {
   // Check that each node has at least one available skill (if it lists any)
   for (const [nodeId, node] of Object.entries(workflow.nodes)) {
     if (node.skills.length === 0) continue;
+    for (const id of node.skills) {
+      const skill = skills.get(id);
+      if (skill?.mcp && skill.tools.length === 0 && !skill.instruction?.trim()) {
+        throw new Error(
+          `Skill "${id}" declares an MCP server but has no instruction or tools. Add an instruction describing how to use its MCP tools (node "${nodeId}").`,
+        );
+      }
+    }
     const available = node.skills.filter((id) => skills.has(id));
     if (available.length === 0) {
       consoleLogger.warn(`Node "${nodeId}" has no available skills (needs one of: ${node.skills.join(", ")})`);
