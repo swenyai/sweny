@@ -237,7 +237,13 @@ describe("the agent command", () => {
   it("preflight finds the command without starting it; a missing one fails with the fix", async () => {
     const ok = await new AcpHarness({ acpCommand: fakes.command }).preflight();
     expect(ok.ok).toBe(true);
-    const missing = new AcpHarness({ acpCommand: "definitely-not-an-acp-agent --flag", logger: logger() });
+    const missing = new AcpHarness({
+      acpCommand: "definitely-not-an-acp-agent --flag",
+      logger: logger(),
+      policy: "warn",
+      sandbox: "off",
+      sandboxWrapper: null,
+    });
     const pre = await missing.preflight();
     expect(pre.ok).toBe(false);
     expect(pre.ok === false && pre.reason).toMatch(/definitely-not-an-acp-agent.*not found/);
