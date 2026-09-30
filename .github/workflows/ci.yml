@@ -206,9 +206,9 @@ jobs:
         run: |
           settings="$RUNNER_TEMP/srt-probe.json"
           echo '{"network":{"allowedDomains":[],"deniedDomains":[]},"filesystem":{"denyRead":[],"allowRead":[],"allowWrite":[],"denyWrite":[]}}' > "$settings"
-          out=$(srt --settings "$settings" -- node -e 'console.log(JSON.stringify(process.argv.slice(1)))' "a b" 'c$d')
+          out=$(srt --settings "$settings" -- node -e 'console.log(JSON.stringify(process.argv.slice(1)))' "a b" 'c;d')
           echo "PROBE argv through srt: $out"
-          test "$out" = '["a b","c$d"]'
+          test "$out" = '["a b","c;d"]'
           if srt --settings "$settings" -- sh -c "echo x > '$RUNNER_TEMP/outside'" 2>/dev/null; then
             echo "PROBE RESULT: srt did NOT block a write outside allowWrite"; exit 1
           fi

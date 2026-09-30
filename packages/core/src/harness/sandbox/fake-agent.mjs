@@ -1,0 +1,101 @@
+#!/usr/bin/env node
+// Fake agent process for the sandbox wrapper specs (#360 step 2). No model:
+// it plays a JSON plan (argv[2]) of probes and prints one JSON array of
+// results on stdout. Every probe reports what happened; the spec decides what
+// should have happened.
+//
+// Probes:
+//   { kind: "http", url, via: "proxy" | "direct" }  -> { ok, status?, body?, error? }
+//   { kind: "write", path }                          -> { ok, error? }
+//   { kind: "read", path }                           -> { ok, error? }
+//   { kind: "env", names }                           -> { values: { name: value | null } }
+//   { kind: "procScan", needle }                     -> { found, scanned }
+//   { kind: "dumpEnv", path }                        -> appends {env, cwd} as one JSON line to path
+// Paths starting with "$HOME" resolve against the HOME this process sees.
+
+import { appendFileSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import http from "node:http";
+
+const TIMEOUT_MS = 5000;
+
+function proxyUrl() {
+  const raw = process.env.HTTP_PROXY || process.env.http_proxy;
+  return raw ? new URL(raw) : undefined;
+}
+
+function httpProbe(url, via) {
+  return new Promise((resolve) => {
+    const target = new URL(url);
+    const proxy = via === "proxy" ? proxyUrl() : undefined;
+    if (via === "proxy" && !proxy) return resolve({ ok: false, error: "no HTTP_PROXY in env" });
+    const headers = { Host: target.host };
+    if (proxy && (proxy.username || proxy.password)) {
+      const cred = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
+      headers["Proxy-Authorization"] = `Basic ${Buffer.from(cred).toString("base64")}`;
+    }
+    const req = http.request(
+      proxy
+        ? { host: proxy.hostname, port: Number(proxy.port || 80), path: target.href, method: "GET", headers }
+        : { host: target.hostname, port: Number(target.port || 80), path: target.pathname, method: "GET", headers },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => (body += c));
+        res.on("end", () => resolve({ ok: res.statusCode === 200, status: res.statusCode, body: body.slice(0, 200) }));
+      },
+    );
+    req.setTimeout(TIMEOUT_MS, () => req.destroy(new Error("timeout")));
+    req.on("error", (err) => resolve({ ok: false, error: `${err.code ?? ""} ${err.message}`.trim() }));
+    req.end();
+  });
+}
+
+function tryFs(fn) {
+  try {
+    fn();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.code ?? String(err) };
+  }
+}
+
+function procScan(needle) {
+  let scanned = 0;
+  let found = false;
+  let pids = [];
+  try {
+    pids = readdirSync("/proc").filter((d) => /^\d+$/.test(d));
+  } catch {
+    return { found: false, scanned: 0, error: "no /proc" };
+  }
+  for (const pid of pids) {
+    try {
+      const environ = readFileSync(`/proc/${pid}/environ`, "utf8");
+      scanned++;
+      if (environ.includes(needle)) found = true;
+    } catch {
+      // not readable: that is containment too
+    }
+  }
+  return { found, scanned };
+}
+
+/** A leading "$HOME" is the HOME this process sees (the scratch HOME when wrapped). */
+function resolvePath(p) {
+  return p.startsWith("$HOME") ? (process.env.HOME ?? "") + p.slice("$HOME".length) : p;
+}
+
+const plan = JSON.parse(process.argv[2] ?? "[]");
+const results = [];
+for (const p of plan) {
+  if (p.kind === "http") results.push(await httpProbe(p.url, p.via));
+  else if (p.kind === "write") results.push(tryFs(() => writeFileSync(resolvePath(p.path), "sweny-fake-agent\n")));
+  else if (p.kind === "read") results.push(tryFs(() => readFileSync(resolvePath(p.path))));
+  else if (p.kind === "dumpEnv")
+    results.push(tryFs(() => appendFileSync(p.path, JSON.stringify({ env: process.env, cwd: process.cwd() }) + "\n")));
+  else if (p.kind === "env")
+    results.push({ values: Object.fromEntries(p.names.map((n) => [n, process.env[n] ?? null])) });
+  else if (p.kind === "procScan") results.push(procScan(p.needle));
+  else results.push({ error: `unknown probe ${p.kind}` });
+}
+process.stdout.write(JSON.stringify(results) + "\n");
