@@ -629,6 +629,12 @@ export interface Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
+    /**
+     * What this node's agent may see (#360): env var names declared by the
+     * node's skills (added to the scoped subprocess env) and the provider
+     * hosts its sandboxed commands may reach. Absent = allowlist only.
+     */
+    agentAccess?: { envVars: string[]; domains: string[] };
   }): Promise<NodeResult>;
 
   /**

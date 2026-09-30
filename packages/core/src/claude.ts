@@ -23,6 +23,8 @@ import type {
   McpServerConfig,
 } from "./types.js";
 import { consoleLogger } from "./types.js";
+import { buildAgentEnv, parseList, resolveAgentSandbox, type AgentAccess, type SandboxMode } from "./agent-env.js";
+import { fenceUntrustedJson } from "./untrusted.js";
 
 const SYSTEM_PROMPT = `You are a step in an automated workflow. Execute the instruction precisely using the tools available to you. Be thorough but concise. When you're done, summarize your findings and results.`;
 
@@ -132,6 +134,21 @@ export interface ClaudeClientOptions {
   defaultContext?: ToolContext;
   /** External MCP servers (GitHub, Linear, Sentry, etc.) — merged with core skill tools */
   mcpServers?: Record<string, McpServerConfig>;
+  /**
+   * Extra env var names passed to the agent subprocess on top of the
+   * allowlist (see agent-env.ts). `"*"` inherits the full environment.
+   * Default: `SWENY_ENV_PASSTHROUGH` (comma-separated).
+   */
+  envPassthrough?: string[];
+  /**
+   * SDK sandbox for agent commands: `auto` (on when CI is truthy), `on`, `off`.
+   * Default: `SWENY_SANDBOX`, else `auto`.
+   */
+  sandbox?: SandboxMode;
+  /** Extra hosts sandboxed commands may reach. Default: `SWENY_SANDBOX_ALLOWED_DOMAINS`. */
+  sandboxAllowedDomains?: string[];
+  /** Sandbox preflight probe (test seam). Returns a reason when the sandbox cannot run. */
+  sandboxProbe?: () => string | undefined;
 }
 
 /**
@@ -248,6 +265,10 @@ export class ClaudeClient implements Claude {
   private logger: Logger;
   private defaultContext: ToolContext;
   private mcpServers: Record<string, McpServerConfig>;
+  private envPassthrough: string[] | undefined;
+  private sandboxMode: SandboxMode | undefined;
+  private sandboxAllowedDomains: string[] | undefined;
+  private sandboxProbe: (() => string | undefined) | undefined;
 
   constructor(opts: ClaudeClientOptions = {}) {
     this.model = opts.model;
@@ -256,17 +277,29 @@ export class ClaudeClient implements Claude {
     this.logger = opts.logger ?? consoleLogger;
     this.defaultContext = opts.defaultContext ?? { config: {}, logger: this.logger };
     this.mcpServers = opts.mcpServers ?? {};
+    this.envPassthrough = opts.envPassthrough;
+    this.sandboxMode = opts.sandbox;
+    this.sandboxAllowedDomains = opts.sandboxAllowedDomains;
+    this.sandboxProbe = opts.sandboxProbe;
   }
 
   /**
-   * Build env for the Claude Code subprocess. Snapshots process.env (dropping
-   * nullish values) and applies auth precedence via {@link resolveAuthEnv}.
+   * Build env for the Claude Code subprocess (#360). Applies auth precedence
+   * via {@link resolveAuthEnv} on the full process env (it reads
+   * `SWENY_AUTH`), then narrows the result to the allowlist in
+   * {@link buildAgentEnv} plus `extraVars` (the node's declared skill env
+   * vars) and the operator passthrough list. Nothing else leaks through.
    */
-  private buildEnv(): Record<string, string> {
-    const env: Record<string, string> = Object.fromEntries(
+  private buildEnv(extraVars: readonly string[] = []): Record<string, string> {
+    const full: Record<string, string> = Object.fromEntries(
       Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
     );
-    return resolveAuthEnv(env, { logger: this.logger });
+    const authed = resolveAuthEnv(full, { logger: this.logger });
+    return buildAgentEnv(authed, {
+      extraVars,
+      passthrough: this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH),
+      logger: this.logger,
+    });
   }
 
   async run(opts: {
@@ -282,6 +315,8 @@ export class ClaudeClient implements Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
+    /** Env var names + sandbox hosts this node's skills need (#360). */
+    agentAccess?: AgentAccess;
   }): Promise<NodeResult> {
     const {
       instruction,
@@ -294,8 +329,25 @@ export class ClaudeClient implements Claude {
       model,
       timeoutMs,
       signal,
+      agentAccess,
     } = opts;
     const effectiveModel = model ?? this.model;
+
+    // #360: in CI (or when forced on) run agent commands in the SDK sandbox.
+    // Fail closed: when the sandbox is required but cannot start, the node
+    // fails here instead of running the agent unsandboxed.
+    const sandbox = resolveAgentSandbox({
+      env: process.env,
+      mode: this.sandboxMode,
+      allowedDomains: this.sandboxAllowedDomains,
+      nodeDomains: agentAccess?.domains,
+      probe: this.sandboxProbe,
+      logger: this.logger,
+    });
+    if (sandbox.error) {
+      this.logger.error(sandbox.error);
+      return { status: "failed", data: { error: sandbox.error }, toolCalls: [] };
+    }
 
     // Tool-call accounting (Fix #1).
     //
@@ -327,10 +379,11 @@ export class ClaudeClient implements Claude {
       tools: sdkTools,
     });
 
-    // Build prompt
+    // Build prompt. Context (workflow input such as issues/alerts, plus prior
+    // node outputs) is fenced as untrusted data (#360).
     const prompt = [
       `## Instruction\n\n${instruction}`,
-      `## Context\n\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``,
+      `## Context\n\n${fenceUntrustedJson(context, "context")}`,
       outputSchema
         ? `## Required Output\n\nYou MUST end with a JSON object matching this schema:\n\`\`\`json\n${JSON.stringify(outputSchema, null, 2)}\n\`\`\``
         : "",
@@ -338,7 +391,7 @@ export class ClaudeClient implements Claude {
       .filter(Boolean)
       .join("\n\n");
 
-    const env = this.buildEnv();
+    const env = this.buildEnv(agentAccess?.envVars);
 
     let response = "";
     // CC-08: when the SDK populates typed structured output (because we passed
@@ -372,6 +425,7 @@ export class ClaudeClient implements Claude {
           env,
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
+          ...(sandbox.settings ? { sandbox: sandbox.settings } : {}),
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
           ...(abort ? { abortController: abort.controller } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
@@ -646,7 +700,7 @@ export class ClaudeClient implements Claude {
     const { instruction, context, model, timeoutMs, signal } = opts;
     const prompt = [
       instruction,
-      Object.keys(context).length > 0 ? `\nContext:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`` : "",
+      Object.keys(context).length > 0 ? `\nContext:\n${fenceUntrustedJson(context, "context")}` : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -782,7 +836,7 @@ export function buildEvaluatePrompt(
   const choiceList = choices.map((c) => `- "${c.id}": ${c.description}`).join("\n");
   return [
     question,
-    `\nContext:\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``,
+    `\nContext:\n${fenceUntrustedJson(context, "context")}`,
     `\nChoices:\n${choiceList}`,
     `\nEvaluation rules:`,
     `1. Read each choice's condition literally and match against the structured fields in the context (e.g. status, counts, enum values, boolean flags).`,
