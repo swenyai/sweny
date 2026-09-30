@@ -85,6 +85,18 @@ export function validateWorkflowFile(filePath: string): {
       };
     }
 
+    // Marketplace templates are required to declare workflow_type (spec:
+    // https://spec.sweny.ai/nodes/#workflow_type). Absence defaults to
+    // "generic" at runtime, but a marketplace submission that never chose a
+    // type is a template that never got the cross-type renderer it should
+    // have. Warn, don't block: this stays a warning so existing community
+    // submissions aren't hard-rejected by `sweny publish`.
+    if (!workflow.workflow_type) {
+      warnings.push(
+        'Workflow does not declare "workflow_type" (pr_review, e2e_test, content_generation, monitor, data_sync, generic); defaults to "generic". Marketplace templates should declare one explicitly.',
+      );
+    }
+
     // Config completeness warnings
     const allSkills = [...builtinSkills, ...customSkills];
     const skillMap = new Map(allSkills.map((s) => [s.id, s]));

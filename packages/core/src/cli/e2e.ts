@@ -571,6 +571,7 @@ export function buildFlowWorkflow(flow: FlowConfig, baseUrl: string, cleanup?: C
     id: `e2e-${flow.type}`,
     name: `E2E: ${typeName}`,
     description: `End-to-end test for ${flow.type} flow`,
+    workflow_type: "e2e_test",
     entry: "setup",
     nodes,
     edges,

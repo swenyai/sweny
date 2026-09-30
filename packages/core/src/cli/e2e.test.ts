@@ -332,6 +332,11 @@ describe("buildFlowWorkflow", () => {
     expect(() => workflowZ.parse(wf)).not.toThrow();
   });
 
+  it("declares workflow_type e2e_test", () => {
+    const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000");
+    expect(wf.workflow_type).toBe("e2e_test");
+  });
+
   it("passes structural validation (no cycles, all reachable)", () => {
     const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000");
     const errors = validateWorkflow(wf);

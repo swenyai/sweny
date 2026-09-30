@@ -13,6 +13,7 @@ import {
   EVALUATOR_KINDS,
   EVAL_POLICIES,
   MCP_TRANSPORTS,
+  NODE_ON_FAIL,
   REQUIRES_ON_FAIL,
   SKILL_CATEGORIES,
   SKILL_ID_MAX_LENGTH,
@@ -285,6 +286,7 @@ export const nodeZ = z
     disallowed_tools: z.array(z.string().min(1)).optional(),
     tools: nodeToolsZ.optional(),
     fail_soft: z.boolean().optional(),
+    on_fail: z.enum(NODE_ON_FAIL).optional(),
     rules: nodeSourcesZ.optional(),
     context: nodeSourcesZ.optional(),
     eval: z.array(evaluatorZ).min(1).optional(),
@@ -921,6 +923,12 @@ export const workflowJsonSchema = {
             type: "boolean",
             description:
               "When true, an agent-level failure at this node (max turns, early termination, SDK error) is downgraded to success with fail_soft: true and the error preserved in data; routing proceeds with partial output. Eval failures are not softened. Default false.",
+          },
+          on_fail: {
+            type: "string",
+            enum: [...NODE_ON_FAIL],
+            description:
+              "What to do when this node finishes 'failed' (agent-level failure, or an eval failure that exhausted retries and was not softened by fail_soft). 'halt' (default) stops the workflow with the failure surfaced so a broken node never advances down a conditional edge; 'continue' preserves the legacy fall-through where routing proceeds from the failed node. Distinct from requires.on_fail (the pre-condition gate).",
           },
           rules: {
             $ref: "#/$defs/NodeSources",
