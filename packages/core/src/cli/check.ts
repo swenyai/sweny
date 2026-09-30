@@ -1,7 +1,5 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
-import { spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import type { CliConfig } from "./config.js";
 import { validateInputs } from "./config.js";
@@ -370,44 +368,9 @@ function networkErrorMessage(err: unknown): string {
 /**
  * Detect a local Claude Code login the way `sweny workflow run` benefits from
  * it: the spawned Claude Code agent finds its own login, so no env credential
- * is needed. Checks `~/.claude/.credentials.json` (or CLAUDE_CONFIG_DIR) and,
- * on macOS, the Keychain entry (attributes only, the secret is never read).
+ * is needed. Lives with the harness login probes (#339); re-exported here.
  */
-export function detectClaudeCodeLogin(
-  opts: {
-    env?: Record<string, string | undefined>;
-    home?: string;
-    platform?: NodeJS.Platform;
-    keychainHasLogin?: () => boolean;
-  } = {},
-): boolean {
-  const env = opts.env ?? process.env;
-  const home = opts.home ?? os.homedir();
-  const platform = opts.platform ?? process.platform;
-  const configDir = env.CLAUDE_CONFIG_DIR || path.join(home, ".claude");
-  try {
-    if (fs.existsSync(path.join(configDir, ".credentials.json"))) return true;
-  } catch {
-    // fall through
-  }
-  if (platform === "darwin") {
-    const probe =
-      opts.keychainHasLogin ??
-      (() => {
-        const r = spawnSync("security", ["find-generic-password", "-s", "Claude Code-credentials"], {
-          stdio: "ignore",
-          timeout: 3000,
-        });
-        return r.status === 0;
-      });
-    try {
-      return probe();
-    } catch {
-      return false;
-    }
-  }
-  return false;
-}
+export { detectClaudeCodeLogin } from "../harness/auth.js";
 
 /**
  * Skill ids used by the workflows in `.sweny/workflows/`. `found` is false when

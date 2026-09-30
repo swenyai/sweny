@@ -21,6 +21,8 @@ runContractSuite(
       policy: "warn",
       codexCommand: fakes.command,
       killGraceMs: 500,
+      // No host login probe in tests (#339): the suite drives a fake codex.
+      authProbe: () => ({ ok: true, via: "test" }),
       // No host srt probe in tests: case 15 hands in its recording wrapper, every other case has none.
       sandboxWrapper: sandboxWrapper ?? null,
       ...(sandbox ? { sandbox: "auto" as const, sandboxProbe: () => undefined } : { sandbox: "off" as const }),

@@ -105,6 +105,7 @@ sweny triage [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--dry-run` | Analyze only. Every node runs with read-only tools: write tools, external MCP servers, and shell/file-edit tools are withheld by the executor, so no issues are created, no PRs opened, no notifications sent. Stops at the first conditional edge. See [Dry run](/workflows/#dry-run). | `false` |
+| `--stage` | Run normally, but preview every issue, comment and PR instead of filing it; the run stops before any code is pushed. See [Permissions and safe outputs](/workflows/yaml-reference/#permissions-and-safe-outputs). | `false` |
 | `--no-novelty-mode` | Allow +1 on existing issues instead of skipping duplicates | -- |
 | `--issue-override <issue>` | Work on a specific existing issue instead of scanning for new ones | -- |
 | `--additional-instructions <text>` | Extra instructions passed to the coding agent | -- |
@@ -179,6 +180,7 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 | `--issue-tracker-provider <provider>` | Issue tracker: `linear`, `jira`, `github-issues`, `file` | `linear` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
 | `--dry-run` | Analyze and plan only. Runs with read-only tools (no code edits, no shell, no PR). See [Dry run](/workflows/#dry-run). | `false` |
+| `--stage` | Run normally, but preview the PR and the issue comment instead of writing them. | `false` |
 | `--max-implement-turns <n>` | Max coding agent turns (1-500) | `40` |
 | `--base-branch <branch>` | Base branch for PRs | `main` |
 | `--repository <owner/repo>` | Repository (auto-detected from git remote) | -- |

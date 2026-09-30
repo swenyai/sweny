@@ -76,6 +76,7 @@ export type {
   SafeOutputDeclaration,
   SafeOutputsPolicy,
   SafeOutputReceipt,
+  SafeOutputPin,
   AuthorAssociation,
 } from "./types.js";
 

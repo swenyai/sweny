@@ -92,6 +92,13 @@ export function policyGate(
     }
   }
 
+  // Exclusive MCP (`permissions.strict`): only the servers sweny passes may
+  // load, never the user's own config. A harness that cannot exclude them
+  // cannot honor it, so strict refuses the node.
+  if (policy.exclusiveMcp && caps.mcp.exclusive === "none") {
+    unenforced.push("exclusive MCP: harness cannot keep the user's own MCP servers out of the run");
+  }
+
   if (policy.egress.length > 0 && !caps.sandbox.network && !wrappers.egress) {
     unenforced.push("egress allowlist: harness has no network sandbox and no egress wrapper is active");
   }

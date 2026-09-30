@@ -226,3 +226,37 @@ describe.runIf(HAS_BUILD)("sweny check (#382)", () => {
     expect(flat(r.stdout + r.stderr)).toMatch(/GITHUB_TOKEN/);
   });
 });
+
+// #339: the harness preflight runs before any node. Linux only: on macOS the
+// login probe also asks the real Keychain, which a temp HOME cannot hide.
+describe.runIf(HAS_BUILD && process.platform !== "darwin")("agent login preflight (#339)", () => {
+  const NO_SKILL = `id: local
+name: Local
+description: d
+entry: a
+nodes:
+  a:
+    name: A
+    instruction: say hi
+`;
+
+  it("workflow run with no Claude Code login fails before any node, naming the agent and the fix", () => {
+    const sb = sandbox();
+    fs.writeFileSync(path.join(sb.cwd, "wf.yml"), NO_SKILL);
+    const r = sb.run(["workflow", "run", "wf.yml"]);
+    const out = flat(r.stdout + r.stderr);
+    expect(r.status).toBe(1);
+    expect(out).toMatch(/--agent claude: Claude Code has no login/);
+    expect(out).toMatch(/ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN/);
+    // Nothing ran: the workflow never started.
+    expect(out).not.toMatch(/▲ local/);
+  });
+
+  it("check names the agent in its auth failure", () => {
+    const sb = sandbox();
+    expect(sb.run(["new", "--template", "explain-repo", "--yes"]).status).toBe(0);
+    const r = sb.run(["check"]);
+    expect(r.status).toBe(1);
+    expect(flat(r.stdout + r.stderr)).toMatch(/--agent claude: Claude Code has no login/);
+  });
+});

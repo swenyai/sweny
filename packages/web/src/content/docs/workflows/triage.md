@@ -235,6 +235,30 @@ The triage workflow lists **all compatible skills per category** in each node. A
 | tasks | `linear`, `github` | Past issues, ticket creation |
 | notification | `slack`, `notification` | Team alerts |
 
+## Permissions and writes
+
+Triage runs on sweny's own opinions ([permissions and safe outputs](/workflows/yaml-reference/#permissions-and-safe-outputs)):
+
+| Node | Access | What it may write |
+|------|--------|-------------------|
+| `gather`, `investigate` | `read` | Nothing. Read skill tools only: no write tool, no shell, no file edits, on any agent. |
+| `create_issue` | `read` + outputs | Issues (at most 10) and +1 comments (at most 10), as safe outputs. |
+| `skip` | `read` + outputs | +1 comments (at most 10), as safe outputs. |
+| `implement` | `write`, no web | The code change: file edits, tests, a local commit. No GitHub write tool. |
+| `create_pr` | `write` + outputs | Pushes the branch (git needs a shell); the PR itself (at most 1) is a safe output. |
+| `notify` | `write` | The notification. |
+
+The workflow caps the run at 25 writes and allows only `issue`, `comment` and `pr`. The agent requests each issue, comment and PR with `emit_output`; sweny checks it and files it after the step, through the `github` or `linear` skill. The next steps read the new issue's identifier and URL from `context.create_issue.safe_outputs`.
+
+`sweny triage` pins every write to the tracker and repository you configured. When a provider cannot work that way, only the affected nodes keep their older write-capable shape, and the run prints which and why:
+
+- A Jira or file tracker, or GitLab source control: the nodes that write there use the tracker's own tools.
+- An integration a read-only step cannot reach (Jira, GitLab, an observability provider without a built-in skill such as Loki or New Relic, your own MCP servers or workspace tools): `gather` and `investigate` keep the shell and MCP, with file edits and skill write tools denied.
+
+`sweny triage --stage` previews every issue, comment and PR instead of filing it, and stops before any code is pushed. `--dry-run` runs with no side effects at all.
+
+Behavior notes: a closed duplicate gets its +1 comment but is no longer reopened on Linear, since no safe output changes an issue's state; the comment says it is closed. On Codex, read-only steps have no shell, so `gather` and `investigate` see skill tools only.
+
 ## Running the triage workflow
 
 **From the CLI:**

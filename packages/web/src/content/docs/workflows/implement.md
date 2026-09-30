@@ -157,14 +157,19 @@ A `risk_level: "high"` result or an incomplete `fix_plan` routes to `skip`, wher
 
 ## How implementation works
 
-The `implement` and `create_pr` nodes use the `github` skill, which gives Claude access to full coding capabilities through Claude Code. At these nodes, Claude can:
+Each node gets only what its task needs ([permissions and safe outputs](/workflows/yaml-reference/#permissions-and-safe-outputs)):
 
-- Read and write files in the repository
-- Create branches and make commits
-- Push branches and open pull requests
-- Add reviewers and labels
+| Node | Access | What it may write |
+|------|--------|-------------------|
+| `analyze` | `read` | Nothing: read skill tools only, no shell, no file edits. |
+| `implement` | `write`, no web | The code change: read and write files, run tests, create a branch, commit. No GitHub write tool. |
+| `create_pr` | `write` + outputs | Pushes the branch (git needs a shell). The PR (at most 1, labels `sweny` and `agent`) is a safe output: the agent requests it, sweny opens it after the step and reuses an open PR for the same branch. |
+| `notify` | `write` | The notification. |
+| `skip` | `read` + outputs | One comment, pinned to the issue being implemented (`number: { input: issueIdentifier }`). |
 
-The instruction at each node keeps Claude focused on a specific task. The `implement` node explicitly says "fix the bug, nothing more" to prevent scope creep. The `create_pr` node focuses on the PR itself -- title, description, issue reference.
+The instruction at each node keeps the agent focused on a specific task. The `implement` node explicitly says "fix the bug, nothing more" to prevent scope creep. The `create_pr` node focuses on the PR itself -- title, description, issue reference.
+
+`sweny implement` pins the PR and comment to the tracker and repository you configured. With GitLab or file source control, or a Jira or file tracker, the affected nodes keep their older write-capable shape and the run says so.
 
 ## Running the implement workflow
 
@@ -173,6 +178,7 @@ The instruction at each node keeps Claude focused on a specific task. The `imple
 ```bash
 sweny implement ENG-123           # implement a fix for a Linear issue
 sweny implement --dry-run ENG-123 # analyze without making changes
+sweny implement --stage ENG-123   # run, but preview the PR and comment instead of writing them
 ```
 
 **From GitHub Actions:**

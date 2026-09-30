@@ -203,6 +203,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   const runEnv = options.env ?? process.env;
   const usesOutputs = Object.values(workflow.nodes).some((n) => (n.outputs?.length ?? 0) > 0);
   const actor: ActorInfo = usesOutputs ? resolveActor(runEnv, options.actor) : {};
+  // The run input, for `number: { input }` issue pins on outputs.
+  const runInput = input && typeof input === "object" ? (input as Record<string, unknown>) : undefined;
 
   // Build an eval-time alias table from the loaded skills. Each skill owns
   // its own mapping between skill-tool names and equivalent MCP names. Core
@@ -446,7 +448,9 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       skillInstructions,
     );
     const nodeInstruction =
-      outputDecls.length > 0 ? `${baseInstruction}\n\n${safeOutputsInstruction(outputDecls)}` : baseInstruction;
+      outputDecls.length > 0
+        ? `${baseInstruction}\n\n${safeOutputsInstruction(outputDecls, runInput)}`
+        : baseInstruction;
     const instruction = dryRun ? `${dryRunNotice(skippedWrites)}\n\n---\n\n${nodeInstruction}` : nodeInstruction;
 
     // Run Claude on this node, with optional eval-failure retry loop.
@@ -671,6 +675,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
           staged: stageOutputs,
           state: writeState,
           logger,
+          input: runInput,
           screen: async (writes) =>
             claude.ask({
               instruction: SAFE_OUTPUT_SCREEN_INSTRUCTION,
@@ -862,11 +867,18 @@ function warnOnJudgeBudget(workflow: Workflow, logger: Logger): void {
  * including when no evaluator ran (the trusted namespace is then empty).
  */
 function buildPriorNodeContext(result: NodeResult): Record<string, unknown> {
-  const data = (result.data ?? {}) as Record<string, unknown>;
+  const { safe_outputs: _forged, ...data } = (result.data ?? {}) as Record<string, unknown>;
   const evals = result.evals ?? [];
 
   const evalsByName = Object.fromEntries(evals.map((e) => [e.name, e]));
-  return { ...data, evals: evalsByName };
+  // Safe-output receipts (#365) are runtime facts, like evals: what sweny
+  // actually wrote (type, status, ref, url). A downstream node reads the new
+  // issue's identifier here. Agent data can never shadow them.
+  return {
+    ...data,
+    evals: evalsByName,
+    ...(result.outputs && result.outputs.length > 0 ? { safe_outputs: result.outputs } : {}),
+  };
 }
 
 /**
