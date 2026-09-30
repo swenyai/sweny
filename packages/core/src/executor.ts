@@ -43,6 +43,8 @@ import { evaluateRequires } from "./requires.js";
 import { buildRetryPreamble } from "./retry.js";
 import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
+import { resolveAgentAccess } from "./agent-env.js";
+import { fenceUntrusted } from "./untrusted.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -392,6 +394,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         model: nodeModel,
         signal,
         timeoutMs,
+        agentAccess: resolveAgentAccess(node.skills, skills),
         ...(dryRun ? { readOnly: true } : {}),
         onProgress: (message) => {
           safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
@@ -622,7 +625,8 @@ function buildNodeInstruction(
     sections.push(`## Rules — You MUST Follow These\n\n${effectiveRules}`);
   }
   if (effectiveContext) {
-    sections.push(`## Background Context\n\n${effectiveContext}`);
+    // Context Sources can be fetched pages or runtime input: fence as untrusted (#360).
+    sections.push(`## Background Context\n\n${fenceUntrusted(effectiveContext, "background-context")}`);
   }
 
   // Legacy fallback for `input.additionalContext` when no rules/context cascaded

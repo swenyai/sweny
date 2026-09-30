@@ -39,7 +39,7 @@ export function TransitionEdge({
   const shiftedLabelX = isConditional ? labelX + (targetX - labelX) * 0.4 : labelX;
   const shiftedLabelY = isConditional ? labelY + (targetY - labelY) * 0.4 : labelY;
 
-  const strokeColor = isError ? "#ef4444" : isConditional ? "#6366f1" : "#4d7aaa";
+  const strokeColor = isError ? "#ef4444" : isConditional ? "#3b82f6" : "#4d7aaa";
   const displayLabel = isError && when ? `⚠ ${when}` : when;
 
   return (
@@ -75,9 +75,9 @@ export function TransitionEdge({
                 borderRadius: 5,
                 display: "block",
                 lineHeight: 1.4,
-                color: isError ? "#dc2626" : "#4338ca",
+                color: isError ? "#dc2626" : "#1d4ed8",
                 background: isError ? "#fef2f2" : "#eef0ff",
-                border: isError ? "1px solid #fecaca" : "1px solid #c7d2fe",
+                border: isError ? "1px solid #fecaca" : "1px solid #bfdbfe",
                 boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
               }}
             >
