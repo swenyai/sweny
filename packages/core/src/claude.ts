@@ -24,7 +24,7 @@ import type {
 } from "./types.js";
 import { consoleLogger } from "./types.js";
 import {
-  formatWithheldWarning,
+  reportWithheldEnv,
   parseList,
   resolveEnvScope,
   scopeAgentEnv,
@@ -303,7 +303,6 @@ export class ClaudeClient implements Claude {
   private sandboxProbe: (() => string | undefined) | undefined;
   private sandboxWarned = false;
   private envScope: boolean | undefined;
-  private envWarned = false;
 
   constructor(opts: ClaudeClientOptions = {}) {
     this.model = opts.model;
@@ -325,8 +324,8 @@ export class ClaudeClient implements Claude {
    * `SWENY_AUTH`). When env scoping is on (default in CI, see
    * {@link resolveEnvScope}) the result is narrowed to the allowlist plus
    * `extraVars` (the node's declared skill env vars) and the operator
-   * passthrough list, and the withheld names (never values) are warned once
-   * per client. When off, the full env passes through as before.
+   * passthrough list, and the withheld names (never values) are reported once
+   * per process ({@link reportWithheldEnv}). When off, the full env passes through as before.
    */
   private buildEnv(extraVars: readonly string[] = []): Record<string, string> {
     const full: Record<string, string> = Object.fromEntries(
@@ -339,11 +338,7 @@ export class ClaudeClient implements Claude {
       passthrough: this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH),
       logger: this.logger,
     });
-    if (withheld.length > 0 && !this.envWarned) {
-      this.envWarned = true;
-      const prefix = process.env.GITHUB_ACTIONS === "true" ? "::warning title=SWEny agent env::" : "";
-      this.logger.warn(`${prefix}${formatWithheldWarning(withheld)}`);
-    }
+    reportWithheldEnv(withheld, this.logger);
     return env;
   }
 
