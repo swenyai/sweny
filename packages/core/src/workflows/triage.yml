@@ -9,7 +9,7 @@ entry: gather
 # by sweny after the node, within these types and this run-wide cap.
 permissions: write
 safe_outputs:
-  allow: [issue, comment, pr]
+  allow: [issue, comment, issue_state, pr]
   max: 25
 nodes:
   gather:
@@ -260,8 +260,9 @@ nodes:
       {UTC timestamp}. {one sentence of new context}." (Keep it under 2 lines. No markdown headers, no emoji,
       no formatting.)
 
-      4. If the existing issue is closed or done: reopen it when you have a tool that can; otherwise say in
-      the comment that it is closed and was seen again.
+      4. If the existing issue is closed or done: reopen it (type `issue_state`, `state` = `reopen`, `number`
+      = the issue ID or number) when you have `emit_output`; with a tracker tool instead, use one that can
+      reopen. If you can do neither, say in the comment that it is closed and was seen again.
 
 
       If context.issueTemplate is provided, use it as the format for new issue bodies. Otherwise use a clear structure
@@ -290,6 +291,12 @@ nodes:
       - type: issue
         max: 10
       - type: comment
+        max: 10
+      # Reopening a closed duplicate (what triage did before #365). Reopen
+      # only: this node never closes an issue. The issue must be named on the
+      # request; sweny checks it is in the tracker and only moves a closed one.
+      - type: issue_state
+        state: reopen
         max: 10
     # Legacy runs (a tracker with no safe-output skill, see
     # cli/builtin-workflows.ts) still never open PRs from here.
@@ -375,18 +382,22 @@ nodes:
       issue ID or number): "+1 seen again {UTC timestamp}. {one sentence of new context}." (Keep it under 2
       lines. No markdown headers, no emoji, no formatting.)
 
-      4. If the issue is closed or done: reopen it when you have a tool that can; otherwise say in the comment
-      that it is closed and was seen again.
+      4. If the issue is closed or done: reopen it (`emit_output` type `issue_state`, `state` = `reopen`,
+      `number` = the issue ID or number) when you have `emit_output`; with a tracker tool instead, use one
+      that can reopen. If you can do neither, say in the comment that it is closed and was seen again.
 
 
       For **low priority** findings, log a brief note about why they were skipped.
     skills:
       - linear
       - github
-    # #365: comments on existing issues only, as a declared output. Read-only
-    # otherwise: it never creates issues or PRs.
+    # #365: comments on existing issues, and reopening closed ones, as declared
+    # outputs. Read-only otherwise: it never creates issues or PRs.
     outputs:
       - type: comment
+        max: 10
+      - type: issue_state
+        state: reopen
         max: 10
   implement:
     name: Implement Fix

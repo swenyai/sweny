@@ -356,3 +356,35 @@ describe("github_list_dependabot_alerts", () => {
     await expect(tool.handler({ repo: "o/r" }, ctx())).rejects.toThrow(/HTTP 500/);
   });
 });
+
+describe("github_set_issue_state", () => {
+  const setState = github.tools.find((t) => t.name === "github_set_issue_state")!;
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is a write tool", () => {
+    expect(setState.access).toBe("write");
+  });
+
+  it.each([
+    ["reopen", { state: "open", state_reason: "reopened" }],
+    ["close", { state: "closed", state_reason: "completed" }],
+  ])("%s PATCHes the issue", async (state, body) => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { number: 7, state: body.state }));
+    vi.stubGlobal("fetch", fetchMock);
+    const out: any = await setState.handler({ repo: "acme/api", issue_number: 7, state }, ctx());
+    expect(out.number).toBe(7);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.github.com/repos/acme/api/issues/7");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toEqual(body);
+  });
+
+  it("rejects any other state without calling the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(setState.handler({ repo: "acme/api", issue_number: 7, state: "delete" }, ctx())).rejects.toThrow(
+      /reopen/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
