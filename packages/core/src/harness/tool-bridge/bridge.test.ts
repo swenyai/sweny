@@ -17,7 +17,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { startToolBridge, type ToolBridge } from "./server.js";
-import { BridgeClient } from "./shim.js";
+import { BridgeClient, parseConnectTarget } from "./shim.js";
 import { TOKEN_ENV, callToolAsMcp, createFrameReader, tokenMatches } from "./protocol.js";
 import { coreToolToSdkTool, parseToolResultContent } from "../claude-code.js";
 import type { Tool, ToolContext } from "../../types.js";
@@ -384,4 +384,149 @@ describeDist("tool bridge crash cleanup", () => {
       else expect(signal).toBe(how);
     });
   }
+});
+
+// ─── Loopback TCP endpoint for sandboxed agents (#439) ───────────
+
+/** A minimal HTTP CONNECT proxy, like srt's: checks Basic auth, then pipes. */
+async function startConnectProxy(opts: { user: string; pass: string; refuse?: boolean }) {
+  const seen: string[] = [];
+  const server = net.createServer((client) => {
+    let buf = Buffer.alloc(0);
+    const onData = (chunk: Buffer) => {
+      buf = Buffer.concat([buf, chunk]);
+      const end = buf.indexOf("\r\n\r\n");
+      if (end === -1) return;
+      client.removeListener("data", onData);
+      const head = buf.subarray(0, end).toString("latin1").split("\r\n");
+      const [, target] = head[0].split(" ");
+      seen.push(target);
+      const auth = head
+        .find((h) => /^proxy-authorization:/i.test(h))
+        ?.split(" ")
+        .at(-1);
+      const want = Buffer.from(`${opts.user}:${decodeURIComponent(opts.pass)}`).toString("base64");
+      if (auth !== want) return client.end("HTTP/1.1 407 Proxy Authentication Required\r\n\r\n");
+      if (opts.refuse) return client.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+      const [host, port] = [
+        target.slice(0, target.lastIndexOf(":")),
+        Number(target.slice(target.lastIndexOf(":") + 1)),
+      ];
+      const upstream = net.createConnection(port, host, () => {
+        client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        const rest = buf.subarray(end + 4);
+        if (rest.length > 0) upstream.write(rest);
+        client.pipe(upstream).pipe(client);
+      });
+      upstream.on("error", () => client.destroy());
+      client.on("error", () => upstream.destroy());
+    };
+    client.on("data", onData);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const port = (server.address() as net.AddressInfo).port;
+  return {
+    url: `http://${opts.user}:${opts.pass}@127.0.0.1:${port}`,
+    seen,
+    close: () => new Promise<void>((r) => server.close(() => r())),
+  };
+}
+
+describe("tool bridge TCP endpoint (#439)", () => {
+  let bridge: ToolBridge | undefined;
+  afterEach(async () => {
+    await bridge?.close();
+    bridge = undefined;
+  });
+
+  it("parses --connect targets", () => {
+    expect(parseConnectTarget("127.0.0.1:4321")).toEqual({ host: "127.0.0.1", port: 4321 });
+    expect(parseConnectTarget("[::1]:80")).toEqual({ host: "::1", port: 80 });
+    expect(parseConnectTarget("127.0.0.1")).toBeUndefined();
+    expect(parseConnectTarget("127.0.0.1:0")).toBeUndefined();
+    expect(parseConnectTarget("127.0.0.1:70000")).toBeUndefined();
+    expect(parseConnectTarget("a b:1")).toBeUndefined();
+  });
+
+  it("is off by default: no port, no egress, the shim gets --socket", async () => {
+    bridge = await startToolBridge({ tools: [], context: ctx });
+    expect(bridge.tcp).toBeUndefined();
+    expect(bridge.egress).toEqual([]);
+    expect(bridge.mcpServer.args).toContain("--socket");
+    expect(bridge.mcpServer.args).not.toContain("--connect");
+  });
+
+  it("with tcp: listens on loopback only, names the one egress host, points the shim there", async () => {
+    bridge = await startToolBridge({ tools: [], context: ctx, tcp: true });
+    expect(bridge.tcp).toEqual({ host: "127.0.0.1", port: expect.any(Number) });
+    expect(bridge.egress).toEqual([`127.0.0.1:${bridge.tcp!.port}`]);
+    const args = bridge.mcpServer.args!;
+    expect(args.slice(-2)).toEqual(["--connect", `127.0.0.1:${bridge.tcp!.port}`]);
+    expect(args).not.toContain("--socket");
+    expect(args.join(" ")).not.toContain(bridge.token);
+  });
+
+  it("serves the same tools with the same token check over TCP", async () => {
+    const calls: string[] = [];
+    bridge = await startToolBridge({ tools: makeTools(calls), context: ctx, logger: silent, tcp: true });
+    const client = new BridgeClient(bridge.tcp!, bridge.token, {});
+    try {
+      const list = await client.request("tools/list");
+      expect((list as any).result.tools.map((t: any) => t.name)).toEqual(["lookup", "say", "explode"]);
+      expect(await client.request("tools/call", { name: "say", arguments: { text: "x" } })).toMatchObject({ ok: true });
+      expect(calls).toEqual(["say"]);
+    } finally {
+      client.close();
+    }
+    const bad = new BridgeClient(bridge.tcp!, "0".repeat(64), {});
+    expect(await bad.request("tools/call", { name: "say", arguments: {} })).toMatchObject({
+      ok: false,
+      error: { code: "unauthorized" },
+    });
+    bad.close();
+    expect(calls).toEqual(["say"]);
+  });
+
+  it("tunnels through the HTTP proxy in the env with its credentials, ignoring NO_PROXY", async () => {
+    const calls: string[] = [];
+    bridge = await startToolBridge({ tools: makeTools(calls), context: ctx, logger: silent, tcp: true });
+    const proxy = await startConnectProxy({ user: "srt", pass: "p%40ss" });
+    const client = new BridgeClient(bridge.tcp!, bridge.token, { HTTP_PROXY: proxy.url, NO_PROXY: "127.0.0.1" });
+    try {
+      expect(await client.request("tools/call", { name: "say", arguments: { text: "y" } })).toMatchObject({ ok: true });
+      expect(proxy.seen).toEqual([`127.0.0.1:${bridge.tcp!.port}`]);
+      expect(calls).toEqual(["say"]);
+    } finally {
+      client.close();
+      await proxy.close();
+    }
+  });
+
+  it("fails closed when the proxy refuses the tunnel", async () => {
+    const calls: string[] = [];
+    bridge = await startToolBridge({ tools: makeTools(calls), context: ctx, logger: silent, tcp: true });
+    const proxy = await startConnectProxy({ user: "u", pass: "p", refuse: true });
+    const client = new BridgeClient(bridge.tcp!, bridge.token, { http_proxy: proxy.url });
+    try {
+      await expect(client.request("tools/list")).rejects.toThrow(/proxy refused .*403/);
+      // Later calls fail fast, same as a dropped socket.
+      await expect(client.request("tools/list")).rejects.toThrow(/proxy refused/);
+      expect(calls).toEqual([]);
+    } finally {
+      client.close();
+      await proxy.close();
+    }
+  });
+
+  it("close() stops the TCP listener too", async () => {
+    const b = await startToolBridge({ tools: [], context: ctx, tcp: true });
+    const { port } = b.tcp!;
+    await b.close();
+    await expect(
+      new Promise((resolve, reject) => {
+        const s = net.createConnection(port, "127.0.0.1", () => resolve(s.end()));
+        s.on("error", reject);
+      }),
+    ).rejects.toThrow(/ECONNREFUSED/);
+  });
 });

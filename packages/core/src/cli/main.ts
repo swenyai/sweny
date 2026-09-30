@@ -1493,11 +1493,12 @@ workflowCmd
 program
   .command("tool-bridge", { hidden: true })
   .description("Internal: stdio MCP shim for sweny skill tools")
-  .requiredOption("--socket <path>", "Per-run bridge socket")
+  .option("--socket <path>", "Per-run bridge socket")
+  .option("--connect <host:port>", "Per-run bridge TCP endpoint (inside the process sandbox, via its proxy)")
   .option("--token <token>", "Per-run token (default: SWENY_TOOL_BRIDGE_TOKEN)")
-  .action(async (options: { socket: string; token?: string }) => {
+  .action(async (options: { socket?: string; connect?: string; token?: string }) => {
     const { runToolBridgeShim } = await import("../harness/tool-bridge/shim.js");
-    await runToolBridgeShim({ socket: options.socket, token: options.token, version });
+    await runToolBridgeShim({ socket: options.socket, connect: options.connect, token: options.token, version });
   });
 
 // ── sweny upgrade / update ────────────────────────────────────────────
