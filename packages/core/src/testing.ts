@@ -50,7 +50,8 @@ export interface MockClaudeOptions {
  *
  * For each node, it executes scripted tool calls and returns
  * scripted results. For routing decisions, it follows the
- * routes map or defaults to the first choice.
+ * routes map. With no scripted route (or an invalid one) it returns
+ * `null`, mirroring the real client failing closed on a route-eval failure.
  */
 export class MockClaude implements Claude {
   private callOrder: string[] = [];
@@ -127,7 +128,7 @@ export class MockClaude implements Claude {
     question: string;
     context: Record<string, unknown>;
     choices: { id: string; description: string }[];
-  }): Promise<string> {
+  }): Promise<string | null> {
     // Check if we have a scripted route from the last executed node
     const lastNode = this.callOrder[this.callOrder.length - 1];
     if (lastNode && this.routes[lastNode]) {
@@ -138,8 +139,8 @@ export class MockClaude implements Claude {
       }
     }
 
-    // Default: first choice
-    return opts.choices[0].id;
+    // No scripted route: fail closed (same as ClaudeClient.evaluate).
+    return null;
   }
 
   async ask(opts: { instruction: string; context: Record<string, unknown> }): Promise<string> {
