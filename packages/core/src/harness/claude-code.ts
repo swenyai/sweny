@@ -28,6 +28,7 @@ import {
   parseList,
   resolveEnvScope,
   scopeAgentEnv,
+  withPushBlocked,
   resolveAgentSandbox,
   type AgentAccess,
   type SandboxMode,
@@ -423,7 +424,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
       strictMcp: readOnly || policy.strict || policy.exclusiveMcp === true,
       sandboxMode: policy.sandbox,
-      agentAccess: { envVars: req.agentAccess?.envVars ?? [], domains: policy.egress },
+      agentAccess: { envVars: req.agentAccess?.envVars ?? [], domains: policy.egress, noPush: req.agentAccess?.noPush },
     });
     return { ...result, harness: this.info(), degraded: gate.degraded };
   }
@@ -535,7 +536,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     // node outputs) is fenced as untrusted data (#360).
     const prompt = buildNodePrompt(instruction, context, outputSchema);
 
-    const env = this.buildEnv(agentAccess?.envVars);
+    const env = withPushBlocked(this.buildEnv(agentAccess?.envVars), agentAccess?.noPush);
 
     let response = "";
     // CC-08: when the SDK populates typed structured output (because we passed

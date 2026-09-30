@@ -44,6 +44,7 @@ import {
   resolveEnvScope,
   resolveSandboxMode,
   scopeAgentEnv,
+  withPushBlocked,
   type SandboxMode,
 } from "../agent-env.js";
 import type {
@@ -877,7 +878,7 @@ export class PiHarness implements AgentHarness {
     const deny = new Set<ToolClass>(policy.deny);
     if (readOnly) for (const c of ["shell", "write", "edit"] as ToolClass[]) deny.add(c);
 
-    const env = this.buildEnv(req.agentAccess?.envVars);
+    const env = withPushBlocked(this.buildEnv(req.agentAccess?.envVars), req.agentAccess?.noPush);
     const model = req.model ?? this.model;
     let bridge: ToolBridge | undefined;
     let agentDir: string | undefined;
