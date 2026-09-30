@@ -27,11 +27,14 @@ Requires Node 20+ and a Claude login (`claude` signed in) or an `ANTHROPIC_API_K
 ```bash
 npm install -g @sweny-ai/core
 sweny new --template explain-repo --yes   # zero-credential starter: reads this checkout, no tokens
+sweny workflow validate .sweny/workflows/explain-repo.yml
+sweny workflow diagram .sweny/workflows/explain-repo.yml   # Mermaid graph of the DAG
 sweny workflow run .sweny/workflows/explain-repo.yml
 ```
 
 `sweny new` with no flags opens the interactive picker. `--template <id> --yes` skips every prompt (no
 terminal needed). It writes `.sweny.yml`, `.env` (added to `.gitignore`), and the workflow file.
+CI runs everything above except `run` in a clean container on every PR (`scripts/quickstart-smoke.sh`).
 
 Templates that use skills such as GitHub need their token first. `sweny new` writes blank values for
 credentials it can't infer:

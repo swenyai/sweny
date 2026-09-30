@@ -36,6 +36,41 @@ export function loadDotenv(cwd: string = process.cwd()): void {
   }
 }
 
+/**
+ * `.sweny.yml` keys for the agent execution floor (#360) and the env var each
+ * maps to. The runtime (claude.ts / agent-env.ts) reads the env var, so the
+ * same knob works for the CLI, the Action and library callers.
+ */
+const AGENT_FILE_KEYS: ReadonlyArray<readonly [string[], string]> = [
+  [["env-passthrough", "env_passthrough"], "SWENY_ENV_PASSTHROUGH"],
+  [["env-scope", "env_scope"], "SWENY_ENV_SCOPE"],
+  [["sandbox"], "SWENY_SANDBOX"],
+  [["sandbox-allowed-domains", "sandbox_allowed_domains"], "SWENY_SANDBOX_ALLOWED_DOMAINS"],
+];
+
+/**
+ * Copy agent sandbox / env-passthrough settings from `.sweny.yml` into the
+ * environment. Real env vars win (same precedence as {@link loadDotenv}).
+ * YAML booleans arrive as "true"/"false", which the sandbox mode parser
+ * treats as on/off.
+ */
+export function applyAgentFileConfig(fileConfig: FileConfig, env: NodeJS.ProcessEnv = process.env): void {
+  for (const [keys, envVar] of AGENT_FILE_KEYS) {
+    if (env[envVar] !== undefined) continue;
+    for (const key of keys) {
+      const v = fileConfig[key];
+      if (Array.isArray(v) && v.length > 0) {
+        env[envVar] = v.join(",");
+        break;
+      }
+      if (typeof v === "string" && v) {
+        env[envVar] = v;
+        break;
+      }
+    }
+  }
+}
+
 /** Parsed config file — flat strings for scalar fields, arrays for list fields, objects for nested blocks. */
 export type FileConfig = Record<string, string | string[] | Record<string, unknown>>;
 
@@ -120,7 +155,7 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # observability-provider: datadog        # datadog | sentry | cloudwatch | splunk | elastic | newrelic | loki | prometheus | pagerduty | heroku | opsgenie | vercel | supabase | netlify | fly | render | file
 # issue-tracker-provider: github-issues  # github-issues | linear | jira
 # source-control-provider: github        # github | gitlab
-# coding-agent-provider: claude          # claude | codex | gemini
+# coding-agent-provider: claude          # claude (the only supported agent)
 # notification-provider: console         # console | slack | teams | discord | email | webhook
 
 # ── Investigation ────────────────────────────────────────────────────
@@ -146,6 +181,13 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # leaving this unset means no reporting request is ever made.
 # cloud-token: sweny_pk_...
 # Or set SWENY_CLOUD_TOKEN in your environment.
+
+# ── Agent sandbox ─────────────────────────────────────────────────────
+# See https://docs.sweny.ai/advanced/agent-sandbox/
+# sandbox: off                           # off (local default) | auto (CI default: sandbox if supported, else warn) | strict
+# sandbox-allowed-domains: [internal.example.com]   # extra hosts agent commands may reach
+# env-scope: off                         # off (local default: full env) | on (CI default: allowlist)
+# env-passthrough: [NPM_TOKEN]           # extra env vars the agent may see when scoped ("*" = all)
 
 # ── MCP servers ───────────────────────────────────────────────────────
 # Extend the coding agent with additional tools via MCP.
