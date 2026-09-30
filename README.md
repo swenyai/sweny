@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>AI workflows as code. Describe what you want, get a reliable DAG.</strong>
+  <strong>Workflows for coding agents. One set of rules, a receipt for every run.</strong>
 </p>
 
 <p align="center">
@@ -19,6 +19,35 @@
 </p>
 
 ---
+
+SWEny runs a DAG of coding-agent steps from a YAML file, on your laptop or in any CI. The agent does
+the work. SWEny decides what it can touch, checks what it hands back, and records what it did.
+
+- **Security.** In CI, the agent sees only the env vars a node's skills need, and its commands run
+  sandboxed when the host supports it (both opt-in locally). Inputs reach the model fenced as untrusted
+  data. `--dry-run` withholds shell, write and edit tools.
+- **Quality.** A node's declared output schema is a contract: a missing required field fails the node
+  (or retries it), and a step that returns no result fails instead of passing.
+- **Proof.** Every run ends with a receipt: nodes, tool calls, duration, tokens, cost. The GitHub Action
+  posts it to the PR with the run's DAG, and `sweny runs diff` compares a run with the one before it.
+
+```bash
+npm install -g @sweny-ai/core
+sweny new --template explain-repo --yes            # two-node starter, no tokens needed
+sweny workflow run .sweny/workflows/explain-repo.yml
+# ...node progress, then one receipt line:
+# ✓ 2/2 nodes · <tool calls> · <duration> · <tokens> · <cost>
+```
+
+### Supported agents
+
+| Agent | Status |
+|-------|--------|
+| Claude Code | Supported. Passes the 14-case harness contract suite on every CI run. |
+| Codex | In progress, [#331](https://github.com/swenyai/sweny/issues/331) |
+
+An agent is listed as supported once it passes the same contract suite: scoped env, exclusive MCP config,
+read-only dry run, output checks, timeouts, untrusted-input fencing, cleanup.
 
 ## Quickstart
 
@@ -57,7 +86,7 @@ sweny workflow run examples/file-ops.yml
 Build a workflow from scratch: pick "Describe your own" in the `sweny new` picker.
 
 ```bash
-# Visualize any workflow as a Mermaid diagram — drop it into a PR or README
+# Visualize any workflow as a Mermaid diagram, drop it into a PR or README
 sweny workflow diagram .sweny/workflows/pr-review.yml -o pr-review.mmd
 ```
 
@@ -72,7 +101,7 @@ Browse **[marketplace.sweny.ai](https://marketplace.sweny.ai)** for ready-to-run
 
 ## What it does
 
-Describe a task in plain English. SWEny builds a DAG of focused AI agents — each node gets its own MCP tool set scoped by the skills it declares, structured output, and conditional routing. Every tool call is tracked. (The underlying Claude Code agent process keeps its built-in tools available so nodes stay agentic inside their box; see [ARCHITECTURE.md](./ARCHITECTURE.md#what-scoped-tools-means) for the exact capability contract.)
+Describe a task in plain English. SWEny builds a DAG of focused AI agents. Each node gets its own MCP tool set scoped by the skills it declares, structured output, and conditional routing. Every tool call is tracked. (The underlying Claude Code agent process keeps its built-in tools available so nodes stay agentic inside their box; see [ARCHITECTURE.md](./ARCHITECTURE.md#what-scoped-tools-means) for the exact capability contract.)
 
 ```
 $ sweny workflow create "audit our repo for security issues, \
@@ -97,10 +126,88 @@ $ sweny workflow create "audit our repo for security issues, \
 | Surface | What it does |
 |---------|-------------|
 | **[CLI](https://docs.sweny.ai/cli/)** | Build, run, and publish workflows from your terminal |
-| **[GitHub Action](https://docs.sweny.ai/action/)** | Run any workflow on CI — plus dedicated [triage](https://github.com/swenyai/triage) and [e2e](https://github.com/swenyai/e2e) actions |
+| **[GitHub Action](https://docs.sweny.ai/action/)** | Run any workflow on CI, plus dedicated [triage](https://github.com/swenyai/triage) and [e2e](https://github.com/swenyai/e2e) actions |
 | **[Studio](https://docs.sweny.ai/studio/)** | Visual DAG editor and live execution monitor |
 | **[Claude Code Plugin](https://docs.sweny.ai/advanced/mcp-plugin/)** | Slash commands, MCP tools, and an isolated workflow agent |
 | **[Marketplace](https://marketplace.sweny.ai)** | Browse, fork, and share community workflows |
+
+## Workflows
+
+Three recurring packs, built to be enabled once and useful again next week. Each is read-only except one declared output, validates with no credentials, and comes with a GitHub Action trigger. Pick one in `sweny new` (right after "Explain this repo") or by id. Setup, permissions, and gates: [docs.sweny.ai/workflows/packs](https://docs.sweny.ai/workflows/packs/).
+
+| Pack | Runs | Output | Tokens per run (estimate) |
+|------|------|--------|---------------------------|
+| `weekly-digest` | Mondays | Commits, merged PRs, issues opened and closed, risky files, as one issue or Slack message | 15k to 40k |
+| `dependency-drift` | Weekly | Lockfiles plus open advisories, one deduped issue with what matters and why | 20k to 60k |
+| `pr-risk-review` | Every PR | Read-only scope and risk comment: size, tests touched, risky areas | 10k to 30k |
+
+```bash
+sweny new --template weekly-digest --yes
+sweny workflow validate .sweny/workflows/weekly-digest.yml   # no credentials needed
+```
+
+<details>
+<summary>Sample output: weekly-digest</summary>
+
+```text
+Weekly digest 2026-09-21 to 2026-09-28 (acme/api)
+
+Auth middleware rewrite landed; 11 PRs merged, one touching the session store.
+
+11 commits by 4 authors | 11 PRs merged | 6 issues opened | 9 closed
+
+Merged
+- #482 Rotate session secrets on deploy (@dana)
+- #479 Cache permit lookups (@ravi)
+
+Risky files
+- src/auth/session.ts (auth): session secret handling changed, no test touched
+- db/migrations/0041_add_index.sql (data): new index on a 40M-row table
+
+Watch next week
+- Add a test for session rotation (src/auth/session.ts)
+```
+
+</details>
+
+<details>
+<summary>Sample output: dependency-drift</summary>
+
+```text
+Dependency drift: 2 actionable
+
+| Package | Severity | Advisory | Why it matters | Fix |
+| --- | --- | --- | --- | --- |
+| jsonwebtoken | high | GHSA-xxxx-xxxx-xxxx | Runtime dependency of the auth middleware | Upgrade to 9.0.0 |
+| lodash | medium | GHSA-yyyy-yyyy-yyyy | Runtime dependency, reachable from the export route | Upgrade to 4.17.21 |
+
+Drift
+- services/worker/package.json: no lockfile, installs are unpinned
+
+9 lower-severity or dev-only alerts deferred.
+```
+
+</details>
+
+<details>
+<summary>Sample output: pr-risk-review</summary>
+
+```text
+Risk: high (size m, 6 files)
+
+- src/auth/session.ts changed and no test file was touched
+- db/migrations/0041_add_index.sql is a data migration
+
+Where to look
+- session secret handling in src/auth/session.ts
+- whether 0041 needs a concurrent index build
+
+Read-only scope review. No code was changed.
+```
+
+</details>
+
+The samples are illustrative (made-up repo), not captured from a run.
 
 ## Custom skills
 
@@ -139,7 +246,7 @@ nodes:
     skills: [code-standards, github]
 ```
 
-Skills are cross-tool compatible — the same `SKILL.md` works in Claude Code, Codex, and Gemini CLI. Write once, use everywhere. [Learn more](https://docs.sweny.ai/skills/custom/).
+Skills are cross-tool compatible: the same `SKILL.md` works in Claude Code, Codex, and Gemini CLI. Write once, use everywhere. [Learn more](https://docs.sweny.ai/skills/custom/).
 
 ## Built-in skills
 
@@ -172,7 +279,7 @@ Focused actions for common use cases:
 | Action | Purpose |
 |--------|---------|
 | [`swenyai/sweny@v5`](https://github.com/swenyai/sweny) | Run any workflow YAML |
-| [`swenyai/triage@v1`](https://github.com/swenyai/triage) | SRE triage — observability + issue tracker |
+| [`swenyai/triage@v1`](https://github.com/swenyai/triage) | SRE triage: observability + issue tracker |
 | [`swenyai/e2e@v1`](https://github.com/swenyai/e2e) | Agentic E2E browser tests |
 
 ### Run reporting (optional, not yet available)
@@ -188,7 +295,7 @@ The hosted service behind it is in active development and **not open for sign-up
 Share your workflows and skills with the community:
 
 ```bash
-sweny publish   # interactive CLI — publish a workflow or skill
+sweny publish   # interactive CLI: publish a workflow or skill
 ```
 
 ## Packages
@@ -201,9 +308,9 @@ sweny publish   # interactive CLI — publish a workflow or skill
 
 ## Links
 
-- [Documentation](https://docs.sweny.ai) — full docs, guides, and reference
-- [Workflow Spec](https://spec.sweny.ai) — formal YAML specification
-- [Marketplace](https://marketplace.sweny.ai) — browse and share workflows
+- [Documentation](https://docs.sweny.ai): full docs, guides, and reference
+- [Workflow Spec](https://spec.sweny.ai): formal YAML specification
+- [Marketplace](https://marketplace.sweny.ai): browse and share workflows
 
 ## Development
 
