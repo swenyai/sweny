@@ -28,10 +28,14 @@ import {
   type AgentSpawn,
   type SandboxWrapper,
 } from "../sandbox-wrapper.js";
+import { TOKEN_ENV } from "../tool-bridge/protocol.js";
+import { startToolBridge, type ToolBridge } from "../tool-bridge/server.js";
 import type { HarnessCapabilities, NodePolicy } from "../types.js";
+import type { Tool } from "../../types.js";
 
 const REQUIRED = process.env.SWENY_REQUIRE_SANDBOX_WRAPPER === "1";
 const FAKE_AGENT = fileURLToPath(new URL("./fake-agent.mjs", import.meta.url));
+const DIST_CLI = fileURLToPath(new URL("../../../dist/cli/main.js", import.meta.url));
 const CANARY_NAME = "SWENY_WRAP_CANARY";
 const CANARY_VALUE = `canary-${process.pid}-${Date.now()}`;
 
@@ -69,12 +73,22 @@ type Probe =
   | { kind: "write"; path: string }
   | { kind: "read"; path: string }
   | { kind: "env"; names: string[] }
-  | { kind: "procScan"; needle: string };
+  | { kind: "procScan"; needle: string }
+  | {
+      kind: "mcp";
+      command: string;
+      args: string[];
+      envFrom: string[];
+      call: { name: string; arguments: Record<string, unknown> };
+    };
 
 interface ProbeResult {
   ok?: boolean;
   status?: number;
   error?: string;
+  stderr?: string;
+  tools?: string[];
+  result?: { content?: Array<{ type: string; text?: string }>; isError?: boolean };
   values?: Record<string, string | null>;
   found?: boolean;
   scanned?: number;
@@ -110,11 +124,11 @@ function parseResults(stdout: string, stderr: string): ProbeResult[] {
 }
 
 /** The fake agent, unwrapped: the control that proves each probe can succeed. */
-async function runUnwrapped(plan: Probe[]): Promise<ProbeResult[]> {
+async function runUnwrapped(plan: Probe[], extraEnv: Record<string, string> = {}): Promise<ProbeResult[]> {
   const r = await runChild({
     command: process.execPath,
     args: [FAKE_AGENT, JSON.stringify(plan)],
-    env: { ...scopedEnv(), [CANARY_NAME]: CANARY_VALUE },
+    env: { ...scopedEnv(), [CANARY_NAME]: CANARY_VALUE, ...extraEnv },
     cwd: workspace,
   });
   return parseResults(r.stdout, r.stderr);
@@ -123,7 +137,7 @@ async function runUnwrapped(plan: Probe[]): Promise<ProbeResult[]> {
 /** The fake agent through prepareAgentSpawn with the host's wrapper, strict sandbox mode. */
 async function runWrapped(
   plan: Probe[],
-  opts: { egress?: string[]; readOnly?: boolean } = {},
+  opts: { egress?: string[]; readOnly?: boolean; extraEnv?: Record<string, string> } = {},
 ): Promise<{ results: ProbeResult[]; home?: string; homeExistsAfterCleanup: boolean }> {
   const policy: NodePolicy = {
     readOnly: opts.readOnly ?? false,
@@ -137,7 +151,12 @@ async function runWrapped(
     policy,
     wrapper,
     env: {},
-    spawn: { command: process.execPath, args: [FAKE_AGENT, JSON.stringify(plan)], env: scopedEnv(), cwd: workspace },
+    spawn: {
+      command: process.execPath,
+      args: [FAKE_AGENT, JSON.stringify(plan)],
+      env: { ...scopedEnv(), ...opts.extraEnv },
+      cwd: workspace,
+    },
   });
   expect(prep.refuse).toBeUndefined();
   expect(prep.wrappedBy).toBe("srt");
@@ -340,6 +359,96 @@ describe.skipIf(!wrapper)(`wrapped fake agent (${process.platform}, srt)`, () =>
     }
     expect(existsSync(second.home)).toBe(false);
     expect(existsSync(scratchRoot ?? tmpdir()), "caller scratch parent must survive cleanup").toBe(true);
+  });
+
+  // #439: pi and ACP get skill tools through the tool bridge shim, which the
+  // agent starts inside the sandbox and which must reach the bridge the sweny
+  // process serves outside it.
+  describe("tool bridge from inside the sandbox", () => {
+    const calls: string[] = [];
+    const echo: Tool = {
+      name: "echo",
+      description: "Echo text back",
+      access: "read",
+      input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+      handler: async (input: any) => {
+        calls.push(String(input.text));
+        return `echo ${input.text}`;
+      },
+    };
+    const silent = { info() {}, warn() {}, error() {}, debug() {} };
+    const start = (tcp: boolean) =>
+      startToolBridge({
+        tools: [echo],
+        context: { config: {}, logger: silent },
+        logger: silent,
+        tcp,
+        // The shipped shim (`sweny tool-bridge`) from the core build; the job builds core first.
+        shimCommand: { command: process.execPath, args: [DIST_CLI, "tool-bridge"] },
+      });
+    // What an agent's MCP client hands the shim: the server's env, plus the
+    // proxy variables srt set for the agent (pi forwards them by reference).
+    const probe = (bridge: ToolBridge, text: string): Probe => ({
+      kind: "mcp",
+      command: bridge.mcpServer.command!,
+      args: bridge.mcpServer.args ?? [],
+      envFrom: [TOKEN_ENV, "SWENY_NO_UPDATE_CHECK", "HTTP_PROXY", "http_proxy"],
+      call: { name: "echo", arguments: { text } },
+    });
+    const tokenEnv = (bridge: ToolBridge) => ({ [TOKEN_ENV]: bridge.token, SWENY_NO_UPDATE_CHECK: "1" });
+
+    it("the unix socket is out of reach: srt blocks AF_UNIX sockets", async () => {
+      calls.length = 0;
+      const bridge = await start(false);
+      try {
+        const control = await runUnwrapped([probe(bridge, "control")], tokenEnv(bridge));
+        expect(control[0], JSON.stringify(control[0])).toMatchObject({ ok: true, tools: ["echo"] });
+        const { results } = await runWrapped([probe(bridge, "wrapped")], { extraEnv: tokenEnv(bridge) });
+        expect(results[0].ok, JSON.stringify(results[0])).toBe(false);
+        expect(calls).toEqual(["control"]);
+      } finally {
+        await bridge.close();
+      }
+    }, 60_000);
+
+    it.each([false, true])(
+      "lists and calls a tool over the bridge's allowlisted loopback port (readOnly %s)",
+      async (readOnly) => {
+        calls.length = 0;
+        const bridge = await start(true);
+        try {
+          expect(bridge.egress).toEqual([`127.0.0.1:${bridge.tcp!.port}`]);
+          // Control: unwrapped, the shim connects straight to the port.
+          const control = await runUnwrapped([probe(bridge, "control")], tokenEnv(bridge));
+          expect(control[0], JSON.stringify(control[0])).toMatchObject({ ok: true, tools: ["echo"] });
+
+          const { results } = await runWrapped([probe(bridge, "wrapped")], {
+            readOnly,
+            egress: bridge.egress,
+            extraEnv: tokenEnv(bridge),
+          });
+          expect(results[0], JSON.stringify(results[0])).toMatchObject({ ok: true, tools: ["echo"] });
+          expect(results[0].result?.content?.[0]?.text).toContain("echo wrapped");
+          // The handler ran here, in the sweny process, not inside the sandbox.
+          expect(calls).toEqual(["control", "wrapped"]);
+        } finally {
+          await bridge.close();
+        }
+      },
+      60_000,
+    );
+
+    it("without the bridge's egress entry the port stays unreachable", async () => {
+      calls.length = 0;
+      const bridge = await start(true);
+      try {
+        const { results } = await runWrapped([probe(bridge, "wrapped")], { extraEnv: tokenEnv(bridge) });
+        expect(results[0].ok, JSON.stringify(results[0])).toBe(false);
+        expect(calls).toEqual([]);
+      } finally {
+        await bridge.close();
+      }
+    }, 60_000);
   });
 
   it("a dry run cannot write the workspace either", async () => {
