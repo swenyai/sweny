@@ -29,7 +29,7 @@ import {
   type SandboxWrapper,
 } from "../sandbox-wrapper.js";
 import { TOKEN_ENV } from "../tool-bridge/protocol.js";
-import { startToolBridge } from "../tool-bridge/server.js";
+import { startToolBridge, type ToolBridge } from "../tool-bridge/server.js";
 import type { HarnessCapabilities, NodePolicy } from "../types.js";
 import type { Tool } from "../../types.js";
 
@@ -362,54 +362,94 @@ describe.skipIf(!wrapper)(`wrapped fake agent (${process.platform}, srt)`, () =>
   });
 
   // #439: pi and ACP get skill tools through the tool bridge shim, which the
-  // agent starts inside the sandbox and which must reach the bridge socket the
-  // sweny process holds outside it.
-  it.each([false, true])(
-    "lists and calls a tool bridge tool through the shim (readOnly %s)",
-    async (readOnly) => {
-      const calls: string[] = [];
-      const echo: Tool = {
-        name: "echo",
-        description: "Echo text back",
-        access: "read",
-        input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
-        handler: async (input: any) => {
-          calls.push(String(input.text));
-          return `echo ${input.text}`;
-        },
-      };
-      const silent = { info() {}, warn() {}, error() {}, debug() {} };
-      const bridge = await startToolBridge({
+  // agent starts inside the sandbox and which must reach the bridge the sweny
+  // process serves outside it.
+  describe("tool bridge from inside the sandbox", () => {
+    const calls: string[] = [];
+    const echo: Tool = {
+      name: "echo",
+      description: "Echo text back",
+      access: "read",
+      input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+      handler: async (input: any) => {
+        calls.push(String(input.text));
+        return `echo ${input.text}`;
+      },
+    };
+    const silent = { info() {}, warn() {}, error() {}, debug() {} };
+    const start = (tcp: boolean) =>
+      startToolBridge({
         tools: [echo],
         context: { config: {}, logger: silent },
         logger: silent,
+        tcp,
         // The shipped shim (`sweny tool-bridge`) from the core build; the job builds core first.
         shimCommand: { command: process.execPath, args: [DIST_CLI, "tool-bridge"] },
       });
-      const probe = (text: string): Probe => ({
-        kind: "mcp",
-        command: bridge.mcpServer.command!,
-        args: bridge.mcpServer.args ?? [],
-        envFrom: [TOKEN_ENV, "SWENY_NO_UPDATE_CHECK"],
-        call: { name: "echo", arguments: { text } },
-      });
-      const tokenEnv = { [TOKEN_ENV]: bridge.token, SWENY_NO_UPDATE_CHECK: "1" };
-      try {
-        // Control: unwrapped, the shim reaches the bridge.
-        const control = await runUnwrapped([probe("control")], tokenEnv);
-        expect(control[0], JSON.stringify(control[0])).toMatchObject({ ok: true, tools: ["echo"] });
+    // What an agent's MCP client hands the shim: the server's env, plus the
+    // proxy variables srt set for the agent (pi forwards them by reference).
+    const probe = (bridge: ToolBridge, text: string): Probe => ({
+      kind: "mcp",
+      command: bridge.mcpServer.command!,
+      args: bridge.mcpServer.args ?? [],
+      envFrom: [TOKEN_ENV, "SWENY_NO_UPDATE_CHECK", "HTTP_PROXY", "http_proxy"],
+      call: { name: "echo", arguments: { text } },
+    });
+    const tokenEnv = (bridge: ToolBridge) => ({ [TOKEN_ENV]: bridge.token, SWENY_NO_UPDATE_CHECK: "1" });
 
-        const { results } = await runWrapped([probe("wrapped")], { readOnly, extraEnv: tokenEnv });
-        expect(results[0], JSON.stringify(results[0])).toMatchObject({ ok: true, tools: ["echo"] });
-        expect(results[0].result?.content?.[0]?.text).toContain("echo wrapped");
-        // The handler ran here, in the sweny process, not inside the sandbox.
-        expect(calls).toEqual(["control", "wrapped"]);
+    it("the unix socket is out of reach: srt blocks AF_UNIX sockets", async () => {
+      calls.length = 0;
+      const bridge = await start(false);
+      try {
+        const control = await runUnwrapped([probe(bridge, "control")], tokenEnv(bridge));
+        expect(control[0], JSON.stringify(control[0])).toMatchObject({ ok: true, tools: ["echo"] });
+        const { results } = await runWrapped([probe(bridge, "wrapped")], { extraEnv: tokenEnv(bridge) });
+        expect(results[0].ok, JSON.stringify(results[0])).toBe(false);
+        expect(calls).toEqual(["control"]);
       } finally {
         await bridge.close();
       }
-    },
-    60_000,
-  );
+    }, 60_000);
+
+    it.each([false, true])(
+      "lists and calls a tool over the bridge's allowlisted loopback port (readOnly %s)",
+      async (readOnly) => {
+        calls.length = 0;
+        const bridge = await start(true);
+        try {
+          expect(bridge.egress).toEqual([`127.0.0.1:${bridge.tcp!.port}`]);
+          // Control: unwrapped, the shim connects straight to the port.
+          const control = await runUnwrapped([probe(bridge, "control")], tokenEnv(bridge));
+          expect(control[0], JSON.stringify(control[0])).toMatchObject({ ok: true, tools: ["echo"] });
+
+          const { results } = await runWrapped([probe(bridge, "wrapped")], {
+            readOnly,
+            egress: bridge.egress,
+            extraEnv: tokenEnv(bridge),
+          });
+          expect(results[0], JSON.stringify(results[0])).toMatchObject({ ok: true, tools: ["echo"] });
+          expect(results[0].result?.content?.[0]?.text).toContain("echo wrapped");
+          // The handler ran here, in the sweny process, not inside the sandbox.
+          expect(calls).toEqual(["control", "wrapped"]);
+        } finally {
+          await bridge.close();
+        }
+      },
+      60_000,
+    );
+
+    it("without the bridge's egress entry the port stays unreachable", async () => {
+      calls.length = 0;
+      const bridge = await start(true);
+      try {
+        const { results } = await runWrapped([probe(bridge, "wrapped")], { extraEnv: tokenEnv(bridge) });
+        expect(results[0].ok, JSON.stringify(results[0])).toBe(false);
+        expect(calls).toEqual([]);
+      } finally {
+        await bridge.close();
+      }
+    }, 60_000);
+  });
 
   it("a dry run cannot write the workspace either", async () => {
     const target = path.join(workspace, `dry-run-${Date.now()}.txt`);
