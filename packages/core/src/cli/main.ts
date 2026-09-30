@@ -565,7 +565,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 });
 
 // ── sweny implement ───────────────────────────────────────────────────
-const implementCmd = registerImplementCommand(program);
+const implementCmd = registerImplementCommand(program).option("--json", "Output result as JSON", false);
 
 implementCmd.action(async (issueId: string, options: Record<string, unknown>) => {
   const fileConfig = loadConfigFile();

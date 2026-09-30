@@ -50,6 +50,7 @@ afterEach(() => {
 describe("implement CLI to MCP output contract", () => {
   it.each(["success", "failed"] as const)("returns the actual %s CLI result through MCP", async (status) => {
     vi.resetModules();
+    mocks.execute.mockClear();
     const results = new Map<string, NodeResult>([
       ["analyze", { status, data: { summary: "A multiline result\nwith café and {braces}" }, toolCalls: [] }],
     ]);
@@ -77,12 +78,18 @@ describe("implement CLI to MCP output contract", () => {
     vi.spyOn(console, "log").mockImplementation((message: unknown) => {
       child.stdout!.emit("data", Buffer.from(String(message) + "\n"));
     });
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    let cliStderr = "";
+    vi.spyOn(console, "error").mockImplementation((message: unknown) => {
+      cliStderr += String(message) + "\n";
+    });
     vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
       child.stdout!.emit("data", typeof chunk === "string" ? Buffer.from(chunk) : Buffer.from(chunk));
       return true;
     });
-    vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+      cliStderr += String(chunk);
+      return true;
+    });
     const stopped = new Error("CLI process exited");
     const exit = vi.spyOn(process, "exit").mockImplementation(() => {
       throw stopped;
@@ -96,6 +103,7 @@ describe("implement CLI to MCP output contract", () => {
       child.emit("close", status === "success" ? 0 : 1);
     }
     const result = await resultPromise;
+    expect(mocks.execute, cliStderr).toHaveBeenCalledOnce();
     expect(exit.mock.calls[0][0]).toBe(status === "success" ? 0 : 1);
     expect(result.success).toBe(status === "success");
     expect(JSON.parse(result.output)).toEqual(Object.fromEntries(results));
