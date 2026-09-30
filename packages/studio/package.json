@@ -27,7 +27,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:lib": "BUILD_MODE=lib vite build && tsc --project tsconfig.lib.json",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@sweny-ai/core": "*",
