@@ -545,6 +545,9 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     // emitted no usage (mocks, older SDKs), so `usage` stays absent rather
     // than shipping zeroes that read as a real (free) run.
     let usage: NodeUsage | undefined;
+    // Fail closed: a stream that ends with no terminal `result` message
+    // (subprocess died, stream truncated) is not a success.
+    let sawResult = false;
 
     // Timeout / abort wiring (back-compat: only armed when requested).
     // A single AbortController drives both an optional caller signal and an
@@ -667,6 +670,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           }
         } else if (message.type === "result") {
           const resultMsg = message as SDKResultMessage;
+          sawResult = true;
           // Capture token/cost accounting off the terminal result. Present on
           // both success and error subtypes; shape-only. Attached to every
           // return below (including early-termination and error paths).
@@ -739,6 +743,17 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       await bridge?.close();
     }
 
+    if (!sawResult) {
+      const msg = "agent stream ended without a result message";
+      this.logger.warn(`Claude Code query: ${msg}; failing closed (${toolCalls.length} tool calls captured).`);
+      return {
+        status: "failed",
+        data: { error: msg },
+        toolCalls,
+        ...(usage ? { usage } : {}),
+      };
+    }
+
     // CC-08: prefer the SDK's validated structured output when it gave us an
     // object. Fall back to the free-text JSON heuristic when it's absent
     // (no schema requested, mocked result, or an older SDK that didn't set it).
@@ -773,6 +788,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
 
     const abort = makeAbort(timeoutMs, signal);
     let failed = false;
+    let sawResult = false;
     let stream: ReturnType<typeof query> | undefined;
 
     try {
@@ -803,6 +819,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       for await (const message of stream) {
         if (message.type === "result") {
           const resultMsg = message as SDKResultMessage;
+          sawResult = true;
           if (resultMsg.subtype === "success" && "result" in resultMsg) {
             response = resultMsg.result;
           } else {
@@ -839,6 +856,11 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     } finally {
       abort?.clear();
       await interruptStream(stream);
+    }
+
+    if (!sawResult) {
+      this.logger.warn(`claude.${purpose}: agent stream ended without a result message ${DASH} failing closed.`);
+      return null;
     }
 
     return failed ? null : response;

@@ -123,6 +123,37 @@ describe("ClaudeCodeHarness", () => {
     expect(logger.warn).toHaveBeenCalledWith("Evaluate query failed: sdk down. Failing closed (no route decision).");
   });
 
+  it("run() fails closed when the stream ends without a result, keeping tool calls and warning", async () => {
+    const logger = noopLogger();
+    mockQuery.mockReturnValueOnce(
+      (async function* () {
+        yield {
+          type: "assistant",
+          message: { content: [{ type: "tool_use", id: "t1", name: "lookup", input: { q: 1 } }] },
+        };
+      })(),
+    );
+    const h = new mod.ClaudeCodeHarness({ logger });
+    const r = await h.run({ instruction: "x", context: {}, tools: [] });
+    expect(r.status).toBe("failed");
+    expect(r.data.error).toBe("agent stream ended without a result message");
+    expect(r.data.summary).toBeUndefined();
+    expect(r.toolCalls).toHaveLength(1);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("ended without a result message"));
+  });
+
+  it("complete() returns null when the stream ends without a result; ask() maps it to the empty string", async () => {
+    const logger = noopLogger();
+    const h = new mod.ClaudeCodeHarness({ logger });
+    mockQuery.mockReturnValueOnce((async function* () {})());
+    expect(await h.complete({ prompt: "p", purpose: "evaluate" })).toBeNull();
+    expect(logger.warn).toHaveBeenLastCalledWith(
+      expect.stringMatching(/^claude\.evaluate: agent stream ended without a result message/),
+    );
+    mockQuery.mockReturnValueOnce((async function* () {})());
+    expect(await h.ask({ instruction: "x", context: {} })).toBe("");
+  });
+
   it("run() tags the result with the harness and an empty degraded list", async () => {
     mockQuery.mockReturnValueOnce(resultStream("done"));
     const h = new mod.ClaudeCodeHarness({ logger: noopLogger() });

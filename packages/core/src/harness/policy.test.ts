@@ -65,4 +65,27 @@ describe("policyGate", () => {
       expect(r.degraded).toEqual(["deny [write, edit]: harness can only deny the shell tool"]);
     });
   });
+
+  describe("X cells in the enforcement matrix (harness-design section 3)", () => {
+    const codexLike: HarnessCapabilities = { ...weak, builtinDeny: "shell-only", readOnly: "native" };
+    const cells: [string, HarnessCapabilities, NodePolicy][] = [
+      ["codex: deny write", codexLike, { ...base, deny: ["write"] }],
+      ["codex: deny edit", codexLike, { ...base, deny: ["edit"] }],
+      ["codex: deny net", codexLike, { ...base, deny: ["net"] }],
+      ["codex: deny subagent", codexLike, { ...base, deny: ["subagent"] }],
+      ["acp-generic: deny shell (no built-in deny)", weak, { ...base, deny: ["shell"] }],
+      ["acp-generic: nativeDeny passthrough", weak, { ...base, nativeDeny: ["Bash"] }],
+      ["acp-generic: read-only", weak, { ...base, readOnly: true }],
+      ["pi: sandbox egress", weak, { ...base, egress: ["api.github.com"] }],
+    ];
+
+    it.each(cells)("%s: degraded in warn, refuse in strict", (_name, caps, policy) => {
+      const warn = policyGate(caps, { ...policy, strict: false });
+      expect(warn.degraded.length).toBeGreaterThan(0);
+      expect(warn.refuse).toBeUndefined();
+      const strict = policyGate(caps, { ...policy, strict: true });
+      expect(strict.refuse).toMatch(/^strict policy: /);
+      expect(strict.degraded).toEqual(warn.degraded);
+    });
+  });
 });
