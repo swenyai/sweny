@@ -547,7 +547,9 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // instead of failing outright. The original error stays in `data.error`
     // and `data.fail_soft` marks the downgrade for downstream nodes and
     // observers. Eval failures never take this path (agentRunFailed guards it).
-    if (agentRunFailed && result.status === "failed" && node.fail_soft === true) {
+    // A strict-policy refusal (#331) is not an agent failure: fail_soft never softens it.
+    const refused = (result.data as Record<string, unknown> | undefined)?.refused === true;
+    if (agentRunFailed && result.status === "failed" && node.fail_soft === true && !refused) {
       const failError = (result.data as Record<string, unknown> | undefined)?.error;
       logger.warn(
         `  fail_soft: node failed (${String(failError ?? "unknown error")}); continuing with partial output`,

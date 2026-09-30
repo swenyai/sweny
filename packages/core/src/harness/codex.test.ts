@@ -158,6 +158,34 @@ describe("CodexHarness argv", () => {
 });
 
 describe("CodexHarness policy", () => {
+  it("strict: a workflow node with tools.deny: [write] fails the run, even with fail_soft", async () => {
+    const { execute } = await import("../executor.js");
+    const { createSkillMap } = await import("../skills/index.js");
+    const { h } = harness({ policy: "strict" });
+    fakes.script(DONE);
+    const workflow: Workflow = {
+      id: "strict",
+      name: "strict",
+      description: "one node",
+      entry: "edit",
+      nodes: {
+        edit: { name: "Edit", instruction: "Change nothing", skills: [], tools: { deny: ["write"] }, fail_soft: true },
+      },
+      edges: [],
+    };
+    const silent = { info() {}, warn() {}, error() {}, debug() {} };
+    const { results } = await execute(
+      workflow,
+      {},
+      { skills: createSkillMap([]), harness: h, config: {}, logger: silent },
+    );
+    const r = results.get("edit")!;
+    expect(r.status).toBe("failed");
+    expect(String(r.data.error)).toMatch(/^codex refused this node: strict policy: deny \[write\]/);
+    expect(r.data.fail_soft).toBeUndefined();
+    expect(fakes.raw()).toHaveLength(0);
+  });
+
   it("strict refuses deny: [write] before codex starts, naming codex and write", async () => {
     const { h, log } = harness({ policy: "strict" });
     fakes.script(DONE);

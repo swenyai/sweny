@@ -739,7 +739,8 @@ export class CodexHarness implements AgentHarness {
     if (gate.refuse) {
       const msg = `codex refused this node: ${gate.refuse}`;
       this.logger.error(msg);
-      return tag({ status: "failed", data: { error: msg }, toolCalls: [] });
+      // `refused` keeps fail_soft from softening a policy refusal (executor.ts).
+      return tag({ status: "failed", data: { error: msg, refused: true }, toolCalls: [] });
     }
 
     const pre = await this.preflight();
