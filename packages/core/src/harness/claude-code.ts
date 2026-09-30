@@ -384,7 +384,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
    * is a read-only run; `policy.deny` classes become native `disallowedTools`
    * names, merged with `nativeDeny` and the legacy `disallowedTools`; and
    * `policy.strict` makes MCP exclusive (`strictMcpConfig`) even for a
-   * write-capable node.
+   * write-capable node. Per-request sandbox mode overrides the client default,
+   * and policy egress supplies the node hosts without dropping scoped env access.
    */
   async run(req: HarnessRunRequest): Promise<HarnessRunResult> {
     const policy: NodePolicy = req.policy ?? {
@@ -413,6 +414,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       readOnly,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
       strictMcp: readOnly || policy.strict,
+      sandboxMode: policy.sandbox,
+      agentAccess: { ...req.agentAccess, domains: policy.egress },
     });
     return { ...result, harness: this.info(), degraded: gate.degraded };
   }
@@ -438,6 +441,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     agentAccess?: AgentAccess;
     /** Exclusive MCP: only the servers passed here load (#365 strict policy). */
     strictMcp?: boolean;
+    /** Per-request containment requirement; falls back to the client default. */
+    sandboxMode?: SandboxMode;
   }): Promise<NodeResult> {
     const {
       instruction,
@@ -465,7 +470,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     // `strict` fails the node here instead.
     const sandbox = resolveAgentSandbox({
       env: process.env,
-      mode: this.sandboxMode,
+      mode: opts.sandboxMode ?? this.sandboxMode,
       allowedDomains: this.sandboxAllowedDomains,
       nodeDomains: agentAccess?.domains,
       probe: this.sandboxProbe,
@@ -473,7 +478,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     });
     if (sandbox.error) {
       this.logger.error(sandbox.error);
-      return { status: "failed", data: { error: sandbox.error }, toolCalls: [] };
+      return { status: "failed", data: { error: sandbox.error, refused: true }, toolCalls: [] };
     }
     if (sandbox.warning && !this.sandboxWarned) {
       this.sandboxWarned = true;
