@@ -68,6 +68,7 @@ A conforming executor:
 - **SHOULD** remove the named tools from the model's context entirely, rather than rejecting calls after the fact, so the model does not waste turns attempting blocked tools.
 - **MUST NOT** apply `disallowed_tools` to skill-provided tools registered via `skills`. Skills are gated by their own declaration (only listed `skills` are available); `disallowed_tools` is exclusively for built-in agent tools.
 - When the field is absent or empty, the executor applies its default tool set with no removals.
+- Under a dry run the executor additionally removes every write-capable built-in and every write skill tool, on top of this list. See [Dry-Run Semantics](/execution#dry-run-semantics).
 
 ```yaml
 implement:
@@ -97,6 +98,7 @@ A conforming executor:
 
 - **MUST NOT** register a filtered-out tool for the node's run. The model never sees the tool; this is structural enforcement, not call-time rejection.
 - **MUST** expose all skill tools unchanged when the field is absent (back-compat).
+- **MUST** apply the dry-run read-only gate after this filter, so `allow` can never re-admit a write tool during a dry run. See [Dry-Run Semantics](/execution#dry-run-semantics).
 - **SHOULD** warn when a filter entry matches no tool resolved for the node (typo detection; also fires when a skill is unconfigured).
 
 Typical use: a read-only context-gathering node that declares the `github` and `linear` skills for their search tools but must never create issues or pull requests:

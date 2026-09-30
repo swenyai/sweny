@@ -44,11 +44,12 @@ For each node, a conforming executor MUST perform the following steps in order:
 
 The result of executing a single node.
 
-| Field       | Type                                     | Description                                                                                                        |
-| ----------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `status`    | `"success"` \| `"skipped"` \| `"failed"` | Outcome of this node's execution.                                                                                  |
-| `data`      | Record&lt;string, unknown&gt;            | Output data. When the node has an `output` schema, this conforms to it. Available to downstream nodes via context. |
-| `toolCalls` | [ToolCall](#toolcall)[]                  | Record of tools invoked during execution.                                                                          |
+| Field           | Type                                     | Description                                                                                                        |
+| --------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `status`        | `"success"` \| `"skipped"` \| `"failed"` | Outcome of this node's execution.                                                                                  |
+| `data`          | Record&lt;string, unknown&gt;            | Output data. When the node has an `output` schema, this conforms to it. Available to downstream nodes via context. |
+| `toolCalls`     | [ToolCall](#toolcall)[]                  | Record of tools invoked during execution.                                                                          |
+| `skippedWrites` | string[]                                 | Dry run only. Names of the node's tools withheld as write or unclassified. Absent when nothing was withheld.       |
 
 ### ToolCall
 
@@ -60,15 +61,17 @@ The result of executing a single node.
 
 ## Dry-Run Semantics
 
-When the workflow input contains `dryRun: true`, a conforming executor MUST:
+A dry run never takes a write action. When the workflow input contains `dryRun: true`, a conforming executor MUST:
 
-1. Execute nodes normally through unconditional edges.
-2. **Stop** at the first node that has conditional outgoing edges (edges with `when` clauses).
-3. Return the execution result with all nodes completed up to that point.
+1. **Pass only read tools to every node.** A skill tool reaches a node only when it declares `access: "read"` ([Tool Object](/skills#tool-object)). Tools with `access: "write"` and tools with no `access` are withheld: they are not registered for the node, so the model can neither see nor call them.
+2. **Expose no other write path.** The agent runtime MUST NOT give the node external MCP servers (their tools are unclassified, so they count as writes) or built-in tools that can edit files, run shell commands, or spawn subagents.
+3. **Record withheld tools** on the node result as `skippedWrites` (tool names), and tell the model which tools were withheld so it can describe what it would have written.
+4. Execute nodes through unconditional edges, and **stop** at the first node that has conditional outgoing edges (edges with `when` clauses), without evaluating them.
+5. Return the execution result with all nodes completed up to that point.
 
-This enables "analysis without action" — a workflow runs through gathering and analysis nodes but stops before making action decisions that require conditional routing.
+Rules 1 to 3 are what make a dry run side-effect free, on every workflow shape, including linear workflows with no conditional edges. Rule 4 keeps the dry-run path deterministic: the nodes visited depend only on the graph, never on a model's routing decision, and action branches that could only describe withheld writes are not run.
 
-Unconditional edges are deterministic transitions (e.g., `gather` &rarr; `investigate`). Conditional edges represent decision points (e.g., `investigate` &rarr; `create_issue` vs `skip`). Dry-run halts at decisions.
+A dry run is still useful: analysis nodes run with their read tools (log queries, code search, issue lookups) and produce real output.
 
 ## Execution Events
 
