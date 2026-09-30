@@ -533,6 +533,10 @@ export interface NodeResult {
    * dry-run nodes that had no write tools.
    */
   skippedWrites?: string[];
+  /** Which harness ran this node (id + version). Set by harness adapters; absent for mocks. */
+  harness?: { id: string; version: string };
+  /** Opinions this run could not honor natively. Always empty for Claude Code. */
+  degraded?: string[];
 }
 
 export interface ToolCall {
@@ -629,7 +633,14 @@ export interface ExecutionResult {
 // Abstract interface so the executor doesn't depend on the SDK.
 // Swap in a mock for testing, or a different model provider entirely.
 
+/**
+ * @deprecated as the public seam: new code targets `AgentHarness`
+ * (harness/types.ts). This interface stays for back-compat;
+ * `claudeCompat()` wraps it into a harness.
+ */
 export interface Claude {
+  /** Default judge model when no evaluator, node or workflow names one. */
+  readonly defaultJudgeModel?: string;
   /** Run a node: give Claude an instruction, context, and tools */
   run(opts: {
     instruction: string;

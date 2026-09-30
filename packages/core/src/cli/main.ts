@@ -13,7 +13,7 @@ import type { ExecuteOptions } from "../executor.js";
 import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workflows/index.js";
 import type { ExecutionEvent, ExecutionTrace, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
-import { ClaudeClient } from "../claude.js";
+import { createHarness } from "../harness/index.js";
 import { builtinSkills, createSkillMap, validateWorkflowSkills } from "../skills/index.js";
 import { formatMissingSkillLines, skillEnvWarnings } from "./skill-env.js";
 import { configuredSkills, configuredSkillsWithDiagnostics } from "../skills/custom-loader.js";
@@ -267,7 +267,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   const skills = createSkillMap(triageSkillDiscovery.skills);
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
-  const claude = new ClaudeClient({
+  const claude = createHarness("claude-code", {
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: consoleLogger,
@@ -608,7 +608,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   const skills = createSkillMap(implementSkillDiscovery.skills);
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
-  const claude = new ClaudeClient({
+  const claude = createHarness("claude-code", {
     maxTurns: config.maxImplementTurns || 40,
     cwd: process.cwd(),
     logger: consoleLogger,
@@ -894,7 +894,7 @@ export async function workflowRunAction(
   // Raw [info]/[debug] lines are verbose-only; warnings are rendered (#383).
   const runLogger = createRunLogger({ verbose: Boolean(options.verbose), tty: isTTY });
 
-  const claude = new ClaudeClient({
+  const claude = createHarness("claude-code", {
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: runLogger,
@@ -1266,7 +1266,7 @@ workflowCmd
       console.warn("\x1B[33m  ⚠  `sweny workflow create` is deprecated. Use `sweny new` instead.\x1B[0m\n");
     }
     const skills = configuredSkills();
-    const claude = new ClaudeClient({
+    const claude = createHarness("claude-code", {
       maxTurns: 3,
       cwd: process.cwd(),
       logger: consoleLogger,
@@ -1333,7 +1333,7 @@ workflowCmd
     }
 
     const skills = configuredSkills();
-    const claude = new ClaudeClient({
+    const claude = createHarness("claude-code", {
       maxTurns: 3,
       cwd: process.cwd(),
       logger: consoleLogger,

@@ -8,15 +8,15 @@
  *
  * @example
  * ```ts
- * import { execute, ClaudeClient, createSkillMap, github, sentry, slack } from '@sweny-ai/core'
+ * import { execute, createHarness, createSkillMap, github, sentry, slack } from '@sweny-ai/core'
  * import { triageWorkflow } from '@sweny-ai/core/workflows'
  *
  * const skills = createSkillMap([github, sentry, slack])
- * const claude = new ClaudeClient()
+ * const harness = createHarness("claude-code")
  *
  * const results = await execute(triageWorkflow, alertPayload, {
  *   skills,
- *   claude,
+ *   harness,
  *   observer: (event) => console.log(event),
  * })
  * ```
@@ -93,9 +93,25 @@ export { consoleLogger } from "./types.js";
 export { execute, RouteEvaluationError } from "./executor.js";
 export type { ExecuteOptions } from "./executor.js";
 
-// Claude client
-export { ClaudeClient, resolveAuthEnv } from "./claude.js";
-export type { ClaudeClientOptions, SwenyAuthMode, ResolveAuthEnvOpts } from "./claude.js";
+// Agent harness (the seam) and its Claude Code adapter
+export { createHarness, claudeCompat, asClaude, policyGate, ClaudeCodeHarness } from "./harness/index.js";
+export type {
+  AgentHarness,
+  HarnessCapabilities,
+  HarnessId,
+  HarnessInfo,
+  HarnessRunRequest,
+  HarnessRunResult,
+  NodePolicy,
+  PolicyGateResult,
+  PolicyWrappers,
+  ToolClass,
+  ClaudeCodeHarnessOptions,
+} from "./harness/index.js";
+
+// Claude client (back-compat: ClaudeClient is ClaudeCodeHarness, @deprecated)
+export { ClaudeClient, resolveAuthEnv } from "./harness/claude-code.js";
+export type { ClaudeClientOptions, SwenyAuthMode, ResolveAuthEnvOpts } from "./harness/claude-code.js";
 
 // Execution model resolution
 export { resolveExecutionModel } from "./model.js";

@@ -55,6 +55,8 @@ export interface RunRecord {
   nodes: RunNodeRecord[];
   routes: Array<{ from: string; to: string }>;
   totals: RunTotals;
+  /** Harness that ran the nodes (id + version). Absent for runs with no harness-tagged result. */
+  harness?: { id: string; version: string };
 }
 
 // ── Hash + ids ──────────────────────────────────────────────────
@@ -161,6 +163,8 @@ export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
     };
   });
 
+  const harness = [...i.results.values()].find((r) => r.harness)?.harness;
+
   return {
     schema_version: RUN_HISTORY_SCHEMA_VERSION,
     run_id: i.runId,
@@ -179,6 +183,7 @@ export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
       tokens: summary.tokens ?? null,
       cost_usd: summary.costUsd ?? null,
     },
+    ...(harness ? { harness: { id: harness.id, version: harness.version } } : {}),
   };
 }
 

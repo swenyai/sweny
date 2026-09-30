@@ -15,7 +15,7 @@ import chalk from "chalk";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from "./templates.js";
 import { buildWorkflow, refineWorkflow } from "../workflow-builder.js";
-import { ClaudeClient } from "../claude.js";
+import { createHarness } from "../harness/index.js";
 import { consoleLogger, type Skill } from "../types.js";
 import { configuredSkills } from "../skills/custom-loader.js";
 import { builtinSkills } from "../skills/index.js";
@@ -626,7 +626,7 @@ export async function runNew(options?: {
     const { installMarketplaceWorkflow } = await import("./marketplace.js");
     const allSkills = configuredSkills(process.env, cwd);
     const hasAgent = !!process.env.ANTHROPIC_API_KEY;
-    const claude = hasAgent ? new ClaudeClient({ maxTurns: 3, cwd, logger: consoleLogger }) : null;
+    const claude = hasAgent ? createHarness("claude-code", { maxTurns: 3, cwd, logger: consoleLogger }) : null;
 
     if (!options.skipIntro) p.intro(`Installing ${options.marketplaceId} from marketplace`);
 
@@ -944,7 +944,7 @@ async function runCustomWorkflowBuilder(skills: Skill[]): Promise<WorkflowTempla
     },
   });
   if (p.isCancel(description)) return null;
-  const claude = new ClaudeClient({
+  const claude = createHarness("claude-code", {
     maxTurns: 3,
     cwd: process.cwd(),
     logger: consoleLogger,

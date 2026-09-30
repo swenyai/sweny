@@ -287,3 +287,18 @@ describe("createFileSkill", () => {
     expect(skill.tools.map((t) => t.name)).toContain("fs_list_dir");
   });
 });
+
+// #330: MockClaude is now an alias of MockHarness.
+describe("MockHarness", () => {
+  it("MockClaude is the same class", async () => {
+    const { MockHarness, MockClaude: Alias } = await import("../testing.js");
+    expect(Alias).toBe(MockHarness);
+  });
+
+  it("run() tags the result with the mock harness and an empty degraded list", async () => {
+    const { MockHarness } = await import("../testing.js");
+    const h = new MockHarness({ responses: { a: { data: { ok: true } } } });
+    const r = await h.run({ instruction: "a", context: {}, tools: [] });
+    expect(r).toMatchObject({ status: "success", data: { ok: true }, degraded: [], harness: { id: "mock" } });
+  });
+});

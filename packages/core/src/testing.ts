@@ -22,8 +22,22 @@
 
 import type { Claude, NodeResult, ToolCall, Tool, ToolContext, JSONSchema, Workflow } from "./types.js";
 import { consoleLogger } from "./types.js";
+import type { AgentHarness, HarnessCapabilities, HarnessRunResult } from "./harness/types.js";
 
-// ─── Mock Claude ─────────────────────────────────────────────────
+// ─── Mock harness ────────────────────────────────────────────────
+
+const MOCK_CAPABILITIES: HarnessCapabilities = {
+  structuredOutput: "prompt",
+  toolTrace: "skill-only",
+  builtinDeny: "none",
+  mcp: { inject: false, exclusive: "none" },
+  sandbox: { fs: false, network: false },
+  readOnly: "none",
+  turnLimit: "none",
+  usage: { tokens: false, costUsd: false, live: false },
+  cancel: "signal",
+  resume: false,
+};
 
 export interface MockNodeResponse {
   /** Tool calls to execute (optional — handlers will be called) */
@@ -34,7 +48,7 @@ export interface MockNodeResponse {
   status?: "success" | "skipped" | "failed";
 }
 
-export interface MockClaudeOptions {
+export interface MockHarnessOptions {
   /** Node ID → scripted response */
   responses: Record<string, MockNodeResponse>;
   /** Route decisions: "fromNode" → chosen target node ID */
@@ -53,14 +67,16 @@ export interface MockClaudeOptions {
  * routes map. With no scripted route (or an invalid one) it returns
  * `null`, mirroring the real client failing closed on a route-eval failure.
  */
-export class MockClaude implements Claude {
+export class MockHarness implements Claude, AgentHarness {
+  readonly id = "mock" as const;
+  readonly capabilities = MOCK_CAPABILITIES;
   private callOrder: string[] = [];
   private responses: Record<string, MockNodeResponse>;
   private routes: Record<string, string>;
   private instructionMap: Map<string, string>; // instruction text → node ID
   private askFn?: (i: string, c: Record<string, unknown>) => string;
 
-  constructor(opts: MockClaudeOptions) {
+  constructor(opts: MockHarnessOptions) {
     this.responses = opts.responses;
     this.routes = opts.routes ?? {};
     this.askFn = opts.ask;
@@ -81,7 +97,26 @@ export class MockClaude implements Claude {
     return [...this.callOrder];
   }
 
+  async preflight(): Promise<{ ok: true; version: string }> {
+    return { ok: true, version: "mock" };
+  }
+
+  /** One scripted completion: the `ask` script, or the empty string. */
+  async complete(req: { prompt: string }): Promise<string | null> {
+    return this.ask({ instruction: req.prompt, context: {} });
+  }
+
   async run(opts: {
+    instruction: string;
+    context: Record<string, unknown>;
+    tools: Tool[];
+    outputSchema?: JSONSchema;
+  }): Promise<HarnessRunResult> {
+    const result = await this.runScripted(opts);
+    return { ...result, harness: { id: "mock", version: "mock" }, degraded: [] };
+  }
+
+  private async runScripted(opts: {
     instruction: string;
     context: Record<string, unknown>;
     tools: Tool[];
@@ -175,6 +210,13 @@ export class MockClaude implements Claude {
     return unused[0] ?? `unknown-${this.callOrder.length}`;
   }
 }
+
+/** @deprecated Use {@link MockHarnessOptions}. */
+export type MockClaudeOptions = MockHarnessOptions;
+/** @deprecated Use {@link MockHarness}. */
+export const MockClaude = MockHarness;
+/** @deprecated Use {@link MockHarness}. */
+export type MockClaude = MockHarness;
 
 // ─── File-based Skill ────────────────────────────────────────────
 //
