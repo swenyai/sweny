@@ -18,6 +18,7 @@ export { WORKFLOW_INPUT_TYPES } from "./inputs.js";
 // step code calls, skills expose tools that Claude calls directly.
 
 import type { Source as _Source, ResolvedSource as _ResolvedSource } from "./sources.js";
+import type { ToolClass } from "./harness/types.js";
 
 export type JSONSchema = Record<string, unknown>;
 
@@ -413,7 +414,7 @@ export interface NodeToolFilter {
 export interface Edge {
   from: string;
   to: string;
-  /** Natural language condition. Claude evaluates at runtime. */
+  /** Natural language condition, evaluated at runtime by the workflow's harness. */
   when?: string;
   /** Max times this edge can be followed (enables retry loops). Default: unlimited. */
   max_iterations?: number;
@@ -655,6 +656,12 @@ export interface Claude {
     maxTurns?: number;
     /** Built-in SDK tool names to disallow for this node (e.g. ["Bash"]). */
     disallowedTools?: string[];
+    /**
+     * Portable built-in tool classes denied at this node (`tools.deny` entries
+     * that name a class: shell, write, edit, net, subagent). Each harness
+     * compiles them to its native form, or reports them in `degraded`.
+     */
+    deny?: ToolClass[];
     /** Per-node execution model. Overrides the client default when set. Absent = no SDK model option emitted. */
     model?: string;
     /** Abort the query after this many ms. Default: no timeout (back-compat). */

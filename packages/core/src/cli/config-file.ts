@@ -155,7 +155,7 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # observability-provider: datadog        # datadog | sentry | cloudwatch | splunk | elastic | newrelic | loki | prometheus | pagerduty | heroku | opsgenie | vercel | supabase | netlify | fly | render | file
 # issue-tracker-provider: github-issues  # github-issues | linear | jira
 # source-control-provider: github        # github | gitlab
-# coding-agent-provider: claude          # claude (the only supported agent)
+# coding-agent-provider: claude          # claude | codex
 # notification-provider: console         # console | slack | teams | discord | email | webhook
 
 # ── Investigation ────────────────────────────────────────────────────

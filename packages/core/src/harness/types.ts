@@ -1,8 +1,8 @@
 /**
  * AgentHarness: the seam between the executor and whatever agent runs a node.
  *
- * Design: research/2026-09-30-sota/harness-design.md, section 1. Claude Code
- * (`ClaudeCodeHarness`) is the only adapter today. `evaluate` and `ask` are
+ * Design: research/2026-09-30-sota/harness-design.md, section 1. Adapters:
+ * Claude Code (`ClaudeCodeHarness`) and Codex (`CodexHarness`). `evaluate` and `ask` are
  * not adapter methods: core builds the prompt and calls `complete()` (see
  * prompts.ts), so every adapter gets routing and judging for free.
  *
@@ -22,6 +22,12 @@ export interface HarnessCapabilities {
   /** full = built-in tool calls are visible with status; skill-only = only skill tools are traced. */
   toolTrace: "full" | "skill-only";
   builtinDeny: "by-name" | "by-class" | "shell-only" | "none";
+  /**
+   * Tool classes the harness can deny natively on top of what `builtinDeny`
+   * implies (Codex: shell-only by name, but web search and subagents are
+   * config switches). See `nativeDenyClasses()` in policy.ts.
+   */
+  denyClasses?: ToolClass[];
   mcp: { inject: boolean; exclusive: "native" | "home-isolation" | "none" };
   /** Native sandbox, before any sweny wrapper. */
   sandbox: { fs: boolean; network: boolean };
@@ -44,6 +50,11 @@ export interface NodePolicy {
   egress: string[];
   /** Refuse instead of degrade when an opinion cannot be enforced. */
   strict: boolean;
+  /**
+   * Turn budget for the run. Set by adapters whose `turnLimit` is not native,
+   * so the gate reports how the budget is kept (watchdog) or that it is not.
+   */
+  maxTurns?: number;
   /**
    * Process sandbox mode (`SWENY_SANDBOX`, #360). `auto` and `strict` need fs
    * and network containment: native, or a process wrapper (sandbox-wrapper.ts).

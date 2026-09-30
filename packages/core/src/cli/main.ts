@@ -14,6 +14,9 @@ import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workf
 import type { ExecutionEvent, ExecutionTrace, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { createHarness } from "../harness/index.js";
+import { isSupportedAgent, unsupportedAgentError } from "../harness/agents.js";
+import { resolveHarnessPolicy } from "../harness/policy.js";
+import type { AgentHarness, ClaudeCodeHarnessOptions, CodexHarnessOptions } from "../harness/index.js";
 import { builtinSkills, createSkillMap, validateWorkflowSkills } from "../skills/index.js";
 import { formatMissingSkillLines, skillEnvWarnings } from "./skill-env.js";
 import { configuredSkills, configuredSkillsWithDiagnostics } from "../skills/custom-loader.js";
@@ -234,6 +237,33 @@ async function resolveRulesAndContext(config: CliConfig): Promise<{
   };
 }
 
+/**
+ * Build the harness for `--agent` (#331). A non-Claude agent is checked before
+ * any node runs, so a missing or too-old CLI fails fast with the fix.
+ */
+async function harnessFor(
+  agent: string,
+  opts: ClaudeCodeHarnessOptions & CodexHarnessOptions,
+  harnessPolicy?: string,
+): Promise<AgentHarness> {
+  if (!isSupportedAgent(agent)) {
+    console.error(chalk.red(`\n  ${unsupportedAgentError(agent)}\n`));
+    process.exit(1);
+  }
+  const harness = createHarness(agent, {
+    ...opts,
+    policy: resolveHarnessPolicy(process.env, harnessPolicy, opts.logger),
+  });
+  if (agent !== "claude") {
+    const pre = await harness.preflight();
+    if (!pre.ok) {
+      console.error(chalk.red(`\n  ${pre.reason}\n`));
+      process.exit(1);
+    }
+  }
+  return harness;
+}
+
 // ── sweny triage ──────────────────────────────────────────────────────
 const triageCmd = registerTriageCommand(program);
 
@@ -267,7 +297,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   const skills = createSkillMap(triageSkillDiscovery.skills);
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
-  const claude = createHarness("claude-code", {
+  const claude = await harnessFor(config.codingAgentProvider, {
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: consoleLogger,
@@ -608,7 +638,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   const skills = createSkillMap(implementSkillDiscovery.skills);
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
-  const claude = createHarness("claude-code", {
+  const claude = await harnessFor(config.codingAgentProvider, {
     maxTurns: config.maxImplementTurns || 40,
     cwd: process.cwd(),
     logger: consoleLogger,
@@ -898,14 +928,19 @@ export async function workflowRunAction(
   // Raw [info]/[debug] lines are verbose-only; warnings are rendered (#383).
   const runLogger = createRunLogger({ verbose: Boolean(options.verbose), tty: isTTY });
 
-  const claude = createHarness("claude-code", {
-    maxTurns: config.maxInvestigateTurns || 50,
-    cwd: process.cwd(),
-    logger: runLogger,
-    defaultMcpServers: mcpServers,
-    mcpServers: config.mcpServers,
-    model: workflow.model,
-  });
+  // --agent picks the harness (#331): claude (default) or codex.
+  const claude = await harnessFor(
+    config.codingAgentProvider,
+    {
+      maxTurns: config.maxInvestigateTurns || 50,
+      cwd: process.cwd(),
+      logger: runLogger,
+      defaultMcpServers: mcpServers,
+      mcpServers: config.mcpServers,
+      model: workflow.model,
+    },
+    typeof options.harnessPolicy === "string" ? options.harnessPolicy : undefined,
+  );
 
   // Track per-node entry time to compute elapsed on exit
   const nodeEnterTimes = new Map<string, number>();

@@ -89,6 +89,39 @@ jobs:
 
       - run: npm run test
 
+  package-audit:
+    name: Core package exports and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build core
+        run: npm run build --workspace=packages/core
+
+      # Both audits inspect the same publishable artifact, including only files
+      # npm would ship. Checking the workspace can hide missing packed files.
+      - name: Pack core
+        run: |
+          mkdir "$RUNNER_TEMP/core-package-audit"
+          npm pack --workspace=packages/core --pack-destination "$RUNNER_TEMP/core-package-audit"
+
+      - name: Check published exports
+        run: npx --yes publint@0.3.24 --strict "$RUNNER_TEMP/core-package-audit/"*.tgz
+
+      # Core is ESM-only; require Node ESM and bundler resolution, not require().
+      # Keep automatic entrypoint discovery so new exports join the audit.
+      - name: Check published TypeScript declarations
+        run: npx --yes @arethetypeswrong/cli@0.18.5 --profile esm-only "$RUNNER_TEMP/core-package-audit/"*.tgz
+
   smoke-test:
     name: Smoke — core loads without optional deps
     runs-on: ubuntu-latest
