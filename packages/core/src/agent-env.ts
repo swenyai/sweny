@@ -527,8 +527,7 @@ function shQuote(s: string): string {
 /**
  * A sweny-owned directory holding a `pre-push` hook and a `GIT_ASKPASS`
  * program that both refuse, an ssh wrapper that refuses pushes, and an empty
- * `gh` config dir. Created once per
- * process under the OS temp dir.
+ * `gh` config dir. Created once per process under the OS temp dir.
  */
 export function noPushDir(): string {
   if (noPushDirCache && existsSync(path.join(noPushDirCache, "hooks", "pre-push"))) return noPushDirCache;
@@ -588,8 +587,8 @@ export function noPushGitConfig(dir: string): Array<[string, string]> {
  *
  * Not a sandbox: a process that rewrites its own env or git config and
  * finds a credential on disk (an ssh key without a passphrase, a keychain
- * entry) is outside what env can stop. The sandbox wrapper's scratch HOME
- * closes that. `enabled` false returns `env` unchanged. Pure apart from
+ * entry) is outside what env can stop. The sandbox wrapper hides credential
+ * files such as `~/.ssh`. `enabled` false returns `env` unchanged. Pure apart from
  * creating {@link noPushDir} once.
  */
 export function withPushBlocked(env: Record<string, string>, enabled: boolean | undefined): Record<string, string> {
