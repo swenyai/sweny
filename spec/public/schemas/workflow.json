@@ -636,14 +636,7 @@
       "description": "Inline skill definitions scoped to this workflow",
       "additionalProperties": {
         "type": "object",
-        "anyOf": [
-          {
-            "required": ["instruction"]
-          },
-          {
-            "required": ["mcp"]
-          }
-        ],
+        "required": ["instruction"],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -654,6 +647,7 @@
           },
           "instruction": {
             "type": "string",
+            "pattern": "\\S",
             "description": "Natural language expertise injected into the node prompt"
           },
           "mcp": {

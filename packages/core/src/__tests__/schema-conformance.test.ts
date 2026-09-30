@@ -140,10 +140,23 @@ const fixtures: Fixture[] = [
       entry: "a",
       nodes: { a: { ...baseNode(), skills: ["c"] } },
       edges: [],
-      skills: { c: { mcp: { url: "https://example.com/mcp" } } },
+      skills: { c: { instruction: "Use the server", mcp: { url: "https://example.com/mcp" } } },
     },
     expected: true,
   },
+
+  ...[undefined, "", "  "].map((instruction) => ({
+    name: `inline MCP skill without usable instruction (${JSON.stringify(instruction)})`,
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      skills: { c: { ...(instruction === undefined ? {} : { instruction }), mcp: { url: "https://example.com/mcp" } } },
+    },
+    expected: false,
+  })),
 
   // ── Negative — Zod refine invariants ──────────────────────────────
   {

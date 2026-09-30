@@ -83,8 +83,8 @@ export const skillDefinitionZ = z
     mcp: mcpServerConfigZ.optional(),
   })
   .strict()
-  .refine((s) => s.instruction || s.mcp, {
-    message: "Inline skill must provide instruction, mcp, or both",
+  .refine((s) => Boolean(s.instruction?.trim()), {
+    message: "Inline skill must provide a non-empty instruction",
   });
 
 export const skillZ = z
@@ -616,12 +616,18 @@ export function validateWorkflow(
     }
   }
 
-  // Inline skill definitions must have instruction or mcp
+  // Inline skills need usage instructions; the engine server name is reserved.
   for (const [skillId, def] of Object.entries(workflow.skills ?? {})) {
-    if (!def.instruction && !def.mcp) {
+    if (!def.instruction?.trim()) {
       errors.push({
         code: "INVALID_INLINE_SKILL",
-        message: `Inline skill "${skillId}" must provide at least instruction or mcp`,
+        message: `Inline skill "${skillId}" must provide a non-empty instruction`,
+      });
+    }
+    if (skillId === "sweny-core" && def.mcp) {
+      errors.push({
+        code: "INVALID_INLINE_SKILL",
+        message: `Skill "sweny-core" is reserved for the engine MCP server; use a different skill ID`,
       });
     }
   }
@@ -1088,14 +1094,18 @@ export const workflowJsonSchema = {
       description: "Inline skill definitions scoped to this workflow",
       additionalProperties: {
         type: "object",
-        // Fix #4: an inline skill must provide instruction, mcp, or both.
-        anyOf: [{ required: ["instruction"] }, { required: ["mcp"] }],
+        // Inline skills need usable instructions, including when they declare MCP.
+        required: ["instruction"],
         // Round 2: reject unknown keys to match Zod skillDefinitionZ.strict().
         additionalProperties: false,
         properties: {
           name: { type: "string" },
           description: { type: "string" },
-          instruction: { type: "string", description: "Natural language expertise injected into the node prompt" },
+          instruction: {
+            type: "string",
+            pattern: "\\S",
+            description: "Natural language expertise injected into the node prompt",
+          },
           mcp: {
             type: "object",
             description: "External MCP server definition",
