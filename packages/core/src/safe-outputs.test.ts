@@ -320,7 +320,10 @@ describe("write stage: actor trust", () => {
   it("resolveActor reads GITHUB_ACTOR and the event author association", () => {
     const dir = mkdtempSync(join(tmpdir(), "sweny-actor-"));
     const path = join(dir, "event.json");
-    writeFileSync(path, JSON.stringify({ comment: { author_association: "CONTRIBUTOR" }, issue: {} }));
+    writeFileSync(
+      path,
+      JSON.stringify({ comment: { user: { login: "octocat" }, author_association: "CONTRIBUTOR" }, issue: {} }),
+    );
     try {
       expect(resolveActor({ GITHUB_ACTOR: "octocat", GITHUB_EVENT_PATH: path })).toEqual({
         login: "octocat",
@@ -331,6 +334,132 @@ describe("write stage: actor trust", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("write stage: actor association provenance", () => {
+  it.each([
+    {
+      name: "different author",
+      event: { issue: { user: { login: "owner" }, author_association: "OWNER" } },
+      login: "visitor",
+    },
+    { name: "missing author", event: { comment: { author_association: "MEMBER" } }, login: "visitor" },
+    {
+      name: "override differs from author",
+      event: { review: { user: { login: "owner" }, author_association: "OWNER" } },
+      login: "owner",
+      override: { login: "visitor" },
+    },
+    { name: "no actor", event: { pull_request: { user: { login: "owner" }, author_association: "OWNER" } } },
+    {
+      name: "untrusted commenter with trusted issue author",
+      event: {
+        comment: { user: { login: "visitor" }, author_association: "NONE" },
+        issue: { user: { login: "owner" }, author_association: "OWNER" },
+      },
+      login: "visitor",
+    },
+  ])("refuses writes for $name", async ({ event, login, override }) => {
+    const dir = mkdtempSync(join(tmpdir(), "sweny-actor-"));
+    const path = join(dir, "event.json");
+    try {
+      writeFileSync(path, JSON.stringify(event));
+      const actor = resolveActor({ GITHUB_ACTOR: login, GITHUB_EVENT_PATH: path }, override);
+      const { o, gh } = opts({ actor, policy: { trusted_associations: ["OWNER", "MEMBER"] } });
+      expect((await applySafeOutputs(o)).receipts[0]).toMatchObject({ status: "refused", reason: "actor not trusted" });
+      expect(gh.calls).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("finds only the matching author and preserves trusted explicit association overrides", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sweny-actor-"));
+    const path = join(dir, "event.json");
+    try {
+      writeFileSync(
+        path,
+        JSON.stringify({
+          comment: { user: { login: "other" }, author_association: "OWNER" },
+          issue: { user: { login: "Octocat" }, author_association: "MEMBER" },
+        }),
+      );
+      expect(resolveActor({ GITHUB_ACTOR: "octocat", GITHUB_EVENT_PATH: path })).toEqual({
+        login: "octocat",
+        association: "MEMBER",
+      });
+      expect(
+        resolveActor(
+          { GITHUB_ACTOR: "octocat", GITHUB_EVENT_PATH: path },
+          { login: "explicit", association: "COLLABORATOR" },
+        ),
+      ).toEqual({ login: "explicit", association: "COLLABORATOR" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("write stage: Linear comment team pin", () => {
+  function linearOptions(result: unknown, missing = false) {
+    const read = vi.fn(async () => {
+      if (result instanceof Error) throw result;
+      return result;
+    });
+    const write = vi.fn(async () => ({ id: "comment-id" }));
+    const tool = (name: string, handler: Tool["handler"], access: "read" | "write"): Tool => ({
+      name,
+      handler,
+      access,
+      description: "",
+      input_schema: { type: "object" },
+    });
+    const skill: Skill = {
+      ...fakeGithub().skill,
+      id: "linear",
+      tools: [tool("linear_add_comment", write, "write"), ...(missing ? [] : [tool("linear_get_issue", read, "read")])],
+    };
+    const { o } = opts({
+      declarations: [{ type: "comment", via: "linear", target: "team-a" }],
+      intents: [intent({ type: "comment", number: "ABC-42" })],
+      nodeSkills: ["linear"],
+      skills: new Map([["linear", skill]]),
+    });
+    return { o, read, write };
+  }
+
+  it.each([
+    { name: "another team", result: { issue: { id: "issue-id", team: { id: "team-b" } } } },
+    { name: "missing team", result: { issue: { id: "issue-id", team: { key: "A" } } } },
+    { name: "missing issue", result: { issue: null } },
+    { name: "missing canonical ID", result: { issue: { team: { id: "team-a" } } } },
+    { name: "lookup error", result: new Error("lookup failed") },
+    { name: "unconfigured lookup", result: {}, missing: true },
+  ])("refuses $name before any mutation or screen", async ({ result, missing }) => {
+    const { o, write } = linearOptions(result, missing);
+    const screen = vi.fn(async () => "ALLOW");
+    o.policy = { screen: true };
+    o.screen = screen;
+    expect((await applySafeOutputs(o)).receipts[0]).toMatchObject({ status: "refused" });
+    expect(write).not.toHaveBeenCalled();
+    expect(screen).not.toHaveBeenCalled();
+  });
+
+  it("checks the actual team then writes the canonical issue ID", async () => {
+    const { o, read, write } = linearOptions({ issue: { id: "immutable-issue-id", team: { id: "team-a" } } });
+    expect((await applySafeOutputs(o)).receipts[0]).toMatchObject({ status: "applied", target: "team-a" });
+    expect(read).toHaveBeenCalledWith({ id: "ABC-42" }, expect.objectContaining({ config: o.config }));
+    expect(write).toHaveBeenCalledWith({ issueId: "immutable-issue-id", body: "Details" }, expect.anything());
+    expect(read.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]);
+  });
+
+  it("staged comments still verify the pinned team without writing", async () => {
+    const { o, read, write } = linearOptions({ issue: { id: "immutable-issue-id", team: { id: "team-a" } } });
+    o.staged = true;
+    expect((await applySafeOutputs(o)).receipts[0]).toMatchObject({ status: "staged" });
+    expect(read).toHaveBeenCalledOnce();
+    expect(write).not.toHaveBeenCalled();
   });
 });
 
