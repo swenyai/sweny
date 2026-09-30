@@ -22,26 +22,30 @@
 
 ## Quickstart
 
-Requires an `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` (SWEny runs its nodes on the Claude Code agent).
+Requires Node 20+ and a Claude login (`claude` signed in) or an `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` (SWEny runs its nodes on the Claude Code agent).
 
 ```bash
-npx @sweny-ai/core new      # pick a workflow → writes .sweny.yml, .env, and the workflow file
+npm install -g @sweny-ai/core
+sweny new --template explain-repo --yes   # zero-credential starter: reads this checkout, no tokens
+sweny workflow run .sweny/workflows/explain-repo.yml
 ```
 
-`sweny new` picks providers from the skills your workflow uses, but it writes blank values for any
-credential it can't infer, so fill those in before running:
+`sweny new` with no flags opens the interactive picker. `--template <id> --yes` skips every prompt (no
+terminal needed). It writes `.sweny.yml`, `.env` (added to `.gitignore`), and the workflow file.
+
+Templates that use skills such as GitHub need their token first. `sweny new` writes blank values for
+credentials it can't infer:
 
 ```bash
-$EDITOR .env                # fill in the printed API keys (ANTHROPIC_API_KEY, GITHUB_TOKEN, etc.)
-sweny check                 # verify provider credentials and connectivity
+$EDITOR .env                # fill in GITHUB_TOKEN etc. for the skills your workflow uses
+sweny check                 # verify only the credentials your workflows need
 sweny workflow run .sweny/workflows/pr-review.yml
 ```
 
-Already have `@sweny-ai/core` installed? Run `sweny new` directly. Already have a `.sweny.yml`?
-`sweny new` adds additional workflows to it non-destructively.
+Already have a `.sweny.yml`? `sweny new` adds additional workflows to it non-destructively.
 
-No credentials configured yet? [`examples/file-ops.yml`](./examples/file-ops.yml) is a local
-file-I/O workflow that needs nothing beyond your Claude Code auth, good for a first smoke test:
+[`examples/file-ops.yml`](./examples/file-ops.yml) is another local file-I/O workflow that needs nothing
+beyond your Claude auth:
 
 ```bash
 sweny workflow run examples/file-ops.yml

@@ -14,7 +14,8 @@ import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workf
 import type { ExecutionEvent, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
-import { createSkillMap, validateWorkflowSkills } from "../skills/index.js";
+import { builtinSkills, createSkillMap, validateWorkflowSkills } from "../skills/index.js";
+import { formatMissingSkillLines, skillEnvWarnings } from "./skill-env.js";
 import { configuredSkills, configuredSkillsWithDiagnostics } from "../skills/custom-loader.js";
 import { buildAutoMcpServers, buildSkillMcpServers, buildProviderContext } from "../mcp.js";
 import { loadAdditionalContext } from "../templates.js";
@@ -34,7 +35,7 @@ import * as readline from "node:readline";
 
 import { loadDotenv, loadConfigFile } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
-import { runNew } from "./new.js";
+import { nonInteractiveUsage, runNew } from "./new.js";
 import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "./e2e.js";
 import { createVerboseToolObserver } from "./verbose-observer.js";
 import {
@@ -68,7 +69,12 @@ import {
   formatCrashError,
   formatCheckResults,
 } from "./output.js";
-import { checkProviderConnectivity } from "./check.js";
+import {
+  checkProviderConnectivity,
+  detectClaudeCodeLogin,
+  discoverWorkflowSkillIds,
+  validateCheckInputs,
+} from "./check.js";
 import { registerSetupCommand } from "./setup.js";
 import { registerPublishCommand } from "./publish.js";
 import { registerSkillCommand } from "./skill.js";
@@ -114,10 +120,18 @@ const program = new Command()
 program
   .command("new [id]")
   .description(
-    "Create a new workflow. With no id, opens the interactive picker. With an id, installs that workflow from the marketplace (swenyai/workflows).",
+    "Create a new workflow. With no id, opens the interactive picker. With an id, uses that built-in template, or installs it from the marketplace (swenyai/workflows).",
   )
-  .action(async (id: string | undefined) => {
-    await runNew(id ? { marketplaceId: id } : undefined);
+  .option("--template <id>", "Use a built-in template without the picker")
+  .option("-y, --yes", "Skip every prompt (never overwrites existing files)")
+  .action(async (id: string | undefined, options: { template?: string; yes?: boolean }) => {
+    // Prompts need a terminal. Without one (CI, pipes), a prompt never
+    // settles, so print usage and exit 2 instead of hanging.
+    if (!options.yes && !process.stdin.isTTY) {
+      console.error(nonInteractiveUsage());
+      process.exit(2);
+    }
+    await runNew({ marketplaceId: id, template: options.template, yes: options.yes });
   });
 
 // ── sweny check ───────────────────────────────────────────────────────
@@ -127,13 +141,16 @@ program
   .action(async () => {
     const fileConfig = loadConfigFile();
     const config = parseCliInputs({}, fileConfig);
-    const errors = validateInputs(config);
+    const workflows = discoverWorkflowSkillIds(process.cwd());
+    const scope = workflows.found ? workflows.skillIds : undefined;
+    const claudeCodeLogin = detectClaudeCodeLogin();
+    const errors = validateCheckInputs(config, { scope, claudeCodeLogin });
     if (errors.length > 0) {
       console.error(formatValidationErrors(errors));
       process.exit(1);
     }
     console.log(chalk.dim("\n  Checking provider connectivity…\n"));
-    const results = await checkProviderConnectivity(config);
+    const results = await checkProviderConnectivity(config, { scope, claudeCodeLogin });
     console.log(formatCheckResults(results));
     const hasFailure = results.some((r) => r.status === "fail");
     process.exit(hasFailure ? 1 : 0);
@@ -793,7 +810,9 @@ export async function workflowRunAction(
   for (const w of earlySkillDiscovery.warnings) {
     console.error(chalk.yellow(`  ⚠  ${w.message}`));
   }
-  const knownSkillIds = new Set(earlySkillDiscovery.skills.map((s) => s.id));
+  // A built-in skill with unset env is not "unknown": include every built-in id
+  // so the loader only flags genuine typos; missing env is reported below.
+  const knownSkillIds = new Set([...earlySkillDiscovery.skills.map((s) => s.id), ...builtinSkills.map((s) => s.id)]);
 
   let workflow: Workflow;
   try {
@@ -832,12 +851,10 @@ export async function workflowRunAction(
   // we require at least one configured skill per category.
   const validation = validateWorkflowSkills(workflow, skills, workflow.skills);
   if (validation.errors.length > 0) {
-    console.error(chalk.red(`\n  Workflow cannot run — missing required skills:\n`));
-    for (const err of validation.errors) console.error(chalk.red(`    \u2717 ${err}`));
+    console.error(chalk.red(`\n  Workflow cannot run:\n`));
+    for (const line of formatMissingSkillLines(validation)) console.error(chalk.red(`    \u2717 ${line}`));
 
     const unknown = validation.missing.filter((m) => m.category === "unknown");
-    const envGaps = validation.missing.filter((m) => m.category !== "unknown" && m.missingEnv.length > 0);
-
     if (unknown.length > 0) {
       console.error(
         chalk.dim(
@@ -846,12 +863,6 @@ export async function workflowRunAction(
       );
       for (const m of unknown) {
         console.error(chalk.dim(`    sweny skill new ${m.id}`));
-      }
-    }
-    if (envGaps.length > 0) {
-      console.error(chalk.dim(`\n  These skills are built-in but their env vars aren't set:`));
-      for (const m of envGaps) {
-        console.error(chalk.dim(`    - ${m.id}: ${m.missingEnv.join(", ")}`));
       }
     }
     console.error(chalk.dim(`\n  Run \`sweny skill list\` to see what's available.\n`));
@@ -1136,12 +1147,19 @@ export function workflowExportAction(name: string): void {
 
 export function workflowValidateAction(file: string, options: { json?: boolean }): void {
   const result = loadAndValidateWorkflow(file);
+  // Missing skill env is a warning here, not a failure: `run` is where it blocks.
+  const warnings = result.ok
+    ? skillEnvWarnings(result.workflow, process.env, builtinSkills.concat(configuredSkills(process.env, process.cwd())))
+    : [];
 
   if (options.json) {
     const errs = result.ok ? [] : result.errors;
-    process.stdout.write(JSON.stringify({ valid: result.ok, errors: errs }, null, 2) + "\n");
+    const payload: Record<string, unknown> = { valid: result.ok, errors: errs };
+    if (warnings.length > 0) payload.warnings = warnings;
+    process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
   } else if (result.ok) {
     console.log(chalk.green(`  \u2713 ${file} is valid`));
+    for (const w of warnings) console.error(chalk.yellow(`  \u26A0 ${w}`));
   } else {
     console.error(
       chalk.red(`  \u2717 ${file} has ${result.errors.length} validation error${result.errors.length > 1 ? "s" : ""}:`),

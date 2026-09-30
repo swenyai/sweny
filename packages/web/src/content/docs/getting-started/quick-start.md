@@ -11,7 +11,12 @@ SWEny is one tool with multiple surfaces. Install it once, then pick the way tha
 npm install -g @sweny-ai/core
 ```
 
-You can also run it directly with `npx @sweny-ai/core`.
+Every command below uses the installed `sweny` binary. Try it with no credentials beyond your Claude login:
+
+```bash
+sweny new --template explain-repo --yes
+sweny workflow run .sweny/workflows/explain-repo.yml
+```
 
 ## Add your API key
 
@@ -28,7 +33,7 @@ Or use a Claude subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) for flat-rate bil
 
 ### Claude Code Plugin — use SWEny inside Claude Code
 
-If you use [Claude Code](https://code.claude.com), install the plugin and get 11 slash commands, MCP tools, and a startup hook:
+If you use [Claude Code](https://code.claude.com), install the plugin and get 9 slash commands, MCP tools, and a startup hook:
 
 ```
 /plugin marketplace add swenyai/sweny

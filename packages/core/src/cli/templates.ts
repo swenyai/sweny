@@ -14,6 +14,38 @@ export interface WorkflowTemplate {
 
 export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
+    id: "explain-repo",
+    name: "Explain this repo",
+    description: "Read the local checkout and explain it. Needs no tokens, no network beyond Claude.",
+    yaml: `id: explain-repo
+name: Explain This Repo
+description: Read the local checkout and explain what it does, how it is laid out, and how to run it.
+workflow_type: generic
+entry: survey
+
+nodes:
+  survey:
+    name: Survey the Repo
+    instruction: |
+      Look at the current directory. Read the README, the package or
+      build manifests, and the top-level layout. Identify the main
+      languages, the entry points, and the key directories.
+      Only read files. Do not modify anything.
+
+  explain:
+    name: Explain It
+    instruction: |
+      From the survey, write a short plain-English explanation:
+      what this project does, how it is organized, how to build and
+      run it, and where a new contributor should start.
+      Keep it under 300 words.
+
+edges:
+  - from: survey
+    to: explain
+`,
+  },
+  {
     id: "pr-review",
     name: "PR Review Bot",
     description: "Automated code review on pull requests",
