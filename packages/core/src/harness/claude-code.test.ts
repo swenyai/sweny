@@ -171,6 +171,7 @@ describe("ClaudeCodeHarness", () => {
     const h = new mod.ClaudeCodeHarness({ logger: noopLogger(), sandboxProbe: () => "unsupported host" });
     const r = await h.run({ instruction: "x", context: {}, tools: [] });
     expect(r.status).toBe("failed");
+    expect(r.data.refused).toBe(true);
     expect(r.degraded).toEqual([]);
     expect(r.harness.id).toBe("claude-code");
     expect(mockQuery).not.toHaveBeenCalled();
@@ -193,6 +194,46 @@ describe("ClaudeCodeHarness", () => {
       egress: [],
       strict: false,
       ...over,
+    });
+
+    it("a strict request refuses an unsupported host even when the client sandbox is off", async () => {
+      mockQuery.mockReturnValueOnce(resultStream("must not run"));
+      const probe = vi.fn(() => "unsupported host");
+      const h = new mod.ClaudeCodeHarness({ logger: noopLogger(), sandbox: "off", sandboxProbe: probe });
+      const result = await h.run({
+        instruction: "x",
+        context: {},
+        tools: [],
+        policy: policy({ sandbox: "strict" }),
+      });
+      expect(result.status).toBe("failed");
+      expect(result.data.refused).toBe(true);
+      expect(probe).toHaveBeenCalledOnce();
+      expect(mockQuery).not.toHaveBeenCalled();
+    });
+
+    it("a supported strict request uses its policy hosts and preserves legacy env access", async () => {
+      mockQuery.mockReturnValueOnce(resultStream("done"));
+      vi.stubEnv("SWENY_REQUEST_TEST_KEY", "synthetic-value");
+      const h = new mod.ClaudeCodeHarness({
+        logger: noopLogger(),
+        sandbox: "off",
+        sandboxProbe: () => undefined,
+        envScope: true,
+      });
+      const result = await h.run({
+        instruction: "x",
+        context: {},
+        tools: [],
+        agentAccess: { domains: ["legacy.example.test"], envVars: ["SWENY_REQUEST_TEST_KEY"] },
+        policy: policy({ sandbox: "strict", egress: ["policy.example.test"] }),
+      });
+      expect(result.status).toBe("success");
+      const options = mockQuery.mock.calls[0][0].options;
+      expect(options.sandbox.enabled).toBe(true);
+      expect(options.sandbox.network.allowedDomains).toContain("policy.example.test");
+      expect(options.sandbox.network.allowedDomains).not.toContain("legacy.example.test");
+      expect(options.env.SWENY_REQUEST_TEST_KEY).toBe("synthetic-value");
     });
 
     it("policy.deny classes reach the SDK as native disallowedTools, merged with the legacy names", async () => {
