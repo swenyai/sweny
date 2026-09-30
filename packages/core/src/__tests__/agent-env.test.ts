@@ -520,21 +520,32 @@ describe("ClaudeClient env scope wiring", () => {
     expect(envAt(2).DATABASE_URL).toBe("postgres://u:hunter2@db");
   });
 
-  it("warns once per run with withheld names, never values, as a GitHub annotation under Actions", async () => {
+  it("reports once per process: a plain info summary, plus a GitHub annotation listing only non-baseline names", async () => {
     vi.stubEnv("CI", "true");
     vi.stubEnv("GITHUB_ACTIONS", "true");
+    vi.stubEnv("ANDROID_HOME", "/usr/local/lib/android");
+    vi.stubEnv("ACCEPT_EULA", "Y");
     const log = logger();
     const client = new ClaudeClient({ logger: log });
     await run(client);
     await run(client);
     await client.ask({ instruction: "q", context: {} });
+    await run(new ClaudeClient({ logger: log }));
+    const infos = log.info.mock.calls.map((c: unknown[]) => String(c[0])).filter((m: string) => /env scoped/.test(m));
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).not.toContain("::warning");
+    expect(infos[0]).toMatch(/\(\d+ withheld, \d+ from the CI image\)/);
     const warns = log.warn.mock.calls.map((c: unknown[]) => String(c[0])).filter((m: string) => /withheld/.test(m));
     expect(warns).toHaveLength(1);
     expect(warns[0].startsWith("::warning title=SWEny agent env::")).toBe(true);
     expect(warns[0]).toContain("BASE_URL");
     expect(warns[0]).toContain("DATABASE_URL");
+    expect(warns[0]).not.toContain("ANDROID_HOME");
+    expect(warns[0]).not.toContain("ACCEPT_EULA");
     expect(warns[0]).not.toContain("hunter2");
     expect(warns[0]).not.toContain("localhost:3000");
+    const dbg = log.debug.mock.calls.map((c: unknown[]) => String(c[0])).find((m: string) => /env withheld/.test(m));
+    expect(dbg).toContain("ANDROID_HOME");
   });
 
   it("maps .sweny.yml env-scope to SWENY_ENV_SCOPE", async () => {
