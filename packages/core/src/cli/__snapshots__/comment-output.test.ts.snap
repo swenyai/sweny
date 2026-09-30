@@ -1,0 +1,125 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`formatCrashComment > crash: receipt only, no DAG, no error text 1`] = `
+"<!-- sweny-run-comment:pr-review -->
+## ❌ PR Review
+
+\`✗ 0/0 nodes · 0 tool calls · 2s · crashed\`
+
+The run stopped before finishing. See the job log for details.
+
+<sub>Run with [SWEny](https://sweny.ai): \`npx @sweny-ai/core new\`</sub>
+"
+`;
+
+exports[`formatRunComment > failure 1`] = `
+"<!-- sweny-run-comment:pr-review -->
+## ❌ PR Review
+
+\`✗ 1/2 nodes · 6 tool calls · 12s · 1.5k tokens · $0.05\`
+
+\`\`\`mermaid
+graph TB
+    gather([Gather ▶])
+    analyze[Analyze]
+    report[Report]
+
+    gather --> analyze
+    analyze --> report
+
+    classDef current fill:#3b82f6,stroke:#2563eb,color:#fff,stroke-width:2px
+    classDef success fill:#2563eb,stroke:#1d4ed8,color:#fff,stroke-width:2px
+    classDef failed fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px
+    classDef skipped fill:#6b7280,stroke:#4b5563,color:#fff,stroke-dasharray:5 5
+    class gather success
+    class analyze failed
+\`\`\`
+
+<details>
+<summary>Nodes</summary>
+
+| Node | Status | Duration |
+| --- | --- | --- |
+| Gather | ✅ success | 4s |
+| Analyze | ❌ failed | 1m05s |
+
+</details>
+
+<sub>Run with [SWEny](https://sweny.ai): \`npx @sweny-ai/core new\`</sub>
+"
+`;
+
+exports[`formatRunComment > skipped 1`] = `
+"<!-- sweny-run-comment:pr-review -->
+## ✅ PR Review
+
+\`✓ 1/3 nodes · 2 skipped · 1 tool call · 3s · 1.5k tokens · $0.05\`
+
+\`\`\`mermaid
+graph TB
+    gather([Gather ▶])
+    analyze[Analyze]
+    report[Report]
+
+    gather --> analyze
+    analyze --> report
+
+    classDef current fill:#3b82f6,stroke:#2563eb,color:#fff,stroke-width:2px
+    classDef success fill:#2563eb,stroke:#1d4ed8,color:#fff,stroke-width:2px
+    classDef failed fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px
+    classDef skipped fill:#6b7280,stroke:#4b5563,color:#fff,stroke-dasharray:5 5
+    class gather success
+    class analyze,report skipped
+\`\`\`
+
+<details>
+<summary>Nodes</summary>
+
+| Node | Status | Duration |
+| --- | --- | --- |
+| Gather | ✅ success | - |
+| Analyze | ⏭️ skipped | - |
+| Report | ⏭️ skipped | - |
+
+</details>
+
+<sub>Run with [SWEny](https://sweny.ai): \`npx @sweny-ai/core new\`</sub>
+"
+`;
+
+exports[`formatRunComment > success 1`] = `
+"<!-- sweny-run-comment:pr-review -->
+## ✅ PR Review
+
+\`✓ 3/3 nodes · 16 tool calls · 1m10s · 4.5k tokens · $0.15\`
+
+\`\`\`mermaid
+graph TB
+    gather([Gather ▶])
+    analyze[Analyze]
+    report[Report]
+
+    gather --> analyze
+    analyze --> report
+
+    classDef current fill:#3b82f6,stroke:#2563eb,color:#fff,stroke-width:2px
+    classDef success fill:#2563eb,stroke:#1d4ed8,color:#fff,stroke-width:2px
+    classDef failed fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px
+    classDef skipped fill:#6b7280,stroke:#4b5563,color:#fff,stroke-dasharray:5 5
+    class gather,analyze,report success
+\`\`\`
+
+<details>
+<summary>Nodes</summary>
+
+| Node | Status | Duration |
+| --- | --- | --- |
+| Gather | ✅ success | 4s |
+| Analyze | ✅ success | 1m05s |
+| Report | ✅ success | 900ms |
+
+</details>
+
+<sub>Run with [SWEny](https://sweny.ai): \`npx @sweny-ai/core new\`</sub>
+"
+`;

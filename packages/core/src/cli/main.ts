@@ -48,6 +48,7 @@ import {
   WORKFLOW_RUN_DESCRIPTION,
   WORKFLOW_RUN_OPTIONS,
 } from "./run-output.js";
+import { writeRunComment } from "./comment-output.js";
 import {
   registerTriageCommand,
   registerImplementCommand,
@@ -780,6 +781,7 @@ export async function workflowRunAction(
     json?: boolean;
     stream?: boolean;
     mermaid?: boolean;
+    commentFile?: string;
     verbose?: boolean;
     timeout?: string;
     maxSteps?: string;
@@ -1107,6 +1109,15 @@ export async function workflowRunAction(
       // silent
     }
 
+    // PR billboard markdown (metadata only). Written before any early exit so
+    // --json runs and failed runs still get a comment.
+    if (options.commentFile) {
+      writeRunComment(options.commentFile, workflow, results, summarizeRun(results, wfDurationMs), {
+        trace,
+        durationsMs: Object.fromEntries(nodeTimer.durations),
+      });
+    }
+
     if (isJson) {
       process.stdout.write(JSON.stringify(Object.fromEntries(results), null, 2) + "\n");
       process.exit(wfHasFailed ? 1 : 0);
@@ -1146,6 +1157,12 @@ export async function workflowRunAction(
     runLogger.flush();
     recordHistory(nodeTimer.lastResults, undefined, true);
     console.error(`  ${renderReceiptLine(summarizeRun(new Map(), Date.now() - runStart, true), isTTY)}\n`);
+    // A crash must not leave a stale success comment behind.
+    if (options.commentFile) {
+      writeRunComment(options.commentFile, workflow, new Map(), summarizeRun(new Map(), Date.now() - runStart, true), {
+        crashed: true,
+      });
+    }
     // Finalize the cloud run as failed (covers thrown errors, incl.
     // RouteEvaluationError). Without this a crashed workflow run stays
     // "running" in cloud forever.
