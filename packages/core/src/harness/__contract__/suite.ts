@@ -9,7 +9,9 @@
  *
  * Each case passes, or is skipped only where the adapter's declared
  * `capabilities` say the opinion is not native (the skip must match the
- * declaration). Fifteen cases, one `it` each, so a report reads "15 passed".
+ * declaration). Eighteen cases, one `it` each, so a report reads "18 passed".
+ * Cases 16 to 18 (#365) prove the node policy reaches the agent, which safe
+ * outputs depend on.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -96,6 +98,9 @@ export const CONTRACT_CASE_NAMES = [
   "13 capabilities honesty: every native declaration reaches the agent",
   "14 cleanup: nothing is left running or on disk after success, failure and abort",
   "15 sandbox wrapper: no native sandbox means the agent runs only inside the wrapper, and strict refuses without one",
+  "16 policy deny: every class in policy.deny reaches the agent natively, or degrades and strict refuses",
+  "17 strict policy: MCP is exclusive for a write-capable node too",
+  "18 policy read-only: policy.readOnly alone is enforced and the skill tool channel survives",
 ] as const;
 
 export interface ContractSuiteOptions {
@@ -550,6 +555,75 @@ export function runContractSuite(
       // 15
       async (skip) => {
         await sandboxWrapperCase(make, fakes, skip);
+      },
+
+      // 16 (#365): case 4 checks the gate; this checks the deny actually reaches the agent.
+      async () => {
+        const { h } = await fresh();
+        const native = nativeDenyClasses(h.capabilities);
+        const denyGaps = (d: string[]) => d.filter((x) => x.startsWith("deny "));
+        for (const c of TOOL_CLASSES) {
+          const mappable = native.includes(c);
+          const policy: NodePolicy = { readOnly: false, deny: [c], egress: [], strict: false };
+
+          fakes.script(DONE);
+          const warn = await h.run(req({ policy }));
+          if (mappable) {
+            expect(fakes.captured().allows(c), `${c} must be denied`).toBe(false);
+            expect(denyGaps(warn.degraded), c).toEqual([]);
+          } else {
+            expect(denyGaps(warn.degraded).length, `${c} degraded`).toBeGreaterThan(0);
+          }
+
+          fakes.script(DONE);
+          const before = fakes.captured().invocations;
+          const strict = await h.run(req({ policy: { ...policy, strict: true } }));
+          if (mappable) {
+            expect(strict.status, `${c} strict`).toBe("success");
+            expect(fakes.captured().allows(c), `${c} strict`).toBe(false);
+          } else {
+            // Refused before the agent ever starts.
+            expect(strict.status, `${c} strict`).toBe("failed");
+            expect(fakes.captured().invocations, `${c} strict: agent not started`).toBe(before);
+          }
+        }
+      },
+
+      // 17 (#365)
+      async (skip) => {
+        const { h } = await fresh();
+        if (h.capabilities.mcp.exclusive === "none") return skip("mcp exclusive is none");
+        fakes.script(DONE);
+        const r = await h.run(
+          req({
+            policy: { readOnly: false, deny: [], egress: [], strict: true },
+            tools: [lookupTool],
+            mcpServers: { injected: { type: "stdio", command: "injected-server" } },
+          }),
+        );
+        expect(r.status).toBe("success");
+        const loaded = fakes.captured().mcpServersLoaded;
+        expect(loaded).toContain("injected");
+        expect(loaded).not.toContain(AMBIENT_MCP_CANARY);
+      },
+
+      // 18 (#365): safe outputs rely on this. A read-only node still needs its
+      // skill tools (emit_output among them), and nothing that can write.
+      async () => {
+        const { h } = await fresh();
+        fakes.script(DONE);
+        const r = await h.run(req({ policy: readOnlyPolicy, tools: [lookupTool] }));
+        if (h.capabilities.readOnly === "none") {
+          expect(r.degraded.length).toBeGreaterThan(0);
+          return;
+        }
+        const cap = fakes.captured();
+        for (const c of TOOL_CLASSES) {
+          expect(cap.allows(c), `${c} must be denied under policy.readOnly`).toBe(false);
+        }
+        expect(cap.mcpServersLoaded.some((n) => n.startsWith("sweny"))).toBe(true);
+        if (h.capabilities.mcp.exclusive !== "none") expect(cap.mcpServersLoaded).not.toContain(AMBIENT_MCP_CANARY);
+        expect(r.degraded.filter((d) => d.startsWith("read-only"))).toEqual([]);
       },
     ];
 

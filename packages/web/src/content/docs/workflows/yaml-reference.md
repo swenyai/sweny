@@ -15,6 +15,8 @@ This is the complete schema reference for SWEny workflow YAML files. Every field
 | `entry` | string | Yes | ID of the entry node. Execution starts here. |
 | `nodes` | object | Yes | Map of node ID to node definition. Keys are the node IDs. |
 | `edges` | array | Yes | Array of edge objects defining the graph structure. |
+| `permissions` | string \| object | No | Default and ceiling for every node's permissions. See [Permissions and safe outputs](#permissions-and-safe-outputs). |
+| `safe_outputs` | object | No | Run-wide limits on safe outputs: allowed types, total cap, staged preview, trusted actors, optional screen. |
 
 ## Node definition
 
@@ -32,6 +34,36 @@ Each key in the `nodes` object is a node ID (an arbitrary string you choose). Th
 | `rules` | array \| object | No | inherited | Per-node directives, cascading from workflow level. See [Rules & Context](https://spec.sweny.ai/nodes/#rules--context). |
 | `context` | array \| object | No | inherited | Per-node background knowledge, cascading from workflow level. See [Rules & Context](https://spec.sweny.ai/nodes/#rules--context). |
 | `max_turns` | integer | No | implementation-defined | Cap on AI model turns for this node. See [Max Turns Semantics](https://spec.sweny.ai/nodes/#max-turns-semantics). |
+| `permissions` | string \| object | No | see below | `read` or `write`, or `{ access, deny, strict }`. See [Permissions and safe outputs](#permissions-and-safe-outputs). |
+| `outputs` | array | No | -- | Typed writes (`comment`, `issue`, `pr`, `label`) the node may request. sweny applies them after the node. |
+
+### Permissions and safe outputs
+
+A node that only needs to read should not hold write tools. Declare what it may write instead, and let sweny do the write after the agent finishes:
+
+```yaml
+nodes:
+  report:
+    name: File the crash
+    instruction: If the logs show a new crash, file one issue with the stack trace.
+    skills: [github, sentry]
+    outputs:
+      - type: issue
+        title_prefix: "[sweny] "
+        labels: [sweny]
+        max: 1
+safe_outputs:
+  max: 3
+  trusted_associations: [OWNER, MEMBER, COLLABORATOR]
+```
+
+- A node with `outputs` runs read-only: it gets read tools plus `emit_output`, no write tools, no external skill MCP servers, and no shell, file-write, edit, fetch or subagent built-ins.
+- `emit_output` only records the request. After the node succeeds, sweny checks each request (declared type, allowed types, trusted actor, expiry, target, labels, title prefix, duplicates, caps) and then calls the skill's own write tool. An optional `safe_outputs.screen` model call can veto the writes, never approve extra ones.
+- `permissions: read` makes any node read-only without outputs. `permissions: { deny: [shell, net] }` removes those built-in tool classes on any agent runtime. `strict: true` loads only the MCP servers sweny injects.
+- Preview with `sweny workflow run <file> --stage` (or `safe_outputs.staged: true`): sweny prints each write it would make and makes none. `--dry-run` also stages.
+- Nodes without `permissions` or `outputs` keep today's behavior.
+
+Full field reference: [spec.sweny.ai/nodes/#safe-outputs](https://spec.sweny.ai/nodes/#safe-outputs).
 
 ### Instructions
 
@@ -212,6 +244,10 @@ SWEny validates workflows before execution. The `sweny workflow validate` comman
 | Retry ceiling | `RETRY_MAX_EXCEEDED` | `retry.max` may not exceed 10. |
 | Known skills | `UNKNOWN_SKILL` | If a skill catalog is provided, all referenced skill IDs must exist in it. |
 | Valid inline skills | `INVALID_INLINE_SKILL` | Inline `skills` entries in a workflow must declare `instruction`, `mcp`, or both. |
+| Permission ceiling | `PERMISSION_CEILING` | A node may not declare `permissions: write` when the workflow declares `read`. |
+| Allowed outputs | `OUTPUT_NOT_ALLOWED` | A node's output type must be in `safe_outputs.allow` when that is set. |
+| One entry per output type | `DUPLICATE_OUTPUT` | A node may declare each output type once. |
+| Supported output skill | `UNSUPPORTED_OUTPUT` | An output's `via` must name a skill that can apply it (`github`: all types; `linear`: `comment`, `issue`). |
 
 All checks run in one pass and every problem is reported together. The same validation runs inside `execute()`, so a workflow passed straight to the library (or Studio's simulator) is rejected before any node runs.
 
@@ -241,6 +277,7 @@ name: My Workflow
 | `sweny workflow validate <file>` | Validate a workflow YAML/JSON file. Exit 0 if valid, 1 if errors. |
 | `sweny workflow run <file>` | Execute a workflow file. |
 | `sweny workflow run <file> --dry-run` | Validate and show structure without running. |
+| `sweny workflow run <file> --stage` | Run normally, but print each safe output instead of writing it. |
 | `sweny workflow run <file> --json` | Output results as JSON on stdout. |
 | `sweny workflow export triage` | Print the built-in triage workflow as YAML. |
 | `sweny workflow export implement` | Print the built-in implement workflow as YAML. |

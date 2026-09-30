@@ -21,6 +21,8 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 | `workflow_type` | string (enum)                                                    | OPTIONAL | `generic`          | Workflow type discriminator. Routes runs to a type-specific renderer. See [Workflow type](#workflow-type).                                  |
 | `model`         | string                                                           | OPTIONAL | impl&#8209;defined | Default execution model for every node. Overridable per-node. Free-text passthrough. See [Nodes — Model Selection](/nodes#model-selection). |
 | `inputs`        | Record&lt;string, [InputField](#inputs)&gt;                      | OPTIONAL | —                  | Declared per-run input contract. The CLI validates `--input` against this and applies defaults. See [Inputs](#inputs).                      |
+| `permissions`   | [Permissions](/nodes#permissions)                                | OPTIONAL | `write`            | Default and ceiling for every node's `permissions`.                                                                                         |
+| `safe_outputs`  | [SafeOutputsPolicy](#safe-outputs-policy)                        | OPTIONAL | none               | Run-wide limits for [safe outputs](/nodes#safe-outputs). See [Safe Outputs Policy](#safe-outputs-policy).                                   |
 
 ## Workflow type
 
@@ -222,18 +224,45 @@ A conforming validator MUST enforce the following rules:
 
 ## Error Codes
 
-| Code                       | Description                                               |
-| -------------------------- | --------------------------------------------------------- |
-| `MISSING_ENTRY`            | `entry` does not reference an existing node.              |
-| `UNKNOWN_EDGE_SOURCE`      | An edge `from` references a non-existent node.            |
-| `UNKNOWN_EDGE_TARGET`      | An edge `to` references a non-existent node.              |
-| `UNREACHABLE_NODE`         | A node is not reachable from `entry`.                     |
-| `SELF_LOOP`                | A self-loop edge lacks `max_iterations`.                  |
-| `UNBOUNDED_CYCLE`          | A cycle exists with no `max_iterations` guard.            |
-| `EDGE_ITERATIONS_EXCEEDED` | An edge's `max_iterations` is above 100.                  |
-| `RETRY_MAX_EXCEEDED`       | A node's `retry.max` is above 10.                         |
-| `UNKNOWN_SKILL`            | A node references a skill not in the registry.            |
-| `INVALID_INLINE_SKILL`     | An inline skill provides neither `instruction` nor `mcp`. |
+| Code                       | Description                                                   |
+| -------------------------- | ------------------------------------------------------------- |
+| `MISSING_ENTRY`            | `entry` does not reference an existing node.                  |
+| `UNKNOWN_EDGE_SOURCE`      | An edge `from` references a non-existent node.                |
+| `UNKNOWN_EDGE_TARGET`      | An edge `to` references a non-existent node.                  |
+| `UNREACHABLE_NODE`         | A node is not reachable from `entry`.                         |
+| `SELF_LOOP`                | A self-loop edge lacks `max_iterations`.                      |
+| `UNBOUNDED_CYCLE`          | A cycle exists with no `max_iterations` guard.                |
+| `EDGE_ITERATIONS_EXCEEDED` | An edge's `max_iterations` is above 100.                      |
+| `RETRY_MAX_EXCEEDED`       | A node's `retry.max` is above 10.                             |
+| `UNKNOWN_SKILL`            | A node references a skill not in the registry.                |
+| `INVALID_INLINE_SKILL`     | An inline skill provides neither `instruction` nor `mcp`.     |
+| `PERMISSION_CEILING`       | A node declares `permissions: write` under a workflow `read`. |
+| `OUTPUT_NOT_ALLOWED`       | A node declares an output type outside `safe_outputs.allow`.  |
+| `DUPLICATE_OUTPUT`         | A node declares the same output type twice.                   |
+| `UNSUPPORTED_OUTPUT`       | An output's `via` names a skill that cannot apply its type.   |
+
+## Safe Outputs Policy
+
+`safe_outputs` sets the ceiling and run-wide limits for every node's [`outputs`](/nodes#safe-outputs).
+
+| Field                  | Type                                        | Required | Description                                                                                                |
+| ---------------------- | ------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
+| `allow`                | (`comment` \| `issue` \| `pr` \| `label`)[] | OPTIONAL | Output types any node may declare. A node declaring another type is invalid (`OUTPUT_NOT_ALLOWED`).        |
+| `max`                  | integer 1..100                              | OPTIONAL | Total writes per run across all nodes.                                                                     |
+| `staged`               | boolean                                     | OPTIONAL | Preview every write and apply none.                                                                        |
+| `trusted_actors`       | string[]                                    | OPTIONAL | GitHub logins whose runs may write.                                                                        |
+| `trusted_associations` | string[]                                    | OPTIONAL | Author associations (`OWNER`, `MEMBER`, `COLLABORATOR`, ...) of the triggering event whose runs may write. |
+| `screen`               | boolean                                     | OPTIONAL | After every deterministic check, one model call may veto the writes. It can never authorize one.           |
+
+When `trusted_actors` or `trusted_associations` is set, a run whose actor matches neither, or whose actor is unknown, writes nothing. The actor is `GITHUB_ACTOR`, and the association comes from the event payload (`GITHUB_EVENT_PATH`: the comment, review, issue or pull request author).
+
+```yaml
+permissions: read
+safe_outputs:
+  allow: [comment, label]
+  max: 2
+  trusted_associations: [OWNER, MEMBER, COLLABORATOR]
+```
 
 ## SkillDefinition Object
 
