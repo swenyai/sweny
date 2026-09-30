@@ -269,7 +269,15 @@ const retryInstructionReflectZ = z.object({ reflect: z.string().min(1) }).strict
  * still catching a fat-fingered value (e.g. a missing digit) at author time
  * instead of at runtime. See #325.
  */
-const NODE_RETRY_MAX_CEILING = 10;
+export const NODE_RETRY_MAX_CEILING = 10;
+
+/**
+ * Ceiling on an edge's `max_iterations`. A bounded back-edge is still a spend
+ * multiplier (each lap re-runs model nodes), and the default `max_steps` is
+ * 200, so a value above this can never be reached in a default run and only
+ * hides a typo. See #325.
+ */
+export const EDGE_MAX_ITERATIONS_CEILING = 100;
 
 export const nodeRetryZ = z
   .object({
@@ -305,7 +313,7 @@ export const edgeZ = z
     from: z.string().min(1),
     to: z.string().min(1),
     when: z.string().optional(),
-    max_iterations: z.number().int().min(1).optional(),
+    max_iterations: z.number().int().min(1).max(EDGE_MAX_ITERATIONS_CEILING).optional(),
   })
   .strict();
 
@@ -401,7 +409,9 @@ export interface WorkflowError {
     | "UNBOUNDED_CYCLE"
     | "AMBIGUOUS_EDGES"
     | "UNSUPPORTED_EVAL_POLICY"
-    | "INVALID_INLINE_SKILL";
+    | "INVALID_INLINE_SKILL"
+    | "EDGE_ITERATIONS_EXCEEDED"
+    | "RETRY_MAX_EXCEEDED";
   message: string;
   nodeId?: string;
 }
@@ -426,14 +436,25 @@ export function validateWorkflow(
 ): WorkflowError[] {
   const errors: WorkflowError[] = [];
   const nodeIds = new Set(Object.keys(workflow.nodes));
+  const entryExists = nodeIds.has(workflow.entry);
 
   // Entry must exist
-  if (!nodeIds.has(workflow.entry)) {
+  if (!entryExists) {
     errors.push({
       code: "MISSING_ENTRY",
       message: `Entry node "${workflow.entry}" does not exist`,
     });
   }
+
+  // Adjacency over real nodes, built once (O(nodes + edges)) so reachability
+  // and cycle detection stay linear on large graphs.
+  const outAll = new Map<string, string[]>();
+  const outUnbounded = new Map<string, string[]>();
+  const push = (m: Map<string, string[]>, k: string, v: string) => {
+    const l = m.get(k);
+    if (l) l.push(v);
+    else m.set(k, [v]);
+  };
 
   // Edge targets must exist
   for (const edge of workflow.edges) {
@@ -458,6 +479,17 @@ export function validateWorkflow(
         nodeId: edge.from,
       });
     }
+    if (edge.max_iterations != null && edge.max_iterations > EDGE_MAX_ITERATIONS_CEILING) {
+      errors.push({
+        code: "EDGE_ITERATIONS_EXCEEDED",
+        message: `Edge from "${edge.from}" to "${edge.to}" declares max_iterations ${edge.max_iterations}, above the ceiling of ${EDGE_MAX_ITERATIONS_CEILING}`,
+        nodeId: edge.from,
+      });
+    }
+    if (nodeIds.has(edge.from) && nodeIds.has(edge.to)) {
+      push(outAll, edge.from, edge.to);
+      if (!edge.max_iterations && edge.from !== edge.to) push(outUnbounded, edge.from, edge.to);
+    }
   }
 
   // Edge determinism: a node with two or more out-edges that have no `when`
@@ -471,9 +503,7 @@ export function validateWorkflow(
   for (const edge of workflow.edges) {
     if (!nodeIds.has(edge.from)) continue;
     if (edge.when) continue;
-    const list = unconditionalByNode.get(edge.from) ?? [];
-    list.push(edge.to);
-    unconditionalByNode.set(edge.from, list);
+    push(unconditionalByNode, edge.from, edge.to);
   }
   for (const [from, targets] of unconditionalByNode) {
     if (targets.length > 1) {
@@ -485,61 +515,66 @@ export function validateWorkflow(
     }
   }
 
-  // Don't check reachability if there are structural errors
-  if (errors.length > 0) return errors;
-
-  // Reachability: BFS from entry
-  const visited = new Set<string>();
-  const queue: string[] = [workflow.entry];
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    if (visited.has(id)) continue;
-    visited.add(id);
-    for (const edge of workflow.edges) {
-      if (edge.from === id && !visited.has(edge.to)) {
-        queue.push(edge.to);
+  // Reachability: BFS from entry. Skipped only when the entry is missing
+  // (every node would be reported, which is noise). All other diagnostics
+  // accumulate so one pass reports every structural problem.
+  if (entryExists) {
+    const visited = new Set<string>([workflow.entry]);
+    const queue: string[] = [workflow.entry];
+    for (let i = 0; i < queue.length; i++) {
+      for (const to of outAll.get(queue[i]) ?? []) {
+        if (!visited.has(to)) {
+          visited.add(to);
+          queue.push(to);
+        }
       }
     }
-  }
-
-  for (const nodeId of nodeIds) {
-    if (!visited.has(nodeId)) {
-      errors.push({
-        code: "UNREACHABLE_NODE",
-        message: `Node "${nodeId}" is unreachable from entry "${workflow.entry}"`,
-        nodeId,
-      });
+    for (const nodeId of nodeIds) {
+      if (!visited.has(nodeId)) {
+        errors.push({
+          code: "UNREACHABLE_NODE",
+          message: `Node "${nodeId}" is unreachable from entry "${workflow.entry}"`,
+          nodeId,
+        });
+      }
     }
   }
 
   // Detect unbounded cycles: the graph with max_iterations edges removed must be acyclic.
   // If removing bounded edges still leaves a cycle, it can loop forever.
-  const unboundedEdges = workflow.edges.filter((e) => !e.max_iterations && e.from !== e.to);
-  // DFS-based cycle detection on the unbounded subgraph
+  // Iterative DFS with an explicit stack so a deep chain cannot overflow the
+  // call stack (#326).
   const WHITE = 0,
     GRAY = 1,
     BLACK = 2;
   const color = new Map<string, number>();
   for (const id of nodeIds) color.set(id, WHITE);
 
-  function dfs(node: string): string | null {
-    color.set(node, GRAY);
-    for (const e of unboundedEdges) {
-      if (e.from !== node) continue;
-      const c = color.get(e.to);
-      if (c === GRAY) return e.to; // back-edge found → cycle
+  const findCycle = (start: string): string | null => {
+    const stack: Array<{ node: string; i: number }> = [{ node: start, i: 0 }];
+    color.set(start, GRAY);
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1];
+      const outs = outUnbounded.get(top.node) ?? [];
+      if (top.i >= outs.length) {
+        color.set(top.node, BLACK);
+        stack.pop();
+        continue;
+      }
+      const to = outs[top.i++];
+      const c = color.get(to);
+      if (c === GRAY) return to; // back-edge found → cycle
       if (c === WHITE) {
-        const cycle = dfs(e.to);
-        if (cycle) return cycle;
+        color.set(to, GRAY);
+        stack.push({ node: to, i: 0 });
       }
     }
-    color.set(node, BLACK);
     return null;
-  }
+  };
 
   for (const id of nodeIds) {
     if (color.get(id) === WHITE) {
-      const cycleNode = dfs(id);
+      const cycleNode = findCycle(id);
       if (cycleNode) {
         errors.push({
           code: "UNBOUNDED_CYCLE",
@@ -547,6 +582,19 @@ export function validateWorkflow(
           nodeId: cycleNode,
         });
       }
+    }
+  }
+
+  // Retry ceiling for workflows that never went through zod (library callers,
+  // the e2e batch runner). Mirrors nodeRetryZ so every path enforces it (#325).
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    const max = node.retry?.max;
+    if (max != null && max > NODE_RETRY_MAX_CEILING) {
+      errors.push({
+        code: "RETRY_MAX_EXCEEDED",
+        message: `Node "${nodeId}" declares retry.max ${max}, above the ceiling of ${NODE_RETRY_MAX_CEILING}`,
+        nodeId,
+      });
     }
   }
 
@@ -1029,6 +1077,7 @@ export const workflowJsonSchema = {
           max_iterations: {
             type: "integer",
             minimum: 1,
+            maximum: EDGE_MAX_ITERATIONS_CEILING,
             description: "Max times this edge can be followed. Enables controlled retry loops.",
           },
         },

@@ -625,6 +625,7 @@
           "max_iterations": {
             "type": "integer",
             "minimum": 1,
+            "maximum": 100,
             "description": "Max times this edge can be followed. Enables controlled retry loops."
           }
         }
