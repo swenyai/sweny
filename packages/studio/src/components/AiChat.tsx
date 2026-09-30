@@ -133,7 +133,7 @@ export function AiChat({ onWorkflowGenerated, currentWorkflow, hasGenerated }: A
     <div className="w-72 flex flex-col bg-gray-900 border-r border-gray-700 flex-shrink-0">
       {/* Header */}
       <div className="px-3 py-2 border-b border-gray-700 flex items-center gap-2">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" className="text-indigo-400">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" className="text-blue-400">
           <path d="M8 1l1.5 4.5L14 7l-4.5 1.5L8 13l-1.5-4.5L2 7l4.5-1.5z" />
         </svg>
         <span className="text-xs font-semibold text-gray-300">AI Workflow Builder</span>
@@ -178,7 +178,7 @@ export function AiChat({ onWorkflowGenerated, currentWorkflow, hasGenerated }: A
                 title={skill.description}
                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${
                   active
-                    ? "bg-indigo-600/30 text-indigo-300 ring-1 ring-indigo-500/50"
+                    ? "bg-blue-600/30 text-blue-300 ring-1 ring-blue-500/50"
                     : "bg-gray-800 text-gray-500 hover:text-gray-300 hover:bg-gray-700"
                 }`}
               >
@@ -206,13 +206,13 @@ export function AiChat({ onWorkflowGenerated, currentWorkflow, hasGenerated }: A
             disabled={loading}
             rows={2}
             placeholder={hasGenerated ? "Describe changes..." : "Describe your workflow... (Cmd+K)"}
-            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-none disabled:opacity-50"
+            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"
           />
           <div className="absolute right-1.5 bottom-1.5 flex items-center gap-1">
             <button
               onClick={handleSubmit}
               disabled={loading || !input.trim()}
-              className="p-1 rounded bg-indigo-600 text-white disabled:opacity-30 hover:bg-indigo-500 transition-colors"
+              className="p-1 rounded bg-blue-600 text-white disabled:opacity-30 hover:bg-blue-500 transition-colors"
               title="Send (Enter)"
             >
               <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
