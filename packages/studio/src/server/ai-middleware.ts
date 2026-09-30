@@ -15,6 +15,9 @@
  */
 
 import type { Connect } from "vite";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
+import type { TLSSocket } from "node:tls";
 import type { IncomingMessage, ServerResponse } from "http";
 import type { Claude, Skill, Workflow } from "@sweny-ai/core";
 
@@ -46,6 +49,14 @@ async function ensureInitialized(): Promise<void> {
 // ─── Helpers ─────────────────────────────────────────────────────
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
+
+function isLoopbackPeer(address: string | undefined): boolean {
+  if (!address) return false;
+  if (address === "::1") return true;
+  // Dual-stack listeners expose IPv4 peers as IPv4-mapped IPv6 addresses.
+  const ipv4 = address.startsWith("::ffff:") ? address.slice(7) : address;
+  return isIP(ipv4) === 4 && ipv4.startsWith("127.");
+}
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -187,10 +198,61 @@ export function aiMiddlewarePlugin() {
   return {
     name: "sweny-ai-middleware",
     configureServer(server: { middlewares: Connect.Server }) {
+      // Kept only in this dev server instance, never embedded in a served module.
+      const token = randomBytes(32).toString("hex");
       server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) => {
         if (req.method !== "POST") return next();
 
         const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+
+        if (
+          !["/api/ai-session", "/api/generate-workflow", "/api/refine-workflow", "/api/generate-instruction"].includes(
+            pathname,
+          )
+        )
+          return next();
+
+        // Host/Origin can be forged by non-browser clients. Check the transport
+        // peer too, including when Vite listens on all interfaces with --host.
+        // A local reverse proxy is a trusted local peer; it must not expose these
+        // endpoints remotely. Forwarded headers cannot authenticate its clients.
+        if (!isLoopbackPeer(req.socket.remoteAddress)) {
+          return sendJson(res, 403, { error: "Local connections only" });
+        }
+
+        // Do not trust forwarded headers. These endpoints execute local agents,
+        // so only the local Studio origin may bootstrap or use a session.
+        const protocol = (req.socket as TLSSocket).encrypted ? "https:" : "http:";
+        let expectedOrigin: URL;
+        try {
+          expectedOrigin = new URL(`${protocol}//${req.headers.host}`);
+        } catch {
+          return sendJson(res, 403, { error: "Forbidden origin" });
+        }
+        if (
+          !["localhost", "127.0.0.1", "[::1]"].includes(expectedOrigin.hostname) ||
+          req.headers.origin !== expectedOrigin.origin ||
+          (req.headers["sec-fetch-site"] !== undefined && req.headers["sec-fetch-site"] !== "same-origin")
+        ) {
+          return sendJson(res, 403, { error: "Forbidden origin" });
+        }
+        if (req.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+          return sendJson(res, 415, { error: "Content-Type must be application/json" });
+        }
+        // The browser sends Origin on this JSON POST. A GET bootstrap would
+        // lack Origin on normal same-origin fetches and weaken this boundary.
+        if (pathname === "/api/ai-session") {
+          res.setHeader("Cache-Control", "no-store");
+          return sendJson(res, 200, { token });
+        }
+        const suppliedToken = req.headers["x-sweny-dev-token"];
+        if (
+          typeof suppliedToken !== "string" ||
+          Buffer.byteLength(suppliedToken) !== Buffer.byteLength(token) ||
+          !timingSafeEqual(Buffer.from(suppliedToken), Buffer.from(token))
+        ) {
+          return sendJson(res, 403, { error: "Invalid development session" });
+        }
 
         if (pathname === "/api/generate-workflow") {
           return handleGenerateWorkflow(req, res);

@@ -2662,8 +2662,8 @@ describe("route evaluator: schema-strict view of prior data", () => {
 
     const firstView = routeContext.first as Record<string, unknown>;
     const secondView = routeContext.second as Record<string, unknown>;
-    expect(firstView).toEqual({ a_status: "ok" });
-    expect(secondView).toEqual({ b_count: 3 });
+    expect(firstView).toEqual({ a_status: "ok", evals: {} });
+    expect(secondView).toEqual({ b_count: 3, evals: {} });
   });
 });
 
