@@ -75,7 +75,7 @@ describe("execute() seam (#330)", () => {
   });
 
   it("tools.deny entries that name a tool class reach the harness as deny (#331)", async () => {
-    const run = vi.fn(async (): Promise<NodeResult> => ({ status: "success", data: {}, toolCalls: [] }));
+    const run = vi.fn(async (_req: unknown): Promise<NodeResult> => ({ status: "success", data: {}, toolCalls: [] }));
     const legacy: Claude = { run, evaluate: async () => null, ask: async () => "" };
     const denying = {
       ...wf,

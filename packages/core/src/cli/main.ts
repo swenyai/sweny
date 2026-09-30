@@ -13,7 +13,9 @@ import type { ExecuteOptions } from "../executor.js";
 import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workflows/index.js";
 import type { ExecutionEvent, ExecutionTrace, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
-import { createHarness, isSupportedAgent, resolveHarnessPolicy, unsupportedAgentError } from "../harness/index.js";
+import { createHarness } from "../harness/index.js";
+import { isSupportedAgent, unsupportedAgentError } from "../harness/agents.js";
+import { resolveHarnessPolicy } from "../harness/policy.js";
 import type { AgentHarness, ClaudeCodeHarnessOptions, CodexHarnessOptions } from "../harness/index.js";
 import { builtinSkills, createSkillMap, validateWorkflowSkills } from "../skills/index.js";
 import { formatMissingSkillLines, skillEnvWarnings } from "./skill-env.js";
@@ -252,7 +254,7 @@ async function harnessFor(
     ...opts,
     policy: resolveHarnessPolicy(process.env, harnessPolicy, opts.logger),
   });
-  if (harness.id !== "claude-code") {
+  if (agent !== "claude") {
     const pre = await harness.preflight();
     if (!pre.ok) {
       console.error(chalk.red(`\n  ${pre.reason}\n`));

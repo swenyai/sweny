@@ -382,7 +382,13 @@ describe("CodexHarness preflight", () => {
     fakes.setVersion("0.100.0");
     const pre = await h.preflight();
     expect(pre).toMatchObject({ ok: false });
-    const r = await new CodexHarness({ logger: logger(), codexCommand: fakes.command }).run({
+    const r = await new CodexHarness({
+      logger: logger(),
+      codexCommand: fakes.command,
+      policy: "warn",
+      sandbox: "off",
+      sandboxWrapper: null,
+    }).run({
       instruction: "x",
       context: {},
       tools: [],
