@@ -26,7 +26,15 @@ When scoped, the agent gets:
 | Every env var declared by the node's skills (for example `GITHUB_TOKEN` for a node with `skills: [github]`) | So `gh` and friends work where the node asked for them |
 | Your `env-passthrough` list | Anything else a node's commands need |
 
-Everything else is withheld. A node without the `linear` skill never sees `LINEAR_API_KEY`; nothing sees `NPM_TOKEN` unless you pass it through. SWEny logs one warning per run (a `::warning::` annotation under GitHub Actions) naming the withheld variables, names only, never values, sorted and capped at 30. Add any a node needs to `env-passthrough`.
+Everything else is withheld. A node without the `linear` skill never sees `LINEAR_API_KEY`; nothing sees `NPM_TOKEN` unless you pass it through. Add any a node needs to `env-passthrough`.
+
+CI images set many variables of their own (`ANDROID_HOME`, `CHROME_BIN`, `JAVA_HOME_*`, `DOTNET_*`, `ACTIONS_*`, `RUNNER_*`, `ACCEPT_EULA`, and so on). SWEny treats these as the runner baseline and does not warn about them. Once per process it logs one plain line:
+
+```
+sweny: agent env scoped (128 withheld, 120 from the CI image). Add names to env-passthrough if a node needs them; --verbose lists them.
+```
+
+Only when a variable outside the baseline is withheld (for example `DATABASE_URL` or `NPM_TOKEN`) does SWEny also emit a warning (a `::warning::` annotation under GitHub Actions) listing just those names, names only, never values, sorted and capped at 30. `--verbose` lists every withheld name, baseline included.
 
 MCP servers that SWEny wires for a skill get their credentials explicitly, so they keep working.
 
