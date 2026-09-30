@@ -76,17 +76,39 @@ export function formatRunComment(
   ].join("\n");
 }
 
+/**
+ * Minimal comment for a run that crashed before producing node results: no DAG
+ * and no error text (thrown messages can embed model prose). Replaces any stale
+ * success comment for the same workflow.
+ */
+export function formatCrashComment(workflow: Workflow, summary: RunSummary): string {
+  return [
+    runCommentMarker(workflow.id),
+    `## ❌ ${cell(workflow.name)}`,
+    "",
+    `\`${formatReceipt(summary)} · crashed\``,
+    "",
+    "The run stopped before finishing. See the job log for details.",
+    "",
+    `<sub>${RUN_COMMENT_FOOTER}</sub>`,
+    "",
+  ].join("\n");
+}
+
 /** Write the comment markdown to `file`. Never throws; returns true only when written. */
 export function writeRunComment(
   file: string,
   workflow: Workflow,
   results: Map<string, NodeResult>,
   summary: RunSummary,
-  opts: RunCommentOptions = {},
+  opts: RunCommentOptions & { crashed?: boolean } = {},
 ): boolean {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, formatRunComment(workflow, results, summary, opts));
+    fs.writeFileSync(
+      file,
+      opts.crashed ? formatCrashComment(workflow, summary) : formatRunComment(workflow, results, summary, opts),
+    );
     return true;
   } catch (err) {
     process.stderr.write(`  ⚠ could not write comment file: ${err instanceof Error ? err.message : err}\n`);

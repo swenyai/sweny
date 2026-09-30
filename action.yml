@@ -166,7 +166,15 @@ runs:
         PR_COMMENT_NORM=$(normalize "$PR_COMMENT")
         rm -f "$COMMENT_FILE"
         if [ "$PR_COMMENT_NORM" = "true" ] && [ -n "$PR_NUMBER" ]; then
-          FLAGS+=("--comment-file" "$COMMENT_FILE")
+          # Feature-detect: an older installed CLI has no --comment-file and
+          # would fail the run. Capture help first (no pipe into grep -q, which
+          # can SIGPIPE the CLI and trip pipefail).
+          RUN_HELP=$(sweny workflow run --help 2>/dev/null || true)
+          if grep -q -- '--comment-file' <<< "$RUN_HELP"; then
+            FLAGS+=("--comment-file" "$COMMENT_FILE")
+          else
+            echo "::notice::installed sweny CLI does not support PR comments yet; skipping"
+          fi
         fi
         [ "$DRY_NORM" = "true" ] && FLAGS+=("--dry-run")
         [ "$VERBOSE_NORM" = "true" ] && FLAGS+=("--verbose")

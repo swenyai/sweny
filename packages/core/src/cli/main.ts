@@ -1135,6 +1135,12 @@ export async function workflowRunAction(
     console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
     runLogger.flush();
     console.error(`  ${renderReceiptLine(summarizeRun(new Map(), Date.now() - runStart, true), isTTY)}\n`);
+    // A crash must not leave a stale success comment behind.
+    if (options.commentFile) {
+      writeRunComment(options.commentFile, workflow, new Map(), summarizeRun(new Map(), Date.now() - runStart, true), {
+        crashed: true,
+      });
+    }
     // Finalize the cloud run as failed (covers thrown errors, incl.
     // RouteEvaluationError). Without this a crashed workflow run stays
     // "running" in cloud forever.

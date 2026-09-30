@@ -119,10 +119,65 @@ describe("action.yml wiring", () => {
     const runStep = steps.find((s) => s.name === "Run workflow")!;
     expect(runStep.run).toContain('FLAGS+=("--comment-file" "$COMMENT_FILE")');
     expect(runStep.run).toContain('[ -n "$PR_NUMBER" ]');
+    // feature-detect: old CLIs without --comment-file must not fail the run
+    expect(runStep.run).toContain("sweny workflow run --help");
+    expect(runStep.run).toContain("grep -q -- '--comment-file'");
+    expect(runStep.run).toContain("::notice::installed sweny CLI does not support PR comments yet; skipping");
+    expect(runStep.run.indexOf("grep -q -- '--comment-file'")).toBeLessThan(
+      runStep.run.indexOf('FLAGS+=("--comment-file"'),
+    );
     const post = steps.find((s) => s.name === "Post PR comment")!;
     expect(post.if).toContain("!cancelled()");
     expect(post.if).toContain("inputs.pr-comment != 'false'");
     expect(post.run).toContain("scripts/post-run-comment.sh");
     expect(steps.indexOf(post)).toBeGreaterThan(steps.indexOf(runStep));
+  });
+});
+
+describe("Run workflow step with a stub sweny", () => {
+  const action = parse(fs.readFileSync(path.join(repoRoot, "action.yml"), "utf8"));
+  const runScript = (action.runs.steps as Array<Record<string, any>>).find((s) => s.name === "Run workflow")!
+    .run as string;
+
+  function runStep(helpText: string, env: Record<string, string>) {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-step-"));
+    const argsLog = path.join(d, "args.log");
+    const bin = path.join(d, "bin");
+    fs.mkdirSync(bin);
+    fs.writeFileSync(
+      path.join(bin, "sweny"),
+      `#!/bin/sh\nfor a in "$@"; do [ "$a" = "--help" ] && { printf '%s\\n' '${helpText}'; exit 0; }; done\necho "$@" >> "${argsLog}"\n`,
+      { mode: 0o755 },
+    );
+    const r = spawnSync("bash", ["-eo", "pipefail", "-c", runScript], {
+      encoding: "utf8",
+      env: {
+        PATH: `${bin}:${process.env.PATH}`,
+        WORKFLOW_PATH: "wf.yml",
+        COMMENT_FILE: path.join(d, "c.md"),
+        PR_COMMENT: "true",
+        PR_NUMBER: "7",
+        ...env,
+      },
+    });
+    return { r, args: fs.existsSync(argsLog) ? fs.readFileSync(argsLog, "utf8") : "" };
+  }
+
+  it("passes --comment-file when the CLI supports it", () => {
+    const { r, args } = runStep("  --comment-file <path>  write comment", {});
+    expect(r.status).toBe(0);
+    expect(args).toContain("--comment-file");
+  });
+
+  it("skips with a notice on an older CLI", () => {
+    const { r, args } = runStep("  --json  output json", {});
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("::notice::installed sweny CLI does not support PR comments yet; skipping");
+    expect(args).not.toContain("--comment-file");
+  });
+
+  it("does nothing off pull_request or when opted out", () => {
+    expect(runStep("--comment-file", { PR_NUMBER: "" }).args).not.toContain("--comment-file");
+    expect(runStep("--comment-file", { PR_COMMENT: "false" }).args).not.toContain("--comment-file");
   });
 });

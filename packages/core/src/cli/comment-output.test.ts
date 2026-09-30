@@ -4,7 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import type { NodeResult, Workflow } from "../types.js";
 import { summarizeRun } from "./run-output.js";
-import { formatRunComment, runCommentMarker, writeRunComment, RUN_COMMENT_FOOTER } from "./comment-output.js";
+import {
+  formatCrashComment,
+  formatRunComment,
+  runCommentMarker,
+  writeRunComment,
+  RUN_COMMENT_FOOTER,
+} from "./comment-output.js";
 
 const workflow = {
   id: "pr-review",
@@ -112,5 +118,14 @@ describe("CLI flag", () => {
     const { WORKFLOW_RUN_OPTIONS } = await import("./run-output.js");
     const flag = WORKFLOW_RUN_OPTIONS.find(([f]) => f.startsWith("--comment-file"));
     expect(flag?.[0]).toBe("--comment-file <path>");
+  });
+});
+
+describe("formatCrashComment", () => {
+  it("crash: receipt only, no DAG, no error text", () => {
+    const md = formatCrashComment(workflow, summarizeRun(new Map(), 2_000, true));
+    expect(md).toMatchSnapshot();
+    expect(md).not.toContain("mermaid");
+    expect(md.split("\n")[0]).toBe("<!-- sweny-run-comment:pr-review -->");
   });
 });
