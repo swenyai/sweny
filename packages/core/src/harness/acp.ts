@@ -56,6 +56,7 @@ import {
   resolveEnvScope,
   resolveSandboxMode,
   scopeAgentEnv,
+  withPushBlocked,
   type SandboxMode,
 } from "../agent-env.js";
 import type {
@@ -879,7 +880,7 @@ export class AcpHarness implements AgentHarness {
     // Permission answers: the node's deny list, plus legacy `disallowed_tools` names that map to a class.
     const deny = new Set<ToolClass>([...policy.deny, ...translateDenyNames(policy.nativeDeny).classes]);
 
-    const env = this.buildEnv(req.agentAccess?.envVars);
+    const env = withPushBlocked(this.buildEnv(req.agentAccess?.envVars), req.agentAccess?.noPush);
     let bridge: ToolBridge | undefined;
     try {
       // Dry run: external MCP servers cannot be classified per tool, so only

@@ -264,6 +264,30 @@ export const github: Skill = {
         }),
     },
     {
+      name: "github_set_issue_state",
+      access: "write",
+      description: "Reopen a closed GitHub issue or pull request, or close an open one",
+      input_schema: {
+        type: "object",
+        properties: {
+          repo: { type: "string", description: "owner/repo" },
+          issue_number: { type: "number", description: "Issue or PR number" },
+          state: { type: "string", enum: ["reopen", "close"], description: "reopen or close" },
+        },
+        required: ["repo", "issue_number", "state"],
+      },
+      handler: async (input: { repo: string; issue_number: number; state: string }, ctx) => {
+        if (input.state !== "reopen" && input.state !== "close") {
+          throw new Error(`[GitHub] github_set_issue_state: state must be "reopen" or "close"`);
+        }
+        const reopen = input.state === "reopen";
+        return gh(`/repos/${input.repo}/issues/${input.issue_number}`, ctx, {
+          method: "PATCH",
+          body: JSON.stringify({ state: reopen ? "open" : "closed", state_reason: reopen ? "reopened" : "completed" }),
+        });
+      },
+    },
+    {
       name: "github_list_recent_commits",
       access: "read",
       description: "List recent commits on a branch",

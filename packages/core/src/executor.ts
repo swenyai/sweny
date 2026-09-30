@@ -471,7 +471,12 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // compiles them or reports them in `degraded`.
     const denyClasses = (node.tools?.deny ?? []).filter(isToolClass);
     let degradedLogged = false;
-    const agentAccess = resolveAgentAccess(node.skills, skills);
+    // #442: a staged or dry run cannot push. The harness blocks git push and
+    // withholds write tokens in this node's agent env (see withPushBlocked).
+    const agentAccess = {
+      ...resolveAgentAccess(node.skills, skills),
+      ...(stageOutputs ? { noPush: true } : {}),
+    };
     // #365: a node or workflow that declares `permissions` or `outputs` gets
     // one portable policy, compiled by each adapter. The gate also runs here so
     // a strict refusal holds on every harness, before any spend. Nodes that

@@ -647,9 +647,21 @@ describe("built-in workflows: least privilege and safe outputs (#365)", () => {
 
   it("triage files issues and +1 comments only as capped outputs", () => {
     const create = triageWorkflow.nodes.create_issue;
-    expect(create.outputs!.map((o) => o.type).sort()).toEqual(["comment", "issue"]);
+    expect(create.outputs!.map((o) => o.type).sort()).toEqual(["comment", "issue", "issue_state"]);
     for (const o of create.outputs!) expect(o.max).toBeGreaterThan(0);
-    expect(triageWorkflow.nodes.skip.outputs).toEqual([{ type: "comment", max: 10 }]);
+    expect(triageWorkflow.nodes.skip.outputs).toEqual([
+      { type: "comment", max: 10 },
+      { type: "issue_state", state: "reopen", max: 10 },
+    ]);
+  });
+
+  it("triage reopens closed duplicates (and never closes): capped issue_state, reopen only, inside the ceiling", () => {
+    expect(triageWorkflow.safe_outputs!.allow).toContain("issue_state");
+    for (const id of ["create_issue", "skip"]) {
+      const node = triageWorkflow.nodes[id];
+      expect(node.outputs).toContainEqual({ type: "issue_state", state: "reopen", max: 10 });
+      expect(node.instruction as string).toMatch(/issue_state/);
+    }
   });
 
   it("the PR is an output of create_pr, which stays a write node only to push the branch", () => {

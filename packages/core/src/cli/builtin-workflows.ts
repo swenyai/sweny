@@ -57,6 +57,7 @@ const LEGACY_WRITE_TOOLS: Record<SafeOutputType, string[]> = {
   comment: ["github_add_comment", "linear_add_comment", "linear_update_issue"],
   pr: ["github_create_pr"],
   label: ["github_add_labels"],
+  issue_state: ["linear_update_issue", "linear_set_issue_state", "github_set_issue_state"],
 };
 
 const writeToolsBySkill = new Map(
@@ -84,7 +85,7 @@ export function readGaps(p: BuiltinProviders): string[] {
 
 /** The skill that applies this output type for these providers, or undefined when none can. */
 export function outputSkill(type: SafeOutputType, p: BuiltinProviders): string | undefined {
-  if (type === "issue" || type === "comment") return TRACKER_SKILL[p.issueTracker];
+  if (type === "issue" || type === "comment" || type === "issue_state") return TRACKER_SKILL[p.issueTracker];
   return p.sourceControl === "github" ? "github" : undefined;
 }
 
