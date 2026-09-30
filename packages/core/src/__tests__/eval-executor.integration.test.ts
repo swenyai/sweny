@@ -162,6 +162,44 @@ describe("downstream context exposes evals from prior nodes", () => {
 });
 
 describe("runtime evaluator provenance", () => {
+  it("keeps a __proto__ evaluator as an own verdict in route and downstream context", async () => {
+    const workflow: Workflow = parseWorkflow({
+      id: "prototype-evaluator",
+      name: "prototype-evaluator",
+      description: "",
+      entry: "check",
+      nodes: {
+        check: {
+          name: "check",
+          instruction: "check",
+          skills: [],
+          eval: [{ name: "__proto__", kind: "value", rule: { output_required: ["tested"] } }],
+        },
+        finish: {
+          name: "finish",
+          instruction: "finish",
+          skills: [],
+          requires: { output_matches: [{ path: "check.evals.__proto__.pass", equals: true }] },
+        },
+      },
+      edges: [{ from: "check", to: "finish", when: "the check passed" }],
+    });
+    const claude = fakeClaude({ results: { check: { status: "success", data: { tested: true }, toolCalls: [] } } });
+    const evaluate = vi.spyOn(claude, "evaluate");
+    const run = vi.spyOn(claude, "run");
+    const { results } = await execute(workflow, {}, { skills: createSkillMap([]), claude, logger: silentLogger() });
+
+    expect(results.get("finish")?.status).toBe("success");
+    expect(evaluate).toHaveBeenCalledOnce();
+    expect(run).toHaveBeenCalledTimes(2);
+    for (const context of [evaluate.mock.calls[0]![0].context, run.mock.calls[1]![0].context]) {
+      const prior = context.check as { evals: Record<string, unknown> };
+      expect(Object.hasOwn(prior.evals, "__proto__")).toBe(true);
+      expect(prior.evals["__proto__"]).toMatchObject({ name: "__proto__", pass: true });
+      expect(JSON.parse(JSON.stringify(prior.evals))["__proto__"]).toMatchObject({ pass: true });
+    }
+  });
+
   it.each([
     { label: "a forged pass over a failed evaluator", declared: true, tested: false, allowed: false },
     { label: "an invented evaluator", declared: false, tested: true, allowed: false },
@@ -205,7 +243,7 @@ describe("runtime evaluator provenance", () => {
       },
     });
     const run = vi.spyOn(claude, "run");
-    const results = await execute(workflow, {}, { skills: createSkillMap([]), claude, logger: silentLogger() });
+    const { results } = await execute(workflow, {}, { skills: createSkillMap([]), claude, logger: silentLogger() });
 
     expect(results.get("check")?.evals).toEqual(
       declared ? [expect.objectContaining({ name: "tests_ok", pass: tested })] : [],

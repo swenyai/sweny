@@ -720,10 +720,7 @@ function buildPriorNodeContext(result: NodeResult): Record<string, unknown> {
   const data = (result.data ?? {}) as Record<string, unknown>;
   const evals = result.evals ?? [];
 
-  const evalsByName: Record<string, unknown> = {};
-  for (const e of evals) {
-    evalsByName[e.name] = e;
-  }
+  const evalsByName = Object.fromEntries(evals.map((e) => [e.name, e]));
   return { ...data, evals: evalsByName };
 }
 
@@ -789,10 +786,7 @@ function buildRouteEvalEntry(
 
   const evals = result.evals ?? [];
 
-  const evalsByName: Record<string, unknown> = {};
-  for (const e of evals) {
-    evalsByName[e.name] = e;
-  }
+  const evalsByName = Object.fromEntries(evals.map((e) => [e.name, e]));
   // Schema projection never grants agent data authority over runtime verdicts.
   return { view: { ...dataView, evals: evalsByName }, missing };
 }
