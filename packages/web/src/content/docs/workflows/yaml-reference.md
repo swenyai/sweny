@@ -208,10 +208,12 @@ SWEny validates workflows before execution. The `sweny workflow validate` comman
 | Bounded self-loops | `SELF_LOOP` | An edge where `from` equals `to` must declare `max_iterations`. Bounded self-loops are allowed — only unbounded ones are rejected. |
 | All nodes reachable | `UNREACHABLE_NODE` | Every node must be reachable from the entry node via BFS traversal. |
 | No unbounded cycles | `UNBOUNDED_CYCLE` | Any cycle must have at least one edge with `max_iterations`. The detector removes bounded edges, then checks the remaining subgraph for cycles. |
+| Edge iteration ceiling | `EDGE_ITERATIONS_EXCEEDED` | `max_iterations` may not exceed 100. |
+| Retry ceiling | `RETRY_MAX_EXCEEDED` | `retry.max` may not exceed 10. |
 | Known skills | `UNKNOWN_SKILL` | If a skill catalog is provided, all referenced skill IDs must exist in it. |
 | Valid inline skills | `INVALID_INLINE_SKILL` | Inline `skills` entries in a workflow must declare `instruction`, `mcp`, or both. |
 
-Validation runs in two phases. First, structural checks (entry exists, edges reference valid nodes, bounded self-loops, no unbounded cycles). If those pass, reachability is checked via breadth-first search from the entry node.
+All checks run in one pass and every problem is reported together. The same validation runs inside `execute()`, so a workflow passed straight to the library (or Studio's simulator) is rejected before any node runs.
 
 ## JSON Schema
 

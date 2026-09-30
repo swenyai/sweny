@@ -11,7 +11,7 @@ import chalk from "chalk";
 import { execute } from "../executor.js";
 import type { ExecuteOptions } from "../executor.js";
 import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workflows/index.js";
-import type { ExecutionEvent, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
+import type { ExecutionEvent, ExecutionTrace, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
 import { builtinSkills, createSkillMap, validateWorkflowSkills } from "../skills/index.js";
@@ -33,9 +33,11 @@ import { runWorkflowDiagram } from "./diagram.js";
 import { DagRenderer } from "./renderer.js";
 import * as readline from "node:readline";
 
-import { loadDotenv, loadConfigFile } from "./config-file.js";
+import { loadDotenv, loadConfigFile, applyAgentFileConfig } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { nonInteractiveUsage, runNew } from "./new.js";
+import { buildRunRecord, createNodeTimer, historyDisabled, newRunId, recordRun } from "./run-history.js";
+import { registerRunsCommand } from "./runs.js";
 import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "./e2e.js";
 import { createVerboseToolObserver } from "./verbose-observer.js";
 import {
@@ -111,6 +113,8 @@ function composeObservers(...observers: (Observer | undefined)[]): Observer | un
 
 // Auto-load .env before Commander parses (so env vars are available for defaults)
 loadDotenv();
+// Agent sandbox / env-passthrough keys from .sweny.yml -> SWENY_* env (#360).
+applyAgentFileConfig(loadConfigFile());
 
 const program = new Command()
   .name("sweny")
@@ -267,7 +271,8 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: consoleLogger,
-    mcpServers,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
   });
 
   // ── Progress display state ─────────────────────────────────
@@ -607,7 +612,8 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     maxTurns: config.maxImplementTurns || 40,
     cwd: process.cwd(),
     logger: consoleLogger,
-    mcpServers,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
   });
 
   console.log(chalk.cyan(`\n  sweny implement ${issueId}\n`));
@@ -892,7 +898,8 @@ export async function workflowRunAction(
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: runLogger,
-    mcpServers,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
     model: workflow.model,
   });
 
@@ -1024,21 +1031,34 @@ export async function workflowRunAction(
     console.log(c.subtle(`  cloud: ${wfCloudHandle.dashboardUrl}`));
   }
 
-  // Per-node wall-clock for the PR comment (--comment-file). Independent of
-  // wfProgressObserver, which is off under --json.
-  const commentDurations: Record<string, number> = {};
-  const commentEnter = new Map<string, number>();
-  const commentDurationObserver: Observer | undefined = options.commentFile
-    ? (event: ExecutionEvent) => {
-        if (event.type === "node:enter") commentEnter.set(event.node, Date.now());
-        else if (event.type === "node:exit")
-          commentDurations[event.node] = Date.now() - (commentEnter.get(event.node) ?? Date.now());
-      }
-    : undefined;
+  // Run history (#388): metadata-only record under .sweny/runs/, written once at run end.
+  const nodeTimer = createNodeTimer();
+  const runId = newRunId(runStart);
+  let historyRecorded = false;
+  const recordHistory = (results: Map<string, NodeResult>, trace: ExecutionTrace | undefined, crashed: boolean) => {
+    if (historyRecorded || historyDisabled(options.history, fileConfig["history"])) return;
+    historyRecorded = true;
+    try {
+      recordRun(
+        buildRunRecord({
+          runId,
+          workflow,
+          startedAtMs: runStart,
+          durationMs: Date.now() - runStart,
+          results,
+          trace,
+          nodeDurations: nodeTimer.durations,
+          crashed,
+        }),
+      );
+    } catch {
+      // history must never fail a run
+    }
+  };
 
   const observer = composeObservers(
     wfProgressObserver,
-    commentDurationObserver,
+    nodeTimer.observer,
     options.verbose ? createVerboseToolObserver() : undefined,
     options.stream ? createStreamObserver() : undefined,
     createCloudStreamObserver(config, wfCloudHandle),
@@ -1078,6 +1098,7 @@ export async function workflowRunAction(
 
     const wfDurationMs = Date.now() - runStart;
     const wfHasFailed = [...results.values()].some((r) => r.status === "failed");
+    recordHistory(results, trace, false);
 
     // Close the cloud lifecycle session BEFORE the JSON early-exit so
     // every workflow run reports a terminal status, regardless of how
@@ -1093,7 +1114,7 @@ export async function workflowRunAction(
     if (options.commentFile) {
       writeRunComment(options.commentFile, workflow, results, summarizeRun(results, wfDurationMs), {
         trace,
-        durationsMs: commentDurations,
+        durationsMs: Object.fromEntries(nodeTimer.durations),
       });
     }
 
@@ -1134,6 +1155,7 @@ export async function workflowRunAction(
     const crashMsg = err instanceof Error ? err.message : String(err);
     console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
     runLogger.flush();
+    recordHistory(nodeTimer.lastResults, undefined, true);
     console.error(`  ${renderReceiptLine(summarizeRun(new Map(), Date.now() - runStart, true), isTTY)}\n`);
     // A crash must not leave a stale success comment behind.
     if (options.commentFile) {
@@ -1215,6 +1237,8 @@ const workflowRunCmd = workflowCmd
 for (const [flags, description] of WORKFLOW_RUN_OPTIONS) {
   workflowRunCmd.option(flags, description);
 }
+workflowRunCmd.option("--no-history", "Do not record this run in .sweny/runs/ (or set `history: off` in .sweny.yml)");
+registerRunsCommand(program);
 
 workflowCmd
   .command("diagram <file>")
