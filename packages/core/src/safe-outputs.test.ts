@@ -851,7 +851,7 @@ describe("issue_state: workflow validation", () => {
       nodes: { a: { name: "A", instruction: "x", skills: ["github"], outputs } },
       edges: [],
       ...(safe_outputs ? { safe_outputs } : {}),
-    }) as Workflow;
+    }) as unknown as Workflow;
 
   it("accepts number and state on issue_state, and the ceiling applies to it", () => {
     expect(validateWorkflow(wf([{ type: "issue_state", state: "reopen", number: { input: "n" } }]))).toEqual([]);

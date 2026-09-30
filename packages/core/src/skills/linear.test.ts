@@ -145,7 +145,7 @@ describe("linear_set_issue_state", () => {
   ];
   const found = (type: string) =>
     gqlResponse({ issue: { id: "uuid-1", state: { type }, team: { states: { nodes: states } } } });
-  const updated = gqlResponse({ issueUpdate: { success: true, issue: { id: "uuid-1", identifier: "OFF-1" } } });
+  const updated = () => gqlResponse({ issueUpdate: { success: true, issue: { id: "uuid-1", identifier: "OFF-1" } } });
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -159,14 +159,14 @@ describe("linear_set_issue_state", () => {
   });
 
   it("reopens a closed issue into the team's first unstarted state", async () => {
-    fetchMock.mockResolvedValueOnce(found("completed")).mockResolvedValueOnce(updated);
+    fetchMock.mockResolvedValueOnce(found("completed")).mockResolvedValueOnce(updated());
     await setState.handler({ issueId: "OFF-1", state: "reopen" }, ctx());
     const sent = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(sent.variables).toEqual({ id: "uuid-1", input: { stateId: "s-todo-first" } });
   });
 
   it("closes an open issue into the first completed state", async () => {
-    fetchMock.mockResolvedValueOnce(found("started")).mockResolvedValueOnce(updated);
+    fetchMock.mockResolvedValueOnce(found("started")).mockResolvedValueOnce(updated());
     await setState.handler({ issueId: "OFF-1", state: "close" }, ctx());
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).variables.input).toEqual({ stateId: "s-done" });
   });
