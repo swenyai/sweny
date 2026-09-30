@@ -5,7 +5,8 @@
 
 import { ClaudeCodeHarness, type ClaudeCodeHarnessOptions } from "./claude-code.js";
 import { CodexHarness, type CodexHarnessOptions } from "./codex.js";
-import { unsupportedAgentError } from "./agents.js";
+import { AcpHarness, type AcpHarnessOptions } from "./acp.js";
+import { parseAcpAgent, unsupportedAgentError } from "./agents.js";
 export { claudeCompat, asClaude } from "./compat.js";
 
 export type {
@@ -28,11 +29,13 @@ export { ClaudeCodeHarness, CLAUDE_CODE_CAPABILITIES } from "./claude-code.js";
 export type { ClaudeCodeHarnessOptions } from "./claude-code.js";
 export { CodexHarness, CODEX_CAPABILITIES, MIN_CODEX_VERSION } from "./codex.js";
 export type { CodexHarnessOptions } from "./codex.js";
+export { AcpHarness, ACP_CAPABILITIES, ACP_PROTOCOL_VERSION } from "./acp.js";
+export type { AcpHarnessOptions } from "./acp.js";
 export { startToolBridge } from "./tool-bridge/server.js";
 export type { ToolBridge, ToolBridgeOptions } from "./tool-bridge/server.js";
 
-export { SUPPORTED_AGENTS, isSupportedAgent, unsupportedAgentError } from "./agents.js";
-export type { SupportedAgent } from "./agents.js";
+export { SUPPORTED_AGENTS, isSupportedAgent, parseAcpAgent, unsupportedAgentError } from "./agents.js";
+export type { AcpAgentId, SupportedAgent } from "./agents.js";
 
 /**
  * Build the harness for an agent id. `claude` is the historical `--agent` /
@@ -41,14 +44,17 @@ export type { SupportedAgent } from "./agents.js";
  */
 export function createHarness(id: "claude" | "claude-code", opts?: ClaudeCodeHarnessOptions): ClaudeCodeHarness;
 export function createHarness(id: "codex", opts?: CodexHarnessOptions): CodexHarness;
+export function createHarness(id: `acp:${string}`, opts?: AcpHarnessOptions): AcpHarness;
 export function createHarness(
   id: string,
-  opts?: ClaudeCodeHarnessOptions & CodexHarnessOptions,
-): ClaudeCodeHarness | CodexHarness;
+  opts?: ClaudeCodeHarnessOptions & CodexHarnessOptions & AcpHarnessOptions,
+): ClaudeCodeHarness | CodexHarness | AcpHarness;
 export function createHarness(
   id: string,
-  opts: ClaudeCodeHarnessOptions & CodexHarnessOptions = {},
-): ClaudeCodeHarness | CodexHarness {
+  opts: ClaudeCodeHarnessOptions & CodexHarnessOptions & AcpHarnessOptions = {},
+): ClaudeCodeHarness | CodexHarness | AcpHarness {
+  // `acp:<command>` (#416): any ACP agent. An empty command is an error, not a fallback.
+  if (id.startsWith("acp:")) return new AcpHarness({ ...opts, acpCommand: parseAcpAgent(id) ?? "" });
   switch (id) {
     case "claude":
     case "claude-code":

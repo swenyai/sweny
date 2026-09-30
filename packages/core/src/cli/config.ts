@@ -4,7 +4,7 @@ import type { Command } from "commander";
 import type { McpServerConfig } from "../types.js";
 import type { FileConfig } from "./config-file.js";
 import { hasCodexLogin } from "../agent-env.js";
-import { unsupportedAgentError } from "../harness/agents.js";
+import { parseAcpAgent, unsupportedAgentError } from "../harness/agents.js";
 
 export interface CliConfig {
   // Coding agent
@@ -139,7 +139,10 @@ export function registerTriageCommand(program: Command): Command {
   return program
     .command("triage")
     .description("Run the SWEny triage workflow")
-    .option("--agent <provider>", "Coding agent: claude (default) or codex")
+    .option(
+      "--agent <provider>",
+      "Coding agent: claude (default), codex, or acp:<command> for any ACP agent (experimental)",
+    )
     .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
     .option("--observability-provider <provider>", "Observability provider (default: none)")
     .option("--issue-tracker-provider <provider>", "Issue tracker provider (default: github-issues)")
@@ -426,6 +429,8 @@ export function validateInputs(config: CliConfig): string[] {
       }
       break;
     default:
+      // An ACP agent (`acp:<command>`, #416) brings its own auth; it says so itself when it is missing.
+      if (parseAcpAgent(config.codingAgentProvider) !== undefined) break;
       // Honest --agent (#330): only agents with an adapter are accepted.
       // Anything else would silently run a different agent under that name.
       errors.push(unsupportedAgentError(config.codingAgentProvider));
@@ -870,7 +875,10 @@ export function registerImplementCommand(program: Command): Command {
   return program
     .command("implement <issueId>")
     .description("Implement a fix for a specific issue and open a PR")
-    .option("--agent <provider>", "Coding agent: claude (default) or codex")
+    .option(
+      "--agent <provider>",
+      "Coding agent: claude (default), codex, or acp:<command> for any ACP agent (experimental)",
+    )
     .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
     .option("--issue-tracker-provider <provider>", "Issue tracker (linear|jira|github-issues|file)")
     .option("--source-control-provider <provider>", "Source control (github|gitlab|file)")

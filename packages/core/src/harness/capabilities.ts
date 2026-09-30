@@ -54,3 +54,45 @@ export const CODEX_CAPABILITIES: HarnessCapabilities = {
   cancel: "kill",
   resume: false,
 };
+
+/**
+ * Any ACP agent (`--agent acp:<command>`, #416), declared from the Agent
+ * Client Protocol schema v1.24.1 (agentclientprotocol/agent-client-protocol,
+ * `schema/v1/schema.json`, docs under `docs/protocol/v1/`) and probed by the
+ * contract suite against a scripted fake agent. ACP is the long-tail adapter:
+ * the protocol carries a prompt and a stream of updates, not sweny's opinions.
+ * - structuredOutput prompt: `PromptResponse` has only `stopReason`, so there
+ *   is no schema channel. sweny asks for the JSON in the prompt, parses it,
+ *   checks it and retries once.
+ * - toolTrace full: `tool_call` and `tool_call_update` session updates carry an
+ *   id, a kind, a status and (optionally) raw input and content.
+ * - builtinDeny none: the protocol has no tool allow or deny list. The only
+ *   hook is `session/request_permission`, which fires only when the agent
+ *   chooses to ask. sweny answers it by policy (best effort), but cannot
+ *   promise the agent asks, so nothing is declared.
+ * - mcp inject, exclusive none: `session/new` takes `mcpServers`, but whether
+ *   the agent also loads its own MCP config is agent-defined.
+ * - sandbox none: nothing in the protocol. The process wrapper (srt) is the
+ *   only containment, see sandbox-wrapper.ts.
+ * - readOnly none: modes are agent-defined. `policyGate` counts read-only as
+ *   enforced only with the wrapper's read-only mount.
+ * - turnLimit watchdog: no turn limit in the protocol; sweny counts tool calls.
+ * - usage costUsd only: `usage_update {used, size, cost?}` is the stable
+ *   usage. `used` and `size` are context window occupancy, not billed tokens,
+ *   so they are not mapped; `cost` (cumulative, ISO 4217 currency) is, when it
+ *   is USD. Per-turn token usage is behind an unstable flag.
+ * - cancel rpc: `session/cancel`, then kill.
+ * - resume false: sweny starts a fresh session per node.
+ */
+export const ACP_CAPABILITIES: HarnessCapabilities = {
+  structuredOutput: "prompt",
+  toolTrace: "full",
+  builtinDeny: "none",
+  mcp: { inject: true, exclusive: "none" },
+  sandbox: { fs: false, network: false },
+  readOnly: "none",
+  turnLimit: "watchdog",
+  usage: { tokens: false, costUsd: true, live: false },
+  cancel: "rpc",
+  resume: false,
+};

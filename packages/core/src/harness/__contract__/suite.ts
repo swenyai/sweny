@@ -284,7 +284,7 @@ export function runContractSuite(
       // 7
       async (skip) => {
         const { h } = await fresh();
-        if (!h.capabilities.usage.tokens) return skip("usage is not captured");
+        if (!h.capabilities.usage.tokens && !h.capabilities.usage.costUsd) return skip("usage is not captured");
         // Only fields the wire format carries can arrive; the rest must stay absent (never a guessed 0).
         const carried = new Set<keyof FakeUsage>(fakes.usageFields ?? (Object.keys(FULL_USAGE) as (keyof FakeUsage)[]));
         const pick = (u: FakeUsage) =>

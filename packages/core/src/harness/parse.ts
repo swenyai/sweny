@@ -196,7 +196,7 @@ export function tryParseJSON(
  *
  * Returns a list of human-readable problems; empty means no detected mismatch.
  */
-function schemaMismatches(value: unknown, schema: JSONSchema): string[] {
+export function schemaMismatches(value: unknown, schema: JSONSchema): string[] {
   const problems: string[] = [];
   const s = schema as Record<string, unknown>;
 
