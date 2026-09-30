@@ -22,6 +22,7 @@ The GitHub skill gives Claude access to repositories, issues, pull requests, and
 | `github_search_issues` | Search issues and pull requests across a repo or globally |
 | `github_create_issue` | Create a new GitHub issue with title, body, and labels |
 | `github_create_pr` | Create a pull request from a head branch to a base branch |
+| `github_add_labels` | Add labels to an issue or pull request (also applies `label` safe outputs) |
 | `github_list_recent_commits` | List recent commits on a branch (default: main) |
 | `github_get_file` | Get a file's contents from a repository at a given ref |
 | `github_list_pr_files` | List the files changed in a pull request with status and line counts (read-only) |

@@ -121,6 +121,18 @@ export const CLAUDE_TOOLS_BY_CLASS: Readonly<Record<ToolClass, readonly string[]
   subagent: ["Task", "Agent"],
 };
 
+/** Native `disallowedTools` for a policy: legacy names, compiled classes, and the read-only set. */
+export function compileClaudeCodeDeny(policy: NodePolicy, legacy: readonly string[] = []): string[] {
+  return [
+    ...new Set([
+      ...legacy,
+      ...(policy.nativeDeny ?? []),
+      ...policy.deny.flatMap((c) => CLAUDE_TOOLS_BY_CLASS[c] ?? []),
+      ...(policy.readOnly ? READ_ONLY_DISALLOWED_TOOLS : []),
+    ]),
+  ];
+}
+
 /** How sweny resolves which credentials reach the Claude Code subprocess. */
 export type SwenyAuthMode = "auto" | "api-key" | "oauth";
 
@@ -364,9 +376,15 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
   }
 
   /**
-   * Run a node. The query itself is unchanged by the harness seam; this only
-   * runs {@link policyGate} (always `degraded: []` for Claude Code) and tags
-   * the result with the harness id and version.
+   * Run a node. Runs {@link policyGate} (always `degraded: []` for Claude
+   * Code), compiles the policy to native options, and tags the result with the
+   * harness id and version.
+   *
+   * Policy compile (#365): `policy.readOnly` (or the legacy `readOnly` flag)
+   * is a read-only run; `policy.deny` classes become native `disallowedTools`
+   * names, merged with `nativeDeny` and the legacy `disallowedTools`; and
+   * `policy.strict` makes MCP exclusive (`strictMcpConfig`) even for a
+   * write-capable node.
    */
   async run(req: HarnessRunRequest): Promise<HarnessRunResult> {
     const policy: NodePolicy = req.policy ?? {
@@ -377,11 +395,25 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       strict: false,
     };
     const gate = policyGate(this.capabilities, policy);
-    // Portable deny classes (`tools.deny: [write]`) compile to Claude Code tool names.
-    const classNames = policy.deny.flatMap((c) => CLAUDE_TOOLS_BY_CLASS[c] ?? []);
-    const disallowedTools =
-      classNames.length > 0 ? [...new Set([...(req.disallowedTools ?? []), ...classNames])] : req.disallowedTools;
-    const result = await this.runQuery({ ...req, disallowedTools });
+    if (gate.refuse) {
+      this.logger.error(gate.refuse);
+      return {
+        status: "failed",
+        // `refused` keeps fail_soft from softening a policy refusal (executor.ts).
+        data: { error: gate.refuse, refused: true },
+        toolCalls: [],
+        harness: this.info(),
+        degraded: gate.degraded,
+      };
+    }
+    const readOnly = !!req.readOnly || policy.readOnly;
+    const disallowedTools = compileClaudeCodeDeny(policy, req.disallowedTools ?? []);
+    const result = await this.runQuery({
+      ...req,
+      readOnly,
+      disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
+      strictMcp: readOnly || policy.strict,
+    });
     return { ...result, harness: this.info(), degraded: gate.degraded };
   }
 
@@ -404,6 +436,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     readOnly?: boolean;
     /** Env var names + sandbox hosts this node's skills need (#360). */
     agentAccess?: AgentAccess;
+    /** Exclusive MCP: only the servers passed here load (#365 strict policy). */
+    strictMcp?: boolean;
   }): Promise<NodeResult> {
     const {
       instruction,
@@ -549,7 +583,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           // project and local settings, including their MCP servers (and
           // project .mcp.json, plugins). strictMcpConfig limits MCP to the
           // servers passed above, which under readOnly is only sweny-core.
-          ...(readOnly ? { strictMcpConfig: true } : {}),
+          // A strict policy (#365) makes it exclusive for write nodes too.
+          ...(readOnly || opts.strictMcp ? { strictMcpConfig: true } : {}),
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
           // CC-08: ask the SDK to produce validated structured output when the
           // node declares an output schema. The SDK then returns the parsed

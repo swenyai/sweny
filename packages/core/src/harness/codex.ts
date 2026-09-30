@@ -437,13 +437,17 @@ export class CodexHarness implements AgentHarness {
 
   /** The node policy after `disallowed_tools` names are translated into Codex classes. */
   private compilePolicy(req: HarnessRunRequest, maxTurns: number): NodePolicy {
-    const base: NodePolicy = req.policy ?? {
-      readOnly: !!req.readOnly,
-      deny: req.deny ?? [],
-      nativeDeny: req.disallowedTools,
-      egress: req.agentAccess?.domains ?? [],
-      strict: this.policyMode === "strict",
-    };
+    // A node policy (#365) can make the run stricter, never looser than the
+    // harness policy mode.
+    const base: NodePolicy = req.policy
+      ? { ...req.policy, strict: req.policy.strict || this.policyMode === "strict" }
+      : {
+          readOnly: !!req.readOnly,
+          deny: req.deny ?? [],
+          nativeDeny: req.disallowedTools,
+          egress: req.agentAccess?.domains ?? [],
+          strict: this.policyMode === "strict",
+        };
     const { classes, unknown } = translateDenyNames(base.nativeDeny);
     return {
       ...base,
