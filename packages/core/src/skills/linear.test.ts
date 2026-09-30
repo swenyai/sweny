@@ -117,3 +117,19 @@ describe("linear_list_comments", () => {
     expect(linear.mcpAliases?.linear_list_comments).toEqual(["list_comments"]);
   });
 });
+
+describe("linear_get_issue authorization fields", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("requests the authoritative team ID alongside the issue ID", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(gqlResponse({ issue: { id: "issue-id", team: { id: "team-id" } } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const getIssue = linear.tools.find((t) => t.name === "linear_get_issue")!;
+    expect(await getIssue.handler({ id: "ABC-42" }, ctx())).toEqual({
+      issue: { id: "issue-id", team: { id: "team-id" } },
+    });
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.query).toMatch(/team\s*\{[^}]*\bid\b/);
+    expect(sent.variables).toEqual({ id: "ABC-42" });
+  });
+});
