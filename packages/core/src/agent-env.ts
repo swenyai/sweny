@@ -169,6 +169,69 @@ export function resolveCodexAuthEnv(env: Record<string, string>): Record<string,
   return out;
 }
 
+/**
+ * pi's provider credentials (badlogic/pi-mono v0.99.2, docs/providers.md).
+ * sweny has no model opinion, so a pi run may need any provider's key; only
+ * these names (never the rest of the env) reach the pi process. A stored
+ * `auth.json` is not used: pi runs with a scratch `PI_CODING_AGENT_DIR`.
+ */
+export const PI_AUTH_VARS: readonly string[] = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_OAUTH_TOKEN",
+  "ANTHROPIC_AUTH_TOKEN",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "MISTRAL_API_KEY",
+  "GROQ_API_KEY",
+  "CEREBRAS_API_KEY",
+  "XAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "AI_GATEWAY_API_KEY",
+  "ZAI_API_KEY",
+  "ZAI_CODING_CN_API_KEY",
+  "OPENCODE_API_KEY",
+  "RADIUS_API_KEY",
+  "TYPESAFE_API_KEY",
+  "HF_TOKEN",
+  "FIREWORKS_API_KEY",
+  "TOGETHER_API_KEY",
+  "BASETEN_API_KEY",
+  "KIMI_API_KEY",
+  "META_API_KEY",
+  "MINIMAX_API_KEY",
+  "MINIMAX_CN_API_KEY",
+  "MOONSHOT_API_KEY",
+  "NVIDIA_API_KEY",
+  "ANT_LING_API_KEY",
+  "QWEN_TOKEN_PLAN_API_KEY",
+  "QWEN_TOKEN_PLAN_CN_API_KEY",
+  "XIAOMI_API_KEY",
+  "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+  "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+  "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+  "COPILOT_GITHUB_TOKEN",
+  "AZURE_OPENAI_API_KEY",
+  "AZURE_OPENAI_BASE_URL",
+  "AZURE_OPENAI_RESOURCE_NAME",
+  "CLOUDFLARE_API_KEY",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_GATEWAY_ID",
+  "GOOGLE_CLOUD_API_KEY",
+  "GOOGLE_CLOUD_PROJECT",
+  "GCLOUD_PROJECT",
+  "GOOGLE_CLOUD_LOCATION",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION",
+];
+
+/** Prefixes for a pi run: locale only. `ANTHROPIC_*` / `CLAUDE_*` beyond the names above never reach pi. */
+export const PI_ENV_PREFIXES: readonly string[] = ["LC_"];
+
 /** A stored Codex login (`codex login`): `auth.json` under `CODEX_HOME`, default `~/.codex`. */
 export function hasCodexLogin(
   env: Record<string, string | undefined> = process.env,

@@ -141,7 +141,7 @@ export function registerTriageCommand(program: Command): Command {
     .description("Run the SWEny triage workflow")
     .option(
       "--agent <provider>",
-      "Coding agent: claude (default), codex, or acp:<command> for any ACP agent (experimental)",
+      "Coding agent: claude (default), codex, pi (experimental), or acp:<command> for any ACP agent (experimental)",
     )
     .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
     .option("--observability-provider <provider>", "Observability provider (default: none)")
@@ -427,6 +427,10 @@ export function validateInputs(config: CliConfig): string[] {
       if (!config.openaiApiKey && !config.codexApiKey && !hasCodexLogin(process.env)) {
         errors.push("Missing: CODEX_API_KEY or OPENAI_API_KEY, or a Codex login (`codex login`), for --agent codex");
       }
+      break;
+    case "pi":
+      // pi takes any provider's key, or none (a local model in models.json), so
+      // there is no single credential to check here; pi reports its own auth error.
       break;
     default:
       // An ACP agent (`acp:<command>`, #416) brings its own auth; it says so itself when it is missing.
@@ -877,7 +881,7 @@ export function registerImplementCommand(program: Command): Command {
     .description("Implement a fix for a specific issue and open a PR")
     .option(
       "--agent <provider>",
-      "Coding agent: claude (default), codex, or acp:<command> for any ACP agent (experimental)",
+      "Coding agent: claude (default), codex, pi (experimental), or acp:<command> for any ACP agent (experimental)",
     )
     .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
     .option("--issue-tracker-provider <provider>", "Issue tracker (linear|jira|github-issues|file)")
