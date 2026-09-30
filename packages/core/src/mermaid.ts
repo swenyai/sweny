@@ -23,6 +23,12 @@ export interface MermaidOptions {
   direction?: "TB" | "LR";
   /** Title rendered above the diagram */
   title?: string;
+  /**
+   * Override the `classDef` style body (the part after the class name) for
+   * specific statuses, e.g. `{ success: "fill:#2563eb,stroke:#1d4ed8,color:#fff" }`.
+   * Unset statuses keep the defaults.
+   */
+  classDefs?: Partial<Record<NodeStatus, string>>;
 }
 
 /**
@@ -40,7 +46,7 @@ export interface MermaidOptions {
  * ```
  */
 export function toMermaid(workflow: Workflow, options: MermaidOptions = {}): string {
-  const { state = {}, trace, direction = "TB", title } = options;
+  const { state = {}, trace, direction = "TB", title, classDefs = {} } = options;
   const lines: string[] = [];
 
   if (title) {
@@ -154,10 +160,15 @@ export function toMermaid(workflow: Workflow, options: MermaidOptions = {}): str
 
   if (statusNodes.size > 0) {
     lines.push("");
-    lines.push("    classDef current fill:#3b82f6,stroke:#2563eb,color:#fff,stroke-width:2px");
-    lines.push("    classDef success fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:2px");
-    lines.push("    classDef failed fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px");
-    lines.push("    classDef skipped fill:#6b7280,stroke:#4b5563,color:#fff,stroke-dasharray:5 5");
+    const defaults: Record<NodeStatus, string> = {
+      current: "fill:#3b82f6,stroke:#2563eb,color:#fff,stroke-width:2px",
+      success: "fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:2px",
+      failed: "fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px",
+      skipped: "fill:#6b7280,stroke:#4b5563,color:#fff,stroke-dasharray:5 5",
+    };
+    for (const status of ["current", "success", "failed", "skipped"] as const) {
+      lines.push(`    classDef ${status} ${classDefs[status] ?? defaults[status]}`);
+    }
 
     for (const [status, ids] of statusNodes) {
       const sanitized = ids.map(aliasFor).join(",");

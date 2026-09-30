@@ -39,6 +39,14 @@ import { nonInteractiveUsage, runNew } from "./new.js";
 import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "./e2e.js";
 import { createVerboseToolObserver } from "./verbose-observer.js";
 import {
+  createRunLogger,
+  renderReceiptLine,
+  summarizeRun,
+  writeStepSummary,
+  WORKFLOW_RUN_DESCRIPTION,
+  WORKFLOW_RUN_OPTIONS,
+} from "./run-output.js";
+import {
   registerTriageCommand,
   registerImplementCommand,
   parseCliInputs,
@@ -875,10 +883,13 @@ export async function workflowRunAction(
     userMcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
   });
 
+  // Raw [info]/[debug] lines are verbose-only; warnings are rendered (#383).
+  const runLogger = createRunLogger({ verbose: Boolean(options.verbose), tty: isTTY });
+
   const claude = new ClaudeClient({
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
-    logger: consoleLogger,
+    logger: runLogger,
     mcpServers,
     model: workflow.model,
   });
@@ -912,6 +923,7 @@ export async function workflowRunAction(
             } else {
               process.stderr.write(`  ${icon} ${event.node}  ${elapsed}\n`);
             }
+            runLogger.flush();
             break;
           }
           case "workflow:end":
@@ -1036,7 +1048,7 @@ export async function workflowRunAction(
           skills,
           claude,
           observer,
-          logger: consoleLogger,
+          logger: runLogger,
           cwd: process.cwd(),
           env: process.env,
           fetchAuth: config.fetchAuth,
@@ -1083,16 +1095,22 @@ export async function workflowRunAction(
       // silent
     }
 
+    // Run receipt (metadata only) + optional $GITHUB_STEP_SUMMARY.
+    runLogger.flush();
+    const receipt = summarizeRun(results, wfDurationMs);
+    writeStepSummary(workflow, results, receipt, trace);
     if (wfHasFailed) {
-      console.error(chalk.red(`  Workflow failed\n`));
+      console.error(`  ${renderReceiptLine(receipt, isTTY)}\n`);
       process.exit(1);
       return;
     }
-    console.log(chalk.green(`  Workflow completed\n`));
+    console.log(`  ${renderReceiptLine(receipt, isTTY)}\n`);
     process.exit(0);
   } catch (err) {
     const crashMsg = err instanceof Error ? err.message : String(err);
     console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
+    runLogger.flush();
+    console.error(`  ${renderReceiptLine(summarizeRun(new Map(), Date.now() - runStart, true), isTTY)}\n`);
     // Finalize the cloud run as failed (covers thrown errors, incl.
     // RouteEvaluationError). Without this a crashed workflow run stays
     // "running" in cloud forever.
@@ -1160,37 +1178,13 @@ workflowCmd
   .option("--json", "Output result as JSON")
   .action(workflowValidateAction);
 
-workflowCmd
+const workflowRunCmd = workflowCmd
   .command("run [file]")
-  .description(
-    "Run a workflow from a YAML or JSON file. With no file, batch-runs every workflow in .sweny/e2e/ (lists and confirms first; use --yes to skip the prompt).",
-  )
-  .option(
-    "--timeout <ms>",
-    "Whole-run wall-clock timeout in ms. Applies to batch runs (.sweny/e2e/) and to a single workflow file (default: 3600000 = 60 min; 0 = no wall-clock budget)",
-  )
-  .option(
-    "--max-steps <n>",
-    "Hard cap on total node executions for a single workflow file, including eval-failure retries (default: 200, see executor DEFAULT_MAX_STEPS)",
-  )
-  .option("-y, --yes", "Skip the batch confirmation prompt (for CI)")
-  .option(
-    "--dry-run",
-    "Execute until the first conditional routing decision, then stop (no side effects past that point). NOTE: behavior changed in this release — previously --dry-run only printed the node list. For that behavior use --list-nodes.",
-  )
-  .option(
-    "--list-nodes",
-    "Validate, print nodes/skills, and exit without running. (Replaces the pre-Fix-#6 --dry-run behavior.)",
-  )
-  .option("--json", "Output result as JSON on stdout; suppress progress output")
-  .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)")
-  .option(
-    "--verbose",
-    "Print each tool call's input and output inline (human-readable, truncated). Use --stream for full untruncated NDJSON.",
-  )
-  .option("--mermaid", "Output a Mermaid diagram with execution state after run")
-  .option("--input <json>", "JSON string of input data to pass to the workflow")
+  .description(WORKFLOW_RUN_DESCRIPTION)
   .action(workflowRunAction);
+for (const [flags, description] of WORKFLOW_RUN_OPTIONS) {
+  workflowRunCmd.option(flags, description);
+}
 
 workflowCmd
   .command("diagram <file>")

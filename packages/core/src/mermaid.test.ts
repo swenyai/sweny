@@ -363,4 +363,14 @@ describe("toMermaidBlock", () => {
     expect(result).toContain("graph LR");
     expect(result).toContain("class a success");
   });
+
+  it("classDefs overrides only the named statuses", () => {
+    const first = Object.keys(triageWorkflow.nodes)[0];
+    const result = toMermaid(triageWorkflow, {
+      state: { [first]: "success", other: "failed" },
+      classDefs: { success: "fill:#2563eb,stroke:#1d4ed8,color:#fff" },
+    });
+    expect(result).toContain("classDef success fill:#2563eb,stroke:#1d4ed8,color:#fff");
+    expect(result).toContain("classDef failed fill:#ef4444");
+  });
 });
