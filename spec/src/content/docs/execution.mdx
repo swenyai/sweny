@@ -64,7 +64,7 @@ The result of executing a single node.
 A dry run never takes a write action. When the workflow input contains `dryRun: true`, a conforming executor MUST:
 
 1. **Pass only read tools to every node.** A skill tool reaches a node only when it declares `access: "read"` ([Tool Object](/skills#tool-object)). Tools with `access: "write"` and tools with no `access` are withheld: they are not registered for the node, so the model can neither see nor call them.
-2. **Expose no other write path.** The agent runtime MUST NOT give the node external MCP servers (their tools are unclassified, so they count as writes) or built-in tools that can edit files, run shell commands, or spawn subagents.
+2. **Expose no other write path.** The agent runtime MUST NOT give the node external MCP servers from any source, including user or project settings and plugins (their tools are unclassified, so they count as writes), or built-in tools that can edit files, run shell commands, spawn subagents, or fetch arbitrary URLs (a GET can still trigger a webhook or exfiltrate data).
 3. **Record withheld tools** on the node result as `skippedWrites` (tool names), and tell the model which tools were withheld so it can describe what it would have written.
 4. Execute nodes through unconditional edges, and **stop** at the first node that has conditional outgoing edges (edges with `when` clauses), without evaluating them.
 5. Return the execution result with all nodes completed up to that point.

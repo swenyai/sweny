@@ -50,8 +50,9 @@ export const CLASSIFICATION_DISALLOWED_TOOLS = [
 /**
  * Built-in tools disallowed for a node run with `readOnly: true` (dry run,
  * #380): everything that can edit the workspace, shell out (and so reach
- * `gh`, `curl`, `git push`), or spawn a subagent that could. Read, Grep,
- * Glob, WebFetch and WebSearch stay available for analysis.
+ * `gh`, `curl`, `git push`), spawn a subagent that could, or fetch an
+ * arbitrary URL (a GET can still trigger a webhook or exfiltrate data).
+ * Read, Grep, Glob and WebSearch stay available for analysis.
  */
 export const READ_ONLY_DISALLOWED_TOOLS = [
   "Bash",
@@ -61,6 +62,7 @@ export const READ_ONLY_DISALLOWED_TOOLS = [
   "NotebookEdit",
   "Task",
   "Agent",
+  "WebFetch",
 ] as const;
 
 /** How sweny resolves which credentials reach the Claude Code subprocess. */
@@ -390,6 +392,11 @@ export class ClaudeClient implements Claude {
           ...(abort ? { abortController: abort.controller } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(Object.keys(allMcpServers).length > 0 ? { mcpServers: allMcpServers } : {}),
+          // Dry run (#380): settingSources is omitted, so the SDK loads user,
+          // project and local settings, including their MCP servers (and
+          // project .mcp.json, plugins). strictMcpConfig limits MCP to the
+          // servers passed above, which under readOnly is only sweny-core.
+          ...(readOnly ? { strictMcpConfig: true } : {}),
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
           // CC-08: ask the SDK to produce validated structured output when the
           // node declares an output schema. The SDK then returns the parsed

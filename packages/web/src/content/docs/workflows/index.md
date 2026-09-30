@@ -123,7 +123,7 @@ This is how the triage workflow's conditional routing works: the `investigate` n
 Pass `dryRun: true` (CLI: `--dry-run`, Action: `dry-run: true`) to run a workflow in analysis-only mode. A dry run never takes a write action, on any workflow shape.
 
 - **Every node runs with read-only tools.** Each skill tool is classified `read` or `write`. Under a dry run only `read` tools are handed to a node; `write` tools (create issue, add comment, open PR, send message, insert row) and any tool with no classification are withheld. Claude cannot call a tool it was never given.
-- **No other write path.** External MCP servers are not attached (their tools are unclassified, so they count as writes), and the shell and file-edit built-ins (`Bash`, `Write`, `Edit`, ...) are disallowed. `Read`, `Grep`, `Glob`, `WebFetch` and `WebSearch` stay available.
+- **No other write path.** External MCP servers are not attached, including ones from your Claude settings, `.mcp.json`, or plugins (their tools are unclassified, so they count as writes). The shell, file-edit, subagent and URL-fetch built-ins (`Bash`, `Write`, `Edit`, `WebFetch`, ...) are disallowed. `Read`, `Grep`, `Glob` and `WebSearch` stay available.
 - **Withheld tools are recorded.** Each node's result lists them under `skippedWrites`, and the node is told which tools were withheld so it can describe what it would have written.
 - **The run stops at the first conditional edge.** Unconditional edges are followed; at a node with `when` edges the run ends without asking Claude to pick a branch. This keeps the dry-run path deterministic (same graph, same nodes visited). It is not what makes a dry run safe; the read-only tools are.
 

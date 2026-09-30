@@ -339,16 +339,29 @@ describe("ClaudeClient readOnly (#380)", () => {
       context: {},
       tools: [readTool],
       readOnly: true,
-      disallowedTools: ["WebSearch"],
+      disallowedTools: ["Glob"],
     });
 
     const opts = mockQuery.mock.calls[0][0].options;
     expect(Object.keys(opts.mcpServers)).toEqual(["sweny-core"]);
-    for (const t of ["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"]) {
+    for (const t of ["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "Task", "Agent", "WebFetch"]) {
       expect(opts.disallowedTools).toContain(t);
     }
-    expect(opts.disallowedTools).toContain("WebSearch");
+    // The node's own disallow list is kept; analysis reads stay available.
+    expect(opts.disallowedTools).toContain("Glob");
+    for (const t of ["Read", "Grep", "WebSearch"]) {
+      expect(opts.disallowedTools).not.toContain(t);
+    }
     expect(READ_ONLY_DISALLOWED_TOOLS).toContain("Bash");
+  });
+
+  it("readOnly passes strictMcpConfig: true so settings/.mcp.json/plugin MCP servers never load", async () => {
+    const client = new ClaudeClient({ mcpServers: { github: { type: "http", url: "https://example.com/mcp" } } });
+    await client.run({ instruction: "x", context: {}, tools: [readTool], readOnly: true });
+    expect(mockQuery.mock.calls[0][0].options.strictMcpConfig).toBe(true);
+
+    await client.run({ instruction: "x", context: {}, tools: [], readOnly: true });
+    expect(mockQuery.mock.calls[1][0].options.strictMcpConfig).toBe(true);
   });
 
   it("read-only with no skill tools passes no MCP servers at all", async () => {
@@ -363,5 +376,6 @@ describe("ClaudeClient readOnly (#380)", () => {
     const opts = mockQuery.mock.calls[0][0].options;
     expect(Object.keys(opts.mcpServers).sort()).toEqual(["github", "sweny-core"]);
     expect(opts.disallowedTools).toBeUndefined();
+    expect(opts.strictMcpConfig).toBeUndefined();
   });
 });
