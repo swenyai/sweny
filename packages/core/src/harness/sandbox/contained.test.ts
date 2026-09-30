@@ -21,7 +21,13 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildAgentEnv } from "../../agent-env.js";
-import { detectSandboxWrapper, prepareAgentSpawn, type AgentSpawn, type SandboxWrapper } from "../sandbox-wrapper.js";
+import {
+  detectSandboxWrapper,
+  prepareAgentSpawn,
+  SrtSandboxWrapper,
+  type AgentSpawn,
+  type SandboxWrapper,
+} from "../sandbox-wrapper.js";
 import type { HarnessCapabilities, NodePolicy } from "../types.js";
 
 const REQUIRED = process.env.SWENY_REQUIRE_SANDBOX_WRAPPER === "1";
@@ -275,6 +281,65 @@ describe.skipIf(!wrapper)(`wrapped fake agent (${process.platform}, srt)`, () =>
     expect(control[0].ok).toBe(true);
     const { results } = await runWrapped([{ kind: "read", path: credential }]);
     expect(results[0].ok, JSON.stringify(results[0])).toBe(false);
+  });
+
+  it.each(["default", "inside-workspace"])("isolates sibling scratch credentials (%s root)", async (placement) => {
+    // The custom placement also proves a writable workspace does not reopen
+    // the denied scratch subtree. Both adapters must use the same root.
+    const scratchRoot = placement === "inside-workspace" ? workspace : undefined;
+    const detected = await detectSandboxWrapper({ wrapper: { scratchRoot } });
+    expect(detected.wrapper, detected.reason).toBeDefined();
+    const request = {
+      command: process.execPath,
+      args: [FAKE_AGENT, "[]"],
+      env: scopedEnv(),
+      cwd: workspace,
+      egress: [],
+    };
+    const first = await detected.wrapper!.wrap(request);
+    // Create the sibling AFTER the first policy is written. Enumerating the
+    // currently existing homes would miss this sibling.
+    const otherWrapper = new SrtSandboxWrapper({ srtPath: first.command, scratchRoot });
+    const second = await otherWrapper.wrap(request).catch(async (error) => {
+      await first.cleanup();
+      throw error;
+    });
+    const firstCredential = path.join(first.home, "auth.json");
+    const secondCredential = path.join(second.home, "auth.json");
+    try {
+      await writeFile(firstCredential, '{"token":"first-canary"}');
+      await writeFile(secondCredential, '{"token":"second-canary"}');
+      const control = await runUnwrapped([
+        { kind: "read", path: firstCredential },
+        { kind: "read", path: secondCredential },
+      ]);
+      expect(control).toEqual([{ ok: true }, { ok: true }]);
+
+      for (const [current, ownCredential, siblingCredential] of [
+        [first, firstCredential, secondCredential],
+        [second, secondCredential, firstCredential],
+      ] as const) {
+        current.args[current.args.length - 1] = JSON.stringify([
+          { kind: "read", path: ownCredential },
+          { kind: "read", path: siblingCredential },
+          { kind: "write", path: "$HOME/still-writable.txt" },
+        ]);
+        const child = await runChild(current);
+        expect(child.code, child.stderr).toBe(0);
+        const results = parseResults(child.stdout, child.stderr);
+        expect(results[0], "own credential remains readable").toEqual({ ok: true });
+        expect(results[1], "sibling credential must be unreadable").toMatchObject({ ok: false });
+        expect(results[2], "own HOME remains writable").toEqual({ ok: true });
+      }
+      await first.cleanup();
+      expect(existsSync(first.home)).toBe(false);
+      expect(existsSync(secondCredential), "cleanup must preserve the sibling").toBe(true);
+    } finally {
+      await first.cleanup();
+      await second.cleanup();
+    }
+    expect(existsSync(second.home)).toBe(false);
+    expect(existsSync(scratchRoot ?? tmpdir()), "caller scratch parent must survive cleanup").toBe(true);
   });
 
   it("a dry run cannot write the workspace either", async () => {
