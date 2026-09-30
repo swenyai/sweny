@@ -82,7 +82,7 @@ export const CONTRACT_CASE_NAMES = [
   "07 usage: fields map one to one, absent stays absent",
   "08 timeout: fails fast and the agent is stopped",
   "09 abort: the caller's signal stops the run, same guarantees",
-  "10 exit semantics: nonzero exit, crash and aborted final are failed, never success",
+  "10 exit semantics: nonzero exit, crash, aborted final and a missing result are failed, never success",
   "11 fencing: context is fenced as untrusted and cannot close the fence",
   "12 complete(): no tools, no MCP, null on failure, evaluate fails closed",
   "13 capabilities honesty: every native declaration reaches the agent",
@@ -323,6 +323,7 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
           }
           expect(r.status, ec.label).toBe("failed");
           expect(r.data.error, ec.label).toBeTypeOf("string");
+          if (ec.toolCalls !== undefined) expect(r.toolCalls, `${ec.label} (toolCalls)`).toHaveLength(ec.toolCalls);
 
           fakes.script(ec.script);
           expect(await h.complete({ prompt: "p" }), `${ec.label} (complete)`).toBeNull();

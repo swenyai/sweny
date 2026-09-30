@@ -116,6 +116,8 @@ export interface ExitCase {
   script: FakeScript;
   /** The run is fine (stderr noise alone must not fail a run). */
   ok?: boolean;
+  /** run() must keep this many tool calls captured before the failure. */
+  toolCalls?: number;
 }
 
 /** Every one of these ends `failed`, never `success`, except the noise-only case. */
@@ -140,6 +142,12 @@ export const EXIT_CASES: ExitCase[] = [
     label: "clean exit with an aborted final event",
     script: [{ kind: "final", text: "aborted by user", ok: false }],
   },
+  {
+    label: "stream ends without a result message",
+    script: [{ kind: "tool-call", id: "n1", name: "lookup", input: {} }],
+    toolCalls: 1,
+  },
+  { label: "empty stream, no result message", script: [] },
   {
     label: "stderr noise alone does not fail a good run",
     script: [
