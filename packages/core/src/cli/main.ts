@@ -1413,6 +1413,19 @@ workflowCmd
     console.log();
   });
 
+// ── sweny tool-bridge (hidden, #414) ──────────────────────────────────
+// stdio MCP shim a harness starts to reach this run's skill tools over the
+// per-run unix socket. Not for humans; started by harness/tool-bridge/server.ts.
+program
+  .command("tool-bridge", { hidden: true })
+  .description("Internal: stdio MCP shim for sweny skill tools")
+  .requiredOption("--socket <path>", "Per-run bridge socket")
+  .option("--token <token>", "Per-run token (default: SWENY_TOOL_BRIDGE_TOKEN)")
+  .action(async (options: { socket: string; token?: string }) => {
+    const { runToolBridgeShim } = await import("../harness/tool-bridge/shim.js");
+    await runToolBridgeShim({ socket: options.socket, token: options.token, version });
+  });
+
 // ── sweny upgrade / update ────────────────────────────────────────────
 // Self-update the globally-installed @sweny-ai/core. Mirrors the UX of
 // `bun upgrade`, `deno upgrade`, `rustup update`, etc.

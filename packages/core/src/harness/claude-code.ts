@@ -11,7 +11,6 @@
 
 import { query, createSdkMcpServer, tool as sdkTool, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createRequire } from "node:module";
-import { z } from "zod";
 import type {
   Claude,
   Tool,
@@ -46,6 +45,8 @@ import type {
 import { policyGate } from "./policy.js";
 import { CLAUDE_CODE_CAPABILITIES } from "./capabilities.js";
 import { ask as coreAsk, evaluate as coreEvaluate, buildEvaluatePrompt } from "./prompts.js";
+import { jsonSchemaToZodShape, toolErrorToMcpResult, toolOutputToMcpResult } from "./tool-bridge/protocol.js";
+import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
 
 export { buildEvaluatePrompt, CLAUDE_CODE_CAPABILITIES };
 
@@ -213,6 +214,15 @@ export interface ClaudeCodeHarnessOptions {
   sandboxAllowedDomains?: string[];
   /** Sandbox preflight probe (test seam). Returns a reason when the sandbox cannot run. */
   sandboxProbe?: () => string | undefined;
+  /**
+   * Serve skill tools through the SwenyToolBridge (a stdio MCP shim over a
+   * per-run unix socket, #414) instead of the in-process SDK MCP server.
+   * Same tools, same results; used to run the harness contract suite both
+   * ways. Default: off, unless `SWENY_TOOL_BRIDGE=1`.
+   */
+  toolBridge?: boolean;
+  /** Shim command override for the bridge (test seam). Default: this package's `sweny tool-bridge`. */
+  toolBridgeShim?: { command: string; args: string[] };
 }
 
 /**
@@ -339,6 +349,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
   private sandboxProbe: (() => string | undefined) | undefined;
   private sandboxWarned = false;
   private envScope: boolean | undefined;
+  private toolBridge: boolean;
+  private toolBridgeShim: { command: string; args: string[] } | undefined;
 
   constructor(opts: ClaudeCodeHarnessOptions = {}) {
     this.model = opts.model;
@@ -353,6 +365,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     this.sandboxMode = opts.sandbox;
     this.sandboxAllowedDomains = opts.sandboxAllowedDomains;
     this.sandboxProbe = opts.sandboxProbe;
+    this.toolBridge = opts.toolBridge ?? process.env.SWENY_TOOL_BRIDGE === "1";
+    this.toolBridgeShim = opts.toolBridgeShim;
   }
 
   /**
@@ -491,13 +505,19 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     // handler and returns `content` via the MCP transport. We do not push
     // to toolCalls from the wrapper - the stream's tool_result is the sole
     // signal of completion, which keeps pairing correct under parallelism.
-    const sdkTools = tools.map((t) => coreToolToSdkTool(t, this.defaultContext));
+    // #414: with the bridge on, the same tools reach Claude Code through the
+    // `sweny tool-bridge` stdio shim instead, so no in-process server is built.
+    const useBridge = this.toolBridge && tools.length > 0;
+    const sdkTools = useBridge ? [] : tools.map((t) => coreToolToSdkTool(t, this.defaultContext));
 
     // Create in-process MCP server
-    const mcpServer = createSdkMcpServer({
-      name: "sweny-core",
-      tools: sdkTools,
-    });
+    const mcpServer = useBridge
+      ? undefined
+      : createSdkMcpServer({
+          name: "sweny-core",
+          tools: sdkTools,
+        });
+    let bridge: ToolBridge | undefined;
 
     // Build prompt. Context (workflow input such as issues/alerts, plus prior
     // node outputs) is fenced as untrusted data (#360).
@@ -539,7 +559,20 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       const allMcpServers: Record<string, any> = readOnly
         ? {}
         : { ...this.defaultMcpServers, ...opts.mcpServers, ...this.mcpServers };
-      if (sdkTools.length > 0) allMcpServers["sweny-core"] = mcpServer;
+      if (useBridge) {
+        // Only `tools` (already allow/deny and dry-run filtered by the
+        // executor) are exposed. Under readOnly it is still the only MCP
+        // server, and strictMcpConfig below keeps it that way.
+        bridge = await startToolBridge({
+          tools,
+          context: this.defaultContext,
+          logger: this.logger,
+          ...(this.toolBridgeShim ? { shimCommand: this.toolBridgeShim } : {}),
+        });
+        allMcpServers["sweny-core"] = bridge.mcpServer;
+      } else if (sdkTools.length > 0) {
+        allMcpServers["sweny-core"] = mcpServer;
+      }
 
       stream = query({
         prompt,
@@ -706,6 +739,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       // it cannot fire after we are done.
       abort?.clear();
       await interruptStream(stream);
+      // #414: the socket and its directory go away with the run.
+      await bridge?.close();
     }
 
     if (!sawResult) {
@@ -876,8 +911,10 @@ export type ClaudeClient = ClaudeCodeHarness;
  * handler in `run()`), keyed by `tool_use_id` - never from inside the
  * wrapper. Keeping the wrapper stateless means parallel calls to the same
  * tool cannot mis-pair outputs.
+ *
+ * @internal Exported for the tool bridge parity test (#414).
  */
-function coreToolToSdkTool(coreTool: Tool, defaultCtx: ToolContext) {
+export function coreToolToSdkTool(coreTool: Tool, defaultCtx: ToolContext) {
   const zodShape = jsonSchemaToZodShape(coreTool.input_schema);
 
   return sdkTool(coreTool.name, coreTool.description, zodShape, async (args: Record<string, unknown>) => {
@@ -886,15 +923,11 @@ function coreToolToSdkTool(coreTool: Tool, defaultCtx: ToolContext) {
       // When used standalone, defaultCtx is the fallback.
       const output = await coreTool.handler(args, defaultCtx);
       // JSON-stringify structured output so the tool_result handler can
-      // recover it via parseToolResultContent. Strings pass through.
-      return {
-        content: [{ type: "text" as const, text: typeof output === "string" ? output : JSON.stringify(output) }],
-      };
+      // recover it via parseToolResultContent. Strings pass through. Shared
+      // with the tool bridge so both paths return the same content.
+      return toolOutputToMcpResult(output);
     } catch (err: any) {
-      return {
-        content: [{ type: "text" as const, text: `Error: ${err.message}` }],
-        isError: true,
-      };
+      return toolErrorToMcpResult(err);
     }
   });
 }
@@ -998,73 +1031,6 @@ export function summarizeToolError(parsed: unknown): string {
   }
   const collapsed = raw.replace(/\s+/g, " ").trim();
   return collapsed.length > 300 ? collapsed.slice(0, 297) + "..." : collapsed;
-}
-
-// ─── JSON Schema → Zod conversion ───────────────────────────────
-
-/**
- * Convert a JSON Schema object to a Zod raw shape for the agent SDK.
- * Preserves property names, types, and descriptions so Claude sees
- * accurate tool parameters through the MCP protocol.
- */
-function jsonSchemaToZodShape(schema: JSONSchema): Record<string, z.ZodType> {
-  const props = (schema as any)?.properties ?? {};
-  const required = new Set<string>((schema as any)?.required ?? []);
-  const shape: Record<string, z.ZodType> = {};
-
-  for (const [key, prop] of Object.entries(props)) {
-    let zodType = jsonPropertyToZod(prop as Record<string, unknown>);
-    if (!required.has(key)) {
-      zodType = zodType.optional();
-    }
-    shape[key] = zodType;
-  }
-
-  return shape;
-}
-
-function jsonPropertyToZod(prop: Record<string, unknown>): z.ZodType {
-  if (!prop || typeof prop !== "object") return z.unknown();
-
-  const desc = typeof prop.description === "string" ? prop.description : undefined;
-
-  switch (prop.type) {
-    case "string": {
-      if (prop.enum && Array.isArray(prop.enum)) {
-        const e = z.enum(prop.enum as [string, ...string[]]);
-        return desc ? e.describe(desc) : e;
-      }
-      const s = z.string();
-      return desc ? s.describe(desc) : s;
-    }
-    case "number":
-    case "integer": {
-      const n = z.number();
-      return desc ? n.describe(desc) : n;
-    }
-    case "boolean": {
-      const b = z.boolean();
-      return desc ? b.describe(desc) : b;
-    }
-    case "array": {
-      const items = prop.items ? jsonPropertyToZod(prop.items as Record<string, unknown>) : z.unknown();
-      const a = z.array(items);
-      return desc ? a.describe(desc) : a;
-    }
-    case "object": {
-      if (prop.properties && typeof prop.properties === "object") {
-        const nested = jsonSchemaToZodShape(prop as JSONSchema);
-        const o = z.object(nested);
-        return desc ? o.describe(desc) : o;
-      }
-      const r = z.record(z.string(), z.unknown());
-      return desc ? r.describe(desc) : r;
-    }
-    default: {
-      const u = z.unknown();
-      return desc ? u.describe(desc) : u;
-    }
-  }
 }
 
 /** Strip MCP server prefix: "mcp__server__tool" → "tool" */
