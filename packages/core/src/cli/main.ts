@@ -1091,6 +1091,7 @@ export async function workflowRunAction(
           fileRoot: config.fileRoot || undefined,
           signal,
           max_steps: wfMaxSteps,
+          stageOutputs: options.stage === true,
         }),
       wfTimeoutMs,
       `Workflow ${workflow.name}`,

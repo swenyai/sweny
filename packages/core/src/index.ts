@@ -69,6 +69,14 @@ export type {
   McpTransport,
   WorkflowType,
   SkillHarnessKey,
+  NodeAccess,
+  NodePermissions,
+  NodePermissionsSpec,
+  SafeOutputType,
+  SafeOutputDeclaration,
+  SafeOutputsPolicy,
+  SafeOutputReceipt,
+  AuthorAssociation,
 } from "./types.js";
 
 export { WORKFLOW_INPUT_TYPES } from "./types.js";
@@ -85,6 +93,11 @@ export {
   SKILL_ID_PATTERN,
   SKILL_ID_MAX_LENGTH,
   isValidSkillId,
+  NODE_ACCESS,
+  TOOL_CLASSES,
+  SAFE_OUTPUT_TYPES,
+  SAFE_OUTPUT_APPLIERS,
+  AUTHOR_ASSOCIATIONS,
 } from "./types.js";
 
 export { consoleLogger } from "./types.js";
@@ -92,6 +105,12 @@ export { consoleLogger } from "./types.js";
 // Executor
 export { execute, RouteEvaluationError } from "./executor.js";
 export type { ExecuteOptions } from "./executor.js";
+
+// Least-privilege nodes and safe outputs (#365)
+export { resolveNodePermissions, buildNodePolicy } from "./node-policy.js";
+export type { ResolvedPermissions } from "./node-policy.js";
+export { applySafeOutputs, createEmitOutputTool, resolveActor, EMIT_OUTPUT_TOOL } from "./safe-outputs.js";
+export type { SafeOutputIntent, ActorInfo, WriteStageState } from "./safe-outputs.js";
 
 // Agent harness (the seam) and its Claude Code adapter
 export { createHarness, claudeCompat, asClaude, policyGate, ClaudeCodeHarness } from "./harness/index.js";

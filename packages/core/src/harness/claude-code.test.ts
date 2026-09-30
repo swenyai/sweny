@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { NodePolicy } from "./types.js";
 
 // ClaudeCodeHarness behind the seam (#330): the SDK query options must be the
 // ones ClaudeClient.ask / ClaudeClient.evaluate passed before the refactor.
@@ -183,6 +184,73 @@ describe("ClaudeCodeHarness", () => {
     expect(h.capabilities.structuredOutput).toBe("native");
     expect(h.defaultJudgeModel).toBe("claude-haiku-4-5");
     expect(await h.preflight()).toMatchObject({ ok: true });
+  });
+
+  describe("policy compile (#365)", () => {
+    const policy = (over: Partial<NodePolicy> = {}): NodePolicy => ({
+      readOnly: false,
+      deny: [],
+      egress: [],
+      strict: false,
+      ...over,
+    });
+
+    it("policy.deny classes reach the SDK as native disallowedTools, merged with the legacy names", async () => {
+      mockQuery.mockReturnValueOnce(resultStream("done"));
+      const h = new mod.ClaudeCodeHarness({ logger: noopLogger() });
+      await h.run({
+        instruction: "x",
+        context: {},
+        tools: [],
+        disallowedTools: ["Glob"],
+        policy: policy({ deny: ["shell", "net"], nativeDeny: ["Glob"] }),
+      });
+      const opts = mockQuery.mock.calls[0][0].options;
+      expect(opts.disallowedTools).toEqual(["Glob", "Bash", "WebFetch", "WebSearch"]);
+      expect(opts.strictMcpConfig).toBeUndefined();
+    });
+
+    it("every class compiles to at least one native name", () => {
+      for (const c of ["shell", "write", "edit", "net", "subagent"] as const) {
+        expect(mod.compileClaudeCodeDeny(policy({ deny: [c] })).length, c).toBeGreaterThan(0);
+      }
+    });
+
+    it("policy.readOnly alone is a read-only run (no legacy flag needed)", async () => {
+      mockQuery.mockReturnValueOnce(resultStream("done"));
+      const h = new mod.ClaudeCodeHarness({
+        logger: noopLogger(),
+        mcpServers: { github: { type: "http", url: "https://example.test/mcp" } },
+      });
+      await h.run({ instruction: "x", context: {}, tools: [], policy: policy({ readOnly: true }) });
+      const opts = mockQuery.mock.calls[0][0].options;
+      for (const t of mod.READ_ONLY_DISALLOWED_TOOLS) expect(opts.disallowedTools).toContain(t);
+      expect(opts.mcpServers).toBeUndefined();
+      expect(opts.strictMcpConfig).toBe(true);
+    });
+
+    it("strict makes MCP exclusive on a write-capable node", async () => {
+      mockQuery.mockReturnValueOnce(resultStream("done"));
+      const h = new mod.ClaudeCodeHarness({
+        logger: noopLogger(),
+        mcpServers: { github: { type: "http", url: "https://example.test/mcp" } },
+      });
+      await h.run({ instruction: "x", context: {}, tools: [], policy: policy({ strict: true }) });
+      const opts = mockQuery.mock.calls[0][0].options;
+      expect(opts.strictMcpConfig).toBe(true);
+      // Still write-capable: its own servers stay, no built-in is denied.
+      expect(Object.keys(opts.mcpServers)).toEqual(["github"]);
+      expect(opts.disallowedTools).toBeUndefined();
+    });
+
+    it("without a policy the legacy fields behave exactly as before", async () => {
+      mockQuery.mockReturnValueOnce(resultStream("done"));
+      const h = new mod.ClaudeCodeHarness({ logger: noopLogger() });
+      await h.run({ instruction: "x", context: {}, tools: [], disallowedTools: ["Bash"] });
+      const opts = mockQuery.mock.calls[0][0].options;
+      expect(opts.disallowedTools).toEqual(["Bash"]);
+      expect(opts.strictMcpConfig).toBeUndefined();
+    });
   });
 
   it("ClaudeClient is the same class (deprecated alias)", () => {

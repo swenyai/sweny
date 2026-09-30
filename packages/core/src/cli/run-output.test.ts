@@ -294,6 +294,7 @@ describe("workflow run help text", () => {
         "--max-steps <n>  Hard cap on total node executions for a single workflow file, including eval-failure retries (default: 200)",
         "-y, --yes  Skip the batch confirmation prompt (for CI)",
         "--dry-run  Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge. To inspect nodes without running, use --list-nodes.",
+        "--stage  Run normally, but preview every safe output (nodes with outputs:) instead of writing it: print what would be written and write nothing",
         "--list-nodes  Validate, print nodes and skills, and exit without running",
         "--json  Output result as JSON on stdout; suppress progress output",
         "--stream  Stream NDJSON events to stdout (for Studio / automation)",

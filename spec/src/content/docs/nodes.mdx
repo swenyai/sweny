@@ -7,24 +7,26 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 
 ## Fields
 
-| Field              | Type                             | Required | Default                        | Description                                                                                                    |
-| ------------------ | -------------------------------- | -------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `name`             | string                           | REQUIRED | —                              | Display name for this node. MUST be non-empty.                                                                 |
-| `instruction`      | [Source](/sources)               | REQUIRED | —                              | Natural language instruction for the AI model. MUST be non-empty.                                              |
-| `skills`           | string[]                         | OPTIONAL | `[]`                           | Skill IDs this node has access to.                                                                             |
-| `output`           | JSON Schema object               | OPTIONAL | —                              | Structured output schema for this node's result.                                                               |
-| `max_turns`        | integer &ge; 1                   | OPTIONAL | implementation&#8209;defined   | Maximum AI model turns for this node's execution.                                                              |
-| `model`            | string                           | OPTIONAL | inherited / impl&#8209;defined | Execution model for this node's AI invocation. Free-text passthrough. See [Model Selection](#model-selection). |
-| `disallowed_tools` | string[]                         | OPTIONAL | `[]`                           | Built-in agent tools removed from the model context at this node. See [Disallowed Tools](#disallowed-tools).   |
-| `tools`            | [ToolFilter](#tool-filter)       | OPTIONAL | all skill tools                | Allowlist/denylist over skill-provided tools at this node. See [Tool Filter](#tool-filter).                    |
-| `fail_soft`        | boolean                          | OPTIONAL | `false`                        | Downgrade an agent-level failure to success and proceed with partial output. See [Fail Soft](#fail-soft).      |
-| `rules`            | [NodeSources](#nodesources-type) | OPTIONAL | inherited                      | Rules for this node. Additive by default; see [cascade](#cascade-semantics).                                   |
-| `context`          | [NodeSources](#nodesources-type) | OPTIONAL | inherited                      | Context for this node. Additive by default; see [cascade](#cascade-semantics).                                 |
-| `eval`             | [Eval](#eval)                    | OPTIONAL | —                              | Named evaluators (value, function, judge) run after the AI finishes the node.                                  |
-| `eval_policy`      | string                           | OPTIONAL | `all_pass`                     | How to aggregate evaluator results. v1 supports `all_pass`.                                                    |
-| `requires`         | [Requires](#requires)            | OPTIONAL | —                              | Machine-checked pre-conditions evaluated before the AI starts the node.                                        |
-| `retry`            | [Retry](#retry)                  | OPTIONAL | —                              | Node-local retry on eval failure with optional autonomous reflection.                                          |
-| `on_fail`          | `halt` \| `continue`             | OPTIONAL | `halt`                         | What happens when this node ends `failed`. See [Failure Handling](#failure-handling-on_fail).                  |
+| Field              | Type                             | Required | Default                         | Description                                                                                                         |
+| ------------------ | -------------------------------- | -------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `name`             | string                           | REQUIRED | —                               | Display name for this node. MUST be non-empty.                                                                      |
+| `instruction`      | [Source](/sources)               | REQUIRED | —                               | Natural language instruction for the AI model. MUST be non-empty.                                                   |
+| `skills`           | string[]                         | OPTIONAL | `[]`                            | Skill IDs this node has access to.                                                                                  |
+| `output`           | JSON Schema object               | OPTIONAL | —                               | Structured output schema for this node's result.                                                                    |
+| `max_turns`        | integer &ge; 1                   | OPTIONAL | implementation&#8209;defined    | Maximum AI model turns for this node's execution.                                                                   |
+| `model`            | string                           | OPTIONAL | inherited / impl&#8209;defined  | Execution model for this node's AI invocation. Free-text passthrough. See [Model Selection](#model-selection).      |
+| `disallowed_tools` | string[]                         | OPTIONAL | `[]`                            | Built-in agent tools removed from the model context at this node. See [Disallowed Tools](#disallowed-tools).        |
+| `tools`            | [ToolFilter](#tool-filter)       | OPTIONAL | all skill tools                 | Allowlist/denylist over skill-provided tools at this node. See [Tool Filter](#tool-filter).                         |
+| `fail_soft`        | boolean                          | OPTIONAL | `false`                         | Downgrade an agent-level failure to success and proceed with partial output. See [Fail Soft](#fail-soft).           |
+| `rules`            | [NodeSources](#nodesources-type) | OPTIONAL | inherited                       | Rules for this node. Additive by default; see [cascade](#cascade-semantics).                                        |
+| `context`          | [NodeSources](#nodesources-type) | OPTIONAL | inherited                       | Context for this node. Additive by default; see [cascade](#cascade-semantics).                                      |
+| `eval`             | [Eval](#eval)                    | OPTIONAL | —                               | Named evaluators (value, function, judge) run after the AI finishes the node.                                       |
+| `eval_policy`      | string                           | OPTIONAL | `all_pass`                      | How to aggregate evaluator results. v1 supports `all_pass`.                                                         |
+| `requires`         | [Requires](#requires)            | OPTIONAL | —                               | Machine-checked pre-conditions evaluated before the AI starts the node.                                             |
+| `retry`            | [Retry](#retry)                  | OPTIONAL | —                               | Node-local retry on eval failure with optional autonomous reflection.                                               |
+| `on_fail`          | `halt` \| `continue`             | OPTIONAL | `halt`                          | What happens when this node ends `failed`. See [Failure Handling](#failure-handling-on_fail).                       |
+| `permissions`      | [Permissions](#permissions)      | OPTIONAL | see [Permissions](#permissions) | What this node's agent may do: `read` or `write`, plus denied tool classes and strict mode.                         |
+| `outputs`          | [SafeOutput](#safe-outputs)[]    | OPTIONAL | none                            | Typed write intents the node may emit. The executor applies them after the node. See [Safe Outputs](#safe-outputs). |
 
 ## Max Turns Semantics
 
@@ -115,6 +117,69 @@ gather:
       - linear_create_issue
       - github_create_issue
       - github_create_pr
+```
+
+## Permissions
+
+`permissions` says what the node's agent may do. It is `read`, `write`, or an object:
+
+| Field    | Type                                                    | Required | Description                                                                                                      |
+| -------- | ------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `access` | `read` \| `write`                                       | OPTIONAL | `read` runs the node read-only.                                                                                  |
+| `deny`   | (`shell` \| `write` \| `edit` \| `net` \| `subagent`)[] | OPTIONAL | Built-in tool classes the agent MUST NOT have. Compiled by the executor to each agent runtime's native names.    |
+| `strict` | boolean                                                 | OPTIONAL | Load only the MCP servers the executor injects, and refuse the node on a runtime that cannot enforce the policy. |
+
+The object form MUST declare at least one field.
+
+**Default access.** The node's own `access`; else `read` when the node declares [`outputs`](#safe-outputs); else the workflow's `permissions`; else `write`. A workflow without `permissions` behaves as before.
+
+**Ceiling.** The workflow's [`permissions`](/workflow#fields) is the default and the ceiling for every node. A node MUST NOT declare `write` under a workflow `read` (validation error `PERMISSION_CEILING`). `deny` classes are the union of both levels; `strict` applies if either level sets it.
+
+A conforming executor, for a node whose access is `read`:
+
+- **MUST** pass only skill tools classified `access: read` (the same gate as a [dry run](/execution#dry-run-semantics)).
+- **MUST NOT** load external skill MCP servers, since their tools cannot be classified.
+- **MUST** remove shell, file-write, edit, fetch and subagent built-ins.
+
+For every node it **MUST** enforce `deny`, and under `strict` it **MUST** refuse the node before any model call when the runtime cannot enforce part of the policy. Without `strict`, it MAY run the node and report what it could not enforce.
+
+## Safe Outputs
+
+`outputs` lists the writes a node may request. The agent does not hold the write. It records a typed intent with the `emit_output` tool, and the executor applies the intents after the node finishes, within the declared limits. A node that declares `outputs` defaults to `permissions: read`.
+
+| Field          | Type                                    | Required | Default                           | Description                                                                                   |
+| -------------- | --------------------------------------- | -------- | --------------------------------- | --------------------------------------------------------------------------------------------- |
+| `type`         | `comment` \| `issue` \| `pr` \| `label` | REQUIRED | none                              | Kind of write.                                                                                |
+| `via`          | string                                  | OPTIONAL | first node skill that supports it | Skill that applies the write (`github`: all four types; `linear`: `comment`, `issue`).        |
+| `max`          | integer 1..100                          | OPTIONAL | `1`                               | Writes of this type from this node per run. Loops and retries cannot raise it.                |
+| `target`       | string                                  | OPTIONAL | `GITHUB_REPOSITORY` for `github`  | Pinned target (GitHub `owner/repo`, Linear team id). An intent for another target is refused. |
+| `title_prefix` | string (max 64)                         | OPTIONAL | none                              | Prepended to issue and PR titles that do not already start with it.                           |
+| `labels`       | string[]                                | OPTIONAL | none                              | `issue` / `pr`: labels always added. `label`: the only labels the agent may add.              |
+| `expires`      | duration (`30s`, `30m`, `2h`, `7d`)     | OPTIONAL | none                              | An intent older than this when the write stage runs is dropped.                               |
+
+A node MUST NOT declare the same `type` twice (`DUPLICATE_OUTPUT`), and `via` MUST name a skill that can apply the type (`UNSUPPORTED_OUTPUT`).
+
+**The write stage.** After the node succeeds and every evaluator passes, the executor checks each intent, in order: the type is declared; it is inside the workflow's `safe_outputs.allow`; the actor is trusted; it has not expired; a skill can apply it; its target matches the pin; it has the fields its type needs and fits the size limits; its labels are allowed; the title prefix is applied; it is not a duplicate of a write already accepted this run; and the node's and the run's caps have room. Every check is deterministic. When `safe_outputs.screen` is on, one model call then reviews the writes that passed, and anything other than an exact `ALLOW` vetoes them. The screen can veto a write; it can never authorize one.
+
+A conforming executor:
+
+- **MUST NOT** give the agent any way to perform a declared output itself other than `emit_output` (unless the node also declares `permissions: write`).
+- **MUST** apply only the final attempt's intents when a node retries after an eval failure, and **MUST NOT** apply intents from a node that ended `failed`.
+- **MUST** count caps per run, not per visit.
+- **MUST** fail the node when an apply call fails. A refused, skipped or vetoed intent does not fail the node.
+- **MUST** record one receipt per intent on the node result (`outputs`: type, via, status, reason, target, ref). Receipts carry no titles or bodies.
+- Under a dry run, `safe_outputs.staged`, or the CLI `--stage` flag, **MUST** print what would be written and write nothing.
+
+```yaml
+report:
+  name: File the crash
+  instruction: If the logs show a new crash, file one issue with the stack trace.
+  skills: [github, sentry]
+  outputs:
+    - type: issue
+      title_prefix: "[sweny] "
+      labels: [sweny, crash]
+      max: 1
 ```
 
 ## Fail Soft

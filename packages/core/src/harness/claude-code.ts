@@ -41,6 +41,7 @@ import type {
   HarnessRunRequest,
   HarnessRunResult,
   NodePolicy,
+  ToolClass,
 } from "./types.js";
 import { policyGate } from "./policy.js";
 import { CLAUDE_CODE_CAPABILITIES } from "./capabilities.js";
@@ -105,6 +106,31 @@ export const READ_ONLY_DISALLOWED_TOOLS = [
   "Agent",
   "WebFetch",
 ] as const;
+
+/**
+ * Portable tool classes (`NodePolicy.deny`, #365) compiled to Claude Code's
+ * built-in tool names. `net` covers both fetch and search: an explicit deny
+ * is stricter than a dry run, which keeps WebSearch for analysis.
+ */
+export const CLAUDE_CODE_TOOLS_BY_CLASS: Readonly<Record<ToolClass, readonly string[]>> = {
+  shell: ["Bash"],
+  write: ["Write", "NotebookEdit"],
+  edit: ["Edit", "MultiEdit"],
+  net: ["WebFetch", "WebSearch"],
+  subagent: ["Task", "Agent"],
+};
+
+/** Native `disallowedTools` for a policy: legacy names, compiled classes, and the read-only set. */
+export function compileClaudeCodeDeny(policy: NodePolicy, legacy: readonly string[] = []): string[] {
+  return [
+    ...new Set([
+      ...legacy,
+      ...(policy.nativeDeny ?? []),
+      ...policy.deny.flatMap((c) => CLAUDE_CODE_TOOLS_BY_CLASS[c] ?? []),
+      ...(policy.readOnly ? READ_ONLY_DISALLOWED_TOOLS : []),
+    ]),
+  ];
+}
 
 /** How sweny resolves which credentials reach the Claude Code subprocess. */
 export type SwenyAuthMode = "auto" | "api-key" | "oauth";
@@ -403,9 +429,15 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
   }
 
   /**
-   * Run a node. The query itself is unchanged by the harness seam; this only
-   * runs {@link policyGate} (always `degraded: []` for Claude Code) and tags
-   * the result with the harness id and version.
+   * Run a node. Runs {@link policyGate} (always `degraded: []` for Claude
+   * Code), compiles the policy to native options, and tags the result with the
+   * harness id and version.
+   *
+   * Policy compile (#365): `policy.readOnly` (or the legacy `readOnly` flag)
+   * is a read-only run; `policy.deny` classes become native `disallowedTools`
+   * names, merged with `nativeDeny` and the legacy `disallowedTools`; and
+   * `policy.strict` makes MCP exclusive (`strictMcpConfig`) even for a
+   * write-capable node.
    */
   async run(req: HarnessRunRequest): Promise<HarnessRunResult> {
     const policy: NodePolicy = req.policy ?? {
@@ -416,7 +448,24 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       strict: false,
     };
     const gate = policyGate(this.capabilities, policy);
-    const result = await this.runQuery(req);
+    if (gate.refuse) {
+      this.logger.error(gate.refuse);
+      return {
+        status: "failed",
+        data: { error: gate.refuse },
+        toolCalls: [],
+        harness: this.info(),
+        degraded: gate.degraded,
+      };
+    }
+    const readOnly = !!req.readOnly || policy.readOnly;
+    const disallowedTools = compileClaudeCodeDeny(policy, req.disallowedTools ?? []);
+    const result = await this.runQuery({
+      ...req,
+      readOnly,
+      disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
+      strictMcp: readOnly || policy.strict,
+    });
     return { ...result, harness: this.info(), degraded: gate.degraded };
   }
 
@@ -439,6 +488,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     readOnly?: boolean;
     /** Env var names + sandbox hosts this node's skills need (#360). */
     agentAccess?: AgentAccess;
+    /** Exclusive MCP: only the servers passed here load (#365 strict policy). */
+    strictMcp?: boolean;
   }): Promise<NodeResult> {
     const {
       instruction,
@@ -592,7 +643,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           // project and local settings, including their MCP servers (and
           // project .mcp.json, plugins). strictMcpConfig limits MCP to the
           // servers passed above, which under readOnly is only sweny-core.
-          ...(readOnly ? { strictMcpConfig: true } : {}),
+          // A strict policy (#365) makes it exclusive for write nodes too.
+          ...(readOnly || opts.strictMcp ? { strictMcpConfig: true } : {}),
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
           // CC-08: ask the SDK to produce validated structured output when the
           // node declares an output schema. The SDK then returns the parsed

@@ -396,6 +396,118 @@ export interface Node {
    * Distinct from `requires.on_fail`, which is the pre-condition gate.
    */
   on_fail?: NodeOnFail;
+  /**
+   * What this node's agent may do (#365). `read` runs the node read-only:
+   * only `access: "read"` skill tools, no external skill MCP servers, no
+   * shell / file-write / edit / fetch / subagent built-ins. Absent: `read`
+   * when the node declares `outputs`, else the workflow's `permissions`,
+   * else `write` (today's behavior).
+   */
+  permissions?: NodePermissions;
+  /**
+   * Typed write intents this node may emit (#365). The agent records them with
+   * the `emit_output` tool; sweny applies them after the node, within the
+   * declared caps. See {@link SafeOutputDeclaration}.
+   */
+  outputs?: SafeOutputDeclaration[];
+}
+
+// ─── Permissions and safe outputs (#365) ─────────────────────────
+
+/** Node access level. `read` = no write-capable tool reaches the agent. */
+export const NODE_ACCESS = ["read", "write"] as const;
+export type NodeAccess = (typeof NODE_ACCESS)[number];
+
+/** Portable built-in tool classes, compiled per harness (Claude Code: native tool names). */
+export const TOOL_CLASSES = ["shell", "write", "edit", "net", "subagent"] as const;
+
+/** Object form of {@link NodePermissions}. */
+export interface NodePermissionsSpec {
+  access?: NodeAccess;
+  /** Built-in tool classes the agent must not have. */
+  deny?: (typeof TOOL_CLASSES)[number][];
+  /** Exclusive MCP, and refuse the node on a harness that cannot enforce the policy. */
+  strict?: boolean;
+}
+
+/** `read` / `write` shorthand, or the object form. */
+export type NodePermissions = NodeAccess | NodePermissionsSpec;
+
+/** Write operations a node may request through `emit_output`. */
+export const SAFE_OUTPUT_TYPES = ["comment", "issue", "pr", "label"] as const;
+export type SafeOutputType = (typeof SAFE_OUTPUT_TYPES)[number];
+
+/**
+ * Skills that can apply each output type. The write stage calls the skill's
+ * own tool handler; a skill not listed here cannot apply safe outputs.
+ */
+export const SAFE_OUTPUT_APPLIERS: Readonly<Record<string, readonly SafeOutputType[]>> = {
+  github: ["comment", "issue", "pr", "label"],
+  linear: ["comment", "issue"],
+};
+
+/** GitHub author associations accepted by `safe_outputs.trusted_associations`. */
+export const AUTHOR_ASSOCIATIONS = [
+  "OWNER",
+  "MEMBER",
+  "COLLABORATOR",
+  "CONTRIBUTOR",
+  "FIRST_TIME_CONTRIBUTOR",
+  "FIRST_TIMER",
+  "NONE",
+] as const;
+export type AuthorAssociation = (typeof AUTHOR_ASSOCIATIONS)[number];
+
+/** Upper bound on a single output's `max` and on `safe_outputs.max`. */
+export const SAFE_OUTPUT_MAX_CEILING = 100;
+
+/** `expires` grammar: a positive integer and a unit (s, m, h, d). */
+export const SAFE_OUTPUT_EXPIRES_PATTERN = /^[1-9][0-9]*(s|m|h|d)$/;
+
+/** One declared output on a node. */
+export interface SafeOutputDeclaration {
+  type: SafeOutputType;
+  /** Skill that applies it. Default: the first node skill that supports the type. */
+  via?: string;
+  /** Max writes of this type from this node per run. Default 1. */
+  max?: number;
+  /** Pinned target (GitHub `owner/repo`, Linear team id). GitHub default: `GITHUB_REPOSITORY`. */
+  target?: string;
+  /** Prepended to issue / PR titles that do not already start with it. */
+  title_prefix?: string;
+  /** issue / pr: labels always added. label: the only labels the agent may add. */
+  labels?: string[];
+  /** Drop an intent older than this when the write stage runs (e.g. `30m`, `2h`, `7d`). */
+  expires?: string;
+}
+
+/** Workflow-level safe-output policy: the ceiling and run-wide limits. */
+export interface SafeOutputsPolicy {
+  /** Output types any node may declare. Absent: all types. */
+  allow?: SafeOutputType[];
+  /** Total writes per run across all nodes. */
+  max?: number;
+  /** Preview every write and apply none. */
+  staged?: boolean;
+  /** GitHub logins whose runs may write. */
+  trusted_actors?: string[];
+  /** Author associations whose runs may write (from the GitHub event payload). */
+  trusted_associations?: AuthorAssociation[];
+  /** One model call that may veto the writes. It can never authorize one. */
+  screen?: boolean;
+}
+
+/** What the write stage did with one intent. Metadata only: never a title or body. */
+export interface SafeOutputReceipt {
+  type: string;
+  /** Skill that applied (or would apply) it. */
+  via?: string;
+  status: "applied" | "staged" | "skipped" | "refused" | "vetoed" | "failed";
+  /** Why it was skipped, refused, vetoed or failed. Fixed wording, never model text. */
+  reason?: string;
+  target?: string;
+  /** Issue / PR / comment number or id the write produced. */
+  ref?: string | number;
 }
 
 /**
@@ -469,6 +581,10 @@ export interface Workflow {
    * See `src/inputs.ts` for the field shape and validation rules.
    */
   inputs?: import("./inputs.js").WorkflowInputs;
+  /** Default and ceiling for every node's `permissions` (#365). Absent: `write`. */
+  permissions?: NodePermissions;
+  /** Workflow-level safe-output policy (#365). */
+  safe_outputs?: SafeOutputsPolicy;
 }
 
 /**
@@ -537,6 +653,8 @@ export interface NodeResult {
   harness?: { id: string; version: string };
   /** Opinions this run could not honor natively. Always empty for Claude Code. */
   degraded?: string[];
+  /** Safe outputs (#365): what the write stage did with each intent. Absent when the node declares none. */
+  outputs?: SafeOutputReceipt[];
 }
 
 export interface ToolCall {
@@ -673,6 +791,12 @@ export interface Claude {
      * (external MCP servers, shell, file-edit built-ins).
      */
     readOnly?: boolean;
+    /**
+     * The node's portable policy (#365), compiled per adapter. Legacy `Claude`
+     * implementations may ignore it; `readOnly` and `disallowedTools` above
+     * carry the same read-only and native-deny intent.
+     */
+    policy?: import("./harness/types.js").NodePolicy;
   }): Promise<NodeResult>;
 
   /**

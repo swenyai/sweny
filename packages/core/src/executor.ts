@@ -49,6 +49,19 @@ import { resolveAgentAccess } from "./agent-env.js";
 import { fenceUntrusted } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
 import type { AgentHarness } from "./harness/types.js";
+import { policyGate } from "./harness/policy.js";
+import { buildNodePolicy, resolveNodePermissions } from "./node-policy.js";
+import {
+  applySafeOutputs,
+  createEmitOutputTool,
+  createWriteStageState,
+  resolveActor,
+  safeOutputsInstruction,
+  unresolvedOutputs,
+  SAFE_OUTPUT_SCREEN_INSTRUCTION,
+  type ActorInfo,
+  type SafeOutputIntent,
+} from "./safe-outputs.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -109,6 +122,17 @@ export interface ExecuteOptions {
    * whole-run budget. Default: no timeout (back-compat).
    */
   timeoutMs?: number;
+  /**
+   * Safe outputs (#365): preview every write and apply none (CLI `--stage`).
+   * A dry run always stages. Default: false.
+   */
+  stageOutputs?: boolean;
+  /**
+   * Who triggered the run, for `safe_outputs.trusted_actors` /
+   * `trusted_associations`. Default: `GITHUB_ACTOR` and the author
+   * association in the `GITHUB_EVENT_PATH` payload.
+   */
+  actor?: ActorInfo;
 }
 
 /**
@@ -171,6 +195,14 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   const trace: ExecutionTrace = { steps: [], edges: [], sources: {} };
 
   validate(workflow, skills);
+
+  // Safe outputs (#365): run-wide caps and dedupe, the staged switch and the
+  // triggering actor, resolved once per run.
+  const writeState = createWriteStageState();
+  const stageOutputs = dryRun || options.stageOutputs === true || workflow.safe_outputs?.staged === true;
+  const runEnv = options.env ?? process.env;
+  const usesOutputs = Object.values(workflow.nodes).some((n) => (n.outputs?.length ?? 0) > 0);
+  const actor: ActorInfo = usesOutputs ? resolveActor(runEnv, options.actor) : {};
 
   // Build an eval-time alias table from the loaded skills. Each skill owns
   // its own mapping between skill-tool names and equivalent MCP names. Core
@@ -266,10 +298,31 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // Dry run (#380): only `access: "read"` tools reach the node. Write and
     // unclassified tools are withheld (never registered, so never callable)
     // and recorded on the node result as `skippedWrites`.
-    const tools = dryRun ? filteredTools.filter(isReadTool) : filteredTools;
+    // #365: `permissions: read` (explicit, inherited, or implied by `outputs`)
+    // gets the same tool gate as a dry run.
+    const permissions = resolveNodePermissions(node, workflow);
+    const readOnlyNode = dryRun || permissions.access === "read";
+    const readTools = readOnlyNode ? filteredTools.filter(isReadTool) : filteredTools;
     const skippedWrites = dryRun ? filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name) : [];
     if (skippedWrites.length > 0) {
       logger.info(`  dry run: withheld write tools: ${skippedWrites.join(", ")}`, { node: currentId });
+    } else if (readOnlyNode && readTools.length < filteredTools.length) {
+      const withheld = filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name);
+      logger.info(`  permissions: read: withheld write tools: ${withheld.join(", ")}`, { node: currentId });
+    }
+    // Safe outputs (#365): the agent records write intents with emit_output;
+    // the write stage after the node applies them. One buffer per attempt.
+    const outputDecls = node.outputs ?? [];
+    const intents: SafeOutputIntent[] = [];
+    const tools = outputDecls.length > 0 ? [...readTools, createEmitOutputTool(outputDecls, intents)] : readTools;
+    if (outputDecls.length > 0 && !stageOutputs) {
+      const missing = unresolvedOutputs(outputDecls, node.skills, skills);
+      if (missing.length > 0) {
+        throw new Error(
+          `Node "${currentId}" declares outputs [${missing.join(", ")}] but no configured skill can apply them ` +
+            `(github or linear). Set the skill's environment variables, or run with --stage to preview.`,
+        );
+      }
     }
     const skillInstructions = resolveSkillInstructions(node.skills, skills);
     const skillMcpServers = resolveSkillMcpServers(node.skills, skills);
@@ -390,7 +443,9 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       input,
       skillInstructions,
     );
-    const instruction = dryRun ? `${dryRunNotice(skippedWrites)}\n\n---\n\n${baseInstruction}` : baseInstruction;
+    const nodeInstruction =
+      outputDecls.length > 0 ? `${baseInstruction}\n\n${safeOutputsInstruction(outputDecls)}` : baseInstruction;
+    const instruction = dryRun ? `${dryRunNotice(skippedWrites)}\n\n---\n\n${nodeInstruction}` : nodeInstruction;
 
     // Run Claude on this node, with optional eval-failure retry loop.
     let attempt = 0;
@@ -405,8 +460,26 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // Per-node execution model: node.model ?? workflow.model. When undefined,
     // claude.run falls back to its own client default (then Claude Code's).
     const nodeModel = resolveExecutionModel(node, workflow);
+    const agentAccess = resolveAgentAccess(node.skills, skills);
+    // #365: one portable policy per node, compiled by each adapter. The gate
+    // runs here so a strict refusal holds on every harness, before any spend.
+    const nodePolicy = buildNodePolicy({
+      permissions,
+      dryRun,
+      disallowedTools: node.disallowed_tools,
+      egress: agentAccess.domains,
+    });
+    const gate = options.harness ? policyGate(options.harness.capabilities, nodePolicy) : undefined;
 
     while (true) {
+      if (gate?.refuse) {
+        // Not an agent failure: fail_soft never softens a policy refusal.
+        logger.warn(`  harness refused the node: ${gate.refuse}`, { node: currentId });
+        result = { status: "failed", data: { error: gate.refuse }, toolCalls: [], degraded: gate.degraded };
+        break;
+      }
+      // Only the final attempt's intents may be applied.
+      intents.length = 0;
       result = await claude.run({
         instruction: currentInstruction,
         context,
@@ -417,9 +490,10 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         model: nodeModel,
         signal,
         timeoutMs,
-        agentAccess: resolveAgentAccess(node.skills, skills),
-        ...(dryRun ? {} : { mcpServers: skillMcpServers }),
-        ...(dryRun ? { readOnly: true } : {}),
+        agentAccess,
+        policy: nodePolicy,
+        ...(readOnlyNode ? {} : { mcpServers: skillMcpServers }),
+        ...(readOnlyNode ? { readOnly: true } : {}),
         onProgress: (message) => {
           safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
         },
@@ -546,6 +620,46 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         status: "success",
         data: { ...((result.data as Record<string, unknown> | undefined) ?? {}), fail_soft: true },
       };
+    }
+
+    // Safe outputs write stage (#365). Runs only after the agent finished and
+    // every eval passed; deterministic checks first, an optional model screen
+    // may veto, and only then does sweny call the skill's own write handler.
+    if (outputDecls.length > 0) {
+      if (result.status === "success" && !agentRunFailed) {
+        const stage = await applySafeOutputs({
+          nodeId: currentId,
+          declarations: outputDecls,
+          intents,
+          policy: workflow.safe_outputs,
+          nodeSkills: node.skills,
+          skills,
+          config,
+          env: runEnv,
+          actor,
+          staged: stageOutputs,
+          state: writeState,
+          logger,
+          screen: async (writes) =>
+            claude.ask({
+              instruction: SAFE_OUTPUT_SCREEN_INSTRUCTION,
+              context: { writes },
+              model: nodeModel,
+              signal,
+              timeoutMs,
+            }),
+        });
+        result = { ...result, outputs: stage.receipts };
+        if (stage.error) {
+          logger.warn(`  ${stage.error}`, { node: currentId });
+          result = { ...result, status: "failed", data: { ...result.data, error: stage.error } };
+        }
+      } else if (intents.length > 0) {
+        result = {
+          ...result,
+          outputs: intents.map((i) => ({ type: i.type, status: "skipped" as const, reason: "node did not succeed" })),
+        };
+      }
     }
 
     if (skippedWrites.length > 0) result = { ...result, skippedWrites };
