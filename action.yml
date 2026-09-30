@@ -44,9 +44,19 @@ inputs:
     default: "."
 
   dry-run:
-    description: "When 'true', execute until the first conditional routing decision and stop. Validates the workflow end-to-end without triggering downstream actions."
+    description: "When 'true', run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge."
     required: false
     default: "false"
+
+  timeout:
+    description: "Whole-run wall-clock budget in milliseconds, forwarded to `sweny workflow run --timeout`. Empty uses the CLI default (3600000 = 60 min). Use 0 for no wall-clock budget."
+    required: false
+    default: ""
+
+  max-steps:
+    description: "Hard cap on total node executions (including eval-failure retries), forwarded to `sweny workflow run --max-steps`. Empty uses the CLI default (200)."
+    required: false
+    default: ""
 
   verbose:
     description: "When 'true', print each tool call's input and output inline. Truncated for readability; use the CLI's --stream flag locally for full untruncated NDJSON. Helpful for debugging a node that halts or fails."
@@ -102,6 +112,34 @@ runs:
         CLI_VERSION: ${{ inputs.cli-version }}
       run: npm install -g "@sweny-ai/core@${CLI_VERSION}"
 
+    # Agent sandbox deps (#360). SWENY_SANDBOX=auto (default) sandboxes agent
+    # shell commands when bubblewrap + socat work and otherwise warns and runs
+    # unsandboxed, so this step is best-effort and never fails the job.
+    - name: Install agent sandbox dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        SUDO=""
+        if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo -n"; fi
+        if ! command -v bwrap >/dev/null 2>&1 || ! command -v socat >/dev/null 2>&1; then
+          if command -v apt-get >/dev/null 2>&1; then
+            if ! { $SUDO apt-get update -qq && $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bubblewrap socat; } >/dev/null 2>&1; then
+              echo "::warning title=SWEny agent sandbox::Could not install bubblewrap/socat with apt; agent commands will run unsandboxed (SWENY_SANDBOX=auto)."
+            fi
+          else
+            echo "::notice title=SWEny agent sandbox::apt-get not found; install bubblewrap and socat to sandbox agent commands."
+          fi
+        fi
+        # Ubuntu 23.10+ restricts unprivileged user namespaces via AppArmor,
+        # which bubblewrap needs. Only relax the host kernel setting when the
+        # caller explicitly asked for SWENY_SANDBOX=strict.
+        if command -v bwrap >/dev/null 2>&1 && ! bwrap --ro-bind / / --dev /dev --proc /proc true >/dev/null 2>&1; then
+          if [ "${SWENY_SANDBOX:-}" = "strict" ]; then
+            $SUDO sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+          fi
+        fi
+        exit 0
+
     - name: Run workflow
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -114,6 +152,8 @@ runs:
         WORKFLOW_PATH: ${{ inputs.workflow }}
         DRY_RUN: ${{ inputs.dry-run }}
         VERBOSE: ${{ inputs.verbose }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_MAX_STEPS: ${{ inputs.max-steps }}
         WORKFLOW_INPUT: ${{ inputs.input }}
         INPUT_CLOUD_TOKEN: ${{ inputs.cloud-token }}
       run: |
@@ -136,6 +176,12 @@ runs:
         FLAGS=()
         [ "$DRY_NORM" = "true" ] && FLAGS+=("--dry-run")
         [ "$VERBOSE_NORM" = "true" ] && FLAGS+=("--verbose")
+        if [ -n "$INPUT_TIMEOUT" ]; then
+          FLAGS+=("--timeout" "$INPUT_TIMEOUT")
+        fi
+        if [ -n "$INPUT_MAX_STEPS" ]; then
+          FLAGS+=("--max-steps" "$INPUT_MAX_STEPS")
+        fi
         # Forward per-run inputs verbatim. Pass through env to avoid shell
         # quoting issues with nested JSON; the CLI parses and validates the
         # string against the workflow's declared `inputs` block (if any) and

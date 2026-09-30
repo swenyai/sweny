@@ -1,0 +1,96 @@
+id: data-sync-example
+name: Data Sync Pipeline (example)
+description: Sync structured records from a source to a target, with a judge checking every mapping for fidelity.
+workflow_type: data_sync
+entry: fetch-records
+
+nodes:
+  fetch-records:
+    name: Fetch Source Records
+    instruction: |
+      Fetch a small batch of source records to sync. If nothing else is
+      specified, make up 3 plausible sample records (e.g. customer name,
+      email, plan) to demonstrate the pipeline. Normalize them into a
+      structured JSON array with clear, consistent field names.
+    output:
+      type: object
+      properties:
+        records:
+          type: array
+          items:
+            type: object
+        sourceCount:
+          type: number
+      required:
+        - records
+        - sourceCount
+
+  transform-records:
+    name: Transform Records
+    instruction: |
+      Map each source record from the previous step onto a target schema
+      of { id, fullName, contactEmail, planTier }. For any record that
+      can't be cleanly mapped, leave it out of "mapped" and log it in
+      "unmapped" with a specific reason.
+    output:
+      type: object
+      properties:
+        mapped:
+          type: array
+          items:
+            type: object
+        unmapped:
+          type: array
+          items:
+            type: object
+            properties:
+              record: {}
+              reason:
+                type: string
+            required:
+              - reason
+      required:
+        - mapped
+    eval:
+      - name: mapping_is_faithful
+        kind: judge
+        rubric: |
+          Read result.data.mapped and result.data.unmapped, and compare
+          them against the source records produced by the fetch-records
+          step.
+
+          PASS only if every mapped record preserves the source record's
+          key identifying fields (no dropped IDs, no fabricated values),
+          and every unmapped record has a specific, genuine reason logged.
+
+          FAIL if any record was silently dropped, any value was invented,
+          or an "unmapped" reason is vague or missing.
+
+          Respond with a single token: yes or no.
+        pass_when: "yes"
+
+  sync-target:
+    name: Write to Target
+    instruction: |
+      "Write" the mapped records from the previous step to the sync
+      target (for this example, just report what would be written, no
+      external system is configured). Report how many records were
+      written, skipped, or failed, and why.
+    output:
+      type: object
+      properties:
+        written:
+          type: number
+        skipped:
+          type: number
+        summary:
+          type: string
+      required:
+        - written
+        - summary
+
+edges:
+  - from: fetch-records
+    to: transform-records
+  - from: transform-records
+    to: sync-target

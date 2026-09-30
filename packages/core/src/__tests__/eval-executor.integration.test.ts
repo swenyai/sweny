@@ -219,6 +219,8 @@ describe("judge_budget warning", () => {
 
 // ─── eval_policy reserved values fail at runtime ────────────────────
 
+// execute() now runs validateWorkflow first (#326), so a reserved policy is
+// rejected before any node runs; aggregateEval's own throw stays as a backstop.
 describe("eval_policy: reserved values", () => {
   function makeWorkflow(policy: "any_pass" | "weighted"): Workflow {
     return {
@@ -239,22 +241,22 @@ describe("eval_policy: reserved values", () => {
     };
   }
 
-  it("any_pass at runtime surfaces a reserved-policy error", async () => {
+  it("any_pass is rejected at execute() entry", async () => {
     const claude = fakeClaude({
       results: { n: { status: "success", data: { x: 1 }, toolCalls: [] } },
     });
     await expect(
       execute(makeWorkflow("any_pass"), {}, { skills: createSkillMap([]), claude, logger: silentLogger() }),
-    ).rejects.toThrow(/any_pass.*reserved in v1\.0/);
+    ).rejects.toThrow(/UNSUPPORTED_EVAL_POLICY.*any_pass/);
   });
 
-  it("weighted at runtime surfaces a reserved-policy error", async () => {
+  it("weighted is rejected at execute() entry", async () => {
     const claude = fakeClaude({
       results: { n: { status: "success", data: { x: 1 }, toolCalls: [] } },
     });
     await expect(
       execute(makeWorkflow("weighted"), {}, { skills: createSkillMap([]), claude, logger: silentLogger() }),
-    ).rejects.toThrow(/weighted.*reserved in v1\.0/);
+    ).rejects.toThrow(/UNSUPPORTED_EVAL_POLICY.*weighted/);
   });
 });
 

@@ -32,7 +32,7 @@ All execution happens locally. The executor has an opt-in reporting path that em
 
 ### What "scoped tools" means
 
-Each node declares `skills`, and SWEny wires only those skills' MCP servers into that node's invocation. In that sense the MCP tool surface is scoped per node.
+Each node declares `skills`. MCP servers declared on those resolved skills are passed only to that node. Client-level MCP servers (including CLI catalog auto-wiring and explicit user configuration) remain available across the run.
 
 What SWEny does **not** scope: the underlying Claude Code subprocess runs with `permissionMode: "bypassPermissions"`, which keeps the built-in Bash/Read/Write/Edit tools available without permission prompting. This is intentional — SWEny targets CI-style autonomous runs where interactive approval is not an option, and the agent needs these capabilities to do the work. If you need a stricter sandbox, run the Action in a container that constrains the filesystem and network instead of looking for a flag inside SWEny.
 
@@ -43,12 +43,22 @@ What SWEny does **not** scope: the underlying Claude Code subprocess runs with `
 Skills are composable tool bundles. Three types:
 
 - **Built-in** — set the credential, the skill is ready (e.g., `github`, `linear`, `sentry`, `datadog`)
-- **Custom** — author a `SKILL.md` with instructions and/or an MCP server declaration
+- **Custom**: author a `SKILL.md` with instructions and an optional MCP server declaration
 - **MCP** — any MCP-compatible server, wired per-node via skill config
 
 Custom skills are harness-agnostic: the same `SKILL.md` works in Claude Code, Codex, Gemini CLI, and SWEny.
 
 See [spec.sweny.ai/skills](https://spec.sweny.ai/skills/) for the formal specification.
+
+### Skill-declared MCP execution (#328)
+
+Skill MCP declarations are supported through the library executor, so CLI and library runs use the same path. `execute()` passes each node's resolved skill servers through `Claude.run({ mcpServers })`; custom implementations of `Claude` must honor that optional field. Caller-provided skills take precedence over inline definitions. Catalog defaults have lowest precedence, followed by node skill declarations, then explicit client MCP configuration. An omitted transport is inferred from `command` (stdio) or `url` (HTTP).
+
+MCP-only inline skills are rejected during workflow validation with an instruction-specific diagnostic. Add `instruction` describing how to use the server. Resolved caller-provided and discovered MCP-only skills remain supported. The MCP skill ID `sweny-core` is reserved for the engine; validation rejects external declarations using it before any node runs.
+
+Discovered `SKILL.md` stdio commands still require `SWENY_ALLOW_SKILL_STDIO_COMMAND=1`; discovery strips them otherwise. Inline workflow declarations and caller-provided skills are explicit configuration and do not use that discovery opt-in. Dry-run execution withholds all external MCP servers, including skill declarations and client overrides. The node `tools.allow`/`tools.deny` filter applies to in-process skill tools only; external MCP tools are not filtered by it.
+
+The regression test launches a local stdio fixture and calls its tool through the configs produced by `execute()` and `ClaudeClient`. The SDK/model boundary is deterministic; this test does not exercise a live Claude session.
 
 ### MCP Transport Standards and npx
 

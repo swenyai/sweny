@@ -13,10 +13,12 @@ import {
   EVALUATOR_KINDS,
   EVAL_POLICIES,
   MCP_TRANSPORTS,
+  NODE_ON_FAIL,
   REQUIRES_ON_FAIL,
   SKILL_CATEGORIES,
   SKILL_ID_MAX_LENGTH,
   SKILL_ID_PATTERN,
+  TOOL_ACCESS,
   WORKFLOW_TYPES,
 } from "./types.js";
 import { sourceZ } from "./sources.js";
@@ -53,6 +55,7 @@ export const toolZ = z
     name: z.string().min(1),
     description: z.string(),
     input_schema: jsonSchemaZ,
+    access: z.enum(TOOL_ACCESS).optional(),
   })
   .strict();
 
@@ -80,8 +83,8 @@ export const skillDefinitionZ = z
     mcp: mcpServerConfigZ.optional(),
   })
   .strict()
-  .refine((s) => s.instruction || s.mcp, {
-    message: "Inline skill must provide instruction, mcp, or both",
+  .refine((s) => Boolean(s.instruction?.trim()), {
+    message: "Inline skill must provide a non-empty instruction",
   });
 
 export const skillZ = z
@@ -258,9 +261,27 @@ export const nodeToolsZ = z
 const retryInstructionAutoZ = z.object({ auto: z.literal(true) }).strict();
 const retryInstructionReflectZ = z.object({ reflect: z.string().min(1) }).strict();
 
+/**
+ * Ceiling on `retry.max`. Each retry attempt re-invokes the agent on the
+ * node (full model spend), so an unbounded value here is an unbounded spend
+ * multiplier per node, independent of the workflow-level `max_steps` budget.
+ * 10 comfortably covers every declared workflow today (max observed: 1) while
+ * still catching a fat-fingered value (e.g. a missing digit) at author time
+ * instead of at runtime. See #325.
+ */
+export const NODE_RETRY_MAX_CEILING = 10;
+
+/**
+ * Ceiling on an edge's `max_iterations`. A bounded back-edge is still a spend
+ * multiplier (each lap re-runs model nodes), and the default `max_steps` is
+ * 200, so a value above this can never be reached in a default run and only
+ * hides a typo. See #325.
+ */
+export const EDGE_MAX_ITERATIONS_CEILING = 100;
+
 export const nodeRetryZ = z
   .object({
-    max: z.number().int().min(1),
+    max: z.number().int().min(1).max(NODE_RETRY_MAX_CEILING),
     instruction: z.union([z.string().min(1), retryInstructionAutoZ, retryInstructionReflectZ]).optional(),
   })
   .strict();
@@ -275,6 +296,7 @@ export const nodeZ = z
     disallowed_tools: z.array(z.string().min(1)).optional(),
     tools: nodeToolsZ.optional(),
     fail_soft: z.boolean().optional(),
+    on_fail: z.enum(NODE_ON_FAIL).optional(),
     rules: nodeSourcesZ.optional(),
     context: nodeSourcesZ.optional(),
     eval: z.array(evaluatorZ).min(1).optional(),
@@ -291,7 +313,7 @@ export const edgeZ = z
     from: z.string().min(1),
     to: z.string().min(1),
     when: z.string().optional(),
-    max_iterations: z.number().int().min(1).optional(),
+    max_iterations: z.number().int().min(1).max(EDGE_MAX_ITERATIONS_CEILING).optional(),
   })
   .strict();
 
@@ -387,7 +409,9 @@ export interface WorkflowError {
     | "UNBOUNDED_CYCLE"
     | "AMBIGUOUS_EDGES"
     | "UNSUPPORTED_EVAL_POLICY"
-    | "INVALID_INLINE_SKILL";
+    | "INVALID_INLINE_SKILL"
+    | "EDGE_ITERATIONS_EXCEEDED"
+    | "RETRY_MAX_EXCEEDED";
   message: string;
   nodeId?: string;
 }
@@ -412,14 +436,25 @@ export function validateWorkflow(
 ): WorkflowError[] {
   const errors: WorkflowError[] = [];
   const nodeIds = new Set(Object.keys(workflow.nodes));
+  const entryExists = nodeIds.has(workflow.entry);
 
   // Entry must exist
-  if (!nodeIds.has(workflow.entry)) {
+  if (!entryExists) {
     errors.push({
       code: "MISSING_ENTRY",
       message: `Entry node "${workflow.entry}" does not exist`,
     });
   }
+
+  // Adjacency over real nodes, built once (O(nodes + edges)) so reachability
+  // and cycle detection stay linear on large graphs.
+  const outAll = new Map<string, string[]>();
+  const outUnbounded = new Map<string, string[]>();
+  const push = (m: Map<string, string[]>, k: string, v: string) => {
+    const l = m.get(k);
+    if (l) l.push(v);
+    else m.set(k, [v]);
+  };
 
   // Edge targets must exist
   for (const edge of workflow.edges) {
@@ -444,6 +479,17 @@ export function validateWorkflow(
         nodeId: edge.from,
       });
     }
+    if (edge.max_iterations != null && edge.max_iterations > EDGE_MAX_ITERATIONS_CEILING) {
+      errors.push({
+        code: "EDGE_ITERATIONS_EXCEEDED",
+        message: `Edge from "${edge.from}" to "${edge.to}" declares max_iterations ${edge.max_iterations}, above the ceiling of ${EDGE_MAX_ITERATIONS_CEILING}`,
+        nodeId: edge.from,
+      });
+    }
+    if (nodeIds.has(edge.from) && nodeIds.has(edge.to)) {
+      push(outAll, edge.from, edge.to);
+      if (!edge.max_iterations && edge.from !== edge.to) push(outUnbounded, edge.from, edge.to);
+    }
   }
 
   // Edge determinism: a node with two or more out-edges that have no `when`
@@ -457,9 +503,7 @@ export function validateWorkflow(
   for (const edge of workflow.edges) {
     if (!nodeIds.has(edge.from)) continue;
     if (edge.when) continue;
-    const list = unconditionalByNode.get(edge.from) ?? [];
-    list.push(edge.to);
-    unconditionalByNode.set(edge.from, list);
+    push(unconditionalByNode, edge.from, edge.to);
   }
   for (const [from, targets] of unconditionalByNode) {
     if (targets.length > 1) {
@@ -471,61 +515,66 @@ export function validateWorkflow(
     }
   }
 
-  // Don't check reachability if there are structural errors
-  if (errors.length > 0) return errors;
-
-  // Reachability: BFS from entry
-  const visited = new Set<string>();
-  const queue: string[] = [workflow.entry];
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    if (visited.has(id)) continue;
-    visited.add(id);
-    for (const edge of workflow.edges) {
-      if (edge.from === id && !visited.has(edge.to)) {
-        queue.push(edge.to);
+  // Reachability: BFS from entry. Skipped only when the entry is missing
+  // (every node would be reported, which is noise). All other diagnostics
+  // accumulate so one pass reports every structural problem.
+  if (entryExists) {
+    const visited = new Set<string>([workflow.entry]);
+    const queue: string[] = [workflow.entry];
+    for (let i = 0; i < queue.length; i++) {
+      for (const to of outAll.get(queue[i]) ?? []) {
+        if (!visited.has(to)) {
+          visited.add(to);
+          queue.push(to);
+        }
       }
     }
-  }
-
-  for (const nodeId of nodeIds) {
-    if (!visited.has(nodeId)) {
-      errors.push({
-        code: "UNREACHABLE_NODE",
-        message: `Node "${nodeId}" is unreachable from entry "${workflow.entry}"`,
-        nodeId,
-      });
+    for (const nodeId of nodeIds) {
+      if (!visited.has(nodeId)) {
+        errors.push({
+          code: "UNREACHABLE_NODE",
+          message: `Node "${nodeId}" is unreachable from entry "${workflow.entry}"`,
+          nodeId,
+        });
+      }
     }
   }
 
   // Detect unbounded cycles: the graph with max_iterations edges removed must be acyclic.
   // If removing bounded edges still leaves a cycle, it can loop forever.
-  const unboundedEdges = workflow.edges.filter((e) => !e.max_iterations && e.from !== e.to);
-  // DFS-based cycle detection on the unbounded subgraph
+  // Iterative DFS with an explicit stack so a deep chain cannot overflow the
+  // call stack (#326).
   const WHITE = 0,
     GRAY = 1,
     BLACK = 2;
   const color = new Map<string, number>();
   for (const id of nodeIds) color.set(id, WHITE);
 
-  function dfs(node: string): string | null {
-    color.set(node, GRAY);
-    for (const e of unboundedEdges) {
-      if (e.from !== node) continue;
-      const c = color.get(e.to);
-      if (c === GRAY) return e.to; // back-edge found → cycle
+  const findCycle = (start: string): string | null => {
+    const stack: Array<{ node: string; i: number }> = [{ node: start, i: 0 }];
+    color.set(start, GRAY);
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1];
+      const outs = outUnbounded.get(top.node) ?? [];
+      if (top.i >= outs.length) {
+        color.set(top.node, BLACK);
+        stack.pop();
+        continue;
+      }
+      const to = outs[top.i++];
+      const c = color.get(to);
+      if (c === GRAY) return to; // back-edge found → cycle
       if (c === WHITE) {
-        const cycle = dfs(e.to);
-        if (cycle) return cycle;
+        color.set(to, GRAY);
+        stack.push({ node: to, i: 0 });
       }
     }
-    color.set(node, BLACK);
     return null;
-  }
+  };
 
   for (const id of nodeIds) {
     if (color.get(id) === WHITE) {
-      const cycleNode = dfs(id);
+      const cycleNode = findCycle(id);
       if (cycleNode) {
         errors.push({
           code: "UNBOUNDED_CYCLE",
@@ -533,6 +582,19 @@ export function validateWorkflow(
           nodeId: cycleNode,
         });
       }
+    }
+  }
+
+  // Retry ceiling for workflows that never went through zod (library callers,
+  // the e2e batch runner). Mirrors nodeRetryZ so every path enforces it (#325).
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    const max = node.retry?.max;
+    if (max != null && max > NODE_RETRY_MAX_CEILING) {
+      errors.push({
+        code: "RETRY_MAX_EXCEEDED",
+        message: `Node "${nodeId}" declares retry.max ${max}, above the ceiling of ${NODE_RETRY_MAX_CEILING}`,
+        nodeId,
+      });
     }
   }
 
@@ -554,12 +616,18 @@ export function validateWorkflow(
     }
   }
 
-  // Inline skill definitions must have instruction or mcp
+  // Inline skills need usage instructions; the engine server name is reserved.
   for (const [skillId, def] of Object.entries(workflow.skills ?? {})) {
-    if (!def.instruction && !def.mcp) {
+    if (!def.instruction?.trim()) {
       errors.push({
         code: "INVALID_INLINE_SKILL",
-        message: `Inline skill "${skillId}" must provide at least instruction or mcp`,
+        message: `Inline skill "${skillId}" must provide a non-empty instruction`,
+      });
+    }
+    if (skillId === "sweny-core" && def.mcp) {
+      errors.push({
+        code: "INVALID_INLINE_SKILL",
+        message: `Skill "sweny-core" is reserved for the engine MCP server; use a different skill ID`,
       });
     }
   }
@@ -912,6 +980,12 @@ export const workflowJsonSchema = {
             description:
               "When true, an agent-level failure at this node (max turns, early termination, SDK error) is downgraded to success with fail_soft: true and the error preserved in data; routing proceeds with partial output. Eval failures are not softened. Default false.",
           },
+          on_fail: {
+            type: "string",
+            enum: [...NODE_ON_FAIL],
+            description:
+              "What to do when this node finishes 'failed' (agent-level failure, or an eval failure that exhausted retries and was not softened by fail_soft). 'halt' (default) stops the workflow with the failure surfaced so a broken node never advances down a conditional edge; 'continue' preserves the legacy fall-through where routing proceeds from the failed node. Distinct from requires.on_fail (the pre-condition gate).",
+          },
           rules: {
             $ref: "#/$defs/NodeSources",
             description: "Per-node rules. Additive by default; set { only: true } to block cascade.",
@@ -973,7 +1047,7 @@ export const workflowJsonSchema = {
             required: ["max"],
             additionalProperties: false,
             properties: {
-              max: { type: "integer", minimum: 1 },
+              max: { type: "integer", minimum: 1, maximum: 10 },
               instruction: {
                 oneOf: [
                   { type: "string", minLength: 1 },
@@ -1009,6 +1083,7 @@ export const workflowJsonSchema = {
           max_iterations: {
             type: "integer",
             minimum: 1,
+            maximum: EDGE_MAX_ITERATIONS_CEILING,
             description: "Max times this edge can be followed. Enables controlled retry loops.",
           },
         },
@@ -1019,14 +1094,18 @@ export const workflowJsonSchema = {
       description: "Inline skill definitions scoped to this workflow",
       additionalProperties: {
         type: "object",
-        // Fix #4: an inline skill must provide instruction, mcp, or both.
-        anyOf: [{ required: ["instruction"] }, { required: ["mcp"] }],
+        // Inline skills need usable instructions, including when they declare MCP.
+        required: ["instruction"],
         // Round 2: reject unknown keys to match Zod skillDefinitionZ.strict().
         additionalProperties: false,
         properties: {
           name: { type: "string" },
           description: { type: "string" },
-          instruction: { type: "string", description: "Natural language expertise injected into the node prompt" },
+          instruction: {
+            type: "string",
+            pattern: "\\S",
+            description: "Natural language expertise injected into the node prompt",
+          },
           mcp: {
             type: "object",
             description: "External MCP server definition",
@@ -1171,6 +1250,12 @@ export const skillJsonSchema = {
         input_schema: {
           type: "object",
           description: "JSON Schema defining the tool's input parameters.",
+        },
+        access: {
+          type: "string",
+          enum: [...TOOL_ACCESS],
+          description:
+            "Side-effect class: read (only reads) or write (creates, updates, deletes, posts, sends). Absent means write. Dry runs pass only read tools to nodes.",
         },
       },
     },

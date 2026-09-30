@@ -73,7 +73,7 @@ sweny triage [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude`, `codex`, `gemini` (alias: `--coding-agent-provider`) | `claude` |
+| `--agent <provider>` | Coding agent: `claude` only; other values are rejected (alias: `--coding-agent-provider`) | `claude` |
 | `--observability-provider <provider>` | Observability platform | `datadog` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `github-issues`, `linear`, `jira`, `file` | `github-issues` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
@@ -104,7 +104,7 @@ sweny triage [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--dry-run` | Analyze only -- the executor stops at the first conditional edge, guaranteeing zero side effects (no issues created, no PRs opened, no notifications sent). This is enforced by the executor, not by prompt instructions. | `false` |
+| `--dry-run` | Analyze only. Every node runs with read-only tools: write tools, external MCP servers, and shell/file-edit tools are withheld by the executor, so no issues are created, no PRs opened, no notifications sent. Stops at the first conditional edge. See [Dry run](/workflows/#dry-run). | `false` |
 | `--no-novelty-mode` | Allow +1 on existing issues instead of skipping duplicates | -- |
 | `--issue-override <issue>` | Work on a specific existing issue instead of scanning for new ones | -- |
 | `--additional-instructions <text>` | Extra instructions passed to the coding agent | -- |
@@ -175,10 +175,10 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude`, `codex`, `gemini` (alias: `--coding-agent-provider`) | `claude` |
+| `--agent <provider>` | Coding agent: `claude` only; other values are rejected (alias: `--coding-agent-provider`) | `claude` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `linear`, `jira`, `github-issues`, `file` | `linear` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
-| `--dry-run` | Skip creating PR -- report only | `false` |
+| `--dry-run` | Analyze and plan only. Runs with read-only tools (no code edits, no shell, no PR). See [Dry run](/workflows/#dry-run). | `false` |
 | `--max-implement-turns <n>` | Max coding agent turns (1-500) | `40` |
 | `--base-branch <branch>` | Base branch for PRs | `main` |
 | `--repository <owner/repo>` | Repository (auto-detected from git remote) | -- |
@@ -230,11 +230,13 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--dry-run` | Validate the workflow and print its node list without running | `false` |
+| `--dry-run` | Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge. See [Dry run](/workflows/#dry-run). | `false` |
+| `--list-nodes` | Validate the workflow and print its node list without running | `false` |
 | `--json` | Output result as JSON to stdout; suppress progress rendering | `false` |
 | `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |
 | `--mermaid` | Print a Mermaid diagram with per-node execution state after the run finishes | `false` |
-| `--timeout <ms>` | Per-workflow timeout for batch (no-file) runs | `900000` (15 min) |
+| `--timeout <ms>` | Whole-run wall-clock budget for `workflow run` (one file, or per workflow in batch runs). `0` disables the budget. Non-numeric values are rejected | `3600000` (60 min) |
+| `--max-steps <n>` | Hard cap on total node executions for a single workflow file, including eval-failure retries | `200` |
 | `-y, --yes` | Skip the batch confirmation prompt (use in CI) | `false` |
 
 With a file, loads the definition, validates its schema, then executes it with the same DAG renderer and skill infrastructure as the built-in `triage` and `implement` commands. With no file, it lists every `.sweny/e2e/*.yml` workflow, asks you to confirm (skip with `--yes`), runs them sequentially with template variables (`{base_url}`, `{run_id}`, ...) resolved, and exits `0` if all pass, `1` if any fail. Provider settings from `.sweny.yml` and `.env` apply.

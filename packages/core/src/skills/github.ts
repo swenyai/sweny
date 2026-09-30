@@ -80,6 +80,7 @@ export const github: Skill = {
   tools: [
     {
       name: "github_search_code",
+      access: "read",
       description: "Search for code in a GitHub repository",
       input_schema: {
         type: "object",
@@ -94,6 +95,7 @@ export const github: Skill = {
     },
     {
       name: "github_get_issue",
+      access: "read",
       description: "Get details of a GitHub issue",
       input_schema: {
         type: "object",
@@ -108,6 +110,7 @@ export const github: Skill = {
     },
     {
       name: "github_search_issues",
+      access: "read",
       description: "Search issues and pull requests",
       input_schema: {
         type: "object",
@@ -124,6 +127,7 @@ export const github: Skill = {
     },
     {
       name: "github_create_issue",
+      access: "write",
       description: "Create a new GitHub issue",
       input_schema: {
         type: "object",
@@ -143,6 +147,7 @@ export const github: Skill = {
     },
     {
       name: "github_add_comment",
+      access: "write",
       description: "Add a comment to a GitHub issue or pull request",
       input_schema: {
         type: "object",
@@ -161,6 +166,7 @@ export const github: Skill = {
     },
     {
       name: "github_create_pr",
+      access: "write",
       description: "Create a pull request",
       input_schema: {
         type: "object",
@@ -240,6 +246,7 @@ export const github: Skill = {
     },
     {
       name: "github_list_recent_commits",
+      access: "read",
       description: "List recent commits on a branch",
       input_schema: {
         type: "object",
@@ -255,6 +262,7 @@ export const github: Skill = {
     },
     {
       name: "github_get_file",
+      access: "read",
       description: "Get a file's contents from a repository",
       input_schema: {
         type: "object",

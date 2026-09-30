@@ -136,6 +136,7 @@ export const betterstack: Skill = {
   tools: [
     {
       name: "betterstack_list_sources",
+      access: "read",
       description: "List available telemetry sources (id, name, table_name, platform)",
       input_schema: {
         type: "object",
@@ -157,6 +158,7 @@ export const betterstack: Skill = {
     },
     {
       name: "betterstack_get_source",
+      access: "read",
       description: "Get full details for a telemetry source (table name, retention, config)",
       input_schema: {
         type: "object",
@@ -172,6 +174,7 @@ export const betterstack: Skill = {
     },
     {
       name: "betterstack_get_source_fields",
+      access: "read",
       description: "Get queryable fields for a source table (column names and types)",
       input_schema: {
         type: "object",
@@ -186,6 +189,7 @@ export const betterstack: Skill = {
     },
     {
       name: "betterstack_query",
+      access: "read",
       description: `Execute a read-only ClickHouse SQL query against a telemetry source.
 Tables: remote(TABLE_logs) for recent logs, s3Cluster(primary, TABLE_s3) for historical (add WHERE _row_type = 1).
 Key fields: dt (timestamp), raw (JSON blob with all log fields).

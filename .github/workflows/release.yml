@@ -8,6 +8,9 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   # Gate: build + test must pass before we publish OR move the v5 action tag.
   # Kept as its own job so a publish-credential failure (which is NOT a code
@@ -17,8 +20,8 @@ jobs:
     name: Verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -40,16 +43,16 @@ jobs:
       id-token: write
       issues: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT || github.token }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-          cache: npm
+          package-manager-cache: false
 
       - run: npm ci
 
@@ -105,7 +108,7 @@ jobs:
             # Surface which package failed (the failure alert links the run, but
             # the annotation names the package). bash runs with -eo pipefail, so
             # a bare failure would still abort; this just makes it legible.
-            npm publish || { echo "::error::npm publish failed for $pkg_name@$(node -p "require('./package.json').version")"; return 1; }
+            npm publish --provenance || { echo "::error::npm publish failed for $pkg_name@$(node -p "require('./package.json').version")"; return 1; }
             echo "Published $pkg_name@$(node -p "require('./package.json').version")"
             cd - > /dev/null
           }
@@ -178,7 +181,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Latest main, so we tag the publish bump commit when publish ran.
           ref: main

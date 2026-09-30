@@ -222,16 +222,18 @@ A conforming validator MUST enforce the following rules:
 
 ## Error Codes
 
-| Code                   | Description                                               |
-| ---------------------- | --------------------------------------------------------- |
-| `MISSING_ENTRY`        | `entry` does not reference an existing node.              |
-| `UNKNOWN_EDGE_SOURCE`  | An edge `from` references a non-existent node.            |
-| `UNKNOWN_EDGE_TARGET`  | An edge `to` references a non-existent node.              |
-| `UNREACHABLE_NODE`     | A node is not reachable from `entry`.                     |
-| `SELF_LOOP`            | A self-loop edge lacks `max_iterations`.                  |
-| `UNBOUNDED_CYCLE`      | A cycle exists with no `max_iterations` guard.            |
-| `UNKNOWN_SKILL`        | A node references a skill not in the registry.            |
-| `INVALID_INLINE_SKILL` | An inline skill provides neither `instruction` nor `mcp`. |
+| Code                       | Description                                               |
+| -------------------------- | --------------------------------------------------------- |
+| `MISSING_ENTRY`            | `entry` does not reference an existing node.              |
+| `UNKNOWN_EDGE_SOURCE`      | An edge `from` references a non-existent node.            |
+| `UNKNOWN_EDGE_TARGET`      | An edge `to` references a non-existent node.              |
+| `UNREACHABLE_NODE`         | A node is not reachable from `entry`.                     |
+| `SELF_LOOP`                | A self-loop edge lacks `max_iterations`.                  |
+| `UNBOUNDED_CYCLE`          | A cycle exists with no `max_iterations` guard.            |
+| `EDGE_ITERATIONS_EXCEEDED` | An edge's `max_iterations` is above 100.                  |
+| `RETRY_MAX_EXCEEDED`       | A node's `retry.max` is above 10.                         |
+| `UNKNOWN_SKILL`            | A node references a skill not in the registry.            |
+| `INVALID_INLINE_SKILL`     | An inline skill provides neither `instruction` nor `mcp`. |
 
 ## SkillDefinition Object
 

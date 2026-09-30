@@ -92,6 +92,44 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
   };
 }
 
+describe("validateInputs: coding agent (honest --agent, #330)", () => {
+  it("accepts claude", () => {
+    const errors = validateInputs(baseConfig({ codingAgentProvider: "claude" }));
+    expect(errors.filter((e) => /agent/i.test(e))).toEqual([]);
+  });
+
+  it.each(["codex", "gemini", "openai", "bogus"])("rejects --agent %s instead of silently running Claude", (agent) => {
+    // Even with the matching vendor key present, a non-Claude agent must not
+    // pass validation: nothing dispatches on it and Claude would run instead.
+    const errors = validateInputs(
+      baseConfig({ codingAgentProvider: agent, openaiApiKey: "sk-openai", geminiApiKey: "g-key" }),
+    );
+    const err = errors.find((e) => e.includes(`"${agent}"`));
+    expect(err).toBeDefined();
+    expect(err).toMatch(/only supported agent is "claude"/);
+  });
+
+  it("rejects coding-agent-provider from .sweny.yml the same way", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-agent-"));
+    try {
+      fs.writeFileSync(path.join(dir, ".sweny.yml"), "coding-agent-provider: codex\n");
+      const config = parseCliInputs({}, loadConfigFile(dir));
+      expect(config.codingAgentProvider).toBe("codex");
+      expect(validateInputs(config).some((e) => e.includes('"codex"'))).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("CLI help no longer advertises codex or gemini", () => {
+    for (const register of [registerTriageCommand, registerImplementCommand]) {
+      const cmd = register(new Command());
+      const opt = cmd.options.find((o) => o.long === "--agent");
+      expect(opt?.description).not.toMatch(/codex|gemini/i);
+    }
+  });
+});
+
 describe("validateInputs — notification provider", () => {
   it("accepts console (no credentials required)", () => {
     const errors = validateInputs(baseConfig({ notificationProvider: "console" }));

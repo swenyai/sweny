@@ -65,6 +65,7 @@ export type {
   NodeSources,
   EvalPolicy,
   RequiresOnFail,
+  NodeOnFail,
   McpTransport,
   WorkflowType,
   SkillHarnessKey,
@@ -77,6 +78,7 @@ export {
   EVALUATOR_KINDS,
   EVAL_POLICIES,
   REQUIRES_ON_FAIL,
+  NODE_ON_FAIL,
   MCP_TRANSPORTS,
   SKILL_CATEGORIES,
   SKILL_HARNESSES,
@@ -88,7 +90,7 @@ export {
 export { consoleLogger } from "./types.js";
 
 // Executor
-export { execute } from "./executor.js";
+export { execute, RouteEvaluationError } from "./executor.js";
 export type { ExecuteOptions } from "./executor.js";
 
 // Claude client
