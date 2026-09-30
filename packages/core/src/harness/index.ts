@@ -23,6 +23,8 @@ export { policyGate } from "./policy.js";
 export { ask, evaluate, buildAskPrompt, buildEvaluatePrompt } from "./prompts.js";
 export { ClaudeCodeHarness, CLAUDE_CODE_CAPABILITIES } from "./claude-code.js";
 export type { ClaudeCodeHarnessOptions } from "./claude-code.js";
+export { startToolBridge } from "./tool-bridge/server.js";
+export type { ToolBridge, ToolBridgeOptions } from "./tool-bridge/server.js";
 
 /**
  * Build the harness for an agent id. `claude` is the historical `--agent` /
