@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
 const skillColors: Record<string, string> = {
-  github: "#6366f1",
-  linear: "#818cf8",
+  github: "#3b82f6",
+  linear: "#60a5fa",
   sentry: "#f472b6",
   datadog: "#a78bfa",
   betterstack: "#22d3ee",
@@ -76,7 +76,7 @@ interface SkillIconProps {
 }
 
 export function SkillIcon({ skillId, size = 14, className }: SkillIconProps) {
-  const color = skillColors[skillId] ?? "#6366f1";
+  const color = skillColors[skillId] ?? "#3b82f6";
   const renderPath = skillPaths[skillId];
 
   if (!renderPath) {
