@@ -92,6 +92,12 @@ describe("fetchMarketplaceIndex", () => {
     expect(entries[0]).toMatchObject({ id: "pr-review", name: "PR Review" });
   });
 
+  it("passes an abort signal when a timeout is requested", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("[]", { status: 200 }));
+    await fetchMarketplaceIndex({ timeoutMs: 3000 });
+    expect((spy.mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("throws not-found when index.json is missing", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 404 }));
     await expect(fetchMarketplaceIndex()).rejects.toMatchObject({ kind: "not-found" });
