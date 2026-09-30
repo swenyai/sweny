@@ -82,15 +82,9 @@ The Action and CLI are standalone open-source tools with no phone-home behavior.
 
 ## Can I use a different LLM?
 
-The `coding-agent-provider` input on [`swenyai/triage@v1`](https://github.com/swenyai/triage) supports three options for the **Implement** workflow:
+SWEny runs on headless Claude Code, and that is the only agent backend. `--agent` / `coding-agent-provider` accepts `claude` only; any other value (for example `codex` or `gemini`) is rejected with an error instead of silently running Claude.
 
-| Provider | Input value | Credential |
-|----------|------------|------------|
-| Claude (default) | `claude` | `anthropic-api-key` or `claude-oauth-token` |
-| OpenAI Codex | `codex` | `openai-api-key` |
-| Google Gemini | `gemini` | `gemini-api-key` |
-
-The Triage workflow always uses Claude for investigation and routing. The implementation step (writing code, opening PRs) can use any of the three providers.
+To route nodes to other models, point Claude Code at an Anthropic-compatible gateway. See [Model gateway (LiteLLM)](/advanced/model-gateway/).
 
 ## Does SWEny auto-merge PRs?
 

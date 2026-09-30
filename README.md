@@ -15,32 +15,48 @@
   <a href="https://www.npmjs.com/package/@sweny-ai/core"><img alt="npm" src="https://img.shields.io/npm/v/@sweny-ai/core?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/swenyai/sweny?style=flat-square" /></a>
   <a href="https://docs.sweny.ai"><img alt="Docs" src="https://img.shields.io/badge/docs-docs.sweny.ai-blue?style=flat-square" /></a>
-  <a href="https://marketplace.sweny.ai"><img alt="Marketplace" src="https://img.shields.io/badge/Workflows-marketplace.sweny.ai-blueviolet?style=flat-square" /></a>
+  <a href="https://marketplace.sweny.ai"><img alt="Marketplace" src="https://img.shields.io/badge/Workflows-marketplace.sweny.ai-blue?style=flat-square" /></a>
 </p>
 
 ---
 
 ## Quickstart
 
+Requires Node 20+ and a Claude login (`claude` signed in) or an `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` (SWEny runs its nodes on the Claude Code agent).
+
 ```bash
-npx @sweny-ai/core new      # pick a workflow → auto-detects providers → done
+npm install -g @sweny-ai/core
+sweny new --template explain-repo --yes   # zero-credential starter: reads this checkout, no tokens
+sweny workflow validate .sweny/workflows/explain-repo.yml
+sweny workflow diagram .sweny/workflows/explain-repo.yml   # Mermaid graph of the DAG
+sweny workflow run .sweny/workflows/explain-repo.yml
+```
+
+`sweny new` with no flags opens the interactive picker. `--template <id> --yes` skips every prompt (no
+terminal needed). It writes `.sweny.yml`, `.env` (added to `.gitignore`), and the workflow file.
+CI runs everything above except `run` in a clean container on every PR (`scripts/quickstart-smoke.sh`).
+
+Templates that use skills such as GitHub need their token first. `sweny new` writes blank values for
+credentials it can't infer:
+
+```bash
+$EDITOR .env                # fill in GITHUB_TOKEN etc. for the skills your workflow uses
+sweny check                 # verify only the credentials your workflows need
 sweny workflow run .sweny/workflows/pr-review.yml
 ```
 
-Or if you already have `@sweny-ai/core` installed:
+Already have a `.sweny.yml`? `sweny new` adds additional workflows to it non-destructively.
+
+[`examples/file-ops.yml`](./examples/file-ops.yml) is another local file-I/O workflow that needs nothing
+beyond your Claude auth:
 
 ```bash
-sweny new
+sweny workflow run examples/file-ops.yml
 ```
 
-Already have a `.sweny.yml`? `sweny new` adds additional workflows non-destructively.
-
-Build a workflow from scratch — pick "Describe your own" in the `sweny new` picker, or:
+Build a workflow from scratch: pick "Describe your own" in the `sweny new` picker.
 
 ```bash
-sweny workflow create "review PRs for security issues and code quality"
-sweny workflow run .sweny/workflows/pr-review.yml
-
 # Visualize any workflow as a Mermaid diagram — drop it into a PR or README
 sweny workflow diagram .sweny/workflows/pr-review.yml -o pr-review.mmd
 ```

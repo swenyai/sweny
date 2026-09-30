@@ -6,14 +6,19 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -26,9 +31,11 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -41,9 +48,11 @@ jobs:
     name: Typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -64,9 +73,11 @@ jobs:
         # most consumers run the action on is exercised in CI.
         node-version: [20, 22, 24]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -83,9 +94,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -107,9 +120,11 @@ jobs:
     name: Schema — published JSON Schema matches generator
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -121,3 +136,79 @@ jobs:
 
       - name: Assert no diff between checked-in schema and generated output
         run: npm run check:schema-drift --workspace=packages/core
+
+  # Evidence for #360: does SWENY_SANDBOX=auto actually sandbox on a
+  # GitHub-hosted runner? Non-required; always green, the log is the result.
+  sandbox-probe:
+    name: Sandbox probe (bubblewrap on hosted runner)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Install bubblewrap and socat
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bubblewrap socat
+          echo "PROBE bwrap: $(command -v bwrap) $(bwrap --version 2>&1 || true)"
+          echo "PROBE socat: $(command -v socat)"
+          echo "PROBE os: $(. /etc/os-release && echo "$PRETTY_NAME"), kernel $(uname -r)"
+          echo "PROBE apparmor_restrict_unprivileged_userns=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo n/a)"
+
+      - name: Probe bwrap
+        run: |
+          probe() { bwrap --ro-bind / / --dev /dev --proc /proc true 2>&1; }
+          if out=$(probe); then
+            echo "PROBE RESULT: bwrap works as-is (auto sandboxes on hosted runners)"
+            exit 0
+          fi
+          echo "PROBE first attempt failed: $out"
+          if echo "$out" | grep -qiE "user namespace|uid map|setting up uid|Operation not permitted|Permission denied"; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            if out2=$(probe); then
+              echo "PROBE RESULT: bwrap works only after sysctl kernel.apparmor_restrict_unprivileged_userns=0"
+            else
+              echo "PROBE RESULT: bwrap still fails after sysctl: $out2"
+            fi
+          else
+            echo "PROBE RESULT: bwrap fails for a non-userns reason"
+          fi
+
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
+
+      - name: zizmor
+        run: |
+          pipx run zizmor==1.30.1 --min-severity high .github/workflows
+
+  quickstart:
+    name: Quickstart — README runs in a clean container
+    runs-on: ubuntu-latest
+    container: node:22
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: npm ci
+
+      - name: Build core
+        run: npm run build --workspace=packages/core
+
+      # Packs core, installs the tarball into an empty prefix with a scrubbed
+      # env (no credentials, no LLM calls) and runs the README quickstart.
+      - name: Run README quickstart
+        run: sh scripts/quickstart-smoke.sh

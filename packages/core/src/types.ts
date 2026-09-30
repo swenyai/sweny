@@ -29,11 +29,24 @@ export interface ToolContext {
   logger: Logger;
 }
 
+/**
+ * Side-effect class of a tool. `"read"` only reads. `"write"` can change
+ * something outside the run: create, update, delete, post, send, invoke.
+ */
+export const TOOL_ACCESS = ["read", "write"] as const;
+export type ToolAccess = (typeof TOOL_ACCESS)[number];
+
 /** A single tool Claude can invoke */
 export interface Tool {
   name: string;
   description: string;
   input_schema: JSONSchema;
+  /**
+   * Side-effect class. Under dry-run (`input.dryRun === true`) the executor
+   * passes only `"read"` tools to a node. Absent means `"write"`, so a new or
+   * unclassified tool fails safe: it is withheld from dry runs.
+   */
+  access?: ToolAccess;
   handler: (input: any, ctx: ToolContext) => Promise<unknown>;
 }
 
@@ -156,6 +169,20 @@ export type EvalPolicy = (typeof EVAL_POLICIES)[number];
 /** Action when a `requires` precondition fails. */
 export const REQUIRES_ON_FAIL = ["fail", "skip"] as const;
 export type RequiresOnFail = (typeof REQUIRES_ON_FAIL)[number];
+
+/**
+ * Post-execution failure policy for a node (the top-level `on_fail` field).
+ *
+ * Distinct from {@link REQUIRES_ON_FAIL}, which governs the pre-condition
+ * `requires` gate (`fail | skip`). This one governs what happens AFTER the
+ * node ran and its retry budget is exhausted with `status: "failed"`:
+ *  - `halt`     (default) — stop the workflow, leaving the failed node in the
+ *                results so the run surfaces as failed. Fails closed: a broken
+ *                node never advances down a conditional edge.
+ *  - `continue` — legacy fall-through: routing proceeds from the failed node.
+ */
+export const NODE_ON_FAIL = ["halt", "continue"] as const;
+export type NodeOnFail = (typeof NODE_ON_FAIL)[number];
 
 /** MCP server transport type. Inferred from command/url when omitted. */
 export const MCP_TRANSPORTS = ["stdio", "http"] as const;
@@ -354,6 +381,21 @@ export interface Node {
    * Default false (previous behavior, back-compat).
    */
   fail_soft?: boolean;
+  /**
+   * What to do when this node finishes with `status: "failed"` (agent-level
+   * failure or an eval failure that exhausted the retry budget and was not
+   * softened by `fail_soft`).
+   *
+   *  - `"halt"` (default) — stop the workflow. The failed node stays in the
+   *    results so the run surfaces as failed; routing does NOT proceed. This
+   *    fails closed: a broken node can never take a conditional out-edge (e.g.
+   *    file an issue/PR) on the back of a failure.
+   *  - `"continue"` — legacy fall-through: routing proceeds from the failed
+   *    node, letting a downstream branch inspect or recover from the failure.
+   *
+   * Distinct from `requires.on_fail`, which is the pre-condition gate.
+   */
+  on_fail?: NodeOnFail;
 }
 
 /**
@@ -444,6 +486,30 @@ export interface SkillDefinition {
 
 // ─── Execution ───────────────────────────────────────────────────
 
+/**
+ * Model usage + cost accounting for a single node's AI invocation.
+ *
+ * SHAPE-ONLY telemetry: counts, cost, and turn totals. Never any prompt,
+ * response, or tool payload. Populated from the Claude Agent SDK's terminal
+ * `result` message (`total_cost_usd`, `usage`, `num_turns`). Absent when the
+ * node made no AI call (e.g. a deterministic node) or when running against a
+ * mock/older SDK that doesn't emit the fields.
+ */
+export interface NodeUsage {
+  /** Aggregate USD cost the SDK billed for this node's turn(s). */
+  costUsd?: number;
+  /** Input (prompt) tokens across the node's turns. */
+  inputTokens?: number;
+  /** Output (completion) tokens across the node's turns. */
+  outputTokens?: number;
+  /** Cache-read input tokens (prompt-cache hits). */
+  cacheReadTokens?: number;
+  /** Cache-creation input tokens (prompt-cache writes). */
+  cacheCreationTokens?: number;
+  /** Number of model turns the SDK ran for this node. */
+  numTurns?: number;
+}
+
 export interface NodeResult {
   status: "success" | "skipped" | "failed";
   /** Arbitrary data produced by this node */
@@ -456,6 +522,17 @@ export interface NodeResult {
    * eval was not run (e.g. node failed during execution).
    */
   evals?: EvalResult[];
+  /**
+   * Token + cost accounting for this node's AI invocation. Shape-only
+   * telemetry; see {@link NodeUsage}. Absent for nodes that made no AI call.
+   */
+  usage?: NodeUsage;
+  /**
+   * Dry-run only: names of the node's skill tools that were withheld because
+   * they are write-capable or unclassified. Absent on normal runs and on
+   * dry-run nodes that had no write tools.
+   */
+  skippedWrites?: string[];
 }
 
 export interface ToolCall {
@@ -561,6 +638,8 @@ export interface Claude {
     outputSchema?: JSONSchema;
     /** Called with status messages while Claude is working (tool name, etc.) */
     onProgress?: (message: string) => void;
+    /** MCP servers declared by this node's resolved skills. Explicit client configs win. */
+    mcpServers?: Record<string, McpServerConfig>;
     /** Per-node turn limit. Overrides the client default when set. */
     maxTurns?: number;
     /** Built-in SDK tool names to disallow for this node (e.g. ["Bash"]). */
@@ -571,9 +650,29 @@ export interface Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
+    /**
+     * What this node's agent may see (#360): env var names declared by the
+     * node's skills (added to the scoped subprocess env) and the provider
+     * hosts its sandboxed commands may reach. Absent = allowlist only.
+     */
+    agentAccess?: { envVars: string[]; domains: string[] };
+    /**
+     * Dry-run: the node must not change anything. `tools` is already filtered
+     * to reads; implementations MUST NOT add any other write-capable tool
+     * (external MCP servers, shell, file-edit built-ins).
+     */
+    readOnly?: boolean;
   }): Promise<NodeResult>;
 
-  /** Evaluate a routing condition — pick one of N choices */
+  /**
+   * Evaluate a routing condition — pick one of N choices.
+   *
+   * Fails closed: returns `null` when the routing decision could not be made
+   * (SDK error, timeout, non-success subtype, or an unparseable answer).
+   * Callers MUST treat `null` as "no decision" and take an explicit default
+   * edge or terminate — never fall through to the first choice. Returning a
+   * choice id on that path is the fail-open bug this contract exists to close.
+   */
   evaluate(opts: {
     question: string;
     context: Record<string, unknown>;
@@ -582,7 +681,7 @@ export interface Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
-  }): Promise<string>;
+  }): Promise<string | null>;
 
   /**
    * Single-completion free-text query. No tools, no output schema.

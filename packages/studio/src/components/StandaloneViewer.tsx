@@ -175,8 +175,8 @@ export function WorkflowViewer({
             style={{
               width: 32,
               height: 32,
-              border: "3px solid rgba(99,102,241,0.25)",
-              borderTopColor: "#6366f1",
+              border: "3px solid rgba(59,130,246,0.25)",
+              borderTopColor: "#3b82f6",
               borderRadius: "50%",
               animation: "spin 0.7s linear infinite",
             }}

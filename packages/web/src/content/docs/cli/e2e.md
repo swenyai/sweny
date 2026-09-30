@@ -83,7 +83,7 @@ sweny workflow run --yes
 # Run a specific workflow (no prompt — the file is explicit)
 sweny workflow run .sweny/e2e/registration.yml
 
-# Custom timeout for batch runs (default: 15 minutes per workflow)
+# Custom timeout for batch runs (default: 60 minutes per workflow; 0 disables)
 sweny workflow run --timeout 300000 --yes
 ```
 

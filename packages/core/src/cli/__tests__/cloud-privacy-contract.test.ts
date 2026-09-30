@@ -43,6 +43,8 @@ const PURE_HELPERS = [
   "newRunUuid",
   "buildStartRunPayload",
   "deriveGenericMetrics",
+  "deriveTypeMetricSubstrate",
+  "crashSummaryForCloud",
 ] as const;
 
 describe("cloud privacy contract", () => {

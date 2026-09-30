@@ -103,6 +103,7 @@ export const notification: Skill = {
   tools: [
     {
       name: "notify_webhook",
+      access: "write",
       description:
         "Send a JSON payload to the configured notification webhook (NOTIFICATION_WEBHOOK_URL). " +
         "The destination is fixed: an optional `url` is only honored when its host is on the " +
@@ -134,6 +135,7 @@ export const notification: Skill = {
     },
     {
       name: "notify_discord",
+      access: "write",
       description: "Send a message to Discord via webhook",
       input_schema: {
         type: "object",
@@ -178,6 +180,7 @@ export const notification: Skill = {
     },
     {
       name: "notify_teams",
+      access: "write",
       description: "Send a message to Microsoft Teams via webhook",
       input_schema: {
         type: "object",

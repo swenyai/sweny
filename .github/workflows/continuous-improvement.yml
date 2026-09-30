@@ -23,6 +23,9 @@ on:
         default: "thorough"
         required: false
 
+permissions:
+  contents: read
+
 jobs:
   improve:
     name: Autonomous Improvement
@@ -37,7 +40,7 @@ jobs:
       actions: read
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -61,7 +64,7 @@ jobs:
           echo "Collected $(jq length /tmp/ci-failures.json) failed runs"
 
       - name: Run SWEny
-        uses: swenyai/triage@v1
+        uses: swenyai/triage@5ccc716ee92cd6a16713fa9ce73b7efd6f584d35 # v1
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
