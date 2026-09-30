@@ -5,11 +5,27 @@
  * strings — no filesystem reads needed, works from npm install.
  */
 
+import { PACK_TEMPLATES } from "./packs.js";
+
+/** Extra metadata for a recurring pack (#338): how to schedule it and what it produces. */
+export interface WorkflowPack {
+  /** A GitHub Actions workflow file to paste into .github/workflows/. */
+  trigger: string;
+  /** Sample of what the pack posts (issue body, comment, or message). */
+  sample: string;
+  /** Expected tokens per run. An estimate; the run receipt shows the real number. */
+  tokens: string;
+  /** Write tools the pack may call, by node id. Every other node is read-only. */
+  writes: Record<string, string[]>;
+}
+
 export interface WorkflowTemplate {
   id: string;
   name: string;
   description: string;
   yaml: string;
+  /** Present on the recurring packs only. */
+  pack?: WorkflowPack;
 }
 
 export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
@@ -45,6 +61,9 @@ edges:
     to: explain
 `,
   },
+  // Recurring packs (#338): run weekly or on every PR. Kept right after the
+  // zero-credential starter so they are the next thing sweny new offers.
+  ...PACK_TEMPLATES,
   {
     id: "pr-review",
     name: "PR Review Bot",

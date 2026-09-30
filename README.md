@@ -102,6 +102,84 @@ $ sweny workflow create "audit our repo for security issues, \
 | **[Claude Code Plugin](https://docs.sweny.ai/advanced/mcp-plugin/)** | Slash commands, MCP tools, and an isolated workflow agent |
 | **[Marketplace](https://marketplace.sweny.ai)** | Browse, fork, and share community workflows |
 
+## Workflows
+
+Three recurring packs, built to be enabled once and useful again next week. Each is read-only except one declared output, validates with no credentials, and comes with a GitHub Action trigger. Pick one in `sweny new` (right after "Explain this repo") or by id. Setup, permissions, and gates: [docs.sweny.ai/workflows/packs](https://docs.sweny.ai/workflows/packs/).
+
+| Pack | Runs | Output | Tokens per run (estimate) |
+|------|------|--------|---------------------------|
+| `weekly-digest` | Mondays | Commits, merged PRs, issues opened and closed, risky files, as one issue or Slack message | 15k to 40k |
+| `dependency-drift` | Weekly | Lockfiles plus open advisories, one deduped issue with what matters and why | 20k to 60k |
+| `pr-risk-review` | Every PR | Read-only scope and risk comment: size, tests touched, risky areas | 10k to 30k |
+
+```bash
+sweny new --template weekly-digest --yes
+sweny workflow validate .sweny/workflows/weekly-digest.yml   # no credentials needed
+```
+
+<details>
+<summary>Sample output: weekly-digest</summary>
+
+```text
+Weekly digest 2026-09-21 to 2026-09-28 (acme/api)
+
+Auth middleware rewrite landed; 11 PRs merged, one touching the session store.
+
+11 commits by 4 authors | 11 PRs merged | 6 issues opened | 9 closed
+
+Merged
+- #482 Rotate session secrets on deploy (@dana)
+- #479 Cache permit lookups (@ravi)
+
+Risky files
+- src/auth/session.ts (auth): session secret handling changed, no test touched
+- db/migrations/0041_add_index.sql (data): new index on a 40M-row table
+
+Watch next week
+- Add a test for session rotation (src/auth/session.ts)
+```
+
+</details>
+
+<details>
+<summary>Sample output: dependency-drift</summary>
+
+```text
+Dependency drift: 2 actionable
+
+| Package | Severity | Advisory | Why it matters | Fix |
+| --- | --- | --- | --- | --- |
+| jsonwebtoken | high | GHSA-xxxx-xxxx-xxxx | Runtime dependency of the auth middleware | Upgrade to 9.0.0 |
+| lodash | medium | GHSA-yyyy-yyyy-yyyy | Runtime dependency, reachable from the export route | Upgrade to 4.17.21 |
+
+Drift
+- services/worker/package.json: no lockfile, installs are unpinned
+
+9 lower-severity or dev-only alerts deferred.
+```
+
+</details>
+
+<details>
+<summary>Sample output: pr-risk-review</summary>
+
+```text
+Risk: high (size m, 6 files)
+
+- src/auth/session.ts changed and no test file was touched
+- db/migrations/0041_add_index.sql is a data migration
+
+Where to look
+- session secret handling in src/auth/session.ts
+- whether 0041 needs a concurrent index build
+
+Read-only scope review. No code was changed.
+```
+
+</details>
+
+The samples are illustrative (made-up repo), not captured from a run.
+
 ## Custom skills
 
 Extend any workflow with your own skills. Scaffold one in a single command:
