@@ -20,7 +20,7 @@ const mockSpinner = vi.fn();
 const mockIsCancel = vi.fn((_value?: unknown) => false);
 const mockIntro = vi.fn();
 const mockCancel = vi.fn();
-const mockLog = { error: vi.fn(), success: vi.fn(), info: vi.fn() };
+const mockLog = { error: vi.fn(), success: vi.fn(), info: vi.fn(), warn: vi.fn() };
 
 vi.mock("@clack/prompts", () => ({
   select: (...args: unknown[]) => mockSelect(...args),
@@ -136,6 +136,43 @@ describe("validateWorkflowFile", () => {
     expect(result.nodeCount).toBe(3);
     expect(result.edgeCount).toBe(2);
     expect(result.errors).toEqual([]);
+  });
+
+  it("warns when workflow_type is missing", () => {
+    const filePath = makeTmpFile("no-type.yml", "id: test\nname: Test\n");
+    vi.mocked(parseWorkflow).mockReturnValue({
+      id: "test",
+      name: "Test",
+      description: "",
+      nodes: { start: mockNode("start") },
+      edges: [],
+      entry: "start",
+      skills: {},
+    });
+    vi.mocked(validateWorkflow).mockReturnValue([]);
+
+    const result = validateWorkflowFile(filePath);
+    expect(result.valid).toBe(true);
+    expect(result.warnings.some((w) => /workflow_type/.test(w))).toBe(true);
+  });
+
+  it("does not warn when workflow_type is declared", () => {
+    const filePath = makeTmpFile("typed.yml", "id: test\nname: Test\nworkflow_type: monitor\n");
+    vi.mocked(parseWorkflow).mockReturnValue({
+      id: "test",
+      name: "Test",
+      description: "",
+      workflow_type: "monitor",
+      nodes: { start: mockNode("start") },
+      edges: [],
+      entry: "start",
+      skills: {},
+    });
+    vi.mocked(validateWorkflow).mockReturnValue([]);
+
+    const result = validateWorkflowFile(filePath);
+    expect(result.valid).toBe(true);
+    expect(result.warnings.some((w) => /workflow_type/.test(w))).toBe(false);
   });
 
   it("catches parseWorkflow throw as schema error", () => {
