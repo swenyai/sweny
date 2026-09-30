@@ -12,6 +12,8 @@ runContractSuite(
     return new ClaudeCodeHarness({
       logger,
       envScope: true,
+      // No host login probe in tests (#339): the suite drives a fake SDK.
+      authProbe: () => ({ ok: true, via: "test" }),
       toolBridge: true,
       ...(sandbox ? { sandbox: "auto" as const, sandboxProbe: () => undefined } : { sandbox: "off" as const }),
     });

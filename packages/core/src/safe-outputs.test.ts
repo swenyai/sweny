@@ -126,7 +126,9 @@ describe("write stage: apply", () => {
     });
     const r = await applySafeOutputs(o);
     expect(r.error).toBeUndefined();
-    expect(r.receipts).toEqual([{ type: "issue", status: "applied", via: "github", target: "acme/api", ref: 7 }]);
+    expect(r.receipts).toEqual([
+      { type: "issue", status: "applied", via: "github", target: "acme/api", ref: 7, url: "https://example.test/7" },
+    ]);
     expect(gh.calls).toEqual([
       {
         tool: "github_create_issue",
@@ -534,5 +536,118 @@ describe("helpers", () => {
     expect(resolveOutputSkill(decl, [], skills)).toBe("linear");
     expect(resolveOutputSkill({ type: "pr" }, [], skills)).toBeUndefined();
     expect(unresolvedOutputs([{ type: "pr" }, decl], [], skills)).toEqual(["pr"]);
+  });
+
+  it("resolveOutputSkill prefers a node skill that is configured", () => {
+    const skills = new Map<string, Skill>([["github", { id: "github" } as Skill]]);
+    expect(resolveOutputSkill({ type: "issue" }, ["linear", "github"], skills)).toBe("github");
+    expect(resolveOutputSkill({ type: "comment" }, ["linear", "github"], new Map())).toBe("linear");
+  });
+});
+
+function linearSkill(tools: Tool[]): Skill {
+  return { id: "linear", name: "Linear", description: "", category: "tasks", config: {}, tools };
+}
+
+function writeTool(name: string, handler: Tool["handler"]): Tool {
+  return { name, description: name, input_schema: { type: "object" }, access: "write", handler };
+}
+
+describe("write stage: issue pin (number)", () => {
+  const comment = (number?: string) => intent({ type: "comment", body: "+1", ...(number ? { number } : {}) });
+
+  it("a literal pin accepts that issue and fills a missing number", async () => {
+    const { o, gh } = opts({
+      declarations: [{ type: "comment", number: 12, max: 2 }],
+      intents: [comment("#12"), comment()],
+    });
+    const r = await applySafeOutputs(o);
+    // Same issue, same body: the second is a duplicate, not a second comment.
+    expect(r.receipts.map((x) => x.status)).toEqual(["applied", "skipped"]);
+    expect(gh.calls).toHaveLength(1);
+    expect(gh.calls[0]).toMatchObject({
+      tool: "github_add_comment",
+      input: { repo: "acme/api", issue_number: 12, body: "+1" },
+    });
+  });
+
+  it("refuses a comment on any other issue", async () => {
+    const { o, gh } = opts({ declarations: [{ type: "comment", number: "12" }], intents: [comment("13")] });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts[0]).toMatchObject({ status: "refused", reason: "issue outside the declared number" });
+    expect(gh.calls).toEqual([]);
+  });
+
+  it("an input pin reads the run input, and an empty input refuses", async () => {
+    const pinned = opts({
+      declarations: [{ type: "comment", number: { input: "pr_number" } }],
+      intents: [comment()],
+      input: { pr_number: 7 },
+    });
+    await applySafeOutputs(pinned.o);
+    expect(pinned.gh.calls[0].input).toMatchObject({ issue_number: 7 });
+
+    const empty = opts({
+      declarations: [{ type: "comment", number: { input: "pr_number" } }],
+      intents: [comment("7")],
+      input: { pr_number: 0 },
+    });
+    const r = await applySafeOutputs(empty.o);
+    expect(r.receipts[0]).toMatchObject({ status: "refused", reason: "pinned issue is not set for this run" });
+    expect(empty.gh.calls).toEqual([]);
+  });
+
+  it("Linear identifiers match case-insensitively", async () => {
+    const write = vi.fn(async () => ({ commentCreate: { success: true, comment: { id: "c-1" } } }));
+    const { o } = opts({
+      declarations: [{ type: "comment", via: "linear", number: { input: "issueIdentifier" } }],
+      intents: [comment("off-12")],
+      nodeSkills: ["linear"],
+      skills: new Map([["linear", linearSkill([writeTool("linear_add_comment", write)])]]),
+      input: { issueIdentifier: "OFF-12" },
+    });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts[0]).toMatchObject({ status: "applied", ref: "c-1" });
+    expect(write).toHaveBeenCalledWith({ issueId: "OFF-12", body: "+1" }, expect.anything());
+  });
+
+  it("the instruction names the pinned issue", () => {
+    const text = safeOutputsInstruction([{ type: "comment", number: { input: "pr_number" } }], { pr_number: 5 });
+    expect(text).toContain("only issue or PR 5");
+  });
+});
+
+describe("write stage: receipts carry what the API produced", () => {
+  it("reads the identifier and URL a Linear mutation wraps", async () => {
+    const create = vi.fn(async () => ({
+      issueCreate: {
+        success: true,
+        issue: { id: "uuid-1", identifier: "OFF-77", url: "https://linear.app/acme/issue/OFF-77", title: "t" },
+      },
+    }));
+    const { o } = opts({
+      declarations: [{ type: "issue", via: "linear", target: "team-a" }],
+      nodeSkills: ["linear"],
+      skills: new Map([["linear", linearSkill([writeTool("linear_create_issue", create)])]]),
+    });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts[0]).toMatchObject({
+      status: "applied",
+      ref: "OFF-77",
+      url: "https://linear.app/acme/issue/OFF-77",
+    });
+  });
+
+  it("never records a GitHub API URL as the web URL", async () => {
+    const gh = fakeGithub();
+    gh.skill.tools = gh.skill.tools.map((t) =>
+      t.name === "github_create_issue"
+        ? { ...t, handler: async () => ({ number: 3, url: "https://api.github.com/repos/acme/api/issues/3" }) }
+        : t,
+    );
+    const { o } = opts({ skills: new Map([["github", gh.skill]]) });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts[0].ref).toBe(3);
+    expect(r.receipts[0].url).toBeUndefined();
   });
 });

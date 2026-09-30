@@ -60,5 +60,6 @@ export function buildNodePolicy(opts: {
     ...(opts.disallowedTools && opts.disallowedTools.length > 0 ? { nativeDeny: opts.disallowedTools } : {}),
     egress: opts.egress ?? [],
     strict: opts.permissions.strict,
+    ...(opts.permissions.strict ? { exclusiveMcp: true } : {}),
   };
 }

@@ -8,7 +8,9 @@ import type { NodeResult, Workflow } from "../../types.js";
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), spawn: vi.fn() }));
 vi.mock("../../executor.js", () => ({ execute: mocks.execute }));
-vi.mock("../../harness/index.js", () => ({ createHarness: () => ({}) }));
+vi.mock("../../harness/index.js", () => ({
+  createHarness: () => ({ preflight: async () => ({ ok: true, version: "test" }) }),
+}));
 vi.mock("node:child_process", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:child_process")>()),
   spawn: mocks.spawn,

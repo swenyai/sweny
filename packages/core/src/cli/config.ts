@@ -161,6 +161,11 @@ export function registerTriageCommand(program: Command): Command {
     .option("--pr-labels <labels>", "Comma-separated PR labels (default: agent,triage,needs-review)")
     .option("--dry-run", "Analyze only, do not create issues or PRs", false)
     .option(
+      "--stage",
+      "Run normally, but preview the issues, comments and PR instead of filing them; stops before any code is pushed",
+      false,
+    )
+    .option(
       "--review-mode <mode>",
       "PR merge behavior: auto (merge when CI passes) | review (human approval, default)",
       "review",
@@ -887,6 +892,7 @@ export function registerImplementCommand(program: Command): Command {
     .option("--issue-tracker-provider <provider>", "Issue tracker (linear|jira|github-issues|file)")
     .option("--source-control-provider <provider>", "Source control (github|gitlab|file)")
     .option("--dry-run", "Skip creating PR — report only", false)
+    .option("--stage", "Run normally, but preview the PR and issue comment instead of writing them", false)
     .option("--max-implement-turns <n>", "Max coding agent turns (default: 40)")
     .option("--base-branch <branch>", "Base branch for PRs (default: main)")
     .option("--repository <owner/repo>", "Repository (auto-detected from git remote)")

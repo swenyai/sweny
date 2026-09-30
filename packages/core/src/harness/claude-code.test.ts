@@ -178,13 +178,24 @@ describe("ClaudeCodeHarness", () => {
   });
 
   it("declares honest capabilities and preflights ok", async () => {
-    const h = new mod.ClaudeCodeHarness({ logger: noopLogger() });
+    const h = new mod.ClaudeCodeHarness({ logger: noopLogger(), authProbe: () => ({ ok: true, via: "test" }) });
     expect(h.id).toBe("claude-code");
     expect(h.capabilities.builtinDeny).toBe("by-name");
     expect(h.capabilities.readOnly).toBe("native");
     expect(h.capabilities.structuredOutput).toBe("native");
     expect(h.defaultJudgeModel).toBe("claude-haiku-4-5");
     expect(await h.preflight()).toMatchObject({ ok: true });
+  });
+
+  it("preflight fails with the login fix when Claude Code has no auth (#339)", async () => {
+    const h = new mod.ClaudeCodeHarness({
+      logger: noopLogger(),
+      authProbe: () => ({ ok: false, reason: "Claude Code has no login. Set ANTHROPIC_API_KEY" }),
+    });
+    const pre = await h.preflight();
+    expect(pre.ok).toBe(false);
+    expect(!pre.ok && pre.reason).toMatch(/Claude Code has no login/);
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   describe("policy compile (#365)", () => {

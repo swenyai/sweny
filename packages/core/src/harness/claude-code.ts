@@ -49,6 +49,7 @@ import { jsonSchemaToZodShape, toolErrorToMcpResult, toolOutputToMcpResult } fro
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
 import { makeAbort } from "./abort.js";
+import { claudeCodeAuth, type AuthProbe } from "./auth.js";
 
 export { buildEvaluatePrompt, CLAUDE_CODE_CAPABILITIES };
 export { parseToolResultContent, summarizeToolError, makeAbort };
@@ -241,6 +242,8 @@ export interface ClaudeCodeHarnessOptions {
   sandboxAllowedDomains?: string[];
   /** Sandbox preflight probe (test seam). Returns a reason when the sandbox cannot run. */
   sandboxProbe?: () => string | undefined;
+  /** Login probe for `preflight()` (test seam). Default: {@link claudeCodeAuth} over `process.env`. */
+  authProbe?: AuthProbe;
   /**
    * Serve skill tools through the SwenyToolBridge (a stdio MCP shim over a
    * per-run unix socket, #414) instead of the in-process SDK MCP server.
@@ -324,6 +327,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
   private envScope: boolean | undefined;
   private toolBridge: boolean;
   private toolBridgeShim: { command: string; args: string[] } | undefined;
+  private authProbe: AuthProbe;
 
   constructor(opts: ClaudeCodeHarnessOptions = {}) {
     this.model = opts.model;
@@ -340,6 +344,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     this.sandboxProbe = opts.sandboxProbe;
     this.toolBridge = opts.toolBridge ?? process.env.SWENY_TOOL_BRIDGE === "1";
     this.toolBridgeShim = opts.toolBridgeShim;
+    this.authProbe = opts.authProbe ?? (() => claudeCodeAuth(process.env));
   }
 
   /**
@@ -371,7 +376,10 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     return { id: this.id, version: claudeSdkVersion() };
   }
 
-  async preflight(): Promise<{ ok: true; version: string }> {
+  /** Checks the agent can authenticate (#339): an env credential, Bedrock/Vertex, or a Claude Code login. */
+  async preflight(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
+    const auth = this.authProbe();
+    if (!auth.ok) return { ok: false, reason: auth.reason };
     return { ok: true, version: claudeSdkVersion() };
   }
 
@@ -413,7 +421,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       ...req,
       readOnly,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
-      strictMcp: readOnly || policy.strict,
+      strictMcp: readOnly || policy.strict || policy.exclusiveMcp === true,
       sandboxMode: policy.sandbox,
       agentAccess: { envVars: req.agentAccess?.envVars ?? [], domains: policy.egress },
     });

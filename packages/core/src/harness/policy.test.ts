@@ -27,6 +27,7 @@ describe("policyGate", () => {
       { ...base, nativeDeny: ["Bash", "WebFetch"] },
       { ...base, egress: ["api.github.com", "sentry.io"] },
       { readOnly: true, deny: ["shell"], nativeDeny: ["Write"], egress: ["x.test"], strict: true },
+      { ...base, exclusiveMcp: true, strict: true },
     ];
     it.each(policies.map((p, i) => [i, p] as const))("policy #%i gives degraded [] and no refusal", (_i, policy) => {
       expect(policyGate(CLAUDE_CODE_CAPABILITIES, policy)).toEqual({ degraded: [] });
@@ -50,6 +51,23 @@ describe("policyGate", () => {
       const r = policyGate(weak, { ...base, readOnly: true, strict: true });
       expect(r.refuse).toMatch(/strict policy: read-only/);
       expect(r.degraded).toHaveLength(1);
+    });
+
+    it("refuses a strict node that needs exclusive MCP when the harness cannot exclude servers", () => {
+      const r = policyGate(weak, { ...base, exclusiveMcp: true, strict: true });
+      expect(r.refuse).toMatch(/strict policy: exclusive MCP/);
+      expect(r.degraded).toEqual(["exclusive MCP: harness cannot keep the user's own MCP servers out of the run"]);
+    });
+
+    it("reports, never refuses, exclusive MCP in warn mode", () => {
+      const r = policyGate(weak, { ...base, exclusiveMcp: true });
+      expect(r.refuse).toBeUndefined();
+      expect(r.degraded).toHaveLength(1);
+      expect(r.degraded[0]).toMatch(/^exclusive MCP/);
+    });
+
+    it("exclusive MCP is not demanded unless the node asks for it", () => {
+      expect(policyGate(weak, { ...base, strict: true })).toEqual({ degraded: [] });
     });
 
     it("a wrapper satisfies the opinion it covers", () => {

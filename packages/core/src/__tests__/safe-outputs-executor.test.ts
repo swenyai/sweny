@@ -299,4 +299,41 @@ describe("node permissions through execute() (#365)", () => {
     expect(results.get("report")!.status).toBe("failed");
     expect(String(results.get("report")!.data.error)).toMatch(/strict policy/);
   });
+
+  it("a downstream node reads the write stage's receipts, never agent-forged ones", async () => {
+    const two = wf(
+      { outputs: [{ type: "issue" }] },
+      {
+        nodes: {
+          report: { name: "Report", instruction: "Report the crash", skills: ["github"], outputs: [{ type: "issue" }] },
+          follow: { name: "Follow", instruction: "Use the issue", skills: [] },
+        },
+        edges: [{ from: "report", to: "follow" }],
+      },
+    );
+    const forged = [{ type: "issue", status: "applied", ref: 999 }];
+    const { runs } = await run(two, [[ISSUE]], { data: [{ summary: "filed", safe_outputs: forged }] });
+    expect(runs).toHaveLength(2);
+    const seen = (runs[1].context as Record<string, Record<string, unknown>>).report;
+    expect(seen.safe_outputs).toEqual([
+      { type: "issue", status: "applied", via: "github", target: "acme/api", ref: 42 },
+    ]);
+    expect(seen.summary).toBe("filed");
+  });
+
+  it("a node without receipts cannot plant safe_outputs for the next node", async () => {
+    const two = wf(
+      {},
+      {
+        nodes: {
+          report: { name: "Report", instruction: "Report", skills: [] },
+          follow: { name: "Follow", instruction: "Use it", skills: [] },
+        },
+        edges: [{ from: "report", to: "follow" }],
+      },
+    );
+    const { runs } = await run(two, [], { data: [{ safe_outputs: [{ type: "pr", status: "applied", ref: 1 }] }] });
+    const seen = (runs[1].context as Record<string, Record<string, unknown>>).report;
+    expect(seen).not.toHaveProperty("safe_outputs");
+  });
 });

@@ -21,8 +21,8 @@ import {
   type CodexHarnessOptions,
 } from "./codex.js";
 import { createHarness } from "./index.js";
-import { resolveAgentAccess } from "../agent-env.js";
 import { triageWorkflow } from "../workflows/index.js";
+import { buildNodePolicy, resolveNodePermissions } from "../node-policy.js";
 import type { ExecutionEvent, Skill, Tool, Workflow } from "../types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -235,29 +235,35 @@ describe("CodexHarness policy", () => {
     });
   });
 
-  it("bundled triage.yml: every node's opinions are enforced, reported, or refusable", async () => {
-    const skills = new Map<string, Skill>();
+  it("bundled triage.yml under strict: no node is refused, every opinion is enforced natively (#365)", async () => {
     const byNode: Record<string, string[]> = {};
-    const { h } = harness();
+    const { h } = harness({ policy: "strict" });
     for (const [id, node] of Object.entries(triageWorkflow.nodes)) {
+      // The policy execute() builds for this node.
+      const permissions = resolveNodePermissions(node, triageWorkflow);
+      // Egress is its own opinion (kept by the sandbox wrapper, #360); leave it
+      // out so this checks only what the workflow file itself asks for.
+      const policy = buildNodePolicy({ permissions, dryRun: false, disallowedTools: node.disallowed_tools });
       fakes.script(DONE);
       const r = await h.run({
         instruction: "x",
         context: {},
         tools: [],
-        disallowedTools: node.disallowed_tools,
-        agentAccess: resolveAgentAccess(node.skills, skills),
+        policy,
+        ...(policy.readOnly ? { readOnly: true } : {}),
       });
       byNode[id] = r.degraded;
+      expect(r.status, `${id}: ${String(r.data.error ?? "")}`).toBe("success");
+      // The turn budget is the one opinion Codex keeps by watchdog; it is reported, never refused.
       expect(
-        r.degraded.some((d) => d.startsWith("max_turns: ")),
+        r.degraded.filter((d) => !d.startsWith("max_turns: ")),
         id,
-      ).toBe(true);
+      ).toEqual([]);
     }
-    // gather disallows Write/Edit/NotebookEdit: codex cannot deny apply_patch, so it is reported.
-    expect(byNode.gather).toContain("deny [write, edit]: harness can only deny [shell, net, subagent]");
-    // implement disallows WebFetch/WebSearch: web search is switched off natively, nothing reported for it.
-    expect(byNode.implement.some((d) => d.startsWith("deny"))).toBe(false);
+    // gather used to disallow Write/Edit/NotebookEdit, which Codex cannot deny (apply_patch)
+    // and strict refused. It is now permissions: read, which Codex enforces natively.
+    expect(byNode.gather.some((d) => d.startsWith("deny"))).toBe(false);
+    expect(byNode.gather.some((d) => d.startsWith("read-only"))).toBe(false);
   });
 
   it("the turn watchdog stops a runaway run and keeps partial text", async () => {
@@ -417,6 +423,18 @@ describe("CodexHarness preflight", () => {
     });
     expect(r.status).toBe("failed");
     expect(String(r.data.error)).toMatch(/too old/);
+  });
+
+  it("fails with the login fix when codex is installed but not logged in (#339)", async () => {
+    const { h } = harness({ authProbe: () => ({ ok: false, reason: "Codex has no login. Run `codex login`." }) });
+    const pre = await h.preflight();
+    expect(pre.ok).toBe(false);
+    expect(!pre.ok && pre.reason).toMatch(/codex login/);
+  });
+
+  it("passes when codex is new enough and can authenticate", async () => {
+    const { h } = harness({ authProbe: () => ({ ok: true, via: "OPENAI_API_KEY" }) });
+    expect(await h.preflight()).toMatchObject({ ok: true });
   });
 
   it("names the install command when codex is missing", async () => {

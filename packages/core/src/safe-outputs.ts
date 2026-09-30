@@ -9,8 +9,8 @@
  * the write, so this holds on every harness.
  *
  * Order of checks per intent (all deterministic): declared type, workflow
- * ceiling, actor trust, expiry, skill, target pin, shape and size, labels,
- * title prefix, dedupe, node cap, run cap. An optional model screen runs last
+ * ceiling, actor trust, expiry, skill, target pin, issue pin, shape and size,
+ * labels, title prefix, dedupe, node cap, run cap. An optional model screen runs last
  * over the intents that passed and can only veto them.
  */
 
@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import type {
   Logger,
   SafeOutputDeclaration,
+  SafeOutputPin,
   SafeOutputReceipt,
   SafeOutputsPolicy,
   SafeOutputType,
@@ -141,10 +142,14 @@ export function createEmitOutputTool(
 }
 
 /** Instruction block that tells the agent how writes work at this node. */
-export function safeOutputsInstruction(declarations: SafeOutputDeclaration[]): string {
+export function safeOutputsInstruction(declarations: SafeOutputDeclaration[], input?: Record<string, unknown>): string {
   const lines = declarations.map((d) => {
     const parts = [`at most ${d.max ?? 1}`];
     if (d.target) parts.push(`target ${d.target}`);
+    if (d.number !== undefined) {
+      const pin = resolvePin(d.number, input);
+      parts.push(pin ? `only issue or PR ${pin} (the number may be omitted)` : "pinned issue not set for this run");
+    }
     if (d.title_prefix) parts.push(`title prefix "${d.title_prefix}"`);
     if (d.type === "label" && d.labels?.length) parts.push(`only these labels: ${d.labels.join(", ")}`);
     return `- ${d.type}: ${parts.join(", ")}`;
@@ -207,6 +212,24 @@ export function actorTrusted(policy: SafeOutputsPolicy | undefined, actor: Actor
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
+/**
+ * The issue or PR a declaration pins, as a string. `{ input: name }` reads the
+ * run input; an absent or empty value is `undefined`, which refuses the write.
+ */
+export function resolvePin(pin: SafeOutputPin, input?: Record<string, unknown>): string | undefined {
+  const raw = typeof pin === "object" ? input?.[pin.input] : pin;
+  if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) return String(raw);
+  if (typeof raw !== "string") return undefined;
+  const v = raw.trim().replace(/^#/, "");
+  return v.length > 0 ? v : undefined;
+}
+
+/** Same issue or PR: `#42` and `42`, `OFF-12` and `off-12` match. */
+function sameIssue(a: string, b: string): boolean {
+  const norm = (x: string) => x.trim().replace(/^#/, "").toLowerCase();
+  return norm(a) === norm(b);
+}
+
 const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 
 /** `30m` → 1_800_000. Undefined for anything the schema would reject. */
@@ -215,7 +238,12 @@ export function parseDuration(s: string | undefined): number | undefined {
   return m ? Number(m[1]) * UNIT_MS[m[2]] : undefined;
 }
 
-/** The skill that applies a declaration: its `via`, else the first node skill (then any loaded skill) that can. */
+/**
+ * The skill that applies a declaration: its `via`, else the first node skill
+ * that can and is configured, else the first node skill that can, else any
+ * configured skill that can. A node listing `[linear, github]` therefore files
+ * on GitHub when only GitHub has credentials.
+ */
 export function resolveOutputSkill(
   decl: SafeOutputDeclaration,
   nodeSkills: string[],
@@ -224,6 +252,7 @@ export function resolveOutputSkill(
   if (decl.via) return decl.via;
   const supports = (id: string) => SAFE_OUTPUT_APPLIERS[id]?.includes(decl.type) === true;
   return (
+    nodeSkills.find((id) => supports(id) && skills.has(id)) ??
     nodeSkills.find((id) => supports(id)) ??
     Object.keys(SAFE_OUTPUT_APPLIERS).find((id) => supports(id) && skills.has(id))
   );
@@ -328,12 +357,40 @@ function dedupeKey(w: ResolvedWrite, explicit: string | undefined): string {
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 }
 
+/**
+ * The object an apply call produced: the output itself (GitHub REST), or the
+ * record a GraphQL mutation wraps (`{ issueCreate: { issue: {...} } }`, Linear).
+ */
+function producedRecord(output: unknown): Record<string, unknown> | undefined {
+  let o: unknown = output;
+  for (let depth = 0; depth < 3; depth++) {
+    if (!o || typeof o !== "object" || Array.isArray(o)) return undefined;
+    const rec = o as Record<string, unknown>;
+    if (["number", "identifier", "id"].some((k) => k in rec)) return rec;
+    const nested = Object.values(rec).filter((v) => v && typeof v === "object" && !Array.isArray(v));
+    if (nested.length !== 1) return undefined;
+    o = nested[0];
+  }
+  return undefined;
+}
+
 function refOf(output: unknown): string | number | undefined {
-  if (!output || typeof output !== "object") return undefined;
-  const o = output as Record<string, unknown>;
+  const o = producedRecord(output);
+  if (!o) return undefined;
   for (const k of ["number", "identifier", "id"]) {
     const v = o[k];
     if (typeof v === "number" || (typeof v === "string" && v.length > 0 && v.length <= 64)) return v;
+  }
+  return undefined;
+}
+
+/** The web URL of what a write produced (`html_url` on GitHub, `url` on Linear). */
+function urlOf(output: unknown): string | undefined {
+  const o = producedRecord(output);
+  if (!o) return undefined;
+  for (const k of ["html_url", "url"]) {
+    const v = o[k];
+    if (typeof v === "string" && /^https:\/\//.test(v) && v.length <= 512 && !/\/\/api\./.test(v)) return v;
   }
   return undefined;
 }
@@ -369,6 +426,8 @@ export interface ApplySafeOutputsOptions {
   staged: boolean;
   state: WriteStageState;
   logger: Logger;
+  /** The run input, for `number: { input }` pins. */
+  input?: Record<string, unknown>;
   /**
    * Model screen (only called when `policy.screen` is on and at least one write
    * passed every deterministic check). Anything but `ALLOW` is a veto.
@@ -437,11 +496,25 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       refuse(type === "comment" && !body.trim() ? "missing body" : "body too long", at);
       continue;
     }
-    if ((type === "comment" || type === "label") && !intent.number) {
+    // Issue pin: a pinned comment or label may only land on that issue or PR.
+    let issueRef = intent.number?.trim().replace(/^#/, "") || undefined;
+    if ((type === "comment" || type === "label") && decl.number !== undefined) {
+      const pin = resolvePin(decl.number, o.input);
+      if (!pin) {
+        refuse("pinned issue is not set for this run", at);
+        continue;
+      }
+      if (issueRef !== undefined && !sameIssue(issueRef, pin)) {
+        refuse("issue outside the declared number", at);
+        continue;
+      }
+      issueRef = pin;
+    }
+    if ((type === "comment" || type === "label") && !issueRef) {
       refuse("missing number", at);
       continue;
     }
-    if (via === "github" && intent.number !== undefined && !/^[1-9][0-9]*$/.test(intent.number)) {
+    if (via === "github" && issueRef !== undefined && !/^[1-9][0-9]*$/.test(issueRef)) {
       refuse("number must be an issue or PR number", at);
       continue;
     }
@@ -482,7 +555,7 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
     // A Linear comment's issue ID does not encode or enforce its declared team.
     // Resolve it through the configured read tool and carry its immutable ID to
     // the write. Missing lookup support or unverifiable membership fails closed.
-    let number = intent.number;
+    let number = issueRef;
     if (via === "linear" && type === "comment" && target) {
       const lookup = o.skills.get(via)?.tools.find((t) => t.name === "linear_get_issue" && t.access === "read");
       let issue: { id?: unknown; team?: { id?: unknown } } | undefined;
@@ -576,7 +649,8 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
     try {
       const output = await tool.handler(applier.build(write), { config: o.config, logger: o.logger });
       const ref = refOf(output);
-      receipts[index] = { ...receipts[index], ...(ref !== undefined ? { ref } : {}) };
+      const url = urlOf(output);
+      receipts[index] = { ...receipts[index], ...(ref !== undefined ? { ref } : {}), ...(url ? { url } : {}) };
       o.logger.info(`  safe output: ${write.type} via ${write.via} applied${ref !== undefined ? ` (${ref})` : ""}`, {
         node: o.nodeId,
       });

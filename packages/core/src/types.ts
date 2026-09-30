@@ -480,7 +480,17 @@ export interface SafeOutputDeclaration {
   labels?: string[];
   /** Drop an intent older than this when the write stage runs (e.g. `30m`, `2h`, `7d`). */
   expires?: string;
+  /**
+   * comment / label: the only issue or PR this output may write to (GitHub
+   * issue or PR number, Linear issue identifier), or `{ input: <name> }` to pin
+   * it to a run input. An intent naming another is refused; an intent naming
+   * none uses the pin. An empty pinned input refuses the write.
+   */
+  number?: SafeOutputPin;
 }
+
+/** A pinned issue / PR: a literal number or identifier, or the name of a run input that holds one. */
+export type SafeOutputPin = string | number | { input: string };
 
 /** Workflow-level safe-output policy: the ceiling and run-wide limits. */
 export interface SafeOutputsPolicy {
@@ -509,6 +519,8 @@ export interface SafeOutputReceipt {
   target?: string;
   /** Issue / PR / comment number or id the write produced. */
   ref?: string | number;
+  /** Web URL of what the write produced, as the API returned it. */
+  url?: string;
 }
 
 /**

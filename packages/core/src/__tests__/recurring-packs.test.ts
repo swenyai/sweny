@@ -7,12 +7,14 @@ import { WORKFLOW_TEMPLATES } from "../cli/templates.js";
 import { PACK_TEMPLATES } from "../cli/packs.js";
 import { parseWorkflow, validateWorkflow } from "../schema.js";
 import { builtinSkills } from "../skills/index.js";
+import { resolveNodePermissions } from "../node-policy.js";
 import type { Tool, Workflow } from "../types.js";
 
 /**
  * #338: three recurring packs. Each must validate with no credentials, carry an
  * output schema and a gate on every node, stay read-only except its declared
  * delivery node, and be reachable from `sweny new` right after explain-repo.
+ * #365: GitHub writes are declared safe outputs, never tools a node holds.
  */
 
 const EM_DASH = String.fromCharCode(0x2014);
@@ -137,6 +139,38 @@ for (const template of PACK_TEMPLATES) {
         } else {
           expect(writes, `${id} is not a declared output node but can write`).toEqual([]);
         }
+      }
+    });
+
+    it("declares a workflow permission ceiling and a safe_outputs policy (#365)", () => {
+      expect(workflow.permissions, "workflow permissions ceiling").toBeDefined();
+      expect(workflow.safe_outputs?.allow?.length, "safe_outputs.allow").toBeGreaterThan(0);
+      expect(workflow.safe_outputs?.max, "safe_outputs.max").toBeGreaterThan(0);
+    });
+
+    it("holds no GitHub write tool anywhere: GitHub writes are declared outputs only (#365)", () => {
+      const githubWrites = (skillTools.get("github") ?? []).filter((t) => t.access === "write").map((t) => t.name);
+      for (const [id, node] of nodes) {
+        const names = effectiveTools(node).map((t) => t.name);
+        for (const w of githubWrites) expect(names, `${id} can call ${w}`).not.toContain(w);
+      }
+      const outputs = nodes.flatMap(([, n]) => n.outputs ?? []);
+      expect(outputs.length).toBeGreaterThan(0);
+      for (const o of outputs) {
+        expect(o.max, `${o.type} max`).toBeDefined();
+        if (o.type === "issue") {
+          expect(o.title_prefix, "issue title_prefix").toBeDefined();
+          expect(o.labels?.length, "issue labels").toBeGreaterThan(0);
+        }
+        expect(workflow.safe_outputs!.allow).toContain(o.type);
+      }
+    });
+
+    it("every node is read-only except the declared delivery nodes (#365)", () => {
+      const declared = template.pack!.writes;
+      for (const [id, node] of nodes) {
+        const access = resolveNodePermissions(node, workflow).access;
+        expect(access, `${id} access`).toBe(declared[id] ? "write" : "read");
       }
     });
 
