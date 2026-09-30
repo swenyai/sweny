@@ -43,8 +43,8 @@ sweny workflow run .sweny/workflows/explain-repo.yml
 
 | Agent | Status |
 |-------|--------|
-| Claude Code | Supported. Passes the 14-case harness contract suite on every CI run. |
-| Codex | In progress, [#331](https://github.com/swenyai/sweny/issues/331) |
+| Claude Code | Supported. Passes the 15-case harness contract suite on every CI run, with skill tools in process and over the tool bridge. |
+| Codex | Supported (`--agent codex`, Codex CLI 0.159+). Passes the same suite against a scripted Codex. Reports as degraded: `max_turns` (kept by a sweny watchdog), `tools.deny: [write]` / `[edit]`, and per-host egress unless it runs inside the sandbox wrapper. See [Agent harnesses](#agent-harnesses). |
 
 An agent is listed as supported once it passes the same contract suite: scoped env, exclusive MCP config,
 read-only dry run, output checks, timeouts, untrusted-input fencing, cleanup.
@@ -120,6 +120,25 @@ $ sweny workflow create "audit our repo for security issues, \
 
   Save to .sweny/workflows/github_security_audit.yml? [Y/n/refine]
 ```
+
+## Agent harnesses
+
+Nodes run on Claude Code by default. `--agent codex` (Action input `agent: codex`) runs the same workflow on the Codex CLI (0.159 or newer, `CODEX_API_KEY` / `OPENAI_API_KEY` or `codex login`). Each row below is checked by the harness contract suite against a scripted fake of that agent, in CI, with no model calls.
+
+| Policy | Claude Code | Codex |
+|---|---|---|
+| Scoped env (no stray secrets) | enforced | enforced |
+| Read-only dry run | enforced | enforced (`--sandbox read-only`, no shell, web search or subagents) |
+| Only the MCP servers sweny injects | enforced | enforced (`--ignore-user-config`) |
+| `tools.deny` tool classes | shell, write, edit, net, subagent | shell, net, subagent |
+| Structured output (JSON schema) | enforced | enforced (`--output-schema`) |
+| Tool call trace with status | enforced | enforced |
+| Turn limit (`max_turns`) | enforced | sweny watchdog over tool calls |
+| Per-host egress allowlist | enforced when sandboxed | only inside the sandbox wrapper (srt); Codex's own network switch is on or off |
+| Usage | tokens and cost | tokens |
+| Timeout and cancel | enforced | enforced |
+
+What Codex cannot enforce itself is never dropped silently: it is listed as `degraded` in the log, the run receipt and `.sweny/runs/`, or, with `--harness-policy strict` (the default under GitHub Actions), the node is refused. On Codex that list is `max_turns` (kept by the watchdog, never refused), `tools.deny: [write]` / `[edit]` (apply_patch has no switch), `disallowed_tools` names Codex has no tool for, and the per-host egress allowlist (plus, with `SWENY_SANDBOX` on, the sandbox itself) unless Codex runs inside the sandbox wrapper.
 
 ## Use it anywhere
 

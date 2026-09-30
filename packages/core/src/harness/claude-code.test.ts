@@ -195,18 +195,17 @@ describe("ClaudeCodeHarness", () => {
       expect(index.createHarness("claude", { logger: noopLogger() })).toBeInstanceOf(mod.ClaudeCodeHarness);
     });
 
-    it("unknown ids keep the original honest error", () => {
-      expect(() => index.createHarness("codex")).toThrow(
-        'Unsupported coding agent "codex": the only supported agent is "claude" ' +
-          "(headless Claude Code). Remove --agent / coding-agent-provider or set it to claude.",
+    it("ids without an adapter keep an honest error", () => {
+      expect(() => index.createHarness("gemini")).toThrow(
+        'Unsupported coding agent "gemini": supported agents are "claude" (headless Claude Code) ' +
+          'and "codex" (Codex CLI). Remove --agent / coding-agent-provider or set it to one of them.',
       );
     });
 
-    it("matches the wording of the CLI validation error in cli/config.ts", async () => {
+    it("the CLI validation error in cli/config.ts uses the same words", async () => {
       const fs = await import("node:fs");
       const src = fs.readFileSync(new URL("../cli/config.ts", import.meta.url), "utf-8");
-      expect(src).toContain("the only supported agent is");
-      expect(src).toContain("(headless Claude Code). Remove --agent / coding-agent-provider or set it to claude.");
+      expect(src).toContain("errors.push(unsupportedAgentError(config.codingAgentProvider));");
     });
   });
 });

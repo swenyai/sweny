@@ -29,7 +29,9 @@ export type FakeStep =
   /** The agent process dies mid-stream. */
   | { kind: "crash"; message: string }
   /** The agent process exits nonzero. */
-  | { kind: "exit"; code: number };
+  | { kind: "exit"; code: number }
+  /** A wire event verbatim, for adapter-specific tests (a JSONL line for process fakes). Other fakes skip it. */
+  | { kind: "raw"; event: unknown };
 
 export type FakeScript = FakeStep[];
 

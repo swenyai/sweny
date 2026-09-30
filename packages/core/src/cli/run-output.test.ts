@@ -68,6 +68,34 @@ describe("receipt", () => {
     expect(line).toBe("✓ 3/3 nodes · 41 tool calls · 2m10s · 12k tokens · $0.18");
   });
 
+  it("names a non-Claude harness and what it could not honor natively (#331)", () => {
+    const codex = (degraded: string[]): NodeResult => ({
+      ...ok(2, { inputTokens: 900, outputTokens: 100 }),
+      harness: { id: "codex", version: "0.159.2" },
+      degraded,
+    });
+    const results = new Map<string, NodeResult>([
+      [
+        "a",
+        codex(["deny [write, edit]: harness can only deny [shell, net, subagent]", "max_turns: no native turn limit"]),
+      ],
+      ["b", codex(["max_turns: no native turn limit"])],
+    ]);
+    const s = summarizeRun(results, 5_000);
+    expect(s.harness).toBe("codex");
+    expect(s.degraded).toEqual(["deny [write, edit]", "max_turns"]);
+    expect(formatReceipt(s)).toBe(
+      "✓ 2/2 nodes · 4 tool calls · 5s · 2k tokens · codex · degraded: deny [write, edit], max_turns",
+    );
+  });
+
+  it("stays unchanged for Claude Code, which never degrades", () => {
+    const results = new Map<string, NodeResult>([
+      ["a", { ...ok(1), harness: { id: "claude-code", version: "0.3.0" }, degraded: [] }],
+    ]);
+    expect(formatReceipt(summarizeRun(results, 1_000))).toBe("✓ 1/1 nodes · 1 tool call · 1s");
+  });
+
   it("failure shows the cross and the partial count", () => {
     const results = new Map<string, NodeResult>([
       ["a", ok(3, { inputTokens: 900, outputTokens: 100, costUsd: 0.01 })],
@@ -301,6 +329,8 @@ describe("workflow run help text", () => {
         "--mermaid  Output a Mermaid diagram with execution state after run",
         "--comment-file <path>  Write a PR-comment markdown (run receipt, status-colored DAG, per-node table; metadata only) to <path> so any CI can post it",
         "--input <json>  JSON string of input data to pass to the workflow",
+        "--agent <id>  Coding agent that runs the nodes: claude (default) or codex",
+        "--harness-policy <mode>  strict: refuse a node whose policy the agent cannot enforce; warn: run it and report what was not enforced (default: strict under GitHub Actions, warn elsewhere; env SWENY_HARNESS_POLICY)",
       ]
     `);
   });

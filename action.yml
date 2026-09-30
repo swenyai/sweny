@@ -28,6 +28,22 @@ inputs:
     required: false
     default: "auto"
 
+  agent:
+    description: "Coding agent that runs the nodes: claude (default) or codex. codex needs openai-api-key and installs the Codex CLI (@openai/codex)."
+    required: false
+    default: "claude"
+  openai-api-key:
+    description: "OpenAI API key for agent: codex. Passed to Codex as CODEX_API_KEY."
+    required: false
+  codex-version:
+    description: "Version of @openai/codex to install when agent is codex. sweny needs 0.159.0 or newer."
+    required: false
+    default: "latest"
+  harness-policy:
+    description: "strict refuses a node whose policy the agent cannot enforce (for example tools.deny: [write] on codex); warn runs it and reports it in the receipt. Empty uses the CLI default, which is strict under GitHub Actions."
+    required: false
+    default: ""
+
   cli-version:
     description: "Version of @sweny-ai/core to install (the package that ships the `sweny` CLI). Defaults to latest."
     required: false
@@ -105,14 +121,30 @@ runs:
     - name: Validate auth inputs
       shell: bash
       env:
+        AGENT: ${{ inputs.agent }}
         HAS_OAUTH: ${{ inputs.claude-oauth-token != '' }}
         HAS_API_KEY: ${{ inputs.anthropic-api-key != '' }}
         HAS_AUTH_TOKEN: ${{ inputs.anthropic-auth-token != '' }}
+        HAS_OPENAI_KEY: ${{ inputs.openai-api-key != '' }}
       run: |
-        if [ "$HAS_OAUTH" != "true" ] && [ "$HAS_API_KEY" != "true" ] && [ "$HAS_AUTH_TOKEN" != "true" ]; then
-          echo "::error::Provide one of: claude-oauth-token, anthropic-api-key, or anthropic-auth-token"
-          exit 1
-        fi
+        case "${AGENT:-claude}" in
+          claude)
+            if [ "$HAS_OAUTH" != "true" ] && [ "$HAS_API_KEY" != "true" ] && [ "$HAS_AUTH_TOKEN" != "true" ]; then
+              echo "::error::Provide one of: claude-oauth-token, anthropic-api-key, or anthropic-auth-token"
+              exit 1
+            fi
+            ;;
+          codex)
+            if [ "$HAS_OPENAI_KEY" != "true" ]; then
+              echo "::error::agent: codex needs openai-api-key"
+              exit 1
+            fi
+            ;;
+          *)
+            echo "::error::agent must be claude or codex (got '$AGENT')"
+            exit 1
+            ;;
+        esac
 
     - name: Setup Node.js
       uses: actions/setup-node@v7
@@ -124,6 +156,15 @@ runs:
       env:
         CLI_VERSION: ${{ inputs.cli-version }}
       run: npm install -g "@sweny-ai/core@${CLI_VERSION}"
+
+    - name: Install Codex CLI
+      if: inputs.agent == 'codex'
+      shell: bash
+      env:
+        CODEX_VERSION: ${{ inputs.codex-version }}
+      run: |
+        npm install -g "@openai/codex@${CODEX_VERSION}"
+        codex --version
 
     # Agent sandbox deps (#360). SWENY_SANDBOX=auto (default) sandboxes agent
     # shell commands when bubblewrap + socat work and otherwise warns and runs
@@ -162,6 +203,9 @@ runs:
         ANTHROPIC_AUTH_TOKEN: ${{ inputs.anthropic-auth-token }}
         ANTHROPIC_BASE_URL: ${{ inputs.anthropic-base-url }}
         SWENY_AUTH: ${{ inputs.sweny-auth }}
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        AGENT: ${{ inputs.agent }}
+        INPUT_HARNESS_POLICY: ${{ inputs.harness-policy }}
         WORKFLOW_PATH: ${{ inputs.workflow }}
         DRY_RUN: ${{ inputs.dry-run }}
         VERBOSE: ${{ inputs.verbose }}
@@ -218,6 +262,20 @@ runs:
         # fails with a readable error when the shape doesn't match.
         if [ -n "$WORKFLOW_INPUT" ]; then
           FLAGS+=("--input" "$WORKFLOW_INPUT")
+        fi
+        # Harness policy travels by env, which an older CLI simply ignores.
+        if [ -n "$INPUT_HARNESS_POLICY" ]; then
+          export SWENY_HARNESS_POLICY="$INPUT_HARNESS_POLICY"
+        fi
+        # --agent only for a non-default agent, and only on a CLI that has it:
+        # an older CLI would reject the flag, and silently running Claude would be worse.
+        if [ -n "$AGENT" ] && [ "$AGENT" != "claude" ]; then
+          RUN_HELP_AGENT=$(sweny workflow run --help 2>/dev/null || true)
+          if ! grep -q -- '--agent' <<< "$RUN_HELP_AGENT"; then
+            echo "::error::the installed sweny CLI does not support agent: $AGENT; set cli-version to a release that does"
+            exit 1
+          fi
+          FLAGS+=("--agent" "$AGENT")
         fi
 
         sweny workflow run "$WORKFLOW_PATH" "${FLAGS[@]}"

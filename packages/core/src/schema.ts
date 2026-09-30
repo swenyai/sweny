@@ -954,12 +954,12 @@ export const workflowJsonSchema = {
             type: "array",
             items: { type: "string", minLength: 1 },
             description:
-              "Built-in tool names the agent cannot use at this node (e.g. ['Bash']). Forwarded to the Claude Agent SDK's disallowedTools, which removes the tools from the model context entirely.",
+              "Built-in tool names the agent cannot use at this node, in the harness's own names (Claude Code: ['Bash']). Passed through to the harness: Claude Code removes them from the model context; Codex maps known names to tool classes and reports what it cannot deny as degraded. For portable workflows prefer tool classes in tools.deny.",
           },
           tools: {
             type: "object",
             description:
-              "Per-node filter over skill-provided tools. 'allow' keeps only the listed skill tools; 'deny' removes the listed skill tools (applied after 'allow'). Filtered tools are never registered for the node's run. Absent field = all skill tools exposed. Complements disallowed_tools, which covers built-in agent tools only.",
+              "Per-node filter over skill-provided tools. 'allow' keeps only the listed skill tools; 'deny' removes the listed skill tools (applied after 'allow'). Filtered tools are never registered for the node's run. Absent field = all skill tools exposed. A 'deny' entry that names a portable tool class (shell, write, edit, net, subagent) also denies that class of built-in agent tools on every harness.",
             additionalProperties: false,
             anyOf: [{ required: ["allow"] }, { required: ["deny"] }],
             properties: {
@@ -972,6 +972,8 @@ export const workflowJsonSchema = {
                 type: "array",
                 items: { type: "string", minLength: 1 },
                 minItems: 1,
+                description:
+                  "Skill tool names to remove, and/or portable tool classes (shell, write, edit, net, subagent) to deny for built-in agent tools. Each harness enforces a class natively or reports it as degraded; under strict harness policy an unenforceable class refuses the node.",
               },
             },
           },
@@ -1079,7 +1081,10 @@ export const workflowJsonSchema = {
         properties: {
           from: { type: "string", minLength: 1 },
           to: { type: "string", minLength: 1 },
-          when: { type: "string", description: "Natural language condition. Claude evaluates at runtime." },
+          when: {
+            type: "string",
+            description: "Natural language condition, evaluated at runtime by the workflow's harness.",
+          },
           max_iterations: {
             type: "integer",
             minimum: 1,
