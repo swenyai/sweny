@@ -713,16 +713,21 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       // silent
     }
 
+    if (config.json) {
+      console.log(formatResultJson(results));
+    }
     if (hasFailed) {
       console.error(chalk.red(`\n  Implement workflow failed\n`));
       process.exit(1);
     }
-    const prResult = results.get("create_pr");
-    const prUrl = prResult?.data?.prUrl as string | undefined;
-    if (prUrl) {
-      console.log(chalk.green(`\n  PR created: ${prUrl}\n`));
-    } else {
-      console.log(chalk.green(`\n  Implement workflow completed\n`));
+    if (!config.json) {
+      const prResult = results.get("create_pr");
+      const prUrl = prResult?.data?.prUrl as string | undefined;
+      if (prUrl) {
+        console.log(chalk.green(`\n  PR created: ${prUrl}\n`));
+      } else {
+        console.log(chalk.green(`\n  Implement workflow completed\n`));
+      }
     }
 
     // Legacy /api/report back-compat — see triage path.
