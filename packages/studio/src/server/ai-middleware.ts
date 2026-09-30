@@ -32,9 +32,9 @@ async function ensureInitialized(): Promise<void> {
   if (_initPromise) return _initPromise;
 
   _initPromise = (async () => {
-    const { ClaudeClient, buildWorkflow, refineWorkflow, builtinSkills } = await import("@sweny-ai/core");
+    const { createHarness, buildWorkflow, refineWorkflow, builtinSkills } = await import("@sweny-ai/core");
 
-    _claude = new ClaudeClient({ maxTurns: 3 });
+    _claude = createHarness("claude-code", { maxTurns: 3 });
     _buildWorkflow = buildWorkflow;
     _refineWorkflow = refineWorkflow;
     _allSkills = builtinSkills;

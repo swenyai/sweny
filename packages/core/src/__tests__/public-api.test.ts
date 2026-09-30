@@ -125,3 +125,24 @@ describe("browser surface mirrors the safe constants (issue #213)", () => {
     expect((browser as Record<string, unknown>).validateParsed).toBeUndefined();
   });
 });
+
+// #330: the AgentHarness seam is public; nothing old was removed.
+describe("public API surface: AgentHarness seam (#330)", () => {
+  it("exports the harness factory, bridges, gate and Claude Code adapter", () => {
+    expect(typeof core.createHarness).toBe("function");
+    expect(typeof core.claudeCompat).toBe("function");
+    expect(typeof core.asClaude).toBe("function");
+    expect(typeof core.policyGate).toBe("function");
+    expect(typeof core.ClaudeCodeHarness).toBe("function");
+  });
+
+  it("keeps the deprecated Claude client exports", () => {
+    expect(core.ClaudeClient).toBe(core.ClaudeCodeHarness);
+    expect(typeof core.resolveAuthEnv).toBe("function");
+  });
+
+  it("createHarness builds the adapter and keeps the honest unknown-agent error", () => {
+    expect(core.createHarness("claude-code")).toBeInstanceOf(core.ClaudeCodeHarness);
+    expect(() => core.createHarness("nope")).toThrow(/Unsupported coding agent "nope"/);
+  });
+});

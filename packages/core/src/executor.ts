@@ -47,14 +47,24 @@ import { buildToolAliases } from "./skills/index.js";
 import { validateWorkflow } from "./schema.js";
 import { resolveAgentAccess } from "./agent-env.js";
 import { fenceUntrusted } from "./untrusted.js";
+import { asClaude } from "./harness/compat.js";
+import type { AgentHarness } from "./harness/types.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
   skills: Map<string, Skill>;
   /** Config values — env vars + explicit overrides */
   config?: Record<string, string>;
-  /** Claude client */
-  claude: Claude;
+  /**
+   * The agent harness that runs nodes (`createHarness("claude-code")`).
+   * Required unless the deprecated `claude` option is given.
+   */
+  harness?: AgentHarness;
+  /**
+   * Claude client.
+   * @deprecated Pass `harness`. Still accepted (see `claudeCompat()`); when both are set, `harness` wins.
+   */
+  claude?: Claude;
   /** Event observer for streaming/logging */
   observer?: Observer;
   /** Logger */
@@ -134,7 +144,12 @@ function throwIfAborted(signal?: AbortSignal): void {
  * - `trace`: full ordered execution trace including loops and routing decisions
  */
 export async function execute(workflow: Workflow, input: unknown, options: ExecuteOptions): Promise<ExecutionResult> {
-  const { claude, observer, signal, timeoutMs } = options;
+  const { observer, signal, timeoutMs } = options;
+  // `harness` is the seam; a legacy `claude` object is used as-is (what `asClaude(claudeCompat(claude))` yields).
+  const claude: Claude = options.harness ? asClaude(options.harness) : (options.claude as Claude);
+  if (!claude) {
+    throw new Error("execute() needs options.harness (or the deprecated options.claude)");
+  }
 
   // If the caller already aborted before we started, fail fast.
   throwIfAborted(signal);

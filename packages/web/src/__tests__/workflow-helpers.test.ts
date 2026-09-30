@@ -288,9 +288,9 @@ describe("generateCodeSnippet", () => {
     expect(code).toContain("createSkillMap([github, notification, slack])");
   });
 
-  it("includes ClaudeClient import and setup", () => {
+  it("includes createHarness import and setup", () => {
     const code = generateCodeSnippet(simpleWorkflow);
-    expect(code).toContain("ClaudeClient");
+    expect(code).toContain("createHarness");
     expect(code).toContain("process.env.ANTHROPIC_API_KEY");
   });
 

@@ -14,7 +14,10 @@ export type { ToolAliases } from "./function.js";
 /** Reasoning cap, matching the spec's ~500-character ceiling. */
 const MAX_REASONING_LENGTH = 500;
 
-/** Default judge model when neither evaluator nor node nor workflow specify one. */
+/**
+ * Judge model when neither evaluator, node, workflow nor the harness names one.
+ * Harnesses declare their own via `defaultJudgeModel` (Claude Code: this value).
+ */
 const DEFAULT_JUDGE_MODEL = "claude-haiku-4-5";
 
 function capReasoning(reasoning: string | undefined): string | undefined {
@@ -23,8 +26,13 @@ function capReasoning(reasoning: string | undefined): string | undefined {
   return reasoning.slice(0, MAX_REASONING_LENGTH - 1) + "…";
 }
 
-function resolveJudgeModel(evaluator: Evaluator, node: Node | undefined, workflow: Workflow | undefined): string {
-  return evaluator.model ?? node?.judge_model ?? workflow?.judge_model ?? DEFAULT_JUDGE_MODEL;
+function resolveJudgeModel(
+  evaluator: Evaluator,
+  node: Node | undefined,
+  workflow: Workflow | undefined,
+  harnessDefault: string | undefined,
+): string {
+  return evaluator.model ?? node?.judge_model ?? workflow?.judge_model ?? harnessDefault ?? DEFAULT_JUDGE_MODEL;
 }
 
 export interface EvaluateAllOptions {
@@ -76,7 +84,7 @@ export async function evaluateAll(
       if (!opts.claude) {
         throw new Error(`evaluator '${e.name}' is kind: judge but no Claude client was provided to evaluateAll`);
       }
-      const model = resolveJudgeModel(e, opts.node, opts.workflow);
+      const model = resolveJudgeModel(e, opts.node, opts.workflow, opts.claude.defaultJudgeModel);
       const verdict = await evaluateJudge(e, result, opts.claude, { model });
       out.push({
         name: e.name,

@@ -89,9 +89,9 @@ export function generateCodeSnippet(workflow: Workflow): string {
     workflow.id === "triage" ? "triageWorkflow" : workflow.id === "implement" ? "implementWorkflow" : null;
 
   const importLines = builtinVar
-    ? `import { execute, createSkillMap, ClaudeClient, ${skillImports} } from "@sweny-ai/core";
+    ? `import { execute, createSkillMap, createHarness, ${skillImports} } from "@sweny-ai/core";
 import { ${builtinVar} } from "@sweny-ai/core/workflows";`
-    : `import { execute, createSkillMap, ClaudeClient, ${skillImports} } from "@sweny-ai/core";
+    : `import { execute, createSkillMap, createHarness, ${skillImports} } from "@sweny-ai/core";
 import type { Workflow } from "@sweny-ai/core";`;
 
   const workflowRef = builtinVar ?? "myWorkflow";
@@ -102,7 +102,7 @@ import type { Workflow } from "@sweny-ai/core";`;
   return `${importLines}
 ${workflowComment}
 const skills = createSkillMap([${skillImports}]);
-const claude = new ClaudeClient({ apiKey: process.env.ANTHROPIC_API_KEY! });
+const claude = createHarness("claude-code", { apiKey: process.env.ANTHROPIC_API_KEY! });
 
 const results = await execute(${workflowRef}, {
   input: "your alert or issue description here",

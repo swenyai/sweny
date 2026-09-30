@@ -13,7 +13,7 @@
  *   npx tsx run.ts implement "Fix issue #42"
  */
 
-import { execute, createSkillMap, configuredSkills, validateWorkflowSkills, ClaudeClient } from "./src/index.js";
+import { execute, createSkillMap, configuredSkills, validateWorkflowSkills, createHarness } from "./src/index.js";
 import { triageWorkflow, implementWorkflow } from "./src/workflows/index.js";
 import type { ExecutionEvent } from "./src/types.js";
 
@@ -80,7 +80,7 @@ console.log();
 
 // ─── Execute ────────────────────────────────────────────────────
 
-const claude = new ClaudeClient({ maxTurns: 15 });
+const claude = createHarness("claude-code", { maxTurns: 15 });
 
 const observer = (event: ExecutionEvent) => {
   switch (event.type) {
