@@ -255,7 +255,7 @@ The workflow caps the run at 25 writes and allows only `issue`, `comment` and `p
 - A Jira or file tracker, or GitLab source control: the nodes that write there use the tracker's own tools.
 - An integration a read-only step cannot reach (Jira, GitLab, an observability provider without a built-in skill such as Loki or New Relic, your own MCP servers or workspace tools): `gather` and `investigate` keep the shell and MCP, with file edits and skill write tools denied.
 
-`sweny triage --stage` previews every issue, comment and PR instead of filing it, and stops before any code is pushed. `--dry-run` runs with no side effects at all.
+`sweny triage --stage` previews every issue, comment and PR instead of filing it, and stops before any code is pushed. `--dry-run` runs with no side effects at all. In both, sweny blocks the push itself rather than trusting the agent to skip it: `git push` fails in every node, and write tokens (`GITHUB_TOKEN`, `GH_TOKEN`) are withheld from the agent, so `gh pr create` fails too. See [No push under --stage](/cli/commands/#no-push-under---stage-and---dry-run).
 
 Behavior notes: a closed duplicate gets its +1 comment but is no longer reopened on Linear, since no safe output changes an issue's state; the comment says it is closed. On Codex, read-only steps have no shell, so `gather` and `investigate` see skill tools only.
 
