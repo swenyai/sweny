@@ -661,9 +661,10 @@ describe("Zod schemas", () => {
       });
       expect(result.instruction).toBe("Follow our coding conventions...");
     });
-    it("accepts mcp-only skill", () => {
-      const result = skillDefinitionZ.parse({ mcp: { command: "npx", args: ["-y", "server"] } });
-      expect(result.mcp?.command).toBe("npx");
+    it.each([undefined, "", "  "])("rejects mcp-only skill with instruction %j", (instruction) => {
+      expect(() => skillDefinitionZ.parse({ instruction, mcp: { command: "npx", args: ["-y", "server"] } })).toThrow(
+        "Inline skill must provide a non-empty instruction",
+      );
     });
     it("accepts both instruction and mcp", () => {
       const result = skillDefinitionZ.parse({
@@ -675,7 +676,7 @@ describe("Zod schemas", () => {
     });
     it("rejects skill with neither instruction nor mcp", () => {
       expect(() => skillDefinitionZ.parse({ name: "Empty" })).toThrow(
-        "Inline skill must provide instruction, mcp, or both",
+        "Inline skill must provide a non-empty instruction",
       );
     });
   });
@@ -1085,13 +1086,15 @@ describe("validateWorkflow", () => {
     expect(errors.filter((e) => e.code === "INVALID_INLINE_SKILL")).toEqual([]);
   });
 
-  it("accepts inline skills with mcp only", () => {
+  it("rejects inline skills with mcp only and explains the missing instruction", () => {
     const wf = {
       ...validWorkflow,
       skills: { "mcp-skill": { mcp: { command: "npx", args: ["-y", "server"] } } },
     };
     const errors = validateWorkflow(wf);
-    expect(errors.filter((e) => e.code === "INVALID_INLINE_SKILL")).toEqual([]);
+    expect(errors.filter((e) => e.code === "INVALID_INLINE_SKILL")).toEqual([
+      expect.objectContaining({ message: expect.stringMatching(/mcp-skill.*instruction/i) }),
+    ]);
   });
 });
 
