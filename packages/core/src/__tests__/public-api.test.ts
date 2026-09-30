@@ -144,7 +144,8 @@ describe("public API surface: AgentHarness seam (#330)", () => {
   it("createHarness builds the adapter and keeps the honest unknown-agent error", () => {
     expect(core.createHarness("claude-code")).toBeInstanceOf(core.ClaudeCodeHarness);
     expect(core.createHarness("codex")).toBeInstanceOf(core.CodexHarness);
-    expect(core.SUPPORTED_AGENTS).toEqual(["claude", "codex"]);
+    expect(core.createHarness("pi")).toBeInstanceOf(core.PiHarness);
+    expect(core.SUPPORTED_AGENTS).toEqual(["claude", "codex", "pi"]);
     expect(() => core.createHarness("nope")).toThrow(/Unsupported coding agent "nope"/);
   });
 });

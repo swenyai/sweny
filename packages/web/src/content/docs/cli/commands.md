@@ -73,7 +73,7 @@ sweny triage [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude` or `codex`; other values are rejected (alias: `--coding-agent-provider`) | `claude` |
+| `--agent <provider>` | Coding agent: `claude`, `codex` or `pi` (experimental); other values are rejected (alias: `--coding-agent-provider`) | `claude` |
 | `--observability-provider <provider>` | Observability platform | `datadog` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `github-issues`, `linear`, `jira`, `file` | `github-issues` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
@@ -175,7 +175,7 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude` or `codex`; other values are rejected (alias: `--coding-agent-provider`) | `claude` |
+| `--agent <provider>` | Coding agent: `claude`, `codex` or `pi` (experimental); other values are rejected (alias: `--coding-agent-provider`) | `claude` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `linear`, `jira`, `github-issues`, `file` | `linear` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
 | `--dry-run` | Analyze and plan only. Runs with read-only tools (no code edits, no shell, no PR). See [Dry run](/workflows/#dry-run). | `false` |
@@ -239,7 +239,7 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 | `--timeout <ms>` | Whole-run wall-clock budget for `workflow run` (one file, or per workflow in batch runs). `0` disables the budget. Non-numeric values are rejected | `3600000` (60 min) |
 | `--max-steps <n>` | Hard cap on total node executions for a single workflow file, including eval-failure retries | `200` |
 | `-y, --yes` | Skip the batch confirmation prompt (use in CI) | `false` |
-| `--agent <id>` | Coding agent that runs the nodes: `claude` or `codex` | `claude` |
+| `--agent <id>` | Coding agent that runs the nodes: `claude`, `codex` or `pi` (experimental) | `claude` |
 | `--harness-policy <mode>` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and reports it as degraded. Env: `SWENY_HARNESS_POLICY` | `strict` under GitHub Actions, else `warn` |
 
 With a file, loads the definition, validates its schema, then executes it with the same DAG renderer and skill infrastructure as the built-in `triage` and `implement` commands. With no file, it lists every `.sweny/e2e/*.yml` workflow, asks you to confirm (skip with `--yes`), runs them sequentially with template variables (`{base_url}`, `{run_id}`, ...) resolved, and exits `0` if all pass, `1` if any fail. Provider settings from `.sweny.yml` and `.env` apply.

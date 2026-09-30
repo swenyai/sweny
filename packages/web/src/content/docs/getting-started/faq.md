@@ -82,7 +82,7 @@ The Action and CLI are standalone open-source tools with no phone-home behavior.
 
 ## Can I use a different LLM?
 
-SWEny runs nodes on headless Claude Code by default, or on the Codex CLI with `--agent codex` (Action input `agent: codex`). Any other value (for example `gemini`) is rejected with an error instead of silently running a different agent. What each agent enforces natively, and what SWEny reports as degraded or refuses under `--harness-policy strict`, is in the harness table in the [README](https://github.com/swenyai/sweny#agent-harnesses).
+SWEny runs nodes on headless Claude Code by default, on the Codex CLI with `--agent codex` (Action input `agent: codex`), or experimentally on pi with `--agent pi`. Any other value (for example `gemini`) is rejected with an error instead of silently running a different agent. What each agent enforces natively, and what SWEny reports as degraded or refuses under `--harness-policy strict`, is in the harness table in the [README](https://github.com/swenyai/sweny#agent-harnesses).
 
 To route nodes to other models, point Claude Code at an Anthropic-compatible gateway. See [Model gateway (LiteLLM)](/advanced/model-gateway/).
 
