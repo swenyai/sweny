@@ -179,6 +179,103 @@ export function resolveEnvScope(
 export const WITHHELD_WARNING_CAP = 30;
 
 /**
+ * Runner baseline: exact names set by common CI images (GitHub-hosted runner
+ * image, Actions runner context, Debian-based containers). They are present on
+ * every run, so listing them as "withheld" is noise. Names only; none of these
+ * is a credential the operator supplied. Secrets such as `GITHUB_TOKEN`,
+ * `NPM_TOKEN`, or `AWS_*` are deliberately absent, so withholding them still
+ * warns.
+ */
+export const RUNNER_BASELINE_VARS: ReadonlySet<string> = new Set([
+  // image / OS
+  "ImageOS",
+  "ImageVersion",
+  "ACCEPT_EULA",
+  "DEBIAN_FRONTEND",
+  "AGENT_TOOLSDIRECTORY",
+  "CONDA",
+  "SWIFT_PATH",
+  "LEIN_HOME",
+  "LEIN_JAR",
+  "ANT_HOME",
+  "GRADLE_HOME",
+  "M2_HOME",
+  "SELENIUM_JAR_PATH",
+  "ENABLE_RUNNER_TRACING",
+  "INVOCATION_ID",
+  "JOURNAL_STREAM",
+  "SYSTEMD_EXEC_PID",
+  "MANAGERPID",
+  "OLDPWD",
+  "PWD",
+  "SHLVL",
+  "_",
+  // GitHub Actions context (never GITHUB_TOKEN)
+  "GITHUB_ACTION",
+  "GITHUB_ACTION_PATH",
+  "GITHUB_ACTION_REF",
+  "GITHUB_ACTION_REPOSITORY",
+  "GITHUB_ACTOR",
+  "GITHUB_ACTOR_ID",
+  "GITHUB_ENV",
+  "GITHUB_EVENT_PATH",
+  "GITHUB_GRAPHQL_URL",
+  "GITHUB_JOB",
+  "GITHUB_OUTPUT",
+  "GITHUB_PATH",
+  "GITHUB_REF_PROTECTED",
+  "GITHUB_REF_TYPE",
+  "GITHUB_REPOSITORY_ID",
+  "GITHUB_REPOSITORY_OWNER_ID",
+  "GITHUB_RETENTION_DAYS",
+  "GITHUB_RUN_ATTEMPT",
+  "GITHUB_STATE",
+  "GITHUB_STEP_SUMMARY",
+  "GITHUB_TRIGGERING_ACTOR",
+  "GITHUB_WORKFLOW",
+  "GITHUB_WORKFLOW_REF",
+  "GITHUB_WORKFLOW_SHA",
+]);
+
+/**
+ * Runner baseline: name patterns for families the CI images set in bulk
+ * (Actions runner internals, Android/Java/.NET/Go/Python toolchains, browsers
+ * and webdrivers, Azure CLI, vcpkg, ghcup, ...). `AWS_*`, `NPM_*` and
+ * `GITHUB_TOKEN`-style names are intentionally not matched.
+ */
+export const RUNNER_BASELINE_PATTERNS: readonly RegExp[] = [
+  /^ACTIONS_/,
+  /^RUNNER_/,
+  /^ANDROID_/,
+  /^JAVA_HOME(_|$)/,
+  /^CHROME/,
+  /WEBDRIVER$/,
+  /^DOTNET_/,
+  /^GOROOT(_|$)/,
+  /^PIPX_/,
+  /^POWERSHELL_/,
+  /^VCPKG_/,
+  /^GHCUP_/,
+  /^BOOTSTRAP_HASKELL_/,
+  /^AZURE_(EXTENSION_DIR|HTTP_USER_AGENT|CONFIG_DIR)$/,
+  /^HOMEBREW_/,
+  /^STATS_/,
+];
+
+/** True when `name` is set by the CI image itself, not by the workflow author. */
+export function isRunnerBaselineVar(name: string): boolean {
+  return RUNNER_BASELINE_VARS.has(name) || RUNNER_BASELINE_PATTERNS.some((re) => re.test(name));
+}
+
+/** Split withheld names into the runner baseline and everything else. */
+export function classifyWithheld(withheld: readonly string[]): { baseline: string[]; other: string[] } {
+  const baseline: string[] = [];
+  const other: string[] = [];
+  for (const n of withheld) (isRunnerBaselineVar(n) ? baseline : other).push(n);
+  return { baseline: baseline.sort(), other: other.sort() };
+}
+
+/**
  * One-line warning naming the withheld variables. Names only, never values;
  * sorted; capped at {@link WITHHELD_WARNING_CAP}.
  */
@@ -191,6 +288,46 @@ export function formatWithheldWarning(withheld: readonly string[]): string {
     `If a node's commands need any of them, add the names to env-passthrough ` +
     `(SWENY_ENV_PASSTHROUGH), or set env-scope: off (SWENY_ENV_SCOPE=off).`
   );
+}
+
+/** Plain-log summary: counts only, no names. */
+export function formatScopeSummary(total: number, baseline: number): string {
+  return (
+    `sweny: agent env scoped (${total} withheld, ${baseline} from the CI image). ` +
+    `Add names to env-passthrough if a node needs them; --verbose lists them.`
+  );
+}
+
+let withheldReported = false;
+
+/** Test seam: forget that the withheld notice was already emitted. */
+export function resetWithheldReport(): void {
+  withheldReported = false;
+}
+
+/**
+ * Report withheld env names, once per process (not per node or per client).
+ *
+ * - always: one plain `info` line with counts (not a `::warning::` annotation);
+ * - only when non-baseline names were withheld: a `warn` listing just those
+ *   (capped), as a `::warning title=SWEny agent env::` annotation under GitHub
+ *   Actions;
+ * - `debug` (shown with `--verbose`): every withheld name.
+ */
+export function reportWithheldEnv(
+  withheld: readonly string[],
+  logger: Pick<Logger, "info" | "warn" | "debug">,
+  env: Record<string, string | undefined> = process.env,
+): void {
+  if (withheld.length === 0 || withheldReported) return;
+  withheldReported = true;
+  const { baseline, other } = classifyWithheld(withheld);
+  logger.info(formatScopeSummary(withheld.length, baseline.length));
+  if (other.length > 0) {
+    const prefix = env.GITHUB_ACTIONS === "true" ? "::warning title=SWEny agent env::" : "";
+    logger.warn(`${prefix}${formatWithheldWarning(other)}`);
+  }
+  logger.debug(`sweny: agent env withheld: ${[...withheld].sort().join(", ")}`);
 }
 
 /**

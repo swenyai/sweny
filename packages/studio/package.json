@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/studio",
-  "version": "8.0.27",
+  "version": "8.0.28",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -53,5 +53,10 @@
     "react-dom": "^18.0.0 || ^19.0.0",
     "@xyflow/react": "^12.11.2",
     "elkjs": "^0.9.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/swenyai/sweny.git",
+    "directory": "packages/studio"
   }
 }
