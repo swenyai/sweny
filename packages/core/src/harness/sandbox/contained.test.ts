@@ -1,0 +1,286 @@
+/**
+ * Real containment (#360 step 2): the fake agent runs under srt through
+ * `prepareAgentSpawn`, exactly as a pi or ACP adapter would spawn its agent.
+ *
+ * Needs srt on PATH (plus bubblewrap, socat and ripgrep on Linux). Skips when
+ * no working wrapper is found, except under SWENY_REQUIRE_SANDBOX_WRAPPER=1
+ * (the `sandbox-wrapper` CI job), where a missing wrapper fails the suite.
+ *
+ * Every "blocked" assertion has an unwrapped control run proving the probe
+ * itself works, so a pass can never come from a broken probe. No external
+ * network: the allowlisted and blocked hosts are two local HTTP servers.
+ */
+
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import { homedir, tmpdir } from "node:os";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildAgentEnv } from "../../agent-env.js";
+import { detectSandboxWrapper, prepareAgentSpawn, type AgentSpawn, type SandboxWrapper } from "../sandbox-wrapper.js";
+import type { HarnessCapabilities, NodePolicy } from "../types.js";
+
+const REQUIRED = process.env.SWENY_REQUIRE_SANDBOX_WRAPPER === "1";
+const FAKE_AGENT = fileURLToPath(new URL("./fake-agent.mjs", import.meta.url));
+const CANARY_NAME = "SWENY_WRAP_CANARY";
+const CANARY_VALUE = `canary-${process.pid}-${Date.now()}`;
+
+const NO_NATIVE_SANDBOX: HarnessCapabilities = {
+  structuredOutput: "prompt",
+  toolTrace: "skill-only",
+  builtinDeny: "none",
+  mcp: { inject: true, exclusive: "none" },
+  sandbox: { fs: false, network: false },
+  readOnly: "none",
+  turnLimit: "watchdog",
+  usage: { tokens: false, costUsd: false, live: false },
+  cancel: "kill",
+  resume: false,
+};
+
+// Scratch laid out before detection so the credential file can be denied.
+const root = await mkdtemp(path.join(tmpdir(), "sweny-contained-"));
+const workspace = path.join(root, "workspace");
+const outside = path.join(root, "outside");
+const credential = path.join(root, "operator-credential.json");
+await mkdir(workspace, { recursive: true });
+await mkdir(outside, { recursive: true });
+await writeFile(credential, '{"token":"operator-secret"}');
+
+const detection = await detectSandboxWrapper({ wrapper: { credentialPaths: [credential] } });
+const wrapper: SandboxWrapper | undefined = detection.wrapper;
+
+afterAll(async () => {
+  await rm(root, { recursive: true, force: true });
+});
+
+type Probe =
+  | { kind: "http"; url: string; via: "proxy" | "direct" }
+  | { kind: "write"; path: string }
+  | { kind: "read"; path: string }
+  | { kind: "env"; names: string[] }
+  | { kind: "procScan"; needle: string };
+
+interface ProbeResult {
+  ok?: boolean;
+  status?: number;
+  error?: string;
+  values?: Record<string, string | null>;
+  found?: boolean;
+  scanned?: number;
+}
+
+function scopedEnv(): Record<string, string> {
+  // The adapter's env is already scoped: the canary is withheld, the node's var passes.
+  return buildAgentEnv(
+    { ...process.env, [CANARY_NAME]: CANARY_VALUE, NODE_SCOPED_VAR: "node-scoped" },
+    { extraVars: ["NODE_SCOPED_VAR"] },
+  );
+}
+
+function runChild(s: AgentSpawn): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(s.command, s.args, { cwd: s.cwd, env: s.env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c) => (stdout += c));
+    child.stderr.on("data", (c) => (stderr += c));
+    child.on("error", reject);
+    child.on("exit", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+function parseResults(stdout: string, stderr: string): ProbeResult[] {
+  const line = stdout
+    .split("\n")
+    .reverse()
+    .find((l) => l.startsWith("["));
+  if (!line) throw new Error(`fake agent printed no results.\nstdout: ${stdout}\nstderr: ${stderr}`);
+  return JSON.parse(line) as ProbeResult[];
+}
+
+/** The fake agent, unwrapped: the control that proves each probe can succeed. */
+async function runUnwrapped(plan: Probe[]): Promise<ProbeResult[]> {
+  const r = await runChild({
+    command: process.execPath,
+    args: [FAKE_AGENT, JSON.stringify(plan)],
+    env: { ...scopedEnv(), [CANARY_NAME]: CANARY_VALUE },
+    cwd: workspace,
+  });
+  return parseResults(r.stdout, r.stderr);
+}
+
+/** The fake agent through prepareAgentSpawn with the host's wrapper, strict sandbox mode. */
+async function runWrapped(
+  plan: Probe[],
+  opts: { egress?: string[]; readOnly?: boolean } = {},
+): Promise<{ results: ProbeResult[]; home?: string; homeExistsAfterCleanup: boolean }> {
+  const policy: NodePolicy = {
+    readOnly: opts.readOnly ?? false,
+    deny: [],
+    egress: opts.egress ?? [],
+    strict: false,
+    sandbox: "strict",
+  };
+  const prep = await prepareAgentSpawn({
+    caps: NO_NATIVE_SANDBOX,
+    policy,
+    wrapper,
+    env: {},
+    spawn: { command: process.execPath, args: [FAKE_AGENT, JSON.stringify(plan)], env: scopedEnv(), cwd: workspace },
+  });
+  expect(prep.refuse).toBeUndefined();
+  expect(prep.wrappedBy).toBe("srt");
+  let r: Awaited<ReturnType<typeof runChild>>;
+  try {
+    r = await runChild(prep.spawn);
+  } finally {
+    await prep.cleanup();
+  }
+  return {
+    results: parseResults(r.stdout, r.stderr),
+    home: prep.home,
+    homeExistsAfterCleanup: prep.home ? existsSync(prep.home) : false,
+  };
+}
+
+if (!wrapper && REQUIRED) {
+  describe("sandbox wrapper (required)", () => {
+    it("a working wrapper is available on this host", () => {
+      throw new Error(`SWENY_REQUIRE_SANDBOX_WRAPPER=1 but no wrapper: ${detection.reason}`);
+    });
+  });
+}
+
+describe.skipIf(!wrapper)(`wrapped fake agent (${process.platform}, srt)`, () => {
+  let allowed: http.Server;
+  let blocked: http.Server;
+  let hits = { allowed: 0, blocked: 0 };
+  let allowedUrl = "";
+  let blockedUrl = "";
+  let decoy: ChildProcess | undefined;
+
+  const listen = (onHit: () => void) =>
+    new Promise<http.Server>((resolve) => {
+      const s = http.createServer((_req, res) => {
+        onHit();
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("reached");
+      });
+      s.listen(0, "127.0.0.1", () => resolve(s));
+    });
+
+  beforeAll(async () => {
+    allowed = await listen(() => hits.allowed++);
+    blocked = await listen(() => hits.blocked++);
+    allowedUrl = `http://127.0.0.1:${(allowed.address() as AddressInfo).port}/`;
+    blockedUrl = `http://127.0.0.1:${(blocked.address() as AddressInfo).port}/`;
+    // A host process whose initial env holds the canary: what a wrapped agent
+    // must not be able to read through /proc/<pid>/environ.
+    decoy = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      env: { ...process.env, [CANARY_NAME]: CANARY_VALUE },
+      stdio: "ignore",
+    });
+  });
+
+  afterAll(async () => {
+    decoy?.kill("SIGKILL");
+    await new Promise((r) => allowed?.close(r));
+    await new Promise((r) => blocked?.close(r));
+  });
+
+  it("reaches an allowlisted host", async () => {
+    hits = { allowed: 0, blocked: 0 };
+    const allowedHost = new URL(allowedUrl).host; // 127.0.0.1:<port>
+    const { results } = await runWrapped([{ kind: "http", url: allowedUrl, via: "proxy" }], {
+      egress: [allowedHost],
+    });
+    expect(results[0], JSON.stringify(results[0])).toMatchObject({ ok: true, status: 200 });
+    expect(hits.allowed).toBe(1);
+  });
+
+  it("cannot reach a non-allowlisted host, through the proxy or directly", async () => {
+    // Control: unwrapped, the blocked server answers.
+    hits = { allowed: 0, blocked: 0 };
+    const control = await runUnwrapped([{ kind: "http", url: blockedUrl, via: "direct" }]);
+    expect(control[0]).toMatchObject({ ok: true, status: 200 });
+    expect(hits.blocked).toBe(1);
+
+    hits = { allowed: 0, blocked: 0 };
+    const allowedHost = new URL(allowedUrl).host;
+    const { results } = await runWrapped(
+      [
+        { kind: "http", url: blockedUrl, via: "proxy" },
+        { kind: "http", url: blockedUrl, via: "direct" },
+      ],
+      { egress: [allowedHost] },
+    );
+    expect(results[0].ok, `via proxy: ${JSON.stringify(results[0])}`).toBe(false);
+    expect(results[1].ok, `direct: ${JSON.stringify(results[1])}`).toBe(false);
+    expect(hits.blocked, "the blocked server saw no request").toBe(0);
+  });
+
+  it("cannot read an env var outside its scope", async () => {
+    const plan: Probe[] = [
+      { kind: "env", names: [CANARY_NAME, "NODE_SCOPED_VAR", "HOME"] },
+      { kind: "procScan", needle: CANARY_VALUE },
+    ];
+    // Control: /proc is readable and the decoy's env holds the canary.
+    if (process.platform === "linux") {
+      const control = await runUnwrapped(plan);
+      expect(control[1].found, "control: the canary is visible through /proc unwrapped").toBe(true);
+    }
+
+    const { results, home } = await runWrapped(plan);
+    const env = results[0].values ?? {};
+    expect(env[CANARY_NAME]).toBeNull();
+    expect(env.NODE_SCOPED_VAR).toBe("node-scoped");
+    expect(env.HOME, "scratch HOME, not the operator's").toBe(home);
+    expect(env.HOME).not.toBe(homedir());
+    if (process.platform === "linux") {
+      expect(results[1].found, "no process visible to the agent carries the canary").toBe(false);
+    }
+  });
+
+  it("cannot write outside the workspace; can write the workspace and its scratch HOME", async () => {
+    const inside = path.join(workspace, `inside-${Date.now()}.txt`);
+    const escaped = path.join(outside, `escaped-${Date.now()}.txt`);
+    const operatorHome = path.join(homedir(), `.sweny-escape-${process.pid}-${Date.now()}`);
+    // Control: unwrapped, the outside dir is writable.
+    const control = await runUnwrapped([{ kind: "write", path: path.join(outside, "control.txt") }]);
+    expect(control[0].ok).toBe(true);
+
+    const { results, homeExistsAfterCleanup } = await runWrapped([
+      { kind: "write", path: inside },
+      { kind: "write", path: escaped },
+      { kind: "write", path: operatorHome },
+      { kind: "write", path: "$HOME/scratch.txt" },
+    ]);
+    expect(results[0], "workspace write").toMatchObject({ ok: true });
+    expect(existsSync(inside)).toBe(true);
+    expect(results[1].ok, `outside write: ${JSON.stringify(results[1])}`).toBe(false);
+    expect(existsSync(escaped)).toBe(false);
+    expect(results[2].ok, `operator HOME write: ${JSON.stringify(results[2])}`).toBe(false);
+    expect(existsSync(operatorHome)).toBe(false);
+    expect(results[3], "scratch HOME write").toMatchObject({ ok: true });
+    expect(homeExistsAfterCleanup, "scratch HOME removed by cleanup").toBe(false);
+  });
+
+  it("cannot read the operator's credential files", async () => {
+    const control = await runUnwrapped([{ kind: "read", path: credential }]);
+    expect(control[0].ok).toBe(true);
+    const { results } = await runWrapped([{ kind: "read", path: credential }]);
+    expect(results[0].ok, JSON.stringify(results[0])).toBe(false);
+  });
+
+  it("a dry run cannot write the workspace either", async () => {
+    const target = path.join(workspace, `dry-run-${Date.now()}.txt`);
+    const { results } = await runWrapped([{ kind: "write", path: target }], { readOnly: true });
+    expect(results[0].ok, JSON.stringify(results[0])).toBe(false);
+    expect(existsSync(target)).toBe(false);
+  });
+});

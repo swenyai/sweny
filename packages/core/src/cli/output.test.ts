@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatDagResultMarkdown } from "./output.js";
+import { formatCrashError, formatDagResultMarkdown } from "./output.js";
 import { triageWorkflow } from "../workflows/index.js";
 import type { NodeResult, ExecutionTrace, Workflow } from "../types.js";
 import type { CliConfig } from "./config.js";
@@ -205,5 +205,18 @@ describe("formatDagResultMarkdown", () => {
     });
     expect(md).toContain("```mermaid");
     expect(md).toContain(`title: ${triageWorkflow.name}`);
+  });
+});
+
+// #339: every CLI catch now routes through formatCrashError, so it must keep
+// the message of a thrown non-Error and add the credential hint.
+describe("formatCrashError", () => {
+  it("keeps the text of a thrown string", () => {
+    expect(formatCrashError("boom from a plain string")).toContain("boom from a plain string");
+  });
+
+  it("adds the Anthropic credential hint on a 401 from the agent", () => {
+    const out = formatCrashError(new Error("anthropic API returned 401 Unauthorized"));
+    expect(out).toContain("ANTHROPIC_API_KEY");
   });
 });

@@ -915,6 +915,13 @@ export async function runNew(options?: {
 
   if (template) {
     steps.push(`${stepNum++}. Run your workflow:`, `   ${cli} workflow run .sweny/workflows/${template.id}.yml`);
+    if (template.pack) {
+      steps.push(
+        "",
+        `${stepNum++}. Run it automatically (GitHub Actions trigger and permissions):`,
+        `   https://docs.sweny.ai/workflows/packs/#${template.id}`,
+      );
+    }
   } else {
     steps.push(`${stepNum++}. Create your first workflow:`, `   ${cli} new`);
   }
