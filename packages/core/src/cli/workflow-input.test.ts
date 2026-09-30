@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeDryRunIntoInput, parseRunBudgetFlags } from "./workflow-input.js";
+import { mergeDryRunIntoInput, parseInputFlag, parseRunBudgetFlags } from "./workflow-input.js";
 import { validateRuntimeInput } from "../inputs.js";
 
 // #324: --dry-run must survive when --input replaces the config-derived
@@ -95,5 +95,24 @@ describe("parseRunBudgetFlags", () => {
     expect(() => parseRunBudgetFlags(undefined, "abc", 123)).toThrow(/--max-steps must be/);
     expect(() => parseRunBudgetFlags(undefined, "0", 123)).toThrow(/--max-steps must be/);
     expect(() => parseRunBudgetFlags(undefined, "1.5", 123)).toThrow(/--max-steps must be/);
+  });
+});
+
+describe("parseInputFlag", () => {
+  it("returns the parsed value for valid JSON", () => {
+    expect(parseInputFlag('{"a": 1}')).toEqual({ ok: true, value: { a: 1 } });
+  });
+
+  it("surfaces the real parse error plus an example instead of swallowing it (#339)", () => {
+    const r = parseInputFlag("{a: 1}");
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    const prefix = "--input must be valid JSON: ";
+    expect(r.lines[0].startsWith(prefix)).toBe(true);
+    expect(r.lines[0].length).toBeGreaterThan(prefix.length);
+    expect(r.lines[1]).toMatch(/^Example: --input '\{.*\}'$/);
+    // The example itself must parse.
+    const example = r.lines[1].slice(r.lines[1].indexOf("'") + 1, r.lines[1].lastIndexOf("'"));
+    expect(() => JSON.parse(example)).not.toThrow();
   });
 });

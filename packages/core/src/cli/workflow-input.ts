@@ -64,3 +64,21 @@ export function parseRunBudgetFlags(
     maxSteps: maxSteps === undefined ? undefined : parse(maxSteps, "--max-steps", 1),
   };
 }
+
+/**
+ * Parse the `--input` flag (#339). The old catch printed only "--input must be
+ * valid JSON" and dropped the parser's reason, so a stray quote from shell
+ * escaping left the user guessing. Returns the parsed value, or the lines to
+ * print: the real parse error plus a valid-shape example.
+ */
+export function parseInputFlag(raw: string): { ok: true; value: unknown } | { ok: false; lines: string[] } {
+  try {
+    return { ok: true, value: JSON.parse(raw) };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      lines: [`--input must be valid JSON: ${reason}`, `Example: --input '{"repository": "owner/repo", "limit": 5}'`],
+    };
+  }
+}
