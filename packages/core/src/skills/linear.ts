@@ -126,7 +126,7 @@ export const linear: Skill = {
               priority priorityLabel
               assignee { name email }
               labels { nodes { name } }
-              team { key name }
+              team { id key name }
               createdAt updatedAt
             }
           }`,

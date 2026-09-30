@@ -165,16 +165,21 @@ export function safeOutputsInstruction(declarations: SafeOutputDeclaration[]): s
 export interface ActorInfo {
   /** GitHub login of whoever triggered the run. */
   login?: string;
-  /** Author association of the event's comment, review, issue or PR author. */
+  /** Association verified for this login, or explicitly supplied by the trusted caller. */
   association?: string;
 }
 
-function eventAssociation(path: string | undefined): string | undefined {
-  if (!path) return undefined;
+function eventAssociation(path: string | undefined, login: string | undefined): string | undefined {
+  if (!path || !login) return undefined;
   try {
-    const ev = JSON.parse(readFileSync(path, "utf-8")) as Record<string, { author_association?: unknown } | undefined>;
+    const ev = JSON.parse(readFileSync(path, "utf-8")) as Record<
+      string,
+      { author_association?: unknown; user?: { login?: unknown } } | undefined
+    >;
     for (const key of ["comment", "review", "issue", "pull_request"]) {
-      const a = ev?.[key]?.author_association;
+      const author = ev?.[key];
+      if (typeof author?.user?.login !== "string" || author.user.login.toLowerCase() !== login.toLowerCase()) continue;
+      const a = author.author_association;
       if (typeof a === "string" && a.length > 0) return a;
     }
   } catch {
@@ -186,7 +191,7 @@ function eventAssociation(path: string | undefined): string | undefined {
 /** Who triggered this run: an explicit override, else GitHub Actions' env and event payload. */
 export function resolveActor(env: Record<string, string | undefined>, override?: ActorInfo): ActorInfo {
   const login = override?.login ?? env.GITHUB_ACTOR ?? undefined;
-  const association = override?.association ?? eventAssociation(env.GITHUB_EVENT_PATH);
+  const association = override?.association ?? eventAssociation(env.GITHUB_EVENT_PATH, login);
   return { ...(login ? { login } : {}), ...(association ? { association } : {}) };
 }
 
@@ -474,11 +479,37 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       continue;
     }
 
+    // A Linear comment's issue ID does not encode or enforce its declared team.
+    // Resolve it through the configured read tool and carry its immutable ID to
+    // the write. Missing lookup support or unverifiable membership fails closed.
+    let number = intent.number;
+    if (via === "linear" && type === "comment" && target) {
+      const lookup = o.skills.get(via)?.tools.find((t) => t.name === "linear_get_issue" && t.access === "read");
+      let issue: { id?: unknown; team?: { id?: unknown } } | undefined;
+      try {
+        const result = await lookup?.handler({ id: number }, { config: o.config, logger: o.logger });
+        if (result && typeof result === "object") {
+          issue = (result as { issue?: typeof issue }).issue;
+        }
+      } catch {
+        // A lookup error cannot authorize a write.
+      }
+      if (typeof issue?.id !== "string" || !issue.id || typeof issue.team?.id !== "string") {
+        refuse("cannot verify Linear issue team", at);
+        continue;
+      }
+      if (issue.team.id.toLowerCase() !== target.toLowerCase()) {
+        refuse("issue outside the declared team", at);
+        continue;
+      }
+      number = issue.id;
+    }
+
     const write: ResolvedWrite = {
       type,
       via,
       ...(target ? { target } : {}),
-      ...(intent.number !== undefined ? { number: intent.number } : {}),
+      ...(number !== undefined ? { number } : {}),
       ...(title ? { title } : {}),
       ...(type !== "label" ? { body } : {}),
       ...(labels ? { labels } : {}),
