@@ -452,6 +452,16 @@ export function formatResultJson(results: Map<string, NodeResult>): string {
   return JSON.stringify(Object.fromEntries(results), null, 2);
 }
 
+/** Drain terminal JSON before process.exit(), including when stdout is a pipe. */
+export function writeResultJson(results: Map<string, NodeResult>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    process.stdout.write(formatResultJson(results) + "\n", (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
 // ── Markdown output (for GitHub Actions step summary) ───────────
 /**
  * Format triage results as GitHub-flavored markdown for `$GITHUB_STEP_SUMMARY`.

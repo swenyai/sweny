@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { StringDecoder } from "node:string_decoder";
 import { resolveCustomWorkflowFile } from "./list-workflows.js";
 
 export interface RunWorkflowInput {
@@ -160,31 +161,79 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
 
     let stderr = "";
     let lineBuf = "";
-    let lastJsonLine = "";
+    let terminalJson = "";
+    let invalidTerminal = false;
+    const decoder = new StringDecoder("utf8");
+    let jsonLines: string[] = [];
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
 
-    // Parse stdout line-by-line: each line is either an NDJSON stream event
-    // or (the last valid JSON) the final --json result.
-    child.stdout.on("data", (chunk: Buffer) => {
-      lineBuf += chunk.toString();
+    // Events are NDJSON, but the CLI's terminal result is pretty-printed JSON.
+    // Frame whole JSON values before parsing, never their nested lines. Tracking
+    // strings keeps braces in node output from prematurely ending a value.
+    function consumeLine(line: string): void {
+      // Logger prefixes such as [info] and {progress must not open a JSON
+      // frame. CLI documents are objects, starting with { alone or a key.
+      if (jsonLines.length === 0 && !/^\s*\{\s*(?:"|\}|$)/.test(line)) return;
+      jsonLines.push(line);
+      for (const char of line) {
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (char === "\\") escaped = true;
+          else if (char === '"') inString = false;
+        } else if (char === '"') inString = true;
+        else if (char === "{" || char === "[") depth++;
+        else if (char === "}" || char === "]") depth--;
+      }
+      if (depth > 0 || inString) return;
+
+      const json = jsonLines.join("\n");
+      jsonLines = [];
+      depth = 0;
+      inString = false;
+      escaped = false;
+      try {
+        const parsed: unknown = JSON.parse(json);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          invalidTerminal = true;
+          return;
+        }
+        const value = parsed as Record<string, unknown>;
+        if (typeof value.type === "string") {
+          try {
+            opts.onProgress?.(value);
+          } catch {
+            // Progress is best-effort; a callback cannot break result parsing.
+          }
+        } else if (
+          Object.values(value).every(
+            (node) =>
+              node !== null &&
+              typeof node === "object" &&
+              !Array.isArray(node) &&
+              ["success", "skipped", "failed"].includes((node as Record<string, unknown>).status as string),
+          )
+        ) {
+          terminalJson = JSON.stringify(value);
+          invalidTerminal = false;
+        } else {
+          invalidTerminal = true;
+        }
+      } catch {
+        invalidTerminal = true;
+      }
+    }
+
+    function consumeText(text: string): void {
+      lineBuf += text;
       const parts = lineBuf.split("\n");
       lineBuf = parts.pop()!; // keep incomplete trailing fragment
-      for (const line of parts) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (parsed.type && opts.onProgress) {
-            try {
-              opts.onProgress(parsed);
-            } catch {
-              // Progress is best-effort — don't break the stream
-            }
-          }
-          lastJsonLine = trimmed;
-        } catch {
-          // Non-JSON line — ignore (progress spinner output, etc.)
-        }
-      }
+      for (const line of parts) consumeLine(line);
+    }
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      consumeText(decoder.write(chunk));
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
@@ -215,31 +264,28 @@ export async function runWorkflow(opts: RunWorkflowInput): Promise<RunWorkflowRe
       settled = true;
       clearTimeout(timer);
 
-      // Process any remaining buffered data
-      if (lineBuf.trim()) {
-        try {
-          const parsed = JSON.parse(lineBuf.trim());
-          if (parsed.type && opts.onProgress) {
-            try {
-              opts.onProgress(parsed);
-            } catch {
-              // Progress is best-effort
-            }
-          }
-          lastJsonLine = lineBuf.trim();
-        } catch {
-          // Not JSON
-        }
-      }
+      consumeText(decoder.end());
+      if (lineBuf.trim()) consumeLine(lineBuf);
+      if (jsonLines.length > 0) invalidTerminal = true;
 
       if (timedOut) {
-        resolve({ success: false, output: lastJsonLine, error: "Workflow timed out after 10 minutes" });
+        resolve({ success: false, output: terminalJson, error: "Workflow timed out after 10 minutes" });
       } else if (code === 0) {
-        resolve({ success: true, output: lastJsonLine });
+        if (!terminalJson || invalidTerminal) {
+          resolve({
+            success: false,
+            output: terminalJson,
+            error: invalidTerminal
+              ? "Sweny CLI emitted invalid or incomplete terminal JSON"
+              : "Sweny CLI exited without a terminal JSON result",
+          });
+        } else {
+          resolve({ success: true, output: terminalJson });
+        }
       } else {
         resolve({
           success: false,
-          output: lastJsonLine,
+          output: terminalJson,
           error: stderr.trim() || `Process exited with code ${code ?? "unknown (killed by signal)"}`,
         });
       }

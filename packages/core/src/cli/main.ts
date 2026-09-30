@@ -67,7 +67,7 @@ import {
   formatStepLine,
   formatDagResultHuman,
   formatDagResultMarkdown,
-  formatResultJson,
+  writeResultJson,
   formatValidationErrors,
   formatCrashError,
   formatCheckResults,
@@ -477,7 +477,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 
     // Output
     if (config.json) {
-      console.log(formatResultJson(results));
+      await writeResultJson(results);
     } else {
       console.log(formatDagResultHuman(results, durationMs, config));
     }
@@ -565,7 +565,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 });
 
 // ── sweny implement ───────────────────────────────────────────────────
-const implementCmd = registerImplementCommand(program);
+const implementCmd = registerImplementCommand(program).option("--json", "Output result as JSON", false);
 
 implementCmd.action(async (issueId: string, options: Record<string, unknown>) => {
   const fileConfig = loadConfigFile();
@@ -713,16 +713,21 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       // silent
     }
 
+    if (config.json) {
+      await writeResultJson(results);
+    }
     if (hasFailed) {
       console.error(chalk.red(`\n  Implement workflow failed\n`));
       process.exit(1);
     }
-    const prResult = results.get("create_pr");
-    const prUrl = prResult?.data?.prUrl as string | undefined;
-    if (prUrl) {
-      console.log(chalk.green(`\n  PR created: ${prUrl}\n`));
-    } else {
-      console.log(chalk.green(`\n  Implement workflow completed\n`));
+    if (!config.json) {
+      const prResult = results.get("create_pr");
+      const prUrl = prResult?.data?.prUrl as string | undefined;
+      if (prUrl) {
+        console.log(chalk.green(`\n  PR created: ${prUrl}\n`));
+      } else {
+        console.log(chalk.green(`\n  Implement workflow completed\n`));
+      }
     }
 
     // Legacy /api/report back-compat — see triage path.
@@ -1117,7 +1122,7 @@ export async function workflowRunAction(
     }
 
     if (isJson) {
-      process.stdout.write(JSON.stringify(Object.fromEntries(results), null, 2) + "\n");
+      await writeResultJson(results);
       process.exit(wfHasFailed ? 1 : 0);
       return;
     }

@@ -84,7 +84,7 @@ describe("runWorkflow", () => {
       expect.objectContaining({ cwd: expect.any(String), stdio: ["ignore", "pipe", "pipe"] }),
     );
 
-    proc.stdout!.emit("data", Buffer.from('{"ok": true}\n'));
+    proc.stdout!.emit("data", Buffer.from('{"prepare":{"status":"success"}}\n'));
     proc._emit("close", 0);
 
     const result = await promise;
@@ -103,7 +103,7 @@ describe("runWorkflow", () => {
       expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
     );
 
-    proc.stdout!.emit("data", Buffer.from('{"ok": true}\n'));
+    proc.stdout!.emit("data", Buffer.from('{"prepare":{"status":"success"}}\n'));
     proc._emit("close", 0);
 
     const result = await promise;
@@ -186,6 +186,82 @@ describe("runWorkflow", () => {
     expect(events[2]).toMatchObject({ type: "node:exit", node: "prepare" });
   });
 
+  it.each(["\n", "\r\n"])("parses the CLI's multiline result across byte boundaries (%j)", async (newline) => {
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+    const onProgress = vi.fn();
+    const promise = runWorkflow({ workflow: "triage", onProgress });
+    const event = { type: "node:enter", node: "prepare" };
+    proc.stdout!.emit("data", Buffer.from(JSON.stringify(event) + newline));
+    expect(onProgress).toHaveBeenCalledWith(event);
+
+    const terminal = {
+      prepare: { status: "success", data: { text: 'café 😄 { [ "quoted" \\ text', values: [1, { ok: true }] } },
+      // A workflow node may itself be named "type".
+      type: { status: "skipped", data: {} },
+    };
+    const bytes = Buffer.from(JSON.stringify(terminal, null, 2).replaceAll("\n", newline));
+    for (const byte of bytes) proc.stdout!.emit("data", Buffer.from([byte]));
+    // No trailing newline, as can happen when the child closes mid-flush.
+    proc._emit("close", 0);
+
+    const result = await promise;
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.output)).toEqual(terminal);
+    expect(onProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the terminal result when a progress event follows it", async () => {
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+    const onProgress = vi.fn();
+    const promise = runWorkflow({ workflow: "triage", onProgress });
+    const terminal = { prepare: { status: "success", data: {} } };
+    proc.stdout!.emit(
+      "data",
+      Buffer.from(
+        `[info] Starting {workflow\n{progress incomplete\n${JSON.stringify(terminal, null, 2)}\n{"type":"workflow:end"}\n[info] reporting complete\n`,
+      ),
+    );
+    proc._emit("close", 0);
+    expect(await promise).toEqual({ success: true, output: JSON.stringify(terminal) });
+    expect(onProgress).toHaveBeenCalledWith({ type: "workflow:end" });
+  });
+
+  it.each([
+    "",
+    '{"type":"workflow:end"}\n',
+    '{"type":"node:enter"}',
+    "null\n",
+    "42\n",
+    "[]\n",
+    '{"message":"not a workflow result"}\n',
+    '{"prepare":{"status":"pending"}}\n',
+    '{\n  "prepare": {"status":"success"}\n',
+    '{\n  "prepare": invalid\n}\n',
+    '{"prepare":{"status":"success"}}\n{"prepare": invalid}\n',
+  ])("fails closed without a valid terminal JSON result: %j", async (stdout) => {
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+    const promise = runWorkflow({ workflow: "triage" });
+    proc.stdout!.emit("data", Buffer.from(stdout));
+    proc._emit("close", 0);
+    const result = await promise;
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/terminal JSON/i);
+  });
+
+  it("preserves the terminal JSON on failure without replacing the exit error", async () => {
+    const proc = createMockProcess();
+    mockSpawn.mockReturnValue(proc);
+    const promise = runWorkflow({ workflow: "triage" });
+    const terminal = { prepare: { status: "failed", data: {} } };
+    proc.stdout!.emit("data", Buffer.from(JSON.stringify(terminal, null, 2)));
+    proc.stderr!.emit("data", Buffer.from("Workflow failed"));
+    proc._emit("close", 1);
+    expect(await promise).toEqual({ success: false, output: JSON.stringify(terminal), error: "Workflow failed" });
+  });
+
   it("handles chunked NDJSON across multiple data events", async () => {
     const proc = createMockProcess();
     mockSpawn.mockReturnValue(proc);
@@ -199,10 +275,10 @@ describe("runWorkflow", () => {
     // Simulate data arriving in chunks that split across line boundaries
     proc.stdout!.emit("data", Buffer.from('{"type":"node:ent'));
     proc.stdout!.emit("data", Buffer.from('er","node":"a","instruction":"X"}\n{"result":'));
-    proc.stdout!.emit("data", Buffer.from('"ok"}\n'));
+    proc.stdout!.emit("data", Buffer.from('{"status":"success"}}\n'));
     proc._emit("close", 0);
 
-    await promise;
+    expect((await promise).success).toBe(true);
     expect(events).toHaveLength(1); // only the event with type field
     expect(events[0]).toEqual({ type: "node:enter", node: "a", instruction: "X" });
   });
@@ -316,7 +392,7 @@ describe("runWorkflow", () => {
       expect.any(Object),
     );
 
-    proc.stdout!.emit("data", Buffer.from('{"ok": true}\n'));
+    proc.stdout!.emit("data", Buffer.from('{"prepare":{"status":"success"}}\n'));
     proc._emit("close", 0);
     await promise;
   });
@@ -362,12 +438,12 @@ describe("runWorkflow", () => {
     const promise = runWorkflow({ workflow: "triage" });
 
     // Send data without trailing newline — it stays in lineBuf until close
-    proc.stdout!.emit("data", Buffer.from('{"final":"result"}'));
+    proc.stdout!.emit("data", Buffer.from('{"final":{"status":"success"}}'));
     proc._emit("close", 0);
 
     const result = await promise;
     expect(result.success).toBe(true);
-    expect(JSON.parse(result.output)).toEqual({ final: "result" });
+    expect(JSON.parse(result.output)).toEqual({ final: { status: "success" } });
   });
 
   it("includes partial output in timed-out result", async () => {
@@ -379,7 +455,7 @@ describe("runWorkflow", () => {
 
     // Some progress arrives before timeout
     proc.stdout!.emit("data", Buffer.from('{"type":"node:enter","node":"a","instruction":"X"}\n'));
-    proc.stdout!.emit("data", Buffer.from('{"partial":"data"}\n'));
+    proc.stdout!.emit("data", Buffer.from('{"partial":{"status":"success"}}\n'));
 
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 1);
     proc._emit("close", null);
@@ -388,7 +464,7 @@ describe("runWorkflow", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe("Workflow timed out after 10 minutes");
     // Last JSON line before timeout is preserved
-    expect(JSON.parse(result.output)).toEqual({ partial: "data" });
+    expect(JSON.parse(result.output)).toEqual({ partial: { status: "success" } });
 
     vi.useRealTimers();
   });
@@ -459,7 +535,7 @@ describe("runWorkflow custom workflows (file-run path)", () => {
       expect.objectContaining({ cwd: dir, stdio: ["ignore", "pipe", "pipe"] }),
     );
 
-    proc.stdout!.emit("data", Buffer.from('{"ok": true}\n'));
+    proc.stdout!.emit("data", Buffer.from('{"prepare":{"status":"success"}}\n'));
     proc._emit("close", 0);
     const result = await promise;
     expect(result.success).toBe(true);
