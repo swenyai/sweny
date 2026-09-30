@@ -560,12 +560,12 @@ describe.skipIf(!haveDist)("CodexHarness skill tools over the tool bridge (needs
 // A descendant that ignores SIGTERM and holds inherited stdout/stderr open
 // exercises process-tree cleanup, not just the immediate fake CLI's exit.
 describe.skipIf(process.platform === "win32")("CodexHarness descendant cleanup", () => {
-  it.each(["timeout", "signal"] as const)("bounds %s cleanup after the CLI exits first", async (mode) => {
+  it.each(["timeout", "signal", "exit"] as const)("bounds %s cleanup after the CLI exits first", async (mode) => {
     const dir = fs.mkdtempSync(path.join(tmpdir(), "sweny-codex-reap-"));
     const pidFile = path.join(dir, "pids.json");
     const controller = new AbortController();
     const { h } = harness({
-      codexCommand: { command: process.execPath, args: [path.join(here, "fakes/codex-descendant.mjs"), pidFile] },
+      codexCommand: { command: process.execPath, args: [path.join(here, "fakes/codex-descendant.mjs"), pidFile, mode] },
       killGraceMs: 100,
     });
     let pids: { parent: number; descendant: number } | undefined;
@@ -587,7 +587,9 @@ describe.skipIf(process.platform === "win32")("CodexHarness descendant cleanup",
         }),
       ]);
       expect(result.status).toBe("failed");
-      expect(result.data.error).toMatch(mode === "timeout" ? /timed out/ : /aborted/);
+      expect(result.data.error).toMatch(
+        mode === "timeout" ? /timed out/ : mode === "signal" ? /aborted/ : /without a result/,
+      );
       // Linux may retain a reparented zombie until init reaps it. A zombie has
       // stopped executing and closed its pipes, so it is not a leaked process.
       await vi.waitFor(() => {
@@ -608,7 +610,11 @@ describe.skipIf(process.platform === "win32")("CodexHarness descendant cleanup",
       // Also clean up the deliberately failing regression on the old code.
       if (!pids && fs.existsSync(pidFile)) pids = JSON.parse(fs.readFileSync(pidFile, "utf8"));
       for (const pid of pids ? [pids.parent, pids.descendant] : []) {
-        try { process.kill(pid, "SIGKILL"); } catch { /* already stopped */ }
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          /* already stopped */
+        }
       }
       await running;
       fs.rmSync(dir, { recursive: true, force: true });

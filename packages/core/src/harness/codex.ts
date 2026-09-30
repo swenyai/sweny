@@ -20,7 +20,7 @@
  *
  * Every sweny opinion in the Codex column of the enforcement matrix is
  * enforced natively here, kept by sweny (watchdog, fencing, env scoping,
- * output validation), reported in `degraded`, or refused under strict policy
+ * output parsing), reported in `degraded`, or refused under strict policy
  * by `policyGate`. Nothing is dropped silently.
  */
 
@@ -271,14 +271,19 @@ export function isStrictCompatibleSchema(schema: unknown): boolean {
 const liveChildren = new Set<ChildProcess>();
 let exitHookInstalled = false;
 
-/**
- * Stop Codex. It stays in sweny's process group (not detached), so a Ctrl-C
- * or a CI cancel reaches it too; its MCP servers exit when their stdin closes.
- */
+/** Stop the owned process tree, even after its leader has exited. */
 function stopChild(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+  if (child.pid === undefined) return;
   try {
-    child.kill(signal);
+    if (process.platform !== "win32") {
+      // exec() gives each run its own process group. Descendants can retain
+      // stdout/stderr after the leader exits, so do not gate this on exitCode.
+      process.kill(-child.pid, signal);
+    } else {
+      // Windows has no POSIX process groups. Bound the tree-kill utility too.
+      execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], { timeout: 1000 }, () => {});
+      child.kill(signal);
+    }
   } catch {
     // already gone
   }
@@ -289,9 +294,22 @@ function trackChild(child: ChildProcess): void {
   if (!exitHookInstalled) {
     exitHookInstalled = true;
     // A crashing sweny must not leave Codex (and its MCP servers) running.
-    process.on("exit", () => {
+    const cleanup = () => {
       for (const c of liveChildren) stopChild(c, "SIGKILL");
-    });
+    };
+    process.on("exit", cleanup);
+    // Detached POSIX groups no longer receive our terminal's signals. Clean
+    // them up explicitly while preserving any host application's handlers.
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      const onSignal = () => {
+        cleanup();
+        if (process.listenerCount(signal) === 1) {
+          process.removeListener(signal, onSignal);
+          process.kill(process.pid, signal);
+        }
+      };
+      process.on(signal, onSignal);
+    }
   }
 }
 
@@ -573,6 +591,7 @@ export class CodexHarness implements AgentHarness {
         cwd: opts.spawn.cwd,
         env: opts.spawn.env,
         stdio: ["pipe", "pipe", "pipe"],
+        detached: process.platform !== "win32",
       });
     } catch (err) {
       abort?.clear();
@@ -581,7 +600,9 @@ export class CodexHarness implements AgentHarness {
     }
     trackChild(child);
 
+    let finish!: () => void;
     const closed = new Promise<void>((resolve) => {
+      finish = resolve;
       child.once("close", (code, signal) => {
         out.exitCode = code;
         out.exitSignal = signal;
@@ -598,9 +619,24 @@ export class CodexHarness implements AgentHarness {
       if (stopped) return;
       stopped = true;
       stopChild(child, "SIGTERM");
-      killTimer = setTimeout(() => stopChild(child, "SIGKILL"), this.killGraceMs);
+      killTimer = setTimeout(() => {
+        stopChild(child, "SIGKILL");
+        // An escaped descendant or failed OS kill must not retain this await
+        // through inherited pipes. Cancellation has already failed the run.
+        child.stdin?.destroy();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        child.unref();
+        finish();
+      }, this.killGraceMs);
       killTimer.unref?.();
     };
+    child.once("exit", (code, signal) => {
+      out.exitCode = code;
+      out.exitSignal = signal;
+      // The leader is done, but its descendants may still own our pipes.
+      stop();
+    });
     if (abort) {
       const onAbort = () => {
         out.abortReason = abort.reason();
@@ -747,6 +783,7 @@ export class CodexHarness implements AgentHarness {
     // A final line without a newline is complete only if it parses.
     if (buf.trim()) onLine(buf);
     if (killTimer) clearTimeout(killTimer);
+    stopChild(child, "SIGKILL");
     abort?.clear();
     liveChildren.delete(child);
     return out;
@@ -777,11 +814,11 @@ export class CodexHarness implements AgentHarness {
       harness: this.info(),
       degraded: [...degraded, ...extra],
     });
-    const refused = (why: string): HarnessRunResult => {
+    const refused = (why: string, extra: string[] = []): HarnessRunResult => {
       const msg = `codex refused this node: ${why}`;
       this.logger.error(msg);
       // `refused` keeps fail_soft from softening a policy refusal (executor.ts).
-      return tag({ status: "failed", data: { error: msg, refused: true }, toolCalls: [] });
+      return tag({ status: "failed", data: { error: msg, refused: true }, toolCalls: [] }, extra);
     };
 
     if (gate.refuse) return refused(gate.refuse);
@@ -913,7 +950,7 @@ export class CodexHarness implements AgentHarness {
       if ("refuse" in out) return refused(out.refuse);
       // OpenAI strict structured outputs reject some JSON schemas. When Codex
       // fails on the schema before doing anything, run once more without the
-      // native schema: sweny still asks for it in the prompt and checks it.
+      // native schema in relaxed mode. Prompt-only output is not schema-validated.
       if (
         schemaArgs.length > 0 &&
         !out.completed &&
@@ -924,7 +961,13 @@ export class CodexHarness implements AgentHarness {
         const why = isStrictCompatibleSchema(req.outputSchema)
           ? "codex rejected the output schema"
           : "the output schema is not OpenAI strict-compatible";
-        extraDegraded.push(`structured_output: ${why}; sweny parsed and checked the output instead`);
+        extraDegraded.push(`structured_output: ${why}; native schema validation unavailable`);
+        if (policy.strict) {
+          return refused(
+            "strict policy requires structured_output validation; refusing prompt-only fallback",
+            extraDegraded,
+          );
+        }
         this.logger.warn(`  codex: ${why}; retrying without --output-schema`);
         const again = await execOnce(false);
         if ("refuse" in again) return refused(again.refuse);
