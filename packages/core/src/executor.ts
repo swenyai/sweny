@@ -294,8 +294,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // Build context: input + all prior node results.
     // Each prior node entry is the node's `data` augmented with `evals`
     // (a Record<name, EvalResult> for downstream lookup like
-    // `priorNode.evals.tests_run_clean.pass`). When `data` already has an
-    // `evals` key, the data field wins (back-compat with existing workflows).
+    // `priorNode.evals.tests_run_clean.pass`). This namespace is reserved
+    // for runtime verdicts; an agent-provided `data.evals` never overrides it.
     const context: Record<string, unknown> = {
       input,
       ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, buildPriorNodeContext(v)])),
@@ -712,23 +712,16 @@ function warnOnJudgeBudget(workflow: Workflow, logger: Logger): void {
  *
  * Spec contract (https://spec.sweny.ai/nodes/#evalresult-type): downstream
  * nodes can read `priorNode.evals.<name>.pass` via the natural lookup path.
- * To honor this without breaking back-compat with workflows that read
- * `priorNode.<dataField>` directly, we spread `data` first and then attach
- * an `evals` namespace keyed by evaluator name. If the agent's structured
- * output happens to include a literal `evals` field, that field wins (and
- * the lookup degrades to "evals not available" for downstream readers).
+ * Preserve ordinary data fields, but reserve `evals` for runtime verdicts.
+ * Agent output must not forge a pass for downstream `requires` gates,
+ * including when no evaluator ran (the trusted namespace is then empty).
  */
 function buildPriorNodeContext(result: NodeResult): Record<string, unknown> {
   const data = (result.data ?? {}) as Record<string, unknown>;
   const evals = result.evals ?? [];
-  if (evals.length === 0) return data;
 
-  const evalsByName: Record<string, unknown> = {};
-  for (const e of evals) {
-    evalsByName[e.name] = e;
-  }
-  // Spread evals first so a data-side `evals` key shadows it (back-compat).
-  return { evals: evalsByName, ...data };
+  const evalsByName = Object.fromEntries(evals.map((e) => [e.name, e]));
+  return { ...data, evals: evalsByName };
 }
 
 /**
@@ -792,14 +785,10 @@ function buildRouteEvalEntry(
   }
 
   const evals = result.evals ?? [];
-  if (evals.length === 0) return { view: dataView, missing };
 
-  const evalsByName: Record<string, unknown> = {};
-  for (const e of evals) {
-    evalsByName[e.name] = e;
-  }
-  // Spread evals first so a data-side `evals` key shadows it (back-compat).
-  return { view: { evals: evalsByName, ...dataView }, missing };
+  const evalsByName = Object.fromEntries(evals.map((e) => [e.name, e]));
+  // Schema projection never grants agent data authority over runtime verdicts.
+  return { view: { ...dataView, evals: evalsByName }, missing };
 }
 
 /**
