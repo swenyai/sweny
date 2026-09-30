@@ -114,7 +114,7 @@ const observer = (event: ExecutionEvent) => {
 try {
   const { results } = await execute(workflow, input || undefined, {
     skills,
-    claude,
+    harness: claude,
     observer,
   });
 
