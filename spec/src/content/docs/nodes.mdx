@@ -24,6 +24,7 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 | `eval_policy`      | string                           | OPTIONAL | `all_pass`                     | How to aggregate evaluator results. v1 supports `all_pass`.                                                    |
 | `requires`         | [Requires](#requires)            | OPTIONAL | —                              | Machine-checked pre-conditions evaluated before the AI starts the node.                                        |
 | `retry`            | [Retry](#retry)                  | OPTIONAL | —                              | Node-local retry on eval failure with optional autonomous reflection.                                          |
+| `on_fail`          | `halt` \| `continue`             | OPTIONAL | `halt`                         | What happens when this node ends `failed`. See [Failure Handling](#failure-handling-on_fail).                  |
 
 ## Max Turns Semantics
 
@@ -126,6 +127,27 @@ A conforming executor:
 - When the field is absent or `false`, a failed node fails the workflow as before.
 
 Typical use: a best-effort context-gathering node whose downstream consumer has its own tools and can compensate for incomplete context.
+
+## Failure Handling (`on_fail`)
+
+A node that ends with status `failed` (agent failure, exhausted eval retries not
+softened by `fail_soft`, or a failed [`requires`](#requires) check) HALTS the
+workflow by default (`on_fail: halt`). The failed result stays in the results,
+so callers see the run as failed. Set `on_fail: continue` to route past the
+failure instead; use it only where the node's outgoing edges are safe to take
+after a failure (for example an unconditional edge to a notify node).
+
+This is distinct from `requires.on_fail`, which picks how a failed pre-condition
+is recorded (`fail` or `skip`).
+
+### Fail-closed routing
+
+When a node has conditional outgoing edges, the engine asks the model which
+edge applies. If that route evaluation fails (SDK error, timeout, or an
+unparseable answer), the engine does NOT pick a conditional edge. It takes the
+node's default (unconditional) edge if one exists; otherwise it throws
+`RouteEvaluationError` and the run terminates. Route and reflection calls run
+with all built-in tools disabled and no MCP servers.
 
 ## Rules & Context
 
@@ -360,8 +382,10 @@ The grammar is identical to [eval paths](#path-grammar): dotted segments,
 | `fail` (default) | `failed`      | `{ error: "requires failed: ..." }`           |
 | `skip`           | `skipped`     | `{ skipped_reason: "requires not met: ..." }` |
 
-In both cases the LLM is not invoked. Routing continues normally — edges
-with `when` conditions can read the failure status and route around it.
+In both cases the LLM is not invoked. A `skipped` node continues to routing
+normally. A `failed` node follows the node-level `on_fail` policy (see
+[Failure Handling](#failure-handling-on_fail)): by default the workflow halts.
+Set `on_fail: continue` on the node to route past the failure.
 
 ### Example
 
@@ -732,7 +756,7 @@ Triggered ONLY by eval failure, not by tool/API errors and not by
 
 ```yaml
 retry:
-  max: integer                      # ≥ 1
+  max: integer                      # 1-10
   instruction:                      # optional
     | string                        # static preamble
     | { auto: true }                # LLM-generated diagnosis (default prompt)
@@ -765,6 +789,11 @@ node (initial + N retries × 2 calls each). Workflow authors set the
 ceiling via `max`.
 
 ### Trace and observer events
+
+Each retry attempt also counts as one step against the workflow's
+`max_steps` budget, same as an ordinary node visit. When the budget is
+exhausted mid-retry, the node is recorded as failed and execution throws
+before any further LLM call (including autonomous reflection).
 
 Each attempt is recorded as its own `TraceStep` with a `retryAttempt`
 field (0-indexed). The executor emits a `node:retry` observer event

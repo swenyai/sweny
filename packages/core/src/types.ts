@@ -157,6 +157,20 @@ export type EvalPolicy = (typeof EVAL_POLICIES)[number];
 export const REQUIRES_ON_FAIL = ["fail", "skip"] as const;
 export type RequiresOnFail = (typeof REQUIRES_ON_FAIL)[number];
 
+/**
+ * Post-execution failure policy for a node (the top-level `on_fail` field).
+ *
+ * Distinct from {@link REQUIRES_ON_FAIL}, which governs the pre-condition
+ * `requires` gate (`fail | skip`). This one governs what happens AFTER the
+ * node ran and its retry budget is exhausted with `status: "failed"`:
+ *  - `halt`     (default) — stop the workflow, leaving the failed node in the
+ *                results so the run surfaces as failed. Fails closed: a broken
+ *                node never advances down a conditional edge.
+ *  - `continue` — legacy fall-through: routing proceeds from the failed node.
+ */
+export const NODE_ON_FAIL = ["halt", "continue"] as const;
+export type NodeOnFail = (typeof NODE_ON_FAIL)[number];
+
 /** MCP server transport type. Inferred from command/url when omitted. */
 export const MCP_TRANSPORTS = ["stdio", "http"] as const;
 export type McpTransport = (typeof MCP_TRANSPORTS)[number];
@@ -354,6 +368,21 @@ export interface Node {
    * Default false (previous behavior, back-compat).
    */
   fail_soft?: boolean;
+  /**
+   * What to do when this node finishes with `status: "failed"` (agent-level
+   * failure or an eval failure that exhausted the retry budget and was not
+   * softened by `fail_soft`).
+   *
+   *  - `"halt"` (default) — stop the workflow. The failed node stays in the
+   *    results so the run surfaces as failed; routing does NOT proceed. This
+   *    fails closed: a broken node can never take a conditional out-edge (e.g.
+   *    file an issue/PR) on the back of a failure.
+   *  - `"continue"` — legacy fall-through: routing proceeds from the failed
+   *    node, letting a downstream branch inspect or recover from the failure.
+   *
+   * Distinct from `requires.on_fail`, which is the pre-condition gate.
+   */
+  on_fail?: NodeOnFail;
 }
 
 /**
@@ -602,7 +631,15 @@ export interface Claude {
     signal?: AbortSignal;
   }): Promise<NodeResult>;
 
-  /** Evaluate a routing condition — pick one of N choices */
+  /**
+   * Evaluate a routing condition — pick one of N choices.
+   *
+   * Fails closed: returns `null` when the routing decision could not be made
+   * (SDK error, timeout, non-success subtype, or an unparseable answer).
+   * Callers MUST treat `null` as "no decision" and take an explicit default
+   * edge or terminate — never fall through to the first choice. Returning a
+   * choice id on that path is the fail-open bug this contract exists to close.
+   */
   evaluate(opts: {
     question: string;
     context: Record<string, unknown>;
@@ -611,7 +648,7 @@ export interface Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
-  }): Promise<string>;
+  }): Promise<string | null>;
 
   /**
    * Single-completion free-text query. No tools, no output schema.

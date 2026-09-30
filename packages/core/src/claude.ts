@@ -26,6 +26,27 @@ import { consoleLogger } from "./types.js";
 
 const SYSTEM_PROMPT = `You are a step in an automated workflow. Execute the instruction precisely using the tools available to you. Be thorough but concise. When you're done, summarize your findings and results.`;
 
+/**
+ * Built-in tools disallowed for the route-evaluation (`evaluate`) and
+ * reflection/judge (`ask`) calls.
+ *
+ * These are pure classification calls over prior-node data that can be
+ * attacker-influenceable (a prior node summarizes an untrusted issue body,
+ * PR diff, log line, etc.). They must never be able to mutate the workspace
+ * or shell out, regardless of any node's own `disallowed_tools` policy.
+ * `maxTurns: 1` already bounds them; this removes the powerful built-ins
+ * from the model's context entirely as structural defense-in-depth.
+ */
+export const CLASSIFICATION_DISALLOWED_TOOLS = [
+  "Bash",
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "NotebookEdit",
+  "WebFetch",
+  "WebSearch",
+] as const;
+
 /** How sweny resolves which credentials reach the Claude Code subprocess. */
 export type SwenyAuthMode = "auto" | "api-key" | "oauth";
 
@@ -526,7 +547,7 @@ export class ClaudeClient implements Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
-  }): Promise<string> {
+  }): Promise<string | null> {
     const { question, context, choices, timeoutMs, signal } = opts;
     const prompt = buildEvaluatePrompt(question, context, choices);
 
@@ -547,6 +568,15 @@ export class ClaudeClient implements Claude {
           env,
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
+          // Route evaluation is a pure classification call over
+          // possibly-attacker-influenceable prior-node data. Never let it
+          // shell out or mutate, regardless of the node's own policy.
+          // Disable ALL built-in tools (SDK `tools: []`); no MCP servers are passed.
+          // The disallow list below stays as a second layer.
+          tools: [],
+          mcpServers: {},
+          strictMcpConfig: true,
+          disallowedTools: [...CLASSIFICATION_DISALLOWED_TOOLS],
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
           ...(abort ? { abortController: abort.controller } : {}),
           ...(this.model ? { model: this.model } : {}),
@@ -559,33 +589,32 @@ export class ClaudeClient implements Claude {
           if (resultMsg.subtype === "success" && "result" in resultMsg) {
             response = resultMsg.result;
           } else {
-            // Distinguish an SDK-level failure from a genuinely ambiguous
-            // model answer. Without this, both fall through to validIds[0]
-            // and log the same "Could not parse route choice" warning, so an
-            // operator cannot tell them apart. Short-circuit below so the
-            // ambiguous-answer warning never fires on top of this one.
+            // Fail closed. An SDK-level failure (non-success subtype) is NOT a
+            // routing decision. Signal it to the caller (null) so the executor
+            // takes an explicit default edge or terminates — never the old
+            // fall-through to the first choice, which silently routed an outage
+            // down the first conditional edge (e.g. filing a real issue/PR).
             sdkFailed = true;
             this.logger.warn(
-              `claude.evaluate: SDK returned non-success subtype "${resultMsg.subtype}" — falling back to first choice.`,
+              `claude.evaluate: SDK returned non-success subtype "${resultMsg.subtype}" — failing closed (no route decision).`,
             );
           }
         }
       }
     } catch (err: any) {
       if (abort?.reason() === "timeout") {
-        this.logger.warn(`Evaluate query timed out after ${timeoutMs}ms. Falling back to first choice.`);
+        this.logger.warn(`Evaluate query timed out after ${timeoutMs}ms. Failing closed (no route decision).`);
       } else {
-        this.logger.warn(`Evaluate query failed: ${err.message}. Falling back to first choice.`);
+        this.logger.warn(`Evaluate query failed: ${err.message}. Failing closed (no route decision).`);
       }
-      return choices[0].id;
+      return null;
     } finally {
       abort?.clear();
       await interruptStream(stream);
     }
 
-    // An SDK-level failure already logged a distinct message; do not also emit
-    // the ambiguous-answer warning, which would misattribute the cause.
-    if (sdkFailed) return choices[0].id;
+    // An SDK-level failure already logged a distinct message; fail closed.
+    if (sdkFailed) return null;
 
     const text = response.trim().replace(/^["']|["']$/g, "");
     const validIds = choices.map((c) => c.id);
@@ -597,9 +626,12 @@ export class ClaudeClient implements Claude {
     const match = validIds.find((id) => text.includes(id));
     if (match) return match;
 
-    // Fallback
-    this.logger.warn(`Could not parse route choice from: "${text.slice(0, 100)}". Falling back to first choice.`);
-    return validIds[0];
+    // Fail closed. An unparseable answer is not a decision. Returning
+    // validIds[0] here is the fail-open bug: on a node with a single
+    // conditional out-edge, the "first choice" is always that edge, so a
+    // garbled model answer would always take it. Signal no-decision instead.
+    this.logger.warn(`Could not parse route choice from: "${text.slice(0, 100)}". Failing closed (no route decision).`);
+    return null;
   }
 
   async ask(opts: {
@@ -635,6 +667,15 @@ export class ClaudeClient implements Claude {
           env,
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
+          // Reflection and judge scoring are pure classification calls over
+          // possibly-attacker-influenceable prior-node data. Deny the powerful
+          // built-ins so they can never shell out or mutate the workspace.
+          // Disable ALL built-in tools (SDK `tools: []`); no MCP servers are passed.
+          // The disallow list below stays as a second layer.
+          tools: [],
+          mcpServers: {},
+          strictMcpConfig: true,
+          disallowedTools: [...CLASSIFICATION_DISALLOWED_TOOLS],
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
           ...(abort ? { abortController: abort.controller } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),

@@ -289,6 +289,18 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
       logger.warn(`  requires ${onFail === "skip" ? "skipped" : "failed"}: ${requiresError}`, { node: currentId });
 
+      // Fail closed here too: a requires failure with on_fail: fail yields a
+      // failed node, which halts by default (same policy as a failed run).
+      if (result.status === "failed" && (node.on_fail ?? "halt") === "halt") {
+        logger.warn(`  requires failed; halting workflow (on_fail: halt)`, { node: currentId });
+        safeObserve(
+          observer,
+          { type: "route", from: currentId, to: "(end)", reason: "node failed (on_fail: halt)" },
+          logger,
+        );
+        break;
+      }
+
       // Apply normal routing rules (dry run gate + resolveNext).
       // TODO: dedupe with requires path — see advanceFromNode helper below
       const next = await advanceFromNode(
@@ -436,6 +448,25 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         node: currentId,
       });
 
+      // #325: a retry attempt re-invokes the agent on this node (full model
+      // spend) exactly like a fresh node visit, so it counts against the same
+      // `stepCount`/`maxSteps` budget. Checked BEFORE buildRetryPreamble so no
+      // paid reflection call happens once the budget is exhausted. On
+      // exhaustion, record a failed result and emit node:exit so observers
+      // never see node:enter without a matching node:exit.
+      stepCount++;
+      if (stepCount > maxSteps) {
+        const budgetError =
+          `step budget exceeded: workflow '${workflow.id}' ran ${stepCount} steps (max_steps: ${maxSteps}) ` +
+          `while retrying node '${currentId}' (attempt ${attempt + 1}/${retry.max}). Lower 'retry.max' on the ` +
+          `offending node or raise 'max_steps' if the workflow legitimately needs more steps.`;
+        result = { ...result, status: "failed", data: { ...result.data, error: budgetError } };
+        results.set(currentId, result);
+        trace.steps.push({ node: currentId, status: "failed", iteration, retryAttempt: attempt });
+        safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
+        throw new Error(budgetError);
+      }
+
       const preamble = await buildRetryPreamble({
         retry,
         evalFailures: outcome.failures,
@@ -487,6 +518,23 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
     logger.info(`  ✓ ${result.status}`, { node: currentId, toolCalls: result.toolCalls.length });
 
+    // Fail closed on node failure. A node that finishes `failed` (agent-level
+    // failure, or an eval failure that exhausted retries and was not softened
+    // by `fail_soft`) HALTS the workflow by default. This stops a broken node
+    // from advancing down a conditional out-edge (e.g. filing an issue/PR) on
+    // the back of a failure. The failed result stays in `results`, so the run
+    // surfaces as failed to callers (CLI exit code, cloud status). Authors who
+    // want the legacy fall-through opt in per-node with `on_fail: "continue"`.
+    if (result.status === "failed" && (node.on_fail ?? "halt") === "halt") {
+      logger.warn(`  node failed; halting workflow (on_fail: halt)`, { node: currentId });
+      safeObserve(
+        observer,
+        { type: "route", from: currentId, to: "(end)", reason: "node failed (on_fail: halt)" },
+        logger,
+      );
+      break;
+    }
+
     // Dry run gate + routing — shared with requires path via advanceFromNode helper.
     currentId = await advanceFromNode(
       workflow,
@@ -518,6 +566,23 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
 }
 
 // ─── Internals ───────────────────────────────────────────────────
+
+/**
+ * Thrown when a conditional routing decision could not be made and there is
+ * no explicit default (unconditional) edge to fall back to. Fails closed: the
+ * executor refuses to guess an edge (the historical fail-open bug), so an LLM
+ * outage terminates the run loudly instead of silently taking the first
+ * conditional edge.
+ */
+export class RouteEvaluationError extends Error {
+  constructor(
+    public readonly node: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "RouteEvaluationError";
+  }
+}
 
 /**
  * Build the full instruction for a node.
@@ -1124,6 +1189,47 @@ async function resolveNext(
     signal: abort?.signal,
     timeoutMs: abort?.timeoutMs,
   });
+
+  // Fail closed. `evaluate` returns null when the routing decision could not
+  // be made (SDK error, timeout, non-success subtype, or an unparseable
+  // answer). We must NOT fall through to a conditional edge: on a node with a
+  // single conditional out-edge, "the first choice" IS that edge, so an outage
+  // would always take it (the fail-open bug that silently filed real
+  // issues/PRs instead of routing to `skip`). Take the author's explicit
+  // default/else edge if one exists; otherwise terminate the run loudly.
+  if (chosen === null) {
+    if (defaultEdge) {
+      logger?.warn(
+        `  route eval: evaluation failed for node '${current}'; taking default (unconditional) edge '${defaultEdge.to}'.`,
+        { node: current },
+      );
+      safeObserve(
+        observer,
+        { type: "route", from: current, to: defaultEdge.to, reason: "route evaluation failed; default edge" },
+        logger,
+      );
+      if (edgeCounts) {
+        const key = `${current}→${defaultEdge.to}`;
+        edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+      }
+      return defaultEdge.to;
+    }
+    logger?.error(
+      `  route eval: evaluation failed for node '${current}' and there is no default (unconditional) edge; ` +
+        `refusing to fail open. Terminating the run. Add a default edge or fix the model backend.`,
+      { node: current },
+    );
+    safeObserve(
+      observer,
+      { type: "route", from: current, to: "(end)", reason: "route evaluation failed; no default edge" },
+      logger,
+    );
+    throw new RouteEvaluationError(
+      current,
+      `route evaluation failed for node '${current}' and no default (unconditional) edge exists; ` +
+        `refusing to fail open`,
+    );
+  }
 
   // Validate that Claude returned a valid target.
   const validTargets = new Set(outEdges.map((e) => e.to));
