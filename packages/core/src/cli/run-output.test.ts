@@ -293,7 +293,7 @@ describe("workflow run help text", () => {
         "--timeout <ms>  Whole-run wall-clock timeout in ms. Applies to batch runs (.sweny/e2e/) and to a single workflow file (default: 3600000 = 60 min; 0 = no wall-clock budget)",
         "--max-steps <n>  Hard cap on total node executions for a single workflow file, including eval-failure retries (default: 200)",
         "-y, --yes  Skip the batch confirmation prompt (for CI)",
-        "--dry-run  Execute until the first conditional routing decision, then stop (no side effects past that point). To inspect nodes without running, use --list-nodes.",
+        "--dry-run  Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge. To inspect nodes without running, use --list-nodes.",
         "--list-nodes  Validate, print nodes and skills, and exit without running",
         "--json  Output result as JSON on stdout; suppress progress output",
         "--stream  Stream NDJSON events to stdout (for Studio / automation)",

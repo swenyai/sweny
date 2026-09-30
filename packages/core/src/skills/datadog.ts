@@ -48,6 +48,7 @@ export const datadog: Skill = {
   tools: [
     {
       name: "datadog_search_logs",
+      access: "read",
       description: "Search logs in Datadog",
       input_schema: {
         type: "object",
@@ -76,6 +77,7 @@ export const datadog: Skill = {
     },
     {
       name: "datadog_query_metrics",
+      access: "read",
       description: "Query time-series metrics from Datadog",
       input_schema: {
         type: "object",
@@ -91,6 +93,7 @@ export const datadog: Skill = {
     },
     {
       name: "datadog_list_monitors",
+      access: "read",
       description: "List Datadog monitors, optionally filtered by tag or name",
       input_schema: {
         type: "object",

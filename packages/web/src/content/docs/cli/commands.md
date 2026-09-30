@@ -104,7 +104,7 @@ sweny triage [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--dry-run` | Analyze only -- the executor stops at the first conditional edge, guaranteeing zero side effects (no issues created, no PRs opened, no notifications sent). This is enforced by the executor, not by prompt instructions. | `false` |
+| `--dry-run` | Analyze only. Every node runs with read-only tools: write tools, external MCP servers, and shell/file-edit tools are withheld by the executor, so no issues are created, no PRs opened, no notifications sent. Stops at the first conditional edge. See [Dry run](/workflows/#dry-run). | `false` |
 | `--no-novelty-mode` | Allow +1 on existing issues instead of skipping duplicates | -- |
 | `--issue-override <issue>` | Work on a specific existing issue instead of scanning for new ones | -- |
 | `--additional-instructions <text>` | Extra instructions passed to the coding agent | -- |
@@ -178,7 +178,7 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 | `--agent <provider>` | Coding agent: `claude`, `codex`, `gemini` (alias: `--coding-agent-provider`) | `claude` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `linear`, `jira`, `github-issues`, `file` | `linear` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
-| `--dry-run` | Skip creating PR -- report only | `false` |
+| `--dry-run` | Analyze and plan only. Runs with read-only tools (no code edits, no shell, no PR). See [Dry run](/workflows/#dry-run). | `false` |
 | `--max-implement-turns <n>` | Max coding agent turns (1-500) | `40` |
 | `--base-branch <branch>` | Base branch for PRs | `main` |
 | `--repository <owner/repo>` | Repository (auto-detected from git remote) | -- |
@@ -230,7 +230,8 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--dry-run` | Validate the workflow and print its node list without running | `false` |
+| `--dry-run` | Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge. See [Dry run](/workflows/#dry-run). | `false` |
+| `--list-nodes` | Validate the workflow and print its node list without running | `false` |
 | `--json` | Output result as JSON to stdout; suppress progress rendering | `false` |
 | `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |
 | `--mermaid` | Print a Mermaid diagram with per-node execution state after the run finishes | `false` |

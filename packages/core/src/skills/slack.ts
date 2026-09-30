@@ -27,6 +27,7 @@ export const slack: Skill = {
   tools: [
     {
       name: "slack_send_message",
+      access: "write",
       description: "Send a message to a Slack channel via webhook or API",
       input_schema: {
         type: "object",
@@ -79,6 +80,7 @@ export const slack: Skill = {
     },
     {
       name: "slack_send_thread_reply",
+      access: "write",
       description: "Reply to an existing Slack message thread",
       input_schema: {
         type: "object",

@@ -120,13 +120,17 @@ This is how the triage workflow's conditional routing works: the `investigate` n
 
 ## Dry run
 
-Pass `dryRun: true` (CLI: `--dry-run`, Action: `dry-run: true`) to run a workflow in analysis-only mode. The executor processes nodes normally — Claude queries logs, searches code, analyzes errors — but **stops before any action that requires a routing decision**.
+Pass `dryRun: true` (CLI: `--dry-run`, Action: `dry-run: true`) to run a workflow in analysis-only mode. A dry run never takes a write action, on any workflow shape.
 
-Specifically: after each node completes, the executor checks outgoing edges. If any edge has a `when` condition (a conditional branch), execution stops and returns the results so far. Unconditional edges are followed normally because they represent analysis flow, not action decisions.
+- **Every node runs with read-only tools.** Each skill tool is classified `read` or `write`. Under a dry run only `read` tools are handed to a node; `write` tools (create issue, add comment, open PR, send message, insert row) and any tool with no classification are withheld. Claude cannot call a tool it was never given.
+- **No other write path.** External MCP servers are not attached, including ones from your Claude settings, `.mcp.json`, or plugins (their tools are unclassified, so they count as writes). The shell, file-edit, subagent and URL-fetch built-ins (`Bash`, `Write`, `Edit`, `WebFetch`, ...) are disallowed. `Read`, `Grep`, `Glob` and `WebSearch` stay available.
+- **Withheld tools are recorded.** Each node's result lists them under `skippedWrites`, and the node is told which tools were withheld so it can describe what it would have written.
+- **The run stops at the first conditional edge.** Unconditional edges are followed; at a node with `when` edges the run ends without asking Claude to pick a branch. This keeps the dry-run path deterministic (same graph, same nodes visited). It is not what makes a dry run safe; the read-only tools are.
 
-**This is a hard gate enforced by the executor, not a prompt instruction.** Claude cannot bypass it. The routing check is in the executor code itself — if `dryRun` is true and a conditional edge exists, the executor halts regardless of what Claude returns.
+This is enforced by the executor, not by prompt instructions.
 
 In practice:
+- **A linear workflow** (for example `fetch-diff` → `review-code` → `post-review`) runs every node. The review is real; `post-review` reports the comment it would have posted, and nothing is posted.
 - **Triage workflow:** runs `prepare` → `gather` → `investigate`, then stops. You get the full investigation report but no issues are created, no PRs opened, no notifications sent.
 - **Implement workflow:** runs `analyze`, then stops. You get the analysis and fix plan but no code changes are made.
 
