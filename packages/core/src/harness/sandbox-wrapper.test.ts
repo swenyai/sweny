@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -123,6 +123,46 @@ describe("scratchEnv", () => {
 });
 
 describe("SrtSandboxWrapper", () => {
+  it.each(["symlink", "public-directory"])(
+    "rejects a preexisting %s scratch namespace without adopting it",
+    async (kind) => {
+      const scratchRoot = await mkdtemp(path.join(tmpdir(), "sweny-parent-"));
+      const sharedRoot = path.join(scratchRoot, `sweny-${process.getuid?.() ?? "user"}`);
+      const target = path.join(scratchRoot, "target");
+      try {
+        await mkdir(target);
+        if (kind === "symlink") await symlink(target, sharedRoot, "dir");
+        else {
+          await mkdir(sharedRoot);
+          await chmod(sharedRoot, 0o777);
+        }
+        const w = new SrtSandboxWrapper({ srtPath: "/opt/srt", scratchRoot });
+        await expect(w.wrap({ ...SPAWN, cwd: process.cwd(), egress: [] })).rejects.toThrow(/unsafe.*scratch/i);
+        const existing = await lstat(sharedRoot);
+        expect(existing.isSymbolicLink()).toBe(kind === "symlink");
+        if (kind === "public-directory") expect(existing.mode & 0o777).toBe(0o777);
+        expect(await readdir(sharedRoot)).toEqual([]);
+      } finally {
+        await rm(scratchRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("rejects a nonsticky writable ancestor without creating a scratch namespace", async () => {
+    const ancestor = await mkdtemp(path.join(tmpdir(), "sweny-ancestor-"));
+    const scratchRoot = path.join(ancestor, "private-parent");
+    try {
+      await mkdir(scratchRoot, { mode: 0o700 });
+      await chmod(ancestor, 0o777);
+      const w = new SrtSandboxWrapper({ srtPath: "/opt/srt", scratchRoot });
+      await expect(w.wrap({ ...SPAWN, cwd: process.cwd(), egress: [] })).rejects.toThrow(/unsafe.*scratch/i);
+      expect(await readdir(scratchRoot)).toEqual([]);
+      expect((await lstat(ancestor)).mode & 0o777).toBe(0o777);
+    } finally {
+      await rm(ancestor, { recursive: true, force: true });
+    }
+  });
+
   it("wraps the argv after --, writes the settings, and cleans up its scratch", async () => {
     const w = new SrtSandboxWrapper({ srtPath: "/opt/srt", credentialHome: "/nonexistent-home" });
     expect(w.provides).toEqual({ sandbox: true, egress: true, readOnlyMount: true });

@@ -44,7 +44,7 @@
 
 import { execFile } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import { DEFAULT_SANDBOX_DOMAINS, parseList, resolveSandboxMode, type SandboxMode } from "../agent-env.js";
@@ -220,7 +220,10 @@ export interface SrtWrapperOptions {
    * Storage parent, default `os.tmpdir()`. Runs share a per-user child under
    * this directory, hidden except for their own HOME. Concurrent adapters
    * carrying credentials must use the same parent; separate roots are not
-   * mutually isolated. The parent is caller-owned and never removed.
+   * mutually isolated. The existing parent is never removed. Its canonical
+   * hierarchy must be owned by this user or root; other-writable ancestors
+   * must be sticky (like /tmp). The shared child must be private and owned
+   * by this user. Unsafe existing paths are rejected, never repaired.
    */
   scratchRoot?: string;
 }
@@ -232,12 +235,36 @@ export class SrtSandboxWrapper implements SandboxWrapper {
   constructor(private readonly opts: SrtWrapperOptions) {}
 
   async wrap(req: SandboxWrapRequest): Promise<WrappedSpawn> {
-    const storageParent = real(this.opts.scratchRoot ?? tmpdir());
+    const uid = process.getuid?.();
+    if (uid === undefined) throw new Error("Cannot validate sandbox scratch ownership on this platform");
+    const storageParent = await realpath(this.opts.scratchRoot ?? tmpdir());
+    // A private child can still be renamed by another user through a writable
+    // ancestor. Check the canonical hierarchy before accepting any run paths.
+    for (let ancestor = storageParent; ; ancestor = path.dirname(ancestor)) {
+      const info = await lstat(ancestor);
+      if (
+        !info.isDirectory() ||
+        (info.uid !== uid && info.uid !== 0) ||
+        ((info.mode & 0o022) !== 0 && (info.mode & 0o1000) === 0)
+      ) {
+        throw new Error(`Unsafe sandbox scratch ancestor: ${ancestor}`);
+      }
+      if (ancestor === path.dirname(ancestor)) break;
+    }
     // Keep these components short: srt creates Unix sockets beneath HOME/tmp,
     // and Linux socket paths must fit in 107 bytes (including caller parents).
-    const sharedRoot = path.join(storageParent, `sweny-${process.getuid?.() ?? "user"}`);
-    await mkdir(sharedRoot, { recursive: true, mode: 0o700 });
-    const isolationRoot = real(sharedRoot);
+    const isolationRoot = path.join(storageParent, `sweny-${uid}`);
+    try {
+      await mkdir(isolationRoot, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    // Never adopt a symlink, a foreign-owned directory, or a directory other
+    // users can access. Validate newly created paths too; do not chmod them.
+    const info = await lstat(isolationRoot);
+    if (!info.isDirectory() || info.uid !== uid || (info.mode & 0o077) !== 0) {
+      throw new Error(`Unsafe sandbox scratch directory: ${isolationRoot}`);
+    }
     const dir = await mkdtemp(path.join(isolationRoot, "r-"));
     let cleaned = false;
     const cleanup = async () => {
