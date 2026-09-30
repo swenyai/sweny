@@ -1561,6 +1561,8 @@ describe("executor", () => {
             name: "A",
             instruction: "Step A",
             skills: [],
+            // Opt into legacy fall-through: this test locks requires-gating per visit.
+            on_fail: "continue",
             // Requires b.proceed === "yes" — fails when b says "no"
             requires: { output_matches: [{ path: "b.proceed", equals: "yes" }] },
           },

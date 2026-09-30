@@ -704,6 +704,10 @@ describe("ClaudeClient", () => {
 
     const disallowed: string[] = mockQuery.mock.calls[0][0].options.disallowedTools;
     expect(disallowed).toEqual(expect.arrayContaining(["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"]));
+    const opts = mockQuery.mock.calls[0][0].options;
+    expect(opts.tools).toEqual([]);
+    expect(opts.mcpServers).toEqual({});
+    expect(opts.strictMcpConfig).toBe(true);
   });
 
   it("ask (reflection/judge) disallows Bash/Write/edit tools", async () => {
@@ -714,6 +718,51 @@ describe("ClaudeClient", () => {
 
     const disallowed: string[] = mockQuery.mock.calls[0][0].options.disallowedTools;
     expect(disallowed).toEqual(expect.arrayContaining(["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"]));
+    const opts = mockQuery.mock.calls[0][0].options;
+    expect(opts.tools).toEqual([]);
+    expect(opts.mcpServers).toEqual({});
+    expect(opts.strictMcpConfig).toBe(true);
+  });
+
+  // Integration: a REAL ClaudeClient (mocked SDK stream) fed into execute() on
+  // a single-conditional-edge workflow. A route-eval failure must fail closed:
+  // RouteEvaluationError, and the conditional target never runs.
+  describe.each([
+    ["SDK error_during_execution", [{ type: "result", subtype: "error_during_execution" }]],
+    ["unparseable answer", [{ type: "result", subtype: "success", result: "I cannot decide, sorry" }]],
+  ])("fail-closed routing through execute() (%s)", (_label, routeMessages) => {
+    it("throws RouteEvaluationError and never runs the conditional target", async () => {
+      const { execute, RouteEvaluationError } = await import("../executor.js");
+      const { createSkillMap } = await import("../skills/index.js");
+
+      const prompts: string[] = [];
+      mockQuery.mockImplementation(({ prompt }: { prompt: string }) => {
+        prompts.push(prompt);
+        if (prompt.includes("CHECK node")) {
+          return makeStream([{ type: "result", subtype: "success", result: '{"finding": "x"}' }]);
+        }
+        return makeStream(routeMessages as any);
+      });
+
+      const workflow = {
+        id: "wf-fail-closed",
+        name: "Single conditional edge",
+        description: "",
+        entry: "check",
+        nodes: {
+          check: { name: "Check", instruction: "CHECK node: inspect input", skills: [] },
+          act: { name: "Act", instruction: "ACT node: file an issue", skills: [] },
+        },
+        edges: [{ from: "check", to: "act", when: "an issue should be filed" }],
+      };
+
+      const client = new ClaudeClient();
+      await expect(
+        execute(workflow as any, {}, { skills: createSkillMap([]), claude: client, config: {} }),
+      ).rejects.toBeInstanceOf(RouteEvaluationError);
+
+      expect(prompts.some((p) => p.includes("ACT node"))).toBe(false);
+    });
   });
 
   it("includes output schema in prompt when provided", async () => {

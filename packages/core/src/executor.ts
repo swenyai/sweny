@@ -289,6 +289,18 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
       logger.warn(`  requires ${onFail === "skip" ? "skipped" : "failed"}: ${requiresError}`, { node: currentId });
 
+      // Fail closed here too: a requires failure with on_fail: fail yields a
+      // failed node, which halts by default (same policy as a failed run).
+      if (result.status === "failed" && (node.on_fail ?? "halt") === "halt") {
+        logger.warn(`  requires failed; halting workflow (on_fail: halt)`, { node: currentId });
+        safeObserve(
+          observer,
+          { type: "route", from: currentId, to: "(end)", reason: "node failed (on_fail: halt)" },
+          logger,
+        );
+        break;
+      }
+
       // Apply normal routing rules (dry run gate + resolveNext).
       // TODO: dedupe with requires path — see advanceFromNode helper below
       const next = await advanceFromNode(

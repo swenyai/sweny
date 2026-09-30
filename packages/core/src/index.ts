@@ -90,7 +90,7 @@ export {
 export { consoleLogger } from "./types.js";
 
 // Executor
-export { execute } from "./executor.js";
+export { execute, RouteEvaluationError } from "./executor.js";
 export type { ExecuteOptions } from "./executor.js";
 
 // Claude client

@@ -964,4 +964,41 @@ describe("fail-closed execution", () => {
     expect(results.get("b")?.status).toBe("success");
     expect(ran.some((i) => i.includes("NODE B"))).toBe(true);
   });
+
+  describe("requires failure follows the same on_fail policy", () => {
+    const mk = (onFail?: "halt" | "continue"): Workflow => ({
+      id: "wf-requires-halt",
+      name: "Requires halt",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: {
+          name: "A",
+          instruction: "NODE A: do work",
+          skills: [],
+          requires: { output_required: ["input.missing"] },
+          ...(onFail ? { on_fail: onFail } : {}),
+        },
+        b: { name: "B", instruction: "NODE B: downstream work", skills: [] },
+      },
+      edges: [{ from: "a", to: "b" }],
+    });
+
+    it("halts by default when requires fails (on_fail: fail)", async () => {
+      const ran: string[] = [];
+      const claude = stubClaude({ runByNode: [], evaluateResult: null, ran });
+      const { results } = await execute(mk(), {}, { skills: createSkillMap([]), claude, config: {} });
+      expect(results.get("a")?.status).toBe("failed");
+      expect(results.has("b")).toBe(false);
+      expect(ran.some((i) => i.includes("NODE B"))).toBe(false);
+    });
+
+    it("node on_fail: 'continue' lets routing proceed past a failed requires", async () => {
+      const ran: string[] = [];
+      const claude = stubClaude({ runByNode: [], evaluateResult: null, ran });
+      const { results } = await execute(mk("continue"), {}, { skills: createSkillMap([]), claude, config: {} });
+      expect(results.get("a")?.status).toBe("failed");
+      expect(results.get("b")?.status).toBe("success");
+    });
+  });
 });

@@ -514,6 +514,11 @@ export class ClaudeClient implements Claude {
           // Route evaluation is a pure classification call over
           // possibly-attacker-influenceable prior-node data. Never let it
           // shell out or mutate, regardless of the node's own policy.
+          // Disable ALL built-in tools (SDK `tools: []`); no MCP servers are passed.
+          // The disallow list below stays as a second layer.
+          tools: [],
+          mcpServers: {},
+          strictMcpConfig: true,
           disallowedTools: [...CLASSIFICATION_DISALLOWED_TOOLS],
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
           ...(abort ? { abortController: abort.controller } : {}),
@@ -608,6 +613,11 @@ export class ClaudeClient implements Claude {
           // Reflection and judge scoring are pure classification calls over
           // possibly-attacker-influenceable prior-node data. Deny the powerful
           // built-ins so they can never shell out or mutate the workspace.
+          // Disable ALL built-in tools (SDK `tools: []`); no MCP servers are passed.
+          // The disallow list below stays as a second layer.
+          tools: [],
+          mcpServers: {},
+          strictMcpConfig: true,
           disallowedTools: [...CLASSIFICATION_DISALLOWED_TOOLS],
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
           ...(abort ? { abortController: abort.controller } : {}),
