@@ -54,7 +54,7 @@ Edges can be unconditional (always taken) or conditional (Claude evaluates a nat
 3. If no conditional edge matches, an unconditional edge is taken as fallback
 4. If nothing matches, the workflow terminates at that node
 
-Conditional edges render in indigo with a label pill showing the condition text. Unconditional edges render in a muted blue.
+Conditional edges render in blue with a label pill showing the condition text. Unconditional edges render in a muted blue.
 
 ## Import and export
 

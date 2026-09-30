@@ -27,7 +27,7 @@ const SKILL_COLORS: Record<string, string> = {
 };
 
 function skillColor(id: string): string {
-  return SKILL_COLORS[id] ?? "#6366f1";
+  return SKILL_COLORS[id] ?? "#3b82f6";
 }
 
 // ── Workflow data ─────────────────────────────────────────────────────────────
@@ -119,9 +119,9 @@ function NodeDetail({
                 style={{
                   fontSize: "0.65rem",
                   fontWeight: 600,
-                  color: "#6366f1",
-                  background: "rgba(99,102,241,0.1)",
-                  border: "1px solid rgba(99,102,241,0.2)",
+                  color: "#3b82f6",
+                  background: "rgba(59,130,246,0.1)",
+                  border: "1px solid rgba(59,130,246,0.2)",
                   padding: "2px 6px",
                   borderRadius: 4,
                 }}
@@ -330,7 +330,7 @@ function WorkflowOverview({ workflow, wf }: { workflow: (typeof WORKFLOWS)[numbe
       <div>
         <div style={sectionLabel}>Structure</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <StatRow label="Nodes" value={nodeIds.length} color="#6366f1" />
+          <StatRow label="Nodes" value={nodeIds.length} color="#3b82f6" />
           <StatRow label="Edges" value={wf.edges.length} color="#60a5fa" />
           <StatRow label="Conditional" value={conditionalEdges.length} color="#f59e0b" />
           <StatRow label="Skills" value={skillIds.length} color="#10b981" />
@@ -355,15 +355,15 @@ function WorkflowOverview({ workflow, wf }: { workflow: (typeof WORKFLOWS)[numbe
           lineHeight: 1.6,
           padding: "10px 12px",
           borderRadius: 7,
-          background: "rgba(99,102,241,0.07)",
-          border: "1px solid rgba(99,102,241,0.15)",
+          background: "rgba(59,130,246,0.07)",
+          border: "1px solid rgba(59,130,246,0.15)",
           marginTop: 4,
         }}
       >
         <div
           style={{
             fontWeight: 700,
-            color: "#a5b4fc",
+            color: "#93c5fd",
             marginBottom: 3,
             fontSize: "0.7rem",
             letterSpacing: "0.04em",
@@ -383,7 +383,7 @@ function WorkflowOverview({ workflow, wf }: { workflow: (typeof WORKFLOWS)[numbe
         <br />
         Scroll to zoom &middot; drag to pan
         <br />
-        <span style={{ color: "#6366f1", fontWeight: 600 }}>Click any node</span> to see its instruction, skills, and
+        <span style={{ color: "#3b82f6", fontWeight: 600 }}>Click any node</span> to see its instruction, skills, and
         edges.
       </div>
     </div>
@@ -582,12 +582,12 @@ function SkillsPanel({ workflow }: { workflow: Workflow }) {
               style={{
                 padding: "3px 10px",
                 border: "none",
-                borderBottom: `2px solid ${outputTab === tab ? "#6366f1" : "transparent"}`,
+                borderBottom: `2px solid ${outputTab === tab ? "#3b82f6" : "transparent"}`,
                 background: "transparent",
                 cursor: "pointer",
                 fontSize: 10.5,
                 fontWeight: 600,
-                color: outputTab === tab ? "#a5b4fc" : "#3d4f6a",
+                color: outputTab === tab ? "#93c5fd" : "#3d4f6a",
               }}
             >
               {tab === "env" ? ".env template" : "TypeScript setup"}
@@ -922,7 +922,7 @@ export function WorkflowExplorer() {
     >
       {/* Brand mark */}
       <div style={{ display: "flex", alignItems: "center", gap: 5, marginRight: 4, flexShrink: 0 }}>
-        <span style={{ fontSize: 15, color: "#6366f1", lineHeight: 1 }}>&#x2B21;</span>
+        <span style={{ fontSize: 15, color: "#3b82f6", lineHeight: 1 }}>&#x2B21;</span>
         <span
           style={{
             fontSize: "0.72rem",
@@ -953,9 +953,9 @@ export function WorkflowExplorer() {
               fontSize: "0.77rem",
               fontWeight: 600,
               letterSpacing: "0.01em",
-              background: activeIdx === i ? "rgba(99,102,241,0.22)" : "transparent",
-              color: activeIdx === i ? "#c7d2fe" : "#4f5f80",
-              borderColor: activeIdx === i ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.07)",
+              background: activeIdx === i ? "rgba(59,130,246,0.22)" : "transparent",
+              color: activeIdx === i ? "#bfdbfe" : "#4f5f80",
+              borderColor: activeIdx === i ? "rgba(59,130,246,0.5)" : "rgba(255,255,255,0.07)",
               transition: "all 0.12s ease",
             }}
           >
@@ -990,8 +990,8 @@ export function WorkflowExplorer() {
               fontSize: "0.71rem",
               fontWeight: 600,
               letterSpacing: "0.02em",
-              background: viewMode === mode ? "rgba(99,102,241,0.25)" : "transparent",
-              color: viewMode === mode ? "#a5b4fc" : "#3d4f6a",
+              background: viewMode === mode ? "rgba(59,130,246,0.25)" : "transparent",
+              color: viewMode === mode ? "#93c5fd" : "#3d4f6a",
               transition: "all 0.12s ease",
             }}
           >

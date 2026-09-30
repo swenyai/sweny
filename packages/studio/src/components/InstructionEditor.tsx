@@ -117,9 +117,9 @@ export function InstructionEditor({ nodeId, nodeName, instruction, skills, onSav
                   disabled={aiLoading}
                   onClick={() => handleAiAction(action)}
                   title={action.description}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium bg-white border border-gray-200 text-gray-600 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50 transition-colors disabled:opacity-40"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium bg-white border border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors disabled:opacity-40"
                 >
-                  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="text-indigo-400">
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="text-blue-400">
                     <path d="M8 1l1.5 4.5L14 7l-4.5 1.5L8 13l-1.5-4.5L2 7l4.5-1.5z" />
                   </svg>
                   {action.label}
@@ -127,7 +127,7 @@ export function InstructionEditor({ nodeId, nodeName, instruction, skills, onSav
               );
             })}
             {aiLoading && (
-              <div className="flex items-center gap-1.5 text-[10px] text-indigo-500 ml-2">
+              <div className="flex items-center gap-1.5 text-[10px] text-blue-500 ml-2">
                 <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
                   <circle
                     className="opacity-25"
@@ -153,7 +153,7 @@ export function InstructionEditor({ nodeId, nodeName, instruction, skills, onSav
             ref={ref}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="w-full h-full border border-gray-200 rounded-md px-4 py-3 text-sm font-mono resize-none focus:outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 leading-relaxed"
+            className="w-full h-full border border-gray-200 rounded-md px-4 py-3 text-sm font-mono resize-none focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-200 leading-relaxed"
             placeholder="What should Claude do at this node? Be specific about what to query, how to interpret results, what output to produce, and how to handle edge cases."
             style={{ minHeight: 350 }}
           />
@@ -169,7 +169,7 @@ export function InstructionEditor({ nodeId, nodeName, instruction, skills, onSav
               onSave(text);
               onClose();
             }}
-            className="px-4 py-1.5 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-500"
+            className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-500"
           >
             Done
           </button>
