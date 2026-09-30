@@ -1158,7 +1158,7 @@ workflowCmd
   .option("-y, --yes", "Skip the batch confirmation prompt (for CI)")
   .option(
     "--dry-run",
-    "Execute until the first conditional routing decision, then stop (no side effects past that point). NOTE: behavior changed in this release — previously --dry-run only printed the node list. For that behavior use --list-nodes.",
+    "Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge. To print the node list without running, use --list-nodes.",
   )
   .option(
     "--list-nodes",

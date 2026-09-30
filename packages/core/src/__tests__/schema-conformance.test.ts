@@ -998,6 +998,25 @@ const skillFixtures: Fixture[] = [
     expected: true,
   },
   {
+    name: "tool with access: read and access: write (#380)",
+    input: {
+      ...baseSkill(),
+      tools: [
+        { name: "get_it", description: "reads", input_schema: { type: "object" }, access: "read" },
+        { name: "do_it", description: "writes", input_schema: { type: "object" }, access: "write" },
+      ],
+    },
+    expected: true,
+  },
+  {
+    name: "tool with an unknown access value (rejected by both)",
+    input: {
+      ...baseSkill(),
+      tools: [{ name: "do_it", description: "does it", input_schema: { type: "object" }, access: "admin" }],
+    },
+    expected: false,
+  },
+  {
     name: "skill with instruction only",
     input: { ...baseSkill(), instruction: "be helpful" },
     expected: true,

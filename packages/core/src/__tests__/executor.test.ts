@@ -3240,7 +3240,9 @@ describe("executor termination safety", () => {
     );
     expect(results.has("a")).toBe(true);
     expect(results.has("b")).toBe(false);
-    expect(ran).toEqual(["Analyze"]);
+    expect(ran).toHaveLength(1);
+    // #380: dry-run prepends a read-only notice; the node's own instruction follows it.
+    expect(ran[0]).toMatch(/^## Dry run[\s\S]*Analyze$/);
   });
 });
 

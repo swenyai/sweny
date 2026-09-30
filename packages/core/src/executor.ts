@@ -135,6 +135,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   // If the caller already aborted before we started, fail fast.
   throwIfAborted(signal);
 
+  const dryRun = isDryRunInput(input);
+
   // Merge inline workflow skills into the skill map so they resolve at runtime.
   // Inline skills (instruction/mcp only) become Skill objects with empty tools/config.
   // The caller's skill map takes precedence — inline skills only fill gaps.
@@ -241,7 +243,15 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // skill-tool filter (`tools.allow` / `tools.deny`). Filtered tools are
     // never registered for the run, so the model cannot see or call them.
     const resolvedSkillTools = resolveTools(node.skills, skills);
-    const tools = filterNodeTools(resolvedSkillTools, node.tools, currentId, logger);
+    const filteredTools = filterNodeTools(resolvedSkillTools, node.tools, currentId, logger);
+    // Dry run (#380): only `access: "read"` tools reach the node. Write and
+    // unclassified tools are withheld (never registered, so never callable)
+    // and recorded on the node result as `skippedWrites`.
+    const tools = dryRun ? filteredTools.filter(isReadTool) : filteredTools;
+    const skippedWrites = dryRun ? filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name) : [];
+    if (skippedWrites.length > 0) {
+      logger.info(`  dry run: withheld write tools: ${skippedWrites.join(", ")}`, { node: currentId });
+    }
     const skillInstructions = resolveSkillInstructions(node.skills, skills);
 
     // Runtime guard: if this node declares skills but none resolved, the node
@@ -348,13 +358,14 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       (workflow.context ?? []).length,
       resolvedSources,
     );
-    const instruction = buildNodeInstruction(
+    const baseInstruction = buildNodeInstruction(
       resolvedInstruction,
       effectiveRules,
       effectiveContext,
       input,
       skillInstructions,
     );
+    const instruction = dryRun ? `${dryRunNotice(skippedWrites)}\n\n---\n\n${baseInstruction}` : baseInstruction;
 
     // Run Claude on this node, with optional eval-failure retry loop.
     let attempt = 0;
@@ -381,6 +392,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         model: nodeModel,
         signal,
         timeoutMs,
+        ...(dryRun ? { readOnly: true } : {}),
         onProgress: (message) => {
           safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
         },
@@ -509,6 +521,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       };
     }
 
+    if (skippedWrites.length > 0) result = { ...result, skippedWrites };
     results.set(currentId, result);
     trace.steps.push(
       attempt > 0
@@ -905,6 +918,30 @@ function mergeInlineSkills(
   return merged;
 }
 
+/** True when the run input requests a dry run (`dryRun === true`, strictly). */
+function isDryRunInput(input: unknown): boolean {
+  return input != null && typeof input === "object" && (input as Record<string, unknown>).dryRun === true;
+}
+
+/**
+ * Dry-run tool gate (#380). Only an explicit `access: "read"` passes; a tool
+ * with no `access` is treated as a write so new tools fail safe.
+ */
+export function isReadTool(tool: Pick<Tool, "access">): boolean {
+  return tool.access === "read";
+}
+
+/** Instruction section prepended to every node under dry-run. */
+function dryRunNotice(skippedWrites: string[]): string {
+  const withheld =
+    skippedWrites.length > 0 ? `These write tools were withheld from this step: ${skippedWrites.join(", ")}. ` : "";
+  return (
+    `## Dry run\n\nThis is a dry run. Only read-only tools are available. ${withheld}` +
+    `Do not create, modify, post, or send anything. Do the analysis, and where this step would ` +
+    `normally write, describe exactly what it would have written instead.`
+  );
+}
+
 function resolveTools(skillIds: string[], skills: Map<string, Skill>): Tool[] {
   return skillIds
     .map((id) => skills.get(id))
@@ -1039,12 +1076,13 @@ async function advanceFromNode(
   trace: ExecutionTrace,
   abort?: AbortOptions,
 ): Promise<string | null> {
-  // Dry run hard gate — stop at the first conditional routing decision.
-  // Unconditional edges are analysis flow (prepare→gather→investigate);
-  // conditional edges are action decisions (investigate→create_issue/skip).
-  // Enforced in the executor so it cannot be bypassed by LLM evaluation.
-  const isDryRun = input && typeof input === "object" && (input as Record<string, unknown>).dryRun === true;
-  if (isDryRun) {
+  // Dry run path gate: stop at the first conditional routing decision.
+  // Safety does not depend on this (#380): under dry-run every node already
+  // runs read-only (see execute()). The stop keeps the dry-run path a pure
+  // function of the graph (no LLM route evaluation, so the same workflow
+  // always visits the same nodes) and skips action branches whose output
+  // would only describe writes that cannot happen.
+  if (isDryRunInput(input)) {
     const outEdges = workflow.edges.filter((e) => e.from === currentId);
     if (outEdges.some((e) => e.when)) {
       safeObserve(observer, { type: "route", from: currentId, to: "(end)", reason: "dry run" }, logger);

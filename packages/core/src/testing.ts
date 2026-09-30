@@ -216,6 +216,7 @@ export function createFileSkill(outputDir: string): Skill {
     tools: [
       {
         name: "fs_read_json",
+        access: "read",
         description: "Read and parse a JSON file",
         input_schema: {
           type: "object",
@@ -234,6 +235,7 @@ export function createFileSkill(outputDir: string): Skill {
       },
       {
         name: "fs_read_text",
+        access: "read",
         description: "Read a text file",
         input_schema: {
           type: "object",
@@ -251,6 +253,7 @@ export function createFileSkill(outputDir: string): Skill {
       },
       {
         name: "fs_write_json",
+        access: "write",
         description: "Write a JSON object to a file",
         input_schema: {
           type: "object",
@@ -271,6 +274,7 @@ export function createFileSkill(outputDir: string): Skill {
       },
       {
         name: "fs_write_markdown",
+        access: "write",
         description: "Write a markdown file (for issues, PRs, notifications)",
         input_schema: {
           type: "object",
@@ -291,6 +295,7 @@ export function createFileSkill(outputDir: string): Skill {
       },
       {
         name: "fs_list_dir",
+        access: "read",
         description: "List files in a directory",
         input_schema: {
           type: "object",

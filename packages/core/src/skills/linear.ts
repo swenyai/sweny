@@ -37,6 +37,7 @@ export const linear: Skill = {
   tools: [
     {
       name: "linear_create_issue",
+      access: "write",
       description: "Create a new Linear issue",
       input_schema: {
         type: "object",
@@ -65,6 +66,7 @@ export const linear: Skill = {
     },
     {
       name: "linear_search_issues",
+      access: "read",
       description: "Search Linear issues by text query",
       input_schema: {
         type: "object",
@@ -87,6 +89,7 @@ export const linear: Skill = {
     },
     {
       name: "linear_add_comment",
+      access: "write",
       description: "Add a comment to a Linear issue",
       input_schema: {
         type: "object",
@@ -105,6 +108,7 @@ export const linear: Skill = {
     },
     {
       name: "linear_get_issue",
+      access: "read",
       description: "Get a Linear issue by ID or identifier (e.g. 'OFF-1020')",
       input_schema: {
         type: "object",
@@ -132,6 +136,7 @@ export const linear: Skill = {
     },
     {
       name: "linear_list_comments",
+      access: "read",
       description: "List comments on a Linear issue (returns id, body, author, and timestamp for each)",
       input_schema: {
         type: "object",
@@ -163,6 +168,7 @@ export const linear: Skill = {
     },
     {
       name: "linear_list_teams",
+      access: "read",
       description: "List Linear teams (needed for teamId when creating issues)",
       input_schema: {
         type: "object",
@@ -181,6 +187,7 @@ export const linear: Skill = {
     },
     {
       name: "linear_list_labels",
+      access: "read",
       description: "List issue labels for a Linear team — returns id, name, and color for each label",
       input_schema: {
         type: "object",
@@ -204,6 +211,7 @@ export const linear: Skill = {
     },
     {
       name: "linear_update_issue",
+      access: "write",
       description: "Update an existing Linear issue",
       input_schema: {
         type: "object",

@@ -47,6 +47,22 @@ export const CLASSIFICATION_DISALLOWED_TOOLS = [
   "WebSearch",
 ] as const;
 
+/**
+ * Built-in tools disallowed for a node run with `readOnly: true` (dry run,
+ * #380): everything that can edit the workspace, shell out (and so reach
+ * `gh`, `curl`, `git push`), or spawn a subagent that could. Read, Grep,
+ * Glob, WebFetch and WebSearch stay available for analysis.
+ */
+export const READ_ONLY_DISALLOWED_TOOLS = [
+  "Bash",
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "NotebookEdit",
+  "Task",
+  "Agent",
+] as const;
+
 /** How sweny resolves which credentials reach the Claude Code subprocess. */
 export type SwenyAuthMode = "auto" | "api-key" | "oauth";
 
@@ -282,19 +298,17 @@ export class ClaudeClient implements Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
+    /** Dry run (#380): no external MCP servers, no write-capable built-ins. */
+    readOnly?: boolean;
   }): Promise<NodeResult> {
-    const {
-      instruction,
-      context,
-      tools,
-      outputSchema,
-      onProgress,
-      maxTurns,
-      disallowedTools,
-      model,
-      timeoutMs,
-      signal,
-    } = opts;
+    const { instruction, context, tools, outputSchema, onProgress, maxTurns, model, timeoutMs, signal, readOnly } =
+      opts;
+    // Dry run (#380): external MCP servers cannot be classified per tool, so
+    // they are unknown, and unknown means write. Drop them, and disallow the
+    // built-ins that can change the workspace or shell out.
+    const disallowedTools = readOnly
+      ? [...new Set([...(opts.disallowedTools ?? []), ...READ_ONLY_DISALLOWED_TOOLS])]
+      : opts.disallowedTools;
     const effectiveModel = model ?? this.model;
 
     // Tool-call accounting (Fix #1).
@@ -360,7 +374,7 @@ export class ClaudeClient implements Claude {
     let stream: ReturnType<typeof query> | undefined;
 
     try {
-      const allMcpServers: Record<string, any> = { ...this.mcpServers };
+      const allMcpServers: Record<string, any> = readOnly ? {} : { ...this.mcpServers };
       if (sdkTools.length > 0) allMcpServers["sweny-core"] = mcpServer;
 
       stream = query({
