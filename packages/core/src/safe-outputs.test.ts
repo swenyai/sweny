@@ -352,7 +352,7 @@ describe("write stage: staged preview and screen", () => {
   });
 
   it("screen ALLOW lets the writes through", async () => {
-    const screen = vi.fn(async () => "ALLOW");
+    const screen = vi.fn(async (_writes: Record<string, unknown>[]) => "ALLOW");
     const { o, gh } = opts({ policy: { screen: true }, screen });
     const r = await applySafeOutputs(o);
     expect(r.receipts[0].status).toBe("applied");
