@@ -408,24 +408,43 @@ export async function beginCloudLifecycle(
  * onto the cloud's accepted enum. Failure is silent — the workflow's
  * exit code already reflects the truth.
  */
+/**
+ * Crash summary for the cloud: `error.name` plus a message capped at 200
+ * chars. Thrown messages can embed agent/LLM prose, file paths, or log
+ * excerpts (e.g. a wrapped SDK error), so the cloud only gets a short,
+ * bounded diagnostic, never the full text. Accepts an Error or a string.
+ */
+export function crashSummaryForCloud(err: unknown): string {
+  const name = err instanceof Error ? err.name || "Error" : "Error";
+  const raw = err instanceof Error ? err.message : typeof err === "string" ? err : "Unknown error";
+  const msg = raw.replace(/\s+/g, " ").trim().slice(0, 200);
+  return msg ? `${name}: ${msg}` : name;
+}
+
+// Handles already finished. A run gets exactly one terminal finish: a throw
+// after the in-try finish must not send a second "failed" over a real result.
+const finishedHandles = new WeakSet<CloudLifecycleHandle>();
+
 export async function finishCloudLifecycle(
   config: { cloudToken?: string },
   handle: CloudLifecycleHandle | null,
   results: Map<string, NodeResult>,
   durationMs: number,
   status: "success" | "failed" | "partial" = "success",
-  error?: string,
+  error?: unknown,
 ): Promise<void> {
   if (!handle || !config.cloudToken) return;
+  if (finishedHandles.has(handle)) return;
+  finishedHandles.add(handle);
   const reportConfig: CloudReportConfig = { cloudToken: config.cloudToken };
   await finishRun(reportConfig, handle.runId, {
     status,
     duration_ms: durationMs,
     metrics: deriveGenericMetrics(results, durationMs),
-    // `error` is a short failure summary (an Error message), not raw agent
-    // prose. Only forwarded on the crash/throw path where the executor never
+    // `error` is reduced to name + 200-char message (see crashSummaryForCloud).
+    // Only forwarded on the crash/throw path where the executor never
     // returned a results map.
-    ...(error ? { error } : {}),
+    ...(error ? { error: crashSummaryForCloud(error) } : {}),
   });
 }
 
@@ -435,7 +454,7 @@ export async function finishCloudLifecycle(
  * Maps the engine's ExecutionEvent stream onto `POST /api/runs/:id/node`:
  *   node:enter   → { event: "enter",  node }
  *   node:exit    → { event: "exit",   node, status, duration_ms, data: { evals, tool_calls } }
- *   node:progress → { event: "progress", node, data: { message } }
+ *   node:progress → { event: "progress", node, data: { progress: true } }
  *   node:retry   → { event: "progress", node, data: { retry: true, attempt, reason } }
  *   node:warning → { event: "progress", node, data: { warning: true, reason, fields } }
  *   route        → { event: "progress", node: from, data: { route: { to, reason } } }
@@ -546,7 +565,9 @@ export function createCloudStreamObserver(
           fire({
             event: "progress",
             node: event.node,
-            data: { message: event.message },
+            // PRIVACY: event.message is SDK tool_use_summary prose (model-written)
+            // or "tool (Ns)". Never ship it; the heartbeat alone is the signal.
+            data: { progress: true },
           });
           break;
         }
@@ -554,7 +575,8 @@ export function createCloudStreamObserver(
           fire({
             event: "progress",
             node: event.node,
-            data: { retry: true, attempt: event.attempt, reason: event.reason },
+            // PRIVACY: `reason` can carry model/SDK error prose; omit it.
+            data: { retry: true, attempt: event.attempt },
           });
           break;
         }
@@ -569,13 +591,13 @@ export function createCloudStreamObserver(
           break;
         }
         case "route": {
-          // Routing decision. `reason` is the LLM's short edge-condition
-          // verdict, not agent work product; ship it so the cloud can render
-          // the path taken. Attributed to the `from` node.
+          // Routing decision. `reason` is LLM-written prose and is NEVER
+          // forwarded; only the node ids (author-written workflow structure).
+          // Attributed to the `from` node.
           fire({
             event: "progress",
             node: event.from,
-            data: { route: { to: event.to, reason: event.reason } },
+            data: { route: { from: event.from, to: event.to } },
           });
           break;
         }

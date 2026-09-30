@@ -31,12 +31,12 @@ interface ShapedFinding {
   severity?: string;
   is_duplicate: boolean;
   fix_complexity?: string;
-  affected_services?: string[];
+  affected_services_count?: number;
 }
 
 /**
  * Reduce a raw finding to its shape-only classification. Keeps severity,
- * novel-vs-duplicate, fix complexity, and affected-service NAMES. Drops
+ * novel-vs-duplicate, fix complexity, and affected-service COUNT. Drops
  * `title`, `root_cause`, `fix_approach`, and `duplicate_of` — the fields that
  * would leak the customer's private bug description, the raw root-cause
  * analysis, the proposed fix prose, or a linkable existing-issue id.
@@ -47,12 +47,19 @@ function shapeFinding(f: RawFinding): ShapedFinding {
     is_duplicate: f.is_duplicate === true,
   };
   if (typeof f.fix_complexity === "string") shaped.fix_complexity = f.fix_complexity;
+  // COUNT only. Service names are LLM-written strings; never ship them.
   if (Array.isArray(f.affected_services)) {
-    // NAMES only. These are service identifiers (e.g. "checkout-api"), not
-    // bug detail. Coerce to strings and drop anything non-string.
-    shaped.affected_services = f.affected_services.filter((s): s is string => typeof s === "string");
+    shaped.affected_services_count = f.affected_services.filter((s) => typeof s === "string").length;
   }
   return shaped;
+}
+
+const RECOMMENDATIONS = ["implement", "escalate", "skip"] as const;
+
+/** Clamp free LLM text to a closed enum so no prose can ride in `recommendation`. */
+function toRecommendationEnum(v: unknown): "implement" | "escalate" | "skip" | "other" {
+  const t = typeof v === "string" ? v.trim().toLowerCase() : "";
+  return (RECOMMENDATIONS as readonly string[]).includes(t) ? (t as (typeof RECOMMENDATIONS)[number]) : "other";
 }
 
 /**
@@ -86,7 +93,7 @@ export async function reportToCloud(
   // `fix_approach` — free LLM prose about the customer's private bug and the
   // proposed fix. That MUST NEVER leave the host (product rule: show don't
   // store code). We ship only the classification metadata: severity, novel vs
-  // duplicate, fix complexity, and affected-service NAMES. Mirrors the
+  // duplicate, fix complexity, and affected-service count. Mirrors the
   // `inputs_shape` precedent in cloud-lifecycle.ts (key shape, never values).
   const findings = rawFindings.map(shapeFinding);
   const hasFailed = [...results.values()].some((r) => r.status === "failed");
@@ -116,7 +123,8 @@ export async function reportToCloud(
     status: hasFailed ? "failed" : "completed",
     workflow,
     duration_ms: durationMs,
-    recommendation: investigateData?.recommendation as string | undefined,
+    recommendation:
+      investigateData?.recommendation === undefined ? undefined : toRecommendationEnum(investigateData.recommendation),
     findings,
     findings_count: findings.length,
     duplicate_count: duplicateCount,

@@ -503,7 +503,12 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     // "running" forever. No results map exists on this path, so pass an empty
     // one; the error summary is a short message, never raw agent prose.
     try {
-      await finishCloudLifecycle(config, cloudHandle, new Map(), Date.now() - runStart, "failed", crashMsg);
+      // PRIVACY: pass the raw error, not crashMsg. finishCloudLifecycle reduces it
+      // to error.name + a 200-char message: thrown messages can embed agent/LLM
+      // prose or log text, and the cloud gets metadata only. It also sends at
+      // most one finish per run, so a throw after the in-try finish cannot
+      // overwrite the real result with a second "failed".
+      await finishCloudLifecycle(config, cloudHandle, new Map(), Date.now() - runStart, "failed", error);
     } catch {
       // silent — cloud reporting must never block or mask the crash
     }
@@ -702,7 +707,12 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     // RouteEvaluationError). Without this a crashed implement run stays
     // "running" in cloud forever.
     try {
-      await finishCloudLifecycle(config, implCloudHandle, new Map(), Date.now() - implRunStart, "failed", crashMsg);
+      // PRIVACY: pass the raw error, not crashMsg. finishCloudLifecycle reduces it
+      // to error.name + a 200-char message: thrown messages can embed agent/LLM
+      // prose or log text, and the cloud gets metadata only. It also sends at
+      // most one finish per run, so a throw after the in-try finish cannot
+      // overwrite the real result with a second "failed".
+      await finishCloudLifecycle(config, implCloudHandle, new Map(), Date.now() - implRunStart, "failed", err);
     } catch {
       // silent
     }
@@ -1045,7 +1055,12 @@ export async function workflowRunAction(
     // RouteEvaluationError). Without this a crashed workflow run stays
     // "running" in cloud forever.
     try {
-      await finishCloudLifecycle(config, wfCloudHandle, new Map(), Date.now() - runStart, "failed", crashMsg);
+      // PRIVACY: pass the raw error, not crashMsg. finishCloudLifecycle reduces it
+      // to error.name + a 200-char message: thrown messages can embed agent/LLM
+      // prose or log text, and the cloud gets metadata only. It also sends at
+      // most one finish per run, so a throw after the in-try finish cannot
+      // overwrite the real result with a second "failed".
+      await finishCloudLifecycle(config, wfCloudHandle, new Map(), Date.now() - runStart, "failed", err);
     } catch {
       // silent
     }

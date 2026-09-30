@@ -403,7 +403,7 @@ describe("beginCloudLifecycle / finishCloudLifecycle — CLI wire-up wrapper", (
       new Map(),
       250,
       "failed",
-      "RouteEvaluationError: no edge matched",
+      Object.assign(new Error("no edge matched"), { name: "RouteEvaluationError" }),
     );
     expect(fetchSpy).toHaveBeenCalledOnce();
     const url = fetchSpy.mock.calls[0]![0] as string;
@@ -414,6 +414,25 @@ describe("beginCloudLifecycle / finishCloudLifecycle — CLI wire-up wrapper", (
     };
     expect(body.status).toBe("failed");
     expect(body.error).toBe("RouteEvaluationError: no edge matched");
+    expect(Object.keys(body).sort()).toEqual(["duration_ms", "error", "metrics", "status"]);
+  });
+
+  it("caps the crash message at 200 chars and keeps the error name", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("", { status: 200 }));
+    const handle = { runUuid: "u", runId: "run-long" };
+    await finishCloudLifecycle({ cloudToken: "tok" }, handle, new Map(), 1, "failed", new TypeError("x".repeat(5000)));
+    const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string) as { error: string };
+    expect(body.error).toBe(`TypeError: ${"x".repeat(200)}`);
+  });
+
+  it("sends at most one finish per run (a later crash finish cannot overwrite the real result)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 200 }));
+    const handle = { runUuid: "u", runId: "run-once" };
+    await finishCloudLifecycle({ cloudToken: "tok" }, handle, new Map(), 100, "success");
+    await finishCloudLifecycle({ cloudToken: "tok" }, handle, new Map(), 120, "failed", new Error("late"));
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string) as { status: string };
+    expect(body.status).toBe("success");
   });
 
   it("omits the error field when none is passed (normal finish)", async () => {
@@ -502,17 +521,16 @@ describe("createCloudStreamObserver — per-node event streaming", () => {
     expect(body.duration_ms).toBeUndefined();
   });
 
-  it("posts a 'progress' event with the message in data on node:progress", async () => {
+  it("node:progress ships a bare heartbeat, never the message prose (exact key allowlist)", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 200 }));
     const observer = createCloudStreamObserver(config, handle)!;
-    observer({ type: "node:progress", node: "implement", message: "running pytest" });
+    observer({ type: "node:progress", node: "implement", message: "SECRET_SUMMARY edited src/auth.ts" });
     await new Promise((r) => setImmediate(r));
-    const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string) as {
-      event: string;
-      data: { message: string };
-    };
+    const raw = (fetchSpy.mock.calls[0]![1] as RequestInit).body as string;
+    const body = JSON.parse(raw) as { event: string; data: Record<string, unknown> };
     expect(body.event).toBe("progress");
-    expect(body.data.message).toBe("running pytest");
+    expect(Object.keys(body.data).sort()).toEqual(["progress"]);
+    expect(raw).not.toContain("SECRET_SUMMARY");
   });
 
   it("drops events the cloud node API doesn't model (workflow:start, tool:*, workflow:end)", () => {
@@ -528,17 +546,20 @@ describe("createCloudStreamObserver — per-node event streaming", () => {
   it("forwards a route decision as a progress event on the 'from' node", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 200 }));
     const observer = createCloudStreamObserver(config, handle)!;
-    observer({ type: "route", from: "triage", to: "implement", reason: "novel high-sev bug" });
+    observer({ type: "route", from: "triage", to: "implement", reason: "SECRET_ROUTE_REASON novel high-sev bug" });
     await new Promise((r) => setImmediate(r));
     expect(fetchSpy).toHaveBeenCalledOnce();
     const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string) as {
       event: string;
       node: string;
-      data: { route: { to: string; reason: string } };
+      data: { route: Record<string, unknown> };
     };
     expect(body.event).toBe("progress");
     expect(body.node).toBe("triage");
-    expect(body.data.route).toEqual({ to: "implement", reason: "novel high-sev bug" });
+    expect(Object.keys(body.data)).toEqual(["route"]);
+    expect(Object.keys(body.data.route).sort()).toEqual(["from", "to"]);
+    expect(body.data.route).toEqual({ from: "triage", to: "implement" });
+    expect((fetchSpy.mock.calls[0]![1] as RequestInit).body as string).not.toContain("SECRET_ROUTE_REASON");
   });
 
   it("forwards a node:warning as a progress event with reason + field names", async () => {
@@ -645,19 +666,19 @@ describe("createCloudStreamObserver — per-node event streaming", () => {
       type: "node:retry",
       node: "implement",
       attempt: 2,
-      reason: "timeout",
+      reason: "SECRET_RETRY_REASON timeout",
       preamble: "",
     });
     await new Promise((r) => setImmediate(r));
     expect(fetchSpy).toHaveBeenCalledOnce();
     const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string) as {
       event: string;
-      data: { retry: boolean; attempt: number; reason: string };
+      data: Record<string, unknown>;
     };
     expect(body.event).toBe("progress");
-    expect(body.data.retry).toBe(true);
-    expect(body.data.attempt).toBe(2);
-    expect(body.data.reason).toBe("timeout");
+    expect(Object.keys(body.data).sort()).toEqual(["attempt", "retry"]);
+    expect(body.data).toEqual({ retry: true, attempt: 2 });
+    expect((fetchSpy.mock.calls[0]![1] as RequestInit).body as string).not.toContain("SECRET_RETRY_REASON");
   });
 
   it("does not leak enter timestamps across many node:enter/exit pairs (long-running workflow safety)", async () => {

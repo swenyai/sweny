@@ -265,7 +265,7 @@ describe("reportToCloud", () => {
     }
   });
 
-  it("ships shape-only finding classification: severity, novel/dup, complexity, service names", async () => {
+  it("ships shape-only finding classification: severity, novel/dup, complexity, service count", async () => {
     await reportToCloud(makeResultsWithProse(), 1000, makeConfig({ cloudToken: "sweny_pk_abc" }), "triage");
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(init.body as string);
@@ -275,17 +275,69 @@ describe("reportToCloud", () => {
         severity: "high",
         is_duplicate: false,
         fix_complexity: "moderate",
-        affected_services: ["checkout-api", "auth-service"],
+        affected_services_count: 2,
       },
       {
         severity: "low",
         is_duplicate: true,
         fix_complexity: "simple",
-        affected_services: ["billing"],
+        affected_services_count: 1,
       },
     ]);
+    const raw = init.body as string;
+    for (const name of ["checkout-api", "auth-service", "billing"]) expect(raw).not.toContain(name);
+    for (const f of body.findings) {
+      expect(Object.keys(f).sort()).toEqual(["affected_services_count", "fix_complexity", "is_duplicate", "severity"]);
+    }
     expect(body.findings_count).toBe(2);
     expect(body.duplicate_count).toBe(1);
     expect(body.severity_counts).toEqual({ high: 1, low: 1 });
+  });
+
+  it("top-level report body is a closed key allowlist", async () => {
+    await reportToCloud(makeResultsWithProse(), 1000, makeConfig({ cloudToken: "sweny_pk_abc" }), "triage");
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body as string);
+    const allowed = new Set([
+      "owner",
+      "repo",
+      "status",
+      "workflow",
+      "duration_ms",
+      "recommendation",
+      "findings",
+      "findings_count",
+      "duplicate_count",
+      "severity_counts",
+      "highest_severity",
+      "novel_count",
+      "pr_url",
+      "pr_number",
+      "issue_url",
+      "issue_identifier",
+      "issues_found",
+      "nodes",
+      "action_version",
+      "runner_os",
+    ]);
+    expect(Object.keys(body).filter((k) => !allowed.has(k))).toEqual([]);
+    for (const n of body.nodes) expect(Object.keys(n).sort()).toEqual(["id", "name", "status"]);
+  });
+
+  it("recommendation is clamped to the enum; free text becomes 'other'", async () => {
+    const send = async (rec: unknown) => {
+      fetchMock.mockClear();
+      const r = new Map([
+        ["investigate", { status: "success" as const, data: { recommendation: rec }, toolCalls: [] }],
+      ]);
+      await reportToCloud(r, 1, makeConfig({ cloudToken: "sweny_pk_abc" }), "triage");
+      const [, init] = fetchMock.mock.calls[0];
+      return JSON.parse(init.body as string).recommendation;
+    };
+    expect(await send("implement")).toBe("implement");
+    expect(await send("  Escalate ")).toBe("escalate");
+    expect(await send("skip")).toBe("skip");
+    expect(await send("implement the null guard in src/auth.ts")).toBe("other");
+    expect(await send(42)).toBe("other");
   });
 });
