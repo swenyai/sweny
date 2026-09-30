@@ -44,16 +44,18 @@ export interface BridgeToolDescriptor {
   inputSchema: JSONSchema;
 }
 
-export interface McpTextContent {
+// Type aliases, not interfaces: the agent SDK's tool() handler result has an
+// index signature, which an interface cannot satisfy.
+export type McpTextContent = {
   type: "text";
   text: string;
-}
+};
 
 /** The MCP `CallToolResult` subset sweny produces for skill tools. */
-export interface McpCallToolResult {
+export type McpCallToolResult = {
   content: McpTextContent[];
   isError?: true;
-}
+};
 
 export type BridgeResponse =
   | { id: number; ok: true; result: { tools: BridgeToolDescriptor[] } | McpCallToolResult }
