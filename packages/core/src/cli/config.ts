@@ -135,7 +135,7 @@ export function registerTriageCommand(program: Command): Command {
   return program
     .command("triage")
     .description("Run the SWEny triage workflow")
-    .option("--agent <provider>", "Coding agent: claude (default), codex, gemini")
+    .option("--agent <provider>", "Coding agent: claude (the only supported agent)")
     .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
     .option("--observability-provider <provider>", "Observability provider (default: none)")
     .option("--issue-tracker-provider <provider>", "Issue tracker provider (default: github-issues)")
@@ -413,18 +413,14 @@ export function validateInputs(config: CliConfig): string[] {
         );
       }
       break;
-    case "codex":
-      if (!config.openaiApiKey) {
-        errors.push("Missing: OPENAI_API_KEY — get a key at https://platform.openai.com/api-keys");
-      }
-      break;
-    case "gemini":
-      if (!config.geminiApiKey) {
-        errors.push("Missing: GEMINI_API_KEY or GOOGLE_API_KEY — get a key at https://aistudio.google.com/app/apikey");
-      }
-      break;
     default:
-      errors.push(`Unsupported coding agent provider: ${config.codingAgentProvider} (use claude, codex, or gemini)`);
+      // Honest --agent (#330): SWEny runs headless Claude Code only. Nothing
+      // dispatches on other values, so accepting them would silently run
+      // Claude under a different name.
+      errors.push(
+        `Unsupported coding agent "${config.codingAgentProvider}": the only supported agent is "claude" ` +
+          `(headless Claude Code). Remove --agent / coding-agent-provider or set it to claude.`,
+      );
   }
 
   // Repository required unless all providers are file-based
@@ -866,7 +862,7 @@ export function registerImplementCommand(program: Command): Command {
   return program
     .command("implement <issueId>")
     .description("Implement a fix for a specific issue and open a PR")
-    .option("--agent <provider>", "Coding agent: claude (default), codex, gemini")
+    .option("--agent <provider>", "Coding agent: claude (the only supported agent)")
     .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
     .option("--issue-tracker-provider <provider>", "Issue tracker (linear|jira|github-issues|file)")
     .option("--source-control-provider <provider>", "Source control (github|gitlab|file)")

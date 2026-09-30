@@ -73,7 +73,7 @@ sweny triage [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude`, `codex`, `gemini` (alias: `--coding-agent-provider`) | `claude` |
+| `--agent <provider>` | Coding agent: `claude` only; other values are rejected (alias: `--coding-agent-provider`) | `claude` |
 | `--observability-provider <provider>` | Observability platform | `datadog` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `github-issues`, `linear`, `jira`, `file` | `github-issues` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
@@ -175,7 +175,7 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude`, `codex`, `gemini` (alias: `--coding-agent-provider`) | `claude` |
+| `--agent <provider>` | Coding agent: `claude` only; other values are rejected (alias: `--coding-agent-provider`) | `claude` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `linear`, `jira`, `github-issues`, `file` | `linear` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
 | `--dry-run` | Skip creating PR -- report only | `false` |
