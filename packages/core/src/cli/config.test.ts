@@ -98,7 +98,7 @@ describe("validateInputs: coding agent (honest --agent, #330)", () => {
     expect(errors.filter((e) => /agent/i.test(e))).toEqual([]);
   });
 
-  it.each(["gemini", "openai", "pi", "bogus"])("rejects --agent %s: no adapter, so nothing would run it", (agent) => {
+  it.each(["gemini", "openai", "bogus"])("rejects --agent %s: no adapter, so nothing would run it", (agent) => {
     // Even with the matching vendor key present, an agent without an adapter
     // must not pass validation: another agent would run under its name.
     const errors = validateInputs(
@@ -107,6 +107,11 @@ describe("validateInputs: coding agent (honest --agent, #330)", () => {
     const err = errors.find((e) => e.includes(`"${agent}"`));
     expect(err).toBeDefined();
     expect(err).toMatch(/supported agents are "claude" \(headless Claude Code\) and "codex" \(Codex CLI\)/);
+  });
+
+  it("accepts --agent pi without a key check: pi takes any provider's key, or a local model", () => {
+    const errors = validateInputs(baseConfig({ codingAgentProvider: "pi" }));
+    expect(errors.filter((e) => /agent|supported/i.test(e))).toEqual([]);
   });
 
   describe("codex (#331)", () => {

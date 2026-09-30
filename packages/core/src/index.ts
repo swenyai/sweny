@@ -112,7 +112,7 @@ export type { ResolvedPermissions } from "./node-policy.js";
 export { applySafeOutputs, createEmitOutputTool, resolveActor, EMIT_OUTPUT_TOOL } from "./safe-outputs.js";
 export type { SafeOutputIntent, ActorInfo, WriteStageState } from "./safe-outputs.js";
 
-// Agent harness (the seam) and its adapters: Claude Code and Codex
+// Agent harness (the seam) and its adapters: Claude Code, Codex and pi
 export {
   createHarness,
   claudeCompat,
@@ -120,6 +120,7 @@ export {
   policyGate,
   ClaudeCodeHarness,
   CodexHarness,
+  PiHarness,
   SUPPORTED_AGENTS,
 } from "./harness/index.js";
 export type {
@@ -135,6 +136,7 @@ export type {
   ToolClass,
   ClaudeCodeHarnessOptions,
   CodexHarnessOptions,
+  PiHarnessOptions,
 } from "./harness/index.js";
 
 // Claude client (back-compat: ClaudeClient is ClaudeCodeHarness, @deprecated)
