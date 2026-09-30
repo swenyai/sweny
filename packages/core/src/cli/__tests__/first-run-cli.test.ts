@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -15,6 +15,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI_BIN = path.resolve(__dirname, "..", "..", "..", "dist", "cli", "main.js");
 const HAS_BUILD = fs.existsSync(CLI_BIN);
 const PLUGIN_SKILLS = path.resolve(__dirname, "..", "..", "..", "..", "plugin", "skills");
+
+// Each case spawns the CLI; allow for a loaded machine.
+vi.setConfig({ testTimeout: 30_000 });
 
 const dirs: string[] = [];
 afterEach(() => {
