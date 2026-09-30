@@ -54,3 +54,7 @@ lockf -t 7200 /tmp/sweny-spec.lock npm --prefix spec run dev -- --port 15472
 ```
 
 On Linux, replace `lockf -t 7200` with `flock -w 7200`. All worktrees use the same lock names. Check port availability first; never stop another session's process. If a port is occupied, coordinate a replacement through the bus and update the shared port assignment. Verify the actual listening port after startup, since Astro may choose another port when one is occupied.
+
+### Worktrees
+
+Fresh worktrees have no `node_modules`. Symlink them from the main checkout (`ln -s <main>/node_modules node_modules`, same for `packages/core/node_modules`); `.gitignore` covers the symlinks. The pre-commit hook runs prettier via lint-staged, so put `<main>/node_modules/.bin` on PATH before committing from a worktree.
