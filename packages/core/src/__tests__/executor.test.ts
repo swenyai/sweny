@@ -1561,6 +1561,8 @@ describe("executor", () => {
             name: "A",
             instruction: "Step A",
             skills: [],
+            // Opt into legacy fall-through: this test locks requires-gating per visit.
+            on_fail: "continue",
             // Requires b.proceed === "yes" — fails when b says "no"
             requires: { output_matches: [{ path: "b.proceed", equals: "yes" }] },
           },
@@ -3004,8 +3006,9 @@ describe("bundled workflows: routing contract invariants", () => {
 // ─── Termination safety + eval-gate correctness (issue #212) ───────
 
 describe("executor termination safety", () => {
-  it("an unconditional self-loop with no max_iterations hits the step budget and throws", async () => {
-    // a → a forever (single unconditional edge, no max_iterations).
+  it("a self-loop whose max_iterations exceeds max_steps hits the step budget and throws", async () => {
+    // a → a up to 50 times (an unbounded self-loop is now rejected before
+    // running, see #326); the workflow-level step cap still stops it first.
     const selfLoop: Workflow = {
       id: "self-loop",
       name: "Self loop",
@@ -3014,7 +3017,7 @@ describe("executor termination safety", () => {
       nodes: {
         a: { name: "A", instruction: "Do A", skills: [] },
       },
-      edges: [{ from: "a", to: "a" }],
+      edges: [{ from: "a", to: "a", max_iterations: 50 }],
     };
 
     const claude = new MockClaude({ responses: { a: { data: {} } } });
@@ -3024,8 +3027,8 @@ describe("executor termination safety", () => {
     ).rejects.toThrow(/step budget exceeded/);
   });
 
-  it("a routed loop with no max_iterations hits the step budget and throws", async () => {
-    // a → b → a (conditional, no max_iterations); evaluator always loops back.
+  it("a routed loop whose max_iterations exceeds max_steps hits the step budget and throws", async () => {
+    // a → b → a (conditional, max_iterations 50); evaluator always loops back.
     const routedLoop: Workflow = {
       id: "routed-loop",
       name: "Routed loop",
@@ -3038,7 +3041,7 @@ describe("executor termination safety", () => {
       },
       edges: [
         { from: "a", to: "b" },
-        { from: "b", to: "a", when: "loop back" },
+        { from: "b", to: "a", when: "loop back", max_iterations: 50 },
         { from: "b", to: "done", when: "finish" },
       ],
     };
@@ -3067,17 +3070,17 @@ describe("executor termination safety", () => {
     expect(results.size).toBe(3);
   });
 
-  it("eval retries do NOT count toward the step budget (only node visits do)", async () => {
+  it("eval retries DO count toward the step budget (#325: retries can no longer bypass max_steps)", async () => {
     // A single terminal node whose eval fails on every attempt, with a large
-    // retry budget. Retries re-run claude inside the node; they are bounded by
-    // retry.max and must NOT consume the workflow-level step budget, which
-    // counts node visits (cycle protection). With max_steps: 1 the node is
-    // visited exactly once, so the 1+10 attempts here must complete without
-    // tripping the budget. This pins the deliberate design: retries have their
-    // own bound (retry.max), the step cap guards cycles.
+    // retry budget. Retries re-run claude inside the node at full model spend,
+    // so they must consume the same workflow-level step budget as ordinary
+    // node visits: otherwise a node with a generous retry.max is an unbounded
+    // spend multiplier the step cap can never catch. With max_steps: 1 the
+    // initial attempt exactly exhausts the budget, so the first retry attempt
+    // must trip "step budget exceeded" instead of silently proceeding.
     const node: Workflow = {
-      id: "retry-no-step",
-      name: "Retry no step",
+      id: "retry-counts-as-step",
+      name: "Retry counts as step",
       description: "single terminal node that retries hard",
       entry: "a",
       nodes: {
@@ -3104,16 +3107,143 @@ describe("executor termination safety", () => {
       },
     };
 
-    // max_steps: 1 allows a single node visit. If retries counted toward
-    // the budget, the 11 attempts would throw "step budget exceeded".
+    // max_steps: 1 allows only the initial attempt; the first retry attempt
+    // must trip the budget rather than the old "1 + 10 attempts, no throw".
+    await expect(
+      execute(node, {}, { skills: createSkillMap([]), claude: failingClaude, config: {}, max_steps: 1 }),
+    ).rejects.toThrow(/step budget exceeded/);
+    // Only the initial attempt ran before the budget check stopped the retry loop.
+    expect(runs).toBe(1);
+  });
+
+  it("eval retries run to exhaustion when the step budget comfortably covers them", async () => {
+    // Same node/retry shape as above, but with headroom in max_steps: all
+    // 1 + retry.max attempts should complete normally and the node should
+    // still fail (eval never passes) without tripping the budget.
+    const node: Workflow = {
+      id: "retry-within-budget",
+      name: "Retry within budget",
+      description: "single terminal node that retries hard, budget allows it",
+      entry: "a",
+      nodes: {
+        a: {
+          name: "A",
+          instruction: "Emit ok",
+          skills: [],
+          eval: [{ name: "never", kind: "value", rule: { output_required: ["ok"] } }],
+          retry: { max: 10 },
+        },
+      },
+      edges: [],
+    };
+
+    let runs = 0;
+    const failingClaude: any = {
+      async run() {
+        runs++;
+        return { status: "success", data: { other: 1 }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+
     const { results } = await execute(
       node,
       {},
-      { skills: createSkillMap([]), claude: failingClaude, config: {}, max_steps: 1 },
+      { skills: createSkillMap([]), claude: failingClaude, config: {}, max_steps: 20 },
     );
-    // initial + 10 retries, all within one node visit
+    // initial + 10 retries, all within budget (1 node visit + 10 retry steps = 11 <= 20)
     expect(runs).toBe(11);
     expect(results.get("a")?.status).toBe("failed");
+  });
+
+  it("no paid reflection call happens once the step budget is exhausted, and node:exit is emitted (#325)", async () => {
+    const wf: Workflow = {
+      id: "retry-budget-reflect",
+      name: "Retry budget reflect",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: {
+          name: "A",
+          instruction: "Emit ok",
+          skills: [],
+          eval: [{ name: "never", kind: "value", rule: { output_required: ["ok"] } }],
+          retry: { max: 3, instruction: { auto: true } },
+        },
+      },
+      edges: [],
+    };
+    let runs = 0;
+    let asks = 0;
+    const claude: any = {
+      async run() {
+        runs++;
+        return { status: "success", data: { other: 1 }, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+      async ask() {
+        asks++;
+        return "diagnosis";
+      },
+    };
+    const events: ExecutionEvent[] = [];
+    await expect(
+      execute(
+        wf,
+        {},
+        { skills: createSkillMap([]), claude, config: {}, max_steps: 1, observer: (e) => events.push(e) },
+      ),
+    ).rejects.toThrow(/step budget exceeded/);
+    expect(runs).toBe(1);
+    expect(asks).toBe(0); // budget checked before buildRetryPreamble
+
+    const enters = events.filter((e) => e.type === "node:enter");
+    const exits = events.filter((e) => e.type === "node:exit");
+    expect(enters).toHaveLength(1);
+    expect(exits).toHaveLength(1);
+    const exit = exits[0] as Extract<ExecutionEvent, { type: "node:exit" }>;
+    expect(exit.node).toBe("a");
+    expect(exit.result.status).toBe("failed");
+    expect(String((exit.result.data as Record<string, unknown>).error)).toMatch(/step budget exceeded/);
+  });
+
+  it("dry run stops at the first conditional edge; the downstream node never runs (#324)", async () => {
+    const wf: Workflow = {
+      id: "dry-run-conditional",
+      name: "Dry run conditional",
+      description: "",
+      entry: "a",
+      nodes: {
+        a: { name: "A", instruction: "Analyze", skills: [] },
+        b: { name: "B", instruction: "Side effect", skills: [] },
+      },
+      edges: [{ from: "a", to: "b", when: "analysis found a problem" }],
+    };
+    const ran: string[] = [];
+    const claude: any = {
+      async run(opts: { instruction: string }) {
+        ran.push(opts.instruction);
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate(opts: any) {
+        return opts.choices[0].id;
+      },
+    };
+    const validatedInput = { alert: "x" };
+    const { results } = await execute(
+      wf,
+      { ...validatedInput, dryRun: true },
+      { skills: createSkillMap([]), claude, config: {} },
+    );
+    expect(results.has("a")).toBe(true);
+    expect(results.has("b")).toBe(false);
+    expect(ran).toHaveLength(1);
+    // #380: dry-run prepends a read-only notice; the node's own instruction follows it.
+    expect(ran[0]).toMatch(/^## Dry run[\s\S]*Analyze$/);
   });
 });
 
@@ -3387,9 +3517,10 @@ describe("missing-required-field retry", () => {
 });
 
 describe("resolveNext deterministic routing (CE-03)", () => {
-  it("makes zero claude.evaluate calls when there are no conditional edges", async () => {
-    // Node "a" has two unconditional out-edges (a→b, a→c). resolveNext should
-    // follow the first default edge directly and never call claude.evaluate.
+  it("rejects two unconditional out-edges before any node or evaluate call (AMBIGUOUS_EDGES, #326)", async () => {
+    // Node "a" has two unconditional out-edges (a→b, a→c). validateWorkflow
+    // now rejects this at execute() entry; resolveNext's first-default
+    // behavior remains only as a defense-in-depth backstop.
     const wf: Workflow = {
       id: "ambiguous-runtime",
       name: "Ambiguous",
@@ -3415,11 +3546,10 @@ describe("resolveNext deterministic routing (CE-03)", () => {
         return opts.choices[0].id;
       },
     };
-    const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+    await expect(execute(wf, {}, { skills: createSkillMap([]), claude, config: {} })).rejects.toThrow(
+      /AMBIGUOUS_EDGES/,
+    );
     expect(evaluateCalls).toBe(0);
-    // First default edge followed: b ran, c did not.
-    expect(results.has("b")).toBe(true);
-    expect(results.has("c")).toBe(false);
   });
 
   it("still uses claude.evaluate when there is at least one conditional edge", async () => {

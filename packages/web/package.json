@@ -23,10 +23,10 @@
     "astro": "^6.4.5",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "sharp": "^0.34.2",
+    "sharp": "^0.35.4",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

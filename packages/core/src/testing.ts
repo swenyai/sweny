@@ -50,7 +50,8 @@ export interface MockClaudeOptions {
  *
  * For each node, it executes scripted tool calls and returns
  * scripted results. For routing decisions, it follows the
- * routes map or defaults to the first choice.
+ * routes map. With no scripted route (or an invalid one) it returns
+ * `null`, mirroring the real client failing closed on a route-eval failure.
  */
 export class MockClaude implements Claude {
   private callOrder: string[] = [];
@@ -127,7 +128,7 @@ export class MockClaude implements Claude {
     question: string;
     context: Record<string, unknown>;
     choices: { id: string; description: string }[];
-  }): Promise<string> {
+  }): Promise<string | null> {
     // Check if we have a scripted route from the last executed node
     const lastNode = this.callOrder[this.callOrder.length - 1];
     if (lastNode && this.routes[lastNode]) {
@@ -138,8 +139,8 @@ export class MockClaude implements Claude {
       }
     }
 
-    // Default: first choice
-    return opts.choices[0].id;
+    // No scripted route: fail closed (same as ClaudeClient.evaluate).
+    return null;
   }
 
   async ask(opts: { instruction: string; context: Record<string, unknown> }): Promise<string> {
@@ -215,6 +216,7 @@ export function createFileSkill(outputDir: string): Skill {
     tools: [
       {
         name: "fs_read_json",
+        access: "read",
         description: "Read and parse a JSON file",
         input_schema: {
           type: "object",
@@ -233,6 +235,7 @@ export function createFileSkill(outputDir: string): Skill {
       },
       {
         name: "fs_read_text",
+        access: "read",
         description: "Read a text file",
         input_schema: {
           type: "object",
@@ -250,6 +253,7 @@ export function createFileSkill(outputDir: string): Skill {
       },
       {
         name: "fs_write_json",
+        access: "write",
         description: "Write a JSON object to a file",
         input_schema: {
           type: "object",
@@ -270,6 +274,7 @@ export function createFileSkill(outputDir: string): Skill {
       },
       {
         name: "fs_write_markdown",
+        access: "write",
         description: "Write a markdown file (for issues, PRs, notifications)",
         input_schema: {
           type: "object",
@@ -290,6 +295,7 @@ export function createFileSkill(outputDir: string): Skill {
       },
       {
         name: "fs_list_dir",
+        access: "read",
         description: "List files in a directory",
         input_schema: {
           type: "object",

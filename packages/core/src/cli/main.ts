@@ -11,16 +11,18 @@ import chalk from "chalk";
 import { execute } from "../executor.js";
 import type { ExecuteOptions } from "../executor.js";
 import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workflows/index.js";
-import type { ExecutionEvent, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
+import type { ExecutionEvent, ExecutionTrace, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { ClaudeClient } from "../claude.js";
-import { createSkillMap, validateWorkflowSkills } from "../skills/index.js";
+import { builtinSkills, createSkillMap, validateWorkflowSkills } from "../skills/index.js";
+import { formatMissingSkillLines, skillEnvWarnings } from "./skill-env.js";
 import { configuredSkills, configuredSkillsWithDiagnostics } from "../skills/custom-loader.js";
 import { buildAutoMcpServers, buildSkillMcpServers, buildProviderContext } from "../mcp.js";
 import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
 import { loadAndValidateWorkflow } from "../loader.js";
 import { validateRuntimeInput } from "../inputs.js";
+import { mergeDryRunIntoInput, parseRunBudgetFlags } from "./workflow-input.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -31,11 +33,21 @@ import { runWorkflowDiagram } from "./diagram.js";
 import { DagRenderer } from "./renderer.js";
 import * as readline from "node:readline";
 
-import { loadDotenv, loadConfigFile } from "./config-file.js";
+import { loadDotenv, loadConfigFile, applyAgentFileConfig } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
-import { runNew } from "./new.js";
-import { runE2eRun } from "./e2e.js";
+import { nonInteractiveUsage, runNew } from "./new.js";
+import { buildRunRecord, createNodeTimer, historyDisabled, newRunId, recordRun } from "./run-history.js";
+import { registerRunsCommand } from "./runs.js";
+import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "./e2e.js";
 import { createVerboseToolObserver } from "./verbose-observer.js";
+import {
+  createRunLogger,
+  renderReceiptLine,
+  summarizeRun,
+  writeStepSummary,
+  WORKFLOW_RUN_DESCRIPTION,
+  WORKFLOW_RUN_OPTIONS,
+} from "./run-output.js";
 import {
   registerTriageCommand,
   registerImplementCommand,
@@ -59,7 +71,12 @@ import {
   formatCrashError,
   formatCheckResults,
 } from "./output.js";
-import { checkProviderConnectivity } from "./check.js";
+import {
+  checkProviderConnectivity,
+  detectClaudeCodeLogin,
+  discoverWorkflowSkillIds,
+  validateCheckInputs,
+} from "./check.js";
 import { registerSetupCommand } from "./setup.js";
 import { registerPublishCommand } from "./publish.js";
 import { registerSkillCommand } from "./skill.js";
@@ -95,6 +112,8 @@ function composeObservers(...observers: (Observer | undefined)[]): Observer | un
 
 // Auto-load .env before Commander parses (so env vars are available for defaults)
 loadDotenv();
+// Agent sandbox / env-passthrough keys from .sweny.yml -> SWENY_* env (#360).
+applyAgentFileConfig(loadConfigFile());
 
 const program = new Command()
   .name("sweny")
@@ -105,10 +124,18 @@ const program = new Command()
 program
   .command("new [id]")
   .description(
-    "Create a new workflow. With no id, opens the interactive picker. With an id, installs that workflow from the marketplace (swenyai/workflows).",
+    "Create a new workflow. With no id, opens the interactive picker. With an id, uses that built-in template, or installs it from the marketplace (swenyai/workflows).",
   )
-  .action(async (id: string | undefined) => {
-    await runNew(id ? { marketplaceId: id } : undefined);
+  .option("--template <id>", "Use a built-in template without the picker")
+  .option("-y, --yes", "Skip every prompt (never overwrites existing files)")
+  .action(async (id: string | undefined, options: { template?: string; yes?: boolean }) => {
+    // Prompts need a terminal. Without one (CI, pipes), a prompt never
+    // settles, so print usage and exit 2 instead of hanging.
+    if (!options.yes && !process.stdin.isTTY) {
+      console.error(nonInteractiveUsage());
+      process.exit(2);
+    }
+    await runNew({ marketplaceId: id, template: options.template, yes: options.yes });
   });
 
 // ── sweny check ───────────────────────────────────────────────────────
@@ -118,13 +145,16 @@ program
   .action(async () => {
     const fileConfig = loadConfigFile();
     const config = parseCliInputs({}, fileConfig);
-    const errors = validateInputs(config);
+    const workflows = discoverWorkflowSkillIds(process.cwd());
+    const scope = workflows.found ? workflows.skillIds : undefined;
+    const claudeCodeLogin = detectClaudeCodeLogin();
+    const errors = validateCheckInputs(config, { scope, claudeCodeLogin });
     if (errors.length > 0) {
       console.error(formatValidationErrors(errors));
       process.exit(1);
     }
     console.log(chalk.dim("\n  Checking provider connectivity…\n"));
-    const results = await checkProviderConnectivity(config);
+    const results = await checkProviderConnectivity(config, { scope, claudeCodeLogin });
     console.log(formatCheckResults(results));
     const hasFailure = results.some((r) => r.status === "fail");
     process.exit(hasFailure ? 1 : 0);
@@ -240,7 +270,8 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: consoleLogger,
-    mcpServers,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
   });
 
   // ── Progress display state ─────────────────────────────────
@@ -490,17 +521,36 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
     process.exit(hasFailed ? 1 : 0);
   } catch (error) {
+    const crashMsg = error instanceof Error ? error.message : "Unknown error";
     if (config.json) {
-      console.log(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }));
+      console.log(JSON.stringify({ error: crashMsg }));
     } else {
       console.error(formatCrashError(error));
+    }
+
+    // Finalize the cloud run as failed. execute() threw (including the
+    // RouteEvaluationError the executor raises on route-eval failure), so
+    // the in-try finish never ran and the run would otherwise stay stuck at
+    // "running" forever. No results map exists on this path, so pass an empty
+    // one; the error summary is a short message, never raw agent prose.
+    try {
+      // PRIVACY: pass the raw error, not crashMsg. finishCloudLifecycle reduces it
+      // to error.name + a 200-char message: thrown messages can embed agent/LLM
+      // prose or log text, and the cloud gets metadata only. It also sends at
+      // most one finish per run, so a throw after the in-try finish cannot
+      // overwrite the real result with a second "failed".
+      await finishCloudLifecycle(config, cloudHandle, new Map(), Date.now() - runStart, "failed", error);
+    } catch {
+      // silent — cloud reporting must never block or mask the crash
     }
 
     // Best-effort GitHub Actions step summary on crash
     if (config.notificationProvider === "github-summary" && process.env.GITHUB_STEP_SUMMARY) {
       try {
-        const msg = error instanceof Error ? error.message : "Unknown error";
-        fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## ❌ SWEny Triage Crashed\n\n\`\`\`\n${msg}\n\`\`\`\n`);
+        fs.appendFileSync(
+          process.env.GITHUB_STEP_SUMMARY,
+          `## ❌ SWEny Triage Crashed\n\n\`\`\`\n${crashMsg}\n\`\`\`\n`,
+        );
       } catch {
         // ignore
       }
@@ -561,7 +611,8 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     maxTurns: config.maxImplementTurns || 40,
     cwd: process.cwd(),
     logger: consoleLogger,
-    mcpServers,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
   });
 
   console.log(chalk.cyan(`\n  sweny implement ${issueId}\n`));
@@ -682,7 +733,21 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
 
     process.exit(0);
   } catch (err) {
-    console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+    const crashMsg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
+    // Finalize the cloud run as failed (covers thrown errors, incl.
+    // RouteEvaluationError). Without this a crashed implement run stays
+    // "running" in cloud forever.
+    try {
+      // PRIVACY: pass the raw error, not crashMsg. finishCloudLifecycle reduces it
+      // to error.name + a 200-char message: thrown messages can embed agent/LLM
+      // prose or log text, and the cloud gets metadata only. It also sends at
+      // most one finish per run, so a throw after the in-try finish cannot
+      // overwrite the real result with a second "failed".
+      await finishCloudLifecycle(config, implCloudHandle, new Map(), Date.now() - implRunStart, "failed", err);
+    } catch {
+      // silent
+    }
     process.exit(1);
   }
 });
@@ -717,15 +782,26 @@ export async function workflowRunAction(
     mermaid?: boolean;
     verbose?: boolean;
     timeout?: string;
+    maxSteps?: string;
     yes?: boolean;
   },
 ): Promise<void> {
+  // Reject junk --timeout/--max-steps up front (both paths) instead of
+  // silently falling back to a default.
+  let budget: ReturnType<typeof parseRunBudgetFlags>;
+  try {
+    budget = parseRunBudgetFlags(options.timeout, options.maxSteps, DEFAULT_WORKFLOW_TIMEOUT_MS);
+  } catch (err) {
+    console.error(chalk.red(`\n  ${err instanceof Error ? err.message : String(err)}\n`));
+    process.exit(1);
+  }
+
   // No file given → batch-run the e2e workflows in .sweny/e2e/. This is the
   // home for what used to be `sweny e2e run`; it lists what will run and
   // confirms first (bypass with --yes).
   if (!file) {
     await runE2eRun({
-      timeout: options.timeout ? parseInt(options.timeout, 10) : undefined,
+      timeout: options.timeout === undefined ? undefined : budget.timeoutMs,
       yes: Boolean(options.yes),
     });
     return;
@@ -740,7 +816,9 @@ export async function workflowRunAction(
   for (const w of earlySkillDiscovery.warnings) {
     console.error(chalk.yellow(`  ⚠  ${w.message}`));
   }
-  const knownSkillIds = new Set(earlySkillDiscovery.skills.map((s) => s.id));
+  // A built-in skill with unset env is not "unknown": include every built-in id
+  // so the loader only flags genuine typos; missing env is reported below.
+  const knownSkillIds = new Set([...earlySkillDiscovery.skills.map((s) => s.id), ...builtinSkills.map((s) => s.id)]);
 
   let workflow: Workflow;
   try {
@@ -779,12 +857,10 @@ export async function workflowRunAction(
   // we require at least one configured skill per category.
   const validation = validateWorkflowSkills(workflow, skills, workflow.skills);
   if (validation.errors.length > 0) {
-    console.error(chalk.red(`\n  Workflow cannot run — missing required skills:\n`));
-    for (const err of validation.errors) console.error(chalk.red(`    \u2717 ${err}`));
+    console.error(chalk.red(`\n  Workflow cannot run:\n`));
+    for (const line of formatMissingSkillLines(validation)) console.error(chalk.red(`    \u2717 ${line}`));
 
     const unknown = validation.missing.filter((m) => m.category === "unknown");
-    const envGaps = validation.missing.filter((m) => m.category !== "unknown" && m.missingEnv.length > 0);
-
     if (unknown.length > 0) {
       console.error(
         chalk.dim(
@@ -793,12 +869,6 @@ export async function workflowRunAction(
       );
       for (const m of unknown) {
         console.error(chalk.dim(`    sweny skill new ${m.id}`));
-      }
-    }
-    if (envGaps.length > 0) {
-      console.error(chalk.dim(`\n  These skills are built-in but their env vars aren't set:`));
-      for (const m of envGaps) {
-        console.error(chalk.dim(`    - ${m.id}: ${m.missingEnv.join(", ")}`));
       }
     }
     console.error(chalk.dim(`\n  Run \`sweny skill list\` to see what's available.\n`));
@@ -819,11 +889,15 @@ export async function workflowRunAction(
     userMcpServers: Object.keys(config.mcpServers).length > 0 ? config.mcpServers : undefined,
   });
 
+  // Raw [info]/[debug] lines are verbose-only; warnings are rendered (#383).
+  const runLogger = createRunLogger({ verbose: Boolean(options.verbose), tty: isTTY });
+
   const claude = new ClaudeClient({
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
-    logger: consoleLogger,
-    mcpServers,
+    logger: runLogger,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
     model: workflow.model,
   });
 
@@ -856,6 +930,7 @@ export async function workflowRunAction(
             } else {
               process.stderr.write(`  ${icon} ${event.node}  ${elapsed}\n`);
             }
+            runLogger.flush();
             break;
           }
           case "workflow:end":
@@ -899,7 +974,7 @@ export async function workflowRunAction(
       process.exit(1);
       return;
     }
-    workflowInput = validated.value;
+    workflowInput = mergeDryRunIntoInput(validated.value, config.dryRun);
   } else {
     workflowInput = {
       timeRange: config.timeRange,
@@ -954,28 +1029,74 @@ export async function workflowRunAction(
     console.log(c.subtle(`  cloud: ${wfCloudHandle.dashboardUrl}`));
   }
 
+  // Run history (#388): metadata-only record under .sweny/runs/, written once at run end.
+  const nodeTimer = createNodeTimer();
+  const runId = newRunId(runStart);
+  let historyRecorded = false;
+  const recordHistory = (results: Map<string, NodeResult>, trace: ExecutionTrace | undefined, crashed: boolean) => {
+    if (historyRecorded || historyDisabled(options.history, fileConfig["history"])) return;
+    historyRecorded = true;
+    try {
+      recordRun(
+        buildRunRecord({
+          runId,
+          workflow,
+          startedAtMs: runStart,
+          durationMs: Date.now() - runStart,
+          results,
+          trace,
+          nodeDurations: nodeTimer.durations,
+          crashed,
+        }),
+      );
+    } catch {
+      // history must never fail a run
+    }
+  };
+
   const observer = composeObservers(
     wfProgressObserver,
+    nodeTimer.observer,
     options.verbose ? createVerboseToolObserver() : undefined,
     options.stream ? createStreamObserver() : undefined,
     createCloudStreamObserver(config, wfCloudHandle),
   );
 
+  // #325: this is the primary run path (GitHub Action / CLI / MCP all land
+  // here), and previously never passed signal/timeoutMs/max_steps to
+  // execute() at all: a wedged node (hung tool call, runaway model turn)
+  // could hang the run indefinitely despite the abort/timeout plumbing
+  // existing in the executor. --timeout is a whole-run wall-clock budget,
+  // enforced by runWithWallClockBudget (shared with the .sweny/e2e/ batch
+  // runner in e2e.ts). Absent = DEFAULT_WORKFLOW_TIMEOUT_MS (60 min);
+  // `--timeout 0` = no wall-clock budget; junk is rejected above.
+  // --max-steps overrides the executor's own DEFAULT_MAX_STEPS when set.
+  const wfTimeoutMs = budget.timeoutMs;
+  const wfMaxSteps = budget.maxSteps;
+
   try {
-    const { results, trace } = await execute(workflow, workflowInput, {
-      skills,
-      claude,
-      observer,
-      logger: consoleLogger,
-      cwd: process.cwd(),
-      env: process.env,
-      fetchAuth: config.fetchAuth,
-      offline: config.offline,
-      fileRoot: config.fileRoot || undefined,
-    });
+    const { results, trace } = await runWithWallClockBudget(
+      (signal) =>
+        execute(workflow, workflowInput, {
+          skills,
+          claude,
+          observer,
+          logger: runLogger,
+          cwd: process.cwd(),
+          env: process.env,
+          fetchAuth: config.fetchAuth,
+          offline: config.offline,
+          fileRoot: config.fileRoot || undefined,
+          signal,
+          max_steps: wfMaxSteps,
+        }),
+      wfTimeoutMs,
+      `Workflow ${workflow.name}`,
+    );
 
     const wfDurationMs = Date.now() - runStart;
     const wfHasFailed = [...results.values()].some((r) => r.status === "failed");
+    recordHistory(results, trace, false);
 
     // Close the cloud lifecycle session BEFORE the JSON early-exit so
     // every workflow run reports a terminal status, regardless of how
@@ -1008,15 +1129,36 @@ export async function workflowRunAction(
       // silent
     }
 
+    // Run receipt (metadata only) + optional $GITHUB_STEP_SUMMARY.
+    runLogger.flush();
+    const receipt = summarizeRun(results, wfDurationMs);
+    writeStepSummary(workflow, results, receipt, trace);
     if (wfHasFailed) {
-      console.error(chalk.red(`  Workflow failed\n`));
+      console.error(`  ${renderReceiptLine(receipt, isTTY)}\n`);
       process.exit(1);
       return;
     }
-    console.log(chalk.green(`  Workflow completed\n`));
+    console.log(`  ${renderReceiptLine(receipt, isTTY)}\n`);
     process.exit(0);
   } catch (err) {
-    console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+    const crashMsg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
+    runLogger.flush();
+    recordHistory(nodeTimer.lastResults, undefined, true);
+    console.error(`  ${renderReceiptLine(summarizeRun(new Map(), Date.now() - runStart, true), isTTY)}\n`);
+    // Finalize the cloud run as failed (covers thrown errors, incl.
+    // RouteEvaluationError). Without this a crashed workflow run stays
+    // "running" in cloud forever.
+    try {
+      // PRIVACY: pass the raw error, not crashMsg. finishCloudLifecycle reduces it
+      // to error.name + a 200-char message: thrown messages can embed agent/LLM
+      // prose or log text, and the cloud gets metadata only. It also sends at
+      // most one finish per run, so a throw after the in-try finish cannot
+      // overwrite the real result with a second "failed".
+      await finishCloudLifecycle(config, wfCloudHandle, new Map(), Date.now() - runStart, "failed", err);
+    } catch {
+      // silent
+    }
     process.exit(1);
   }
 }
@@ -1040,12 +1182,19 @@ export function workflowExportAction(name: string): void {
 
 export function workflowValidateAction(file: string, options: { json?: boolean }): void {
   const result = loadAndValidateWorkflow(file);
+  // Missing skill env is a warning here, not a failure: `run` is where it blocks.
+  const warnings = result.ok
+    ? skillEnvWarnings(result.workflow, process.env, builtinSkills.concat(configuredSkills(process.env, process.cwd())))
+    : [];
 
   if (options.json) {
     const errs = result.ok ? [] : result.errors;
-    process.stdout.write(JSON.stringify({ valid: result.ok, errors: errs }, null, 2) + "\n");
+    const payload: Record<string, unknown> = { valid: result.ok, errors: errs };
+    if (warnings.length > 0) payload.warnings = warnings;
+    process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
   } else if (result.ok) {
     console.log(chalk.green(`  \u2713 ${file} is valid`));
+    for (const w of warnings) console.error(chalk.yellow(`  \u26A0 ${w}`));
   } else {
     console.error(
       chalk.red(`  \u2717 ${file} has ${result.errors.length} validation error${result.errors.length > 1 ? "s" : ""}:`),
@@ -1064,30 +1213,15 @@ workflowCmd
   .option("--json", "Output result as JSON")
   .action(workflowValidateAction);
 
-workflowCmd
+const workflowRunCmd = workflowCmd
   .command("run [file]")
-  .description(
-    "Run a workflow from a YAML or JSON file. With no file, batch-runs every workflow in .sweny/e2e/ (lists and confirms first; use --yes to skip the prompt).",
-  )
-  .option("--timeout <ms>", "Per-workflow timeout in ms for batch runs (default: 900000 = 15 min)")
-  .option("-y, --yes", "Skip the batch confirmation prompt (for CI)")
-  .option(
-    "--dry-run",
-    "Execute until the first conditional routing decision, then stop (no side effects past that point). NOTE: behavior changed in this release — previously --dry-run only printed the node list. For that behavior use --list-nodes.",
-  )
-  .option(
-    "--list-nodes",
-    "Validate, print nodes/skills, and exit without running. (Replaces the pre-Fix-#6 --dry-run behavior.)",
-  )
-  .option("--json", "Output result as JSON on stdout; suppress progress output")
-  .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)")
-  .option(
-    "--verbose",
-    "Print each tool call's input and output inline (human-readable, truncated). Use --stream for full untruncated NDJSON.",
-  )
-  .option("--mermaid", "Output a Mermaid diagram with execution state after run")
-  .option("--input <json>", "JSON string of input data to pass to the workflow")
+  .description(WORKFLOW_RUN_DESCRIPTION)
   .action(workflowRunAction);
+for (const [flags, description] of WORKFLOW_RUN_OPTIONS) {
+  workflowRunCmd.option(flags, description);
+}
+workflowRunCmd.option("--no-history", "Do not record this run in .sweny/runs/ (or set `history: off` in .sweny.yml)");
+registerRunsCommand(program);
 
 workflowCmd
   .command("diagram <file>")

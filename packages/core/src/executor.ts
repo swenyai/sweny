@@ -20,6 +20,7 @@ import type {
   NodeToolFilter,
   Skill,
   SkillDefinition,
+  McpServerConfig,
   Tool,
   Claude,
   Observer,
@@ -43,6 +44,9 @@ import { evaluateRequires } from "./requires.js";
 import { buildRetryPreamble } from "./retry.js";
 import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
+import { validateWorkflow } from "./schema.js";
+import { resolveAgentAccess } from "./agent-env.js";
+import { fenceUntrusted } from "./untrusted.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -134,6 +138,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
 
   // If the caller already aborted before we started, fail fast.
   throwIfAborted(signal);
+
+  const dryRun = isDryRunInput(input);
 
   // Merge inline workflow skills into the skill map so they resolve at runtime.
   // Inline skills (instruction/mcp only) become Skill objects with empty tools/config.
@@ -241,15 +247,29 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // skill-tool filter (`tools.allow` / `tools.deny`). Filtered tools are
     // never registered for the run, so the model cannot see or call them.
     const resolvedSkillTools = resolveTools(node.skills, skills);
-    const tools = filterNodeTools(resolvedSkillTools, node.tools, currentId, logger);
+    const filteredTools = filterNodeTools(resolvedSkillTools, node.tools, currentId, logger);
+    // Dry run (#380): only `access: "read"` tools reach the node. Write and
+    // unclassified tools are withheld (never registered, so never callable)
+    // and recorded on the node result as `skippedWrites`.
+    const tools = dryRun ? filteredTools.filter(isReadTool) : filteredTools;
+    const skippedWrites = dryRun ? filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name) : [];
+    if (skippedWrites.length > 0) {
+      logger.info(`  dry run: withheld write tools: ${skippedWrites.join(", ")}`, { node: currentId });
+    }
     const skillInstructions = resolveSkillInstructions(node.skills, skills);
+    const skillMcpServers = resolveSkillMcpServers(node.skills, skills);
 
     // Runtime guard: if this node declares skills but none resolved, the node
     // cannot do its job (e.g. "create a Linear issue" with no linear skill).
     // The startup validate() warns about this possibility, but only throw when
     // the node is actually reached — unreachable nodes with missing skills are fine.
-    // Instruction-only skills (no tools) are valid — they inject context into the prompt.
-    if (node.skills.length > 0 && resolvedSkillTools.length === 0 && skillInstructions.length === 0) {
+    // Instruction-only and resolved MCP-only skills are valid capabilities.
+    if (
+      node.skills.length > 0 &&
+      resolvedSkillTools.length === 0 &&
+      skillInstructions.length === 0 &&
+      Object.keys(skillMcpServers).length === 0
+    ) {
       throw new Error(
         `Node "${currentId}" requires skills [${node.skills.join(", ")}] but none are configured. ` +
           `Set the required environment variables and try again.`,
@@ -288,6 +308,18 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       trace.steps.push({ node: currentId, status: result.status, iteration });
       safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
       logger.warn(`  requires ${onFail === "skip" ? "skipped" : "failed"}: ${requiresError}`, { node: currentId });
+
+      // Fail closed here too: a requires failure with on_fail: fail yields a
+      // failed node, which halts by default (same policy as a failed run).
+      if (result.status === "failed" && (node.on_fail ?? "halt") === "halt") {
+        logger.warn(`  requires failed; halting workflow (on_fail: halt)`, { node: currentId });
+        safeObserve(
+          observer,
+          { type: "route", from: currentId, to: "(end)", reason: "node failed (on_fail: halt)" },
+          logger,
+        );
+        break;
+      }
 
       // Apply normal routing rules (dry run gate + resolveNext).
       // TODO: dedupe with requires path — see advanceFromNode helper below
@@ -336,13 +368,14 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       (workflow.context ?? []).length,
       resolvedSources,
     );
-    const instruction = buildNodeInstruction(
+    const baseInstruction = buildNodeInstruction(
       resolvedInstruction,
       effectiveRules,
       effectiveContext,
       input,
       skillInstructions,
     );
+    const instruction = dryRun ? `${dryRunNotice(skippedWrites)}\n\n---\n\n${baseInstruction}` : baseInstruction;
 
     // Run Claude on this node, with optional eval-failure retry loop.
     let attempt = 0;
@@ -369,6 +402,9 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         model: nodeModel,
         signal,
         timeoutMs,
+        agentAccess: resolveAgentAccess(node.skills, skills),
+        ...(dryRun ? {} : { mcpServers: skillMcpServers }),
+        ...(dryRun ? { readOnly: true } : {}),
         onProgress: (message) => {
           safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
         },
@@ -436,6 +472,25 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         node: currentId,
       });
 
+      // #325: a retry attempt re-invokes the agent on this node (full model
+      // spend) exactly like a fresh node visit, so it counts against the same
+      // `stepCount`/`maxSteps` budget. Checked BEFORE buildRetryPreamble so no
+      // paid reflection call happens once the budget is exhausted. On
+      // exhaustion, record a failed result and emit node:exit so observers
+      // never see node:enter without a matching node:exit.
+      stepCount++;
+      if (stepCount > maxSteps) {
+        const budgetError =
+          `step budget exceeded: workflow '${workflow.id}' ran ${stepCount} steps (max_steps: ${maxSteps}) ` +
+          `while retrying node '${currentId}' (attempt ${attempt + 1}/${retry.max}). Lower 'retry.max' on the ` +
+          `offending node or raise 'max_steps' if the workflow legitimately needs more steps.`;
+        result = { ...result, status: "failed", data: { ...result.data, error: budgetError } };
+        results.set(currentId, result);
+        trace.steps.push({ node: currentId, status: "failed", iteration, retryAttempt: attempt });
+        safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
+        throw new Error(budgetError);
+      }
+
       const preamble = await buildRetryPreamble({
         retry,
         evalFailures: outcome.failures,
@@ -478,6 +533,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       };
     }
 
+    if (skippedWrites.length > 0) result = { ...result, skippedWrites };
     results.set(currentId, result);
     trace.steps.push(
       attempt > 0
@@ -486,6 +542,23 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     );
     safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
     logger.info(`  ✓ ${result.status}`, { node: currentId, toolCalls: result.toolCalls.length });
+
+    // Fail closed on node failure. A node that finishes `failed` (agent-level
+    // failure, or an eval failure that exhausted retries and was not softened
+    // by `fail_soft`) HALTS the workflow by default. This stops a broken node
+    // from advancing down a conditional out-edge (e.g. filing an issue/PR) on
+    // the back of a failure. The failed result stays in `results`, so the run
+    // surfaces as failed to callers (CLI exit code, cloud status). Authors who
+    // want the legacy fall-through opt in per-node with `on_fail: "continue"`.
+    if (result.status === "failed" && (node.on_fail ?? "halt") === "halt") {
+      logger.warn(`  node failed; halting workflow (on_fail: halt)`, { node: currentId });
+      safeObserve(
+        observer,
+        { type: "route", from: currentId, to: "(end)", reason: "node failed (on_fail: halt)" },
+        logger,
+      );
+      break;
+    }
 
     // Dry run gate + routing — shared with requires path via advanceFromNode helper.
     currentId = await advanceFromNode(
@@ -520,6 +593,23 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
 // ─── Internals ───────────────────────────────────────────────────
 
 /**
+ * Thrown when a conditional routing decision could not be made and there is
+ * no explicit default (unconditional) edge to fall back to. Fails closed: the
+ * executor refuses to guess an edge (the historical fail-open bug), so an LLM
+ * outage terminates the run loudly instead of silently taking the first
+ * conditional edge.
+ */
+export class RouteEvaluationError extends Error {
+  constructor(
+    public readonly node: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "RouteEvaluationError";
+  }
+}
+
+/**
  * Build the full instruction for a node.
  *
  * Assembly order (each section separated by `---`):
@@ -544,7 +634,8 @@ function buildNodeInstruction(
     sections.push(`## Rules — You MUST Follow These\n\n${effectiveRules}`);
   }
   if (effectiveContext) {
-    sections.push(`## Background Context\n\n${effectiveContext}`);
+    // Context Sources can be fetched pages or runtime input: fence as untrusted (#360).
+    sections.push(`## Background Context\n\n${fenceUntrusted(effectiveContext, "background-context")}`);
   }
 
   // Legacy fallback for `input.additionalContext` when no rules/context cascaded
@@ -840,6 +931,40 @@ function mergeInlineSkills(
   return merged;
 }
 
+/** True when the run input requests a dry run (`dryRun === true`, strictly). */
+function isDryRunInput(input: unknown): boolean {
+  return input != null && typeof input === "object" && (input as Record<string, unknown>).dryRun === true;
+}
+
+/**
+ * Dry-run tool gate (#380). Only an explicit `access: "read"` passes; a tool
+ * with no `access` is treated as a write so new tools fail safe.
+ */
+export function isReadTool(tool: Pick<Tool, "access">): boolean {
+  return tool.access === "read";
+}
+
+/** Instruction section prepended to every node under dry-run. */
+function dryRunNotice(skippedWrites: string[]): string {
+  const withheld =
+    skippedWrites.length > 0 ? `These write tools were withheld from this step: ${skippedWrites.join(", ")}. ` : "";
+  return (
+    `## Dry run\n\nThis is a dry run. Only read-only tools are available. ${withheld}` +
+    `Do not create, modify, post, or send anything. Do the analysis, and where this step would ` +
+    `normally write, describe exactly what it would have written instead.`
+  );
+}
+
+/** Only this node's resolved skills contribute external servers. */
+function resolveSkillMcpServers(skillIds: string[], skills: Map<string, Skill>): Record<string, McpServerConfig> {
+  return Object.fromEntries(
+    skillIds.flatMap((id) => {
+      const mcp = skills.get(id)?.mcp;
+      return mcp ? [[id, { ...mcp, type: mcp.type ?? (mcp.command ? "stdio" : "http") }]] : [];
+    }),
+  );
+}
+
 function resolveTools(skillIds: string[], skills: Map<string, Skill>): Tool[] {
   return skillIds
     .map((id) => skills.get(id))
@@ -974,12 +1099,13 @@ async function advanceFromNode(
   trace: ExecutionTrace,
   abort?: AbortOptions,
 ): Promise<string | null> {
-  // Dry run hard gate — stop at the first conditional routing decision.
-  // Unconditional edges are analysis flow (prepare→gather→investigate);
-  // conditional edges are action decisions (investigate→create_issue/skip).
-  // Enforced in the executor so it cannot be bypassed by LLM evaluation.
-  const isDryRun = input && typeof input === "object" && (input as Record<string, unknown>).dryRun === true;
-  if (isDryRun) {
+  // Dry run path gate: stop at the first conditional routing decision.
+  // Safety does not depend on this (#380): under dry-run every node already
+  // runs read-only (see execute()). The stop keeps the dry-run path a pure
+  // function of the graph (no LLM route evaluation, so the same workflow
+  // always visits the same nodes) and skips action branches whose output
+  // would only describe writes that cannot happen.
+  if (isDryRunInput(input)) {
     const outEdges = workflow.edges.filter((e) => e.from === currentId);
     if (outEdges.some((e) => e.when)) {
       safeObserve(observer, { type: "route", from: currentId, to: "(end)", reason: "dry run" }, logger);
@@ -1125,6 +1251,47 @@ async function resolveNext(
     timeoutMs: abort?.timeoutMs,
   });
 
+  // Fail closed. `evaluate` returns null when the routing decision could not
+  // be made (SDK error, timeout, non-success subtype, or an unparseable
+  // answer). We must NOT fall through to a conditional edge: on a node with a
+  // single conditional out-edge, "the first choice" IS that edge, so an outage
+  // would always take it (the fail-open bug that silently filed real
+  // issues/PRs instead of routing to `skip`). Take the author's explicit
+  // default/else edge if one exists; otherwise terminate the run loudly.
+  if (chosen === null) {
+    if (defaultEdge) {
+      logger?.warn(
+        `  route eval: evaluation failed for node '${current}'; taking default (unconditional) edge '${defaultEdge.to}'.`,
+        { node: current },
+      );
+      safeObserve(
+        observer,
+        { type: "route", from: current, to: defaultEdge.to, reason: "route evaluation failed; default edge" },
+        logger,
+      );
+      if (edgeCounts) {
+        const key = `${current}→${defaultEdge.to}`;
+        edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+      }
+      return defaultEdge.to;
+    }
+    logger?.error(
+      `  route eval: evaluation failed for node '${current}' and there is no default (unconditional) edge; ` +
+        `refusing to fail open. Terminating the run. Add a default edge or fix the model backend.`,
+      { node: current },
+    );
+    safeObserve(
+      observer,
+      { type: "route", from: current, to: "(end)", reason: "route evaluation failed; no default edge" },
+      logger,
+    );
+    throw new RouteEvaluationError(
+      current,
+      `route evaluation failed for node '${current}' and no default (unconditional) edge exists; ` +
+        `refusing to fail open`,
+    );
+  }
+
   // Validate that Claude returned a valid target.
   const validTargets = new Set(outEdges.map((e) => e.to));
   if (!validTargets.has(chosen)) {
@@ -1183,6 +1350,15 @@ async function resolveNext(
  * Validate a workflow definition before execution.
  */
 function validate(workflow: Workflow, skills: Map<string, Skill>): void {
+  for (const [id, def] of Object.entries(workflow.skills ?? {})) {
+    if (!def.instruction?.trim()) {
+      throw new Error(`Inline skill "${id}" must provide a non-empty instruction`);
+    }
+    if (id === "sweny-core" && def.mcp) {
+      throw new Error(`Skill "sweny-core" is reserved for the engine MCP server; use a different skill ID`);
+    }
+  }
+
   if (!workflow.nodes[workflow.entry]) {
     throw new Error(`Entry node "${workflow.entry}" not found`);
   }
@@ -1192,9 +1368,30 @@ function validate(workflow: Workflow, skills: Map<string, Skill>): void {
     if (!workflow.nodes[edge.to]) throw new Error(`Edge references unknown node: "${edge.to}"`);
   }
 
+  // Same structural validation the CLI loader runs (reachability, self-loops,
+  // ambiguous edges, unbounded cycles, reserved eval policies, retry and
+  // max_iterations ceilings). Library callers, Studio's simulator and run.ts
+  // reach execute() without the loader, so without this they got none of it
+  // (#326). Runs once per execute() call, before any node runs. Skill
+  // availability stays a warning below, so no knownSkills here.
+  const structural = validateWorkflow(workflow);
+  if (structural.length > 0) {
+    throw new Error(
+      `Invalid workflow "${workflow.id}":\n${structural.map((e) => `  ${e.code}: ${e.message}`).join("\n")}`,
+    );
+  }
+
   // Check that each node has at least one available skill (if it lists any)
   for (const [nodeId, node] of Object.entries(workflow.nodes)) {
     if (node.skills.length === 0) continue;
+    for (const id of node.skills) {
+      const skill = skills.get(id);
+      if (id === "sweny-core" && skill?.mcp) {
+        throw new Error(
+          `Skill "sweny-core" is reserved for the engine MCP server; use a different skill ID (node "${nodeId}")`,
+        );
+      }
+    }
     const available = node.skills.filter((id) => skills.has(id));
     if (available.length === 0) {
       consoleLogger.warn(`Node "${nodeId}" has no available skills (needs one of: ${node.skills.join(", ")})`);

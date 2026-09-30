@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/core",
-  "version": "0.1.123",
+  "version": "0.1.132",
   "type": "module",
   "bin": {
     "sweny": "./dist/cli/main.js"
@@ -69,7 +69,7 @@
     "ajv": "^8.20.0",
     "esbuild": "^0.28.1",
     "prettier": "^3.9.6",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "publishConfig": {
     "access": "public"

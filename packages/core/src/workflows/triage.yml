@@ -1,6 +1,6 @@
 id: triage
 name: Alert Triage
-workflow_type: pr_review
+workflow_type: monitor
 description: Investigate a production alert, determine root cause, create an issue, implement a fix, and notify the team
 entry: gather
 nodes:
@@ -683,6 +683,8 @@ nodes:
         auto: true
   create_pr:
     name: Open Pull Request
+    # A failed PR must not stop the run: the only edge is an unconditional one to notify.
+    on_fail: continue
     instruction: >-
       Open a pull request for the fix. The issue identifier and URL are in your context from the create_issue step.
 

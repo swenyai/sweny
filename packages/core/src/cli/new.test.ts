@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -19,6 +19,9 @@ import {
   writeWorkflowFile,
 } from "./new.js";
 import type { InitSelections, Credential } from "./new.js";
+import { ensureGitignoreEnv, nonInteractiveUsage } from "./new.js";
+import { WORKFLOW_TEMPLATES } from "./templates.js";
+import { parseWorkflow } from "../schema.js";
 
 // ── detectGitRemote ────────────────────────────────────────────────────
 
@@ -1083,15 +1086,15 @@ describe("runNew with marketplaceId", () => {
     (mkt.installMarketplaceWorkflow as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       installed: true,
       adapted: false,
-      workflowPath: path.join(cwd, ".sweny", "workflows", "pr-review.yml"),
+      workflowPath: path.join(cwd, ".sweny", "workflows", "community-review.yml"),
       mismatches: [],
       addedEnvKeys: 0,
     });
 
-    await runNew({ marketplaceId: "pr-review" });
+    await runNew({ marketplaceId: "community-review" });
 
     expect(mkt.installMarketplaceWorkflow).toHaveBeenCalledWith(
-      "pr-review",
+      "community-review",
       expect.objectContaining({
         cwd,
         inferredSourceControl: expect.any(String),
@@ -1113,7 +1116,7 @@ describe("runNew with marketplaceId", () => {
     // Pre-create the workflow file so the exists check triggers
     const wfDir = path.join(cwd, ".sweny", "workflows");
     fs.mkdirSync(wfDir, { recursive: true });
-    fs.writeFileSync(path.join(wfDir, "pr-review.yml"), "# existing\n", "utf-8");
+    fs.writeFileSync(path.join(wfDir, "community-review.yml"), "# existing\n", "utf-8");
 
     const mkt = await import("./marketplace.js");
     const p = await import("@clack/prompts");
@@ -1121,7 +1124,7 @@ describe("runNew with marketplaceId", () => {
     (mkt.installMarketplaceWorkflow as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       installed: true,
       adapted: false,
-      workflowPath: path.join(wfDir, "pr-review.yml"),
+      workflowPath: path.join(wfDir, "community-review.yml"),
       mismatches: [],
       addedEnvKeys: 0,
     });
@@ -1129,11 +1132,11 @@ describe("runNew with marketplaceId", () => {
     // User confirms overwrite
     (p.confirm as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
 
-    await runNew({ marketplaceId: "pr-review" });
+    await runNew({ marketplaceId: "community-review" });
 
     expect(p.confirm).toHaveBeenCalled();
     expect(mkt.installMarketplaceWorkflow).toHaveBeenCalledWith(
-      "pr-review",
+      "community-review",
       expect.objectContaining({ overwrite: true }),
     );
   });
@@ -1145,7 +1148,7 @@ describe("runNew with marketplaceId", () => {
     // Pre-create the workflow file so the exists check triggers
     const wfDir = path.join(cwd, ".sweny", "workflows");
     fs.mkdirSync(wfDir, { recursive: true });
-    fs.writeFileSync(path.join(wfDir, "pr-review.yml"), "# existing\n", "utf-8");
+    fs.writeFileSync(path.join(wfDir, "community-review.yml"), "# existing\n", "utf-8");
 
     const mkt = await import("./marketplace.js");
     const p = await import("@clack/prompts");
@@ -1157,7 +1160,7 @@ describe("runNew with marketplaceId", () => {
       throw new Error("process.exit called");
     });
 
-    await expect(runNew({ marketplaceId: "pr-review" })).rejects.toThrow("process.exit called");
+    await expect(runNew({ marketplaceId: "community-review" })).rejects.toThrow("process.exit called");
 
     expect(exitSpy).toHaveBeenCalledWith(0);
     // installMarketplaceWorkflow must NOT have been called
@@ -1188,5 +1191,178 @@ describe("runNew wizard — browse marketplace branch", () => {
 
     expect(mkt.fetchMarketplaceIndex).toHaveBeenCalled();
     expect(mkt.installMarketplaceWorkflow).toHaveBeenCalledWith("pr-review", expect.any(Object));
+  });
+});
+
+// ── #379 / #384: first-run behavior ──────────────────────────────────────
+
+describe("starter template", () => {
+  it("is first, needs no skills, and validates with no env set", () => {
+    const starter = WORKFLOW_TEMPLATES[0];
+    expect(starter.id).toBe("explain-repo");
+    expect(extractSkillsFromYaml(starter.yaml)).toEqual([]);
+    const wf = parseWorkflow(parseYaml(starter.yaml));
+    expect(wf.id).toBe("explain-repo");
+  });
+});
+
+describe("ensureGitignoreEnv", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+  const tmp = () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-ignore-"));
+    dirs.push(d);
+    return d;
+  };
+
+  it("creates the ignore file with .env when missing", () => {
+    const d = tmp();
+    expect(ensureGitignoreEnv(d)).toBe("created");
+    expect(fs.readFileSync(path.join(d, ".gitignore"), "utf-8")).toBe(".env\n");
+  });
+
+  it("appends .env, handling a missing trailing newline", () => {
+    const d = tmp();
+    fs.writeFileSync(path.join(d, ".gitignore"), "node_modules");
+    expect(ensureGitignoreEnv(d)).toBe("appended");
+    expect(fs.readFileSync(path.join(d, ".gitignore"), "utf-8")).toBe("node_modules\n.env\n");
+  });
+
+  it("leaves the file alone when .env is already ignored", () => {
+    const d = tmp();
+    fs.writeFileSync(path.join(d, ".gitignore"), "dist\n.env\n");
+    expect(ensureGitignoreEnv(d)).toBe("present");
+    expect(fs.readFileSync(path.join(d, ".gitignore"), "utf-8")).toBe("dist\n.env\n");
+  });
+});
+
+describe("nonInteractiveUsage", () => {
+  it("names the flags and the zero-credential starter", () => {
+    const u = nonInteractiveUsage();
+    expect(u).toContain("--template");
+    expect(u).toContain("--yes");
+    expect(u).toContain("explain-repo");
+  });
+});
+
+describe("buildEnvTemplate optional credentials", () => {
+  it("writes optional keys commented out", () => {
+    const out = buildEnvTemplate([{ key: "ANTHROPIC_API_KEY", optional: true, hint: "h" }, { key: "GITHUB_TOKEN" }]);
+    expect(out).toContain("# ANTHROPIC_API_KEY=");
+    expect(out).toMatch(/^GITHUB_TOKEN=$/m);
+  });
+});
+
+describe("runNew first-run paths", () => {
+  const dirs: string[] = [];
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+    dirs.length = 0;
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+  function tmp(): string {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-new-first-"));
+    dirs.push(d);
+    vi.spyOn(process, "cwd").mockReturnValue(d);
+    return d;
+  }
+
+  it("--template --yes writes the workflow, .env, and ignore file with no prompts and no network", async () => {
+    const cwd = tmp();
+    const p = await import("@clack/prompts");
+    const mkt = await import("./marketplace.js");
+
+    await runNew({ template: "explain-repo", yes: true });
+
+    expect(fs.existsSync(path.join(cwd, ".sweny", "workflows", "explain-repo.yml"))).toBe(true);
+    expect(fs.existsSync(path.join(cwd, ".sweny.yml"))).toBe(true);
+    const env = fs.readFileSync(path.join(cwd, ".env"), "utf-8");
+    expect(env).toContain("# ANTHROPIC_API_KEY=");
+    expect(env).not.toContain("GITHUB_TOKEN");
+    expect(fs.readFileSync(path.join(cwd, ".gitignore"), "utf-8")).toContain(".env");
+    expect(p.select).not.toHaveBeenCalled();
+    expect(p.confirm).not.toHaveBeenCalled();
+    expect(mkt.fetchMarketplaceIndex).not.toHaveBeenCalled();
+  });
+
+  it("--yes never overwrites an existing workflow file", async () => {
+    const cwd = tmp();
+    const wfDir = path.join(cwd, ".sweny", "workflows");
+    fs.mkdirSync(wfDir, { recursive: true });
+    fs.writeFileSync(path.join(wfDir, "explain-repo.yml"), "# mine\n");
+    await runNew({ template: "explain-repo", yes: true });
+    expect(fs.readFileSync(path.join(wfDir, "explain-repo.yml"), "utf-8")).toBe("# mine\n");
+  });
+
+  it("rejects an unknown --template with exit 1", async () => {
+    tmp();
+    vi.spyOn(process, "exit").mockImplementation((() => {
+      throw new Error("exit");
+    }) as never);
+    await expect(runNew({ template: "nope", yes: true })).rejects.toThrow("exit");
+    expect(process.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("`new <built-in id>` installs the built-in template without touching the marketplace", async () => {
+    const cwd = tmp();
+    const mkt = await import("./marketplace.js");
+    await runNew({ marketplaceId: "pr-review", yes: true });
+    expect(fs.existsSync(path.join(cwd, ".sweny", "workflows", "pr-review.yml"))).toBe(true);
+    expect(mkt.installMarketplaceWorkflow).not.toHaveBeenCalled();
+    expect(mkt.fetchMarketplaceIndex).not.toHaveBeenCalled();
+  });
+
+  it("picker hides marketplace and defaults to the starter when the index 404s", async () => {
+    const cwd = tmp();
+    const p = await import("@clack/prompts");
+    const mkt = await import("./marketplace.js");
+    (mkt.fetchMarketplaceIndex as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      Object.assign(new Error("Marketplace index not found"), { kind: "not-found" }),
+    );
+    (p.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce("explain-repo");
+    (p.confirm as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
+
+    await runNew();
+
+    const cfg = (p.select as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(cfg.initialValue).toBe("explain-repo");
+    expect(cfg.options[0].value).toBe("explain-repo");
+    expect(cfg.options.some((o: { value: string }) => o.value === "__marketplace")).toBe(false);
+    expect(p.log.info).toHaveBeenCalledWith(expect.stringContaining("Marketplace unavailable"));
+    expect(fs.existsSync(path.join(cwd, ".sweny", "workflows", "explain-repo.yml"))).toBe(true);
+  });
+
+  it("picker hides marketplace when the index is empty", async () => {
+    tmp();
+    const p = await import("@clack/prompts");
+    const mkt = await import("./marketplace.js");
+    (mkt.fetchMarketplaceIndex as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+    (p.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce("__blank");
+    (p.confirm as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
+    await runNew();
+    const cfg = (p.select as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(cfg.options.some((o: { value: string }) => o.value === "__marketplace")).toBe(false);
+  });
+
+  it("picker offers marketplace (not first, not default) when the index loads", async () => {
+    tmp();
+    const p = await import("@clack/prompts");
+    const mkt = await import("./marketplace.js");
+    (mkt.fetchMarketplaceIndex as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { id: "x", name: "X", description: "d", skills: [] },
+    ]);
+    (p.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce("__blank");
+    (p.confirm as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
+    await runNew();
+    const cfg = (p.select as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const values = cfg.options.map((o: { value: string }) => o.value);
+    expect(values).toContain("__marketplace");
+    expect(values[0]).toBe("explain-repo");
+    expect(cfg.initialValue).toBe("explain-repo");
   });
 });

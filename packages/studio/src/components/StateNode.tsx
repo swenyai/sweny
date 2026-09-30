@@ -29,8 +29,8 @@ const execStyle: Record<NodeExecStatus, { shadow: string; bg: string; borderColo
 };
 
 const skillColors: Record<string, string> = {
-  github: "#6366f1",
-  linear: "#818cf8",
+  github: "#3b82f6",
+  linear: "#60a5fa",
   sentry: "#f472b6",
   datadog: "#a78bfa",
   betterstack: "#22d3ee",
@@ -43,7 +43,7 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
   const { nodeId, node, isEntry, isTerminal, skills, execStatus, isUnreachable } = data;
   const exec = execStyle[execStatus];
 
-  const accentColor = skills.length > 0 ? (skillColors[skills[0].id] ?? "#6366f1") : "#64748b";
+  const accentColor = skills.length > 0 ? (skillColors[skills[0].id] ?? "#3b82f6") : "#64748b";
   const showUnreachable = isUnreachable && !exec.borderColor;
   const borderColor =
     exec.borderColor || (showUnreachable ? "#f97316" : isEntry ? accentColor + "cc" : accentColor + "40");
@@ -158,8 +158,8 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
                     fontWeight: 600,
                     padding: "1px 5px",
                     borderRadius: 3,
-                    background: `${skillColors[skill.id] ?? "#6366f1"}20`,
-                    color: skillColors[skill.id] ?? "#6366f1",
+                    background: `${skillColors[skill.id] ?? "#3b82f6"}20`,
+                    color: skillColors[skill.id] ?? "#3b82f6",
                     flexShrink: 0,
                     opacity: textOpacity,
                     display: "inline-flex",

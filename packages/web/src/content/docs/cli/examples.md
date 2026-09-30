@@ -61,7 +61,10 @@ sweny workflow edit .sweny/workflows/security_audit.yml \
 # Run a workflow
 sweny workflow run .sweny/workflows/my-workflow.yml
 
-# Dry run (validate structure, don't execute)
+# Validate structure and list nodes, don't execute
+sweny workflow run .sweny/workflows/my-workflow.yml --list-nodes
+
+# Dry run (read-only tools, nothing is written)
 sweny workflow run .sweny/workflows/my-workflow.yml --dry-run
 
 # Validate without running
@@ -265,6 +268,12 @@ sweny workflow run my-workflow.yml
 ```
 
 Validate first without running:
+
+```bash
+sweny workflow run my-workflow.yml --list-nodes
+```
+
+Or run it with read-only tools, so nothing is written ([Dry run](/workflows/#dry-run)):
 
 ```bash
 sweny workflow run my-workflow.yml --dry-run

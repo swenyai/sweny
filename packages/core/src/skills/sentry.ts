@@ -41,6 +41,7 @@ export const sentry: Skill = {
   tools: [
     {
       name: "sentry_list_issues",
+      access: "read",
       description: "List recent issues for a Sentry project",
       input_schema: {
         type: "object",
@@ -57,6 +58,7 @@ export const sentry: Skill = {
     },
     {
       name: "sentry_get_issue",
+      access: "read",
       description: "Get detailed information about a Sentry issue",
       input_schema: {
         type: "object",
@@ -69,6 +71,7 @@ export const sentry: Skill = {
     },
     {
       name: "sentry_get_issue_events",
+      access: "read",
       description: "Get recent events (occurrences) for a Sentry issue",
       input_schema: {
         type: "object",
@@ -81,6 +84,7 @@ export const sentry: Skill = {
     },
     {
       name: "sentry_search_events",
+      access: "read",
       description: "Search events across a project using Discover query syntax",
       input_schema: {
         type: "object",

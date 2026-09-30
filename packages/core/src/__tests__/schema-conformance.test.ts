@@ -140,10 +140,23 @@ const fixtures: Fixture[] = [
       entry: "a",
       nodes: { a: { ...baseNode(), skills: ["c"] } },
       edges: [],
-      skills: { c: { mcp: { url: "https://example.com/mcp" } } },
+      skills: { c: { instruction: "Use the server", mcp: { url: "https://example.com/mcp" } } },
     },
     expected: true,
   },
+
+  ...[undefined, "", "  "].map((instruction) => ({
+    name: `inline MCP skill without usable instruction (${JSON.stringify(instruction)})`,
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      skills: { c: { ...(instruction === undefined ? {} : { instruction }), mcp: { url: "https://example.com/mcp" } } },
+    },
+    expected: false,
+  })),
 
   // ── Negative — Zod refine invariants ──────────────────────────────
   {
@@ -369,6 +382,42 @@ const fixtures: Fixture[] = [
       edges: [],
     },
     expected: false,
+  },
+  {
+    // #325: retry.max ceiling (10). Both validators must agree an absurd
+    // value is rejected, not just runtime (executor never even sees it).
+    name: "retry.max above the ceiling (both must reject)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: {
+          ...baseNode(),
+          eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["x"] } }],
+          retry: { max: 11 },
+        },
+      },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "retry.max at the ceiling (10, both must accept)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: {
+          ...baseNode(),
+          eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["x"] } }],
+          retry: { max: 10 },
+        },
+      },
+      edges: [],
+    },
+    expected: true,
   },
   {
     name: "output_matches entry with unknown key (strict: both must reject)",
@@ -960,6 +1009,25 @@ const skillFixtures: Fixture[] = [
       tools: [{ name: "do_it", description: "does it", input_schema: { type: "object" } }],
     },
     expected: true,
+  },
+  {
+    name: "tool with access: read and access: write (#380)",
+    input: {
+      ...baseSkill(),
+      tools: [
+        { name: "get_it", description: "reads", input_schema: { type: "object" }, access: "read" },
+        { name: "do_it", description: "writes", input_schema: { type: "object" }, access: "write" },
+      ],
+    },
+    expected: true,
+  },
+  {
+    name: "tool with an unknown access value (rejected by both)",
+    input: {
+      ...baseSkill(),
+      tools: [{ name: "do_it", description: "does it", input_schema: { type: "object" }, access: "admin" }],
+    },
+    expected: false,
   },
   {
     name: "skill with instruction only",
