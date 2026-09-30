@@ -9,6 +9,11 @@
  * Security properties (this is an injection boundary):
  * - The socket lives in a fresh `mkdtemp` directory (mode 0700) and is itself
  *   chmod 0600, so other users cannot connect.
+ * - With `tcp` (only for agents inside the process sandbox wrapper, #439) the
+ *   same handler also listens on 127.0.0.1:<random port>. Other local users
+ *   can open that port, so there the token is the only gate; the sandboxed
+ *   agent reaches it through srt's proxy only because the adapter allowlists
+ *   exactly that host:port for the run.
  * - A random 256-bit token is required on every frame. A wrong or missing
  *   token gets an `unauthorized` error and the connection is dropped.
  * - Only the tools passed in are listed or callable. The executor has already
@@ -52,6 +57,14 @@ export interface ToolBridgeOptions {
   shimCommand?: { command: string; args: string[] };
   /** Parent directory for the private socket dir. Default: `os.tmpdir()`. */
   tmpDir?: string;
+  /**
+   * Also serve on a loopback TCP port, and point the shim there (#439). For an
+   * agent inside the process sandbox wrapper: srt blocks `socket(AF_UNIX)` on
+   * Linux, so the shim cannot reach the unix socket, but it can reach an
+   * allowlisted host through srt's egress proxy. The adapter adds
+   * {@link ToolBridge.egress} to the node's egress; nothing else is opened.
+   */
+  tcp?: boolean;
 }
 
 export interface ToolBridge {
@@ -59,6 +72,10 @@ export interface ToolBridge {
   readonly socketPath: string;
   /** Per-run token. Never log it. */
   readonly token: string;
+  /** Loopback TCP endpoint, when started with `tcp: true`. */
+  readonly tcp?: { host: string; port: number };
+  /** Hosts a sandboxed shim must reach (`127.0.0.1:<port>` with `tcp`, else none). */
+  readonly egress: string[];
   /** stdio MCP server config a harness uses to start the shim. The token rides in `env`, not argv. */
   readonly mcpServer: McpServerConfig;
   /** Stop serving, drop connections, remove the socket and its directory. Idempotent. */
@@ -144,7 +161,7 @@ export async function startToolBridge(opts: ToolBridgeOptions): Promise<ToolBrid
 
   const sockets = new Set<net.Socket>();
 
-  const server = net.createServer((sock) => {
+  const onConnection = (sock: net.Socket) => {
     sockets.add(sock);
     sock.on("close", () => sockets.delete(sock));
     sock.on("error", () => sock.destroy());
@@ -195,19 +212,30 @@ export async function startToolBridge(opts: ToolBridgeOptions): Promise<ToolBrid
       },
     );
     sock.on("data", read);
-  });
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(socketPath, () => {
-        server.removeListener("error", reject);
+  };
+  const server = net.createServer(onConnection);
+  // Same handler and token check; only started for sandboxed agents.
+  const tcpServer = opts.tcp ? net.createServer(onConnection) : undefined;
+  const listen = (s: net.Server, options: net.ListenOptions) =>
+    new Promise<void>((resolve, reject) => {
+      s.once("error", reject);
+      s.listen(options, () => {
+        s.removeListener("error", reject);
         resolve();
       });
     });
+
+  let tcp: { host: string; port: number } | undefined;
+  try {
+    await listen(server, { path: socketPath });
     fs.chmodSync(socketPath, 0o600);
+    if (tcpServer) {
+      await listen(tcpServer, { port: 0, host: "127.0.0.1" });
+      tcp = { host: "127.0.0.1", port: (tcpServer.address() as net.AddressInfo).port };
+    }
   } catch (err) {
     server.close();
+    tcpServer?.close();
     liveDirs.delete(dir);
     removeDirSync(dir);
     uninstallCrashHooksIfIdle();
@@ -221,10 +249,12 @@ export async function startToolBridge(opts: ToolBridgeOptions): Promise<ToolBrid
   return {
     socketPath,
     token,
+    tcp,
+    egress: tcp ? [`${tcp.host}:${tcp.port}`] : [],
     mcpServer: {
       type: "stdio",
       command: shim.command,
-      args: [...shim.args, "--socket", socketPath],
+      args: [...shim.args, ...(tcp ? ["--connect", `${tcp.host}:${tcp.port}`] : ["--socket", socketPath])],
       // No update-check nudge in the shim: its stdio belongs to MCP.
       env: { [TOKEN_ENV]: token, SWENY_NO_UPDATE_CHECK: "1" },
     },
@@ -232,7 +262,9 @@ export async function startToolBridge(opts: ToolBridgeOptions): Promise<ToolBrid
       if (closed) return;
       closed = true;
       for (const s of sockets) s.destroy();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await Promise.all(
+        [server, tcpServer].map((s) => (s ? new Promise<void>((resolve) => s.close(() => resolve())) : undefined)),
+      );
       liveDirs.delete(dir);
       removeDirSync(dir);
       uninstallCrashHooksIfIdle();
