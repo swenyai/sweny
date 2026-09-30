@@ -851,7 +851,18 @@ export class CodexHarness implements AgentHarness {
 
     const readOnly = policy.readOnly;
     const deny = new Set<ToolClass>(policy.deny);
-    if (readOnly) for (const c of ["shell", "net", "subagent"] as ToolClass[]) deny.add(c);
+    // Read-only keeps the shell. Codex has no non-shell way to read a file
+    // (apply_patch only writes), so dropping it left read-only nodes (triage
+    // gather/investigate, implement analyze, drift inventory) blind. The shell
+    // is safe here because `--sandbox read-only` is enforced by the OS, not by
+    // the model: it maps to SandboxPolicy::ReadOnly { network_access: false },
+    // "read-only access ... outbound network ... false by default"
+    // (openai/codex rust-v0.159.2, codex-rs/protocol/src/protocol.rs, the
+    // SandboxPolicy enum ~L1079 and new_read_only_policy ~L1205). So a shell
+    // command can read the checkout but cannot write files or reach the
+    // network. Network and subagents are still denied at the tool level, and an
+    // explicit `tools.deny: [shell]` (already in policy.deny) still removes it.
+    if (readOnly) for (const c of ["net", "subagent"] as ToolClass[]) deny.add(c);
 
     let sandbox: "read-only" | "workspace-write" | "danger-full-access" = "read-only";
     if (!readOnly) {

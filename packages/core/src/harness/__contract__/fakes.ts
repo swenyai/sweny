@@ -53,6 +53,13 @@ export interface FakeCapture {
   nativeDisallowed: string[];
   /** Whether the agent would still have any built-in tool of this class. */
   allows(toolClass: ToolClass): boolean;
+  /**
+   * The shell tool exists but every command runs inside an OS-enforced
+   * read-only sandbox with the network off (Codex `--sandbox read-only`), so it
+   * can read the checkout and cannot write or reach the network. A read-only
+   * node may keep such a shell; any other shell must be denied.
+   */
+  shellConfinedReadOnly?: boolean;
   /** All built-in tools disabled (classification calls). */
   builtinToolsDisabled: boolean;
   maxTurns?: number;
@@ -360,6 +367,8 @@ export function createCodexProcessFake(): CodexProcessFake {
       mcpServersLoaded: c.mcpServersLoaded,
       nativeDisallowed: [],
       allows,
+      // The OS read-only sandbox blocks file writes and network for shell commands.
+      shellConfinedReadOnly: c.sandbox === "read-only",
       builtinToolsDisabled: disabled,
       maxTurns: undefined,
       model: c.model,

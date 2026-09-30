@@ -36,8 +36,11 @@ export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
  *   is not trusted in that ignored file (config/src/loader/mod.rs).
  * - sandbox fs only: `--sandbox read-only|workspace-write`. Network is one
  *   on/off switch (`sandbox_workspace_write.network_access`), not a host list.
- * - readOnly native: `--sandbox read-only` plus the shell, web search and
- *   subagent switches above.
+ * - readOnly native: `--sandbox read-only` plus the web search and subagent
+ *   switches above. The shell stays: Codex has no other way to read a file, and
+ *   the OS sandbox (SandboxPolicy::ReadOnly, network off by default,
+ *   protocol/src/protocol.rs) blocks writes and network from it. An explicit
+ *   `tools.deny: [shell]` still removes it.
  * - turnLimit watchdog: codex exec has no turn limit; sweny counts tool calls.
  * - usage tokens only: `turn.completed.usage`; Codex reports no cost.
  */

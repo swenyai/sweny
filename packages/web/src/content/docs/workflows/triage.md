@@ -257,7 +257,7 @@ The workflow caps the run at 25 writes and allows only `issue`, `comment` and `p
 
 `sweny triage --stage` previews every issue, comment and PR instead of filing it, and stops before any code is pushed. `--dry-run` runs with no side effects at all.
 
-Behavior notes: a closed duplicate gets its +1 comment but is no longer reopened on Linear, since no safe output changes an issue's state; the comment says it is closed. On Codex, read-only steps have no shell, so `gather` and `investigate` see skill tools only.
+Behavior notes: a closed duplicate gets its +1 comment but is no longer reopened on Linear, since no safe output changes an issue's state; the comment says it is closed. On Codex, read-only steps keep a shell confined to the OS read-only sandbox (no writes, no network), so `gather` and `investigate` can read the checkout.
 
 ## Running the triage workflow
 
