@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
 import * as fs from "node:fs";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCodexProcessFake } from "./__contract__/fakes.js";
@@ -366,6 +367,26 @@ describe("CodexHarness output", () => {
     expect(fakes.leftovers()).toEqual([]);
   });
 
+  it("strict policy refuses a schema fallback before an unvalidated second run", async () => {
+    const { h } = harness({ policy: "strict" });
+    fakes.scriptFor(1, [
+      { kind: "raw", event: { type: "turn.failed", error: { message: "Invalid schema for response_format" } } },
+    ]);
+    fakes.scriptFor(2, [{ kind: "final", text: '{"ok":"not-a-boolean"}' }]);
+    const r = await h.run({
+      instruction: "x",
+      context: {},
+      tools: [],
+      outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    });
+    expect(r.status).toBe("failed");
+    expect(r.data.refused).toBe(true);
+    expect(r.data.error).toMatch(/strict.*structured.output/i);
+    expect(r.degraded.some((d) => d.startsWith("structured_output:"))).toBe(true);
+    expect(fakes.raw()).toHaveLength(1);
+    expect(fakes.leftovers()).toEqual([]);
+  });
+
   it("complete() fails closed when the model tries to use a tool", async () => {
     const { h } = harness();
     fakes.script([
@@ -533,5 +554,64 @@ describe.skipIf(!haveDist)("CodexHarness skill tools over the tool bridge (needs
     expect(post.toolCalls[0]).toMatchObject({ tool: "get_thread", status: "success", output: { ok: "get_thread" } });
     expect(post.toolCalls[1]).toMatchObject({ tool: "post_comment", status: "error" });
     expect(fakes.leftovers()).toEqual([]);
+  });
+});
+
+// A descendant that ignores SIGTERM and holds inherited stdout/stderr open
+// exercises process-tree cleanup, not just the immediate fake CLI's exit.
+describe.skipIf(process.platform === "win32")("CodexHarness descendant cleanup", () => {
+  it.each(["timeout", "signal"] as const)("bounds %s cleanup after the CLI exits first", async (mode) => {
+    const dir = fs.mkdtempSync(path.join(tmpdir(), "sweny-codex-reap-"));
+    const pidFile = path.join(dir, "pids.json");
+    const controller = new AbortController();
+    const { h } = harness({
+      codexCommand: { command: process.execPath, args: [path.join(here, "fakes/codex-descendant.mjs"), pidFile] },
+      killGraceMs: 100,
+    });
+    let pids: { parent: number; descendant: number } | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const running = h.run({
+      instruction: "x",
+      context: {},
+      tools: [],
+      ...(mode === "timeout" ? { timeoutMs: 1500 } : { signal: controller.signal }),
+    });
+    try {
+      await vi.waitFor(() => expect(fs.existsSync(pidFile)).toBe(true), { timeout: 5000 });
+      pids = JSON.parse(fs.readFileSync(pidFile, "utf8"));
+      if (mode === "signal") controller.abort();
+      const result = await Promise.race([
+        running,
+        new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error("Codex cleanup hung on descendant-held pipes")), 4000);
+        }),
+      ]);
+      expect(result.status).toBe("failed");
+      expect(result.data.error).toMatch(mode === "timeout" ? /timed out/ : /aborted/);
+      // Linux may retain a reparented zombie until init reaps it. A zombie has
+      // stopped executing and closed its pipes, so it is not a leaked process.
+      await vi.waitFor(() => {
+        let alive = true;
+        try {
+          process.kill(pids!.descendant, 0);
+          if (process.platform === "linux") {
+            alive = !/\) Z /.test(fs.readFileSync(`/proc/${pids!.descendant}/stat`, "utf8"));
+          }
+        } catch {
+          alive = false;
+        }
+        expect(alive, "the descendant must be terminated").toBe(false);
+      });
+    } finally {
+      if (deadline) clearTimeout(deadline);
+      controller.abort();
+      // Also clean up the deliberately failing regression on the old code.
+      if (!pids && fs.existsSync(pidFile)) pids = JSON.parse(fs.readFileSync(pidFile, "utf8"));
+      for (const pid of pids ? [pids.parent, pids.descendant] : []) {
+        try { process.kill(pid, "SIGKILL"); } catch { /* already stopped */ }
+      }
+      await running;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
