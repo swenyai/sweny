@@ -48,6 +48,7 @@ import { validateWorkflow } from "./schema.js";
 import { resolveAgentAccess } from "./agent-env.js";
 import { fenceUntrusted } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
+import { isToolClass } from "./harness/policy.js";
 import type { AgentHarness } from "./harness/types.js";
 
 export interface ExecuteOptions {
@@ -405,6 +406,11 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // Per-node execution model: node.model ?? workflow.model. When undefined,
     // claude.run falls back to its own client default (then Claude Code's).
     const nodeModel = resolveExecutionModel(node, workflow);
+    // `tools.deny` entries that name a portable class (shell, write, edit, net,
+    // subagent) also deny that class of built-in agent tools; the harness
+    // compiles them or reports them in `degraded`.
+    const denyClasses = (node.tools?.deny ?? []).filter(isToolClass);
+    let degradedLogged = false;
 
     while (true) {
       result = await claude.run({
@@ -414,6 +420,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         outputSchema: node.output,
         maxTurns: node.max_turns,
         disallowedTools: node.disallowed_tools,
+        ...(denyClasses.length > 0 ? { deny: denyClasses } : {}),
         model: nodeModel,
         signal,
         timeoutMs,
@@ -424,6 +431,13 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
           safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
         },
       });
+
+      // Opinions the harness could not honor natively: said once per node, never silently dropped.
+      if (!degradedLogged && result.degraded && result.degraded.length > 0) {
+        degradedLogged = true;
+        const who = result.harness?.id ?? "harness";
+        logger.warn(`  ${who} could not honor natively: ${result.degraded.join("; ")}`, { node: currentId });
+      }
 
       // Retry only triggers on eval failure. Bail on tool/API errors.
       if (result.status !== "success") {
@@ -1003,7 +1017,10 @@ function filterNodeTools(tools: Tool[], filter: NodeToolFilter | undefined, node
   if (!filter) return tools;
 
   const resolvedNames = new Set(tools.map((t) => t.name));
-  for (const name of [...(filter.allow ?? []), ...(filter.deny ?? [])]) {
+  // A deny entry that names a tool class (write, shell, ...) targets built-in
+  // agent tools too, so it is not a typo when no skill tool has that name.
+  const denyNames = (filter.deny ?? []).filter((n) => !isToolClass(n));
+  for (const name of [...(filter.allow ?? []), ...denyNames]) {
     if (!resolvedNames.has(name)) {
       logger.warn(`  tools filter: '${name}' does not match any tool resolved for node '${nodeId}'`, {
         node: nodeId,

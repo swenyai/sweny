@@ -6,6 +6,8 @@ import { MockHarness, MockClaude } from "../testing.js";
 import { claudeCompat } from "./compat.js";
 import { buildRunRecord } from "../cli/run-history.js";
 import type { Claude, Evaluator, NodeResult, Workflow } from "../types.js";
+import type { AgentHarness } from "./types.js";
+import { CODEX_CAPABILITIES } from "./capabilities.js";
 
 const wf: Workflow = {
   id: "seam",
@@ -70,6 +72,43 @@ describe("execute() seam (#330)", () => {
     });
     const { results } = await execute(branching, {}, { skills: createSkillMap([]), harness, config: {} });
     expect([...results.keys()]).toEqual(["a", "c"]);
+  });
+
+  it("tools.deny entries that name a tool class reach the harness as deny (#331)", async () => {
+    const run = vi.fn(async (): Promise<NodeResult> => ({ status: "success", data: {}, toolCalls: [] }));
+    const legacy: Claude = { run, evaluate: async () => null, ask: async () => "" };
+    const denying = {
+      ...wf,
+      nodes: { ...wf.nodes, a: { ...wf.nodes.a, tools: { deny: ["write", "github_create_pr", "shell"] } } },
+    } as Workflow;
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await execute(denying, {}, { skills: createSkillMap([]), harness: claudeCompat(legacy), config: {}, logger });
+    expect(run.mock.calls[0][0]).toMatchObject({ deny: ["write", "shell"] });
+    expect(run.mock.calls[1][0]).not.toHaveProperty("deny");
+    // Class names are not skill-tool typos; the unknown tool name still warns.
+    const typos = logger.warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("tools filter"));
+    expect(typos).toEqual([expect.stringContaining("'github_create_pr'")]);
+  });
+
+  it("logs what a harness could not honor natively, once per node", async () => {
+    const run = vi.fn(async (): Promise<NodeResult> => ({
+      status: "success",
+      data: {},
+      toolCalls: [],
+      harness: { id: "codex", version: "0.159.2" },
+      degraded: ["max_turns: watchdog"],
+    }));
+    const harness: AgentHarness = {
+      id: "codex",
+      capabilities: CODEX_CAPABILITIES,
+      preflight: async () => ({ ok: true, version: "0.159.2" }),
+      run: run as unknown as AgentHarness["run"],
+      complete: async () => null,
+    };
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await execute(wf, {}, { skills: createSkillMap([]), harness, config: {}, logger });
+    const lines = logger.warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("could not honor"));
+    expect(lines).toEqual(["  codex could not honor natively: max_turns: watchdog", expect.any(String)]);
   });
 
   it("rejects when neither harness nor claude is given", async () => {
@@ -137,6 +176,23 @@ describe("run history records the harness (#330)", () => {
       ]),
     );
     expect(r.harness).toEqual({ id: "claude-code", version: "0.3.220" });
+  });
+
+  it("records what the harness could not honor natively, deduped (#331)", () => {
+    const tagged = (degraded: string[]): NodeResult => ({
+      status: "success",
+      data: {},
+      toolCalls: [],
+      harness: { id: "codex", version: "0.159.2" },
+      degraded,
+    });
+    const r = record(
+      new Map<string, NodeResult>([
+        ["a", tagged(["max_turns: watchdog", "egress allowlist: none"])],
+        ["b", tagged(["max_turns: watchdog"])],
+      ]),
+    );
+    expect(r.degraded).toEqual(["max_turns: watchdog", "egress allowlist: none"]);
   });
 
   it("omits the key when no result carries a harness", () => {

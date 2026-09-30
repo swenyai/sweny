@@ -180,4 +180,46 @@ describe("Run workflow step with a stub sweny", () => {
     expect(runStep("--comment-file", { PR_NUMBER: "" }).args).not.toContain("--comment-file");
     expect(runStep("--comment-file", { PR_COMMENT: "false" }).args).not.toContain("--comment-file");
   });
+
+  describe("agent input (#331)", () => {
+    it("passes --agent codex when the CLI supports it", () => {
+      const { r, args } = runStep("  --agent <id>  coding agent", { AGENT: "codex", PR_NUMBER: "" });
+      expect(r.status).toBe(0);
+      expect(args).toContain("--agent codex");
+    });
+
+    it("fails instead of running Claude when the CLI has no --agent", () => {
+      const { r, args } = runStep("  --json  output json", { AGENT: "codex", PR_NUMBER: "" });
+      expect(r.status).not.toBe(0);
+      expect(r.stdout).toContain("::error::the installed sweny CLI does not support agent: codex");
+      expect(args).toBe("");
+    });
+
+    it("never passes --agent for the default agent", () => {
+      expect(runStep("  --agent <id>", { AGENT: "claude", PR_NUMBER: "" }).args).not.toContain("--agent");
+      expect(runStep("  --agent <id>", { PR_NUMBER: "" }).args).not.toContain("--agent");
+    });
+  });
+});
+
+describe("action.yml agent wiring (#331)", () => {
+  const action = parse(fs.readFileSync(path.join(repoRoot, "action.yml"), "utf8"));
+  const steps = action.runs.steps as Array<Record<string, any>>;
+
+  it("installs the Codex CLI only for agent: codex", () => {
+    const install = steps.find((s) => s.name === "Install Codex CLI")!;
+    expect(install.if).toBe("inputs.agent == 'codex'");
+    expect(install.run).toContain('npm install -g "@openai/codex@${CODEX_VERSION}"');
+    expect(action.inputs.agent.default).toBe("claude");
+  });
+
+  it("asks codex runs for an OpenAI key, not a Claude credential", () => {
+    const validate = steps.find((s) => s.name === "Validate auth inputs")!;
+    const run = (env: Record<string, string>) =>
+      spawnSync("bash", ["-c", validate.run as string], { encoding: "utf8", env: { PATH: process.env.PATH, ...env } });
+    expect(run({ AGENT: "codex", HAS_OPENAI_KEY: "true" }).status).toBe(0);
+    expect(run({ AGENT: "codex", HAS_API_KEY: "true" }).stdout).toContain("agent: codex needs openai-api-key");
+    expect(run({ AGENT: "claude", HAS_API_KEY: "true" }).status).toBe(0);
+    expect(run({ AGENT: "gemini" }).stdout).toContain("agent must be claude or codex");
+  });
 });
