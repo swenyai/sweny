@@ -82,10 +82,28 @@ describe("implement CLI to MCP output contract", () => {
     vi.spyOn(console, "error").mockImplementation((message: unknown) => {
       cliStderr += String(message) + "\n";
     });
-    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
-      child.stdout!.emit("data", typeof chunk === "string" ? Buffer.from(chunk) : Buffer.from(chunk));
-      return true;
-    });
+    let flushTerminal: (() => void) | undefined;
+    vi.spyOn(process.stdout, "write").mockImplementation(
+      (
+        chunk: string | Uint8Array,
+        encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+        callback?: (error?: Error | null) => void,
+      ) => {
+        const bytes = typeof chunk === "string" ? Buffer.from(chunk) : Buffer.from(chunk);
+        const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+        if (done) {
+          // Simulate a pipe under backpressure: terminal bytes are not delivered
+          // until the test releases the write. The command must not exit early.
+          flushTerminal = () => {
+            child.stdout!.emit("data", bytes);
+            done();
+          };
+          return false;
+        }
+        child.stdout!.emit("data", bytes);
+        return true;
+      },
+    );
     vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
       cliStderr += String(chunk);
       return true;
@@ -97,7 +115,12 @@ describe("implement CLI to MCP output contract", () => {
     const originalArgv = process.argv;
     process.argv = [process.execPath, "sweny", "implement", "TEST-1", "--json", "--stream"];
     try {
-      await expect(import("../main.js")).rejects.toBe(stopped);
+      const command = import("../main.js");
+      const commandFinished = expect(command).rejects.toBe(stopped);
+      await vi.waitFor(() => expect(flushTerminal, cliStderr).toBeDefined());
+      expect(exit).not.toHaveBeenCalled();
+      flushTerminal!();
+      await commandFinished;
     } finally {
       process.argv = originalArgv;
       child.emit("close", status === "success" ? 0 : 1);
