@@ -157,7 +157,7 @@ describe("SrtSandboxWrapper", () => {
       try {
         const second = await w.wrap({ ...SPAWN, cwd: process.cwd(), egress: [] });
         try {
-          const isolationRoot = path.join(realpathSync(scratchRoot), `sweny-sandbox-${process.getuid?.() ?? "user"}`);
+          const isolationRoot = path.join(realpathSync(scratchRoot), `sweny-${process.getuid?.() ?? "user"}`);
           expect(path.dirname(path.dirname(first.home))).toBe(isolationRoot);
           expect(path.dirname(path.dirname(second.home))).toBe(isolationRoot);
           expect(first.home).not.toBe(second.home);

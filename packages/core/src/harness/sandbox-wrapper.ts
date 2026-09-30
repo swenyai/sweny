@@ -233,10 +233,12 @@ export class SrtSandboxWrapper implements SandboxWrapper {
 
   async wrap(req: SandboxWrapRequest): Promise<WrappedSpawn> {
     const storageParent = real(this.opts.scratchRoot ?? tmpdir());
-    const sharedRoot = path.join(storageParent, `sweny-sandbox-${process.getuid?.() ?? "user"}`);
+    // Keep these components short: srt creates Unix sockets beneath HOME/tmp,
+    // and Linux socket paths must fit in 107 bytes (including caller parents).
+    const sharedRoot = path.join(storageParent, `sweny-${process.getuid?.() ?? "user"}`);
     await mkdir(sharedRoot, { recursive: true, mode: 0o700 });
     const isolationRoot = real(sharedRoot);
-    const dir = await mkdtemp(path.join(isolationRoot, "run-"));
+    const dir = await mkdtemp(path.join(isolationRoot, "r-"));
     let cleaned = false;
     const cleanup = async () => {
       if (cleaned) return;
