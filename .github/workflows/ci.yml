@@ -256,7 +256,7 @@ jobs:
       - name: Build core
         run: npm run build --workspace=packages/core
 
-      - name: Wrapped fake-agent specs, incl. pi wrapped + tool bridge (wrapper required)
+      - name: Wrapped fake-agent specs, incl. pi and ACP wrapped + tool bridge (wrapper required)
         working-directory: packages/core
         env:
           SWENY_REQUIRE_SANDBOX_WRAPPER: "1"

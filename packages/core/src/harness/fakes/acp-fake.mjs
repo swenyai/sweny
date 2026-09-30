@@ -153,7 +153,9 @@ async function startMcp() {
   capture.mcpTools = {};
   for (const s of capture.mcpServers) {
     if (!s.command) continue;
-    const env = Object.fromEntries((s.env ?? []).map((e) => [e.name, e.value]));
+    // Like real agents, the MCP server inherits the agent's own env (inside the
+    // sandbox wrapper that carries srt's HTTP_PROXY); the listed vars add to it.
+    const env = { ...process.env, ...Object.fromEntries((s.env ?? []).map((e) => [e.name, e.value])) };
     const client = new Client({ name: "acp-fake", version: "0.0.0" });
     await client.connect(new StdioClientTransport({ command: s.command, args: s.args ?? [], env, stderr: "ignore" }));
     capture.mcpTools[s.name] = (await client.listTools()).tools.map((t) => t.name);
