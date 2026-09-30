@@ -12,6 +12,7 @@ import { createCodexProcessFake } from "./__contract__/fakes.js";
 import {
   CodexHarness,
   CODEX_ISOLATION_FEATURES_OFF,
+  codexBackendHosts,
   isStrictCompatibleSchema,
   toTomlValue,
   translateDenyNames,
@@ -407,6 +408,11 @@ describe("CodexHarness helpers", () => {
     expect(toTomlValue('a"b')).toBe('"a\\"b"');
     expect(toTomlValue(["x", 1, true])).toBe('["x", 1, true]');
     expect(toTomlValue({ K: "v", "a.b": false })).toBe('{K = "v", "a.b" = false}');
+  });
+
+  it("lets Codex reach its own backend through the sandbox wrapper, and a gateway when set", () => {
+    expect(codexBackendHosts({})).toEqual(["api.openai.com", "chatgpt.com", "auth.openai.com"]);
+    expect(codexBackendHosts({ OPENAI_BASE_URL: "https://gw.example.test:8443/v1" })).toContain("gw.example.test:8443");
   });
 
   it("recognizes OpenAI strict-compatible schemas", () => {
