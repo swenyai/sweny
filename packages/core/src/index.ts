@@ -8,15 +8,15 @@
  *
  * @example
  * ```ts
- * import { execute, ClaudeClient, createSkillMap, github, sentry, slack } from '@sweny-ai/core'
+ * import { execute, createHarness, createSkillMap, github, sentry, slack } from '@sweny-ai/core'
  * import { triageWorkflow } from '@sweny-ai/core/workflows'
  *
  * const skills = createSkillMap([github, sentry, slack])
- * const claude = new ClaudeClient()
+ * const harness = createHarness("claude-code")
  *
  * const results = await execute(triageWorkflow, alertPayload, {
  *   skills,
- *   claude,
+ *   harness,
  *   observer: (event) => console.log(event),
  * })
  * ```
