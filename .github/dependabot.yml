@@ -3,10 +3,14 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 10
+      interval: monthly
+    open-pull-requests-limit: 3
     ignore:
+      # Majors land only when they make sweny better; bump them on purpose, not
+      # because a bot noticed. Security updates still arrive separately.
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
       # zustand 5 removed StoreApi.destroy(), which @xyflow/react still calls
       # in its shipped bundle. Every published @xyflow/react (through 12.11.2)
       # depends on zustand ^4.4.0, so upgrading studio to v5 leaves two copies
@@ -28,11 +32,15 @@ updates:
       production-dependencies:
         dependency-type: production
         update-types:
+          - minor
           - patch
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns:
+          - "*"
