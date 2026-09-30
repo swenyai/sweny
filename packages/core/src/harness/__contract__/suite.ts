@@ -9,8 +9,8 @@
  *
  * Each case passes, or is skipped only where the adapter's declared
  * `capabilities` say the opinion is not native (the skip must match the
- * declaration). Seventeen cases, one `it` each, so a report reads "17 passed".
- * Cases 15 to 17 (#365) prove the node policy reaches the agent, which safe
+ * declaration). Eighteen cases, one `it` each, so a report reads "18 passed".
+ * Cases 16 to 18 (#365) prove the node policy reaches the agent, which safe
  * outputs depend on.
  */
 
@@ -19,9 +19,11 @@ import type { Logger, Tool } from "../../types.js";
 import { AGENT_ENV_ALLOWLIST, AGENT_ENV_PREFIXES } from "../../agent-env.js";
 import { UNTRUSTED_DATA_NOTICE } from "../../untrusted.js";
 import { ask as coreAsk, evaluate as coreEvaluate } from "../prompts.js";
-import { policyGate } from "../policy.js";
+import { nativeDenyClasses, policyGate } from "../policy.js";
 import type { AgentHarness, HarnessRunRequest, NodePolicy, ToolClass } from "../types.js";
+import type { SandboxWrapper } from "../sandbox-wrapper.js";
 import { AMBIENT_MCP_CANARY, type HarnessFakes } from "./fakes.js";
+import { sandboxWrapperCase } from "./sandbox.js";
 import {
   EXIT_CASES,
   FULL_USAGE,
@@ -31,12 +33,18 @@ import {
   STRUCTURED_CASES,
   TOOL_TRACE_SCRIPT,
   type FakeScript,
+  type FakeUsage,
 } from "./scenarios.js";
 
 export interface MakeOptions {
   logger: Logger;
   /** Turn the harness's native sandbox on (default off, so cases never depend on the host). */
   sandbox?: boolean;
+  /**
+   * The host's process sandbox wrapper (#360 step 2). `null` = none available;
+   * `undefined` = the adapter's default. Only case 15 sets it.
+   */
+  sandboxWrapper?: SandboxWrapper | null;
 }
 
 /**
@@ -89,12 +97,24 @@ export const CONTRACT_CASE_NAMES = [
   "12 complete(): no tools, no MCP, null on failure, evaluate fails closed",
   "13 capabilities honesty: every native declaration reaches the agent",
   "14 cleanup: nothing is left running or on disk after success, failure and abort",
-  "15 policy deny: every class in policy.deny reaches the agent natively, or degrades and strict refuses",
-  "16 strict policy: MCP is exclusive for a write-capable node too",
-  "17 policy read-only: policy.readOnly alone is enforced and the skill tool channel survives",
+  "15 sandbox wrapper: no native sandbox means the agent runs only inside the wrapper, and strict refuses without one",
+  "16 policy deny: every class in policy.deny reaches the agent natively, or degrades and strict refuses",
+  "17 strict policy: MCP is exclusive for a write-capable node too",
+  "18 policy read-only: policy.readOnly alone is enforced and the skill tool channel survives",
 ] as const;
 
-export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label = "harness"): void {
+export interface ContractSuiteOptions {
+  /** Env var names the adapter declares for its own auth (Codex: CODEX_API_KEY, CODEX_HOME, ...). */
+  authVars?: readonly string[];
+}
+
+export function runContractSuite(
+  make: MakeHarness,
+  fakes: HarnessFakes,
+  label = "harness",
+  suiteOpts: ContractSuiteOptions = {},
+): void {
+  const authVars = suiteOpts.authVars ?? [];
   describe(`harness contract: ${label}`, () => {
     afterEach(async () => {
       vi.unstubAllEnvs();
@@ -126,7 +146,8 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
             (k) =>
               !AGENT_ENV_ALLOWLIST.includes(k) &&
               !AGENT_ENV_PREFIXES.some((p) => k.startsWith(p)) &&
-              !nodeVars.includes(k),
+              !nodeVars.includes(k) &&
+              !authVars.includes(k),
           );
           expect(offenders).toEqual([]);
         };
@@ -145,7 +166,7 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
       // 2
       async (skip) => {
         const { h } = await fresh();
-        if (h.capabilities.mcp.exclusive !== "native") return skip("mcp exclusive is not native");
+        if (h.capabilities.mcp.exclusive === "none") return skip("mcp exclusive is not declared");
         fakes.script(DONE);
         await h.run(
           req({
@@ -175,32 +196,38 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
         for (const c of TOOL_CLASSES) {
           expect(cap.allows(c), `${c} must be denied in a read-only run`).toBe(false);
         }
-        expect(r.degraded).toEqual([]);
+        // Read-only is honored natively, so nothing about it is degraded. A
+        // harness with no native turn limit still reports that, and only that.
+        const expected = h.capabilities.turnLimit === "native" ? [] : [expect.stringMatching(/^max_turns: /)];
+        expect(r.degraded).toEqual(expected);
       },
 
       // 4
-      async (skip) => {
+      async () => {
         const { h } = await fresh();
         const caps = h.capabilities;
+        const native = nativeDenyClasses(caps);
         for (const c of TOOL_CLASSES) {
-          const mappable =
-            caps.builtinDeny === "by-name" ||
-            caps.builtinDeny === "by-class" ||
-            (caps.builtinDeny === "shell-only" && c === "shell");
+          const mappable = native.includes(c);
           const policy: NodePolicy = { readOnly: false, deny: [c], egress: [], strict: false };
           const warn = policyGate(caps, policy);
           const strict = policyGate(caps, { ...policy, strict: true });
           if (mappable) {
             expect(warn.degraded, `${c} warn`).toEqual([]);
             expect(strict.refuse, `${c} strict`).toBeUndefined();
+            // Declared native, so the denial must actually reach the agent.
+            fakes.script(DONE);
+            await h.run(req({ policy }));
+            expect(fakes.captured().allows(c), `${c} denied at the agent`).toBe(false);
           } else {
             expect(warn.degraded.length, `${c} warn`).toBeGreaterThan(0);
             expect(warn.refuse, `${c} warn never refuses`).toBeUndefined();
             expect(strict.refuse, `${c} strict`).toBeTypeOf("string");
           }
         }
-        // The legacy native-name passthrough reaches the agent.
-        if (caps.builtinDeny !== "by-name") return skip("builtinDeny is not by-name");
+        // The legacy native-name passthrough reaches the agent. Only a by-name
+        // harness takes names verbatim; the class checks above ran for every harness.
+        if (caps.builtinDeny !== "by-name") return;
         fakes.script(DONE);
         await h.run(
           req({ disallowedTools: ["Bash"], policy: { readOnly: false, deny: [], egress: [], strict: false } }),
@@ -214,6 +241,8 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
         for (const sc of STRUCTURED_CASES) {
           const { h, logger } = await fresh();
           if (sc.needsNative && h.capabilities.structuredOutput !== "native") continue;
+          // A structured result next to prose needs a separate channel on the wire (Codex has none).
+          if (sc.needsNative && fakes.structuredChannel === false) continue;
           fakes.script(sc.script);
           const r = await h.run(req({ outputSchema: OUTPUT_SCHEMA }));
           ran++;
@@ -256,13 +285,22 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
       async (skip) => {
         const { h } = await fresh();
         if (!h.capabilities.usage.tokens) return skip("usage is not captured");
+        // Only fields the wire format carries can arrive; the rest must stay absent (never a guessed 0).
+        const carried = new Set<keyof FakeUsage>(fakes.usageFields ?? (Object.keys(FULL_USAGE) as (keyof FakeUsage)[]));
+        const pick = (u: FakeUsage) =>
+          Object.fromEntries(Object.entries(u).filter(([k]) => carried.has(k as keyof FakeUsage))) as FakeUsage;
+
         fakes.script([{ kind: "final", text: "done", usage: FULL_USAGE }]);
         const full = await h.run(req());
-        expect(full.usage).toMatchObject(FULL_USAGE);
+        expect(full.usage).toMatchObject(pick(FULL_USAGE));
+        for (const k of Object.keys(FULL_USAGE) as (keyof FakeUsage)[]) {
+          if (!carried.has(k)) expect(full.usage?.[k], `${k} is not on the wire`).toBeUndefined();
+        }
+        if (!h.capabilities.usage.costUsd) expect(full.usage?.costUsd).toBeUndefined();
 
         fakes.script([{ kind: "final", text: "done", usage: PARTIAL_USAGE }]);
         const partial = await h.run(req());
-        expect(partial.usage).toMatchObject(PARTIAL_USAGE);
+        expect(partial.usage).toMatchObject(pick(PARTIAL_USAGE));
         // Absent stays absent, never 0.
         expect(partial.usage?.cacheReadTokens).toBeUndefined();
         expect(partial.usage?.cacheCreationTokens).toBeUndefined();
@@ -443,6 +481,23 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
           expect(fakes.captured().maxTurns).toBe(3);
         }
 
+        // turnLimit watchdog: sweny stops a run that goes past the budget, fails it
+        // the way a native max_turns stop does, and says the limit was not native.
+        if (caps.turnLimit === "watchdog") {
+          fakes.script([
+            { kind: "tool-call", id: "w1", name: "lookup", input: {} },
+            { kind: "tool-result", id: "w1", content: "{}" },
+            { kind: "tool-call", id: "w2", name: "lookup", input: {} },
+            { kind: "tool-result", id: "w2", content: "{}" },
+            { kind: "final", text: "done" },
+          ]);
+          const r = await h.run(req({ maxTurns: 1 }));
+          expect(r.status).toBe("failed");
+          expect(String(r.data.error)).toMatch(/max_turns/);
+          expect(r.degraded.some((d) => d.startsWith("max_turns"))).toBe(true);
+          expect(fakes.captured().stopped).toBe(true);
+        }
+
         // cancel: a timeout gives the agent a way to be stopped.
         fakes.script(DONE);
         await h.run(req({ timeoutMs: 60_000 }));
@@ -468,14 +523,15 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
       // 14
       async () => {
         const scenarios: [string, FakeScript, Partial<HarnessRunRequest>][] = [
-          ["success", DONE, {}],
+          // Skill tools and an output schema, so any bridge socket or schema file the adapter makes is checked too.
+          ["success", DONE, { tools: [lookupTool], outputSchema: OUTPUT_SCHEMA }],
           [
             "failure",
             [
               { kind: "tool-call", id: "c1", name: "lookup", input: {} },
               { kind: "exit", code: 1 },
             ],
-            {},
+            { tools: [lookupTool], outputSchema: OUTPUT_SCHEMA },
           ],
         ];
         for (const [label, script, over] of scenarios) {
@@ -490,30 +546,33 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
         fakes.script([{ kind: "hang" }]);
         const ac = new AbortController();
         const timer = setTimeout(() => ac.abort(), 50);
-        await h.run(req({ signal: ac.signal }));
+        await h.run(req({ signal: ac.signal, tools: [lookupTool], outputSchema: OUTPUT_SCHEMA }));
         clearTimeout(timer);
         expect(fakes.captured().stopped, "abort: stopped").toBe(true);
         expect(fakes.leftovers(), "abort: leftovers").toEqual([]);
       },
 
-      // 15 (#365): case 4 checks the gate; this checks the deny actually reaches the agent.
+      // 15
+      async (skip) => {
+        await sandboxWrapperCase(make, fakes, skip);
+      },
+
+      // 16 (#365): case 4 checks the gate; this checks the deny actually reaches the agent.
       async () => {
         const { h } = await fresh();
-        const caps = h.capabilities;
+        const native = nativeDenyClasses(h.capabilities);
+        const denyGaps = (d: string[]) => d.filter((x) => x.startsWith("deny "));
         for (const c of TOOL_CLASSES) {
-          const mappable =
-            caps.builtinDeny === "by-name" ||
-            caps.builtinDeny === "by-class" ||
-            (caps.builtinDeny === "shell-only" && c === "shell");
+          const mappable = native.includes(c);
           const policy: NodePolicy = { readOnly: false, deny: [c], egress: [], strict: false };
 
           fakes.script(DONE);
           const warn = await h.run(req({ policy }));
           if (mappable) {
             expect(fakes.captured().allows(c), `${c} must be denied`).toBe(false);
-            expect(warn.degraded, c).toEqual([]);
+            expect(denyGaps(warn.degraded), c).toEqual([]);
           } else {
-            expect(warn.degraded.length, `${c} degraded`).toBeGreaterThan(0);
+            expect(denyGaps(warn.degraded).length, `${c} degraded`).toBeGreaterThan(0);
           }
 
           fakes.script(DONE);
@@ -530,7 +589,7 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
         }
       },
 
-      // 16 (#365)
+      // 17 (#365)
       async (skip) => {
         const { h } = await fresh();
         if (h.capabilities.mcp.exclusive === "none") return skip("mcp exclusive is none");
@@ -548,7 +607,7 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
         expect(loaded).not.toContain(AMBIENT_MCP_CANARY);
       },
 
-      // 17 (#365): safe outputs rely on this. A read-only node still needs its
+      // 18 (#365): safe outputs rely on this. A read-only node still needs its
       // skill tools (emit_output among them), and nothing that can write.
       async () => {
         const { h } = await fresh();
@@ -564,7 +623,7 @@ export function runContractSuite(make: MakeHarness, fakes: HarnessFakes, label =
         }
         expect(cap.mcpServersLoaded.some((n) => n.startsWith("sweny"))).toBe(true);
         if (h.capabilities.mcp.exclusive !== "none") expect(cap.mcpServersLoaded).not.toContain(AMBIENT_MCP_CANARY);
-        expect(r.degraded).toEqual([]);
+        expect(r.degraded.filter((d) => d.startsWith("read-only"))).toEqual([]);
       },
     ];
 

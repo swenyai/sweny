@@ -12,9 +12,29 @@
  * - ACP: a fake agent built on the ACP SDK.
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
 import type { ToolClass } from "../types.js";
-import type { FakeScript, FakeStep } from "./scenarios.js";
+import type { FakeScript, FakeStep, FakeUsage } from "./scenarios.js";
+
+/** Socket paths named by `--socket <path>` in any stdio MCP server config (the tool bridge). */
+export function bridgeSocketsIn(servers: Record<string, { args?: unknown }> | undefined): string[] {
+  const out: string[] = [];
+  for (const s of Object.values(servers ?? {})) {
+    const args = Array.isArray(s?.args) ? (s.args as unknown[]) : [];
+    const i = args.indexOf("--socket");
+    if (i !== -1 && typeof args[i + 1] === "string") out.push(args[i + 1] as string);
+  }
+  return out;
+}
+
+/** The subset of `paths` still on disk. */
+export function stillOnDisk(paths: Iterable<string>): string[] {
+  return [...new Set(paths)].filter((p) => fs.existsSync(p));
+}
 
 /** A user-level MCP server the fake "has configured". It must never reach a run that asked for exclusive MCP. */
 export const AMBIENT_MCP_CANARY = "ambient-user-mcp-canary";
@@ -58,6 +78,14 @@ export interface HarnessFakes {
   leftovers(): string[];
   /** Tear down after a case (unmock, remove scratch). */
   dispose(): void | Promise<void>;
+  /**
+   * The wire format has a structured-output channel separate from the final
+   * text (Claude's `structured_output`). Codex has none: with a schema, the
+   * final message is the JSON. Default true.
+   */
+  structuredChannel?: boolean;
+  /** Usage fields the wire format can carry. Default: every field. Others must stay absent. */
+  usageFields?: (keyof FakeUsage)[];
 }
 
 // ─── Claude Code: the SDK `query` is the fake ────────────────────
@@ -144,9 +172,12 @@ export interface ClaudeSdkFake extends HarnessFakes {
 export function createClaudeSdkFake(): ClaudeSdkFake {
   let steps: FakeScript = [];
   let capture: FakeCapture = emptyCapture();
+  /** Tool bridge socket directories handed to the SDK since the last reset. */
+  const bridgeDirs = new Set<string>();
 
   const query = vi.fn((args: { prompt: string; options: Record<string, any> }) => {
     const o = args.options ?? {};
+    for (const s of bridgeSocketsIn(o.mcpServers)) bridgeDirs.add(path.dirname(s));
     const disallowed: string[] = Array.isArray(o.disallowedTools) ? o.disallowedTools : [];
     const builtinToolsDisabled = Array.isArray(o.tools) && o.tools.length === 0;
     const loaded = Object.keys(o.mcpServers ?? {});
@@ -212,6 +243,7 @@ export function createClaudeSdkFake(): ClaudeSdkFake {
     reset() {
       steps = [];
       capture = emptyCapture();
+      bridgeDirs.clear();
       query.mockClear();
       register();
     },
@@ -219,11 +251,185 @@ export function createClaudeSdkFake(): ClaudeSdkFake {
       steps = next;
     },
     captured: () => capture,
-    // The SDK fake spawns no process and writes no files.
-    leftovers: () => [],
+    // The SDK fake spawns no process and writes no files; the tool bridge's socket directory must be gone.
+    leftovers: () => stillOnDisk(bridgeDirs),
     dispose() {
       vi.doUnmock("@anthropic-ai/claude-agent-sdk");
       vi.resetModules();
+    },
+  };
+}
+
+// ─── Codex: a scripted `codex` process ───────────────────────────
+
+/** What the Codex fake process recorded (harness/fakes/codex-fake.mjs). */
+export interface CodexFakeCapture {
+  pid: number;
+  args: string[];
+  env: Record<string, string>;
+  prompt: string;
+  /** Every `-c key=value` override, parsed into a nested object. */
+  config: Record<string, any>;
+  sandbox?: string;
+  model?: string;
+  cd?: string;
+  flags: string[];
+  outputSchemaPath?: string;
+  outputSchema?: unknown;
+  mcpServersLoaded: string[];
+  /** With `callMcp`: tool names each MCP server listed. */
+  mcpTools?: Record<string, string[]>;
+}
+
+export interface CodexProcessFake extends HarnessFakes {
+  /** Command that runs the fake in place of `codex` (the adapter's `codexCommand`). */
+  readonly command: { command: string; args: string[] };
+  /** The fake's user-level CODEX_HOME, whose config.toml declares {@link AMBIENT_MCP_CANARY}. */
+  readonly ambientHome: string;
+  /** Every raw capture since the last reset, oldest first. */
+  raw(): CodexFakeCapture[];
+  /** Script with options: `callMcp` makes the fake call the configured MCP servers for real. */
+  scriptWith(steps: FakeScript, opts: { callMcp?: boolean }): void;
+  /** Script only the n-th invocation since the last reset (1-based). */
+  scriptFor(invocation: number, steps: FakeScript): void;
+  /** Make `codex --version` report this version. */
+  setVersion(version: string): void;
+  /** Remove the fake's scratch directory (after all cases). */
+  destroy(): void;
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A scripted `codex` CLI for the contract suite: a node script the adapter
+ * spawns through its `codexCommand` seam. The fake reads its script and writes
+ * what it received to a scratch directory; this kit turns that into the
+ * neutral {@link FakeCapture}.
+ */
+export function createCodexProcessFake(): CodexProcessFake {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-codex-fake-"));
+  const ambientHome = path.join(dir, "ambient-codex-home");
+  fs.mkdirSync(ambientHome);
+  fs.writeFileSync(
+    path.join(ambientHome, "config.toml"),
+    `[mcp_servers.${AMBIENT_MCP_CANARY}]\ncommand = "ambient-server"\n`,
+  );
+  const fakePath = fileURLToPath(new URL("../fakes/codex-fake.mjs", import.meta.url));
+  const command = { command: process.execPath, args: [fakePath, "--fake-dir", dir] };
+
+  const captureFiles = () =>
+    fs
+      .readdirSync(dir)
+      .filter((f) => /^capture-\d+\.json$/.test(f))
+      .sort((a, b) => parseInt(a.slice(8), 10) - parseInt(b.slice(8), 10));
+  const raw = (): CodexFakeCapture[] =>
+    captureFiles().map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as CodexFakeCapture);
+
+  const writeScript = (value: unknown) => fs.writeFileSync(path.join(dir, "script.json"), JSON.stringify(value));
+
+  const toCapture = (c: CodexFakeCapture, invocations: number): FakeCapture => {
+    const features = (c.config.features ?? {}) as Record<string, unknown>;
+    const writable = c.sandbox !== "read-only";
+    const allows = (cls: ToolClass): boolean => {
+      switch (cls) {
+        case "shell":
+          return features.shell_tool !== false;
+        case "write":
+        case "edit":
+          // apply_patch cannot be switched off; only a read-only sandbox stops writes.
+          return writable;
+        case "net":
+          return c.config.web_search !== "disabled";
+        default:
+          // subagent
+          return features.multi_agent !== false && c.config.agents?.enabled !== false;
+      }
+    };
+    const disabled = (["shell", "write", "edit", "net", "subagent"] as ToolClass[]).every((k) => !allows(k));
+    return {
+      invocations,
+      prompt: c.prompt,
+      env: c.env,
+      mcpServersLoaded: c.mcpServersLoaded,
+      nativeDisallowed: [],
+      allows,
+      builtinToolsDisabled: disabled,
+      maxTurns: undefined,
+      model: c.model,
+      structuredSchema: c.outputSchema,
+      sandboxed: c.sandbox === "read-only" || c.sandbox === "workspace-write",
+      // A process harness is always cancellable by kill; cases 8, 9 and 14 prove the process is gone.
+      cancelWired: true,
+      stopped: !pidAlive(c.pid),
+    };
+  };
+
+  return {
+    command,
+    ambientHome,
+    structuredChannel: false,
+    usageFields: ["inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens"],
+    reset() {
+      for (const f of fs.readdirSync(dir)) {
+        if (/^(capture|script)-\d+\.json$/.test(f)) fs.rmSync(path.join(dir, f), { force: true });
+      }
+      fs.rmSync(path.join(dir, "version"), { force: true });
+      writeScript([]);
+      // The user's own Codex home has an MCP server configured; it must never load.
+      vi.stubEnv("CODEX_HOME", ambientHome);
+    },
+    script(steps) {
+      writeScript(steps);
+    },
+    scriptWith(steps, opts) {
+      writeScript({ steps, callMcp: opts.callMcp === true });
+    },
+    scriptFor(invocation, steps) {
+      fs.writeFileSync(path.join(dir, `script-${invocation}.json`), JSON.stringify(steps));
+    },
+    setVersion(version) {
+      fs.writeFileSync(path.join(dir, "version"), version);
+    },
+    captured() {
+      const all = raw();
+      const last = all.at(-1);
+      // No process ran (an abort landed before spawn): nothing is left running.
+      if (!last) return { ...emptyCapture(), stopped: true, cancelWired: true };
+      return toCapture(last, all.length);
+    },
+    raw,
+    leftovers() {
+      const paths: string[] = [];
+      for (const c of raw()) {
+        if (c.outputSchemaPath) paths.push(path.dirname(c.outputSchemaPath));
+        const servers = (c.config.mcp_servers ?? {}) as Record<string, { args?: unknown }>;
+        for (const s of bridgeSocketsIn(servers)) paths.push(path.dirname(s));
+      }
+      const live = raw()
+        .filter((c) => pidAlive(c.pid))
+        .map((c) => `pid ${c.pid} still running`);
+      return [...stillOnDisk(paths), ...live];
+    },
+    dispose() {
+      for (const c of raw()) {
+        if (pidAlive(c.pid)) {
+          try {
+            process.kill(c.pid, "SIGKILL");
+          } catch {
+            // gone
+          }
+        }
+      }
+    },
+    destroy() {
+      fs.rmSync(dir, { recursive: true, force: true });
     },
   };
 }

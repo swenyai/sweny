@@ -5,7 +5,7 @@
  * (#330); prompts.test.ts pins them against the old builders.
  */
 
-import type { Claude, Logger } from "../types.js";
+import type { Claude, JSONSchema, Logger } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { fenceUntrustedJson } from "../untrusted.js";
 import type { AgentHarness } from "./types.js";
@@ -21,6 +21,27 @@ export function registerLegacyClaude(harness: AgentHarness, claude: Claude): voi
 /** @internal The legacy `Claude` behind a compat harness, if any. */
 export function legacyClaudeOf(harness: AgentHarness): Claude | undefined {
   return LEGACY.get(harness);
+}
+
+/**
+ * The prompt for a node run: the instruction, the context fenced as untrusted
+ * data (#360), and the output schema when the node declares one. Every
+ * adapter sends this string, so fencing holds on every harness.
+ */
+export function buildNodePrompt(
+  instruction: string,
+  context: Record<string, unknown>,
+  outputSchema?: JSONSchema,
+): string {
+  return [
+    `## Instruction\n\n${instruction}`,
+    `## Context\n\n${fenceUntrustedJson(context, "context")}`,
+    outputSchema
+      ? `## Required Output\n\nYou MUST end with a JSON object matching this schema:\n\`\`\`json\n${JSON.stringify(outputSchema, null, 2)}\n\`\`\``
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /** The `ask` prompt: the instruction, then the fenced context when there is any. */

@@ -398,7 +398,7 @@ export function extractCredentialHint(err: unknown): string | null {
 
 // ── Crash error ─────────────────────────────────────────────────
 export function formatCrashError(error: unknown): string {
-  const msg = error instanceof Error ? error.message : "Unknown error";
+  const msg = error instanceof Error ? error.message : error == null ? "Unknown error" : String(error);
   const title = `${c.fail("\u2717")} ${chalk.bold("Unexpected Error")}`;
   const header = [title];
 
@@ -450,6 +450,16 @@ export function formatCheckResults(results: CheckResult[]): string {
 // ── JSON output ─────────────────────────────────────────────────
 export function formatResultJson(results: Map<string, NodeResult>): string {
   return JSON.stringify(Object.fromEntries(results), null, 2);
+}
+
+/** Drain terminal JSON before process.exit(), including when stdout is a pipe. */
+export function writeResultJson(results: Map<string, NodeResult>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    process.stdout.write(formatResultJson(results) + "\n", (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 }
 
 // ── Markdown output (for GitHub Actions step summary) ───────────

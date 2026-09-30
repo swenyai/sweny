@@ -48,8 +48,8 @@ import { validateWorkflow } from "./schema.js";
 import { resolveAgentAccess } from "./agent-env.js";
 import { fenceUntrusted } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
+import { isToolClass, policyGate } from "./harness/policy.js";
 import type { AgentHarness } from "./harness/types.js";
-import { policyGate } from "./harness/policy.js";
 import { buildNodePolicy, resolveNodePermissions } from "./node-policy.js";
 import {
   applySafeOutputs,
@@ -301,6 +301,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // #365: `permissions: read` (explicit, inherited, or implied by `outputs`)
     // gets the same tool gate as a dry run.
     const permissions = resolveNodePermissions(node, workflow);
+    const declaresPolicy =
+      node.permissions !== undefined || workflow.permissions !== undefined || (node.outputs?.length ?? 0) > 0;
     const readOnlyNode = dryRun || permissions.access === "read";
     const readTools = readOnlyNode ? filteredTools.filter(isReadTool) : filteredTools;
     const skippedWrites = dryRun ? filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name) : [];
@@ -347,8 +349,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // Build context: input + all prior node results.
     // Each prior node entry is the node's `data` augmented with `evals`
     // (a Record<name, EvalResult> for downstream lookup like
-    // `priorNode.evals.tests_run_clean.pass`). When `data` already has an
-    // `evals` key, the data field wins (back-compat with existing workflows).
+    // `priorNode.evals.tests_run_clean.pass`). This namespace is reserved
+    // for runtime verdicts; an agent-provided `data.evals` never overrides it.
     const context: Record<string, unknown> = {
       input,
       ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, buildPriorNodeContext(v)])),
@@ -460,22 +462,41 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // Per-node execution model: node.model ?? workflow.model. When undefined,
     // claude.run falls back to its own client default (then Claude Code's).
     const nodeModel = resolveExecutionModel(node, workflow);
+    // `tools.deny` entries that name a portable class (shell, write, edit, net,
+    // subagent) also deny that class of built-in agent tools; the harness
+    // compiles them or reports them in `degraded`.
+    const denyClasses = (node.tools?.deny ?? []).filter(isToolClass);
+    let degradedLogged = false;
     const agentAccess = resolveAgentAccess(node.skills, skills);
-    // #365: one portable policy per node, compiled by each adapter. The gate
-    // runs here so a strict refusal holds on every harness, before any spend.
-    const nodePolicy = buildNodePolicy({
-      permissions,
-      dryRun,
-      disallowedTools: node.disallowed_tools,
-      egress: agentAccess.domains,
-    });
-    const gate = options.harness ? policyGate(options.harness.capabilities, nodePolicy) : undefined;
+    // #365: a node or workflow that declares `permissions` or `outputs` gets
+    // one portable policy, compiled by each adapter. The gate also runs here so
+    // a strict refusal holds on every harness, before any spend. Nodes that
+    // declare neither pass no policy, so each harness keeps its own defaults.
+    const nodePolicy = declaresPolicy
+      ? buildNodePolicy({
+          permissions: { ...permissions, deny: [...new Set([...permissions.deny, ...denyClasses])] },
+          dryRun,
+          disallowedTools: node.disallowed_tools,
+          egress: agentAccess.domains,
+        })
+      : undefined;
+    // Egress is left to the adapter: only it knows whether a process sandbox
+    // wrapper covers what its native sandbox cannot.
+    const gate =
+      nodePolicy && options.harness
+        ? policyGate(options.harness.capabilities, { ...nodePolicy, egress: [] })
+        : undefined;
 
     while (true) {
       if (gate?.refuse) {
         // Not an agent failure: fail_soft never softens a policy refusal.
         logger.warn(`  harness refused the node: ${gate.refuse}`, { node: currentId });
-        result = { status: "failed", data: { error: gate.refuse }, toolCalls: [], degraded: gate.degraded };
+        result = {
+          status: "failed",
+          data: { error: gate.refuse, refused: true },
+          toolCalls: [],
+          degraded: gate.degraded,
+        };
         break;
       }
       // Only the final attempt's intents may be applied.
@@ -487,17 +508,25 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         outputSchema: node.output,
         maxTurns: node.max_turns,
         disallowedTools: node.disallowed_tools,
+        ...(denyClasses.length > 0 ? { deny: denyClasses } : {}),
         model: nodeModel,
         signal,
         timeoutMs,
         agentAccess,
-        policy: nodePolicy,
+        ...(nodePolicy ? { policy: nodePolicy } : {}),
         ...(readOnlyNode ? {} : { mcpServers: skillMcpServers }),
         ...(readOnlyNode ? { readOnly: true } : {}),
         onProgress: (message) => {
           safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
         },
       });
+
+      // Opinions the harness could not honor natively: said once per node, never silently dropped.
+      if (!degradedLogged && result.degraded && result.degraded.length > 0) {
+        degradedLogged = true;
+        const who = result.harness?.id ?? "harness";
+        logger.warn(`  ${who} could not honor natively: ${result.degraded.join("; ")}`, { node: currentId });
+      }
 
       // Retry only triggers on eval failure. Bail on tool/API errors.
       if (result.status !== "success") {
@@ -607,7 +636,9 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // instead of failing outright. The original error stays in `data.error`
     // and `data.fail_soft` marks the downgrade for downstream nodes and
     // observers. Eval failures never take this path (agentRunFailed guards it).
-    if (agentRunFailed && result.status === "failed" && node.fail_soft === true) {
+    // A strict-policy refusal (#331) is not an agent failure: fail_soft never softens it.
+    const refused = (result.data as Record<string, unknown> | undefined)?.refused === true;
+    if (agentRunFailed && result.status === "failed" && node.fail_soft === true && !refused) {
       const failError = (result.data as Record<string, unknown> | undefined)?.error;
       logger.warn(
         `  fail_soft: node failed (${String(failError ?? "unknown error")}); continuing with partial output`,
@@ -826,23 +857,16 @@ function warnOnJudgeBudget(workflow: Workflow, logger: Logger): void {
  *
  * Spec contract (https://spec.sweny.ai/nodes/#evalresult-type): downstream
  * nodes can read `priorNode.evals.<name>.pass` via the natural lookup path.
- * To honor this without breaking back-compat with workflows that read
- * `priorNode.<dataField>` directly, we spread `data` first and then attach
- * an `evals` namespace keyed by evaluator name. If the agent's structured
- * output happens to include a literal `evals` field, that field wins (and
- * the lookup degrades to "evals not available" for downstream readers).
+ * Preserve ordinary data fields, but reserve `evals` for runtime verdicts.
+ * Agent output must not forge a pass for downstream `requires` gates,
+ * including when no evaluator ran (the trusted namespace is then empty).
  */
 function buildPriorNodeContext(result: NodeResult): Record<string, unknown> {
   const data = (result.data ?? {}) as Record<string, unknown>;
   const evals = result.evals ?? [];
-  if (evals.length === 0) return data;
 
-  const evalsByName: Record<string, unknown> = {};
-  for (const e of evals) {
-    evalsByName[e.name] = e;
-  }
-  // Spread evals first so a data-side `evals` key shadows it (back-compat).
-  return { evals: evalsByName, ...data };
+  const evalsByName = Object.fromEntries(evals.map((e) => [e.name, e]));
+  return { ...data, evals: evalsByName };
 }
 
 /**
@@ -906,14 +930,10 @@ function buildRouteEvalEntry(
   }
 
   const evals = result.evals ?? [];
-  if (evals.length === 0) return { view: dataView, missing };
 
-  const evalsByName: Record<string, unknown> = {};
-  for (const e of evals) {
-    evalsByName[e.name] = e;
-  }
-  // Spread evals first so a data-side `evals` key shadows it (back-compat).
-  return { view: { evals: evalsByName, ...dataView }, missing };
+  const evalsByName = Object.fromEntries(evals.map((e) => [e.name, e]));
+  // Schema projection never grants agent data authority over runtime verdicts.
+  return { view: { ...dataView, evals: evalsByName }, missing };
 }
 
 /**
@@ -1117,7 +1137,10 @@ function filterNodeTools(tools: Tool[], filter: NodeToolFilter | undefined, node
   if (!filter) return tools;
 
   const resolvedNames = new Set(tools.map((t) => t.name));
-  for (const name of [...(filter.allow ?? []), ...(filter.deny ?? [])]) {
+  // A deny entry that names a tool class (write, shell, ...) targets built-in
+  // agent tools too, so it is not a typo when no skill tool has that name.
+  const denyNames = (filter.deny ?? []).filter((n) => !isToolClass(n));
+  for (const name of [...(filter.allow ?? []), ...denyNames]) {
     if (!resolvedNames.has(name)) {
       logger.warn(`  tools filter: '${name}' does not match any tool resolved for node '${nodeId}'`, {
         node: nodeId,

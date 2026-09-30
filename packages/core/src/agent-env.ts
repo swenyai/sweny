@@ -147,9 +147,47 @@ export function parseList(v: string | undefined): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Codex's own credentials and home (openai/codex rust-v0.159.2,
+ * login/src/auth/manager.rs): `codex exec` authenticates with `CODEX_API_KEY`
+ * (it does not read `OPENAI_API_KEY` for this; see {@link resolveCodexAuthEnv})
+ * or `CODEX_ACCESS_TOKEN`, else the login stored in `$CODEX_HOME/auth.json`.
+ */
+export const CODEX_AUTH_VARS: readonly string[] = ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CODEX_HOME"];
+
+/** Prefixes for a Codex run: locale only. `ANTHROPIC_*` / `CLAUDE_*` never reach Codex. */
+export const CODEX_ENV_PREFIXES: readonly string[] = ["LC_"];
+
+/**
+ * `codex exec` reads `CODEX_API_KEY`, not `OPENAI_API_KEY`. Copy the OpenAI
+ * key into `CODEX_API_KEY` when only the former is set, so either works.
+ * Pure: returns a copy.
+ */
+export function resolveCodexAuthEnv(env: Record<string, string>): Record<string, string> {
+  const out = { ...env };
+  if (!out.CODEX_API_KEY && out.OPENAI_API_KEY) out.CODEX_API_KEY = out.OPENAI_API_KEY;
+  return out;
+}
+
+/** A stored Codex login (`codex login`): `auth.json` under `CODEX_HOME`, default `~/.codex`. */
+export function hasCodexLogin(
+  env: Record<string, string | undefined> = process.env,
+  exists: (p: string) => boolean = existsSync,
+): boolean {
+  const home = env.CODEX_HOME || path.join(homedir(), ".codex");
+  return exists(path.join(home, "auth.json"));
+}
+
 export interface BuildAgentEnvOpts {
   /** Per-call names to include (a node's declared skill env vars). */
   extraVars?: readonly string[];
+  /**
+   * The harness's own credential names (Codex: {@link CODEX_AUTH_VARS}).
+   * Default: none beyond the Claude prefixes.
+   */
+  authVars?: readonly string[];
+  /** Prefixes always kept. Default: {@link AGENT_ENV_PREFIXES} (Claude Code's). */
+  prefixes?: readonly string[];
   /** Operator passthrough list (`env-passthrough`). `"*"` inherits everything. */
   passthrough?: readonly string[];
   logger?: Pick<Logger, "warn">;
@@ -363,10 +401,18 @@ export function buildAgentEnv(
     return Object.fromEntries(Object.entries(source).filter((e): e is [string, string] => e[1] != null));
   }
 
-  const exact = new Set<string>([...AGENT_ENV_ALLOWLIST, ...(opts.extraVars ?? []), ...passthrough]);
-  const prefixes = [...AGENT_ENV_PREFIXES];
-  if (truthy(source.CLAUDE_CODE_USE_BEDROCK)) prefixes.push(...BEDROCK_PREFIXES);
-  if (truthy(source.CLAUDE_CODE_USE_VERTEX)) for (const v of VERTEX_VARS) exact.add(v);
+  const exact = new Set<string>([
+    ...AGENT_ENV_ALLOWLIST,
+    ...(opts.extraVars ?? []),
+    ...(opts.authVars ?? []),
+    ...passthrough,
+  ]);
+  const prefixes = [...(opts.prefixes ?? AGENT_ENV_PREFIXES)];
+  // Bedrock / Vertex routing is a Claude Code setting; only its default prefixes carry it.
+  if (!opts.prefixes) {
+    if (truthy(source.CLAUDE_CODE_USE_BEDROCK)) prefixes.push(...BEDROCK_PREFIXES);
+    if (truthy(source.CLAUDE_CODE_USE_VERTEX)) for (const v of VERTEX_VARS) exact.add(v);
+  }
 
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(source)) {

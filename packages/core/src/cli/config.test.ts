@@ -98,34 +98,64 @@ describe("validateInputs: coding agent (honest --agent, #330)", () => {
     expect(errors.filter((e) => /agent/i.test(e))).toEqual([]);
   });
 
-  it.each(["codex", "gemini", "openai", "bogus"])("rejects --agent %s instead of silently running Claude", (agent) => {
-    // Even with the matching vendor key present, a non-Claude agent must not
-    // pass validation: nothing dispatches on it and Claude would run instead.
+  it.each(["gemini", "openai", "pi", "bogus"])("rejects --agent %s: no adapter, so nothing would run it", (agent) => {
+    // Even with the matching vendor key present, an agent without an adapter
+    // must not pass validation: another agent would run under its name.
     const errors = validateInputs(
       baseConfig({ codingAgentProvider: agent, openaiApiKey: "sk-openai", geminiApiKey: "g-key" }),
     );
     const err = errors.find((e) => e.includes(`"${agent}"`));
     expect(err).toBeDefined();
-    expect(err).toMatch(/only supported agent is "claude"/);
+    expect(err).toMatch(/supported agents are "claude" \(headless Claude Code\) and "codex" \(Codex CLI\)/);
   });
 
-  it("rejects coding-agent-provider from .sweny.yml the same way", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-agent-"));
-    try {
-      fs.writeFileSync(path.join(dir, ".sweny.yml"), "coding-agent-provider: codex\n");
-      const config = parseCliInputs({}, loadConfigFile(dir));
-      expect(config.codingAgentProvider).toBe("codex");
-      expect(validateInputs(config).some((e) => e.includes('"codex"'))).toBe(true);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+  describe("codex (#331)", () => {
+    afterEach(() => vi.unstubAllEnvs());
+    const noLogin = () => vi.stubEnv("CODEX_HOME", fs.mkdtempSync(path.join(os.tmpdir(), "sweny-codex-home-")));
+
+    it("accepts codex with OPENAI_API_KEY or CODEX_API_KEY", () => {
+      noLogin();
+      for (const keys of [{ openaiApiKey: "sk-openai" }, { codexApiKey: "sk-codex" }]) {
+        const errors = validateInputs(baseConfig({ codingAgentProvider: "codex", ...keys }));
+        expect(errors.filter((e) => /agent|CODEX|OPENAI/i.test(e))).toEqual([]);
+      }
+    });
+
+    it("accepts codex with a stored codex login", () => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-codex-home-"));
+      fs.writeFileSync(path.join(home, "auth.json"), "{}");
+      vi.stubEnv("CODEX_HOME", home);
+      const errors = validateInputs(baseConfig({ codingAgentProvider: "codex" }));
+      expect(errors.filter((e) => /CODEX|OPENAI/.test(e))).toEqual([]);
+    });
+
+    it("asks for a Codex credential when there is none", () => {
+      noLogin();
+      const errors = validateInputs(baseConfig({ codingAgentProvider: "codex" }));
+      expect(errors).toContain(
+        "Missing: CODEX_API_KEY or OPENAI_API_KEY, or a Codex login (`codex login`), for --agent codex",
+      );
+    });
+
+    it("reads coding-agent-provider: codex from .sweny.yml", () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-agent-"));
+      try {
+        fs.writeFileSync(path.join(dir, ".sweny.yml"), "coding-agent-provider: codex\n");
+        const config = parseCliInputs({}, loadConfigFile(dir));
+        expect(config.codingAgentProvider).toBe("codex");
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
-  it("CLI help no longer advertises codex or gemini", () => {
+  it("CLI help advertises only agents with an adapter", () => {
     for (const register of [registerTriageCommand, registerImplementCommand]) {
       const cmd = register(new Command());
       const opt = cmd.options.find((o) => o.long === "--agent");
-      expect(opt?.description).not.toMatch(/codex|gemini/i);
+      expect(opt?.description).toMatch(/claude/);
+      expect(opt?.description).toMatch(/codex/);
+      expect(opt?.description).not.toMatch(/gemini|pi\b/i);
     }
   });
 });

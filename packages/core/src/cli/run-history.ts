@@ -57,6 +57,8 @@ export interface RunRecord {
   totals: RunTotals;
   /** Harness that ran the nodes (id + version). Absent for runs with no harness-tagged result. */
   harness?: { id: string; version: string };
+  /** Opinions the harness could not honor natively on some node, deduped. Absent when none. */
+  degraded?: string[];
 }
 
 // ── Hash + ids ──────────────────────────────────────────────────
@@ -164,6 +166,7 @@ export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
   });
 
   const harness = [...i.results.values()].find((r) => r.harness)?.harness;
+  const degraded = [...new Set([...i.results.values()].flatMap((r) => r.degraded ?? []))];
 
   return {
     schema_version: RUN_HISTORY_SCHEMA_VERSION,
@@ -184,6 +187,7 @@ export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
       cost_usd: summary.costUsd ?? null,
     },
     ...(harness ? { harness: { id: harness.id, version: harness.version } } : {}),
+    ...(degraded.length > 0 ? { degraded } : {}),
   };
 }
 

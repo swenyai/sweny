@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { policyGate } from "./policy.js";
-import { CLAUDE_CODE_CAPABILITIES } from "./capabilities.js";
+import { describe, it, expect, vi } from "vitest";
+import { nativeDenyClasses, policyGate, resolveHarnessPolicy, isToolClass } from "./policy.js";
+import { CLAUDE_CODE_CAPABILITIES, CODEX_CAPABILITIES } from "./capabilities.js";
 import type { HarnessCapabilities, NodePolicy } from "./types.js";
 
 const base: NodePolicy = { readOnly: false, deny: [], egress: [], strict: false };
@@ -87,5 +87,99 @@ describe("policyGate", () => {
       expect(strict.refuse).toMatch(/^strict policy: /);
       expect(strict.degraded).toEqual(warn.degraded);
     });
+  });
+
+  describe("Codex, as declared (#331)", () => {
+    it("denies shell, net and subagent natively; write and edit are X", () => {
+      expect(nativeDenyClasses(CODEX_CAPABILITIES)).toEqual(["shell", "net", "subagent"]);
+      expect(nativeDenyClasses(CLAUDE_CODE_CAPABILITIES)).toEqual(["shell", "write", "edit", "net", "subagent"]);
+      expect(policyGate(CODEX_CAPABILITIES, { ...base, deny: ["shell", "net", "subagent"] })).toEqual({ degraded: [] });
+      for (const c of ["write", "edit"] as const) {
+        const strict = policyGate(CODEX_CAPABILITIES, { ...base, deny: [c], strict: true });
+        expect(strict.refuse).toMatch(new RegExp(`deny \\[${c}\\]`));
+      }
+    });
+
+    it("a watchdog turn limit is reported but never refused", () => {
+      const r = policyGate(CODEX_CAPABILITIES, { ...base, maxTurns: 20, strict: true });
+      expect(r.refuse).toBeUndefined();
+      expect(r.degraded).toEqual(["max_turns: no native turn limit; sweny stops the run after 20 tool calls"]);
+      // No limit at all is refused under strict.
+      const none = policyGate({ ...weak, turnLimit: "none" }, { ...base, maxTurns: 5, strict: true });
+      expect(none.refuse).toMatch(/max_turns/);
+      // Claude Code's native limit: nothing to say.
+      expect(policyGate(CLAUDE_CODE_CAPABILITIES, { ...base, maxTurns: 5 })).toEqual({ degraded: [] });
+    });
+
+    it("native tool names a harness does not have are unenforced", () => {
+      const r = policyGate(CODEX_CAPABILITIES, { ...base, nativeDeny: ["FancyTool"], strict: true });
+      expect(r.refuse).toMatch(/disallowed_tools \[FancyTool\]/);
+    });
+
+    it("per-host egress is X for codex (network is one switch)", () => {
+      const r = policyGate(CODEX_CAPABILITIES, { ...base, egress: ["api.github.com"], strict: true });
+      expect(r.refuse).toMatch(/egress allowlist/);
+      expect(policyGate(CODEX_CAPABILITIES, { ...base, egress: ["x"] }, { egress: true })).toEqual({ degraded: [] });
+    });
+  });
+
+  it("isToolClass", () => {
+    expect(isToolClass("write")).toBe(true);
+    expect(isToolClass("github_create_pr")).toBe(false);
+  });
+});
+
+describe("resolveHarnessPolicy", () => {
+  it("explicit wins, then SWENY_HARNESS_POLICY, then strict in GitHub Actions and warn elsewhere", () => {
+    expect(resolveHarnessPolicy({ GITHUB_ACTIONS: "true" }, "warn")).toBe("warn");
+    expect(resolveHarnessPolicy({ SWENY_HARNESS_POLICY: "strict" })).toBe("strict");
+    expect(resolveHarnessPolicy({ GITHUB_ACTIONS: "true" })).toBe("strict");
+    expect(resolveHarnessPolicy({})).toBe("warn");
+  });
+
+  it("warns on an unknown value and uses the default", () => {
+    const warn = vi.fn();
+    expect(resolveHarnessPolicy({}, "loose", { warn })).toBe("warn");
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/"loose" is not one of strict\|warn/));
+  });
+});
+
+describe("policyGate sandbox (#360 step 2)", () => {
+  const sandboxOnly = (sandbox: NodePolicy["sandbox"]): NodePolicy => ({ ...base, sandbox });
+  const GAP = /^sandbox: harness has no native fs and network sandbox/;
+
+  it("off or unset: no requirement", () => {
+    expect(policyGate(weak, base)).toEqual({ degraded: [] });
+    expect(policyGate(weak, sandboxOnly("off"))).toEqual({ degraded: [] });
+  });
+
+  it("auto without a wrapper degrades, never refuses", () => {
+    const r = policyGate(weak, sandboxOnly("auto"));
+    expect(r.refuse).toBeUndefined();
+    expect(r.degraded).toHaveLength(1);
+    expect(r.degraded[0]).toMatch(GAP);
+  });
+
+  it("strict sandbox refuses without a wrapper even when policy.strict is false", () => {
+    const r = policyGate(weak, sandboxOnly("strict"));
+    expect(r.refuse).toMatch(/^strict sandbox \(SWENY_SANDBOX=strict\): sandbox: /);
+    expect(r.degraded[0]).toMatch(GAP);
+  });
+
+  it("strict sandbox does not turn other gaps into refusals", () => {
+    const r = policyGate(weak, { ...base, deny: ["write"], sandbox: "strict" }, { sandbox: true });
+    expect(r.refuse).toBeUndefined();
+    expect(r.degraded).toEqual(["deny [write]: harness cannot deny built-in tools"]);
+  });
+
+  it("a wrapper makes a harness without a native sandbox enforceable", () => {
+    const policy: NodePolicy = { readOnly: true, deny: [], egress: ["x.test"], strict: true, sandbox: "strict" };
+    expect(policyGate(weak, policy, { sandbox: true, egress: true, readOnlyMount: true })).toEqual({ degraded: [] });
+  });
+
+  it("a native fs + network sandbox needs no wrapper", () => {
+    expect(policyGate(CLAUDE_CODE_CAPABILITIES, sandboxOnly("strict"))).toEqual({ degraded: [] });
+    const fsOnly: HarnessCapabilities = { ...weak, sandbox: { fs: true, network: false } };
+    expect(policyGate(fsOnly, sandboxOnly("strict")).refuse).toMatch(/sandbox/);
   });
 });

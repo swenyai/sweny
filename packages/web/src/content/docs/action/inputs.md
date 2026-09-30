@@ -22,12 +22,16 @@ SWEny ships three GitHub Actions, each with its own input surface. This page doc
 | `workflow` | Path to the workflow YAML file to execute (relative to working-directory) | **required** |
 | `claude-oauth-token` | Claude Code OAuth token from a Max/Pro subscription | -- |
 | `anthropic-api-key` | Anthropic API key for Claude (pay-per-use billing) | -- |
+| `agent` | Coding agent that runs the nodes: `claude` or `codex` | `claude` |
+| `openai-api-key` | OpenAI API key for `agent: codex` (passed to Codex as `CODEX_API_KEY`) | -- |
+| `codex-version` | Version of `@openai/codex` to install for `agent: codex` (0.159.0 or newer) | `latest` |
+| `harness-policy` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and lists it as degraded in the receipt. Empty uses the CLI default (`strict` under GitHub Actions) | -- |
 | `cli-version` | Version of `@sweny-ai/core` to install | `latest` |
 | `node-version` | Node.js version to install | `24` |
 | `working-directory` | Working directory to run from | `.` |
 | `pr-comment` | On `pull_request` events, post or update one comment on the PR with the run receipt, a status-colored DAG, and per-node status and duration. Metadata only: no prompts, tool inputs, or model output. No-op on every other event. Set to `false` to opt out | `true` |
 
-You must provide either `claude-oauth-token` or `anthropic-api-key`.
+With `agent: claude` you must provide either `claude-oauth-token` or `anthropic-api-key`; with `agent: codex`, `openai-api-key`.
 
 #### PR comment
 

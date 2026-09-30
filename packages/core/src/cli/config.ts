@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import type { Command } from "commander";
 import type { McpServerConfig } from "../types.js";
 import type { FileConfig } from "./config-file.js";
+import { hasCodexLogin } from "../agent-env.js";
+import { unsupportedAgentError } from "../harness/agents.js";
 
 export interface CliConfig {
   // Coding agent
@@ -17,6 +19,8 @@ export interface CliConfig {
   /** Auth precedence mode: auto (default), api-key, or oauth. */
   swenyAuth: "auto" | "api-key" | "oauth";
   openaiApiKey: string;
+  /** Codex's own credential: CODEX_API_KEY, else CODEX_ACCESS_TOKEN. */
+  codexApiKey?: string;
   geminiApiKey: string;
 
   // Observability
@@ -135,7 +139,7 @@ export function registerTriageCommand(program: Command): Command {
   return program
     .command("triage")
     .description("Run the SWEny triage workflow")
-    .option("--agent <provider>", "Coding agent: claude (the only supported agent)")
+    .option("--agent <provider>", "Coding agent: claude (default) or codex")
     .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
     .option("--observability-provider <provider>", "Observability provider (default: none)")
     .option("--issue-tracker-provider <provider>", "Issue tracker provider (default: github-issues)")
@@ -259,6 +263,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     anthropicBaseUrl: env.ANTHROPIC_BASE_URL || f("anthropic-base-url") || "",
     swenyAuth: normalizeSwenyAuth(env.SWENY_AUTH || f("sweny-auth")),
     openaiApiKey: env.OPENAI_API_KEY || "",
+    codexApiKey: env.CODEX_API_KEY || env.CODEX_ACCESS_TOKEN || "",
     geminiApiKey: env.GEMINI_API_KEY || env.GOOGLE_API_KEY || "",
 
     observabilityProviders: obsProviders,
@@ -413,14 +418,17 @@ export function validateInputs(config: CliConfig): string[] {
         );
       }
       break;
+    case "codex":
+      // codex exec authenticates with CODEX_API_KEY (OPENAI_API_KEY is mapped
+      // to it) or a stored `codex login` under CODEX_HOME.
+      if (!config.openaiApiKey && !config.codexApiKey && !hasCodexLogin(process.env)) {
+        errors.push("Missing: CODEX_API_KEY or OPENAI_API_KEY, or a Codex login (`codex login`), for --agent codex");
+      }
+      break;
     default:
-      // Honest --agent (#330): SWEny runs headless Claude Code only. Nothing
-      // dispatches on other values, so accepting them would silently run
-      // Claude under a different name.
-      errors.push(
-        `Unsupported coding agent "${config.codingAgentProvider}": the only supported agent is "claude" ` +
-          `(headless Claude Code). Remove --agent / coding-agent-provider or set it to claude.`,
-      );
+      // Honest --agent (#330): only agents with an adapter are accepted.
+      // Anything else would silently run a different agent under that name.
+      errors.push(unsupportedAgentError(config.codingAgentProvider));
   }
 
   // Repository required unless all providers are file-based
@@ -862,7 +870,7 @@ export function registerImplementCommand(program: Command): Command {
   return program
     .command("implement <issueId>")
     .description("Implement a fix for a specific issue and open a PR")
-    .option("--agent <provider>", "Coding agent: claude (the only supported agent)")
+    .option("--agent <provider>", "Coding agent: claude (default) or codex")
     .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
     .option("--issue-tracker-provider <provider>", "Issue tracker (linear|jira|github-issues|file)")
     .option("--source-control-provider <provider>", "Source control (github|gitlab|file)")

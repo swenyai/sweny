@@ -24,6 +24,19 @@ export interface RunSummary {
   tokens?: number;
   /** Sum of SDK-reported cost. Undefined when the SDK reported none (never estimated). */
   costUsd?: number;
+  /** Harness that ran the nodes, when a result was tagged. */
+  harness?: string;
+  /**
+   * Opinions some node's harness could not honor natively, as short keys
+   * (`max_turns`, `egress allowlist`, `deny [write]`). Absent when none.
+   */
+  degraded?: string[];
+}
+
+/** The short key of a `degraded` entry: the text before its first colon. */
+export function degradedKey(entry: string): string {
+  const i = entry.indexOf(":");
+  return (i === -1 ? entry : entry.slice(0, i)).trim();
 }
 
 /** Sum the per-node results into one run summary. */
@@ -34,9 +47,13 @@ export function summarizeRun(results: Map<string, NodeResult>, durationMs: numbe
   let toolCalls = 0;
   let tokens: number | undefined;
   let costUsd: number | undefined;
+  let harness: string | undefined;
+  const degraded = new Set<string>();
   const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
   for (const r of results.values()) {
+    harness ??= r.harness?.id;
+    for (const d of r.degraded ?? []) degraded.add(degradedKey(d));
     if (r.status === "success") nodesOk++;
     else if (r.status === "skipped") nodesSkipped++;
     else failed = true;
@@ -60,6 +77,8 @@ export function summarizeRun(results: Map<string, NodeResult>, durationMs: numbe
     durationMs,
     ...(tokens !== undefined ? { tokens } : {}),
     ...(costUsd !== undefined ? { costUsd } : {}),
+    ...(harness !== undefined ? { harness } : {}),
+    ...(degraded.size > 0 ? { degraded: [...degraded] } : {}),
   };
 }
 
@@ -84,8 +103,10 @@ export function formatCost(usd: number): string {
 
 /**
  * One plain line: `✓ 3/3 nodes · 41 tool calls · 2m10s · 12k tokens · $0.18`.
- * Token and cost segments are omitted when the SDK reported none. No ANSI;
- * callers colorize only when writing to a TTY.
+ * Token and cost segments are omitted when the SDK reported none. A harness
+ * other than Claude Code is named, and anything it could not honor natively
+ * is listed (`· codex · degraded: max_turns`). No ANSI; callers colorize only
+ * when writing to a TTY.
  */
 export function formatReceipt(s: RunSummary): string {
   const parts = [
@@ -95,6 +116,8 @@ export function formatReceipt(s: RunSummary): string {
     formatReceiptDuration(s.durationMs),
     ...(s.tokens !== undefined ? [`${formatTokenCount(s.tokens)} tokens`] : []),
     ...(s.costUsd !== undefined ? [formatCost(s.costUsd)] : []),
+    ...(s.harness !== undefined && s.harness !== "claude-code" ? [s.harness] : []),
+    ...(s.degraded && s.degraded.length > 0 ? [`degraded: ${s.degraded.join(", ")}`] : []),
   ];
   return parts.join(" · ");
 }
@@ -235,4 +258,9 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
     "Write a PR-comment markdown (run receipt, status-colored DAG, per-node table; metadata only) to <path> so any CI can post it",
   ],
   ["--input <json>", "JSON string of input data to pass to the workflow"],
+  ["--agent <id>", "Coding agent that runs the nodes: claude (default) or codex"],
+  [
+    "--harness-policy <mode>",
+    "strict: refuse a node whose policy the agent cannot enforce; warn: run it and report what was not enforced (default: strict under GitHub Actions, warn elsewhere; env SWENY_HARNESS_POLICY)",
+  ],
 ];

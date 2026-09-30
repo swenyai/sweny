@@ -598,10 +598,10 @@ describe("spec: Context accumulation", () => {
     expect(contexts[0]).toEqual({ input: { alert: "test" } });
 
     // Node B: context has input + A's result
-    expect(contexts[1]).toEqual({ input: { alert: "test" }, a: { step: 1 } });
+    expect(contexts[1]).toEqual({ input: { alert: "test" }, a: { step: 1, evals: {} } });
 
     // Node C: context has input + A + B results
-    expect(contexts[2]).toEqual({ input: { alert: "test" }, a: { step: 1 }, b: { step: 2 } });
+    expect(contexts[2]).toEqual({ input: { alert: "test" }, a: { step: 1, evals: {} }, b: { step: 2, evals: {} } });
   });
 
   it("bounded cycle overwrites context with most recent result", async () => {

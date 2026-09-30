@@ -14,6 +14,9 @@ import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workf
 import type { ExecutionEvent, ExecutionTrace, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { createHarness } from "../harness/index.js";
+import { isSupportedAgent, unsupportedAgentError } from "../harness/agents.js";
+import { resolveHarnessPolicy } from "../harness/policy.js";
+import type { AgentHarness, ClaudeCodeHarnessOptions, CodexHarnessOptions } from "../harness/index.js";
 import { builtinSkills, createSkillMap, validateWorkflowSkills } from "../skills/index.js";
 import { formatMissingSkillLines, skillEnvWarnings } from "./skill-env.js";
 import { configuredSkills, configuredSkillsWithDiagnostics } from "../skills/custom-loader.js";
@@ -22,7 +25,7 @@ import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
 import { loadAndValidateWorkflow } from "../loader.js";
 import { validateRuntimeInput } from "../inputs.js";
-import { mergeDryRunIntoInput, parseRunBudgetFlags } from "./workflow-input.js";
+import { mergeDryRunIntoInput, parseInputFlag, parseRunBudgetFlags } from "./workflow-input.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -67,7 +70,7 @@ import {
   formatStepLine,
   formatDagResultHuman,
   formatDagResultMarkdown,
-  formatResultJson,
+  writeResultJson,
   formatValidationErrors,
   formatCrashError,
   formatCheckResults,
@@ -118,7 +121,7 @@ applyAgentFileConfig(loadConfigFile());
 
 const program = new Command()
   .name("sweny")
-  .description("SWEny CLI \u2014 autonomous engineering workflows")
+  .description("Workflows for coding agents. One set of rules, a receipt for every run.")
   .version(version);
 
 // ── sweny new ─────────────────────────────────────────────────────────
@@ -234,6 +237,33 @@ async function resolveRulesAndContext(config: CliConfig): Promise<{
   };
 }
 
+/**
+ * Build the harness for `--agent` (#331). A non-Claude agent is checked before
+ * any node runs, so a missing or too-old CLI fails fast with the fix.
+ */
+async function harnessFor(
+  agent: string,
+  opts: ClaudeCodeHarnessOptions & CodexHarnessOptions,
+  harnessPolicy?: string,
+): Promise<AgentHarness> {
+  if (!isSupportedAgent(agent)) {
+    console.error(chalk.red(`\n  ${unsupportedAgentError(agent)}\n`));
+    process.exit(1);
+  }
+  const harness = createHarness(agent, {
+    ...opts,
+    policy: resolveHarnessPolicy(process.env, harnessPolicy, opts.logger),
+  });
+  if (agent !== "claude") {
+    const pre = await harness.preflight();
+    if (!pre.ok) {
+      console.error(chalk.red(`\n  ${pre.reason}\n`));
+      process.exit(1);
+    }
+  }
+  return harness;
+}
+
 // ── sweny triage ──────────────────────────────────────────────────────
 const triageCmd = registerTriageCommand(program);
 
@@ -267,7 +297,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   const skills = createSkillMap(triageSkillDiscovery.skills);
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
-  const claude = createHarness("claude-code", {
+  const claude = await harnessFor(config.codingAgentProvider, {
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: consoleLogger,
@@ -477,7 +507,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 
     // Output
     if (config.json) {
-      console.log(formatResultJson(results));
+      await writeResultJson(results);
     } else {
       console.log(formatDagResultHuman(results, durationMs, config));
     }
@@ -565,7 +595,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 });
 
 // ── sweny implement ───────────────────────────────────────────────────
-const implementCmd = registerImplementCommand(program);
+const implementCmd = registerImplementCommand(program).option("--json", "Output result as JSON", false);
 
 implementCmd.action(async (issueId: string, options: Record<string, unknown>) => {
   const fileConfig = loadConfigFile();
@@ -608,7 +638,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   const skills = createSkillMap(implementSkillDiscovery.skills);
   const mcpAutoConfig = buildMcpAutoConfig(config);
   const mcpServers = buildAutoMcpServers(mcpAutoConfig);
-  const claude = createHarness("claude-code", {
+  const claude = await harnessFor(config.codingAgentProvider, {
     maxTurns: config.maxImplementTurns || 40,
     cwd: process.cwd(),
     logger: consoleLogger,
@@ -713,16 +743,21 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       // silent
     }
 
+    if (config.json) {
+      await writeResultJson(results);
+    }
     if (hasFailed) {
       console.error(chalk.red(`\n  Implement workflow failed\n`));
       process.exit(1);
     }
-    const prResult = results.get("create_pr");
-    const prUrl = prResult?.data?.prUrl as string | undefined;
-    if (prUrl) {
-      console.log(chalk.green(`\n  PR created: ${prUrl}\n`));
-    } else {
-      console.log(chalk.green(`\n  Implement workflow completed\n`));
+    if (!config.json) {
+      const prResult = results.get("create_pr");
+      const prUrl = prResult?.data?.prUrl as string | undefined;
+      if (prUrl) {
+        console.log(chalk.green(`\n  PR created: ${prUrl}\n`));
+      } else {
+        console.log(chalk.green(`\n  Implement workflow completed\n`));
+      }
     }
 
     // Legacy /api/report back-compat — see triage path.
@@ -734,8 +769,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
 
     process.exit(0);
   } catch (err) {
-    const crashMsg = err instanceof Error ? err.message : String(err);
-    console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
+    console.error(formatCrashError(err));
     // Finalize the cloud run as failed (covers thrown errors, incl.
     // RouteEvaluationError). Without this a crashed implement run stays
     // "running" in cloud forever.
@@ -894,14 +928,19 @@ export async function workflowRunAction(
   // Raw [info]/[debug] lines are verbose-only; warnings are rendered (#383).
   const runLogger = createRunLogger({ verbose: Boolean(options.verbose), tty: isTTY });
 
-  const claude = createHarness("claude-code", {
-    maxTurns: config.maxInvestigateTurns || 50,
-    cwd: process.cwd(),
-    logger: runLogger,
-    defaultMcpServers: mcpServers,
-    mcpServers: config.mcpServers,
-    model: workflow.model,
-  });
+  // --agent picks the harness (#331): claude (default) or codex.
+  const claude = await harnessFor(
+    config.codingAgentProvider,
+    {
+      maxTurns: config.maxInvestigateTurns || 50,
+      cwd: process.cwd(),
+      logger: runLogger,
+      defaultMcpServers: mcpServers,
+      mcpServers: config.mcpServers,
+      model: workflow.model,
+    },
+    typeof options.harnessPolicy === "string" ? options.harnessPolicy : undefined,
+  );
 
   // Track per-node entry time to compute elapsed on exit
   const nodeEnterTimes = new Map<string, number>();
@@ -945,14 +984,13 @@ export async function workflowRunAction(
   let workflowInput: Record<string, unknown>;
 
   if (options.input && typeof options.input === "string") {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(options.input as string);
-    } catch {
-      console.error(chalk.red("  --input must be valid JSON"));
+    const parsedInput = parseInputFlag(options.input);
+    if (!parsedInput.ok) {
+      for (const line of parsedInput.lines) console.error(chalk.red(`  ${line}`));
       process.exit(1);
       return;
     }
+    const parsed = parsedInput.value;
     // Validate against the workflow's declared `inputs` contract (when present).
     // Workflows without an `inputs` block pass through unchanged.
     const validated = validateRuntimeInput(workflow.inputs, parsed);
@@ -1120,7 +1158,7 @@ export async function workflowRunAction(
     }
 
     if (isJson) {
-      process.stdout.write(JSON.stringify(Object.fromEntries(results), null, 2) + "\n");
+      await writeResultJson(results);
       process.exit(wfHasFailed ? 1 : 0);
       return;
     }
@@ -1153,8 +1191,7 @@ export async function workflowRunAction(
     console.log(`  ${renderReceiptLine(receipt, isTTY)}\n`);
     process.exit(0);
   } catch (err) {
-    const crashMsg = err instanceof Error ? err.message : String(err);
-    console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
+    console.error(formatCrashError(err));
     runLogger.flush();
     recordHistory(nodeTimer.lastResults, undefined, true);
     console.error(`  ${renderReceiptLine(summarizeRun(new Map(), Date.now() - runStart, true), isTTY)}\n`);
@@ -1314,7 +1351,7 @@ workflowCmd
         }
       }
     } catch (err) {
-      console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+      console.error(formatCrashError(err));
       process.exit(1);
     }
   });
@@ -1387,7 +1424,7 @@ workflowCmd
         }
       }
     } catch (err) {
-      console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+      console.error(formatCrashError(err));
       process.exit(1);
     }
   });

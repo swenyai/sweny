@@ -25,6 +25,8 @@ The GitHub skill gives Claude access to repositories, issues, pull requests, and
 | `github_add_labels` | Add labels to an issue or pull request (also applies `label` safe outputs) |
 | `github_list_recent_commits` | List recent commits on a branch (default: main) |
 | `github_get_file` | Get a file's contents from a repository at a given ref |
+| `github_list_pr_files` | List the files changed in a pull request with status and line counts (read-only) |
+| `github_list_dependabot_alerts` | List open Dependabot alerts: package, severity, advisory id, patched version (read-only; needs a token with Dependabot alerts access, not the built-in Actions token) |
 
 ## Setup
 

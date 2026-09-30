@@ -301,6 +301,84 @@ export const github: Skill = {
         return data;
       },
     },
+    {
+      name: "github_list_pr_files",
+      access: "read",
+      description:
+        "List the files changed in a pull request with per-file status and line counts (no patch bodies). " +
+        "Use it to size a change and spot risky paths without reading the whole diff.",
+      input_schema: {
+        type: "object",
+        properties: {
+          repo: { type: "string", description: "owner/repo" },
+          number: { type: "number", description: "Pull request number" },
+        },
+        required: ["repo", "number"],
+      },
+      handler: async (input: { repo: string; number: number }, ctx) => {
+        const files = (await gh(`/repos/${input.repo}/pulls/${input.number}/files?per_page=100`, ctx)) as Array<
+          Record<string, unknown>
+        >;
+        return {
+          count: files.length,
+          truncated: files.length >= 100,
+          files: files.map((f) => ({
+            filename: f.filename,
+            status: f.status,
+            additions: f.additions,
+            deletions: f.deletions,
+            changes: f.changes,
+          })),
+        };
+      },
+    },
+    {
+      name: "github_list_dependabot_alerts",
+      access: "read",
+      description:
+        "List open Dependabot security alerts for a repository (package, severity, advisory id, patched version). " +
+        "Needs a token with Dependabot alerts read access; the built-in Actions GITHUB_TOKEN does not have it. " +
+        "Returns { unavailable: true } instead of throwing when alerts cannot be read.",
+      input_schema: {
+        type: "object",
+        properties: {
+          repo: { type: "string", description: "owner/repo" },
+          severity: { type: "string", description: "Optional filter: low, medium, high, or critical" },
+        },
+        required: ["repo"],
+      },
+      handler: async (input: { repo: string; severity?: string }, ctx) => {
+        const sev = input.severity ? `&severity=${encodeURIComponent(input.severity)}` : "";
+        let alerts: Array<Record<string, any>>;
+        try {
+          alerts = (await gh(`/repos/${input.repo}/dependabot/alerts?state=open&per_page=50${sev}`, ctx)) as Array<
+            Record<string, any>
+          >;
+        } catch (err) {
+          if (err instanceof GitHubApiError && (err.status === 403 || err.status === 404)) {
+            return { unavailable: true, status: err.status, alerts: [] };
+          }
+          throw err;
+        }
+        return {
+          unavailable: false,
+          count: alerts.length,
+          alerts: alerts.map((a) => ({
+            number: a.number,
+            package: a.dependency?.package?.name,
+            ecosystem: a.dependency?.package?.ecosystem,
+            manifest: a.dependency?.manifest_path,
+            severity: a.security_advisory?.severity,
+            ghsa_id: a.security_advisory?.ghsa_id,
+            cve_id: a.security_advisory?.cve_id,
+            summary: a.security_advisory?.summary,
+            vulnerable_range: a.security_vulnerability?.vulnerable_version_range,
+            patched_version: a.security_vulnerability?.first_patched_version?.identifier ?? null,
+            url: a.html_url,
+          })),
+        };
+      },
+    },
   ],
   // Equivalent tool names on GitHub's official MCP server
   // (github.com/github/github-mcp-server). Aliases declared for every

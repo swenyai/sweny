@@ -225,7 +225,8 @@ describe("node permissions through execute() (#365)", () => {
     expect(opts.tools.map((t) => t.name)).toEqual(["github_get_issue", "github_create_issue", "github_add_comment"]);
     expect(Object.keys(opts.mcpServers ?? {})).toEqual(["github"]);
     expect(opts.readOnly).toBeUndefined();
-    expect(opts.policy).toMatchObject({ readOnly: false, deny: [], strict: false });
+    // No policy: each harness keeps its own defaults (e.g. Codex strict mode in CI).
+    expect(opts.policy).toBeUndefined();
   });
 
   it("permissions: read withholds every write tool and never reaches a write handler", async () => {
