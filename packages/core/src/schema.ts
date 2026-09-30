@@ -20,6 +20,7 @@ import {
   SAFE_OUTPUT_APPLIERS,
   SAFE_OUTPUT_EXPIRES_PATTERN,
   SAFE_OUTPUT_MAX_CEILING,
+  SAFE_OUTPUT_STATES,
   SAFE_OUTPUT_TYPES,
   SKILL_CATEGORIES,
   SKILL_ID_MAX_LENGTH,
@@ -325,6 +326,7 @@ export const safeOutputDeclarationZ = z
     number: z
       .union([z.string().min(1), z.number().int().min(1), z.object({ input: z.string().min(1) }).strict()])
       .optional(),
+    state: z.enum(SAFE_OUTPUT_STATES).optional(),
   })
   .strict();
 
@@ -734,10 +736,26 @@ export function validateWorkflow(
           nodeId,
         });
       }
-      if (out.number !== undefined && out.type !== "comment" && out.type !== "label") {
+      if (out.number !== undefined && out.type !== "comment" && out.type !== "label" && out.type !== "issue_state") {
         errors.push({
           code: "UNSUPPORTED_OUTPUT",
-          message: `Node "${nodeId}" output "${out.type}" pins number, which only applies to comment and label outputs`,
+          message: `Node "${nodeId}" output "${out.type}" pins number, which only applies to comment, label and issue_state outputs`,
+          nodeId,
+        });
+      }
+      // Closing is destructive: an injected agent must not pick the issue. Only a
+      // reopen-only output may rely on the issue named in the request.
+      if (out.type === "issue_state" && out.state !== "reopen" && out.number === undefined) {
+        errors.push({
+          code: "UNSUPPORTED_OUTPUT",
+          message: `Node "${nodeId}" output "issue_state" can close issues, so it must pin number (a literal or { input: name }); only state: reopen may omit the pin`,
+          nodeId,
+        });
+      }
+      if (out.state !== undefined && out.type !== "issue_state") {
+        errors.push({
+          code: "UNSUPPORTED_OUTPUT",
+          message: `Node "${nodeId}" output "${out.type}" sets state, which only applies to issue_state outputs`,
           nodeId,
         });
       }
@@ -973,7 +991,7 @@ export const workflowJsonSchema = {
         },
         number: {
           description:
-            "comment / label: the only issue or PR this output may write to (GitHub number, Linear identifier), or { input: <name> } to pin it to a run input.",
+            "comment / label / issue_state: the only issue or PR this output may write to (GitHub number, Linear identifier), or { input: <name> } to pin it to a run input.",
           oneOf: [
             { type: "string", minLength: 1 },
             { type: "integer", minimum: 1 },
@@ -984,6 +1002,11 @@ export const workflowJsonSchema = {
               properties: { input: { type: "string", minLength: 1 } },
             },
           ],
+        },
+        state: {
+          type: "string",
+          enum: [...SAFE_OUTPUT_STATES],
+          description: "issue_state: the one change this output may make (reopen or close). Default: either.",
         },
       },
     },

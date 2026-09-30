@@ -904,15 +904,24 @@ export class PiHarness implements AgentHarness {
           tools: req.tools,
           context: this.defaultContext,
           logger: this.logger,
+          // Wrapped, the shim cannot open the unix socket (srt blocks AF_UNIX on
+          // Linux); it tunnels to a loopback port through the sandbox proxy (#439).
+          tcp: wrapper !== undefined,
           ...(this.toolBridgeShim ? { shimCommand: this.toolBridgeShim } : {}),
         });
         const shim = bridge.mcpServer;
         // The token reaches the shim by reference (`${VAR}`), never in a file or argv.
         env[TOKEN_ENV] = bridge.token;
+        const ref = (name: string) => "${" + name + "}";
         entries[PI_BRIDGE_SERVER] = {
           command: shim.command,
           args: shim.args ?? [],
-          env: { SWENY_NO_UPDATE_CHECK: "1", [TOKEN_ENV]: "${" + TOKEN_ENV + "}" },
+          env: {
+            SWENY_NO_UPDATE_CHECK: "1",
+            [TOKEN_ENV]: ref(TOKEN_ENV),
+            // The proxy srt sets for pi, which pi's MCP client does not pass on by itself.
+            ...(bridge.tcp ? { HTTP_PROXY: ref("HTTP_PROXY"), http_proxy: ref("http_proxy") } : {}),
+          },
           exposure: "direct",
           timeout: 600,
         };
@@ -934,8 +943,10 @@ export class PiHarness implements AgentHarness {
       }
 
       const args = [...this.baseArgs(model, Object.keys(entries).length > 0), ...toolArgs];
-      const harnessEgress = piBackendHosts(process.env, model);
-      if (mode !== "off" && harnessEgress.length === 0 && !this.egressWarned) {
+      const backendHosts = piBackendHosts(process.env, model);
+      // The bridge's loopback endpoint (wrapped runs only): the one extra host the shim needs.
+      const harnessEgress = [...backendHosts, ...(bridge?.egress ?? [])];
+      if (mode !== "off" && backendHosts.length === 0 && !this.egressWarned) {
         this.egressWarned = true;
         this.logger.warn(
           "pi runs inside the sandbox wrapper with no known model API host; add it with SWENY_SANDBOX_ALLOWED_DOMAINS.",

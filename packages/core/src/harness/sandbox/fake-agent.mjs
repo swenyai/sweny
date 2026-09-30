@@ -11,6 +11,10 @@
 //   { kind: "env", names }                           -> { values: { name: value | null } }
 //   { kind: "procScan", needle }                     -> { found, scanned }
 //   { kind: "dumpEnv", path }                        -> appends {env, cwd} as one JSON line to path
+//   { kind: "mcp", command, args, envFrom, call }    -> { ok, tools?, result?, error?, stderr? }
+//     Starts a stdio MCP server (the tool bridge shim) the way an agent's MCP
+//     client does, with env = PATH, HOME, TMPDIR plus the named vars from this
+//     process, lists its tools, then makes one tools/call.
 // Paths starting with "$HOME" resolve against the HOME this process sees.
 
 import { appendFileSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -80,6 +84,35 @@ function procScan(needle) {
   return { found, scanned };
 }
 
+async function mcpProbe(p) {
+  let client;
+  let stderr = "";
+  const withTimeout = (promise, what) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} timed out`)), 15_000).unref()),
+    ]);
+  try {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+    const env = {};
+    for (const k of ["PATH", "HOME", "TMPDIR", ...(p.envFrom ?? [])]) {
+      if (process.env[k] !== undefined) env[k] = process.env[k];
+    }
+    const transport = new StdioClientTransport({ command: p.command, args: p.args ?? [], env, stderr: "pipe" });
+    transport.stderr?.on("data", (c) => (stderr += c));
+    client = new Client({ name: "fake-agent", version: "0.0.0" });
+    await withTimeout(client.connect(transport), "connect");
+    const listed = await withTimeout(client.listTools(), "tools/list");
+    const result = p.call ? await withTimeout(client.callTool(p.call), "tools/call") : undefined;
+    return { ok: result ? result.isError !== true : true, tools: listed.tools.map((t) => t.name), result };
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err), stderr: stderr.slice(0, 2000) };
+  } finally {
+    await client?.close().catch(() => {});
+  }
+}
+
 /** A leading "$HOME" is the HOME this process sees (the scratch HOME when wrapped). */
 function resolvePath(p) {
   return p.startsWith("$HOME") ? (process.env.HOME ?? "") + p.slice("$HOME".length) : p;
@@ -96,6 +129,7 @@ for (const p of plan) {
   else if (p.kind === "env")
     results.push({ values: Object.fromEntries(p.names.map((n) => [n, process.env[n] ?? null])) });
   else if (p.kind === "procScan") results.push(procScan(p.needle));
+  else if (p.kind === "mcp") results.push(await mcpProbe(p));
   else results.push({ error: `unknown probe ${p.kind}` });
 }
 process.stdout.write(JSON.stringify(results) + "\n");

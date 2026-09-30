@@ -268,7 +268,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["comment", "issue", "pr", "label"]
+          "enum": ["comment", "issue", "pr", "label", "issue_state"]
         },
         "via": {
           "type": "string",
@@ -307,7 +307,7 @@
           "description": "Drop an intent older than this when the write stage runs (e.g. 30m, 2h, 7d)."
         },
         "number": {
-          "description": "comment / label: the only issue or PR this output may write to (GitHub number, Linear identifier), or { input: <name> } to pin it to a run input.",
+          "description": "comment / label / issue_state: the only issue or PR this output may write to (GitHub number, Linear identifier), or { input: <name> } to pin it to a run input.",
           "oneOf": [
             {
               "type": "string",
@@ -329,6 +329,11 @@
               }
             }
           ]
+        },
+        "state": {
+          "type": "string",
+          "enum": ["reopen", "close"],
+          "description": "issue_state: the one change this output may make (reopen or close). Default: either."
         }
       }
     }
@@ -392,7 +397,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["comment", "issue", "pr", "label"]
+            "enum": ["comment", "issue", "pr", "label", "issue_state"]
           },
           "minItems": 1,
           "description": "Output types any node may declare. Absent: all types."

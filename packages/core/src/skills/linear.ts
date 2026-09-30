@@ -237,6 +237,63 @@ export const linear: Skill = {
         return data;
       },
     },
+    {
+      name: "linear_set_issue_state",
+      access: "write",
+      description:
+        "Reopen a closed Linear issue (moves it to the team's first unstarted or backlog state) or close an open one (first completed state). Does nothing when the issue is already in the requested state.",
+      input_schema: {
+        type: "object",
+        properties: {
+          issueId: { type: "string", description: "Linear issue ID (UUID) or identifier (e.g. 'OFF-1020')" },
+          state: { type: "string", enum: ["reopen", "close"], description: "reopen or close" },
+        },
+        required: ["issueId", "state"],
+      },
+      handler: async (input: { issueId: string; state: string }, ctx) => {
+        if (input.state !== "reopen" && input.state !== "close") {
+          throw new Error(`[Linear] linear_set_issue_state: state must be "reopen" or "close"`);
+        }
+        const found = await linearGql(
+          `query($id: String!) {
+            issue(id: $id) {
+              id identifier url
+              state { type }
+              team { states { nodes { id type position } } }
+            }
+          }`,
+          { id: input.issueId },
+          ctx,
+        );
+        const issue = found?.issue;
+        if (!issue?.id) throw new Error(`[Linear] linear_set_issue_state: issue ${input.issueId} not found`);
+        const isClosed = issue.state?.type === "completed" || issue.state?.type === "canceled";
+        const wantClosed = input.state === "close";
+        if (isClosed === wantClosed) {
+          return { issueUpdate: { success: true, changed: false, issue } };
+        }
+        const states: { id: string; type: string; position: number }[] = issue.team?.states?.nodes ?? [];
+        const first = (type: string) =>
+          states.filter((s) => s.type === type).sort((a, b) => a.position - b.position)[0];
+        const target = wantClosed ? first("completed") : (first("unstarted") ?? first("backlog"));
+        if (!target) {
+          throw new Error(
+            `[Linear] linear_set_issue_state: no ${wantClosed ? "completed" : "unstarted"} state for ${input.issueId}`,
+          );
+        }
+        const data = await linearGql(
+          `mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier url title state { name } } } }`,
+          { id: issue.id, input: { stateId: target.id } },
+          ctx,
+        );
+        if (!data?.issueUpdate?.success) {
+          throw new Error(
+            `[Linear] linear_set_issue_state failed for ${input.issueId}. Raw response: ${JSON.stringify(data)}`,
+          );
+        }
+        return data;
+      },
+    },
   ],
   // Equivalent tool names on Linear's official remote MCP server (mcp.linear.app).
   //

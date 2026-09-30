@@ -245,14 +245,14 @@ A conforming validator MUST enforce the following rules:
 
 `safe_outputs` sets the ceiling and run-wide limits for every node's [`outputs`](/nodes#safe-outputs).
 
-| Field                  | Type                                        | Required | Description                                                                                                |
-| ---------------------- | ------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
-| `allow`                | (`comment` \| `issue` \| `pr` \| `label`)[] | OPTIONAL | Output types any node may declare. A node declaring another type is invalid (`OUTPUT_NOT_ALLOWED`).        |
-| `max`                  | integer 1..100                              | OPTIONAL | Total writes per run across all nodes.                                                                     |
-| `staged`               | boolean                                     | OPTIONAL | Preview every write and apply none.                                                                        |
-| `trusted_actors`       | string[]                                    | OPTIONAL | GitHub logins whose runs may write.                                                                        |
-| `trusted_associations` | string[]                                    | OPTIONAL | Author associations (`OWNER`, `MEMBER`, `COLLABORATOR`, ...) of the triggering event whose runs may write. |
-| `screen`               | boolean                                     | OPTIONAL | After every deterministic check, one model call may veto the writes. It can never authorize one.           |
+| Field                  | Type                                                         | Required | Description                                                                                                |
+| ---------------------- | ------------------------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------- |
+| `allow`                | (`comment` \| `issue` \| `pr` \| `label` \| `issue_state`)[] | OPTIONAL | Output types any node may declare. A node declaring another type is invalid (`OUTPUT_NOT_ALLOWED`).        |
+| `max`                  | integer 1..100                                               | OPTIONAL | Total writes per run across all nodes.                                                                     |
+| `staged`               | boolean                                                      | OPTIONAL | Preview every write and apply none.                                                                        |
+| `trusted_actors`       | string[]                                                     | OPTIONAL | GitHub logins whose runs may write.                                                                        |
+| `trusted_associations` | string[]                                                     | OPTIONAL | Author associations (`OWNER`, `MEMBER`, `COLLABORATOR`, ...) of the triggering event whose runs may write. |
+| `screen`               | boolean                                                      | OPTIONAL | After every deterministic check, one model call may veto the writes. It can never authorize one.           |
 
 When `trusted_actors` or `trusted_associations` is set, a run whose actor matches neither, or whose actor is unknown, writes nothing. The actor is `GITHUB_ACTOR`, and the association comes from the event payload (`GITHUB_EVENT_PATH`: the comment, review, issue or pull request author).
 
