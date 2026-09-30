@@ -201,3 +201,145 @@ describe("checkDatadog", () => {
     expect(res.detail).toMatch(/timed out/i);
   });
 });
+
+// ── #382: check agrees with run about auth and scope ─────────────────────
+
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import {
+  detectClaudeCodeLogin,
+  discoverWorkflowSkillIds,
+  validateCheckInputs,
+  checkProviderConnectivity,
+} from "../check.js";
+import { parseCliInputs } from "../config.js";
+
+function tmpDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "sweny-check-"));
+}
+
+function baseConfig() {
+  const keys = [
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_AUTH_TOKEN",
+    "GITHUB_TOKEN",
+    "GITHUB_REPOSITORY",
+  ];
+  const saved: Record<string, string | undefined> = {};
+  for (const k of keys) {
+    saved[k] = process.env[k];
+    delete process.env[k];
+  }
+  try {
+    return parseCliInputs({}, {});
+  } finally {
+    for (const k of keys) if (saved[k] !== undefined) process.env[k] = saved[k];
+  }
+}
+
+describe("detectClaudeCodeLogin", () => {
+  it("true when ~/.claude/.credentials.json exists", () => {
+    const home = tmpDir();
+    fs.mkdirSync(path.join(home, ".claude"));
+    fs.writeFileSync(path.join(home, ".claude", ".credentials.json"), "{}");
+    expect(detectClaudeCodeLogin({ env: {}, home, platform: "linux" })).toBe(true);
+  });
+
+  it("honors CLAUDE_CONFIG_DIR", () => {
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, ".credentials.json"), "{}");
+    expect(detectClaudeCodeLogin({ env: { CLAUDE_CONFIG_DIR: dir }, home: tmpDir(), platform: "linux" })).toBe(true);
+  });
+
+  it("false with no file on linux", () => {
+    expect(detectClaudeCodeLogin({ env: {}, home: tmpDir(), platform: "linux" })).toBe(false);
+  });
+
+  it("uses the macOS keychain probe when no file exists", () => {
+    const base = { env: {}, platform: "darwin" as const };
+    expect(detectClaudeCodeLogin({ ...base, home: tmpDir(), keychainHasLogin: () => true })).toBe(true);
+    expect(detectClaudeCodeLogin({ ...base, home: tmpDir(), keychainHasLogin: () => false })).toBe(false);
+    expect(
+      detectClaudeCodeLogin({
+        ...base,
+        home: tmpDir(),
+        keychainHasLogin: () => {
+          throw new Error("boom");
+        },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("discoverWorkflowSkillIds", () => {
+  it("reports found=false when there are no workflow files", () => {
+    expect(discoverWorkflowSkillIds(tmpDir())).toEqual({ found: false, skillIds: new Set() });
+  });
+
+  it("collects skills across workflow files; a no-skill workflow is found with an empty set", () => {
+    const cwd = tmpDir();
+    const dir = path.join(cwd, ".sweny", "workflows");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "a.yml"),
+      "id: a\nnodes:\n  x:\n    skills: [github]\n  y:\n    skills: [linear]\n",
+    );
+    fs.writeFileSync(path.join(dir, "b.yml"), "id: b\nnodes:\n  z:\n    name: Z\n");
+    const r = discoverWorkflowSkillIds(cwd);
+    expect(r.found).toBe(true);
+    expect([...r.skillIds].sort()).toEqual(["github", "linear"]);
+
+    const only = tmpDir();
+    fs.mkdirSync(path.join(only, ".sweny", "workflows"), { recursive: true });
+    fs.writeFileSync(path.join(only, ".sweny", "workflows", "s.yml"), "id: s\nnodes:\n  a:\n    name: A\n");
+    expect(discoverWorkflowSkillIds(only)).toEqual({ found: true, skillIds: new Set() });
+  });
+});
+
+describe("validateCheckInputs", () => {
+  it("Claude Code login satisfies agent auth (no ANTHROPIC_API_KEY demanded)", () => {
+    const errors = validateCheckInputs(baseConfig(), { scope: new Set(), claudeCodeLogin: true, env: {} });
+    expect(errors).toEqual([]);
+  });
+
+  it("without login, reports only the auth error for a no-skill workflow (no token, no repository)", () => {
+    const errors = validateCheckInputs(baseConfig(), { scope: new Set(), claudeCodeLogin: false, env: {} });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN/);
+  });
+
+  it("requires exactly the credentials the workflow skills need", () => {
+    const errors = validateCheckInputs(baseConfig(), { scope: new Set(["github"]), claudeCodeLogin: true, env: {} });
+    expect(errors).toEqual(['Missing: GITHUB_TOKEN (needed by skill "github")']);
+    const ok = validateCheckInputs(baseConfig(), {
+      scope: new Set(["github"]),
+      claudeCodeLogin: true,
+      env: { GITHUB_TOKEN: "t" },
+    });
+    expect(ok).toEqual([]);
+  });
+
+  it("legacy (no workflows) still demands the repository, login aside", () => {
+    const errors = validateCheckInputs({ ...baseConfig(), repository: "" }, { claudeCodeLogin: true, env: {} });
+    expect(errors.some((e) => /repository/i.test(e))).toBe(true);
+    expect(errors.some((e) => /ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN/.test(e))).toBe(false);
+  });
+});
+
+describe("checkProviderConnectivity scope", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("a no-skill workflow with a Claude Code login checks only the agent, with no network", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("network must not be used");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const results = await checkProviderConnectivity(baseConfig(), { scope: new Set(), claudeCodeLogin: true });
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ name: "Anthropic (claude agent)", status: "ok" });
+    expect(results[0].detail).toMatch(/Claude Code login/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

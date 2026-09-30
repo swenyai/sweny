@@ -927,7 +927,10 @@ function parseMcpServers(json: string): Record<string, McpServerConfig> {
 
 function detectRepository(): string {
   try {
-    const remote = execSync("git remote get-url origin", { encoding: "utf-8" }).trim();
+    const remote = execSync("git remote get-url origin", {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
     const match = remote.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
     return match?.[1] ?? "";
   } catch {

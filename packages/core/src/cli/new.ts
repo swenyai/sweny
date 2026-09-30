@@ -29,6 +29,8 @@ export interface Credential {
   hint?: string;
   url?: string;
   default?: string;
+  /** Written commented-out in .env (not needed in every setup). */
+  optional?: boolean;
 }
 
 export interface InitSelections {
@@ -402,10 +404,11 @@ export function buildEnvTemplate(credentials: Credential[]): string {
     if (cred.hint) {
       lines.push(`# ${cred.hint}`);
     }
+    const prefix = cred.optional ? "# " : "";
     if (cred.default !== undefined) {
-      lines.push(`${cred.key}=${cred.default}`);
+      lines.push(`${prefix}${cred.key}=${cred.default}`);
     } else {
-      lines.push(`${cred.key}=`);
+      lines.push(`${prefix}${cred.key}=`);
     }
     lines.push("");
   }
@@ -503,6 +506,51 @@ export function writeWorkflowFile(
   return { written: true, path: target };
 }
 
+/**
+ * Make sure `.env` is gitignored: create `.gitignore` if missing, append
+ * `.env` if absent. Returns what happened.
+ */
+export function ensureGitignoreEnv(cwd: string): "created" | "appended" | "present" {
+  const gitignorePath = path.join(cwd, ".gitignore");
+  if (!fs.existsSync(gitignorePath)) {
+    fs.writeFileSync(gitignorePath, ".env\n", "utf-8");
+    return "created";
+  }
+  const content = fs.readFileSync(gitignorePath, "utf-8");
+  if (content.split(/\r?\n/).some((line) => line.trim() === ".env")) return "present";
+  const sep = content.length === 0 || content.endsWith("\n") ? "" : "\n";
+  fs.appendFileSync(gitignorePath, `${sep}.env\n`, "utf-8");
+  return "appended";
+}
+
+/** The command to show in next steps: `npx` users have no `sweny` on PATH. */
+function cliCommand(): string {
+  return process.env.npm_command === "exec" ? "npx @sweny-ai/core" : "sweny";
+}
+
+/** Usage printed (exit 2) when `sweny new` has no terminal and no --yes. */
+export function nonInteractiveUsage(): string {
+  return [
+    "sweny new needs a terminal to ask questions. Non-interactive form:",
+    "",
+    "  sweny new --template <id> --yes",
+    "",
+    `Templates: ${WORKFLOW_TEMPLATES.map((t) => t.id).join(", ")}`,
+    `Zero-credential starter: sweny new --template ${WORKFLOW_TEMPLATES[0].id} --yes`,
+  ].join("\n");
+}
+
+/** Credentials to list for a workflow: a no-skill starter only needs Claude auth, which a Claude Code login covers. */
+function credentialsForWorkflow(skillIds: string[], allSkills: Skill[]): Credential[] {
+  const creds = collectCredentialsForSkills(skillIds, allSkills);
+  if (skillIds.length > 0) return creds;
+  return creds.map((c) =>
+    c.key === "ANTHROPIC_API_KEY"
+      ? { ...c, optional: true, hint: "Not needed if you are logged in to Claude Code (run `claude` once)" }
+      : c,
+  );
+}
+
 // ── Interactive wizard ────────────────────────────────────────────────
 
 function cancel(): never {
@@ -530,8 +578,30 @@ function cancel(): never {
  *
  * Safe to re-run in an existing project to add additional workflows.
  */
-export async function runNew(options?: { marketplaceId?: string; skipIntro?: boolean }): Promise<void> {
+export async function runNew(options?: {
+  marketplaceId?: string;
+  skipIntro?: boolean;
+  /** Built-in template id: skip the picker. */
+  template?: string;
+  /** Skip every confirmation prompt (never overwrites existing files). */
+  yes?: boolean;
+  /** Internal: the id came from the marketplace picker, skip the built-in shortcut. */
+  forceMarketplace?: boolean;
+}): Promise<void> {
   const cwd = process.cwd();
+
+  // `sweny new <id>`: a built-in template id wins over a marketplace lookup,
+  // so it works with no network. Only other ids go to the marketplace.
+  if (options?.marketplaceId && options.marketplaceId !== "e2e" && !options.forceMarketplace) {
+    if (WORKFLOW_TEMPLATES.some((t) => t.id === options.marketplaceId)) {
+      return runNew({ template: options.marketplaceId, skipIntro: options.skipIntro, yes: options.yes });
+    }
+  }
+
+  if (options?.template && !WORKFLOW_TEMPLATES.some((t) => t.id === options.template)) {
+    p.log.error(`Unknown template "${options.template}". Available: ${WORKFLOW_TEMPLATES.map((t) => t.id).join(", ")}`);
+    process.exit(1);
+  }
 
   // ── E2E shortcut: `sweny new e2e` jumps straight into the e2e wizard ──
   // `new` is the single entry for all workflow creation; this is a named
@@ -559,6 +629,10 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
     // Check for existing workflow file and prompt before fetching.
     const existingWorkflowPath = path.join(cwd, ".sweny", "workflows", `${options.marketplaceId}.yml`);
     let overwrite = false;
+    if (fs.existsSync(existingWorkflowPath) && options.yes) {
+      p.log.info(`Workflow already exists at ${path.relative(cwd, existingWorkflowPath)}. Not overwritten.`);
+      return;
+    }
     if (fs.existsSync(existingWorkflowPath)) {
       const confirmed = await p.confirm({
         message: `.sweny/workflows/${options.marketplaceId}.yml already exists. Overwrite?`,
@@ -583,7 +657,10 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
         overwrite,
       });
     } catch (err) {
-      p.log.error(err instanceof Error ? err.message : String(err));
+      const reason = err instanceof Error ? err.message : String(err);
+      p.log.error(
+        `${reason}\nNot a built-in template either. Built-in templates (work offline): ${WORKFLOW_TEMPLATES.map((t) => t.id).join(", ")}`,
+      );
       process.exit(1);
     }
 
@@ -619,44 +696,54 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
   }
 
   // ── Step 1: Pick a workflow ─────────────────────────────────────────
-  const templateChoice = await p.select({
-    message: "What do you want to do?",
-    options: [
-      {
-        value: "__marketplace",
-        label: "Browse marketplace",
-        hint: "install a published workflow from swenyai/workflows",
-      },
-      ...WORKFLOW_TEMPLATES.map((t) => ({
-        value: t.id,
-        label: t.name,
-        hint: t.description,
-      })),
-      { value: "__e2e", label: "End-to-end browser testing", hint: "Automated browser tests for your app" },
-      { value: "__custom", label: "Describe your own", hint: "AI-generated from your description" },
-      { value: "__blank", label: "Start blank", hint: "just set up config, I'll create workflows later" },
-    ],
-  });
-  if (p.isCancel(templateChoice)) cancel();
-
-  // ── Marketplace short-circuit: fetch index, pick, delegate ──────────
-  if (templateChoice === "__marketplace") {
-    const { fetchMarketplaceIndex } = await import("./marketplace.js");
-    const spinner = p.spinner();
-    spinner.start("Fetching marketplace index…");
-    let entries;
+  // Marketplace is offered only when its index is reachable. Offline or a
+  // missing index must never leave the default option broken.
+  let marketplaceEntries: Awaited<ReturnType<typeof import("./marketplace.js").fetchMarketplaceIndex>> | null = null;
+  let templateChoice: string | symbol;
+  if (options?.template) {
+    templateChoice = options.template;
+  } else {
     try {
-      entries = await fetchMarketplaceIndex();
-      spinner.stop(`Found ${entries.length} workflow(s)`);
+      const { fetchMarketplaceIndex } = await import("./marketplace.js");
+      const entries = await fetchMarketplaceIndex({ timeoutMs: 3000 });
+      if (Array.isArray(entries) && entries.length > 0) marketplaceEntries = entries;
+      else p.log.info("Marketplace has no workflows yet. Showing built-in templates.");
     } catch (err) {
-      spinner.stop("Failed");
-      p.log.error(err instanceof Error ? err.message : String(err));
-      process.exit(1);
+      const reason = err instanceof Error ? err.message : String(err);
+      p.log.info(`Marketplace unavailable (${reason}). Showing built-in templates.`);
     }
 
+    templateChoice = await p.select({
+      message: "What do you want to do?",
+      initialValue: WORKFLOW_TEMPLATES[0].id,
+      options: [
+        ...WORKFLOW_TEMPLATES.map((t) => ({
+          value: t.id,
+          label: t.name,
+          hint: t.description,
+        })),
+        ...(marketplaceEntries
+          ? [
+              {
+                value: "__marketplace",
+                label: "Browse marketplace",
+                hint: "install a published workflow from swenyai/workflows",
+              },
+            ]
+          : []),
+        { value: "__e2e", label: "End-to-end browser testing", hint: "Automated browser tests for your app" },
+        { value: "__custom", label: "Describe your own", hint: "AI-generated from your description" },
+        { value: "__blank", label: "Start blank", hint: "just set up config, I'll create workflows later" },
+      ],
+    });
+  }
+  if (p.isCancel(templateChoice)) cancel();
+
+  // ── Marketplace short-circuit: pick from the fetched index, delegate ──
+  if (templateChoice === "__marketplace" && marketplaceEntries) {
     const pick = await p.select({
       message: "Which workflow?",
-      options: entries.map((e) => ({
+      options: marketplaceEntries.map((e) => ({
         value: e.id,
         label: e.name,
         hint: e.description,
@@ -666,7 +753,7 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
 
     // Delegate to the marketplace install path
     // Wizard already showed its intro — skip the fast-path intro to avoid doubling.
-    return runNew({ marketplaceId: pick as string, skipIntro: true });
+    return runNew({ marketplaceId: pick as string, skipIntro: true, forceMarketplace: true });
   }
 
   // ── E2E short-circuit: delegate to the e2e wizard ────────────────────
@@ -695,7 +782,7 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
   const observability = inferObservability(workflowSkills);
 
   // Collect credentials for the workflow's skills (+ always ANTHROPIC_API_KEY)
-  const credentials = collectCredentialsForSkills(workflowSkills, allSkills);
+  const credentials = credentialsForWorkflow(workflowSkills, allSkills);
 
   // ── Step 3: Summary + confirm ───────────────────────────────────────
   const files: string[] = [];
@@ -726,19 +813,25 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
   summaryLines.push(chalk.bold(hasExistingConfig ? "Workflow uses:" : "Inferred from workflow:"));
   summaryLines.push(...inferred);
   summaryLines.push("");
-  summaryLines.push(chalk.bold(`Credentials needed: ${credentials.length}`));
-  summaryLines.push(...credentials.map((c) => `  ${chalk.dim(c.key)}`));
+  summaryLines.push(chalk.bold(`Credentials: ${credentials.filter((c) => !c.optional).length} required`));
+  summaryLines.push(
+    ...credentials.map(
+      (c) => `  ${chalk.dim(c.key)}${c.optional ? chalk.dim(" (optional with a Claude Code login)") : ""}`,
+    ),
+  );
 
   p.log.message(summaryLines.join("\n"));
 
-  const confirmed = await p.confirm({
-    message: hasExistingConfig ? "Add this workflow?" : "Create these files?",
-    initialValue: true,
-  });
-  if (p.isCancel(confirmed)) cancel();
-  if (!confirmed) {
-    p.cancel("Setup cancelled.");
-    process.exit(0);
+  if (!options?.yes) {
+    const confirmed = await p.confirm({
+      message: hasExistingConfig ? "Add this workflow?" : "Create these files?",
+      initialValue: true,
+    });
+    if (p.isCancel(confirmed)) cancel();
+    if (!confirmed) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
   }
 
   // ── Step 4: Write files ─────────────────────────────────────────────
@@ -765,6 +858,11 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
   // 3. Workflow template
   if (template) {
     const firstAttempt = writeWorkflowFile(cwd, template.id, template.yaml, { overwrite: false });
+    if (firstAttempt.exists && options?.yes) {
+      p.log.info(`.sweny/workflows/${template.id}.yml already exists, not overwritten`);
+      p.outro("Done.");
+      return;
+    }
     if (firstAttempt.exists) {
       const overwrite = await p.confirm({
         message: `.sweny/workflows/${template.id}.yml already exists. Overwrite?`,
@@ -781,38 +879,33 @@ export async function runNew(options?: { marketplaceId?: string; skipIntro?: boo
     p.log.success(`Created .sweny/workflows/${template.id}.yml`);
   }
 
-  // 4. .gitignore check
-  const gitignorePath = path.join(cwd, ".gitignore");
-  if (fs.existsSync(gitignorePath)) {
-    const gitignore = fs.readFileSync(gitignorePath, "utf-8");
-    const envIgnored = gitignore.split("\n").some((line) => line.trim() === ".env");
-    if (!envIgnored) {
-      p.log.warn(chalk.yellow(".env is not in .gitignore — add it to avoid committing secrets"));
-    }
-  } else {
-    p.log.warn(chalk.yellow("No .gitignore found — make sure .env is not committed"));
-  }
+  // 4. Keep .env out of version control
+  const ignoreResult = ensureGitignoreEnv(cwd);
+  if (ignoreResult === "created") p.log.success("Created .gitignore with .env");
+  else if (ignoreResult === "appended") p.log.success("Added .env to .gitignore");
 
   // 5. Next steps
-  const credUrls = credentials.filter((c) => c.url).map((c) => `  ${c.key}: ${c.url}`);
+  const requiredCreds = credentials.filter((c) => !c.optional);
+  const credUrls = requiredCreds.filter((c) => c.url).map((c) => `  ${c.key}: ${c.url}`);
   const steps: string[] = [];
   let stepNum = 1;
+  const cli = cliCommand();
 
-  if (addedNewKeys) {
+  if (addedNewKeys && requiredCreds.length > 0) {
     steps.push(
       `${stepNum++}. Fill in your API keys in .env:`,
       ...credUrls,
       "",
       `${stepNum++}. Verify connectivity:`,
-      "   sweny check",
+      `   ${cli} check`,
       "",
     );
   }
 
   if (template) {
-    steps.push(`${stepNum++}. Run your workflow:`, `   sweny workflow run .sweny/workflows/${template.id}.yml`);
+    steps.push(`${stepNum++}. Run your workflow:`, `   ${cli} workflow run .sweny/workflows/${template.id}.yml`);
   } else {
-    steps.push(`${stepNum++}. Create your first workflow:`, "   sweny new");
+    steps.push(`${stepNum++}. Create your first workflow:`, `   ${cli} new`);
   }
 
   p.note(steps.join("\n"), "Next steps");

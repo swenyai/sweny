@@ -82,11 +82,11 @@ export async function fetchMarketplaceWorkflow(id: string): Promise<FetchedWorkf
   return { id, yaml: await res.text() };
 }
 
-export async function fetchMarketplaceIndex(): Promise<MarketplaceEntry[]> {
+export async function fetchMarketplaceIndex(opts: { timeoutMs?: number } = {}): Promise<MarketplaceEntry[]> {
   const url = `${MARKETPLACE_RAW_BASE}/index.json`;
   let res: Response;
   try {
-    res = await fetch(url);
+    res = await fetch(url, opts.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : undefined);
   } catch {
     const err = new Error(`Could not reach github.com`) as FetchError;
     err.kind = "network";
