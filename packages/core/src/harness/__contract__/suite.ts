@@ -26,7 +26,7 @@ import { ask as coreAsk, evaluate as coreEvaluate } from "../prompts.js";
 import { nativeDenyClasses, policyGate } from "../policy.js";
 import type { AgentHarness, HarnessRunRequest, NodePolicy, ToolClass } from "../types.js";
 import type { SandboxWrapper } from "../sandbox-wrapper.js";
-import { AMBIENT_MCP_CANARY, type HarnessFakes } from "./fakes.js";
+import { AMBIENT_MCP_CANARY, type FakeCapture, type HarnessFakes } from "./fakes.js";
 import { sandboxWrapperCase } from "./sandbox.js";
 import {
   EXIT_CASES,
@@ -84,12 +84,23 @@ function count(text: string, re: RegExp): number {
 }
 
 type Skip = (note?: string) => void;
+
+/**
+ * Read-only expectation for one tool class. Write, edit, net and subagent must
+ * be denied. A shell must be denied too, unless the harness keeps it confined
+ * to an OS read-only sandbox (Codex), where it can read but not write or reach
+ * the network.
+ */
+function expectDeniedInReadOnly(cap: FakeCapture, c: ToolClass, label: string): void {
+  if (c === "shell" && cap.shellConfinedReadOnly === true) return;
+  expect(cap.allows(c), label).toBe(false);
+}
 type CaseFn = (skip: Skip) => Promise<void>;
 
 export const CONTRACT_CASE_NAMES = [
   "01 env: only the allowlist, the node's vars and auth reach the agent",
   "02 mcp exclusive: only injected servers load, never the user's own config",
-  "03 read-only: no write, edit, shell or net tool is granted",
+  "03 read-only: no write, edit or net tool is granted; a shell only inside an OS read-only sandbox",
   "04 deny compile: every tool class maps natively or degrades/refuses",
   "05 structured output: valid, fenced, prose, invalid and missing-field results",
   "06 tool trace: parallel same-name calls pair by id, errors and orphans keep status",
@@ -199,7 +210,7 @@ export function runContractSuite(
         }
         const cap = fakes.captured();
         for (const c of TOOL_CLASSES) {
-          expect(cap.allows(c), `${c} must be denied in a read-only run`).toBe(false);
+          expectDeniedInReadOnly(cap, c, `${c} must be denied in a read-only run`);
         }
         // Read-only is honored natively, so nothing about it is degraded. A
         // harness with no native turn limit still reports that, and only that.
@@ -475,7 +486,7 @@ export function runContractSuite(
           fakes.script(DONE);
           await h.run(req({ readOnly: true, policy: readOnlyPolicy }));
           for (const c of ["shell", "write", "edit"] as ToolClass[]) {
-            expect(fakes.captured().allows(c), c).toBe(false);
+            expectDeniedInReadOnly(fakes.captured(), c, c);
           }
         }
 
@@ -630,7 +641,7 @@ export function runContractSuite(
         }
         const cap = fakes.captured();
         for (const c of TOOL_CLASSES) {
-          expect(cap.allows(c), `${c} must be denied under policy.readOnly`).toBe(false);
+          expectDeniedInReadOnly(cap, c, `${c} must be denied under policy.readOnly`);
         }
         expect(cap.mcpServersLoaded.some((n) => n.startsWith("sweny"))).toBe(true);
         if (h.capabilities.mcp.exclusive !== "none") expect(cap.mcpServersLoaded).not.toContain(AMBIENT_MCP_CANARY);

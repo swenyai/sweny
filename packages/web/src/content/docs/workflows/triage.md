@@ -257,7 +257,7 @@ The workflow caps the run at 25 writes and allows only `issue`, `comment`, `issu
 
 `sweny triage --stage` previews every issue, comment and PR instead of filing it, and stops before any code is pushed. `--dry-run` runs with no side effects at all. In both, sweny blocks the push itself rather than trusting the agent to skip it: `git push` fails in every node, and write tokens (`GITHUB_TOKEN`, `GH_TOKEN`) are withheld from the agent, so `gh pr create` fails too. See [No push under --stage](/cli/commands/#no-push-under---stage-and---dry-run).
 
-Behavior notes: a closed duplicate gets its +1 comment and is reopened (an `issue_state` output, reopen only). On Codex, read-only steps have no shell, so `gather` and `investigate` see skill tools only.
+Behavior notes: a closed duplicate gets its +1 comment and is reopened (an `issue_state` output, reopen only). On Codex, read-only steps keep a shell confined to the OS read-only sandbox (no writes, no network), so `gather` and `investigate` can read the checkout.
 
 ## Running the triage workflow
 

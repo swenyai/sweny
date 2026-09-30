@@ -24,6 +24,7 @@ import { createHarness } from "./index.js";
 import { triageWorkflow } from "../workflows/index.js";
 import { buildNodePolicy, resolveNodePermissions } from "../node-policy.js";
 import type { ExecutionEvent, Skill, Tool, Workflow } from "../types.js";
+import type { NodePolicy } from "./types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const distCli = path.resolve(here, "../../dist/cli/main.js");
@@ -107,6 +108,32 @@ describe("CodexHarness argv", () => {
     await h.run({ instruction: "x", context: {}, tools: [] });
     expect(fakes.raw().at(-1)!.sandbox).toBe("workspace-write");
     expect(overrides()["sandbox_workspace_write.network_access"]).toBe(true);
+  });
+
+  it("read-only keeps the shell inside --sandbox read-only; net and subagents stay off", async () => {
+    const { h } = harness();
+    fakes.script(DONE);
+    const readOnlyPolicy: NodePolicy = { readOnly: true, deny: [], egress: [], strict: false };
+    const r = await h.run({ instruction: "x", context: {}, tools: [], readOnly: true, policy: readOnlyPolicy });
+    expect(r.status).toBe("success");
+    expect(fakes.raw().at(-1)!.sandbox).toBe("read-only");
+    const o = overrides();
+    // Codex has no non-shell way to read files, so the shell must survive.
+    expect(o["features.shell_tool"]).toBeUndefined();
+    expect(o.web_search).toBe("disabled");
+    expect(o["features.multi_agent"]).toBe(false);
+    expect(o["sandbox_workspace_write.network_access"]).toBeUndefined();
+    expect(r.degraded.filter((d) => d.startsWith("read-only"))).toEqual([]);
+  });
+
+  it("read-only still honors an explicit tools.deny: [shell]", async () => {
+    const { h } = harness();
+    fakes.script(DONE);
+    const policy: NodePolicy = { readOnly: true, deny: ["shell"], egress: [], strict: false };
+    const r = await h.run({ instruction: "x", context: {}, tools: [], readOnly: true, policy });
+    expect(r.status).toBe("success");
+    expect(fakes.raw().at(-1)!.sandbox).toBe("read-only");
+    expect(overrides()["features.shell_tool"]).toBe(false);
   });
 
   it("auto falls back to unsandboxed with one warning; strict fails the node", async () => {

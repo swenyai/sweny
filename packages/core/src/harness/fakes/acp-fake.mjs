@@ -81,7 +81,16 @@ const capture = {
   fsWrites: [],
   cancels: 0,
 };
-const save = () => fs.writeFileSync(path.join(dir, `capture-${n}.json`), JSON.stringify(capture, null, 2));
+// Write to a temp name, then rename: the test reads capture-<n>.json while this
+// process may still be saving it, and a rename is atomic, so the reader sees the
+// previous complete file or the new one, never a torn write. The temp name does
+// not match the reader's /^capture-\d+\.json$/ filter.
+const save = () => {
+  const file = path.join(dir, `capture-${n}.json`);
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(capture, null, 2));
+  fs.renameSync(tmp, file);
+};
 save();
 
 if (opts.ignoreTerm) process.on("SIGTERM", () => {});
