@@ -37,12 +37,15 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   let result;
   if (msg.method === 'initialize') result = { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } };
   if (msg.method === 'tools/list') result = { tools: [{ name: 'echo', description: 'Echo', inputSchema: { type: 'object' } }] };
-  if (msg.method === 'tools/call') result = { content: [{ type: 'text', text: msg.params.arguments.text }] };
+  if (msg.method === 'tools/call') result = { content: [{ type: 'text', text: msg.params.arguments.envName ? process.env[msg.params.arguments.envName] : msg.params.arguments.text }] };
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }) + '\\n');
 });`;
 
-async function callEcho(config: McpServerConfig) {
-  const child = spawn(config.command!, config.args ?? [], { stdio: ["pipe", "pipe", "pipe"] });
+async function callEcho(config: McpServerConfig, env?: Record<string, string>, envName?: string) {
+  const child = spawn(config.command!, config.args ?? [], {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...(env ?? process.env), ...config.env },
+  });
   const lines = createInterface({ input: child.stdout });
   const iterator = lines[Symbol.asyncIterator]();
   const request = async (id: number, method: string, params: unknown) => {
@@ -59,8 +62,8 @@ async function callEcho(config: McpServerConfig) {
     });
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
     expect((await request(2, "tools/list", {})).tools[0].name).toBe("echo");
-    return (await request(3, "tools/call", { name: "echo", arguments: { text: "skill server called" } })).content[0]
-      .text;
+    return (await request(3, "tools/call", { name: "echo", arguments: { text: "skill server called", envName } }))
+      .content[0].text;
   } finally {
     lines.close();
     child.kill();
@@ -82,6 +85,7 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -140,6 +144,43 @@ describe("skill-declared MCP execution (#328)", () => {
     const allowed = discoverSkillsWithDiagnostics(dir, { SWENY_ALLOW_SKILL_STDIO_COMMAND: "1" });
     await run(wf, new Map(allowed.skills.map((skill) => [skill.id, skill])));
     expect(query.mock.calls[0][0].options.mcpServers.external).toEqual({ ...mcp, type: "stdio" });
+  });
+
+  it("passes declared skill credentials and server env into the stdio process under env scoping", async () => {
+    vi.stubEnv("SWENY_ENV_SCOPE", "on");
+    vi.stubEnv("SWENY_MCP_FIXTURE_TOKEN", "declared-fixture-value");
+    vi.stubEnv("SWENY_MCP_UNDECLARED_TOKEN", "withheld-fixture-value");
+    const skill: Skill = {
+      id: "external",
+      name: "External",
+      description: "",
+      category: "general",
+      config: { token: { env: "SWENY_MCP_FIXTURE_TOKEN", description: "Fixture token", required: true } },
+      tools: [],
+      instruction: "Use echo",
+      mcp: { ...mcp, env: { SWENY_MCP_SERVER_SETTING: "explicit-server-value" } },
+    };
+    query.mockImplementation(({ options }) =>
+      (async function* () {
+        const serverConfig = options.mcpServers?.external;
+        if (serverConfig) {
+          expect(options.env.SWENY_MCP_UNDECLARED_TOKEN).toBeUndefined();
+          const token = await callEcho(serverConfig, options.env, "SWENY_MCP_FIXTURE_TOKEN");
+          const setting = await callEcho(serverConfig, options.env, "SWENY_MCP_SERVER_SETTING");
+          yield { type: "result", subtype: "success", result: JSON.stringify({ token, setting }) };
+        } else {
+          yield { type: "result", subtype: "success", result: "{}" };
+        }
+      })(),
+    );
+    const { results } = await run(
+      workflow(mcp),
+      new Map([[skill.id, skill]]),
+      false,
+      new ClaudeClient({ logger: quiet, sandbox: "off", envScope: true }),
+    );
+    expect(results.get("read")?.data.token).toBe("declared-fixture-value");
+    expect(results.get("read")?.data.setting).toBe("explicit-server-value");
   });
 
   it("withholds skill and explicit external servers in dry-run", async () => {
