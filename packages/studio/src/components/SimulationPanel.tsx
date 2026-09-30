@@ -33,7 +33,7 @@ export function SimulationPanel() {
       // not part of the browser entry, so load it lazily — this keeps it out of
       // the eager SPA bundle and lets the build resolve the export.
       const { execute } = await import("@sweny-ai/core-exec");
-      await execute(wf, {}, { skills, claude, observer: applyEvent });
+      await execute(wf, {}, { skills, harness: claude, observer: applyEvent });
     } catch (err: unknown) {
       setSimError(err instanceof Error ? err.message : String(err));
     } finally {

@@ -463,7 +463,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   try {
     const { results, trace } = await execute(triageWorkflow, workflowInput, {
       skills,
-      claude,
+      harness: claude,
       observer,
       logger: consoleLogger,
       cwd: process.cwd(),
@@ -691,7 +691,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   try {
     const { results } = await execute(implementWorkflow, workflowInput, {
       skills,
-      claude,
+      harness: claude,
       observer,
       logger: consoleLogger,
       cwd: process.cwd(),
@@ -1081,7 +1081,7 @@ export async function workflowRunAction(
       (signal) =>
         execute(workflow, workflowInput, {
           skills,
-          claude,
+          harness: claude,
           observer,
           logger: runLogger,
           cwd: process.cwd(),
