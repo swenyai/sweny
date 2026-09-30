@@ -1,7 +1,7 @@
 /**
  * Wrapped + bridge contract case (#439), shared by every harness that runs its
  * agent inside the process sandbox wrapper and hands it sweny's skill tools
- * through the tool bridge (pi today, ACP next).
+ * through the tool bridge (pi and ACP).
  *
  * The harness runs one node with sandbox mode `strict` and the host's real
  * wrapper (srt). Its fake agent, inside the sandbox, starts the bridge shim
