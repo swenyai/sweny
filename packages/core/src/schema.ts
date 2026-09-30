@@ -743,6 +743,15 @@ export function validateWorkflow(
           nodeId,
         });
       }
+      // Closing is destructive: an injected agent must not pick the issue. Only a
+      // reopen-only output may rely on the issue named in the request.
+      if (out.type === "issue_state" && out.state !== "reopen" && out.number === undefined) {
+        errors.push({
+          code: "UNSUPPORTED_OUTPUT",
+          message: `Node "${nodeId}" output "issue_state" can close issues, so it must pin number (a literal or { input: name }); only state: reopen may omit the pin`,
+          nodeId,
+        });
+      }
       if (out.state !== undefined && out.type !== "issue_state") {
         errors.push({
           code: "UNSUPPORTED_OUTPUT",

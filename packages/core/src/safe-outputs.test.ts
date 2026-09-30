@@ -681,6 +681,36 @@ describe("write stage: issue_state", () => {
     expect(gh.calls).toEqual([]);
   });
 
+  it("close needs a declaration-level pin, even when the request names an issue", async () => {
+    for (const declarations of [decl(), decl({ state: "close" })]) {
+      const { o, gh } = opts({ declarations, intents: [reopen({ state: "close", number: "5" })] });
+      const r = await applySafeOutputs(o);
+      expect(r.receipts[0]).toMatchObject({ status: "refused", reason: "close needs a pinned issue" });
+      expect(gh.calls).toEqual([]);
+    }
+  });
+
+  it("a pinned close applies to the pinned issue only, and refuses a different one", async () => {
+    const ok = opts({ declarations: decl({ state: "close", number: 8 }), intents: [reopen({ state: "close" })] });
+    await applySafeOutputs(ok.o);
+    expect(ok.gh.calls[0].input).toEqual({ repo: "acme/api", issue_number: 8, state: "close" });
+
+    const other = opts({
+      declarations: decl({ state: "close", number: { input: "issue" } }),
+      intents: [reopen({ state: "close", number: "9" })],
+      input: { issue: 8 },
+    });
+    const r = await applySafeOutputs(other.o);
+    expect(r.receipts[0]).toMatchObject({ status: "refused", reason: "issue outside the declared number" });
+    expect(other.gh.calls).toEqual([]);
+  });
+
+  it("a reopen-only output still takes its issue from the request", async () => {
+    const { o, gh } = opts({ declarations: decl({ state: "reopen" }), intents: [reopen({ number: "5" })] });
+    expect((await applySafeOutputs(o)).receipts[0].status).toBe("applied");
+    expect(gh.calls[0].input).toMatchObject({ issue_number: 5, state: "reopen" });
+  });
+
   it("a declared pin fills a missing number and refuses any other issue", async () => {
     const fills = opts({ declarations: decl({ number: 12 }), intents: [reopen()] });
     await applySafeOutputs(fills.o);
@@ -720,7 +750,10 @@ describe("write stage: issue_state", () => {
       expect(gh.calls).toEqual([]);
     }
     // The declared state is the default when the agent omits it.
-    const dflt = opts({ declarations: decl({ state: "close" }), intents: [reopen({ state: undefined, number: "5" })] });
+    const dflt = opts({
+      declarations: decl({ state: "close", number: 5 }),
+      intents: [reopen({ state: undefined, number: "5" })],
+    });
     await applySafeOutputs(dflt.o);
     expect(dflt.gh.calls[0].input).toMatchObject({ state: "close" });
   });
@@ -751,13 +784,13 @@ describe("write stage: issue_state", () => {
 
   it("dedupe: the same change twice is applied once, reopen and close on one issue are different writes", async () => {
     const { o, gh } = opts({
-      declarations: decl({ max: 5 }),
+      declarations: decl({ max: 5, number: 4 }),
       intents: [
         reopen({ number: "4" }),
         reopen({ number: "4" }),
         reopen({ number: "4", state: "close" }),
         reopen({ number: "4", dedupe_key: "k" }),
-        reopen({ number: "5", dedupe_key: "k" }),
+        reopen({ number: "4", state: "close", dedupe_key: "k" }),
       ],
     });
     const r = await applySafeOutputs(o);
@@ -855,14 +888,27 @@ describe("issue_state: workflow validation", () => {
 
   it("accepts number and state on issue_state, and the ceiling applies to it", () => {
     expect(validateWorkflow(wf([{ type: "issue_state", state: "reopen", number: { input: "n" } }]))).toEqual([]);
-    const codes = validateWorkflow(wf([{ type: "issue_state" }], { allow: ["comment"] })).map((e) => e.code);
+    expect(validateWorkflow(wf([{ type: "issue_state", state: "reopen" }]))).toEqual([]);
+    expect(validateWorkflow(wf([{ type: "issue_state", state: "close", number: 4 }]))).toEqual([]);
+    expect(validateWorkflow(wf([{ type: "issue_state", number: { input: "n" } }]))).toEqual([]);
+    const codes = validateWorkflow(wf([{ type: "issue_state", state: "reopen" }], { allow: ["comment"] })).map(
+      (e) => e.code,
+    );
     expect(codes).toEqual(["OUTPUT_NOT_ALLOWED"]);
+  });
+
+  it("an unpinned close (or either-way) declaration fails validation", () => {
+    for (const out of [{ type: "issue_state", state: "close" }, { type: "issue_state" }] as SafeOutputDeclaration[]) {
+      const errors = validateWorkflow(wf([out]));
+      expect(errors.map((e) => e.code)).toEqual(["UNSUPPORTED_OUTPUT"]);
+      expect(errors[0].message).toMatch(/must pin number/);
+    }
   });
 
   it("rejects state on any other type, and via a skill that cannot apply it", () => {
     const codes = validateWorkflow(wf([{ type: "comment", state: "reopen" }])).map((e) => e.code);
     expect(codes).toEqual(["UNSUPPORTED_OUTPUT"]);
-    const via = validateWorkflow(wf([{ type: "issue_state", via: "sentry" }])).map((e) => e.code);
+    const via = validateWorkflow(wf([{ type: "issue_state", state: "reopen", via: "sentry" }])).map((e) => e.code);
     expect(via).toEqual(["UNSUPPORTED_OUTPUT"]);
   });
 });

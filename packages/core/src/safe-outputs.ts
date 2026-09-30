@@ -545,6 +545,11 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
         refuse("state outside the declared state", at);
         continue;
       }
+      // Closing needs the declaration to pin the issue (a workflow that skipped validation cannot bypass it).
+      if (asked === "close" && decl.number === undefined) {
+        refuse("close needs a pinned issue", at);
+        continue;
+      }
       state = asked;
     }
     if (via === "github" && issueRef !== undefined && !/^[1-9][0-9]*$/.test(issueRef)) {
