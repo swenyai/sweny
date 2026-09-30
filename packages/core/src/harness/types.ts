@@ -9,6 +9,7 @@
  * Browser-safe: types only, no runtime imports.
  */
 
+import type { AgentAccess } from "../agent-env.js";
 import type { Claude, Logger, NodeResult } from "../types.js";
 
 export type HarnessId = "claude-code" | "mock" | "codex" | "pi" | "hermes" | "gemini" | `acp:${string}`;
@@ -100,6 +101,12 @@ export interface HarnessRunRequest extends ClaudeRunRequest {
    * `readOnly` / `disallowedTools` / `agentAccess` fields.
    */
   policy?: NodePolicy;
+  /**
+   * {@link ClaudeRunRequest.agentAccess} plus `noPush` (#442): the executor
+   * sets it for a staged or dry run, and every adapter applies
+   * `withPushBlocked` to the agent env.
+   */
+  agentAccess?: AgentAccess;
 }
 
 export interface HarnessRunResult extends NodeResult {

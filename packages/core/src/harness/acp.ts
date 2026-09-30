@@ -56,6 +56,7 @@ import {
   resolveEnvScope,
   resolveSandboxMode,
   scopeAgentEnv,
+  withPushBlocked,
   type SandboxMode,
 } from "../agent-env.js";
 import type {
@@ -879,7 +880,7 @@ export class AcpHarness implements AgentHarness {
     // Permission answers: the node's deny list, plus legacy `disallowed_tools` names that map to a class.
     const deny = new Set<ToolClass>([...policy.deny, ...translateDenyNames(policy.nativeDeny).classes]);
 
-    const env = this.buildEnv(req.agentAccess?.envVars);
+    const env = withPushBlocked(this.buildEnv(req.agentAccess?.envVars), req.agentAccess?.noPush);
     let bridge: ToolBridge | undefined;
     try {
       // Dry run: external MCP servers cannot be classified per tool, so only
@@ -892,6 +893,9 @@ export class AcpHarness implements AgentHarness {
           tools: req.tools,
           context: this.defaultContext,
           logger: this.logger,
+          // Wrapped, the shim cannot open the unix socket (srt blocks AF_UNIX on
+          // Linux); it tunnels to a loopback port through the sandbox proxy (#439).
+          tcp: wrapper !== undefined,
           ...(this.toolBridgeShim ? { shimCommand: this.toolBridgeShim } : {}),
         });
         // The token rides in the shim's own env entry of session/new, never in argv.
@@ -929,7 +933,8 @@ export class AcpHarness implements AgentHarness {
         policy,
         spawn: { command: this.agent.command, args: this.agent.args, env, cwd: this.cwd },
         wrapper: wrapper ?? null,
-        harnessEgress: this.egress,
+        // The bridge's loopback endpoint (wrapped runs only): the one extra host the shim needs.
+        harnessEgress: [...this.egress, ...(bridge?.egress ?? [])],
         env: process.env,
       });
       degraded = prep.degraded;

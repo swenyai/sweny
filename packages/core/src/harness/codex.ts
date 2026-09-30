@@ -40,6 +40,7 @@ import {
   resolveEnvScope,
   resolveSandboxMode,
   scopeAgentEnv,
+  withPushBlocked,
   type SandboxMode,
 } from "../agent-env.js";
 import type {
@@ -880,7 +881,7 @@ export class CodexHarness implements AgentHarness {
       }
     }
 
-    const env = this.buildEnv(req.agentAccess?.envVars);
+    const env = withPushBlocked(this.buildEnv(req.agentAccess?.envVars), req.agentAccess?.noPush);
     if (wrapper && !env.CODEX_API_KEY && !env.CODEX_ACCESS_TOKEN && !this.loginWarned) {
       this.loginWarned = true;
       this.logger.warn(

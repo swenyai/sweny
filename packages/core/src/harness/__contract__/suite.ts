@@ -9,12 +9,16 @@
  *
  * Each case passes, or is skipped only where the adapter's declared
  * `capabilities` say the opinion is not native (the skip must match the
- * declaration). Eighteen cases, one `it` each, so a report reads "18 passed".
+ * declaration). Nineteen cases, one `it` each, so a report reads "19 passed".
  * Cases 16 to 18 (#365) prove the node policy reaches the agent, which safe
- * outputs depend on.
+ * outputs depend on. Case 19 (#442) proves a staged run cannot push.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
 import type { Logger, Tool } from "../../types.js";
 import { AGENT_ENV_ALLOWLIST, AGENT_ENV_PREFIXES } from "../../agent-env.js";
 import { UNTRUSTED_DATA_NOTICE } from "../../untrusted.js";
@@ -112,6 +116,7 @@ export const CONTRACT_CASE_NAMES = [
   "16 policy deny: every class in policy.deny reaches the agent natively, or degrades and strict refuses",
   "17 strict policy: MCP is exclusive for a write-capable node too, or strict refuses",
   "18 policy read-only: policy.readOnly alone is enforced and the skill tool channel survives",
+  "19 stage no push: under noPush a git push from the agent's env fails and write tokens are withheld; normal mode pushes",
 ] as const;
 
 export interface ContractSuiteOptions {
@@ -641,6 +646,65 @@ export function runContractSuite(
         expect(cap.mcpServersLoaded.some((n) => n.startsWith("sweny"))).toBe(true);
         if (h.capabilities.mcp.exclusive !== "none") expect(cap.mcpServersLoaded).not.toContain(AMBIENT_MCP_CANARY);
         expect(r.degraded.filter((d) => d.startsWith("read-only"))).toEqual([]);
+      },
+
+      // 19 (#442): --stage / --dry-run mark the node noPush. The agent's shell
+      // inherits the env the adapter hands it, so a real `git push` run with
+      // that exact env is what the agent's own push would do.
+      async (skip) => {
+        if (process.platform === "win32") return skip("posix git fixture");
+        vi.stubEnv("GITHUB_TOKEN", "stage-write-token");
+        vi.stubEnv("GH_TOKEN", "stage-gh-token");
+        const nodeVars = ["GITHUB_TOKEN"];
+        const root = mkdtempSync(path.join(tmpdir(), "sweny-contract-442-"));
+        try {
+          const remote = path.join(root, "remote.git");
+          const work = path.join(root, "work");
+          const hostEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: path.join(root, "gc") };
+          writeFileSync(hostEnv.GIT_CONFIG_GLOBAL, "");
+          const sh = (args: string[], cwd: string, env: NodeJS.ProcessEnv) =>
+            spawnSync("git", args, { cwd, env, encoding: "utf8", timeout: 30_000 });
+          expect(sh(["init", "-q", "--bare", remote], root, hostEnv).status).toBe(0);
+          expect(sh(["init", "-q", work], root, hostEnv).status).toBe(0);
+          const c = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"];
+          expect(sh(c, work, hostEnv).status).toBe(0);
+          expect(sh(["remote", "add", "origin", remote], work, hostEnv).status).toBe(0);
+          const refs = () => (sh(["for-each-ref", "--format=%(refname)"], remote, hostEnv).stdout ?? "").trim();
+          // The agent's env, isolated from the host's global git config.
+          const agentEnv = (env: Record<string, string>) => ({
+            ...env,
+            PATH: env.PATH ?? process.env.PATH ?? "",
+            GIT_CONFIG_NOSYSTEM: "1",
+            GIT_CONFIG_GLOBAL: hostEnv.GIT_CONFIG_GLOBAL,
+          });
+
+          const { h } = await fresh();
+          fakes.script(DONE);
+          await h.run(req({ agentAccess: { envVars: nodeVars, domains: [], noPush: true } }));
+          const staged = fakes.captured().env;
+          expect(staged, "write token withheld even when the node declares it").not.toHaveProperty("GITHUB_TOKEN");
+          expect(Object.values(staged)).not.toContain("stage-write-token");
+          expect(Object.values(staged)).not.toContain("stage-gh-token");
+          for (const args of [
+            ["push", "origin", "HEAD:refs/heads/a"],
+            ["push", "--no-verify", "--force", "origin", "HEAD:refs/heads/b"],
+            ["push"],
+          ]) {
+            const r = sh(args, work, agentEnv(staged));
+            expect(r.status, `staged git ${args.join(" ")}`).not.toBe(0);
+          }
+          expect(refs(), "nothing reached the remote").toBe("");
+
+          fakes.script(DONE);
+          await h.run(req({ agentAccess: { envVars: nodeVars, domains: [] } }));
+          const normal = fakes.captured().env;
+          expect(normal.GITHUB_TOKEN).toBe("stage-write-token");
+          const ok = sh(["push", "-q", "origin", "HEAD:refs/heads/ok"], work, agentEnv(normal));
+          expect(ok.status, `normal push: ${ok.stderr}`).toBe(0);
+          expect(refs()).toBe("refs/heads/ok");
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
       },
     ];
 
