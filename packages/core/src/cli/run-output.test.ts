@@ -299,6 +299,7 @@ describe("workflow run help text", () => {
         "--stream  Stream NDJSON events to stdout (for Studio / automation)",
         "--verbose  Show raw log lines and each tool call's input and output inline (human-readable, truncated). Use --stream for full untruncated NDJSON.",
         "--mermaid  Output a Mermaid diagram with execution state after run",
+        "--comment-file <path>  Write a PR-comment markdown (run receipt, status-colored DAG, per-node table; metadata only) to <path> so any CI can post it",
         "--input <json>  JSON string of input data to pass to the workflow",
       ]
     `);

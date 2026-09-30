@@ -46,6 +46,7 @@ import {
   WORKFLOW_RUN_DESCRIPTION,
   WORKFLOW_RUN_OPTIONS,
 } from "./run-output.js";
+import { writeRunComment } from "./comment-output.js";
 import {
   registerTriageCommand,
   registerImplementCommand,
@@ -774,6 +775,7 @@ export async function workflowRunAction(
     json?: boolean;
     stream?: boolean;
     mermaid?: boolean;
+    commentFile?: string;
     verbose?: boolean;
     timeout?: string;
     maxSteps?: string;
@@ -1022,8 +1024,21 @@ export async function workflowRunAction(
     console.log(c.subtle(`  cloud: ${wfCloudHandle.dashboardUrl}`));
   }
 
+  // Per-node wall-clock for the PR comment (--comment-file). Independent of
+  // wfProgressObserver, which is off under --json.
+  const commentDurations: Record<string, number> = {};
+  const commentEnter = new Map<string, number>();
+  const commentDurationObserver: Observer | undefined = options.commentFile
+    ? (event: ExecutionEvent) => {
+        if (event.type === "node:enter") commentEnter.set(event.node, Date.now());
+        else if (event.type === "node:exit")
+          commentDurations[event.node] = Date.now() - (commentEnter.get(event.node) ?? Date.now());
+      }
+    : undefined;
+
   const observer = composeObservers(
     wfProgressObserver,
+    commentDurationObserver,
     options.verbose ? createVerboseToolObserver() : undefined,
     options.stream ? createStreamObserver() : undefined,
     createCloudStreamObserver(config, wfCloudHandle),
@@ -1071,6 +1086,15 @@ export async function workflowRunAction(
       await finishCloudLifecycle(config, wfCloudHandle, results, wfDurationMs, wfHasFailed ? "failed" : "success");
     } catch {
       // silent
+    }
+
+    // PR billboard markdown (metadata only). Written before any early exit so
+    // --json runs and failed runs still get a comment.
+    if (options.commentFile) {
+      writeRunComment(options.commentFile, workflow, results, summarizeRun(results, wfDurationMs), {
+        trace,
+        durationsMs: commentDurations,
+      });
     }
 
     if (isJson) {

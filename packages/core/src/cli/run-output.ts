@@ -109,9 +109,18 @@ export function renderReceiptLine(s: RunSummary, color: boolean): string {
 // ── Step summary ────────────────────────────────────────────────
 
 /** Brand blue (blue-600 / blue-700), not indigo. Applied to successful nodes. */
-const STEP_SUMMARY_CLASS_DEFS = {
+export const STEP_SUMMARY_CLASS_DEFS = {
   success: "fill:#2563eb,stroke:#1d4ed8,color:#fff,stroke-width:2px",
 } as const;
+
+/** Per-node Mermaid status from run results. */
+export function nodeStates(results: Map<string, NodeResult>): Record<string, NodeStatus> {
+  const state: Record<string, NodeStatus> = {};
+  for (const [id, r] of results) {
+    state[id] = r.status === "success" ? "success" : r.status === "failed" ? "failed" : "skipped";
+  }
+  return state;
+}
 
 /** Markdown for `$GITHUB_STEP_SUMMARY`: receipt + status-colored Mermaid DAG. */
 export function formatStepSummary(
@@ -120,10 +129,7 @@ export function formatStepSummary(
   summary: RunSummary,
   trace?: ExecutionTrace,
 ): string {
-  const state: Record<string, NodeStatus> = {};
-  for (const [id, r] of results) {
-    state[id] = r.status === "success" ? "success" : r.status === "failed" ? "failed" : "skipped";
-  }
+  const state = nodeStates(results);
   return [
     `## ${summary.ok ? "✅" : "❌"} ${workflow.name}`,
     "",
@@ -220,5 +226,9 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
     "Show raw log lines and each tool call's input and output inline (human-readable, truncated). Use --stream for full untruncated NDJSON.",
   ],
   ["--mermaid", "Output a Mermaid diagram with execution state after run"],
+  [
+    "--comment-file <path>",
+    "Write a PR-comment markdown (run receipt, status-colored DAG, per-node table; metadata only) to <path> so any CI can post it",
+  ],
   ["--input <json>", "JSON string of input data to pass to the workflow"],
 ];

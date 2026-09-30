@@ -82,6 +82,19 @@ inputs:
     required: false
     default: ""
 
+  pr-comment:
+    description: |
+      Post or update one sticky comment on the pull request with the run receipt,
+      a status-colored Mermaid DAG, and per-node status and duration. Metadata
+      only: no prompts, tool inputs, or model output. Only acts on pull_request
+      events (no-op on every other event). Uses the job's GITHUB_TOKEN, so the
+      job needs `permissions: pull-requests: write` (fork PRs get a read-only
+      token, so the post is skipped with a warning). A failed post warns and
+      never fails the job. Set to 'false' to opt out. Requires an @sweny-ai/core
+      version that supports `--comment-file`.
+    required: false
+    default: "true"
+
   cloud-token:
     description: "Project token (sweny_pk_...) enabling opt-in run reporting. Optional, and not currently available. Token minting is not yet exposed, so leaving this unset (the default) means no outbound reporting request is made. Equivalent to setting the SWENY_CLOUD_TOKEN env var; either form is accepted."
     required: false
@@ -128,6 +141,9 @@ runs:
         INPUT_MAX_STEPS: ${{ inputs.max-steps }}
         WORKFLOW_INPUT: ${{ inputs.input }}
         INPUT_CLOUD_TOKEN: ${{ inputs.cloud-token }}
+        PR_COMMENT: ${{ inputs.pr-comment }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        COMMENT_FILE: ${{ runner.temp }}/sweny-run-comment.md
       run: |
         # Forward the cloud token to the CLI. Prefer the explicit `cloud-token`
         # input; otherwise honor whatever the caller put on the step env as
@@ -146,6 +162,12 @@ runs:
         VERBOSE_NORM=$(normalize "$VERBOSE")
 
         FLAGS=()
+        # PR billboard: only on pull_request events (PR_NUMBER is empty otherwise).
+        PR_COMMENT_NORM=$(normalize "$PR_COMMENT")
+        rm -f "$COMMENT_FILE"
+        if [ "$PR_COMMENT_NORM" = "true" ] && [ -n "$PR_NUMBER" ]; then
+          FLAGS+=("--comment-file" "$COMMENT_FILE")
+        fi
         [ "$DRY_NORM" = "true" ] && FLAGS+=("--dry-run")
         [ "$VERBOSE_NORM" = "true" ] && FLAGS+=("--verbose")
         if [ -n "$INPUT_TIMEOUT" ]; then
@@ -163,3 +185,13 @@ runs:
         fi
 
         sweny workflow run "$WORKFLOW_PATH" "${FLAGS[@]}"
+
+    - name: Post PR comment
+      if: ${{ !cancelled() && inputs.pr-comment != 'false' && github.event.pull_request.number != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        COMMENT_FILE: ${{ runner.temp }}/sweny-run-comment.md
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: bash "${{ github.action_path }}/scripts/post-run-comment.sh"

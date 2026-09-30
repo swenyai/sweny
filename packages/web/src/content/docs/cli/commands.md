@@ -235,6 +235,7 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 | `--json` | Output result as JSON to stdout; suppress progress rendering | `false` |
 | `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |
 | `--mermaid` | Print a Mermaid diagram with per-node execution state after the run finishes | `false` |
+| `--comment-file <path>` | Write a PR-comment markdown (run receipt, status-colored DAG, per-node table; metadata only) to `<path>` so any CI can post it | -- |
 | `--timeout <ms>` | Whole-run wall-clock budget for `workflow run` (one file, or per workflow in batch runs). `0` disables the budget. Non-numeric values are rejected | `3600000` (60 min) |
 | `--max-steps <n>` | Hard cap on total node executions for a single workflow file, including eval-failure retries | `200` |
 | `-y, --yes` | Skip the batch confirmation prompt (use in CI) | `false` |

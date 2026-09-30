@@ -25,8 +25,23 @@ SWEny ships three GitHub Actions, each with its own input surface. This page doc
 | `cli-version` | Version of `@sweny-ai/core` to install | `latest` |
 | `node-version` | Node.js version to install | `24` |
 | `working-directory` | Working directory to run from | `.` |
+| `pr-comment` | On `pull_request` events, post or update one comment on the PR with the run receipt, a status-colored DAG, and per-node status and duration. Metadata only: no prompts, tool inputs, or model output. No-op on every other event. Set to `false` to opt out | `true` |
 
 You must provide either `claude-oauth-token` or `anthropic-api-key`.
+
+#### PR comment
+
+The comment needs `pull-requests: write` on the job's `GITHUB_TOKEN`. Grant it only when `pr-comment` is enabled:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+```
+
+The comment is created once and updated in place on later runs (found by a hidden `<!-- sweny-run-comment:<workflow-id> -->` marker). If posting fails (for example a fork PR with a read-only token), the step warns and the job is unaffected. Needs a `@sweny-ai/core` version with `--comment-file`.
+
+On other CI systems, run `sweny workflow run <file> --comment-file comment.md` and post the file with your runner's API.
 
 Pass any additional credentials your workflow needs via `env:` on the step — the CLI auto-loads environment variables.
 
