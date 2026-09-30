@@ -165,9 +165,14 @@ describe("ClaudeClient", () => {
 
     const mod = await import("../claude.js");
     ClaudeClient = mod.ClaudeClient;
+    // #360: these specs cover prompt/stream handling, not the CI sandbox
+    // (agent-env.test.ts does). Pin it off so a Linux CI runner without
+    // bubblewrap does not fail every run() closed.
+    vi.stubEnv("SWENY_SANDBOX", "off");
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
     vi.resetModules();
   });

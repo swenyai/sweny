@@ -625,6 +625,7 @@
           "max_iterations": {
             "type": "integer",
             "minimum": 1,
+            "maximum": 100,
             "description": "Max times this edge can be followed. Enables controlled retry loops."
           }
         }
@@ -635,14 +636,7 @@
       "description": "Inline skill definitions scoped to this workflow",
       "additionalProperties": {
         "type": "object",
-        "anyOf": [
-          {
-            "required": ["instruction"]
-          },
-          {
-            "required": ["mcp"]
-          }
-        ],
+        "required": ["instruction"],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -653,6 +647,7 @@
           },
           "instruction": {
             "type": "string",
+            "pattern": "\\S",
             "description": "Natural language expertise injected into the node prompt"
           },
           "mcp": {

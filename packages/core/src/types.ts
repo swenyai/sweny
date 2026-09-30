@@ -638,6 +638,8 @@ export interface Claude {
     outputSchema?: JSONSchema;
     /** Called with status messages while Claude is working (tool name, etc.) */
     onProgress?: (message: string) => void;
+    /** MCP servers declared by this node's resolved skills. Explicit client configs win. */
+    mcpServers?: Record<string, McpServerConfig>;
     /** Per-node turn limit. Overrides the client default when set. */
     maxTurns?: number;
     /** Built-in SDK tool names to disallow for this node (e.g. ["Bash"]). */
@@ -648,6 +650,12 @@ export interface Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
+    /**
+     * What this node's agent may see (#360): env var names declared by the
+     * node's skills (added to the scoped subprocess env) and the provider
+     * hosts its sandboxed commands may reach. Absent = allowlist only.
+     */
+    agentAccess?: { envVars: string[]; domains: string[] };
     /**
      * Dry-run: the node must not change anything. `tools` is already filtered
      * to reads; implementations MUST NOT add any other write-capable tool

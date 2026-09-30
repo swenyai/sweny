@@ -33,7 +33,7 @@ import { runWorkflowDiagram } from "./diagram.js";
 import { DagRenderer } from "./renderer.js";
 import * as readline from "node:readline";
 
-import { loadDotenv, loadConfigFile } from "./config-file.js";
+import { loadDotenv, loadConfigFile, applyAgentFileConfig } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { nonInteractiveUsage, runNew } from "./new.js";
 import { buildRunRecord, createNodeTimer, historyDisabled, newRunId, recordRun } from "./run-history.js";
@@ -112,6 +112,8 @@ function composeObservers(...observers: (Observer | undefined)[]): Observer | un
 
 // Auto-load .env before Commander parses (so env vars are available for defaults)
 loadDotenv();
+// Agent sandbox / env-passthrough keys from .sweny.yml -> SWENY_* env (#360).
+applyAgentFileConfig(loadConfigFile());
 
 const program = new Command()
   .name("sweny")
@@ -268,7 +270,8 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: consoleLogger,
-    mcpServers,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
   });
 
   // ── Progress display state ─────────────────────────────────
@@ -608,7 +611,8 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     maxTurns: config.maxImplementTurns || 40,
     cwd: process.cwd(),
     logger: consoleLogger,
-    mcpServers,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
   });
 
   console.log(chalk.cyan(`\n  sweny implement ${issueId}\n`));
@@ -892,7 +896,8 @@ export async function workflowRunAction(
     maxTurns: config.maxInvestigateTurns || 50,
     cwd: process.cwd(),
     logger: runLogger,
-    mcpServers,
+    defaultMcpServers: mcpServers,
+    mcpServers: config.mcpServers,
     model: workflow.model,
   });
 
