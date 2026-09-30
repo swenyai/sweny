@@ -3006,8 +3006,9 @@ describe("bundled workflows: routing contract invariants", () => {
 // ─── Termination safety + eval-gate correctness (issue #212) ───────
 
 describe("executor termination safety", () => {
-  it("an unconditional self-loop with no max_iterations hits the step budget and throws", async () => {
-    // a → a forever (single unconditional edge, no max_iterations).
+  it("a self-loop whose max_iterations exceeds max_steps hits the step budget and throws", async () => {
+    // a → a up to 50 times (an unbounded self-loop is now rejected before
+    // running, see #326); the workflow-level step cap still stops it first.
     const selfLoop: Workflow = {
       id: "self-loop",
       name: "Self loop",
@@ -3016,7 +3017,7 @@ describe("executor termination safety", () => {
       nodes: {
         a: { name: "A", instruction: "Do A", skills: [] },
       },
-      edges: [{ from: "a", to: "a" }],
+      edges: [{ from: "a", to: "a", max_iterations: 50 }],
     };
 
     const claude = new MockClaude({ responses: { a: { data: {} } } });
@@ -3026,8 +3027,8 @@ describe("executor termination safety", () => {
     ).rejects.toThrow(/step budget exceeded/);
   });
 
-  it("a routed loop with no max_iterations hits the step budget and throws", async () => {
-    // a → b → a (conditional, no max_iterations); evaluator always loops back.
+  it("a routed loop whose max_iterations exceeds max_steps hits the step budget and throws", async () => {
+    // a → b → a (conditional, max_iterations 50); evaluator always loops back.
     const routedLoop: Workflow = {
       id: "routed-loop",
       name: "Routed loop",
@@ -3040,7 +3041,7 @@ describe("executor termination safety", () => {
       },
       edges: [
         { from: "a", to: "b" },
-        { from: "b", to: "a", when: "loop back" },
+        { from: "b", to: "a", when: "loop back", max_iterations: 50 },
         { from: "b", to: "done", when: "finish" },
       ],
     };
@@ -3516,9 +3517,10 @@ describe("missing-required-field retry", () => {
 });
 
 describe("resolveNext deterministic routing (CE-03)", () => {
-  it("makes zero claude.evaluate calls when there are no conditional edges", async () => {
-    // Node "a" has two unconditional out-edges (a→b, a→c). resolveNext should
-    // follow the first default edge directly and never call claude.evaluate.
+  it("rejects two unconditional out-edges before any node or evaluate call (AMBIGUOUS_EDGES, #326)", async () => {
+    // Node "a" has two unconditional out-edges (a→b, a→c). validateWorkflow
+    // now rejects this at execute() entry; resolveNext's first-default
+    // behavior remains only as a defense-in-depth backstop.
     const wf: Workflow = {
       id: "ambiguous-runtime",
       name: "Ambiguous",
@@ -3544,11 +3546,10 @@ describe("resolveNext deterministic routing (CE-03)", () => {
         return opts.choices[0].id;
       },
     };
-    const { results } = await execute(wf, {}, { skills: createSkillMap([]), claude, config: {} });
+    await expect(execute(wf, {}, { skills: createSkillMap([]), claude, config: {} })).rejects.toThrow(
+      /AMBIGUOUS_EDGES/,
+    );
     expect(evaluateCalls).toBe(0);
-    // First default edge followed: b ran, c did not.
-    expect(results.has("b")).toBe(true);
-    expect(results.has("c")).toBe(false);
   });
 
   it("still uses claude.evaluate when there is at least one conditional edge", async () => {

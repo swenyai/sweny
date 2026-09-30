@@ -44,6 +44,7 @@ import { evaluateRequires } from "./requires.js";
 import { buildRetryPreamble } from "./retry.js";
 import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
+import { validateWorkflow } from "./schema.js";
 import { resolveAgentAccess } from "./agent-env.js";
 import { fenceUntrusted } from "./untrusted.js";
 
@@ -1365,6 +1366,19 @@ function validate(workflow: Workflow, skills: Map<string, Skill>): void {
   for (const edge of workflow.edges) {
     if (!workflow.nodes[edge.from]) throw new Error(`Edge references unknown node: "${edge.from}"`);
     if (!workflow.nodes[edge.to]) throw new Error(`Edge references unknown node: "${edge.to}"`);
+  }
+
+  // Same structural validation the CLI loader runs (reachability, self-loops,
+  // ambiguous edges, unbounded cycles, reserved eval policies, retry and
+  // max_iterations ceilings). Library callers, Studio's simulator and run.ts
+  // reach execute() without the loader, so without this they got none of it
+  // (#326). Runs once per execute() call, before any node runs. Skill
+  // availability stays a warning below, so no knownSkills here.
+  const structural = validateWorkflow(workflow);
+  if (structural.length > 0) {
+    throw new Error(
+      `Invalid workflow "${workflow.id}":\n${structural.map((e) => `  ${e.code}: ${e.message}`).join("\n")}`,
+    );
   }
 
   // Check that each node has at least one available skill (if it lists any)
