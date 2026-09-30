@@ -398,7 +398,7 @@ export function extractCredentialHint(err: unknown): string | null {
 
 // ── Crash error ─────────────────────────────────────────────────
 export function formatCrashError(error: unknown): string {
-  const msg = error instanceof Error ? error.message : "Unknown error";
+  const msg = error instanceof Error ? error.message : error == null ? "Unknown error" : String(error);
   const title = `${c.fail("\u2717")} ${chalk.bold("Unexpected Error")}`;
   const header = [title];
 

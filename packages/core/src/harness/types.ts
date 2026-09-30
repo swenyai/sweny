@@ -44,10 +44,18 @@ export interface NodePolicy {
   egress: string[];
   /** Refuse instead of degrade when an opinion cannot be enforced. */
   strict: boolean;
+  /**
+   * Process sandbox mode (`SWENY_SANDBOX`, #360). `auto` and `strict` need fs
+   * and network containment: native, or a process wrapper (sandbox-wrapper.ts).
+   * `strict` refuses the node without it, even when `strict` above is false.
+   * Unset means `off`: no requirement.
+   */
+  sandbox?: "off" | "auto" | "strict";
 }
 
 /** Process-level wrappers the host provides (OS sandbox, egress proxy, read-only mount). */
 export interface PolicyWrappers {
+  /** A process wrapper contains the agent's filesystem and network (sandbox-wrapper.ts). */
   sandbox?: boolean;
   egress?: boolean;
   readOnlyMount?: boolean;

@@ -173,6 +173,58 @@ jobs:
             echo "PROBE RESULT: bwrap fails for a non-userns reason"
           fi
 
+  # #360 step 2: the harness-agnostic process wrapper (harness/sandbox-wrapper.ts)
+  # runs any agent process under @anthropic-ai/sandbox-runtime (srt). This job
+  # gives the hosted runner what srt needs, probes that srt wraps an arbitrary
+  # argv command, then runs the wrapped fake-agent specs with the wrapper
+  # REQUIRED (they fail instead of skipping when it is unavailable).
+  sandbox-wrapper:
+    name: Sandbox wrapper (srt contains a fake agent)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install srt and its Linux host deps
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bubblewrap socat ripgrep
+          # ubuntu-24.04 restricts unprivileged user namespaces; bwrap needs them (CI run 36757667416).
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          npm install -g --ignore-scripts @anthropic-ai/sandbox-runtime@0.0.78
+          echo "PROBE srt: $(command -v srt) $(srt --version)"
+
+      - name: Probe srt on an arbitrary argv command
+        run: |
+          settings="$RUNNER_TEMP/srt-probe.json"
+          echo '{"network":{"allowedDomains":[],"deniedDomains":[]},"filesystem":{"denyRead":[],"allowRead":[],"allowWrite":[],"denyWrite":[]}}' > "$settings"
+          out=$(srt --settings "$settings" -- node -e 'console.log(JSON.stringify(process.argv.slice(1)))' "a b" 'c;d')
+          echo "PROBE argv through srt: $out"
+          test "$out" = '["a b","c;d"]'
+          if srt --settings "$settings" -- sh -c "echo x > '$RUNNER_TEMP/outside'" 2>/dev/null; then
+            echo "PROBE RESULT: srt did NOT block a write outside allowWrite"; exit 1
+          fi
+          if srt --settings "$settings" -- curl -sS --max-time 5 -o /dev/null https://example.com 2>/dev/null; then
+            echo "PROBE RESULT: srt did NOT block a non-allowlisted host"; exit 1
+          fi
+          echo "PROBE RESULT: srt wraps an arbitrary argv command (argv intact, write and egress blocked)"
+
+      - run: npm ci
+
+      - name: Wrapped fake-agent specs (wrapper required)
+        working-directory: packages/core
+        env:
+          SWENY_REQUIRE_SANDBOX_WRAPPER: "1"
+        run: npx vitest run src/harness/sandbox
+
   workflow-lint:
     name: Workflow lint
     runs-on: ubuntu-latest

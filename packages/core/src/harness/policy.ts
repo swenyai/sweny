@@ -2,7 +2,9 @@
  * policyGate: the one place that decides "degrade" versus "refuse".
  *
  * Pure. Called before every harness run. For Claude Code every opinion is
- * enforced natively, so the result is always `{ degraded: [] }`.
+ * enforced natively, so the result is always `{ degraded: [] }`. A harness
+ * without a native sandbox is covered by a process wrapper when the host has
+ * one (`wrappers`; see `prepareAgentSpawn` in sandbox-wrapper.ts).
  */
 
 import type { HarnessCapabilities, NodePolicy, PolicyGateResult, PolicyWrappers } from "./types.js";
@@ -37,8 +39,24 @@ export function policyGate(
     degraded.push("egress allowlist: harness has no network sandbox and no egress wrapper is active");
   }
 
+  const sandboxMode = policy.sandbox ?? "off";
+  let sandboxGap: string | undefined;
+  if (sandboxMode !== "off" && !(caps.sandbox.fs && caps.sandbox.network) && !wrappers.sandbox) {
+    sandboxGap = "sandbox: harness has no native fs and network sandbox and no process sandbox wrapper is available";
+    degraded.push(sandboxGap);
+  }
+
   if (degraded.length > 0 && policy.strict) {
     return { degraded, refuse: `strict policy: ${degraded.join("; ")}` };
+  }
+  if (sandboxGap && sandboxMode === "strict") {
+    return {
+      degraded,
+      refuse:
+        `strict sandbox (SWENY_SANDBOX=strict): ${sandboxGap}. Install srt ` +
+        `(npm i -g @anthropic-ai/sandbox-runtime, plus bubblewrap, socat and ripgrep on Linux), ` +
+        `or set SWENY_SANDBOX=auto to run with a warning.`,
+    };
   }
   return { degraded };
 }
