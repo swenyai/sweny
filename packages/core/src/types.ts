@@ -29,11 +29,24 @@ export interface ToolContext {
   logger: Logger;
 }
 
+/**
+ * Side-effect class of a tool. `"read"` only reads. `"write"` can change
+ * something outside the run: create, update, delete, post, send, invoke.
+ */
+export const TOOL_ACCESS = ["read", "write"] as const;
+export type ToolAccess = (typeof TOOL_ACCESS)[number];
+
 /** A single tool Claude can invoke */
 export interface Tool {
   name: string;
   description: string;
   input_schema: JSONSchema;
+  /**
+   * Side-effect class. Under dry-run (`input.dryRun === true`) the executor
+   * passes only `"read"` tools to a node. Absent means `"write"`, so a new or
+   * unclassified tool fails safe: it is withheld from dry runs.
+   */
+  access?: ToolAccess;
   handler: (input: any, ctx: ToolContext) => Promise<unknown>;
 }
 
@@ -514,6 +527,12 @@ export interface NodeResult {
    * telemetry; see {@link NodeUsage}. Absent for nodes that made no AI call.
    */
   usage?: NodeUsage;
+  /**
+   * Dry-run only: names of the node's skill tools that were withheld because
+   * they are write-capable or unclassified. Absent on normal runs and on
+   * dry-run nodes that had no write tools.
+   */
+  skippedWrites?: string[];
 }
 
 export interface ToolCall {
@@ -635,6 +654,12 @@ export interface Claude {
      * hosts its sandboxed commands may reach. Absent = allowlist only.
      */
     agentAccess?: { envVars: string[]; domains: string[] };
+    /**
+     * Dry-run: the node must not change anything. `tools` is already filtered
+     * to reads; implementations MUST NOT add any other write-capable tool
+     * (external MCP servers, shell, file-edit built-ins).
+     */
+    readOnly?: boolean;
   }): Promise<NodeResult>;
 
   /**

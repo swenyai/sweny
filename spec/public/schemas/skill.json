@@ -116,6 +116,11 @@
         "input_schema": {
           "type": "object",
           "description": "JSON Schema defining the tool's input parameters."
+        },
+        "access": {
+          "type": "string",
+          "enum": ["read", "write"],
+          "description": "Side-effect class: read (only reads) or write (creates, updates, deletes, posts, sends). Absent means write. Dry runs pass only read tools to nodes."
         }
       }
     },

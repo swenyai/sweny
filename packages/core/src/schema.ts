@@ -18,6 +18,7 @@ import {
   SKILL_CATEGORIES,
   SKILL_ID_MAX_LENGTH,
   SKILL_ID_PATTERN,
+  TOOL_ACCESS,
   WORKFLOW_TYPES,
 } from "./types.js";
 import { sourceZ } from "./sources.js";
@@ -54,6 +55,7 @@ export const toolZ = z
     name: z.string().min(1),
     description: z.string(),
     input_schema: jsonSchemaZ,
+    access: z.enum(TOOL_ACCESS).optional(),
   })
   .strict();
 
@@ -1189,6 +1191,12 @@ export const skillJsonSchema = {
         input_schema: {
           type: "object",
           description: "JSON Schema defining the tool's input parameters.",
+        },
+        access: {
+          type: "string",
+          enum: [...TOOL_ACCESS],
+          description:
+            "Side-effect class: read (only reads) or write (creates, updates, deletes, posts, sends). Absent means write. Dry runs pass only read tools to nodes.",
         },
       },
     },

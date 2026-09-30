@@ -44,7 +44,7 @@ inputs:
     default: "."
 
   dry-run:
-    description: "When 'true', execute until the first conditional edge and stop there (nodes past that edge do not run). A workflow with no conditional edges runs to completion."
+    description: "When 'true', run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge."
     required: false
     default: "false"
 

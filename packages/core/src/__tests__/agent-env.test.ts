@@ -13,6 +13,9 @@ import {
   resolveAgentSandbox,
   checkSandboxSupport,
   DEFAULT_SANDBOX_DOMAINS,
+  resolveEnvScope,
+  formatWithheldWarning,
+  scopeAgentEnv,
 } from "../agent-env.js";
 import { github } from "../skills/github.js";
 import { linear } from "../skills/linear.js";
@@ -407,5 +410,137 @@ describe("ClaudeClient scoped env + sandbox wiring", () => {
     await client.ask({ instruction: "q", context: {} });
     expect(opts().env.GITHUB_TOKEN).toBeUndefined();
     expect(opts().sandbox).toBeUndefined();
+  });
+});
+
+// ─── Env scope on/off (default on in CI, off locally) ──────────
+
+describe("resolveEnvScope", () => {
+  it("defaults to off locally and on in CI", () => {
+    expect(resolveEnvScope({})).toBe(false);
+    expect(resolveEnvScope({ CI: "false" })).toBe(false);
+    expect(resolveEnvScope({ CI: "true" })).toBe(true);
+  });
+
+  it("an explicit value wins both ways", () => {
+    expect(resolveEnvScope({ SWENY_ENV_SCOPE: "on" })).toBe(true);
+    expect(resolveEnvScope({ CI: "true", SWENY_ENV_SCOPE: "off" })).toBe(false);
+    expect(resolveEnvScope({ CI: "true" }, false)).toBe(false);
+    expect(resolveEnvScope({}, true)).toBe(true);
+  });
+
+  it("unknown value warns and uses the default", () => {
+    const warn = vi.fn();
+    expect(resolveEnvScope({ CI: "true", SWENY_ENV_SCOPE: "maybe" }, undefined, { warn })).toBe(true);
+    expect(warn).toHaveBeenCalledOnce();
+  });
+});
+
+describe("withheld-vars warning", () => {
+  it("scopeAgentEnv reports withheld names only", () => {
+    const { env, withheld } = scopeAgentEnv({ PATH: "/bin", DATABASE_URL: "postgres://u:hunter2@db" });
+    expect(env.PATH).toBe("/bin");
+    expect(withheld).toEqual(["DATABASE_URL"]);
+  });
+
+  it("lists names sorted, never values, capped at 30 plus 'and N more', with the passthrough hint", () => {
+    const names = Array.from({ length: 35 }, (_, i) => `VAR_${String(i).padStart(2, "0")}`).reverse();
+    const msg = formatWithheldWarning(names);
+    expect(msg).toContain("withheld 35 environment variable(s)");
+    expect(msg).toContain("VAR_00, VAR_01");
+    expect(msg).toContain("VAR_29");
+    expect(msg).not.toContain("VAR_30");
+    expect(msg).toContain("and 5 more");
+    expect(msg).toContain("env-passthrough");
+  });
+});
+
+describe("ClaudeClient env scope wiring", () => {
+  let mockQuery: ReturnType<typeof vi.fn>;
+  let ClaudeClient: any;
+
+  beforeEach(async () => {
+    mockQuery = vi.fn().mockImplementation(() =>
+      (async function* () {
+        yield { type: "result", subtype: "success", result: "ok" };
+      })(),
+    );
+    vi.doMock("@anthropic-ai/claude-agent-sdk", () => ({
+      query: mockQuery,
+      createSdkMcpServer: vi.fn().mockReturnValue({ type: "sdk", name: "sweny-core" }),
+      tool: vi.fn(),
+    }));
+    ClaudeClient = (await import("../claude.js")).ClaudeClient;
+    vi.stubEnv("CI", "");
+    vi.stubEnv("GITHUB_ACTIONS", "");
+    vi.stubEnv("SWENY_SANDBOX", "off");
+    vi.stubEnv("SWENY_ENV_SCOPE", "");
+    vi.stubEnv("SWENY_ENV_PASSTHROUGH", "");
+    vi.stubEnv("DATABASE_URL", "postgres://u:hunter2@db");
+    vi.stubEnv("BASE_URL", "http://localhost:3000");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  const envAt = (i: number) => mockQuery.mock.calls[i][0].options.env;
+  const logger = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() });
+  const run = (client: any) => client.run({ instruction: "x", context: {}, tools: [] });
+
+  it("local default passes the full env and does not warn", async () => {
+    const log = logger();
+    await run(new ClaudeClient({ logger: log }));
+    expect(envAt(0).DATABASE_URL).toBe("postgres://u:hunter2@db");
+    expect(envAt(0).BASE_URL).toBe("http://localhost:3000");
+    expect(log.warn.mock.calls.some((c: unknown[]) => /withheld/.test(String(c[0])))).toBe(false);
+  });
+
+  it("CI default scopes the env", async () => {
+    vi.stubEnv("CI", "true");
+    await run(new ClaudeClient({ logger: logger() }));
+    expect(envAt(0).DATABASE_URL).toBeUndefined();
+    expect(envAt(0).PATH).toBe(process.env.PATH);
+  });
+
+  it("explicit override both ways: on locally, off in CI (env var and client option)", async () => {
+    vi.stubEnv("SWENY_ENV_SCOPE", "on");
+    await run(new ClaudeClient({ logger: logger() }));
+    expect(envAt(0).DATABASE_URL).toBeUndefined();
+
+    vi.stubEnv("CI", "true");
+    vi.stubEnv("SWENY_ENV_SCOPE", "off");
+    await run(new ClaudeClient({ logger: logger() }));
+    expect(envAt(1).DATABASE_URL).toBe("postgres://u:hunter2@db");
+
+    vi.stubEnv("SWENY_ENV_SCOPE", "");
+    await run(new ClaudeClient({ envScope: false, logger: logger() }));
+    expect(envAt(2).DATABASE_URL).toBe("postgres://u:hunter2@db");
+  });
+
+  it("warns once per run with withheld names, never values, as a GitHub annotation under Actions", async () => {
+    vi.stubEnv("CI", "true");
+    vi.stubEnv("GITHUB_ACTIONS", "true");
+    const log = logger();
+    const client = new ClaudeClient({ logger: log });
+    await run(client);
+    await run(client);
+    await client.ask({ instruction: "q", context: {} });
+    const warns = log.warn.mock.calls.map((c: unknown[]) => String(c[0])).filter((m: string) => /withheld/.test(m));
+    expect(warns).toHaveLength(1);
+    expect(warns[0].startsWith("::warning title=SWEny agent env::")).toBe(true);
+    expect(warns[0]).toContain("BASE_URL");
+    expect(warns[0]).toContain("DATABASE_URL");
+    expect(warns[0]).not.toContain("hunter2");
+    expect(warns[0]).not.toContain("localhost:3000");
+  });
+
+  it("maps .sweny.yml env-scope to SWENY_ENV_SCOPE", async () => {
+    const { applyAgentFileConfig } = await import("../cli/config-file.js");
+    const env: NodeJS.ProcessEnv = {};
+    applyAgentFileConfig({ "env-scope": "off" }, env);
+    expect(env.SWENY_ENV_SCOPE).toBe("off");
   });
 });

@@ -73,12 +73,13 @@ A conforming executor:
 
 ## Tool Object
 
-| Field          | Type               | Required           | Description                                                                            |
-| -------------- | ------------------ | ------------------ | -------------------------------------------------------------------------------------- |
-| `name`         | string             | REQUIRED           | Tool name. MUST be unique within the skill.                                            |
-| `description`  | string             | REQUIRED           | What this tool does. Provided to the AI model for tool selection.                      |
-| `input_schema` | JSON Schema object | REQUIRED           | JSON Schema defining the tool's input parameters.                                      |
-| `handler`      | function           | REQUIRED (runtime) | Implementation-defined. Receives validated input and a context object. Not serialized. |
+| Field          | Type                  | Required           | Description                                                                                                                                                            |
+| -------------- | --------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`         | string                | REQUIRED           | Tool name. MUST be unique within the skill.                                                                                                                            |
+| `description`  | string                | REQUIRED           | What this tool does. Provided to the AI model for tool selection.                                                                                                      |
+| `input_schema` | JSON Schema object    | REQUIRED           | JSON Schema defining the tool's input parameters.                                                                                                                      |
+| `access`       | `"read"` \| `"write"` | OPTIONAL           | Side-effect class. `read` only reads; `write` creates, updates, deletes, posts, or sends. Absent means `write`. See [Dry-Run Semantics](/execution#dry-run-semantics). |
+| `handler`      | function              | REQUIRED (runtime) | Implementation-defined. Receives validated input and a context object. Not serialized.                                                                                 |
 
 ### Tool Invocation Contract
 
@@ -173,6 +174,7 @@ config:
 tools:
   - name: search_code
     description: Search for code across repositories.
+    access: read
     input_schema:
       type: object
       properties:
@@ -181,6 +183,7 @@ tools:
       required: [query]
   - name: create_issue
     description: Create a new issue in a repository.
+    access: write
     input_schema:
       type: object
       properties:

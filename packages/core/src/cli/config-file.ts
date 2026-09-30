@@ -43,6 +43,7 @@ export function loadDotenv(cwd: string = process.cwd()): void {
  */
 const AGENT_FILE_KEYS: ReadonlyArray<readonly [string[], string]> = [
   [["env-passthrough", "env_passthrough"], "SWENY_ENV_PASSTHROUGH"],
+  [["env-scope", "env_scope"], "SWENY_ENV_SCOPE"],
   [["sandbox"], "SWENY_SANDBOX"],
   [["sandbox-allowed-domains", "sandbox_allowed_domains"], "SWENY_SANDBOX_ALLOWED_DOMAINS"],
 ];
@@ -185,7 +186,8 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # See https://docs.sweny.ai/advanced/agent-sandbox/
 # sandbox: off                           # off (local default) | auto (CI default: sandbox if supported, else warn) | strict
 # sandbox-allowed-domains: [internal.example.com]   # extra hosts agent commands may reach
-# env-passthrough: [NPM_TOKEN]           # extra env vars the agent may see ("*" = all)
+# env-scope: off                         # off (local default: full env) | on (CI default: allowlist)
+# env-passthrough: [NPM_TOKEN]           # extra env vars the agent may see when scoped ("*" = all)
 
 # ── MCP servers ───────────────────────────────────────────────────────
 # Extend the coding agent with additional tools via MCP.

@@ -7,7 +7,9 @@ Every node runs headless Claude Code over input that may be attacker-controlled:
 
 ## Scoped environment
 
-The agent subprocess no longer inherits your full environment. It gets:
+In CI (`CI=true`) the agent subprocess does not inherit your full environment. Locally it does, as before, so workflows that rely on `DATABASE_URL`, `BASE_URL`, `NODE_ENV` and friends keep working. `env-scope: on|off` (`SWENY_ENV_SCOPE`) overrides the default in either place.
+
+When scoped, the agent gets:
 
 | Always | Why |
 |--------|-----|
@@ -24,7 +26,7 @@ The agent subprocess no longer inherits your full environment. It gets:
 | Every env var declared by the node's skills (for example `GITHUB_TOKEN` for a node with `skills: [github]`) | So `gh` and friends work where the node asked for them |
 | Your `env-passthrough` list | Anything else a node's commands need |
 
-Everything else is dropped. A node without the `linear` skill never sees `LINEAR_API_KEY`; nothing sees `NPM_TOKEN` unless you pass it through.
+Everything else is withheld. A node without the `linear` skill never sees `LINEAR_API_KEY`; nothing sees `NPM_TOKEN` unless you pass it through. SWEny logs one warning per run (a `::warning::` annotation under GitHub Actions) naming the withheld variables, names only, never values, sorted and capped at 30. Add any a node needs to `env-passthrough`.
 
 MCP servers that SWEny wires for a skill get their credentials explicitly, so they keep working.
 
@@ -50,7 +52,7 @@ Three modes:
 | `strict` | Sandboxed | The node **fails closed** with the same message. Never runs unsandboxed. |
 | `off` (default locally) | Not sandboxed | Not sandboxed |
 
-Env scoping and untrusted-input fencing apply in every mode.
+Env scoping is controlled separately by `env-scope`. Untrusted-input fencing always applies.
 
 On Ubuntu 23.10 and later, AppArmor can block the unprivileged user namespaces bubblewrap needs, and GitHub-hosted `ubuntu-24.04` runners do: there `auto` currently warns and runs unsandboxed. SWEny reports this in the warning. The fix is `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, which changes a host kernel setting, so the Action only applies it when you set `SWENY_SANDBOX: strict` in the step's `env`.
 
@@ -70,6 +72,7 @@ Workflow input (issues, alerts, tickets), earlier steps' output, and `context:` 
 |--------------|---------|--------|---------|
 | `sandbox` | `SWENY_SANDBOX` | `auto`, `strict`, `off` (see [Sandbox](#sandbox)) | `auto` in CI, `off` locally |
 | `sandbox-allowed-domains` | `SWENY_SANDBOX_ALLOWED_DOMAINS` | List of hosts; `*.example.com` wildcards allowed | none |
+| `env-scope` | `SWENY_ENV_SCOPE` | `on`, `off` | `on` in CI, `off` locally |
 | `env-passthrough` | `SWENY_ENV_PASSTHROUGH` | List of env var names; `"*"` inherits everything (not recommended) | none |
 
 ```yaml

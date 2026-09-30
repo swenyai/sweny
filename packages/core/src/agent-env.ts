@@ -6,7 +6,9 @@
  * this module it inherited the full `process.env` (every CI secret) and ran
  * Bash with unrestricted network egress. Two controls live here:
  *
- *  1. {@link buildAgentEnv}: the subprocess env is an allowlist, not a copy.
+ *  1. {@link scopeAgentEnv}: the subprocess env is an allowlist, not a copy.
+ *     On by default in CI, off locally (full env, as before); see
+ *     {@link resolveEnvScope}.
  *  2. {@link resolveAgentSandbox}: the SDK `sandbox` option is enabled with a
  *     network allowlist and the agent's own credentials denied to sandboxed
  *     commands. `auto` (default in CI) falls back to unsandboxed with one loud
@@ -14,6 +16,7 @@
  *
  * Configuration (env wins over `.sweny.yml`, see `applyAgentFileConfig` in
  * cli/config-file.ts):
+ *   SWENY_ENV_SCOPE                / env-scope                on | off (default: on in CI, off locally)
  *   SWENY_ENV_PASSTHROUGH          / env-passthrough          extra var names ("*" = inherit all)
  *   SWENY_SANDBOX                  / sandbox                  auto | strict | off (default: auto in CI, off locally)
  *   SWENY_SANDBOX_ALLOWED_DOMAINS  / sandbox-allowed-domains  extra hosts for sandboxed commands
@@ -150,6 +153,57 @@ export interface BuildAgentEnvOpts {
   /** Operator passthrough list (`env-passthrough`). `"*"` inherits everything. */
   passthrough?: readonly string[];
   logger?: Pick<Logger, "warn">;
+}
+
+/**
+ * Whether the agent env is scoped to the allowlist. `SWENY_ENV_SCOPE` (or the
+ * explicit value) `on|true|1` / `off|false|0` wins everywhere; otherwise on
+ * when `CI` is truthy and off locally, so local runs keep the full env that
+ * e2e/test workflows rely on (DATABASE_URL, BASE_URL, NODE_ENV, ...).
+ */
+export function resolveEnvScope(
+  env: Record<string, string | undefined>,
+  explicit?: boolean,
+  logger?: Pick<Logger, "warn">,
+): boolean {
+  if (explicit !== undefined) return explicit;
+  const raw = (env.SWENY_ENV_SCOPE ?? "").trim().toLowerCase();
+  if (raw === "on" || raw === "true" || raw === "1") return true;
+  if (raw === "off" || raw === "false" || raw === "0") return false;
+  const fallback = truthy(env.CI);
+  if (raw !== "") logger?.warn(`SWENY_ENV_SCOPE="${raw}" is not one of on|off; using ${fallback ? "on" : "off"}`);
+  return fallback;
+}
+
+/** Max names listed in the withheld-vars warning before "and N more". */
+export const WITHHELD_WARNING_CAP = 30;
+
+/**
+ * One-line warning naming the withheld variables. Names only, never values;
+ * sorted; capped at {@link WITHHELD_WARNING_CAP}.
+ */
+export function formatWithheldWarning(withheld: readonly string[]): string {
+  const names = [...withheld].sort();
+  const shown = names.slice(0, WITHHELD_WARNING_CAP).join(", ");
+  const more = names.length > WITHHELD_WARNING_CAP ? `, and ${names.length - WITHHELD_WARNING_CAP} more` : "";
+  return (
+    `Agent env scoping withheld ${names.length} environment variable(s) from the agent: ${shown}${more}. ` +
+    `If a node's commands need any of them, add the names to env-passthrough ` +
+    `(SWENY_ENV_PASSTHROUGH), or set env-scope: off (SWENY_ENV_SCOPE=off).`
+  );
+}
+
+/**
+ * Scope the agent env and report which variable names were withheld.
+ * `withheld` holds names only; values never leave `source`.
+ */
+export function scopeAgentEnv(
+  source: Record<string, string | undefined>,
+  opts: BuildAgentEnvOpts = {},
+): { env: Record<string, string>; withheld: string[] } {
+  const env = buildAgentEnv(source, opts);
+  const withheld = Object.keys(source).filter((k) => source[k] != null && !(k in env));
+  return { env, withheld };
 }
 
 /**

@@ -374,6 +374,50 @@ describe("spec: Dry-run semantics", () => {
     // All nodes in a linear (unconditional) workflow execute even in dry-run
     expect(results.size).toBe(3);
   });
+
+  it("passes only read tools to every node; write and unclassified tools are withheld and recorded", async () => {
+    const tool = (name: string, access?: "read" | "write") => ({
+      name,
+      description: name,
+      input_schema: { type: "object" },
+      ...(access ? { access } : {}),
+      handler: async () => ({}),
+    });
+    const skill: Skill = {
+      id: "mixed",
+      name: "Mixed",
+      description: "",
+      category: "general",
+      config: {},
+      tools: [tool("look", "read"), tool("post", "write"), tool("unknown")],
+    };
+    const wf: Workflow = {
+      id: "one",
+      name: "One",
+      description: "",
+      entry: "a",
+      nodes: { a: { name: "A", instruction: "Do A", skills: ["mixed"] } },
+      edges: [],
+    };
+    let seen: string[] = [];
+    let readOnly: unknown;
+    const claude: any = {
+      async run(opts: any) {
+        seen = opts.tools.map((t: any) => t.name);
+        readOnly = opts.readOnly;
+        return { status: "success", data: {}, toolCalls: [] };
+      },
+      async evaluate() {
+        throw new Error("should not evaluate");
+      },
+    };
+
+    const { results } = await execute(wf, { dryRun: true }, { skills: createSkillMap([skill]), claude, config: {} });
+
+    expect(seen).toEqual(["look"]);
+    expect(readOnly).toBe(true);
+    expect(results.get("a")!.skippedWrites).toEqual(["post", "unknown"]);
+  });
 });
 
 // ─── Spec Section: Input Augmentation ───────────────────────────

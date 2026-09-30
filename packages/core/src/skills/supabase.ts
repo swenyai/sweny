@@ -174,6 +174,7 @@ export const supabase: Skill = {
     // ─── Read ────────────────────────────────────────────────
     {
       name: "supabase_query",
+      access: "read",
       description:
         "Query rows from a Supabase table. Uses PostgREST query syntax. " + "Returns an array of matching rows.",
       input_schema: {
@@ -219,6 +220,7 @@ export const supabase: Skill = {
 
     {
       name: "supabase_count",
+      access: "read",
       description: "Count rows in a table, optionally with filters.",
       input_schema: {
         type: "object",
@@ -263,6 +265,7 @@ export const supabase: Skill = {
     // ─── Write ───────────────────────────────────────────────
     {
       name: "supabase_insert",
+      access: "write",
       description:
         "Insert one or more rows into a table. Returns the inserted rows. " +
         "Use upsert=true to update existing rows on conflict.",
@@ -299,6 +302,7 @@ export const supabase: Skill = {
 
     {
       name: "supabase_update",
+      access: "write",
       description: "Update rows matching filters. Returns the updated rows.",
       input_schema: {
         type: "object",
@@ -333,6 +337,7 @@ export const supabase: Skill = {
 
     {
       name: "supabase_delete",
+      access: "write",
       description: "Delete rows matching filters. Returns the deleted rows.",
       input_schema: {
         type: "object",
@@ -360,6 +365,7 @@ export const supabase: Skill = {
     // ─── RPC ─────────────────────────────────────────────────
     {
       name: "supabase_rpc",
+      access: "write",
       description: "Call a Supabase RPC (stored procedure / database function).",
       input_schema: {
         type: "object",
@@ -383,6 +389,7 @@ export const supabase: Skill = {
     // ─── Edge Functions ──────────────────────────────────────
     {
       name: "supabase_invoke_function",
+      access: "write",
       description: "Invoke a Supabase Edge Function by name with a JSON body.",
       input_schema: {
         type: "object",
@@ -406,6 +413,7 @@ export const supabase: Skill = {
     // ─── Auth Admin ──────────────────────────────────────────
     {
       name: "supabase_list_users",
+      access: "read",
       description: "List auth users. Returns user IDs, emails, and metadata.",
       input_schema: {
         type: "object",
@@ -439,6 +447,7 @@ export const supabase: Skill = {
     // ─── Schema Introspection ────────────────────────────────
     {
       name: "supabase_list_tables",
+      access: "read",
       description: "List all public tables with row counts. Useful for content auditing.",
       input_schema: {
         type: "object",

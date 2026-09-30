@@ -23,7 +23,15 @@ import type {
   McpServerConfig,
 } from "./types.js";
 import { consoleLogger } from "./types.js";
-import { buildAgentEnv, parseList, resolveAgentSandbox, type AgentAccess, type SandboxMode } from "./agent-env.js";
+import {
+  formatWithheldWarning,
+  parseList,
+  resolveEnvScope,
+  scopeAgentEnv,
+  resolveAgentSandbox,
+  type AgentAccess,
+  type SandboxMode,
+} from "./agent-env.js";
 import { fenceUntrustedJson } from "./untrusted.js";
 
 const SYSTEM_PROMPT = `You are a step in an automated workflow. Execute the instruction precisely using the tools available to you. Be thorough but concise. When you're done, summarize your findings and results.`;
@@ -47,6 +55,24 @@ export const CLASSIFICATION_DISALLOWED_TOOLS = [
   "NotebookEdit",
   "WebFetch",
   "WebSearch",
+] as const;
+
+/**
+ * Built-in tools disallowed for a node run with `readOnly: true` (dry run,
+ * #380): everything that can edit the workspace, shell out (and so reach
+ * `gh`, `curl`, `git push`), spawn a subagent that could, or fetch an
+ * arbitrary URL (a GET can still trigger a webhook or exfiltrate data).
+ * Read, Grep, Glob and WebSearch stay available for analysis.
+ */
+export const READ_ONLY_DISALLOWED_TOOLS = [
+  "Bash",
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "NotebookEdit",
+  "Task",
+  "Agent",
+  "WebFetch",
 ] as const;
 
 /** How sweny resolves which credentials reach the Claude Code subprocess. */
@@ -140,6 +166,11 @@ export interface ClaudeClientOptions {
    * Default: `SWENY_ENV_PASSTHROUGH` (comma-separated).
    */
   envPassthrough?: string[];
+  /**
+   * Scope the agent env to the allowlist. Default: `SWENY_ENV_SCOPE`, else on
+   * when CI is truthy and off locally (full env).
+   */
+  envScope?: boolean;
   /**
    * SDK sandbox for agent commands: `auto` (sandbox when the host supports
    * it, else warn and run unsandboxed), `strict` (sandbox or fail), `off`.
@@ -271,6 +302,8 @@ export class ClaudeClient implements Claude {
   private sandboxAllowedDomains: string[] | undefined;
   private sandboxProbe: (() => string | undefined) | undefined;
   private sandboxWarned = false;
+  private envScope: boolean | undefined;
+  private envWarned = false;
 
   constructor(opts: ClaudeClientOptions = {}) {
     this.model = opts.model;
@@ -280,6 +313,7 @@ export class ClaudeClient implements Claude {
     this.defaultContext = opts.defaultContext ?? { config: {}, logger: this.logger };
     this.mcpServers = opts.mcpServers ?? {};
     this.envPassthrough = opts.envPassthrough;
+    this.envScope = opts.envScope;
     this.sandboxMode = opts.sandbox;
     this.sandboxAllowedDomains = opts.sandboxAllowedDomains;
     this.sandboxProbe = opts.sandboxProbe;
@@ -288,20 +322,29 @@ export class ClaudeClient implements Claude {
   /**
    * Build env for the Claude Code subprocess (#360). Applies auth precedence
    * via {@link resolveAuthEnv} on the full process env (it reads
-   * `SWENY_AUTH`), then narrows the result to the allowlist in
-   * {@link buildAgentEnv} plus `extraVars` (the node's declared skill env
-   * vars) and the operator passthrough list. Nothing else leaks through.
+   * `SWENY_AUTH`). When env scoping is on (default in CI, see
+   * {@link resolveEnvScope}) the result is narrowed to the allowlist plus
+   * `extraVars` (the node's declared skill env vars) and the operator
+   * passthrough list, and the withheld names (never values) are warned once
+   * per client. When off, the full env passes through as before.
    */
   private buildEnv(extraVars: readonly string[] = []): Record<string, string> {
     const full: Record<string, string> = Object.fromEntries(
       Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
     );
     const authed = resolveAuthEnv(full, { logger: this.logger });
-    return buildAgentEnv(authed, {
+    if (!resolveEnvScope(process.env, this.envScope, this.logger)) return authed;
+    const { env, withheld } = scopeAgentEnv(authed, {
       extraVars,
       passthrough: this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH),
       logger: this.logger,
     });
+    if (withheld.length > 0 && !this.envWarned) {
+      this.envWarned = true;
+      const prefix = process.env.GITHUB_ACTIONS === "true" ? "::warning title=SWEny agent env::" : "";
+      this.logger.warn(`${prefix}${formatWithheldWarning(withheld)}`);
+    }
+    return env;
   }
 
   async run(opts: {
@@ -317,6 +360,8 @@ export class ClaudeClient implements Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
+    /** Dry run (#380): no external MCP servers, no write-capable built-ins. */
+    readOnly?: boolean;
     /** Env var names + sandbox hosts this node's skills need (#360). */
     agentAccess?: AgentAccess;
   }): Promise<NodeResult> {
@@ -327,12 +372,18 @@ export class ClaudeClient implements Claude {
       outputSchema,
       onProgress,
       maxTurns,
-      disallowedTools,
       model,
       timeoutMs,
       signal,
+      readOnly,
       agentAccess,
     } = opts;
+    // Dry run (#380): external MCP servers cannot be classified per tool, so
+    // they are unknown, and unknown means write. Drop them, and disallow the
+    // built-ins that can change the workspace or shell out.
+    const disallowedTools = readOnly
+      ? [...new Set([...(opts.disallowedTools ?? []), ...READ_ONLY_DISALLOWED_TOOLS])]
+      : opts.disallowedTools;
     const effectiveModel = model ?? this.model;
 
     // #360: run agent commands in the SDK sandbox. `auto` (default in CI) falls
@@ -421,7 +472,7 @@ export class ClaudeClient implements Claude {
     let stream: ReturnType<typeof query> | undefined;
 
     try {
-      const allMcpServers: Record<string, any> = { ...this.mcpServers };
+      const allMcpServers: Record<string, any> = readOnly ? {} : { ...this.mcpServers };
       if (sdkTools.length > 0) allMcpServers["sweny-core"] = mcpServer;
 
       stream = query({
@@ -438,6 +489,11 @@ export class ClaudeClient implements Claude {
           ...(abort ? { abortController: abort.controller } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(Object.keys(allMcpServers).length > 0 ? { mcpServers: allMcpServers } : {}),
+          // Dry run (#380): settingSources is omitted, so the SDK loads user,
+          // project and local settings, including their MCP servers (and
+          // project .mcp.json, plugins). strictMcpConfig limits MCP to the
+          // servers passed above, which under readOnly is only sweny-core.
+          ...(readOnly ? { strictMcpConfig: true } : {}),
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
           // CC-08: ask the SDK to produce validated structured output when the
           // node declares an output schema. The SDK then returns the parsed
