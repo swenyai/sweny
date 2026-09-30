@@ -177,7 +177,7 @@ describe.runIf(HAS_BUILD)("sweny new non-interactive (#384, #379)", () => {
     const sb = sandbox();
     fs.writeFileSync(path.join(sb.cwd, ".gitignore"), "node_modules");
     sb.run(["new", "--template", "explain-repo", "--yes"]);
-    expect(fs.readFileSync(path.join(sb.cwd, ".gitignore"), "utf-8")).toBe("node_modules\n.env\n");
+    expect(fs.readFileSync(path.join(sb.cwd, ".gitignore"), "utf-8")).toBe("node_modules\n.env\n.sweny/runs/\n");
   });
 
   it("`new <built-in id> --yes` needs no marketplace", () => {
