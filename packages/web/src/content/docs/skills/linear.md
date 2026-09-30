@@ -21,6 +21,7 @@ The Linear skill connects Claude to your Linear workspace for issue tracking. Cl
 | `linear_search_issues` | Search issues by text query, returning ID, title, state, priority, and URL |
 | `linear_get_issue` | Fetch a single issue by ID or identifier (e.g., `ENG-123`) |
 | `linear_update_issue` | Update an existing issue's title, description, state, or priority |
+| `linear_set_issue_state` | Reopen a closed issue (first unstarted or backlog state) or close an open one (first completed state); a no-op when already there (also applies `issue_state` safe outputs) |
 | `linear_add_comment` | Add a comment to an existing issue |
 | `linear_list_teams` | List all teams in the workspace (useful for discovering team IDs) |
 
