@@ -973,6 +973,78 @@ const fixtures: Fixture[] = [
     },
     expected: true,
   },
+  // ── #365 permissions + safe outputs ──────────────────────────────
+  ...(
+    [
+      ["permissions shorthand read", { permissions: "read" }, {}, true],
+      ["permissions object form", { permissions: { access: "write", deny: ["shell", "net"], strict: true } }, {}, true],
+      ["permissions unknown access", { permissions: "admin" }, {}, false],
+      ["permissions empty object", { permissions: {} }, {}, false],
+      ["permissions unknown deny class", { permissions: { deny: ["browser"] } }, {}, false],
+      ["permissions empty deny", { permissions: { deny: [] } }, {}, false],
+      ["permissions unknown key", { permissions: { access: "read", sudo: true } }, {}, false],
+      [
+        "full output declaration",
+        {
+          outputs: [
+            {
+              type: "issue",
+              via: "github",
+              max: 2,
+              target: "acme/api",
+              title_prefix: "[sweny] ",
+              labels: ["sweny"],
+              expires: "30m",
+            },
+          ],
+        },
+        {},
+        true,
+      ],
+      ["output type only", { outputs: [{ type: "comment" }] }, {}, true],
+      ["output unknown type", { outputs: [{ type: "merge" }] }, {}, false],
+      ["output missing type", { outputs: [{ max: 1 }] }, {}, false],
+      ["output max 0", { outputs: [{ type: "issue", max: 0 }] }, {}, false],
+      ["output max above ceiling", { outputs: [{ type: "issue", max: 101 }] }, {}, false],
+      ["output bad expires", { outputs: [{ type: "issue", expires: "30 minutes" }] }, {}, false],
+      ["output zero expires", { outputs: [{ type: "issue", expires: "0m" }] }, {}, false],
+      ["output empty outputs list", { outputs: [] }, {}, false],
+      ["output unknown key", { outputs: [{ type: "issue", auto_merge: true }] }, {}, false],
+      ["output long title_prefix", { outputs: [{ type: "issue", title_prefix: "x".repeat(65) }] }, {}, false],
+      ["workflow permissions read", {}, { permissions: "read" }, true],
+      [
+        "full safe_outputs policy",
+        {},
+        {
+          safe_outputs: {
+            allow: ["comment", "issue"],
+            max: 3,
+            staged: true,
+            trusted_actors: ["octocat"],
+            trusted_associations: ["OWNER", "MEMBER"],
+            screen: true,
+          },
+        },
+        true,
+      ],
+      ["safe_outputs empty object", {}, { safe_outputs: {} }, true],
+      ["safe_outputs unknown type in allow", {}, { safe_outputs: { allow: ["merge"] } }, false],
+      ["safe_outputs unknown association", {}, { safe_outputs: { trusted_associations: ["ADMIN"] } }, false],
+      ["safe_outputs max 0", {}, { safe_outputs: { max: 0 } }, false],
+      ["safe_outputs unknown key", {}, { safe_outputs: { apply: "always" } }, false],
+    ] as [string, Record<string, unknown>, Record<string, unknown>, boolean][]
+  ).map(([name, node, top, expected]): Fixture => ({
+    name: `#365 ${name}`,
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: { ...baseNode(), ...node } },
+      edges: [],
+      ...top,
+    },
+    expected,
+  })),
 ];
 
 describe("Zod ↔ JSON Schema conformance", () => {

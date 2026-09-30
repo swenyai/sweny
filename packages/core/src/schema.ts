@@ -10,15 +10,22 @@
 import { z } from "zod";
 import type { Workflow, WorkflowType } from "./types.js";
 import {
+  AUTHOR_ASSOCIATIONS,
   EVALUATOR_KINDS,
   EVAL_POLICIES,
   MCP_TRANSPORTS,
+  NODE_ACCESS,
   NODE_ON_FAIL,
   REQUIRES_ON_FAIL,
+  SAFE_OUTPUT_APPLIERS,
+  SAFE_OUTPUT_EXPIRES_PATTERN,
+  SAFE_OUTPUT_MAX_CEILING,
+  SAFE_OUTPUT_TYPES,
   SKILL_CATEGORIES,
   SKILL_ID_MAX_LENGTH,
   SKILL_ID_PATTERN,
   TOOL_ACCESS,
+  TOOL_CLASSES,
   WORKFLOW_TYPES,
 } from "./types.js";
 import { sourceZ } from "./sources.js";
@@ -286,6 +293,50 @@ export const nodeRetryZ = z
   })
   .strict();
 
+/**
+ * Node / workflow permissions (#365): `read` | `write`, or an object with
+ * `access`, `deny` (portable tool classes) and `strict`. The object form must
+ * declare at least one key.
+ */
+export const nodePermissionsZ = z.union([
+  z.enum(NODE_ACCESS),
+  z
+    .object({
+      access: z.enum(NODE_ACCESS).optional(),
+      deny: z.array(z.enum(TOOL_CLASSES)).min(1).optional(),
+      strict: z.boolean().optional(),
+    })
+    .strict()
+    .refine((p) => p.access !== undefined || p.deny !== undefined || p.strict !== undefined, {
+      message: "permissions must declare at least one of access, deny, strict",
+    }),
+]);
+
+/** One typed write intent a node may emit (#365). */
+export const safeOutputDeclarationZ = z
+  .object({
+    type: z.enum(SAFE_OUTPUT_TYPES),
+    via: z.string().min(1).optional(),
+    max: z.number().int().min(1).max(SAFE_OUTPUT_MAX_CEILING).optional(),
+    target: z.string().min(1).optional(),
+    title_prefix: z.string().min(1).max(64).optional(),
+    labels: z.array(z.string().min(1)).min(1).optional(),
+    expires: z.string().regex(SAFE_OUTPUT_EXPIRES_PATTERN).optional(),
+  })
+  .strict();
+
+/** Workflow-level safe-output policy (#365): the ceiling and run-wide limits. */
+export const safeOutputsPolicyZ = z
+  .object({
+    allow: z.array(z.enum(SAFE_OUTPUT_TYPES)).min(1).optional(),
+    max: z.number().int().min(1).max(SAFE_OUTPUT_MAX_CEILING).optional(),
+    staged: z.boolean().optional(),
+    trusted_actors: z.array(z.string().min(1)).min(1).optional(),
+    trusted_associations: z.array(z.enum(AUTHOR_ASSOCIATIONS)).min(1).optional(),
+    screen: z.boolean().optional(),
+  })
+  .strict();
+
 export const nodeZ = z
   .object({
     name: z.string().min(1),
@@ -297,6 +348,8 @@ export const nodeZ = z
     tools: nodeToolsZ.optional(),
     fail_soft: z.boolean().optional(),
     on_fail: z.enum(NODE_ON_FAIL).optional(),
+    permissions: nodePermissionsZ.optional(),
+    outputs: z.array(safeOutputDeclarationZ).min(1).optional(),
     rules: nodeSourcesZ.optional(),
     context: nodeSourcesZ.optional(),
     eval: z.array(evaluatorZ).min(1).optional(),
@@ -356,6 +409,8 @@ export const workflowZ = z.object({
   model: z.string().min(1).optional(),
   judge_budget: z.number().int().min(0).optional(),
   inputs: workflowInputsZ.optional(),
+  permissions: nodePermissionsZ.optional(),
+  safe_outputs: safeOutputsPolicyZ.optional(),
 });
 
 const LEGACY_VERIFY_MESSAGE =
@@ -411,7 +466,11 @@ export interface WorkflowError {
     | "UNSUPPORTED_EVAL_POLICY"
     | "INVALID_INLINE_SKILL"
     | "EDGE_ITERATIONS_EXCEEDED"
-    | "RETRY_MAX_EXCEEDED";
+    | "RETRY_MAX_EXCEEDED"
+    | "PERMISSION_CEILING"
+    | "OUTPUT_NOT_ALLOWED"
+    | "DUPLICATE_OUTPUT"
+    | "UNSUPPORTED_OUTPUT";
   message: string;
   nodeId?: string;
 }
@@ -632,6 +691,49 @@ export function validateWorkflow(
     }
   }
 
+  // Permissions and safe outputs (#365). The workflow's `permissions` and
+  // `safe_outputs.allow` are a ceiling every node inherits.
+  const wfAccess = typeof workflow.permissions === "string" ? workflow.permissions : workflow.permissions?.access;
+  const allowedOutputs = workflow.safe_outputs?.allow;
+  for (const [nodeId, node] of Object.entries(workflow.nodes)) {
+    const nodeAccess = typeof node.permissions === "string" ? node.permissions : node.permissions?.access;
+    if (wfAccess === "read" && nodeAccess === "write") {
+      errors.push({
+        code: "PERMISSION_CEILING",
+        message: `Node "${nodeId}" asks for permissions write, above the workflow's permissions read`,
+        nodeId,
+      });
+    }
+    const seenTypes = new Set<string>();
+    for (const out of node.outputs ?? []) {
+      if (seenTypes.has(out.type)) {
+        errors.push({
+          code: "DUPLICATE_OUTPUT",
+          message: `Node "${nodeId}" declares output "${out.type}" more than once; merge them into one entry`,
+          nodeId,
+        });
+      }
+      seenTypes.add(out.type);
+      if (allowedOutputs && !allowedOutputs.includes(out.type)) {
+        errors.push({
+          code: "OUTPUT_NOT_ALLOWED",
+          message: `Node "${nodeId}" declares output "${out.type}", outside the workflow's safe_outputs.allow [${allowedOutputs.join(", ")}]`,
+          nodeId,
+        });
+      }
+      if (out.via && !SAFE_OUTPUT_APPLIERS[out.via]?.includes(out.type)) {
+        const supported = Object.entries(SAFE_OUTPUT_APPLIERS)
+          .filter(([, types]) => types.includes(out.type))
+          .map(([id]) => id);
+        errors.push({
+          code: "UNSUPPORTED_OUTPUT",
+          message: `Node "${nodeId}" output "${out.type}" names via "${out.via}", which cannot apply it (supported: ${supported.join(", ")})`,
+          nodeId,
+        });
+      }
+    }
+  }
+
   // Skill references
   if (knownSkills) {
     // Merge workflow inline skills into known set
@@ -794,6 +896,73 @@ export const workflowJsonSchema = {
         },
       ],
     },
+    Permissions: {
+      description:
+        "What a node's agent may do. 'read' runs it read-only: only access: read skill tools, no external skill MCP servers, no shell, file-write, edit, fetch or subagent built-ins. On the workflow it is the default and the ceiling for every node.",
+      oneOf: [
+        { type: "string", enum: [...NODE_ACCESS] },
+        {
+          type: "object",
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            access: { type: "string", enum: [...NODE_ACCESS] },
+            deny: {
+              type: "array",
+              items: { type: "string", enum: [...TOOL_CLASSES] },
+              minItems: 1,
+              description: "Built-in tool classes the agent must not have, compiled per harness.",
+            },
+            strict: {
+              type: "boolean",
+              description:
+                "Exclusive MCP (only the servers sweny injects), and refuse the node on a harness that cannot enforce the policy.",
+            },
+          },
+        },
+      ],
+    },
+    SafeOutput: {
+      type: "object",
+      required: ["type"],
+      additionalProperties: false,
+      properties: {
+        type: { type: "string", enum: [...SAFE_OUTPUT_TYPES] },
+        via: {
+          type: "string",
+          minLength: 1,
+          description: "Skill that applies the write. Default: the first node skill that supports the type.",
+        },
+        max: {
+          type: "integer",
+          minimum: 1,
+          maximum: SAFE_OUTPUT_MAX_CEILING,
+          description: "Max writes of this type from this node per run. Default 1.",
+        },
+        target: {
+          type: "string",
+          minLength: 1,
+          description: "Pinned target (GitHub owner/repo, Linear team id). GitHub default: GITHUB_REPOSITORY.",
+        },
+        title_prefix: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+          description: "Prepended to issue and PR titles that do not already start with it.",
+        },
+        labels: {
+          type: "array",
+          items: { type: "string", minLength: 1 },
+          minItems: 1,
+          description: "issue / pr: labels always added. label: the only labels the agent may add.",
+        },
+        expires: {
+          type: "string",
+          pattern: SAFE_OUTPUT_EXPIRES_PATTERN.source,
+          description: "Drop an intent older than this when the write stage runs (e.g. 30m, 2h, 7d).",
+        },
+      },
+    },
   },
   properties: {
     id: { type: "string", minLength: 1 },
@@ -829,6 +998,47 @@ export const workflowJsonSchema = {
       minLength: 1,
       description:
         "Default execution model for every node. Overridable per-node. Free-text passthrough (no registry); resolved as node.model ?? workflow.model ?? executor default.",
+    },
+    permissions: {
+      $ref: "#/$defs/Permissions",
+      description: "Default and ceiling for every node's permissions. Absent: write.",
+    },
+    safe_outputs: {
+      type: "object",
+      description: "Workflow-level safe-output policy: the ceiling on output types and run-wide limits.",
+      additionalProperties: false,
+      properties: {
+        allow: {
+          type: "array",
+          items: { type: "string", enum: [...SAFE_OUTPUT_TYPES] },
+          minItems: 1,
+          description: "Output types any node may declare. Absent: all types.",
+        },
+        max: {
+          type: "integer",
+          minimum: 1,
+          maximum: SAFE_OUTPUT_MAX_CEILING,
+          description: "Total writes per run across all nodes.",
+        },
+        staged: { type: "boolean", description: "Preview every write and apply none." },
+        trusted_actors: {
+          type: "array",
+          items: { type: "string", minLength: 1 },
+          minItems: 1,
+          description: "GitHub logins whose runs may write.",
+        },
+        trusted_associations: {
+          type: "array",
+          items: { type: "string", enum: [...AUTHOR_ASSOCIATIONS] },
+          minItems: 1,
+          description: "Author associations (from the GitHub event payload) whose runs may write.",
+        },
+        screen: {
+          type: "boolean",
+          description:
+            "One model call that may veto the writes after every deterministic check. It can never authorize one.",
+        },
+      },
     },
     judge_budget: {
       type: "integer",
@@ -987,6 +1197,18 @@ export const workflowJsonSchema = {
             enum: [...NODE_ON_FAIL],
             description:
               "What to do when this node finishes 'failed' (agent-level failure, or an eval failure that exhausted retries and was not softened by fail_soft). 'halt' (default) stops the workflow with the failure surfaced so a broken node never advances down a conditional edge; 'continue' preserves the legacy fall-through where routing proceeds from the failed node. Distinct from requires.on_fail (the pre-condition gate).",
+          },
+          permissions: {
+            $ref: "#/$defs/Permissions",
+            description:
+              "What this node's agent may do. Absent: read when the node declares outputs, else the workflow's permissions, else write.",
+          },
+          outputs: {
+            type: "array",
+            items: { $ref: "#/$defs/SafeOutput" },
+            minItems: 1,
+            description:
+              "Typed write intents this node may emit with the emit_output tool. sweny applies them after the node, within the declared caps.",
           },
           rules: {
             $ref: "#/$defs/NodeSources",

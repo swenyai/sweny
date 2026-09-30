@@ -245,6 +245,25 @@ export const github: Skill = {
       },
     },
     {
+      name: "github_add_labels",
+      access: "write",
+      description: "Add labels to a GitHub issue or pull request",
+      input_schema: {
+        type: "object",
+        properties: {
+          repo: { type: "string", description: "owner/repo" },
+          issue_number: { type: "number", description: "Issue or PR number" },
+          labels: { type: "array", items: { type: "string" }, description: "Labels to add" },
+        },
+        required: ["repo", "issue_number", "labels"],
+      },
+      handler: async (input: { repo: string; issue_number: number; labels: string[] }, ctx) =>
+        gh(`/repos/${input.repo}/issues/${input.issue_number}/labels`, ctx, {
+          method: "POST",
+          body: JSON.stringify({ labels: input.labels }),
+        }),
+    },
+    {
       name: "github_list_recent_commits",
       access: "read",
       description: "List recent commits on a branch",
