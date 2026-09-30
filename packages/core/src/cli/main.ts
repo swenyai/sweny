@@ -162,10 +162,7 @@ program
     const agent = config.codingAgentProvider;
     const pre = isSupportedAgent(agent) ? await createHarness(agent, { logger: consoleLogger }).preflight() : undefined;
     if (pre && !pre.ok) {
-      errors = [
-        `--agent ${agent}: ${pre.reason}`,
-        ...errors.filter((e) => !AGENT_AUTH_ERROR_PREFIXES.some((p) => e.startsWith(p))),
-      ];
+      errors = [pre.reason, ...errors.filter((e) => !AGENT_AUTH_ERROR_PREFIXES.some((p) => e.startsWith(p)))];
     }
     if (errors.length > 0) {
       console.error(formatValidationErrors(errors));
@@ -272,7 +269,7 @@ async function harnessFor(
   });
   const pre = await harness.preflight();
   if (!pre.ok) {
-    console.error(chalk.red(`\n  --agent ${agent}: ${pre.reason}\n`));
+    console.error(chalk.red(`\n  ${pre.reason}\n`));
     process.exit(1);
   }
   return harness;

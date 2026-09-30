@@ -18,12 +18,13 @@ export type AuthProbeResult = { ok: true; via: string } | { ok: false; reason: s
 /** Test seam: adapters take one in their options instead of reading the host. */
 export type AuthProbe = () => AuthProbeResult;
 
+/** Same shape as the CLI's other "Missing:" lines; names the agent so the fix is unambiguous. */
 export const CLAUDE_CODE_AUTH_HINT =
-  "Claude Code has no login. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`), " +
-  "or log in once with `claude` and /login. Then run `sweny check`.";
+  "Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`), " +
+  "or a Claude Code login (run `claude`, then /login), for --agent claude";
 
 export const CODEX_AUTH_HINT =
-  "Codex has no login. Set OPENAI_API_KEY (or CODEX_API_KEY), or run `codex login`. Then run `sweny check`.";
+  "Missing: OPENAI_API_KEY or CODEX_API_KEY, or a Codex login (`codex login`), for --agent codex";
 
 function set(v: string | undefined): boolean {
   return typeof v === "string" && v.trim() !== "";

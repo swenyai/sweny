@@ -21,7 +21,6 @@ import {
   type CodexHarnessOptions,
 } from "./codex.js";
 import { createHarness } from "./index.js";
-import { resolveAgentAccess } from "../agent-env.js";
 import { triageWorkflow } from "../workflows/index.js";
 import { buildNodePolicy, resolveNodePermissions } from "../node-policy.js";
 import type { ExecutionEvent, Skill, Tool, Workflow } from "../types.js";
@@ -237,18 +236,14 @@ describe("CodexHarness policy", () => {
   });
 
   it("bundled triage.yml under strict: no node is refused, every opinion is enforced natively (#365)", async () => {
-    const skills = new Map<string, Skill>();
     const byNode: Record<string, string[]> = {};
     const { h } = harness({ policy: "strict" });
     for (const [id, node] of Object.entries(triageWorkflow.nodes)) {
-      // The policy exactly as execute() builds it for this node.
+      // The policy execute() builds for this node.
       const permissions = resolveNodePermissions(node, triageWorkflow);
-      const policy = buildNodePolicy({
-        permissions,
-        dryRun: false,
-        disallowedTools: node.disallowed_tools,
-        egress: resolveAgentAccess(node.skills, skills).domains,
-      });
+      // Egress is its own opinion (kept by the sandbox wrapper, #360); leave it
+      // out so this checks only what the workflow file itself asks for.
+      const policy = buildNodePolicy({ permissions, dryRun: false, disallowedTools: node.disallowed_tools });
       fakes.script(DONE);
       const r = await h.run({
         instruction: "x",
@@ -256,7 +251,6 @@ describe("CodexHarness policy", () => {
         tools: [],
         policy,
         ...(policy.readOnly ? { readOnly: true } : {}),
-        agentAccess: resolveAgentAccess(node.skills, skills),
       });
       byNode[id] = r.degraded;
       expect(r.status, `${id}: ${String(r.data.error ?? "")}`).toBe("success");

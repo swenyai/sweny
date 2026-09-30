@@ -35,14 +35,13 @@ describe("claudeCodeAuth", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("fails with a fix that names Claude Code, the env vars and the login", () => {
+  it("fails with a fix that names the agent, the env vars and the login", () => {
     const r = claudeCodeAuth({}, noLogin);
     expect(r.ok).toBe(false);
     const reason = !r.ok ? r.reason : "";
-    expect(reason).toMatch(/Claude Code/);
-    expect(reason).toMatch(/ANTHROPIC_API_KEY/);
-    expect(reason).toMatch(/CLAUDE_CODE_OAUTH_TOKEN/);
-    expect(reason).toMatch(/login/);
+    expect(reason).toMatch(/^Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN/);
+    expect(reason).toMatch(/Claude Code login/);
+    expect(reason).toMatch(/for --agent claude$/);
   });
 });
 
@@ -61,11 +60,11 @@ describe("codexAuth", () => {
     expect(codexAuth({ ANTHROPIC_API_KEY: "k" }, noLogin)).toEqual({ ok: false, reason: CODEX_AUTH_HINT });
   });
 
-  it("fails with a fix that names Codex, OPENAI_API_KEY and codex login", () => {
+  it("fails with a fix that names the agent, OPENAI_API_KEY and codex login", () => {
     const r = codexAuth({}, noLogin);
     const reason = !r.ok ? r.reason : "";
-    expect(reason).toMatch(/Codex/);
-    expect(reason).toMatch(/OPENAI_API_KEY/);
+    expect(reason).toMatch(/^Missing: OPENAI_API_KEY/);
     expect(reason).toMatch(/codex login/);
+    expect(reason).toMatch(/for --agent codex$/);
   });
 });

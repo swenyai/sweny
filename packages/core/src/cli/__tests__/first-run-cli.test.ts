@@ -238,6 +238,7 @@ nodes:
   a:
     name: A
     instruction: say hi
+edges: []
 `;
 
   it("workflow run with no Claude Code login fails before any node, naming the agent and the fix", () => {
@@ -246,8 +247,8 @@ nodes:
     const r = sb.run(["workflow", "run", "wf.yml"]);
     const out = flat(r.stdout + r.stderr);
     expect(r.status).toBe(1);
-    expect(out).toMatch(/--agent claude: Claude Code has no login/);
-    expect(out).toMatch(/ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN/);
+    expect(out).toMatch(/Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN/);
+    expect(out).toMatch(/for --agent claude/);
     // Nothing ran: the workflow never started.
     expect(out).not.toMatch(/▲ local/);
   });
@@ -257,6 +258,6 @@ nodes:
     expect(sb.run(["new", "--template", "explain-repo", "--yes"]).status).toBe(0);
     const r = sb.run(["check"]);
     expect(r.status).toBe(1);
-    expect(flat(r.stdout + r.stderr)).toMatch(/--agent claude: Claude Code has no login/);
+    expect(flat(r.stdout + r.stderr)).toMatch(/Claude Code login \(run `claude`, then \/login\), for --agent claude/);
   });
 });
