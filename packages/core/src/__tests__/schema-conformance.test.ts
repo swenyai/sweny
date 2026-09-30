@@ -371,6 +371,42 @@ const fixtures: Fixture[] = [
     expected: false,
   },
   {
+    // #325: retry.max ceiling (10). Both validators must agree an absurd
+    // value is rejected, not just runtime (executor never even sees it).
+    name: "retry.max above the ceiling (both must reject)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: {
+          ...baseNode(),
+          eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["x"] } }],
+          retry: { max: 11 },
+        },
+      },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
+    name: "retry.max at the ceiling (10, both must accept)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: {
+          ...baseNode(),
+          eval: [{ name: "x", kind: "function", rule: { any_tool_called: ["x"] } }],
+          retry: { max: 10 },
+        },
+      },
+      edges: [],
+    },
+    expected: true,
+  },
+  {
     name: "output_matches entry with unknown key (strict: both must reject)",
     input: {
       id: "d",

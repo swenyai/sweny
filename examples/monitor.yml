@@ -1,0 +1,76 @@
+id: monitor-example
+name: URL Change Monitor (example)
+description: Watch a set of URLs for content or status changes and alert when something changes.
+workflow_type: monitor
+entry: check-sources
+
+nodes:
+  check-sources:
+    name: Fetch Monitored URLs
+    instruction: |
+      The current content of each monitored URL is provided above as
+      context. For each URL, produce a short fingerprint: a handful of key
+      facts or values that would change if the page's meaningful content
+      changed (ignore timestamps, ads, and other noise).
+    context:
+      - url: https://sweny.ai
+      - url: https://docs.sweny.ai
+    output:
+      type: object
+      properties:
+        snapshot:
+          type: array
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              fingerprint:
+                type: string
+              notes:
+                type: string
+            required:
+              - url
+              - fingerprint
+      required:
+        - snapshot
+
+  compare-baseline:
+    name: Compare Against Last Known State
+    instruction: |
+      Read the last known snapshot from .sweny/monitor-baseline.json if it
+      exists. Compare it against the current snapshot from the previous
+      step. If no baseline file exists yet, this is the first run: treat
+      everything as unchanged and just record the baseline.
+
+      Write the current snapshot back to .sweny/monitor-baseline.json so
+      the next run has something to compare against. Report which URLs
+      changed, if any.
+    output:
+      type: object
+      properties:
+        changed:
+          type: array
+          items:
+            type: string
+        firstRun:
+          type: boolean
+        summary:
+          type: string
+      required:
+        - changed
+        - summary
+
+  alert-on-change:
+    name: Alert on Change
+    instruction: |
+      If the previous step found any changed URLs, report exactly what
+      changed and why it matters. If nothing changed (and it wasn't the
+      first run), just report that no alert was needed.
+    skills: []
+
+edges:
+  - from: check-sources
+    to: compare-baseline
+  - from: compare-baseline
+    to: alert-on-change

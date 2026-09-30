@@ -234,7 +234,8 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 | `--json` | Output result as JSON to stdout; suppress progress rendering | `false` |
 | `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |
 | `--mermaid` | Print a Mermaid diagram with per-node execution state after the run finishes | `false` |
-| `--timeout <ms>` | Per-workflow timeout for batch (no-file) runs | `900000` (15 min) |
+| `--timeout <ms>` | Whole-run wall-clock budget for `workflow run` (one file, or per workflow in batch runs). `0` disables the budget. Non-numeric values are rejected | `3600000` (60 min) |
+| `--max-steps <n>` | Hard cap on total node executions for a single workflow file, including eval-failure retries | `200` |
 | `-y, --yes` | Skip the batch confirmation prompt (use in CI) | `false` |
 
 With a file, loads the definition, validates its schema, then executes it with the same DAG renderer and skill infrastructure as the built-in `triage` and `implement` commands. With no file, it lists every `.sweny/e2e/*.yml` workflow, asks you to confirm (skip with `--yes`), runs them sequentially with template variables (`{base_url}`, `{run_id}`, ...) resolved, and exits `0` if all pass, `1` if any fail. Provider settings from `.sweny.yml` and `.env` apply.

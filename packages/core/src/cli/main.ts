@@ -21,6 +21,7 @@ import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
 import { loadAndValidateWorkflow } from "../loader.js";
 import { validateRuntimeInput } from "../inputs.js";
+import { mergeDryRunIntoInput, parseRunBudgetFlags } from "./workflow-input.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -34,7 +35,7 @@ import * as readline from "node:readline";
 import { loadDotenv, loadConfigFile } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { runNew } from "./new.js";
-import { runE2eRun } from "./e2e.js";
+import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "./e2e.js";
 import { createVerboseToolObserver } from "./verbose-observer.js";
 import {
   registerTriageCommand,
@@ -490,17 +491,36 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
     process.exit(hasFailed ? 1 : 0);
   } catch (error) {
+    const crashMsg = error instanceof Error ? error.message : "Unknown error";
     if (config.json) {
-      console.log(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }));
+      console.log(JSON.stringify({ error: crashMsg }));
     } else {
       console.error(formatCrashError(error));
+    }
+
+    // Finalize the cloud run as failed. execute() threw (including the
+    // RouteEvaluationError the executor raises on route-eval failure), so
+    // the in-try finish never ran and the run would otherwise stay stuck at
+    // "running" forever. No results map exists on this path, so pass an empty
+    // one; the error summary is a short message, never raw agent prose.
+    try {
+      // PRIVACY: pass the raw error, not crashMsg. finishCloudLifecycle reduces it
+      // to error.name + a 200-char message: thrown messages can embed agent/LLM
+      // prose or log text, and the cloud gets metadata only. It also sends at
+      // most one finish per run, so a throw after the in-try finish cannot
+      // overwrite the real result with a second "failed".
+      await finishCloudLifecycle(config, cloudHandle, new Map(), Date.now() - runStart, "failed", error);
+    } catch {
+      // silent — cloud reporting must never block or mask the crash
     }
 
     // Best-effort GitHub Actions step summary on crash
     if (config.notificationProvider === "github-summary" && process.env.GITHUB_STEP_SUMMARY) {
       try {
-        const msg = error instanceof Error ? error.message : "Unknown error";
-        fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## ❌ SWEny Triage Crashed\n\n\`\`\`\n${msg}\n\`\`\`\n`);
+        fs.appendFileSync(
+          process.env.GITHUB_STEP_SUMMARY,
+          `## ❌ SWEny Triage Crashed\n\n\`\`\`\n${crashMsg}\n\`\`\`\n`,
+        );
       } catch {
         // ignore
       }
@@ -682,7 +702,21 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
 
     process.exit(0);
   } catch (err) {
-    console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+    const crashMsg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
+    // Finalize the cloud run as failed (covers thrown errors, incl.
+    // RouteEvaluationError). Without this a crashed implement run stays
+    // "running" in cloud forever.
+    try {
+      // PRIVACY: pass the raw error, not crashMsg. finishCloudLifecycle reduces it
+      // to error.name + a 200-char message: thrown messages can embed agent/LLM
+      // prose or log text, and the cloud gets metadata only. It also sends at
+      // most one finish per run, so a throw after the in-try finish cannot
+      // overwrite the real result with a second "failed".
+      await finishCloudLifecycle(config, implCloudHandle, new Map(), Date.now() - implRunStart, "failed", err);
+    } catch {
+      // silent
+    }
     process.exit(1);
   }
 });
@@ -717,15 +751,26 @@ export async function workflowRunAction(
     mermaid?: boolean;
     verbose?: boolean;
     timeout?: string;
+    maxSteps?: string;
     yes?: boolean;
   },
 ): Promise<void> {
+  // Reject junk --timeout/--max-steps up front (both paths) instead of
+  // silently falling back to a default.
+  let budget: ReturnType<typeof parseRunBudgetFlags>;
+  try {
+    budget = parseRunBudgetFlags(options.timeout, options.maxSteps, DEFAULT_WORKFLOW_TIMEOUT_MS);
+  } catch (err) {
+    console.error(chalk.red(`\n  ${err instanceof Error ? err.message : String(err)}\n`));
+    process.exit(1);
+  }
+
   // No file given → batch-run the e2e workflows in .sweny/e2e/. This is the
   // home for what used to be `sweny e2e run`; it lists what will run and
   // confirms first (bypass with --yes).
   if (!file) {
     await runE2eRun({
-      timeout: options.timeout ? parseInt(options.timeout, 10) : undefined,
+      timeout: options.timeout === undefined ? undefined : budget.timeoutMs,
       yes: Boolean(options.yes),
     });
     return;
@@ -899,7 +944,7 @@ export async function workflowRunAction(
       process.exit(1);
       return;
     }
-    workflowInput = validated.value;
+    workflowInput = mergeDryRunIntoInput(validated.value, config.dryRun);
   } else {
     workflowInput = {
       timeRange: config.timeRange,
@@ -961,18 +1006,37 @@ export async function workflowRunAction(
     createCloudStreamObserver(config, wfCloudHandle),
   );
 
+  // #325: this is the primary run path (GitHub Action / CLI / MCP all land
+  // here), and previously never passed signal/timeoutMs/max_steps to
+  // execute() at all: a wedged node (hung tool call, runaway model turn)
+  // could hang the run indefinitely despite the abort/timeout plumbing
+  // existing in the executor. --timeout is a whole-run wall-clock budget,
+  // enforced by runWithWallClockBudget (shared with the .sweny/e2e/ batch
+  // runner in e2e.ts). Absent = DEFAULT_WORKFLOW_TIMEOUT_MS (60 min);
+  // `--timeout 0` = no wall-clock budget; junk is rejected above.
+  // --max-steps overrides the executor's own DEFAULT_MAX_STEPS when set.
+  const wfTimeoutMs = budget.timeoutMs;
+  const wfMaxSteps = budget.maxSteps;
+
   try {
-    const { results, trace } = await execute(workflow, workflowInput, {
-      skills,
-      claude,
-      observer,
-      logger: consoleLogger,
-      cwd: process.cwd(),
-      env: process.env,
-      fetchAuth: config.fetchAuth,
-      offline: config.offline,
-      fileRoot: config.fileRoot || undefined,
-    });
+    const { results, trace } = await runWithWallClockBudget(
+      (signal) =>
+        execute(workflow, workflowInput, {
+          skills,
+          claude,
+          observer,
+          logger: consoleLogger,
+          cwd: process.cwd(),
+          env: process.env,
+          fetchAuth: config.fetchAuth,
+          offline: config.offline,
+          fileRoot: config.fileRoot || undefined,
+          signal,
+          max_steps: wfMaxSteps,
+        }),
+      wfTimeoutMs,
+      `Workflow ${workflow.name}`,
+    );
 
     const wfDurationMs = Date.now() - runStart;
     const wfHasFailed = [...results.values()].some((r) => r.status === "failed");
@@ -1016,7 +1080,21 @@ export async function workflowRunAction(
     console.log(chalk.green(`  Workflow completed\n`));
     process.exit(0);
   } catch (err) {
-    console.error(chalk.red(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`));
+    const crashMsg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`\n  Error: ${crashMsg}\n`));
+    // Finalize the cloud run as failed (covers thrown errors, incl.
+    // RouteEvaluationError). Without this a crashed workflow run stays
+    // "running" in cloud forever.
+    try {
+      // PRIVACY: pass the raw error, not crashMsg. finishCloudLifecycle reduces it
+      // to error.name + a 200-char message: thrown messages can embed agent/LLM
+      // prose or log text, and the cloud gets metadata only. It also sends at
+      // most one finish per run, so a throw after the in-try finish cannot
+      // overwrite the real result with a second "failed".
+      await finishCloudLifecycle(config, wfCloudHandle, new Map(), Date.now() - runStart, "failed", err);
+    } catch {
+      // silent
+    }
     process.exit(1);
   }
 }
@@ -1069,7 +1147,14 @@ workflowCmd
   .description(
     "Run a workflow from a YAML or JSON file. With no file, batch-runs every workflow in .sweny/e2e/ (lists and confirms first; use --yes to skip the prompt).",
   )
-  .option("--timeout <ms>", "Per-workflow timeout in ms for batch runs (default: 900000 = 15 min)")
+  .option(
+    "--timeout <ms>",
+    "Whole-run wall-clock timeout in ms. Applies to batch runs (.sweny/e2e/) and to a single workflow file (default: 3600000 = 60 min; 0 = no wall-clock budget)",
+  )
+  .option(
+    "--max-steps <n>",
+    "Hard cap on total node executions for a single workflow file, including eval-failure retries (default: 200, see executor DEFAULT_MAX_STEPS)",
+  )
   .option("-y, --yes", "Skip the batch confirmation prompt (for CI)")
   .option(
     "--dry-run",

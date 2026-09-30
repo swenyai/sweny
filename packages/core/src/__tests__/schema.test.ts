@@ -515,6 +515,19 @@ describe("Zod schemas", () => {
       expect(() => nodeRetryZ.parse({ max: 1.5 })).toThrow();
     });
 
+    // #325: retry.max was unbounded (min(1) only), so a workflow author could
+    // declare an absurd retry budget (typo'd digit, copy-paste error) and burn
+    // unbounded model spend per node with no validation-time guard.
+    it("accepts max at the ceiling (10)", () => {
+      expect(() => nodeRetryZ.parse({ max: 10 })).not.toThrow();
+    });
+
+    it("rejects an absurd retry.max above the ceiling", () => {
+      expect(() => nodeRetryZ.parse({ max: 11 })).toThrow();
+      expect(() => nodeRetryZ.parse({ max: 1000 })).toThrow();
+      expect(() => nodeRetryZ.parse({ max: Number.MAX_SAFE_INTEGER })).toThrow();
+    });
+
     it("rejects { auto: false }", () => {
       expect(() => nodeRetryZ.parse({ max: 1, instruction: { auto: false } })).toThrow();
     });

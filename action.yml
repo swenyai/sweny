@@ -44,9 +44,19 @@ inputs:
     default: "."
 
   dry-run:
-    description: "When 'true', execute until the first conditional routing decision and stop. Validates the workflow end-to-end without triggering downstream actions."
+    description: "When 'true', execute until the first conditional edge and stop there (nodes past that edge do not run). A workflow with no conditional edges runs to completion."
     required: false
     default: "false"
+
+  timeout:
+    description: "Whole-run wall-clock budget in milliseconds, forwarded to `sweny workflow run --timeout`. Empty uses the CLI default (3600000 = 60 min). Use 0 for no wall-clock budget."
+    required: false
+    default: ""
+
+  max-steps:
+    description: "Hard cap on total node executions (including eval-failure retries), forwarded to `sweny workflow run --max-steps`. Empty uses the CLI default (200)."
+    required: false
+    default: ""
 
   verbose:
     description: "When 'true', print each tool call's input and output inline. Truncated for readability; use the CLI's --stream flag locally for full untruncated NDJSON. Helpful for debugging a node that halts or fails."
@@ -114,6 +124,8 @@ runs:
         WORKFLOW_PATH: ${{ inputs.workflow }}
         DRY_RUN: ${{ inputs.dry-run }}
         VERBOSE: ${{ inputs.verbose }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_MAX_STEPS: ${{ inputs.max-steps }}
         WORKFLOW_INPUT: ${{ inputs.input }}
         INPUT_CLOUD_TOKEN: ${{ inputs.cloud-token }}
       run: |
@@ -136,6 +148,12 @@ runs:
         FLAGS=()
         [ "$DRY_NORM" = "true" ] && FLAGS+=("--dry-run")
         [ "$VERBOSE_NORM" = "true" ] && FLAGS+=("--verbose")
+        if [ -n "$INPUT_TIMEOUT" ]; then
+          FLAGS+=("--timeout" "$INPUT_TIMEOUT")
+        fi
+        if [ -n "$INPUT_MAX_STEPS" ]; then
+          FLAGS+=("--max-steps" "$INPUT_MAX_STEPS")
+        fi
         # Forward per-run inputs verbatim. Pass through env to avoid shell
         # quoting issues with nested JSON; the CLI parses and validates the
         # string against the workflow's declared `inputs` block (if any) and

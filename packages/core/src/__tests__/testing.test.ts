@@ -156,7 +156,7 @@ describe("MockClaude", () => {
       expect(chosen).toBe("alt");
     });
 
-    it("defaults to first choice when no route is scripted", async () => {
+    it("returns null (fails closed) when no route is scripted", async () => {
       const claude = new MockClaude({ responses: { a: { data: {} } } });
       await claude.run({ instruction: "x", context: {}, tools: [] });
 
@@ -169,7 +169,7 @@ describe("MockClaude", () => {
         ],
       });
 
-      expect(chosen).toBe("x");
+      expect(chosen).toBeNull();
     });
 
     it("ignores invalid scripted routes", async () => {
@@ -185,7 +185,7 @@ describe("MockClaude", () => {
         choices: [{ id: "valid", description: "Valid" }],
       });
 
-      expect(chosen).toBe("valid"); // falls back to first choice
+      expect(chosen).toBeNull(); // invalid scripted route fails closed
     });
   });
 

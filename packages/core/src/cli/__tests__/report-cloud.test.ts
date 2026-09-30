@@ -193,4 +193,151 @@ describe("reportToCloud", () => {
     expect(Array.isArray(body.findings)).toBe(true);
     expect(Array.isArray(body.nodes)).toBe(true);
   });
+
+  // ── Privacy: the report is shape-only, never raw agent prose ──────────
+  //
+  // The triage `investigate` node emits findings that carry `title`,
+  // `root_cause`, and `fix_approach` — free LLM prose about the customer's
+  // private bug and the proposed fix. That MUST NEVER leave the host. These
+  // tests pin the leak closed: the serialized POST body may not contain any
+  // of those fields or their prose values.
+  function makeResultsWithProse(): Map<string, NodeResult> {
+    return new Map([
+      [
+        "investigate",
+        {
+          status: "success" as const,
+          data: {
+            recommendation: "implement",
+            highest_severity: "high",
+            novel_count: 1,
+            findings: [
+              {
+                title: "SECRET_BUG_TITLE null deref in checkout",
+                root_cause: "SECRET_ROOT_CAUSE the session token is read before auth resolves",
+                fix_approach: "SECRET_FIX_APPROACH guard the token read behind the auth promise",
+                severity: "high",
+                is_duplicate: false,
+                duplicate_of: "OFF-9999",
+                fix_complexity: "moderate",
+                affected_services: ["checkout-api", "auth-service"],
+              },
+              {
+                title: "SECRET_DUP_TITLE",
+                root_cause: "SECRET_DUP_ROOT_CAUSE",
+                severity: "low",
+                is_duplicate: true,
+                fix_complexity: "simple",
+                affected_services: ["billing"],
+              },
+            ],
+          },
+          toolCalls: [],
+        },
+      ],
+    ]);
+  }
+
+  it("does NOT ship root_cause / fix_approach / title or any raw prose", async () => {
+    await reportToCloud(makeResultsWithProse(), 1000, makeConfig({ cloudToken: "sweny_pk_abc" }), "triage");
+    const [, init] = fetchMock.mock.calls[0];
+    const raw = init.body as string;
+
+    // Prose field values must be absent from the wire entirely.
+    for (const secret of [
+      "SECRET_BUG_TITLE",
+      "SECRET_ROOT_CAUSE",
+      "SECRET_FIX_APPROACH",
+      "SECRET_DUP_TITLE",
+      "SECRET_DUP_ROOT_CAUSE",
+      "OFF-9999",
+    ]) {
+      expect(raw).not.toContain(secret);
+    }
+
+    // And no finding object may carry the prose keys, even empty.
+    const body = JSON.parse(raw);
+    for (const f of body.findings) {
+      expect(f).not.toHaveProperty("title");
+      expect(f).not.toHaveProperty("root_cause");
+      expect(f).not.toHaveProperty("fix_approach");
+      expect(f).not.toHaveProperty("duplicate_of");
+    }
+  });
+
+  it("ships shape-only finding classification: severity, novel/dup, complexity, service count", async () => {
+    await reportToCloud(makeResultsWithProse(), 1000, makeConfig({ cloudToken: "sweny_pk_abc" }), "triage");
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body as string);
+
+    expect(body.findings).toEqual([
+      {
+        severity: "high",
+        is_duplicate: false,
+        fix_complexity: "moderate",
+        affected_services_count: 2,
+      },
+      {
+        severity: "low",
+        is_duplicate: true,
+        fix_complexity: "simple",
+        affected_services_count: 1,
+      },
+    ]);
+    const raw = init.body as string;
+    for (const name of ["checkout-api", "auth-service", "billing"]) expect(raw).not.toContain(name);
+    for (const f of body.findings) {
+      expect(Object.keys(f).sort()).toEqual(["affected_services_count", "fix_complexity", "is_duplicate", "severity"]);
+    }
+    expect(body.findings_count).toBe(2);
+    expect(body.duplicate_count).toBe(1);
+    expect(body.severity_counts).toEqual({ high: 1, low: 1 });
+  });
+
+  it("top-level report body is a closed key allowlist", async () => {
+    await reportToCloud(makeResultsWithProse(), 1000, makeConfig({ cloudToken: "sweny_pk_abc" }), "triage");
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body as string);
+    const allowed = new Set([
+      "owner",
+      "repo",
+      "status",
+      "workflow",
+      "duration_ms",
+      "recommendation",
+      "findings",
+      "findings_count",
+      "duplicate_count",
+      "severity_counts",
+      "highest_severity",
+      "novel_count",
+      "pr_url",
+      "pr_number",
+      "issue_url",
+      "issue_identifier",
+      "issues_found",
+      "nodes",
+      "action_version",
+      "runner_os",
+    ]);
+    expect(Object.keys(body).filter((k) => !allowed.has(k))).toEqual([]);
+    for (const n of body.nodes) expect(Object.keys(n).sort()).toEqual(["id", "name", "status"]);
+  });
+
+  it("recommendation is clamped to the enum; free text becomes 'other'", async () => {
+    const send = async (rec: unknown) => {
+      fetchMock.mockClear();
+      const r = new Map([
+        ["investigate", { status: "success" as const, data: { recommendation: rec }, toolCalls: [] }],
+      ]);
+      await reportToCloud(r, 1, makeConfig({ cloudToken: "sweny_pk_abc" }), "triage");
+      const [, init] = fetchMock.mock.calls[0];
+      return JSON.parse(init.body as string).recommendation;
+    };
+    expect(await send("implement")).toBe("implement");
+    expect(await send("  Escalate ")).toBe("escalate");
+    expect(await send("skip")).toBe("skip");
+    expect(await send("implement the null guard in src/auth.ts")).toBe("other");
+    expect(await send(42)).toBe("other");
+  });
 });

@@ -90,6 +90,8 @@ nodes:
       - WebSearch
   create_pr:
     name: Open Pull Request
+    # A failed PR must not stop the run: the only edge is an unconditional one to notify.
+    on_fail: continue
     instruction: >-
       Open a pull request for the fix:
 

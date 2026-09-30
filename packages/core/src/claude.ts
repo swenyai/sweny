@@ -11,10 +11,41 @@
 
 import { query, createSdkMcpServer, tool as sdkTool, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import type { Claude, Tool, ToolContext, NodeResult, ToolCall, JSONSchema, Logger, McpServerConfig } from "./types.js";
+import type {
+  Claude,
+  Tool,
+  ToolContext,
+  NodeResult,
+  NodeUsage,
+  ToolCall,
+  JSONSchema,
+  Logger,
+  McpServerConfig,
+} from "./types.js";
 import { consoleLogger } from "./types.js";
 
 const SYSTEM_PROMPT = `You are a step in an automated workflow. Execute the instruction precisely using the tools available to you. Be thorough but concise. When you're done, summarize your findings and results.`;
+
+/**
+ * Built-in tools disallowed for the route-evaluation (`evaluate`) and
+ * reflection/judge (`ask`) calls.
+ *
+ * These are pure classification calls over prior-node data that can be
+ * attacker-influenceable (a prior node summarizes an untrusted issue body,
+ * PR diff, log line, etc.). They must never be able to mutate the workspace
+ * or shell out, regardless of any node's own `disallowed_tools` policy.
+ * `maxTurns: 1` already bounds them; this removes the powerful built-ins
+ * from the model's context entirely as structural defense-in-depth.
+ */
+export const CLASSIFICATION_DISALLOWED_TOOLS = [
+  "Bash",
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "NotebookEdit",
+  "WebFetch",
+  "WebSearch",
+] as const;
 
 /** How sweny resolves which credentials reach the Claude Code subprocess. */
 export type SwenyAuthMode = "auto" | "api-key" | "oauth";
@@ -176,6 +207,40 @@ async function interruptStream(stream: { interrupt?: () => Promise<unknown> } | 
   }
 }
 
+/**
+ * Extract shape-only usage/cost from an SDK `result` message.
+ *
+ * Reads `total_cost_usd`, `usage` (in/out/cache tokens), and `num_turns` off
+ * the terminal result. Returns undefined when the message carries none of
+ * them (mocks, older SDKs) so callers leave `NodeResult.usage` absent rather
+ * than shipping an all-zero object. NEVER touches `result`/prompt text.
+ */
+function extractUsage(resultMsg: unknown): NodeUsage | undefined {
+  const m = resultMsg as {
+    total_cost_usd?: unknown;
+    num_turns?: unknown;
+    usage?: {
+      input_tokens?: unknown;
+      output_tokens?: unknown;
+      cache_read_input_tokens?: unknown;
+      cache_creation_input_tokens?: unknown;
+    };
+  };
+  const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  const u = m.usage;
+  const usage: NodeUsage = {
+    costUsd: num(m.total_cost_usd),
+    inputTokens: num(u?.input_tokens),
+    outputTokens: num(u?.output_tokens),
+    cacheReadTokens: num(u?.cache_read_input_tokens),
+    cacheCreationTokens: num(u?.cache_creation_input_tokens),
+    numTurns: num(m.num_turns),
+  };
+  // Drop the object entirely when the SDK gave us nothing usable, so a
+  // mocked/legacy run reports no usage instead of a misleading zero-cost run.
+  return Object.values(usage).some((v) => v !== undefined) ? usage : undefined;
+}
+
 export class ClaudeClient implements Claude {
   private model: string | undefined;
   private maxTurns: number;
@@ -281,6 +346,12 @@ export class ClaudeClient implements Claude {
     // result. Left undefined when the SDK didn't provide it, so the
     // tryParseJSON heuristic remains the fallback (e.g. mocks, older results).
     let structuredOutput: unknown;
+    // Token + cost accounting. Read off the SDK's terminal `result` message
+    // (present on both success and error subtypes). Shape-only: counts and
+    // cost, never any prompt/response text. Left undefined when the SDK
+    // emitted no usage (mocks, older SDKs), so `usage` stays absent rather
+    // than shipping zeroes that read as a real (free) run.
+    let usage: NodeUsage | undefined;
 
     // Timeout / abort wiring (back-compat: only armed when requested).
     // A single AbortController drives both an optional caller signal and an
@@ -382,6 +453,10 @@ export class ClaudeClient implements Claude {
           }
         } else if (message.type === "result") {
           const resultMsg = message as SDKResultMessage;
+          // Capture token/cost accounting off the terminal result. Present on
+          // both success and error subtypes; shape-only. Attached to every
+          // return below (including early-termination and error paths).
+          usage = extractUsage(resultMsg);
           if (resultMsg.subtype === "success" && "result" in resultMsg) {
             // terminal_reason was added in @anthropic-ai/claude-agent-sdk v0.2.91.
             // When the turn budget is exhausted the SDK still emits subtype='success'
@@ -402,6 +477,7 @@ export class ClaudeClient implements Claude {
                   ...(partial !== "" ? { summary: partial } : {}),
                 },
                 toolCalls,
+                ...(usage ? { usage } : {}),
               };
             }
             response = resultMsg.result;
@@ -422,6 +498,7 @@ export class ClaudeClient implements Claude {
               status: "failed",
               data: { error: prefix + (errors?.join("\n") ?? "Execution failed") },
               toolCalls,
+              ...(usage ? { usage } : {}),
             };
           }
         }
@@ -458,6 +535,7 @@ export class ClaudeClient implements Claude {
       status: "success",
       data: { summary: response, ...parsedData },
       toolCalls,
+      ...(usage ? { usage } : {}),
     };
   }
 
@@ -469,7 +547,7 @@ export class ClaudeClient implements Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
-  }): Promise<string> {
+  }): Promise<string | null> {
     const { question, context, choices, timeoutMs, signal } = opts;
     const prompt = buildEvaluatePrompt(question, context, choices);
 
@@ -490,6 +568,15 @@ export class ClaudeClient implements Claude {
           env,
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
+          // Route evaluation is a pure classification call over
+          // possibly-attacker-influenceable prior-node data. Never let it
+          // shell out or mutate, regardless of the node's own policy.
+          // Disable ALL built-in tools (SDK `tools: []`); no MCP servers are passed.
+          // The disallow list below stays as a second layer.
+          tools: [],
+          mcpServers: {},
+          strictMcpConfig: true,
+          disallowedTools: [...CLASSIFICATION_DISALLOWED_TOOLS],
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
           ...(abort ? { abortController: abort.controller } : {}),
           ...(this.model ? { model: this.model } : {}),
@@ -502,33 +589,32 @@ export class ClaudeClient implements Claude {
           if (resultMsg.subtype === "success" && "result" in resultMsg) {
             response = resultMsg.result;
           } else {
-            // Distinguish an SDK-level failure from a genuinely ambiguous
-            // model answer. Without this, both fall through to validIds[0]
-            // and log the same "Could not parse route choice" warning, so an
-            // operator cannot tell them apart. Short-circuit below so the
-            // ambiguous-answer warning never fires on top of this one.
+            // Fail closed. An SDK-level failure (non-success subtype) is NOT a
+            // routing decision. Signal it to the caller (null) so the executor
+            // takes an explicit default edge or terminates — never the old
+            // fall-through to the first choice, which silently routed an outage
+            // down the first conditional edge (e.g. filing a real issue/PR).
             sdkFailed = true;
             this.logger.warn(
-              `claude.evaluate: SDK returned non-success subtype "${resultMsg.subtype}" — falling back to first choice.`,
+              `claude.evaluate: SDK returned non-success subtype "${resultMsg.subtype}" — failing closed (no route decision).`,
             );
           }
         }
       }
     } catch (err: any) {
       if (abort?.reason() === "timeout") {
-        this.logger.warn(`Evaluate query timed out after ${timeoutMs}ms. Falling back to first choice.`);
+        this.logger.warn(`Evaluate query timed out after ${timeoutMs}ms. Failing closed (no route decision).`);
       } else {
-        this.logger.warn(`Evaluate query failed: ${err.message}. Falling back to first choice.`);
+        this.logger.warn(`Evaluate query failed: ${err.message}. Failing closed (no route decision).`);
       }
-      return choices[0].id;
+      return null;
     } finally {
       abort?.clear();
       await interruptStream(stream);
     }
 
-    // An SDK-level failure already logged a distinct message; do not also emit
-    // the ambiguous-answer warning, which would misattribute the cause.
-    if (sdkFailed) return choices[0].id;
+    // An SDK-level failure already logged a distinct message; fail closed.
+    if (sdkFailed) return null;
 
     const text = response.trim().replace(/^["']|["']$/g, "");
     const validIds = choices.map((c) => c.id);
@@ -540,9 +626,12 @@ export class ClaudeClient implements Claude {
     const match = validIds.find((id) => text.includes(id));
     if (match) return match;
 
-    // Fallback
-    this.logger.warn(`Could not parse route choice from: "${text.slice(0, 100)}". Falling back to first choice.`);
-    return validIds[0];
+    // Fail closed. An unparseable answer is not a decision. Returning
+    // validIds[0] here is the fail-open bug: on a node with a single
+    // conditional out-edge, the "first choice" is always that edge, so a
+    // garbled model answer would always take it. Signal no-decision instead.
+    this.logger.warn(`Could not parse route choice from: "${text.slice(0, 100)}". Failing closed (no route decision).`);
+    return null;
   }
 
   async ask(opts: {
@@ -578,6 +667,15 @@ export class ClaudeClient implements Claude {
           env,
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
+          // Reflection and judge scoring are pure classification calls over
+          // possibly-attacker-influenceable prior-node data. Deny the powerful
+          // built-ins so they can never shell out or mutate the workspace.
+          // Disable ALL built-in tools (SDK `tools: []`); no MCP servers are passed.
+          // The disallow list below stays as a second layer.
+          tools: [],
+          mcpServers: {},
+          strictMcpConfig: true,
+          disallowedTools: [...CLASSIFICATION_DISALLOWED_TOOLS],
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
           ...(abort ? { abortController: abort.controller } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
