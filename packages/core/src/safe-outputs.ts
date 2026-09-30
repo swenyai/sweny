@@ -9,7 +9,7 @@
  * the write, so this holds on every harness.
  *
  * Order of checks per intent (all deterministic): declared type, workflow
- * ceiling, actor trust, expiry, skill, target pin, issue pin, shape and size,
+ * ceiling, actor trust, expiry, skill, target pin, issue pin, state, shape and size,
  * labels, title prefix, dedupe, node cap, run cap. An optional model screen runs last
  * over the intents that passed and can only veto them.
  */
@@ -22,6 +22,7 @@ import type {
   SafeOutputPin,
   SafeOutputReceipt,
   SafeOutputsPolicy,
+  SafeOutputState,
   SafeOutputType,
   Skill,
   Tool,
@@ -49,6 +50,8 @@ export interface SafeOutputIntent {
   labels?: string[];
   head?: string;
   base?: string;
+  /** issue_state: `reopen` or `close`. */
+  state?: string;
   dedupe_key?: string;
   /** ms since epoch when the intent was recorded. */
   recordedAt: number;
@@ -84,7 +87,7 @@ export function createEmitOutputTool(
     name: EMIT_OUTPUT_TOOL,
     access: "read",
     description:
-      "Request a write (comment, issue, pr or label). This does NOT write anything now: sweny checks the request " +
+      "Request a write (comment, issue, pr, label or issue_state). This does NOT write anything now: sweny checks the request " +
       "against this step's declared outputs and limits, and applies it after the step finishes. Call once per write. " +
       `Allowed types here: ${types.join(", ")}.`,
     input_schema: {
@@ -99,8 +102,9 @@ export function createEmitOutputTool(
         },
         number: {
           type: "string",
-          description: "Issue or PR number (GitHub) or issue id (Linear), for comment and label",
+          description: "Issue or PR number (GitHub) or issue id (Linear), for comment, label and issue_state",
         },
+        state: { type: "string", enum: ["reopen", "close"], description: "issue_state only: reopen or close" },
         labels: { type: "array", items: { type: "string" }, description: "Labels to add" },
         head: { type: "string", description: "pr only: branch with the changes" },
         base: { type: "string", description: "pr only: target branch (default main)" },
@@ -123,7 +127,7 @@ export function createEmitOutputTool(
         return { recorded: false, error: `limit reached: at most ${max} ${type} write(s) from this step` };
       }
       const intent: SafeOutputIntent = { type, recordedAt: now() };
-      const fields = ["title", "body", "target", "number", "head", "base", "dedupe_key"] as const;
+      const fields = ["title", "body", "target", "number", "head", "base", "state", "dedupe_key"] as const;
       for (const f of fields) {
         const v = str(input?.[f]);
         if (v !== undefined) intent[f] = v;
@@ -150,6 +154,7 @@ export function safeOutputsInstruction(declarations: SafeOutputDeclaration[], in
       const pin = resolvePin(d.number, input);
       parts.push(pin ? `only issue or PR ${pin} (the number may be omitted)` : "pinned issue not set for this run");
     }
+    if (d.type === "issue_state") parts.push(d.state ? `only to ${d.state}` : "reopen or close");
     if (d.title_prefix) parts.push(`title prefix "${d.title_prefix}"`);
     if (d.type === "label" && d.labels?.length) parts.push(`only these labels: ${d.labels.join(", ")}`);
     return `- ${d.type}: ${parts.join(", ")}`;
@@ -307,6 +312,11 @@ const APPLIERS: Record<string, Partial<Record<SafeOutputType, Applier>>> = {
       needsTarget: true,
       build: (i) => ({ repo: i.target, issue_number: Number(i.number), labels: i.labels }),
     },
+    issue_state: {
+      tool: "github_set_issue_state",
+      needsTarget: true,
+      build: (i) => ({ repo: i.target, issue_number: Number(i.number), state: i.state }),
+    },
   },
   linear: {
     comment: {
@@ -324,6 +334,11 @@ const APPLIERS: Record<string, Partial<Record<SafeOutputType, Applier>>> = {
         ...(i.labels ? { labelIds: i.labels } : {}),
       }),
     },
+    issue_state: {
+      tool: "linear_set_issue_state",
+      needsTarget: false,
+      build: (i) => ({ issueId: i.number, state: i.state }),
+    },
   },
 };
 
@@ -338,6 +353,7 @@ interface ResolvedWrite {
   labels?: string[];
   head?: string;
   base?: string;
+  state?: SafeOutputState;
 }
 
 function dedupeKey(w: ResolvedWrite, explicit: string | undefined): string {
@@ -353,6 +369,7 @@ function dedupeKey(w: ResolvedWrite, explicit: string | undefined): string {
         [...(w.labels ?? [])].sort().join(","),
         w.head ?? "",
         w.base ?? "",
+        ...(w.state ? [w.state] : []),
       ];
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 }
@@ -496,9 +513,11 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       refuse(type === "comment" && !body.trim() ? "missing body" : "body too long", at);
       continue;
     }
-    // Issue pin: a pinned comment or label may only land on that issue or PR.
+    // Issue pin: a pinned comment, label or state change may only land on that issue or PR.
+    // issue_state never guesses an issue: it needs the pin or a number on the intent.
+    const onIssue = type === "comment" || type === "label" || type === "issue_state";
     let issueRef = intent.number?.trim().replace(/^#/, "") || undefined;
-    if ((type === "comment" || type === "label") && decl.number !== undefined) {
+    if (onIssue && decl.number !== undefined) {
       const pin = resolvePin(decl.number, o.input);
       if (!pin) {
         refuse("pinned issue is not set for this run", at);
@@ -510,9 +529,23 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       }
       issueRef = pin;
     }
-    if ((type === "comment" || type === "label") && !issueRef) {
+    if (onIssue && !issueRef) {
       refuse("missing number", at);
       continue;
+    }
+    // State change: reopen or close, inside the declared direction.
+    let state: SafeOutputState | undefined;
+    if (type === "issue_state") {
+      const asked = intent.state?.trim().toLowerCase() || decl.state;
+      if (asked !== "reopen" && asked !== "close") {
+        refuse("state must be reopen or close", at);
+        continue;
+      }
+      if (decl.state && asked !== decl.state) {
+        refuse("state outside the declared state", at);
+        continue;
+      }
+      state = asked;
     }
     if (via === "github" && issueRef !== undefined && !/^[1-9][0-9]*$/.test(issueRef)) {
       refuse("number must be an issue or PR number", at);
@@ -552,11 +585,11 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       continue;
     }
 
-    // A Linear comment's issue ID does not encode or enforce its declared team.
+    // A Linear comment's (or state change's) issue ID does not encode or enforce its declared team.
     // Resolve it through the configured read tool and carry its immutable ID to
     // the write. Missing lookup support or unverifiable membership fails closed.
     let number = issueRef;
-    if (via === "linear" && type === "comment" && target) {
+    if (via === "linear" && (type === "comment" || type === "issue_state") && target) {
       const lookup = o.skills.get(via)?.tools.find((t) => t.name === "linear_get_issue" && t.access === "read");
       let issue: { id?: unknown; team?: { id?: unknown } } | undefined;
       try {
@@ -584,7 +617,8 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       ...(target ? { target } : {}),
       ...(number !== undefined ? { number } : {}),
       ...(title ? { title } : {}),
-      ...(type !== "label" ? { body } : {}),
+      ...(type === "comment" || type === "issue" || type === "pr" ? { body } : {}),
+      ...(state ? { state } : {}),
       ...(labels ? { labels } : {}),
       ...(type === "pr" ? { head: intent.head, ...(intent.base ? { base: intent.base } : {}) } : {}),
     };
@@ -669,6 +703,7 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
 function printPreview(w: ResolvedWrite, logger: Logger): void {
   const where = `${w.target ?? ""}${w.number ? `#${w.number}` : ""}`;
   logger.info(`  [staged] ${w.type} via ${w.via}${where ? ` -> ${where}` : ""}${w.title ? `: ${w.title}` : ""}`);
+  if (w.state) logger.info(`    state: ${w.state}`);
   if (w.labels?.length) logger.info(`    labels: ${w.labels.join(", ")}`);
   if (w.type === "pr") logger.info(`    head: ${w.head} -> base: ${w.base ?? "main"}`);
   if (w.body) {

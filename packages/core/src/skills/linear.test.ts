@@ -133,3 +133,59 @@ describe("linear_get_issue authorization fields", () => {
     expect(sent.variables).toEqual({ id: "ABC-42" });
   });
 });
+
+describe("linear_set_issue_state", () => {
+  const setState = linear.tools.find((t) => t.name === "linear_set_issue_state")!;
+  const states = [
+    { id: "s-done", type: "completed", position: 2 },
+    { id: "s-todo", type: "unstarted", position: 5 },
+    { id: "s-backlog", type: "backlog", position: 1 },
+    { id: "s-todo-first", type: "unstarted", position: 3 },
+    { id: "s-cancel", type: "canceled", position: 9 },
+  ];
+  const found = (type: string) =>
+    gqlResponse({ issue: { id: "uuid-1", state: { type }, team: { states: { nodes: states } } } });
+  const updated = gqlResponse({ issueUpdate: { success: true, issue: { id: "uuid-1", identifier: "OFF-1" } } });
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is a write tool", () => {
+    expect(setState.access).toBe("write");
+  });
+
+  it("reopens a closed issue into the team's first unstarted state", async () => {
+    fetchMock.mockResolvedValueOnce(found("completed")).mockResolvedValueOnce(updated);
+    await setState.handler({ issueId: "OFF-1", state: "reopen" }, ctx());
+    const sent = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(sent.variables).toEqual({ id: "uuid-1", input: { stateId: "s-todo-first" } });
+  });
+
+  it("closes an open issue into the first completed state", async () => {
+    fetchMock.mockResolvedValueOnce(found("started")).mockResolvedValueOnce(updated);
+    await setState.handler({ issueId: "OFF-1", state: "close" }, ctx());
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).variables.input).toEqual({ stateId: "s-done" });
+  });
+
+  it("does nothing when the issue is already in the requested state", async () => {
+    fetchMock.mockResolvedValueOnce(found("canceled"));
+    const out: any = await setState.handler({ issueId: "OFF-1", state: "close" }, ctx());
+    expect(out.issueUpdate.changed).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockResolvedValueOnce(found("unstarted"));
+    await setState.handler({ issueId: "OFF-1", state: "reopen" }, ctx());
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws for an unknown issue or state, without a mutation", async () => {
+    fetchMock.mockResolvedValueOnce(gqlResponse({ issue: null }));
+    await expect(setState.handler({ issueId: "OFF-9", state: "reopen" }, ctx())).rejects.toThrow(/not found/);
+    await expect(setState.handler({ issueId: "OFF-1", state: "delete" }, ctx())).rejects.toThrow(/reopen/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

@@ -20,6 +20,11 @@ describe("bindBuiltinWorkflow (#365)", () => {
       expect(o).toMatchObject({ via: "github", target: "acme/api" });
     expect(workflow.nodes.skip.outputs![0]).toMatchObject({ via: "github", target: "acme/api" });
     expect(workflow.nodes.create_pr.outputs![0]).toMatchObject({ via: "github", target: "acme/api" });
+    expect(workflow.nodes.skip.outputs!.find((o) => o.type === "issue_state")).toMatchObject({
+      via: "github",
+      target: "acme/api",
+      state: "reopen",
+    });
     for (const id of ["gather", "investigate", "create_issue", "skip"]) {
       expect(resolveNodePermissions(workflow.nodes[id], workflow).access, id).toBe("read");
     }
@@ -34,6 +39,7 @@ describe("bindBuiltinWorkflow (#365)", () => {
       // The Linear team comes from the agent (linear_list_teams), as before.
       expect(o.target).toBeUndefined();
     }
+    expect(workflow.nodes.skip.outputs!.find((o) => o.type === "issue_state")).toMatchObject({ via: "linear" });
     expect(workflow.nodes.create_pr.outputs![0]).toMatchObject({ via: "github", target: "acme/api" });
   });
 
@@ -49,6 +55,8 @@ describe("bindBuiltinWorkflow (#365)", () => {
     expect(workflow.nodes.skip.outputs).toBeUndefined();
     expect(workflow.nodes.skip.tools!.deny).toContain("github_create_issue");
     expect(workflow.nodes.skip.tools!.deny).not.toContain("linear_update_issue");
+    // Reopening a closed duplicate keeps working through the tracker's own tools.
+    expect(workflow.nodes.skip.tools!.deny).not.toContain("linear_set_issue_state");
 
     const gather = workflow.nodes.gather;
     expect(gather.permissions).toEqual({ access: "write", deny: ["write", "edit"] });

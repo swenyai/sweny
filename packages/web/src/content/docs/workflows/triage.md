@@ -242,13 +242,13 @@ Triage runs on sweny's own opinions ([permissions and safe outputs](/workflows/y
 | Node | Access | What it may write |
 |------|--------|-------------------|
 | `gather`, `investigate` | `read` | Nothing. Read skill tools only: no write tool, no shell, no file edits, on any agent. |
-| `create_issue` | `read` + outputs | Issues (at most 10) and +1 comments (at most 10), as safe outputs. |
-| `skip` | `read` + outputs | +1 comments (at most 10), as safe outputs. |
+| `create_issue` | `read` + outputs | Issues (at most 10), +1 comments (at most 10) and reopening closed duplicates (at most 10), as safe outputs. |
+| `skip` | `read` + outputs | +1 comments and reopening closed duplicates (at most 10 each), as safe outputs. |
 | `implement` | `write`, no web | The code change: file edits, tests, a local commit. No GitHub write tool. |
 | `create_pr` | `write` + outputs | Pushes the branch (git needs a shell); the PR itself (at most 1) is a safe output. |
 | `notify` | `write` | The notification. |
 
-The workflow caps the run at 25 writes and allows only `issue`, `comment` and `pr`. The agent requests each issue, comment and PR with `emit_output`; sweny checks it and files it after the step, through the `github` or `linear` skill. The next steps read the new issue's identifier and URL from `context.create_issue.safe_outputs`.
+The workflow caps the run at 25 writes and allows only `issue`, `comment`, `issue_state` and `pr`. The agent requests each issue, comment and PR with `emit_output`; sweny checks it and files it after the step, through the `github` or `linear` skill. The next steps read the new issue's identifier and URL from `context.create_issue.safe_outputs`.
 
 `sweny triage` pins every write to the tracker and repository you configured. When a provider cannot work that way, only the affected nodes keep their older write-capable shape, and the run prints which and why:
 
@@ -257,7 +257,7 @@ The workflow caps the run at 25 writes and allows only `issue`, `comment` and `p
 
 `sweny triage --stage` previews every issue, comment and PR instead of filing it, and stops before any code is pushed. `--dry-run` runs with no side effects at all.
 
-Behavior notes: a closed duplicate gets its +1 comment but is no longer reopened on Linear, since no safe output changes an issue's state; the comment says it is closed. On Codex, read-only steps have no shell, so `gather` and `investigate` see skill tools only.
+Behavior notes: a closed duplicate gets its +1 comment and is reopened (an `issue_state` output, reopen only). On Codex, read-only steps have no shell, so `gather` and `investigate` see skill tools only.
 
 ## Running the triage workflow
 

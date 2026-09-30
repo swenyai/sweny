@@ -17,7 +17,8 @@ import {
   type ApplySafeOutputsOptions,
   type SafeOutputIntent,
 } from "./safe-outputs.js";
-import type { SafeOutputDeclaration, Skill, Tool } from "./types.js";
+import { validateWorkflow } from "./schema.js";
+import type { SafeOutputDeclaration, SafeOutputType, Skill, Tool, Workflow } from "./types.js";
 
 function mkLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -47,6 +48,7 @@ function fakeGithub() {
       mk("github_create_issue", { number: 7, html_url: "https://example.test/7" }),
       mk("github_create_pr", { number: 8 }),
       mk("github_add_labels", [{ name: "bug" }]),
+      mk("github_set_issue_state", { number: 4, state: "open" }),
     ],
   };
   return { skill, calls };
@@ -649,5 +651,218 @@ describe("write stage: receipts carry what the API produced", () => {
     const r = await applySafeOutputs(o);
     expect(r.receipts[0].ref).toBe(3);
     expect(r.receipts[0].url).toBeUndefined();
+  });
+});
+
+describe("write stage: issue_state", () => {
+  const reopen = (over: Partial<SafeOutputIntent> = {}) => intent({ type: "issue_state", state: "reopen", ...over });
+  const decl = (over: Partial<SafeOutputDeclaration> = {}): SafeOutputDeclaration[] => [
+    { type: "issue_state", ...over },
+  ];
+
+  it("applies through github_set_issue_state with the pinned repo and number", async () => {
+    const { o, gh } = opts({ declarations: decl({ number: 12 }), intents: [reopen({ number: "#12" })] });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts).toEqual([
+      expect.objectContaining({ type: "issue_state", status: "applied", via: "github", target: "acme/api" }),
+    ]);
+    expect(gh.calls).toEqual([
+      expect.objectContaining({
+        tool: "github_set_issue_state",
+        input: { repo: "acme/api", issue_number: 12, state: "reopen" },
+      }),
+    ]);
+  });
+
+  it("a pin is required: no number and no declared pin is refused, nothing is written", async () => {
+    const { o, gh } = opts({ declarations: decl(), intents: [reopen()] });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts[0]).toMatchObject({ status: "refused", reason: "missing number" });
+    expect(gh.calls).toEqual([]);
+  });
+
+  it("a declared pin fills a missing number and refuses any other issue", async () => {
+    const fills = opts({ declarations: decl({ number: 12 }), intents: [reopen()] });
+    await applySafeOutputs(fills.o);
+    expect(fills.gh.calls[0].input).toMatchObject({ issue_number: 12 });
+
+    const other = opts({ declarations: decl({ number: 12 }), intents: [reopen({ number: "13" })] });
+    const r = await applySafeOutputs(other.o);
+    expect(r.receipts[0]).toMatchObject({ status: "refused", reason: "issue outside the declared number" });
+    expect(other.gh.calls).toEqual([]);
+  });
+
+  it("an input pin reads the run input, and an empty input refuses", async () => {
+    const set = opts({
+      declarations: decl({ number: { input: "issue" } }),
+      intents: [reopen()],
+      input: { issue: 9 },
+    });
+    await applySafeOutputs(set.o);
+    expect(set.gh.calls[0].input).toMatchObject({ issue_number: 9 });
+
+    const empty = opts({ declarations: decl({ number: { input: "issue" } }), intents: [reopen()], input: {} });
+    const r = await applySafeOutputs(empty.o);
+    expect(r.receipts[0]).toMatchObject({ status: "refused", reason: "pinned issue is not set for this run" });
+    expect(empty.gh.calls).toEqual([]);
+  });
+
+  it("the declared state limits the direction, and a missing or unknown state is refused", async () => {
+    const cases: [Partial<SafeOutputIntent>, SafeOutputDeclaration[], string][] = [
+      [{ state: "close", number: "5" }, decl({ state: "reopen" }), "state outside the declared state"],
+      [{ state: "delete", number: "5" }, decl(), "state must be reopen or close"],
+      [{ state: undefined, number: "5" }, decl(), "state must be reopen or close"],
+    ];
+    for (const [over, declarations, reason] of cases) {
+      const { o, gh } = opts({ declarations, intents: [reopen(over)] });
+      const r = await applySafeOutputs(o);
+      expect(r.receipts[0]).toMatchObject({ status: "refused", reason });
+      expect(gh.calls).toEqual([]);
+    }
+    // The declared state is the default when the agent omits it.
+    const dflt = opts({ declarations: decl({ state: "close" }), intents: [reopen({ state: undefined, number: "5" })] });
+    await applySafeOutputs(dflt.o);
+    expect(dflt.gh.calls[0].input).toMatchObject({ state: "close" });
+  });
+
+  it("non-numeric GitHub numbers and other targets are refused", async () => {
+    const bad = opts({ declarations: decl(), intents: [reopen({ number: "12; rm" })] });
+    expect((await applySafeOutputs(bad.o)).receipts[0]).toMatchObject({
+      reason: "number must be an issue or PR number",
+    });
+    const away = opts({ declarations: decl(), intents: [reopen({ number: "5", target: "evil/repo" })] });
+    expect((await applySafeOutputs(away.o)).receipts[0]).toMatchObject({
+      reason: "target outside the declared target",
+    });
+    expect(bad.gh.calls.concat(away.gh.calls)).toEqual([]);
+  });
+
+  it("caps: the node cap defaults to 1, max raises it, the run cap still applies", async () => {
+    const two = [reopen({ number: "1" }), reopen({ number: "2" })];
+    const one = opts({ declarations: decl(), intents: two });
+    expect((await applySafeOutputs(one.o)).receipts.map((x) => x.reason)).toEqual([undefined, "node cap reached"]);
+
+    const ten = opts({ declarations: decl({ max: 10 }), intents: two });
+    expect((await applySafeOutputs(ten.o)).receipts.map((x) => x.status)).toEqual(["applied", "applied"]);
+
+    const run = opts({ declarations: decl({ max: 10 }), intents: two, policy: { max: 1 } });
+    expect((await applySafeOutputs(run.o)).receipts.map((x) => x.reason)).toEqual([undefined, "run cap reached"]);
+  });
+
+  it("dedupe: the same change twice is applied once, reopen and close on one issue are different writes", async () => {
+    const { o, gh } = opts({
+      declarations: decl({ max: 5 }),
+      intents: [
+        reopen({ number: "4" }),
+        reopen({ number: "4" }),
+        reopen({ number: "4", state: "close" }),
+        reopen({ number: "4", dedupe_key: "k" }),
+        reopen({ number: "5", dedupe_key: "k" }),
+      ],
+    });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts.map((x) => [x.status, x.reason])).toEqual([
+      ["applied", undefined],
+      ["skipped", "duplicate"],
+      ["applied", undefined],
+      ["applied", undefined],
+      ["skipped", "duplicate"],
+    ]);
+    expect(gh.calls.map((c) => c.input.state)).toEqual(["reopen", "close", "reopen"]);
+  });
+
+  it("staged: previews the state change and writes nothing", async () => {
+    const { o, gh, logger } = opts({ staged: true, declarations: decl(), intents: [reopen({ number: "4" })] });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts).toEqual([{ type: "issue_state", status: "staged", via: "github", target: "acme/api" }]);
+    expect(gh.calls).toEqual([]);
+    const printed = logger.info.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(printed).toContain("[staged] issue_state via github -> acme/api#4");
+    expect(printed).toContain("state: reopen");
+  });
+
+  it("receipts are metadata only: no state text, title or body", async () => {
+    const { o } = opts({ declarations: decl(), intents: [reopen({ number: "4", body: "secret words" })] });
+    const r = await applySafeOutputs(o);
+    expect(JSON.stringify(r.receipts)).not.toContain("secret words");
+    expect(Object.keys(r.receipts[0]).sort()).toEqual(["ref", "status", "target", "type", "via"]);
+  });
+
+  it("Linear: verifies the team, then calls linear_set_issue_state with the canonical id", async () => {
+    const read = vi.fn(async () => ({ issue: { id: "uuid-1", team: { id: "team-a" } } }));
+    const write = vi.fn(async () => ({
+      issueUpdate: { success: true, issue: { id: "uuid-1", identifier: "OFF-4", url: "https://linear.app/x/OFF-4" } },
+    }));
+    const mk = (name: string, handler: Tool["handler"], access: "read" | "write"): Tool => ({
+      name,
+      handler,
+      access,
+      description: "",
+      input_schema: { type: "object" },
+    });
+    const skill: Skill = {
+      ...fakeGithub().skill,
+      id: "linear",
+      tools: [mk("linear_get_issue", read, "read"), mk("linear_set_issue_state", write, "write")],
+    };
+    const { o } = opts({
+      declarations: decl({ via: "linear", target: "team-a", state: "reopen" }),
+      intents: [reopen({ number: "OFF-4" })],
+      nodeSkills: ["linear"],
+      skills: new Map([["linear", skill]]),
+    });
+    const r = await applySafeOutputs(o);
+    expect(r.receipts[0]).toMatchObject({ status: "applied", via: "linear", ref: "OFF-4" });
+    expect(read).toHaveBeenCalledWith({ id: "OFF-4" }, expect.anything());
+    expect(write).toHaveBeenCalledWith({ issueId: "uuid-1", state: "reopen" }, expect.anything());
+
+    // Another team: refused, nothing written.
+    write.mockClear();
+    read.mockResolvedValueOnce({ issue: { id: "uuid-1", team: { id: "team-b" } } });
+    const again = opts({
+      declarations: decl({ via: "linear", target: "team-a" }),
+      intents: [reopen({ number: "OFF-4" })],
+      nodeSkills: ["linear"],
+      skills: new Map([["linear", skill]]),
+    });
+    expect((await applySafeOutputs(again.o)).receipts[0]).toMatchObject({
+      status: "refused",
+      reason: "issue outside the declared team",
+    });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("emit_output accepts issue_state and records its state; the instruction names the direction", async () => {
+    const buffer: SafeOutputIntent[] = [];
+    const tool = createEmitOutputTool([{ type: "issue_state", state: "reopen", max: 2 }], buffer, () => T0);
+    const r: any = await tool.handler({ type: "issue_state", state: "reopen", number: 4 }, {} as never);
+    expect(r.recorded).toBe(true);
+    expect(buffer[0]).toMatchObject({ type: "issue_state", state: "reopen", number: "4" });
+    expect(safeOutputsInstruction([{ type: "issue_state", state: "reopen", number: 4 }])).toContain("only to reopen");
+  });
+});
+
+describe("issue_state: workflow validation", () => {
+  const wf = (outputs: SafeOutputDeclaration[], safe_outputs?: { allow: SafeOutputType[] }) =>
+    ({
+      id: "w",
+      name: "W",
+      entry: "a",
+      nodes: { a: { name: "A", instruction: "x", skills: ["github"], outputs } },
+      edges: [],
+      ...(safe_outputs ? { safe_outputs } : {}),
+    }) as Workflow;
+
+  it("accepts number and state on issue_state, and the ceiling applies to it", () => {
+    expect(validateWorkflow(wf([{ type: "issue_state", state: "reopen", number: { input: "n" } }]))).toEqual([]);
+    const codes = validateWorkflow(wf([{ type: "issue_state" }], { allow: ["comment"] })).map((e) => e.code);
+    expect(codes).toEqual(["OUTPUT_NOT_ALLOWED"]);
+  });
+
+  it("rejects state on any other type, and via a skill that cannot apply it", () => {
+    const codes = validateWorkflow(wf([{ type: "comment", state: "reopen" }])).map((e) => e.code);
+    expect(codes).toEqual(["UNSUPPORTED_OUTPUT"]);
+    const via = validateWorkflow(wf([{ type: "issue_state", via: "sentry" }])).map((e) => e.code);
+    expect(via).toEqual(["UNSUPPORTED_OUTPUT"]);
   });
 });
