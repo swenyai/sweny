@@ -259,9 +259,19 @@ export const nodeToolsZ = z
 const retryInstructionAutoZ = z.object({ auto: z.literal(true) }).strict();
 const retryInstructionReflectZ = z.object({ reflect: z.string().min(1) }).strict();
 
+/**
+ * Ceiling on `retry.max`. Each retry attempt re-invokes the agent on the
+ * node (full model spend), so an unbounded value here is an unbounded spend
+ * multiplier per node, independent of the workflow-level `max_steps` budget.
+ * 10 comfortably covers every declared workflow today (max observed: 1) while
+ * still catching a fat-fingered value (e.g. a missing digit) at author time
+ * instead of at runtime. See #325.
+ */
+const NODE_RETRY_MAX_CEILING = 10;
+
 export const nodeRetryZ = z
   .object({
-    max: z.number().int().min(1),
+    max: z.number().int().min(1).max(NODE_RETRY_MAX_CEILING),
     instruction: z.union([z.string().min(1), retryInstructionAutoZ, retryInstructionReflectZ]).optional(),
   })
   .strict();
@@ -981,7 +991,7 @@ export const workflowJsonSchema = {
             required: ["max"],
             additionalProperties: false,
             properties: {
-              max: { type: "integer", minimum: 1 },
+              max: { type: "integer", minimum: 1, maximum: 10 },
               instruction: {
                 oneOf: [
                   { type: "string", minLength: 1 },

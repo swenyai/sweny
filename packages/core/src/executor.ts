@@ -448,6 +448,25 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         node: currentId,
       });
 
+      // #325: a retry attempt re-invokes the agent on this node (full model
+      // spend) exactly like a fresh node visit, so it counts against the same
+      // `stepCount`/`maxSteps` budget. Checked BEFORE buildRetryPreamble so no
+      // paid reflection call happens once the budget is exhausted. On
+      // exhaustion, record a failed result and emit node:exit so observers
+      // never see node:enter without a matching node:exit.
+      stepCount++;
+      if (stepCount > maxSteps) {
+        const budgetError =
+          `step budget exceeded: workflow '${workflow.id}' ran ${stepCount} steps (max_steps: ${maxSteps}) ` +
+          `while retrying node '${currentId}' (attempt ${attempt + 1}/${retry.max}). Lower 'retry.max' on the ` +
+          `offending node or raise 'max_steps' if the workflow legitimately needs more steps.`;
+        result = { ...result, status: "failed", data: { ...result.data, error: budgetError } };
+        results.set(currentId, result);
+        trace.steps.push({ node: currentId, status: "failed", iteration, retryAttempt: attempt });
+        safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
+        throw new Error(budgetError);
+      }
+
       const preamble = await buildRetryPreamble({
         retry,
         evalFailures: outcome.failures,

@@ -756,7 +756,7 @@ Triggered ONLY by eval failure, not by tool/API errors and not by
 
 ```yaml
 retry:
-  max: integer                      # ≥ 1
+  max: integer                      # 1-10
   instruction:                      # optional
     | string                        # static preamble
     | { auto: true }                # LLM-generated diagnosis (default prompt)
@@ -789,6 +789,11 @@ node (initial + N retries × 2 calls each). Workflow authors set the
 ceiling via `max`.
 
 ### Trace and observer events
+
+Each retry attempt also counts as one step against the workflow's
+`max_steps` budget, same as an ordinary node visit. When the budget is
+exhausted mid-retry, the node is recorded as failed and execution throws
+before any further LLM call (including autonomous reflection).
 
 Each attempt is recorded as its own `TraceStep` with a `retryAttempt`
 field (0-indexed). The executor emits a `node:retry` observer event
