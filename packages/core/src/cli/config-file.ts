@@ -183,7 +183,7 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 
 # ── Agent sandbox ─────────────────────────────────────────────────────
 # See https://docs.sweny.ai/advanced/agent-sandbox/
-# sandbox: auto                          # auto (sandbox if supported, else warn) | strict | off
+# sandbox: off                           # off (local default) | auto (CI default: sandbox if supported, else warn) | strict
 # sandbox-allowed-domains: [internal.example.com]   # extra hosts agent commands may reach
 # env-passthrough: [NPM_TOKEN]           # extra env vars the agent may see ("*" = all)
 

@@ -30,7 +30,7 @@ MCP servers that SWEny wires for a skill get their credentials explicitly, so th
 
 ## Sandbox
 
-By default (`sandbox: auto`, locally and in CI), the agent's shell commands run in the Claude Code sandbox whenever the host supports it:
+In CI (`CI=true`) the default is `sandbox: auto`: the agent's shell commands run in the Claude Code sandbox whenever the host supports it. Locally the default is `off`, so nothing changes on your laptop (private registries, docker, cargo and go keep working) unless you opt in. When sandboxed:
 
 - Network egress is limited to an allowlist: source hosting and package registries (`github.com`, `api.github.com`, `*.githubusercontent.com`, `registry.npmjs.org`, `pypi.org`, `proxy.golang.org`, `crates.io`, `rubygems.org`, ...), plus the provider hosts of the node's skills (`api.linear.app` for `linear`, `*.sentry.io` for `sentry`, `*.datadoghq.com` for `datadog`, ...), plus your `sandbox-allowed-domains`.
 - Commands cannot opt out of the sandbox.
@@ -46,13 +46,13 @@ Three modes:
 
 | Mode | Host supports the sandbox | Host does not |
 |------|---------------------------|---------------|
-| `auto` (default) | Sandboxed | One loud warning naming what is missing, then runs **unsandboxed**. Unattended CI never breaks on a missing dependency. |
+| `auto` (default in CI) | Sandboxed | One loud warning naming what is missing, then runs **unsandboxed**. Unattended CI never breaks on a missing dependency. |
 | `strict` | Sandboxed | The node **fails closed** with the same message. Never runs unsandboxed. |
-| `off` | Not sandboxed | Not sandboxed |
+| `off` (default locally) | Not sandboxed | Not sandboxed |
 
 Env scoping and untrusted-input fencing apply in every mode.
 
-On Ubuntu 23.10 and later, AppArmor can block the unprivileged user namespaces bubblewrap needs. SWEny reports this in the warning. The fix is `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, which changes a host kernel setting, so the Action only applies it when you set `SWENY_SANDBOX: strict` in the step's `env`.
+On Ubuntu 23.10 and later, AppArmor can block the unprivileged user namespaces bubblewrap needs, and GitHub-hosted `ubuntu-24.04` runners do: there `auto` currently warns and runs unsandboxed. SWEny reports this in the warning. The fix is `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, which changes a host kernel setting, so the Action only applies it when you set `SWENY_SANDBOX: strict` in the step's `env`.
 
 :::note[Scope]
 The sandbox covers the agent's shell commands. SWEny's own skill tools run in the SWEny process, and MCP servers run outside the sandbox; both only receive the credentials wired for them.
@@ -68,13 +68,13 @@ Workflow input (issues, alerts, tickets), earlier steps' output, and `context:` 
 
 | `.sweny.yml` | Env var | Values | Default |
 |--------------|---------|--------|---------|
-| `sandbox` | `SWENY_SANDBOX` | `auto`, `strict`, `off` (see [Sandbox](#sandbox)) | `auto` |
+| `sandbox` | `SWENY_SANDBOX` | `auto`, `strict`, `off` (see [Sandbox](#sandbox)) | `auto` in CI, `off` locally |
 | `sandbox-allowed-domains` | `SWENY_SANDBOX_ALLOWED_DOMAINS` | List of hosts; `*.example.com` wildcards allowed | none |
 | `env-passthrough` | `SWENY_ENV_PASSTHROUGH` | List of env var names; `"*"` inherits everything (not recommended) | none |
 
 ```yaml
 # .sweny.yml
-sandbox: auto
+sandbox: strict
 sandbox-allowed-domains: [internal.example.com]
 env-passthrough: [NPM_TOKEN]
 ```

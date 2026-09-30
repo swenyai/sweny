@@ -143,7 +143,7 @@ export interface ClaudeClientOptions {
   /**
    * SDK sandbox for agent commands: `auto` (sandbox when the host supports
    * it, else warn and run unsandboxed), `strict` (sandbox or fail), `off`.
-   * Default: `SWENY_SANDBOX`, else `auto`.
+   * Default: `SWENY_SANDBOX`, else `auto` when CI is truthy, `off` otherwise.
    */
   sandbox?: SandboxMode;
   /** Extra hosts sandboxed commands may reach. Default: `SWENY_SANDBOX_ALLOWED_DOMAINS`. */
@@ -335,7 +335,7 @@ export class ClaudeClient implements Claude {
     } = opts;
     const effectiveModel = model ?? this.model;
 
-    // #360: run agent commands in the SDK sandbox. `auto` (default) falls
+    // #360: run agent commands in the SDK sandbox. `auto` (default in CI) falls
     // back to unsandboxed with one loud warning when the host cannot sandbox;
     // `strict` fails the node here instead.
     const sandbox = resolveAgentSandbox({

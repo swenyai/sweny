@@ -9,13 +9,13 @@
  *  1. {@link buildAgentEnv}: the subprocess env is an allowlist, not a copy.
  *  2. {@link resolveAgentSandbox}: the SDK `sandbox` option is enabled with a
  *     network allowlist and the agent's own credentials denied to sandboxed
- *     commands. `auto` (default) falls back to unsandboxed with one loud
+ *     commands. `auto` (default in CI) falls back to unsandboxed with one loud
  *     warning when the host cannot sandbox; `strict` fails closed.
  *
  * Configuration (env wins over `.sweny.yml`, see `applyAgentFileConfig` in
  * cli/config-file.ts):
  *   SWENY_ENV_PASSTHROUGH          / env-passthrough          extra var names ("*" = inherit all)
- *   SWENY_SANDBOX                  / sandbox                  auto (default) | strict | off
+ *   SWENY_SANDBOX                  / sandbox                  auto | strict | off (default: auto in CI, off locally)
  *   SWENY_SANDBOX_ALLOWED_DOMAINS  / sandbox-allowed-domains  extra hosts for sandboxed commands
  */
 
@@ -245,16 +245,19 @@ export function resolveAgentAccess(skillIds: readonly string[], skills: Map<stri
 // ─── SDK sandbox ─────────────────────────────────────────────────
 
 /**
- * `off`: never sandbox. `auto` (default, CI included): sandbox when the host
- * supports it, otherwise warn once and run unsandboxed so unattended CI never
- * breaks on a missing dependency. `strict`: sandbox or fail closed.
+ * `off`: never sandbox (default for local runs, so "it's your repo" keeps
+ * working: private registries, docker, cargo, go). `auto` (default when CI is
+ * truthy): sandbox when the host supports it, otherwise warn once and run
+ * unsandboxed so unattended CI never breaks on a missing dependency.
+ * `strict`: sandbox or fail closed.
  */
 export type SandboxMode = "off" | "auto" | "strict";
 
 /**
  * Parse the sandbox mode from the explicit `mode` or `SWENY_SANDBOX`.
- * Accepts `off|false|0`, `auto|""`, `strict|on|true|1` (`on` is an alias for
- * `strict`). Unknown values warn and fall back to `auto`.
+ * Accepts `off|false|0`, `auto`, `strict|on|true|1` (`on` is an alias for
+ * `strict`). Unset or unknown (with a warning) uses the default: `auto` when
+ * `CI` is truthy, `off` otherwise. An explicit value always wins.
  */
 export function resolveSandboxMode(
   env: Record<string, string | undefined>,
@@ -264,8 +267,10 @@ export function resolveSandboxMode(
   const raw = (mode ?? env.SWENY_SANDBOX ?? "").trim().toLowerCase();
   if (raw === "off" || raw === "false" || raw === "0") return "off";
   if (raw === "strict" || raw === "on" || raw === "true" || raw === "1") return "strict";
-  if (raw !== "auto" && raw !== "") logger?.warn(`SWENY_SANDBOX="${raw}" is not one of off|auto|strict; using auto`);
-  return "auto";
+  if (raw === "auto") return "auto";
+  const fallback: SandboxMode = truthy(env.CI) ? "auto" : "off";
+  if (raw !== "") logger?.warn(`SWENY_SANDBOX="${raw}" is not one of off|auto|strict; using ${fallback}`);
+  return fallback;
 }
 
 /** Functional bubblewrap check: can it actually create a sandbox on this host? */

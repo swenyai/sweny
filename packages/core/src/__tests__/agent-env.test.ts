@@ -109,9 +109,17 @@ describe("resolveAgentAccess", () => {
 });
 
 describe("resolveSandboxMode", () => {
-  it("defaults to auto everywhere, CI included", () => {
-    expect(resolveSandboxMode({})).toBe("auto");
+  it("defaults to off locally and auto in CI", () => {
+    expect(resolveSandboxMode({})).toBe("off");
+    expect(resolveSandboxMode({ CI: "false" })).toBe("off");
     expect(resolveSandboxMode({ CI: "true" })).toBe("auto");
+  });
+
+  it("an explicit value wins both ways", () => {
+    expect(resolveSandboxMode({ SWENY_SANDBOX: "auto" })).toBe("auto");
+    expect(resolveSandboxMode({ SWENY_SANDBOX: "strict" })).toBe("strict");
+    expect(resolveSandboxMode({ CI: "true", SWENY_SANDBOX: "off" })).toBe("off");
+    expect(resolveSandboxMode({}, "auto")).toBe("auto");
   });
 
   it("parses off / strict and the on alias", () => {
@@ -122,10 +130,11 @@ describe("resolveSandboxMode", () => {
     expect(resolveSandboxMode({ SWENY_SANDBOX: "off" }, "strict")).toBe("strict");
   });
 
-  it("unknown value warns and falls back to auto", () => {
+  it("unknown value warns and falls back to the default", () => {
     const warn = vi.fn();
-    expect(resolveSandboxMode({ SWENY_SANDBOX: "maybe" }, undefined, { warn })).toBe("auto");
-    expect(warn).toHaveBeenCalledOnce();
+    expect(resolveSandboxMode({ CI: "true", SWENY_SANDBOX: "maybe" }, undefined, { warn })).toBe("auto");
+    expect(resolveSandboxMode({ SWENY_SANDBOX: "maybe" }, undefined, { warn })).toBe("off");
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -163,7 +172,7 @@ describe("resolveAgentSandbox", () => {
 
   it("auto on a supported host: settings with default + node + configured hosts, degrade not fail", () => {
     const { settings, error, warning } = resolveAgentSandbox({
-      env: { SWENY_SANDBOX_ALLOWED_DOMAINS: "internal.example.com, *.corp.example" },
+      env: { CI: "true", SWENY_SANDBOX_ALLOWED_DOMAINS: "internal.example.com, *.corp.example" },
       nodeDomains: ["api.linear.app"],
       probe: () => undefined,
     });
@@ -312,7 +321,7 @@ describe("ClaudeClient scoped env + sandbox wiring", () => {
     expect(opts().env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
-  it("run: auto on a supported host passes the sandbox option with node hosts (CI and local)", async () => {
+  it("run: CI default (auto) on a supported host passes the sandbox option; local default passes none", async () => {
     await new ClaudeClient({ sandboxProbe: supported }).run({
       instruction: "x",
       context: {},
@@ -324,6 +333,11 @@ describe("ClaudeClient scoped env + sandbox wiring", () => {
 
     mockQuery.mockClear();
     vi.stubEnv("CI", "");
+    await new ClaudeClient({ sandboxProbe: supported }).run({ instruction: "x", context: {}, tools: [] });
+    expect(opts().sandbox).toBeUndefined();
+
+    mockQuery.mockClear();
+    vi.stubEnv("SWENY_SANDBOX", "auto");
     await new ClaudeClient({ sandboxProbe: supported }).run({ instruction: "x", context: {}, tools: [] });
     expect(opts().sandbox?.enabled).toBe(true);
   });
