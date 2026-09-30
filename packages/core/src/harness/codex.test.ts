@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
 import * as fs from "node:fs";
+import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -560,6 +561,48 @@ describe.skipIf(!haveDist)("CodexHarness skill tools over the tool bridge (needs
 // A descendant that ignores SIGTERM and holds inherited stdout/stderr open
 // exercises process-tree cleanup, not just the immediate fake CLI's exit.
 describe.skipIf(process.platform === "win32")("CodexHarness descendant cleanup", () => {
+  it("preserves a host once-signal handler's asynchronous graceful shutdown", async () => {
+    const dir = fs.mkdtempSync(path.join(tmpdir(), "sweny-codex-host-"));
+    const pidFile = path.join(dir, "pids.json");
+    try {
+      // CI builds core before testing. Fail rather than skip if it is missing.
+      const distHarness = path.resolve(here, "../../dist/harness/codex.js");
+      expect(fs.existsSync(distHarness)).toBe(true);
+      await new Promise<void>((resolve, reject) => {
+        execFile(
+          process.execPath,
+          [path.join(here, "fakes/codex-descendant.mjs"), "--host", distHarness, pidFile],
+          { timeout: 5000, killSignal: "SIGKILL" },
+          (err) => (err ? reject(err) : resolve()),
+        );
+      });
+      expect(fs.readFileSync(`${pidFile}.graceful`, "utf8")).toBe("done");
+      const { descendant } = JSON.parse(fs.readFileSync(pidFile, "utf8"));
+      await vi.waitFor(() => {
+        let alive = true;
+        try {
+          process.kill(descendant, 0);
+          if (process.platform === "linux") alive = !/\) Z /.test(fs.readFileSync(`/proc/${descendant}/stat`, "utf8"));
+        } catch {
+          alive = false;
+        }
+        expect(alive).toBe(false);
+      });
+    } finally {
+      if (fs.existsSync(pidFile)) {
+        const pids = JSON.parse(fs.readFileSync(pidFile, "utf8"));
+        for (const pid of [pids.parent, pids.descendant]) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            /* already stopped */
+          }
+        }
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.each(["timeout", "signal", "exit"] as const)("bounds %s cleanup after the CLI exits first", async (mode) => {
     const dir = fs.mkdtempSync(path.join(tmpdir(), "sweny-codex-reap-"));
     const pidFile = path.join(dir, "pids.json");

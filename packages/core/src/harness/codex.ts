@@ -299,7 +299,7 @@ function trackChild(child: ChildProcess): void {
     };
     process.on("exit", cleanup);
     // Detached POSIX groups no longer receive our terminal's signals. Clean
-    // them up explicitly while preserving any host application's handlers.
+    // them up before host once-handlers remove themselves during dispatch.
     for (const signal of ["SIGINT", "SIGTERM"] as const) {
       const onSignal = () => {
         cleanup();
@@ -308,7 +308,7 @@ function trackChild(child: ChildProcess): void {
           process.kill(process.pid, signal);
         }
       };
-      process.on(signal, onSignal);
+      process.prependListener(signal, onSignal);
     }
   }
 }
@@ -622,7 +622,7 @@ export class CodexHarness implements AgentHarness {
       killTimer = setTimeout(() => {
         stopChild(child, "SIGKILL");
         // An escaped descendant or failed OS kill must not retain this await
-        // through inherited pipes. Cancellation has already failed the run.
+        // through inherited pipes after cancellation or leader exit.
         child.stdin?.destroy();
         child.stdout?.destroy();
         child.stderr?.destroy();
