@@ -322,6 +322,9 @@ export const safeOutputDeclarationZ = z
     title_prefix: z.string().min(1).max(64).optional(),
     labels: z.array(z.string().min(1)).min(1).optional(),
     expires: z.string().regex(SAFE_OUTPUT_EXPIRES_PATTERN).optional(),
+    number: z
+      .union([z.string().min(1), z.number().int().min(1), z.object({ input: z.string().min(1) }).strict()])
+      .optional(),
   })
   .strict();
 
@@ -731,6 +734,13 @@ export function validateWorkflow(
           nodeId,
         });
       }
+      if (out.number !== undefined && out.type !== "comment" && out.type !== "label") {
+        errors.push({
+          code: "UNSUPPORTED_OUTPUT",
+          message: `Node "${nodeId}" output "${out.type}" pins number, which only applies to comment and label outputs`,
+          nodeId,
+        });
+      }
     }
   }
 
@@ -960,6 +970,20 @@ export const workflowJsonSchema = {
           type: "string",
           pattern: SAFE_OUTPUT_EXPIRES_PATTERN.source,
           description: "Drop an intent older than this when the write stage runs (e.g. 30m, 2h, 7d).",
+        },
+        number: {
+          description:
+            "comment / label: the only issue or PR this output may write to (GitHub number, Linear identifier), or { input: <name> } to pin it to a run input.",
+          oneOf: [
+            { type: "string", minLength: 1 },
+            { type: "integer", minimum: 1 },
+            {
+              type: "object",
+              required: ["input"],
+              additionalProperties: false,
+              properties: { input: { type: "string", minLength: 1 } },
+            },
+          ],
         },
       },
     },

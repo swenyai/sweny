@@ -59,7 +59,9 @@ safe_outputs:
 
 - A node with `outputs` runs read-only: it gets read tools plus `emit_output`, no write tools, no external skill MCP servers, and no shell, file-write, edit, fetch or subagent built-ins.
 - `emit_output` only records the request. After the node succeeds, sweny checks each request (declared type, allowed types, trusted actor, expiry, target, labels, title prefix, duplicates, caps) and then calls the skill's own write tool. An optional `safe_outputs.screen` model call can veto the writes, never approve extra ones.
-- `permissions: read` makes any node read-only without outputs. `permissions: { deny: [shell, net] }` removes those built-in tool classes on any agent runtime. `strict: true` loads only the MCP servers sweny injects.
+- A `comment` or `label` output can be pinned to one issue or PR with `number`: a literal (`number: 42`, `number: OFF-12`) or a run input (`number: { input: pr_number }`). A request for any other issue is refused, a request with no number uses the pin, and an empty pinned input refuses the write.
+- The next nodes see what was written as `context.<node>.safe_outputs`: one receipt per request with `type`, `status` (`applied`, `staged`, `skipped`, `refused`, ...), and for an applied write its `ref` (issue number or identifier) and `url`. That is how a later step uses the identifier of an issue it did not create itself. An agent cannot fake this field.
+- `permissions: read` makes any node read-only without outputs. `permissions: { deny: [shell, net] }` removes those built-in tool classes on any agent runtime. `strict: true` loads only the MCP servers sweny injects; on an agent runtime that cannot keep the user's own MCP servers out, `strict` refuses the node before it starts.
 - Preview with `sweny workflow run <file> --stage` (or `safe_outputs.staged: true`): sweny prints each write it would make and makes none. `--dry-run` also stages.
 - Nodes without `permissions` or `outputs` keep today's behavior.
 

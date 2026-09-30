@@ -3,6 +3,13 @@ name: Implement Fix
 workflow_type: pr_review
 description: Implement a code fix for an issue and open a pull request
 entry: analyze
+# Ceiling (#365). `write` because implement and create_pr change code in the
+# checkout and push a branch; analyze and skip narrow to `read`. External
+# writes (the PR, a comment on the issue) happen only as declared outputs.
+permissions: write
+safe_outputs:
+  allow: [comment, pr]
+  max: 3
 nodes:
   analyze:
     name: Analyze Issue
@@ -34,6 +41,8 @@ nodes:
     skills:
       - github
       - linear
+    # #365: analysis only. No write tool or write-capable built-in reaches it.
+    permissions: read
     output:
       type: object
       properties:
@@ -75,19 +84,26 @@ nodes:
       4. Stage and commit. Start the commit message with the issue identifier
          in brackets, e.g. `[OFF-1234] fix: guard null projectId`.
 
-      Stop after the commit. Do NOT push or open the PR — the dedicated `create_pr`
-      node handles that via `github_create_pr` and its eval gate is what unblocks
-      the rest of the workflow.
+      Stop after the commit. Do NOT push or open the PR: the dedicated `create_pr`
+      node pushes the branch and requests the PR.
 
       If the fix is too risky or complex, explain why and skip.
     skills:
       - github
-    # Same rationale as the triage workflow: keep the implement node focused
-    # on the repo. Bash stays available because `git add`/`git commit` and
-    # test runners are essential.
-    disallowed_tools:
-      - WebFetch
-      - WebSearch
+    # A write node on purpose (#365): the code change itself. It edits files
+    # and commits, which needs file edits and a shell (`git add`/`git commit`,
+    # test runners). Same rationale as the triage workflow: keep it on the
+    # repo, no web (`deny: [net]`, portable across harnesses), and no GitHub
+    # write tool (the PR is create_pr's declared output).
+    permissions:
+      access: write
+      deny: [net]
+    tools:
+      deny:
+        - github_create_pr
+        - github_create_issue
+        - github_add_comment
+        - github_add_labels
   create_pr:
     name: Open Pull Request
     # A failed PR must not stop the run: the only edge is an unconditional one to notify.
@@ -98,15 +114,18 @@ nodes:
 
       1. Push the branch to the remote.
 
-      2. Create the PR using `github_create_pr`. The PR title MUST start with the issue identifier in
-      brackets: `[{context.input.issueIdentifier}] type: short description` (e.g. `[OFF-1234] fix: guard
-      null projectId`).
+      2. Request the PR: with `emit_output` (type `pr`, `head` = the branch, `base` = the base branch,
+      default `main`) when you have it; sweny opens it after this step and reuses an open PR for the same
+      branch instead of failing. Without `emit_output`, call `github_create_pr`. The PR title MUST start
+      with the issue identifier in brackets: `[{context.input.issueIdentifier}] type: short description`
+      (e.g. `[OFF-1234] fix: guard null projectId`).
 
       3. Reference the original issue in the PR body. If the issue tracker is Linear, include the line
       "Fixes {context.input.issueIdentifier}" (e.g. "Fixes OFF-1234") so Linear links the PR and moves
       the issue to Done on merge.
 
-      4. Pass `labels: ["sweny", "agent", "task"]` to `github_create_pr` (or `["sweny", "agent", "feature"]` if the issue is a feature request).
+      4. Labels: add `task` (or `feature` if the issue is a feature request); `sweny` and `agent` are
+      always added.
 
 
       If context.prTemplate is provided, use it as the format for the PR body. Otherwise use a clear structure with:
@@ -117,27 +136,50 @@ nodes:
       sweny:run_id:{context.cloudRunId} -->
 
 
-      Return the PR URL.
+      Return the branch and the PR title you requested.
     skills:
       - github
+    # A write node on purpose (#365): pushing the branch ships the code change
+    # and needs git in a shell. The PR itself is a declared output, so the
+    # agent never holds the PR write; no GitHub write tool is registered here.
+    permissions: write
+    outputs:
+      - type: pr
+        max: 1
+        labels: [sweny, agent]
+    tools:
+      deny:
+        - github_create_pr
+        - github_create_issue
+        - github_add_comment
+        - github_add_labels
   notify:
     name: Notify
     instruction: |-
       Send a notification about the implementation result:
 
-      1. Include: issue reference, PR link, brief summary of changes.
-      2. Keep it concise — one message, not a wall of text.
+      1. Include: issue reference, PR link, brief summary of changes. The PR sweny opened is in
+         `context.create_pr.safe_outputs` (`ref` and `url` of the `applied` entry).
+      2. Keep it concise: one message, not a wall of text.
+      3. If any `safe_outputs` entry has status `staged`, this run is a preview: send nothing, and put the
+         notification you would have sent in your summary.
     skills:
       - slack
       - notification
   skip:
-    name: Skip — Too Complex
+    name: Skip - Too Complex
     instruction: |-
       The fix was determined to be too complex or risky for automated implementation.
-      Add a comment to the issue explaining what was found and why it needs manual attention.
+      Add a comment to the issue explaining what was found and why it needs manual attention
+      (with `emit_output` type `comment` when you have it).
     skills:
-      - github
       - linear
+      - github
+    # #365: one comment, and only on the issue this run is for.
+    outputs:
+      - type: comment
+        max: 1
+        number: { input: issueIdentifier }
 edges:
   - from: analyze
     to: notify

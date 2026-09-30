@@ -99,7 +99,7 @@ export const CONTRACT_CASE_NAMES = [
   "14 cleanup: nothing is left running or on disk after success, failure and abort",
   "15 sandbox wrapper: no native sandbox means the agent runs only inside the wrapper, and strict refuses without one",
   "16 policy deny: every class in policy.deny reaches the agent natively, or degrades and strict refuses",
-  "17 strict policy: MCP is exclusive for a write-capable node too",
+  "17 strict policy: MCP is exclusive for a write-capable node too, or strict refuses",
   "18 policy read-only: policy.readOnly alone is enforced and the skill tool channel survives",
 ] as const;
 
@@ -589,18 +589,24 @@ export function runContractSuite(
         }
       },
 
-      // 17 (#365)
-      async (skip) => {
+      // 17 (#365): `permissions.strict` asks for exclusive MCP. A harness that
+      // cannot exclude the user's own servers refuses before the agent starts.
+      async () => {
         const { h } = await fresh();
-        if (h.capabilities.mcp.exclusive === "none") return skip("mcp exclusive is none");
         fakes.script(DONE);
+        const before = fakes.captured().invocations;
         const r = await h.run(
           req({
-            policy: { readOnly: false, deny: [], egress: [], strict: true },
+            policy: { readOnly: false, deny: [], egress: [], strict: true, exclusiveMcp: true },
             tools: [lookupTool],
             mcpServers: { injected: { type: "stdio", command: "injected-server" } },
           }),
         );
+        if (h.capabilities.mcp.exclusive === "none") {
+          expect(r.status).toBe("failed");
+          expect(fakes.captured().invocations, "agent not started").toBe(before);
+          return;
+        }
         expect(r.status).toBe("success");
         const loaded = fakes.captured().mcpServersLoaded;
         expect(loaded).toContain("injected");

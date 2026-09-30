@@ -66,6 +66,7 @@ import {
   type SandboxWrapper,
 } from "./sandbox-wrapper.js";
 import { TOKEN_ENV } from "./tool-bridge/protocol.js";
+import { codexAuth, type AuthProbe } from "./auth.js";
 
 export { CODEX_CAPABILITIES };
 
@@ -180,6 +181,8 @@ export interface CodexHarnessOptions {
   toolBridgeShim?: { command: string; args: string[] };
   /** Grace period between SIGTERM and SIGKILL when stopping Codex (default: 2000 ms). */
   killGraceMs?: number;
+  /** Login probe for `preflight()` (test seam). Default: {@link codexAuth} over `process.env`. */
+  authProbe?: AuthProbe;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -379,6 +382,7 @@ export class CodexHarness implements AgentHarness {
   private killGraceMs: number;
   private preflightResult: Promise<{ ok: true; version: string } | { ok: false; reason: string }> | undefined;
   private version = "unknown";
+  private authProbe: AuthProbe;
 
   constructor(opts: CodexHarnessOptions = {}) {
     this.model = opts.model;
@@ -397,14 +401,26 @@ export class CodexHarness implements AgentHarness {
     this.codexCommand = opts.codexCommand ?? { command: process.env.SWENY_CODEX_PATH || "codex", args: [] };
     this.toolBridgeShim = opts.toolBridgeShim;
     this.killGraceMs = opts.killGraceMs ?? 2000;
+    this.authProbe = opts.authProbe ?? (() => codexAuth(process.env));
   }
 
   info(): HarnessInfo {
     return { id: this.id, version: this.version };
   }
 
+  /**
+   * Before any node runs (#339): the Codex CLI is installed and new enough,
+   * and Codex can authenticate (an API key, an access token, or `codex login`).
+   */
+  async preflight(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
+    const cli = await this.checkCli();
+    if (!cli.ok) return cli;
+    const auth = this.authProbe();
+    return auth.ok ? cli : { ok: false, reason: auth.reason };
+  }
+
   /** `codex --version`, checked against {@link MIN_CODEX_VERSION}. Cached per instance. */
-  preflight(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
+  private checkCli(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
     this.preflightResult ??= new Promise((resolve) => {
       const { command, args } = this.codexCommand;
       execFile(command, [...args, "--version"], { timeout: 30_000 }, (err, stdout) => {
@@ -827,7 +843,7 @@ export class CodexHarness implements AgentHarness {
 
     if (gate.refuse) return refused(gate.refuse);
 
-    const pre = await this.preflight();
+    const pre = await this.checkCli();
     if (!pre.ok) {
       this.logger.error(pre.reason);
       return tag({ status: "failed", data: { error: pre.reason }, toolCalls: [] });
@@ -1047,7 +1063,7 @@ export class CodexHarness implements AgentHarness {
       );
       return null;
     };
-    const pre = await this.preflight();
+    const pre = await this.checkCli();
     if (!pre.ok) return failClosed(pre.reason);
 
     const args = [

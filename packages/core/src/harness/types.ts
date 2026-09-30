@@ -51,6 +51,12 @@ export interface NodePolicy {
   /** Refuse instead of degrade when an opinion cannot be enforced. */
   strict: boolean;
   /**
+   * Only the MCP servers sweny passes may load, never the user's own config
+   * (`permissions.strict`, #365). A harness whose `mcp.exclusive` is `none`
+   * cannot honor it: reported in `degraded`, refused under `strict`.
+   */
+  exclusiveMcp?: boolean;
+  /**
    * Turn budget for the run. Set by adapters whose `turnLimit` is not native,
    * so the gate reports how the budget is kept (watchdog) or that it is not.
    */
