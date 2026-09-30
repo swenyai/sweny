@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, realpathSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SANDBOX_DOMAINS } from "../agent-env.js";
@@ -135,6 +136,8 @@ describe("SrtSandboxWrapper", () => {
       const settings = JSON.parse(await readFile(settingsPath, "utf8"));
       expect(settings.network.allowedDomains).toEqual(["api.linear.app"]);
       expect(settings.filesystem.allowWrite).toContain(wrapped.home);
+      expect(settings.filesystem.denyRead).toContain(path.dirname(path.dirname(wrapped.home)));
+      expect(settings.filesystem.allowRead).toEqual([wrapped.home]);
       expect(wrapped.env.HOME).toBe(wrapped.home);
       expect(existsSync(wrapped.home)).toBe(true);
     } finally {
@@ -142,6 +145,37 @@ describe("SrtSandboxWrapper", () => {
       await wrapped.cleanup(); // idempotent
     }
     expect(existsSync(wrapped.home)).toBe(false);
+  });
+
+  it("keeps custom scratch parents and siblings when cleaning up a run", async () => {
+    const scratchRoot = await mkdtemp(path.join(tmpdir(), "sweny-scratch-parent-"));
+    const sentinel = path.join(scratchRoot, "caller-owned.txt");
+    await writeFile(sentinel, "keep");
+    try {
+      const w = new SrtSandboxWrapper({ srtPath: "/opt/srt", scratchRoot });
+      const first = await w.wrap({ ...SPAWN, cwd: process.cwd(), egress: [] });
+      try {
+        const second = await w.wrap({ ...SPAWN, cwd: process.cwd(), egress: [] });
+        try {
+          const isolationRoot = path.join(realpathSync(scratchRoot), `sweny-sandbox-${process.getuid?.() ?? "user"}`);
+          expect(path.dirname(path.dirname(first.home))).toBe(isolationRoot);
+          expect(path.dirname(path.dirname(second.home))).toBe(isolationRoot);
+          expect(first.home).not.toBe(second.home);
+          await first.cleanup();
+          await first.cleanup();
+          expect(existsSync(first.home)).toBe(false);
+          expect(existsSync(second.home)).toBe(true);
+          expect(await readFile(sentinel, "utf8")).toBe("keep");
+        } finally {
+          await second.cleanup();
+        }
+      } finally {
+        await first.cleanup();
+      }
+      expect(existsSync(scratchRoot)).toBe(true);
+    } finally {
+      await rm(scratchRoot, { recursive: true, force: true });
+    }
   });
 });
 

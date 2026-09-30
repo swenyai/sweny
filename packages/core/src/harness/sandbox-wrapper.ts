@@ -19,7 +19,10 @@
  *   host network except through that proxy.
  * - filesystem: the workspace (cwd) and a scratch HOME are writable; the rest
  *   of the filesystem is read-only; the operator's credential files are
- *   unreadable. Dry runs (`readOnly`) leave the workspace read-only too.
+ *   unreadable. Sibling homes under the same configured scratch root are
+ *   hidden; only this run's HOME is exposed. Dry runs (`readOnly`) leave the
+ *   workspace read-only too. All concurrent credential-bearing adapters must
+ *   use the same scratch root; different roots are not mutually isolated.
  * - env: exactly the env the adapter passes (already scoped by agent-env.ts),
  *   with HOME, XDG dirs and TMPDIR pointed into the scratch HOME. On Linux the
  *   process also gets its own PID namespace, so it cannot read another
@@ -68,7 +71,7 @@ export interface SandboxWrapRequest extends AgentSpawn {
 
 /** The spawn to run instead, plus the scratch it owns. */
 export interface WrappedSpawn extends AgentSpawn {
-  /** Scratch HOME. Adapters may write config here (generated MCP config, copied auth) before spawning. */
+  /** Scratch HOME. Adapters sharing one scratch root may copy scoped auth/config here before spawning. */
   home: string;
   /** Remove the scratch HOME and the sandbox settings. Idempotent. */
   cleanup(): Promise<void>;
@@ -165,17 +168,27 @@ function real(p: string): string {
  */
 export function buildSrtSettings(
   req: Pick<SandboxWrapRequest, "cwd" | "egress" | "readOnly">,
-  opts: { home: string; credentialHome: string; exists?: (p: string) => boolean; credentialPaths?: readonly string[] },
+  opts: {
+    home: string;
+    credentialHome: string;
+    exists?: (p: string) => boolean;
+    credentialPaths?: readonly string[];
+    /** Shared wrapper storage to hide, with only `home` re-exposed. */
+    isolationRoot?: string;
+  },
 ): SrtSettings {
   const exists = opts.exists ?? existsSync;
   const allowedDomains = [...new Set(req.egress.map((d) => d.trim()).filter(isSrtDomainPattern))];
   const denyRead = (opts.credentialPaths ?? CREDENTIAL_PATHS)
     .map((rel) => (path.isAbsolute(rel) ? rel : path.join(opts.credentialHome, rel)))
     .filter((p) => exists(p));
+  // Deny the parent, not a snapshot of sibling homes: later-created runs
+  // must stay hidden too. srt allowRead carves out only our own HOME.
+  if (opts.isolationRoot) denyRead.push(opts.isolationRoot);
   const allowWrite = req.readOnly ? [opts.home] : [real(req.cwd), opts.home];
   return {
     network: { allowedDomains, deniedDomains: [], strictAllowlist: true, allowLocalBinding: false },
-    filesystem: { denyRead, allowRead: [], allowWrite, denyWrite: [] },
+    filesystem: { denyRead, allowRead: opts.isolationRoot ? [opts.home] : [], allowWrite, denyWrite: [] },
   };
 }
 
@@ -203,7 +216,12 @@ export interface SrtWrapperOptions {
   credentialHome?: string;
   /** Override {@link CREDENTIAL_PATHS} (relative to `credentialHome`, or absolute). */
   credentialPaths?: readonly string[];
-  /** Where scratch dirs are created. Default: `os.tmpdir()`. */
+  /**
+   * Storage parent, default `os.tmpdir()`. Runs share a per-user child under
+   * this directory, hidden except for their own HOME. Concurrent adapters
+   * carrying credentials must use the same parent; separate roots are not
+   * mutually isolated. The parent is caller-owned and never removed.
+   */
   scratchRoot?: string;
 }
 
@@ -214,7 +232,11 @@ export class SrtSandboxWrapper implements SandboxWrapper {
   constructor(private readonly opts: SrtWrapperOptions) {}
 
   async wrap(req: SandboxWrapRequest): Promise<WrappedSpawn> {
-    const dir = await mkdtemp(path.join(real(this.opts.scratchRoot ?? tmpdir()), "sweny-sbx-"));
+    const storageParent = real(this.opts.scratchRoot ?? tmpdir());
+    const sharedRoot = path.join(storageParent, `sweny-sandbox-${process.getuid?.() ?? "user"}`);
+    await mkdir(sharedRoot, { recursive: true, mode: 0o700 });
+    const isolationRoot = real(sharedRoot);
+    const dir = await mkdtemp(path.join(isolationRoot, "run-"));
     let cleaned = false;
     const cleanup = async () => {
       if (cleaned) return;
@@ -228,6 +250,7 @@ export class SrtSandboxWrapper implements SandboxWrapper {
         home,
         credentialHome: this.opts.credentialHome ?? homedir(),
         credentialPaths: this.opts.credentialPaths,
+        isolationRoot,
       });
       const settingsPath = path.join(dir, "srt-settings.json");
       await writeFile(settingsPath, JSON.stringify(settings, null, 2), { mode: 0o600 });
