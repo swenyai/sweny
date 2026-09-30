@@ -460,6 +460,7 @@ export function writeResultJson(results: Map<string, NodeResult>): Promise<void>
       else resolve();
     });
   });
+}
 
 // ── Markdown output (for GitHub Actions step summary) ───────────
 /**
