@@ -35,16 +35,29 @@ gh run watch "$run" -R "$REPO" --exit-status >/dev/null 2>&1 || {
   exit 1
 }
 
-for p in core studio mcp; do
-  printf '@sweny-ai/%s %s\n' "$p" "$(npm view "@sweny-ai/$p" version 2>/dev/null)"
+# The run log names what it published. npm serves new versions after a few
+# minutes, so wait for the registry to list them before checking anything.
+published=$(gh run view "$run" -R "$REPO" --log 2>/dev/null | grep -oE 'Published @sweny-ai/[a-z]+@[0-9][^ ]*' | sed 's/^Published //' | sort -u || true)
+[ -n "$published" ] || echo "release ${run} published nothing (no package changed)"
+for spec in $published; do
+  name=${spec%@*} ver=${spec##*@}
+  enc=$(printf '%s' "$name" | sed 's#/#%2f#')
+  for _ in $(seq 1 60); do
+    [ "$(curl -s "https://registry.npmjs.org/$enc" | jq -r --arg v "$ver" '.versions[$v].version // empty')" = "$ver" ] && break
+    sleep 10
+  done
+  printf '%s %s (gitHead %s)\n' "$name" "$ver" "$(npm view "$name@$ver" gitHead --prefer-online 2>/dev/null | cut -c1-8)"
 done
 
 if [ -n "$EXPECT" ]; then
-  v=$(npm view @sweny-ai/core version)
+  # shellcheck disable=SC2086
+  v=$(printf '%s\n' $published | grep '^@sweny-ai/core@' | sed 's/.*@//' | tail -1)
+  [ -n "$v" ] || v=$(npm view @sweny-ai/core version --prefer-online)
   # Run from an empty dir: inside the monorepo npx resolves the workspace package, not npm.
+  # --prefer-online skips a stale cached packument that does not list the new version yet.
   tmp=$(mktemp -d)
   # shellcheck disable=SC2086
-  if (cd "$tmp" && npx -y "@sweny-ai/core@$v" $HELP_ARGS --help 2>&1) | grep -qF -- "$EXPECT"; then
+  if (cd "$tmp" && npx -y --prefer-online "@sweny-ai/core@$v" $HELP_ARGS --help 2>&1) | grep -qF -- "$EXPECT"; then
     echo "@sweny-ai/core@$v contains: $EXPECT"
   else
     echo "@sweny-ai/core@$v does NOT contain: $EXPECT"
