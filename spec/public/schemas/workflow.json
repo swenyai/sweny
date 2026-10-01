@@ -368,6 +368,11 @@
     "description": {
       "type": "string"
     },
+    "spec_version": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$",
+      "description": "Workflow spec version as a positive integer string. Absent means 1. Older versions are migrated in memory on load; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version."
+    },
     "entry": {
       "type": "string",
       "minLength": 1,

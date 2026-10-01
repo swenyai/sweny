@@ -586,6 +586,8 @@ export interface Workflow {
   id: string;
   name: string;
   description: string;
+  /** Spec version, a positive integer string (e.g. "1"). Absent means "1". See `migrations.ts`. */
+  spec_version?: string;
   /** Optional. Defaults to "generic" when absent. Required on marketplace templates. */
   workflow_type?: WorkflowType;
   nodes: Record<string, Node>;
