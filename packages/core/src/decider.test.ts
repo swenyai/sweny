@@ -33,7 +33,9 @@ import {
   parseAnswers,
   resolveThresholds,
   systemOneProvider,
+  type AddressPolicy,
   type ChoiceAsk,
+  type LookupFn,
   type DeciderOperatorConfig,
   type DecisionProvider,
 } from "./decider.js";
@@ -134,6 +136,9 @@ const picking = (want: (keys: string[]) => string) => (s: Seen) => {
   return { json: choice(label, probs, 0.95) };
 };
 
+/** The fake server is on 127.0.0.1: tests allow loopback, as an operator running local Ollama would. */
+const LOCAL: AddressPolicy = { allowPrivate: true };
+
 const ASK: ChoiceAsk = {
   kind: "choice",
   instructions: "which?",
@@ -170,7 +175,7 @@ const op = (url: string, extra: Partial<DeciderOperatorConfig> = {}): DeciderOpe
 describe("systemOneProvider", () => {
   it("posts the System One body and parses a choice answer", async () => {
     const srv = await fakeServer({ json: choice("handle_high", { handle_high: 0.9, handle_low: 0.1 }, 0.9) });
-    const p = systemOneProvider({ baseUrl: srv.baseUrl + "/", model: "nimble" });
+    const p = systemOneProvider({ baseUrl: srv.baseUrl + "/", model: "nimble", policy: LOCAL });
     const out = await p.decide({ state: { a: 1 }, asks: { route: ASK } });
     expect(out.route).toMatchObject({ kind: "choice", label: "handle_high", confidence: 0.9 });
     expect({ ...out.route.probabilities }).toEqual({ handle_high: 0.9, handle_low: 0.1 });
@@ -185,7 +190,7 @@ describe("systemOneProvider", () => {
 
   it("sends the bearer key only when one is given", async () => {
     const srv = await fakeServer({ json: choice("handle_high", { handle_high: 1, handle_low: 0 }, 1) });
-    await systemOneProvider({ baseUrl: srv.baseUrl, model: "jev-latest", apiKey: "k-123" }).decide({
+    await systemOneProvider({ baseUrl: srv.baseUrl, model: "jev-latest", apiKey: "k-123", policy: LOCAL }).decide({
       state: "s",
       asks: { route: ASK },
     });
@@ -196,6 +201,7 @@ describe("systemOneProvider", () => {
     [400, "invalid_request"],
     [401, "unauthorized"],
     [403, "unauthorized"],
+    [302, "http_error"], // redirects are never followed
     [404, "http_error"],
     [422, "invalid_request"],
     [429, "rate_limited"],
@@ -204,13 +210,13 @@ describe("systemOneProvider", () => {
     [529, "overloaded"],
   ])("maps HTTP %i to %s", async (status, code) => {
     const srv = await fakeServer({ status, json: { error: "x" } });
-    const p = systemOneProvider({ baseUrl: srv.baseUrl, model: "m" });
+    const p = systemOneProvider({ baseUrl: srv.baseUrl, model: "m", policy: LOCAL });
     await expect(p.decide({ state: "s", asks: { route: ASK } })).rejects.toMatchObject({ code });
   });
 
   it("times out when no response arrives", async () => {
     const srv = await fakeServer({ hang: true });
-    const p = systemOneProvider({ baseUrl: srv.baseUrl, model: "m" });
+    const p = systemOneProvider({ baseUrl: srv.baseUrl, model: "m", policy: LOCAL });
     await expect(p.decide({ state: "s", asks: { route: ASK }, timeoutMs: 50 })).rejects.toMatchObject({
       code: "timeout",
     });
@@ -218,7 +224,7 @@ describe("systemOneProvider", () => {
 
   it("times out when the body stalls after the headers", async () => {
     const srv = await fakeServer({ stall: true });
-    const p = systemOneProvider({ baseUrl: srv.baseUrl, model: "m" });
+    const p = systemOneProvider({ baseUrl: srv.baseUrl, model: "m", policy: LOCAL });
     await expect(p.decide({ state: "s", asks: { route: ASK }, timeoutMs: 80 })).rejects.toMatchObject({
       code: "timeout",
     });
@@ -226,7 +232,7 @@ describe("systemOneProvider", () => {
 
   it("a refused connection is `network`, and the error names neither the URL nor the key", async () => {
     const url = await deadUrl();
-    const p = systemOneProvider({ baseUrl: url, model: "m", apiKey: "sk-secret-key-123456" });
+    const p = systemOneProvider({ baseUrl: url, model: "m", apiKey: "sk-secret-key-123456", policy: LOCAL });
     const err = await p.decide({ state: "s", asks: { route: ASK } }).catch((e) => e);
     expect(err).toBeInstanceOf(DecideError);
     expect(err.code).toBe("network");
@@ -353,33 +359,90 @@ describe("hashDecisionInput", () => {
 // ─── URL policy ─────────────────────────────────────────────────
 
 describe("decider URL policy", () => {
-  it.each<[string, boolean, RegExp | null]>([
-    ["https://api.typesafe.ai", false, null],
-    ["http://localhost:11434", false, /private/],
-    ["http://localhost:11434", true, null],
-    ["http://127.0.0.1:11434", false, /private/],
-    ["http://2130706433/", false, /private/], // 127.0.0.1 in decimal
-    ["http://10.1.2.3", false, /private/],
-    ["http://172.20.0.1", false, /private/],
-    ["http://192.168.1.10", false, /private/],
-    ["http://[::1]:11434", false, /private/],
-    ["http://[::1]:11434", true, null],
-    ["http://[fd12::1]", false, /private/],
-    ["http://169.254.169.254/latest", true, /metadata/],
-    ["http://[fe80::1]", true, /metadata/],
-    ["http://[::ffff:169.254.169.254]", true, /metadata/],
-    ["http://[::ffff:127.0.0.1]", false, /private/],
-    ["http://metadata.google.internal", true, /metadata/],
-    ["http://[fd00:ec2::254]", true, /metadata/],
-    ["http://0.0.0.0:11434", true, /metadata|reserved/],
-    ["file:///etc/passwd", true, /http or https/],
-    ["ftp://example.com", true, /http or https/],
-    ["https://user:pass@api.typesafe.ai", false, /credentials/],
-    ["not a url", false, /valid URL/],
-  ])("%s (allow_private %s)", (url, allow, problem) => {
-    const got = deciderUrlProblem(url, allow);
+  const pub = {};
+  const priv = { allowPrivate: true };
+  const loop = { loopbackOnly: true };
+  it.each<[string, AddressPolicy, RegExp | null]>([
+    ["https://api.typesafe.ai", pub, null],
+    ["http://localhost:11434", pub, null], // a name: judged by what it resolves to, on connect
+    ["http://127.0.0.1:11434", pub, /private/],
+    ["http://127.0.0.1:11434", priv, null],
+    ["http://127.0.0.1:11434", loop, null],
+    ["http://2130706433/", pub, /private/], // 127.0.0.1 in decimal
+    ["http://10.1.2.3", pub, /private/],
+    ["http://10.1.2.3", priv, null],
+    ["http://10.1.2.3", loop, /must be loopback/],
+    ["http://172.20.0.1", pub, /private/],
+    ["http://192.168.1.10", pub, /private/],
+    ["http://[::1]:11434", pub, /private/],
+    ["http://[::1]:11434", loop, null],
+    ["http://[fd12::1]", pub, /private/],
+    ["http://8.8.8.8", loop, /must be loopback/],
+    ["http://169.254.169.254/latest", priv, /metadata/],
+    ["http://[fe80::1]", priv, /metadata/],
+    ["http://[::ffff:169.254.169.254]", priv, /metadata/],
+    ["http://[::ffff:127.0.0.1]", pub, /private/],
+    ["http://metadata.google.internal", priv, /metadata/],
+    ["http://[fd00:ec2::254]", priv, /metadata/],
+    ["http://0.0.0.0:11434", priv, /metadata|reserved/],
+    ["file:///etc/passwd", priv, /http or https/],
+    ["ftp://example.com", priv, /http or https/],
+    ["https://user:pass@api.typesafe.ai", pub, /credentials/],
+    ["not a url", pub, /valid URL/],
+  ])("%s %j", (url, policy, problem) => {
+    const got = deciderUrlProblem(url, policy);
     if (problem === null) expect(got).toBeNull();
     else expect(got).toMatch(problem);
+  });
+});
+
+describe("DNS: the resolved address is checked, and the socket connects to it", () => {
+  /** A lookup that resolves every name to `address`. */
+  const resolvesTo =
+    (address: string, seen: string[] = []): LookupFn =>
+    (hostname, options, cb) => {
+      seen.push(hostname);
+      const family = address.includes(":") ? 6 : 4;
+      if (options.all) cb(null, [{ address, family }]);
+      else cb(null, address, family);
+    };
+
+  it.each<[string, AddressPolicy, RegExp]>([
+    ["10.0.0.5", {}, /private/],
+    ["169.254.169.254", { allowPrivate: true }, /metadata/],
+    ["127.0.0.1", {}, /private/],
+    ["10.0.0.5", { loopbackOnly: true }, /must be loopback/],
+  ])("a public name that resolves to %s is refused (%j), before any byte is sent", async (address, policy, msg) => {
+    const srv = await fakeServer({ json: confident("handle_high") });
+    const port = new URL(srv.baseUrl).port;
+    const p = systemOneProvider({
+      baseUrl: `http://decider.example.com:${port}`,
+      model: "m",
+      apiKey: "sk-should-not-leave",
+      policy,
+      lookup: resolvesTo(address),
+    });
+    const err = await p.decide({ state: "s", asks: { route: ASK } }).catch((e) => e);
+    expect(err).toBeInstanceOf(DecideError);
+    expect(err.code).toBe("blocked_address");
+    expect(err.message).toMatch(msg);
+    expect(srv.seen).toHaveLength(0);
+  });
+
+  it("an allowed name connects to the validated address (no second resolution)", async () => {
+    const srv = await fakeServer({ json: confident("handle_high") });
+    const port = new URL(srv.baseUrl).port;
+    const seen: string[] = [];
+    const p = systemOneProvider({
+      baseUrl: `http://decider.example.com:${port}`,
+      model: "m",
+      policy: { allowPrivate: true },
+      lookup: resolvesTo("127.0.0.1", seen),
+    });
+    const out = await p.decide({ state: "s", asks: { route: ASK } });
+    expect(out.route.label).toBe("handle_high");
+    expect(seen).toEqual(["decider.example.com"]);
+    expect(srv.seen[0].headers.host).toBe(`decider.example.com:${port}`);
   });
 });
 
@@ -765,12 +828,33 @@ describe("operator config and turning it off", () => {
     expect(trace.deciderOff).toBeUndefined();
   });
 
-  it("localhost without allow_private is refused before any HTTP", async () => {
+  it("a loopback address without allowPrivate is refused before any HTTP", async () => {
     const srv = await fakeServer({ json: confident("handle_low") });
     const { trace } = await runWith(wf(), "handle_high", { decider: op(srv.baseUrl, { allowPrivate: false }) });
     expect(srv.seen).toHaveLength(0);
-    expect(trace.deciderOff).toMatch(/allow_private/);
+    expect(trace.deciderOff).toMatch(/SWENY_DECIDER_ALLOW_PRIVATE/);
   });
+
+  it("a repo-content URL (loopbackOnly) reaches loopback but never gets the key", async () => {
+    const srv = await fakeServer({ json: confident("handle_low") });
+    const { results } = await runWith(wf(), "handle_high", {
+      decider: { url: srv.baseUrl, model: "nimble", loopbackOnly: true, apiKey: "sk-env-key", timeoutMs: 300 },
+    });
+    expect(results.has("handle_low")).toBe(true);
+    expect(srv.seen).toHaveLength(1);
+    expect(srv.seen[0].headers.authorization).toBeUndefined();
+  });
+
+  it.each(["https://evil.example.com", "http://10.0.0.5:11434", "http://decider.internal:11434"])(
+    "a repo-content URL that is not loopback (%s) is refused, with no request",
+    async (url) => {
+      const { trace } = await runWith(wf(), "handle_high", {
+        decider: { url, model: "nimble", loopbackOnly: true, apiKey: "sk-env-key" },
+      });
+      expect(trace.decisions).toBeUndefined();
+      expect(trace.deciderOff).toMatch(/must be loopback/);
+    },
+  );
 
   it("a metadata address is refused even with allow_private", async () => {
     const { trace } = await runWith(wf(), "handle_high", { decider: op("http://169.254.169.254") });
@@ -787,21 +871,64 @@ describe("operator config and turning it off", () => {
 describe("CLI operator config", () => {
   const file = { "decider.url": "http://localhost:11434", "decider.model": "nimble", "decider.allow_private": "true" };
 
-  it("reads .sweny.yml, env wins, the key only from SWENY_DECIDER_API_KEY", () => {
-    expect(operatorDeciderConfig(file, {}, false)).toEqual({
+  it("a .sweny.yml URL is loopback-only and never carries the key, whatever the env holds", () => {
+    expect(
+      operatorDeciderConfig(file, { SWENY_DECIDER_API_KEY: "k", SWENY_DECIDER_ALLOW_PRIVATE: "true" }, false),
+    ).toEqual({
       url: "http://localhost:11434",
       model: "nimble",
-      allowPrivate: true,
+      loopbackOnly: true,
     });
+    const remote = operatorDeciderConfig(
+      { ...file, "decider.url": "https://evil.example.com" },
+      { SWENY_DECIDER_API_KEY: "k" },
+      false,
+    );
+    expect(remote).toEqual({ url: "https://evil.example.com", model: "nimble", loopbackOnly: true });
+  });
+
+  it("an env URL gets the key; allow_private only from env; the file never sets either", () => {
     expect(
       operatorDeciderConfig(
         { ...file, "decider.api_key": "from-file" },
         { SWENY_DECIDER_URL: "https://api.typesafe.ai", SWENY_DECIDER_MODEL: "jev-latest", SWENY_DECIDER_API_KEY: "k" },
         false,
       ),
-    ).toEqual({ url: "https://api.typesafe.ai", model: "jev-latest", apiKey: "k", allowPrivate: true });
+    ).toEqual({ url: "https://api.typesafe.ai", model: "jev-latest", apiKey: "k" });
+    expect(
+      operatorDeciderConfig(
+        {},
+        { SWENY_DECIDER_URL: "http://127.0.0.1:11434", SWENY_DECIDER_MODEL: "m", SWENY_DECIDER_ALLOW_PRIVATE: "true" },
+        false,
+      ),
+    ).toEqual({ url: "http://127.0.0.1:11434", model: "m", allowPrivate: true });
     expect(operatorDeciderConfig({}, { SWENY_DECIDER_URL: "https://x.test" }, false)).toBeUndefined();
     expect(operatorDeciderConfig({}, {}, false)).toBeUndefined();
+  });
+
+  it("values come through the trusted reader, so a value it does not vouch for is ignored", () => {
+    const env = { SWENY_DECIDER_URL: "https://evil.example.com", SWENY_DECIDER_MODEL: "m", SWENY_DECIDER_API_KEY: "k" };
+    // A reader that vouches only for the key (the URL came from a committed .env, say).
+    const trusted = (k: string) => (k === "SWENY_DECIDER_API_KEY" ? env[k] : undefined);
+    expect(operatorDeciderConfig({ "decider.model": "m" }, env, false, trusted)).toBeUndefined();
+    expect(
+      operatorDeciderConfig({ "decider.url": "https://evil.example.com", "decider.model": "m" }, env, false, trusted),
+    ).toEqual({
+      url: "https://evil.example.com",
+      model: "m",
+      loopbackOnly: true,
+    });
+  });
+
+  it("end to end: a .sweny.yml URL pointing off the machine sends nothing, key or not", async () => {
+    const cfg = operatorDeciderConfig(
+      { "decider.url": "https://evil.example.com", "decider.model": "m" },
+      { SWENY_DECIDER_API_KEY: "sk-real" },
+      false,
+    );
+    const { trace } = await runWith(wf(), "handle_high", { decider: cfg as DeciderOperatorConfig });
+    expect(trace.decisions).toBeUndefined();
+    expect(trace.deciderOff).toMatch(/must be loopback/);
   });
 
   it("--no-decider parses to decider: false and turns the operator config off", () => {

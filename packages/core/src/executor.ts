@@ -44,7 +44,7 @@ import { evaluateAll, aggregateEval } from "./eval/index.js";
 import type { AggregateOutcome } from "./eval/index.js";
 import { evaluateRequires } from "./requires.js";
 import { evaluateExpression, isWhenExpression, parseExpression, whenLabel } from "./when.js";
-import type { ExpressionResult, ExpressionScope } from "./when.js";
+import type { ExpressionResult, ExpressionScope, ExprNode } from "./when.js";
 import { buildRetryPreamble } from "./retry.js";
 import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
@@ -619,6 +619,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // correctness gates and are never softened.
     let agentRunFailed = false;
     let currentInstruction = instruction;
+    // One structured-output repair per visit (#357), before any eval retry.
+    let repaired = false;
     const retry = node.retry;
     // Per-node execution model: node.model ?? workflow.model. When undefined,
     // claude.run falls back to its own client default (then Claude Code's).
@@ -716,7 +718,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       // Resume (#363): spend is journaled as it is reported, so a crash mid-node
       // does not hand the resumed run a fresh budget.
       const usageNode: string = currentId;
-      const usageAttempt = attempt;
+      // The repair call (at most one) shifts later attempts by one, so every agent call has its own key.
+      const usageAttempt = attempt + (repaired ? 1 : 0);
       let liveUsage: NodeUsage | undefined;
       const journalUsage = journal?.usage
         ? (u: NodeUsage) => {
@@ -737,7 +740,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
           instruction: currentInstruction,
           context,
           tools: trackedTools,
-          outputSchema: node.output,
+          outputSchema: harnessSchema(node.output),
           maxTurns: node.max_turns,
           disallowedTools: node.disallowed_tools,
           ...(denyClasses.length > 0 ? { deny: denyClasses } : {}),
@@ -824,7 +827,65 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       // configured. We synthesize an eval-shaped failure so the retry preamble
       // and trace bookkeeping below treat it identically. When no retry is
       // configured (or the budget is exhausted), it still hard-fails the node.
-      const missingRequired = findMissingRequiredFields(result.data, node.output);
+      // Output contract (#357): required fields present, declared types and
+      // enums respected, declared counts consistent. One repair round trip
+      // first, for every harness: the agent is told exactly what is wrong.
+      const contract = outputContractProblems(result.data, node.output);
+      if (contract.length > 0 && !repaired) {
+        repaired = true;
+        stepCount++;
+        if (stepCount > maxSteps) {
+          throw new Error(
+            `step budget exceeded: workflow '${workflow.id}' ran ${stepCount} steps (max_steps: ${maxSteps}) ` +
+              `while repairing node '${currentId}' output. Raise 'max_steps' if the workflow legitimately needs more steps.`,
+          );
+        }
+        const listed = contract.map((p) => `- ${p.field}: ${p.problem}`).join("\n");
+        logger.warn(`  output contract: ${contract.map((p) => p.field).join(", ")}; asking the agent once to fix it`, {
+          node: currentId,
+        });
+        safeObserve(
+          observer,
+          {
+            type: "node:warning",
+            node: currentId,
+            reason: "output contract violated; one repair attempt",
+            fields: contract.map((p) => p.field),
+          },
+          logger,
+        );
+        currentInstruction =
+          `Your previous output did not match this step's declared output schema:\n${listed}\n\n` +
+          `Do the step again and return the complete output with every listed field present and of the declared type.` +
+          `\n\n---\n\n${currentInstruction}`;
+        continue;
+      }
+      // Still wrong after the repair. A field an expression routes on is not a
+      // node failure: routes that read it fall through to the next rung
+      // (decider or agent) at routing time. Other missing required fields keep
+      // failing the node, as before.
+      const routedOn = routingFieldsOf(workflow, currentId);
+      const tolerated = contract.filter((p) => routedOn.has(p.field));
+      if (tolerated.length > 0) {
+        logger.warn(
+          `  output contract still violated for routing field(s) ${tolerated.map((p) => p.field).join(", ")}; ` +
+            `routes that read them fall through to the next rung`,
+          { node: currentId },
+        );
+        safeObserve(
+          observer,
+          {
+            type: "node:warning",
+            node: currentId,
+            reason: "routing fields missing or invalid after repair; their routes fall through",
+            fields: tolerated.map((p) => p.field),
+          },
+          logger,
+        );
+      }
+      const missingRequired = contract
+        .filter((p) => p.kind === "missing" && !routedOn.has(p.field))
+        .map((p) => p.field);
 
       let outcome: AggregateOutcome;
       if (missingRequired.length > 0) {
@@ -1424,20 +1485,172 @@ function getDeclaredRequiredFields(output: JSONSchema | undefined): string[] {
   return required.filter((r): r is string => typeof r === "string");
 }
 
+/** One way a node's emitted data breaks its declared output contract. */
+export interface ContractProblem {
+  field: string;
+  kind: "missing" | "invalid";
+  problem: string;
+}
+
+/** Keyword on an integer output property: the count sweny cross-checks against an array in the same output. */
+export const COUNT_OF_KEYWORD = "x-sweny-count-of";
+
+interface CountOf {
+  /** Top-level array property whose items are counted. */
+  array: string;
+  /** Item field -> allowed values; an item counts only when every listed field has one of them. */
+  where?: Record<string, unknown[]>;
+  /** Item fields that must be non-empty strings for the item to count. */
+  non_empty?: string[];
+}
+
+function typeMatches(t: unknown, v: unknown): boolean {
+  switch (t) {
+    case "string":
+      return typeof v === "string";
+    case "number":
+      return typeof v === "number" && Number.isFinite(v);
+    case "integer":
+      return typeof v === "number" && Number.isInteger(v);
+    case "boolean":
+      return typeof v === "boolean";
+    case "array":
+      return Array.isArray(v);
+    case "object":
+      return typeof v === "object" && v !== null && !Array.isArray(v);
+    case "null":
+      return v === null;
+    default:
+      return true; // unknown or absent type: not checked
+  }
+}
+
+function countOf(spec: CountOf, data: Record<string, unknown>): number | undefined {
+  const items = hasOwn(data, spec.array) ? data[spec.array] : undefined;
+  if (!Array.isArray(items)) return undefined;
+  let n = 0;
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    const it = item as Record<string, unknown>;
+    const whereOk = Object.entries(spec.where ?? {}).every(
+      ([k, allowed]) => hasOwn(it, k) && Array.isArray(allowed) && allowed.some((a) => a === it[k]),
+    );
+    const nonEmptyOk = (spec.non_empty ?? []).every(
+      (k) => hasOwn(it, k) && typeof it[k] === "string" && (it[k] as string).trim() !== "",
+    );
+    if (whereOk && nonEmptyOk) n++;
+  }
+  return n;
+}
+
 /**
- * Validate a node's emitted data against the declared output schema's
- * required fields. Returns the list of required-but-missing field names.
- *
- * This is intentionally narrow: we do NOT do full JSON Schema validation.
- * The routing impact comes from required fields being absent, so that's
- * what we check. Type mismatches, format violations, additionalProperties
- * etc. stay the workflow author's problem.
+ * Check emitted data against the declared output contract (#357): every
+ * `required` field present; every present top-level property of its declared
+ * `type` and inside its `enum`; and every `x-sweny-count-of` integer equal to
+ * the count it declares over its array. Not full JSON Schema: formats,
+ * nested shapes and additionalProperties stay the author's concern.
  */
-function findMissingRequiredFields(data: unknown, output: JSONSchema | undefined): string[] {
-  const required = getDeclaredRequiredFields(output);
-  if (required.length === 0) return [];
-  const obj = (data ?? {}) as Record<string, unknown>;
-  return required.filter((k) => !(k in obj));
+export function outputContractProblems(data: unknown, output: JSONSchema | undefined): ContractProblem[] {
+  if (!output || typeof output !== "object") return [];
+  const obj = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+  const problems: ContractProblem[] = [];
+  for (const k of getDeclaredRequiredFields(output)) {
+    if (!hasOwn(obj, k)) problems.push({ field: k, kind: "missing", problem: "required but missing" });
+  }
+  const props = (output as { properties?: unknown }).properties;
+  if (!props || typeof props !== "object") return problems;
+  for (const [k, raw] of Object.entries(props as Record<string, unknown>)) {
+    if (!hasOwn(obj, k) || !raw || typeof raw !== "object") continue;
+    const p = raw as { type?: unknown; enum?: unknown; [COUNT_OF_KEYWORD]?: unknown };
+    const v = obj[k];
+    const types = Array.isArray(p.type) ? p.type : p.type === undefined ? [] : [p.type];
+    if (types.length > 0 && !types.some((t) => typeMatches(t, v))) {
+      problems.push({ field: k, kind: "invalid", problem: `expected ${types.join(" or ")}, got ${JSON.stringify(v)}` });
+      continue;
+    }
+    if (Array.isArray(p.enum) && !p.enum.some((e) => e === v)) {
+      problems.push({
+        field: k,
+        kind: "invalid",
+        problem: `expected one of ${JSON.stringify(p.enum)}, got ${JSON.stringify(v)}`,
+      });
+      continue;
+    }
+    const spec = p[COUNT_OF_KEYWORD];
+    if (spec && typeof spec === "object" && typeof (spec as CountOf).array === "string") {
+      const want = countOf(spec as CountOf, obj);
+      if (want === undefined) {
+        problems.push({
+          field: k,
+          kind: "invalid",
+          problem: `cannot be checked: '${(spec as CountOf).array}' is not a list`,
+        });
+      } else if (v !== want) {
+        problems.push({
+          field: k,
+          kind: "invalid",
+          problem: `is ${JSON.stringify(v)} but '${(spec as CountOf).array}' has ${want} matching item(s)`,
+        });
+      }
+    }
+  }
+  return problems;
+}
+
+/** The output fields of `nodeId` that some `{ expr }` in the workflow reads. */
+function routingFieldsOf(workflow: Workflow, nodeId: string): Set<string> {
+  const out = new Set<string>();
+  for (const e of workflow.edges) {
+    if (!isWhenExpression(e.when)) continue;
+    let ast: ExprNode;
+    try {
+      ast = parseExpression(whenLabel(e.when)!);
+    } catch {
+      continue;
+    }
+    collectPaths(ast, (segs) => {
+      if (segs[0] === nodeId && segs.length > 1) out.add(segs[1]);
+    });
+  }
+  return out;
+}
+
+function collectPaths(n: ExprNode, visit: (segments: string[]) => void): void {
+  switch (n.kind) {
+    case "path":
+      visit(n.segments);
+      return;
+    case "exists":
+      visit(n.path.segments);
+      return;
+    case "not":
+      collectPaths(n.operand, visit);
+      return;
+    case "and":
+    case "or":
+    case "cmp":
+      collectPaths(n.left, visit);
+      collectPaths(n.right, visit);
+      return;
+    default:
+      return;
+  }
+}
+
+/** The schema handed to the harness: sweny's `x-` keywords stripped (a model API may refuse unknown keywords). */
+function harnessSchema(schema: JSONSchema | undefined): JSONSchema | undefined {
+  const strip = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(strip);
+    if (!v || typeof v !== "object") return v;
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      if (k.startsWith("x-")) continue;
+      Object.defineProperty(out, k, { value: strip(x), enumerable: true, writable: true, configurable: true });
+    }
+    return out;
+  };
+  if (schema === undefined || !JSON.stringify(schema).includes('"x-')) return schema;
+  return strip(schema) as JSONSchema;
 }
 
 function nodeSourcesToArray(ns: NodeSources | undefined): { sources: Source[]; only: boolean } {
@@ -1848,7 +2061,14 @@ async function resolveNext(
       edgeCounts,
       logger,
     );
-    return { next, rung: "expr" };
+    if (typeof next === "string") return { next, rung: "expr" };
+    // A field the expressions need is missing or invalid (#357): fall through
+    // to the next rung with each edge's natural-language description. A dry
+    // run stops here, as it does at any route a model would pick.
+    if (isDryRunInput(input)) {
+      safeObserve(observer, { type: "route", from: current, to: "(end)", reason: "dry run" }, logger);
+      return { next: null };
+    }
   }
 
   // Claude evaluates which condition matches. Include input so conditions
@@ -1895,13 +2115,15 @@ async function resolveNext(
     }
   }
 
+  // An expression edge reached here only by falling through: the model reads
+  // its natural-language `description`, else the expression itself.
   const choices = conditionalEdges.map((e) => ({
     id: e.to,
-    description: whenLabel(e.when)!,
+    description: (isWhenExpression(e.when) ? e.description : undefined) ?? whenLabel(e.when)!,
   }));
 
   if (defaultEdge) {
-    choices.push({ id: defaultEdge.to, description: "None of the above / default path" });
+    choices.push({ id: defaultEdge.to, description: defaultEdge.description ?? "None of the above / default path" });
   }
 
   const question = "Based on the results so far, which condition is true?";
@@ -1918,7 +2140,7 @@ async function resolveNext(
       workflow,
       current,
       results,
-      conditionalEdges.map((e) => whenLabel(e.when) ?? ""),
+      choices.map((c) => c.description),
       abort.secrets ?? [],
     );
     let picked: string | null = null;
@@ -2064,9 +2286,11 @@ async function resolveNext(
  * two or more true) it fails closed with a RouteEvaluationError, the same
  * contract as a failed model route evaluation: sweny never guesses an edge.
  *
- * An expression reads only successful nodes' outputs. A missing field, or a
- * node that did not run or did not succeed, makes that expression false and
- * is logged as a warning, never a silent true.
+ * An expression reads only successful nodes' outputs, and a field that breaks
+ * its declared type or enum reads as missing. When any expression on the node
+ * hits a missing field (or a node that did not run or succeed, or a type
+ * mismatch), none of them is trusted: the route falls through to the next
+ * rung (#357), which reads each edge's `description` (else its expression).
  */
 function resolveByExpressions(
   workflow: Workflow,
@@ -2077,12 +2301,17 @@ function resolveByExpressions(
   observer: Observer | undefined,
   edgeCounts: Map<string, number> | undefined,
   logger: Logger | undefined,
-): string {
+): string | { fallThrough: string[] } {
   const scope: ExpressionScope = {};
   for (const [id, r] of results.entries()) {
-    if (r.status === "success") scope[id] = buildPriorNodeContext(r);
+    if (r.status !== "success") continue;
+    const ctx = buildPriorNodeContext(r);
+    const node = hasOwn(workflow.nodes, id) ? workflow.nodes[id] : undefined;
+    for (const p of outputContractProblems(r.data, node?.output)) if (p.kind === "invalid") delete ctx[p.field];
+    scope[id] = ctx;
   }
 
+  const problems: string[] = [];
   const matched: Array<{ to: string; expr: string }> = [];
   for (const edge of conditionalEdges) {
     const expr = whenLabel(edge.when)!;
@@ -2097,16 +2326,17 @@ function resolveByExpressions(
       throw new RouteEvaluationError(current, `invalid when expression on edge '${current}' -> '${edge.to}': ${msg}`);
     }
     if (outcome.problem) {
-      logger?.warn(`  route expr: '${current}' -> '${edge.to}' is false: ${outcome.problem} (${expr})`, {
-        node: current,
-        to: edge.to,
-      });
+      problems.push(outcome.problem);
+      logger?.warn(
+        `  route expr: '${current}' -> '${edge.to}' cannot be evaluated: ${outcome.problem} (${expr}); falling through`,
+        { node: current, to: edge.to },
+      );
       safeObserve(
         observer,
         {
           type: "node:warning",
           node: current,
-          reason: `when expression on edge to '${edge.to}' evaluated false: ${outcome.problem}`,
+          reason: `when expression on edge to '${edge.to}' cannot be evaluated: ${outcome.problem}; route falls through`,
           fields: [],
         },
         logger,
@@ -2114,6 +2344,7 @@ function resolveByExpressions(
     }
     if (outcome.value) matched.push({ to: edge.to, expr });
   }
+  if (problems.length > 0) return { fallThrough: problems };
 
   const take = (to: string, reason: string): string => {
     if (edgeCounts) {

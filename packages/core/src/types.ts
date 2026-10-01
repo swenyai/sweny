@@ -592,6 +592,12 @@ export interface Edge {
    * evaluated by sweny with no model call.
    */
   when?: EdgeWhen;
+  /**
+   * The condition in natural language (#357). For an `{ expr }` edge it is
+   * what the next rung (decider or agent) reads when the expression cannot be
+   * evaluated because a field it needs is missing or invalid.
+   */
+  description?: string;
   /** Max times this edge can be followed (enables retry loops). Default: unlimited. */
   max_iterations?: number;
 }

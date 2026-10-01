@@ -424,6 +424,7 @@ export const edgeZ = z
     // Natural language (the harness picks the edge) or `{ expr }`, a
     // deterministic expression sweny evaluates itself (#461). One or the other.
     when: z.union([z.string(), z.object({ expr: z.string().min(1).max(WHEN_EXPR_MAX_LENGTH) }).strict()]).optional(),
+    description: z.string().min(1).optional(),
     max_iterations: z.number().int().min(1).max(EDGE_MAX_ITERATIONS_CEILING).optional(),
   })
   .strict();
@@ -1619,6 +1620,12 @@ export const workflowJsonSchema = {
                 },
               },
             ],
+          },
+          description: {
+            type: "string",
+            minLength: 1,
+            description:
+              "The condition in natural language. For an { expr } edge, what the next rung reads when the expression cannot be evaluated because a field it needs is missing or invalid.",
           },
           max_iterations: {
             type: "integer",

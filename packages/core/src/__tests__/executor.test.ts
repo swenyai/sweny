@@ -3485,8 +3485,8 @@ describe("missing-required-field retry", () => {
     };
 
     const { results } = await execute(schemaNode, {}, { skills: createSkillMap([]), claude: stubborn, config: {} });
-    // initial + 1 retry = 2 attempts
-    expect(attempt).toBe(2);
+    // initial + the one output repair (#357) + 1 retry = 3 agent calls
+    expect(attempt).toBe(3);
     expect(results.get("a")?.status).toBe("failed");
     expect(String(results.get("a")?.data.error)).toMatch(/required field\(s\) missing/);
   });
@@ -3515,7 +3515,8 @@ describe("missing-required-field retry", () => {
       },
     };
     const { results } = await execute(noRetryNode, {}, { skills: createSkillMap([]), claude, config: {} });
-    expect(attempt).toBe(1);
+    // No retry configured: the one output repair (#357) is the only second call.
+    expect(attempt).toBe(2);
     expect(results.get("a")?.status).toBe("failed");
   });
 });

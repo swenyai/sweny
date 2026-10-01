@@ -500,11 +500,21 @@ describe("implement workflow specifics", () => {
     const analyzeEdges = implementWorkflow.edges.filter((e) => e.from === "analyze");
     expect(analyzeEdges.length).toBe(3);
     const when = (to: string) => analyzeEdges.find((e) => e.to === to)?.when;
-    expect(when("notify")).toEqual({ expr: "analyze.has_open_pr == true" });
+    expect(when("notify")).toEqual({ expr: "analyze.has_open_pr == true || exists analyze.existing_pr_url" });
     expect(when("implement")).toEqual({
-      expr: "analyze.has_open_pr == false && analyze.risk_level in ['low', 'medium'] && analyze.plan_is_clear == true",
+      expr: "analyze.has_open_pr == false && !(exists analyze.existing_pr_url) && analyze.risk_level in ['low', 'medium'] && analyze.plan_is_clear == true",
     });
     expect(when("skip")).toBeUndefined();
+    // Every converted edge keeps its natural-language condition for the fall-through.
+    for (const e of analyzeEdges) expect(e.description).toBeTruthy();
+    expect(analyzeEdges.find((e) => e.to === "notify")!.description).toMatch(/existing_pr_url/);
+  });
+
+  it("every bundled expression edge carries a natural-language description (#357)", () => {
+    for (const wf of [triageWorkflow, implementWorkflow, seedContentWorkflow]) {
+      const bare = wf.edges.filter((e) => e.when && typeof e.when === "object" && !e.description);
+      expect(bare, `${wf.id}: ${bare.map((e) => `${e.from}->${e.to}`).join(", ")}`).toEqual([]);
+    }
   });
 
   it("analyze declares the routing fields as required booleans and an enum", () => {

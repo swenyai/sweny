@@ -33,13 +33,12 @@ Needs Ollama 0.35 or later ([announcement](https://ollama.com/blog/ollama-now-su
    }'
    ```
 
-3. Point SWEny at it in `.sweny.yml` (operator config, not the workflow):
+3. Point SWEny at it in `.sweny.yml` (a URL there must be loopback):
 
    ```yaml
    decider:
      url: http://localhost:11434
      model: nimble
-     allow_private: true # localhost is refused without this
    ```
 
 4. Opt a node in, in the workflow:
@@ -67,14 +66,16 @@ Needs Ollama 0.35 or later ([announcement](https://ollama.com/blog/ollama-now-su
 
 The endpoint, model and key never come from a workflow file. A workflow that sets `decider.provider` fails to load with a message saying where it goes now.
 
-| Setting | `.sweny.yml` (`decider:` block) | Environment (wins over the file) |
-| --- | --- | --- |
-| Server root serving `POST /v1/systemone` | `url` | `SWENY_DECIDER_URL` |
-| Model | `model` | `SWENY_DECIDER_MODEL` |
-| Bearer key | not allowed in a file | `SWENY_DECIDER_API_KEY` (the only name read) |
-| Allow loopback and private addresses | `allow_private: true` | none |
+`.sweny.yml` is repo content: a pull request can change it. So each credential lives in one trust domain:
 
-The URL must be http or https with no credentials in it. Loopback and private addresses (localhost, 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7) are refused unless `allow_private: true`. Link-local and cloud metadata addresses (169.254.0.0/16, fe80::/10, `metadata.google.internal`) are always refused. A DNS name is judged by its text. Redirects are not followed. There is no default URL and no fallback from a local server to a hosted one.
+| Where the URL comes from | What it may reach | Key sent |
+| --- | --- | --- |
+| `SWENY_DECIDER_URL` in the CI or shell environment | any public address; loopback and private only with `SWENY_DECIDER_ALLOW_PRIVATE=true` (environment) | `SWENY_DECIDER_API_KEY`, the only name read |
+| `decider: { url }` in `.sweny.yml` | loopback only (local Ollama) | never |
+
+The model comes from `SWENY_DECIDER_MODEL`, else `decider.model` in `.sweny.yml`. Never put the URL or key for a remote server in `.sweny.yml` or a committed `.env`.
+
+The URL must be http or https with no credentials in it. SWEny resolves the host name itself, checks every address it resolves to, and connects to the address it checked, so a name cannot be rebound to another address between the check and the connection. Loopback and private addresses (127.0.0.0/8, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, fc00::/7) need the environment's allowance above. Link-local and cloud metadata addresses (169.254.0.0/16, fe80::/10, `metadata.google.internal`) are always refused. Redirects are not followed. There is no default URL and no fallback from a local server to a hosted one.
 
 `sweny workflow run --no-decider` (and `sweny workflow resume --no-decider`) skips the decider for one run.
 
@@ -88,13 +89,13 @@ decider:
   min_margin: 0.25 # default 0.2, never below 0.1
 ```
 
-`route_by` on a node is `agent` (the default) or `decider`. Only nodes that say `route_by: decider` consult the model, so a route into a write action (an issue, a PR) never goes through it unless that node opted in explicitly. **Safety conditions belong in expressions**, not in natural language: an expression cannot be talked into a branch.
+`route_by` on a node is `agent` (the default) or `decider`. Only nodes that say `route_by: decider` consult the model, so a route into a write action (an issue, a PR) never goes through it unless that node opted in explicitly. **Safety conditions belong in expressions**, not in natural language: an expression cannot be talked into a branch. A model, the decider or the agent, can pick an edge whose natural-language condition is in fact false; the gates make that unlikely, not impossible.
 
 ## How a route is chosen
 
 For each node with conditional out-edges, in order:
 
-1. **`when` expressions.** SWEny evaluates them itself. No model is asked, not even the decider.
+1. **`when` expressions.** SWEny evaluates them itself. No model is asked, not even the decider. When a field an expression needs is missing or not of its declared type, SWEny first asks the node's agent once to return the output again with that field fixed. If it is still missing, no expression on that node is trusted: the route falls through to the next rung, which reads each edge's `description` (the condition in natural language; without one, the expression itself).
 2. **The decider**, for a `route_by: decider` node. It gets one Choice question over the node's live out-edges (the default edge included; edges whose `max_iterations` is spent are left out). Its label is the route only when all of these hold: the label is exactly one of those edges, the probabilities cover exactly those edges and sum to 1, the label is the unique most probable one, confidence is at least `min_confidence`, and the top label leads the runner-up by at least `min_margin`. Then the agent is not called for that route.
 3. **The agent.** Anything else falls through to the agent's route evaluation, unchanged, including its fail-closed rules.
 

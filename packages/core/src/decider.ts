@@ -26,6 +26,9 @@
  */
 
 import crypto from "node:crypto";
+import dns from "node:dns";
+import http from "node:http";
+import https from "node:https";
 import { DECIDER_CONFIDENCE_FLOOR, DECIDER_MARGIN_FLOOR, DECIDER_MIN_CONFIDENCE, DECIDER_MIN_MARGIN } from "./types.js";
 
 /** Per-call timeout. */
@@ -48,19 +51,24 @@ export interface DeciderConfig {
 }
 
 /**
- * Operator config: where the decision model lives. From `.sweny.yml`
- * `decider: { url, model, allow_private }` and SWENY_DECIDER_URL /
- * SWENY_DECIDER_MODEL / SWENY_DECIDER_API_KEY in the CLI, or passed by a
- * library caller. Never read from a workflow file.
+ * Operator config: where the decision model lives. Never read from a
+ * workflow file. The CLI builds it with one trust domain per credential: a
+ * URL from operator env (SWENY_DECIDER_URL) may be remote and gets the key
+ * (SWENY_DECIDER_API_KEY); a URL from repo content (`.sweny.yml`) is
+ * `loopbackOnly` and never gets a key. Library callers are the operator.
  */
 export interface DeciderOperatorConfig {
   /** Server root serving POST /v1/systemone. http or https only. */
   url: string;
   model: string;
-  /** Bearer key. The CLI reads it only from SWENY_DECIDER_API_KEY. */
+  /** Bearer key. Never sent when `loopbackOnly`. */
   apiKey?: string;
-  /** Allow loopback and private addresses (local Ollama). Link-local and metadata addresses stay refused. */
+  /** Allow loopback and private addresses. Link-local and metadata addresses stay refused. */
   allowPrivate?: boolean;
+  /** The URL came from repo content: it must resolve to loopback only, and no key is ever sent. */
+  loopbackOnly?: boolean;
+  /** DNS lookup to resolve the host with (test seam). Default: `dns.lookup`. */
+  lookup?: LookupFn;
   /** Per-call timeout in ms. Default 2000. */
   timeoutMs?: number;
   /** Calls per logical run. Default 200. */
@@ -97,7 +105,8 @@ export type DecideErrorCode =
   | "overloaded"
   | "http_error"
   | "malformed"
-  | "unknown_label";
+  | "unknown_label"
+  | "blocked_address";
 
 export class DecideError extends Error {
   constructor(
@@ -155,13 +164,14 @@ function ipv6(host: string): number[] | null {
   return [...head, ...Array<number>(fill).fill(0), ...rest];
 }
 
-type AddressClass = "public" | "private" | "forbidden";
+type AddressClass = "public" | "loopback" | "private" | "forbidden";
 
 function classifyV4([a, b]: number[]): AddressClass {
   if (a === 169 && b === 254) return "forbidden"; // link-local, cloud metadata (169.254.169.254)
   if (a === 0) return "forbidden";
   if (a === 100 && b === 100) return "forbidden"; // 100.100.100.200 metadata
-  if (a === 127 || a === 10) return "private";
+  if (a === 127) return "loopback";
+  if (a === 10) return "private";
   if (a === 172 && b >= 16 && b <= 31) return "private";
   if (a === 192 && b === 168) return "private";
   if (a === 100 && b >= 64 && b <= 127) return "private"; // CGNAT
@@ -169,20 +179,14 @@ function classifyV4([a, b]: number[]): AddressClass {
   return "public";
 }
 
-function classifyHost(hostname: string): AddressClass {
-  const host = hostname
-    .replace(/^\[|\]$/g, "")
-    .toLowerCase()
-    .replace(/\.$/, "");
-  if (host === "localhost" || host.endsWith(".localhost")) return "private";
-  if (host === "metadata" || host === "metadata.google.internal" || host === "instance-data") return "forbidden";
-  if (host.endsWith(".internal") || host.endsWith(".local")) return "private";
+/** Class of an IP literal, or null when `host` is not one. */
+function classifyIp(host: string): AddressClass | null {
   const v4 = ipv4(host);
   if (v4) return classifyV4(v4);
   const v6 = ipv6(host);
   if (v6) {
     if (v6.every((g) => g === 0)) return "forbidden"; // ::
-    if (v6.slice(0, 7).every((g) => g === 0) && v6[7] === 1) return "private"; // ::1
+    if (v6.slice(0, 7).every((g) => g === 0) && v6[7] === 1) return "loopback"; // ::1
     if (v6.slice(0, 5).every((g) => g === 0) && v6[5] === 0xffff) {
       return classifyV4([v6[6] >> 8, v6[6] & 0xff, v6[7] >> 8, v6[7] & 0xff]); // IPv4-mapped
     }
@@ -192,16 +196,44 @@ function classifyHost(hostname: string): AddressClass {
     if ((v6[0] & 0xff00) === 0xff00) return "forbidden"; // multicast
     return "public";
   }
-  return "public";
+  return null;
+}
+
+const REPO_URL_NOT_LOOPBACK =
+  "a decider url from repo content (.sweny.yml or a workspace .env) must be loopback; set SWENY_DECIDER_URL in the environment for a remote server";
+
+/** Which addresses a decider connection may reach. */
+export interface AddressPolicy {
+  /** Loopback and private ranges allowed (operator env only). */
+  allowPrivate?: boolean;
+  /** Only loopback allowed (a URL that came from repo content). */
+  loopbackOnly?: boolean;
+}
+
+const bare = (hostname: string) =>
+  hostname
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase()
+    .replace(/\.$/, "");
+
+/** Why connecting to this resolved address is refused, or null. */
+export function addressProblem(address: string, policy: AddressPolicy): string | null {
+  const cls = classifyIp(bare(address)) ?? "forbidden"; // not an IP: never connect to it
+  if (cls === "forbidden") return "decider address is link-local, metadata or reserved";
+  if (policy.loopbackOnly) return cls === "loopback" ? null : REPO_URL_NOT_LOOPBACK;
+  if ((cls === "loopback" || cls === "private") && !policy.allowPrivate) {
+    return "decider address is loopback or private; set SWENY_DECIDER_ALLOW_PRIVATE=true in the environment to use it";
+  }
+  return null;
 }
 
 /**
- * Why the operator's decider URL is refused, or null when it may be used.
- * Only http(s), no credentials in the URL, no link-local or metadata address
- * ever, and loopback or private addresses only with `allowPrivate`. A DNS
- * name is judged by its text: it is operator config, not workflow input.
+ * Static checks on the operator's decider URL, or null when it may be tried:
+ * http(s) only, no credentials in it, no metadata host name, and an IP
+ * literal must pass {@link addressProblem}. A host name is checked again on
+ * every connection, against the addresses it resolves to.
  */
-export function deciderUrlProblem(raw: string, allowPrivate = false): string | null {
+export function deciderUrlProblem(raw: string, policy: AddressPolicy = {}): string | null {
   let url: URL;
   try {
     url = new URL(raw);
@@ -210,12 +242,41 @@ export function deciderUrlProblem(raw: string, allowPrivate = false): string | n
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return "decider url must be http or https";
   if (url.username || url.password) return "decider url must not carry credentials (use SWENY_DECIDER_API_KEY)";
-  const cls = classifyHost(url.hostname);
-  if (cls === "forbidden") return "decider url points at a link-local, metadata or reserved address";
-  if (cls === "private" && !allowPrivate) {
-    return "decider url is a loopback or private address; set allow_private: true in the .sweny.yml decider block to use a local server";
+  const host = bare(url.hostname);
+  if (host === "metadata" || host === "metadata.google.internal" || host === "instance-data") {
+    return "decider url points at a cloud metadata host";
   }
+  if (classifyIp(host)) return addressProblem(host, policy);
   return null;
+}
+
+/** Node's `lookup` shape for `net.connect` / `http.request`. */
+export type LookupFn = (
+  hostname: string,
+  options: dns.LookupOptions,
+  callback: (err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void,
+) => void;
+
+/**
+ * A `lookup` for `http.request` that resolves every address, refuses the
+ * connection when any of them breaks the policy, and hands the socket the
+ * validated address itself. The socket connects to what was checked, so a
+ * second resolution cannot rebind the name to another address.
+ */
+export function guardedLookup(policy: AddressPolicy, base: LookupFn = dns.lookup as unknown as LookupFn): LookupFn {
+  return (hostname, options, callback) => {
+    base(hostname, { ...(typeof options === "object" ? options : {}), all: true }, (err, addresses) => {
+      if (err) return callback(err, "");
+      const list = (Array.isArray(addresses) ? addresses : [{ address: addresses, family: 4 }]) as dns.LookupAddress[];
+      if (list.length === 0) return callback(Object.assign(new Error("no address"), { code: "ENOTFOUND" }), "");
+      for (const a of list) {
+        const why = addressProblem(a.address, policy);
+        if (why) return callback(Object.assign(new Error(why), { code: "EDECIDERBLOCKED" }), "");
+      }
+      if (typeof options === "object" && options.all) return callback(null, list);
+      return callback(null, list[0].address, list[0].family);
+    });
+  };
 }
 
 // ─── systemOneProvider ──────────────────────────────────────────
@@ -226,6 +287,21 @@ export interface SystemOneOptions {
   apiKey?: string;
   /** Default timeout when `decide()` is not given one. Default 2000 ms. */
   timeoutMs?: number;
+  /** Addresses the connection may reach. Default: public only. */
+  policy?: AddressPolicy;
+  /** DNS lookup the guard resolves with (test seam). Default: `dns.lookup`. */
+  lookup?: LookupFn;
+}
+
+/** Largest response body read. A decision is a few hundred bytes. */
+const MAX_RESPONSE_BYTES = 1_000_000;
+
+function statusCode(s: number): DecideErrorCode {
+  if (s === 401 || s === 403) return "unauthorized";
+  if (s === 400 || s === 422) return "invalid_request";
+  if (s === 429) return "rate_limited";
+  if (s === 529 || s === 503) return "overloaded";
+  return "http_error"; // includes 3xx: redirects are never followed
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -251,63 +327,86 @@ export function systemOneProvider(opts: SystemOneOptions): DecisionProvider {
         questions[name] = { type: ask.kind, instructions: ask.instructions, criteria: ask.criteria };
       }
 
-      const ctl = new AbortController();
-      let timedOut = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        ctl.abort();
-      }, timeoutMs);
-      const onAbort = () => ctl.abort();
-      if (req.signal?.aborted) ctl.abort();
-      req.signal?.addEventListener("abort", onAbort, { once: true });
+      const target = new URL(url);
+      const policy = opts.policy ?? {};
+      // An IP literal never goes through `lookup`: check it here.
+      if (classifyIp(bare(target.hostname))) {
+        const why = addressProblem(target.hostname, policy);
+        if (why) throw new DecideError("blocked_address", why);
+      }
+      const payload = JSON.stringify({ model: opts.model, state: req.state, questions });
+      const transport = target.protocol === "https:" ? https : http;
 
-      try {
-        let res: Response;
-        try {
-          res = await fetch(url, {
+      const body = await new Promise<unknown>((resolve, reject) => {
+        let finished = false;
+        let timedOut = false;
+        let aborted = false;
+        let request: http.ClientRequest | undefined;
+        const finish = (err: DecideError | null, value?: unknown) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          req.signal?.removeEventListener("abort", onAbort);
+          if (err) {
+            request?.destroy();
+            reject(err);
+          } else resolve(value);
+        };
+        const timer = setTimeout(() => {
+          timedOut = true;
+          finish(new DecideError("timeout", `no answer within ${timeoutMs}ms`));
+        }, timeoutMs);
+        const onAbort = () => {
+          aborted = true;
+          finish(new DecideError("aborted", "request aborted"));
+        };
+        if (req.signal?.aborted) return onAbort();
+        req.signal?.addEventListener("abort", onAbort, { once: true });
+
+        request = transport.request(
+          target,
+          {
             method: "POST",
+            agent: false,
+            lookup: guardedLookup(policy, opts.lookup) as unknown as http.RequestOptions["lookup"],
             headers: {
               "content-type": "application/json",
+              "content-length": Buffer.byteLength(payload),
               ...(opts.apiKey ? { authorization: `Bearer ${opts.apiKey}` } : {}),
             },
-            body: JSON.stringify({ model: opts.model, state: req.state, questions }),
-            signal: ctl.signal,
-            redirect: "error",
-          });
-        } catch {
-          if (timedOut) throw new DecideError("timeout", `no answer within ${timeoutMs}ms`);
-          if (ctl.signal.aborted) throw new DecideError("aborted", "request aborted");
-          throw new DecideError("network", "request failed");
-        }
-
-        if (!res.ok) {
-          const s = res.status;
-          const code: DecideErrorCode =
-            s === 401 || s === 403
-              ? "unauthorized"
-              : s === 400 || s === 422
-                ? "invalid_request"
-                : s === 429
-                  ? "rate_limited"
-                  : s === 529 || s === 503
-                    ? "overloaded"
-                    : "http_error";
-          throw new DecideError(code, `HTTP ${s}`);
-        }
-
-        let body: unknown;
-        try {
-          body = await res.json();
-        } catch {
-          if (timedOut) throw new DecideError("timeout", `no answer within ${timeoutMs}ms`);
-          if (ctl.signal.aborted) throw new DecideError("aborted", "request aborted");
-          throw new DecideError("malformed", "response is not JSON");
-        }
-        return parseAnswers(body, req.asks);
-      } finally {
-        clearTimeout(timer);
-        req.signal?.removeEventListener("abort", onAbort);
-      }
+          },
+          (res) => {
+            const status = res.statusCode ?? 0;
+            if (status < 200 || status >= 300) {
+              res.resume();
+              return finish(new DecideError(statusCode(status), `HTTP ${status}`));
+            }
+            const chunks: Buffer[] = [];
+            let size = 0;
+            res.on("data", (c: Buffer) => {
+              size += c.length;
+              if (size > MAX_RESPONSE_BYTES) return finish(new DecideError("malformed", "response too large"));
+              chunks.push(c);
+            });
+            res.on("end", () => {
+              try {
+                finish(null, JSON.parse(Buffer.concat(chunks).toString("utf8")));
+              } catch {
+                finish(new DecideError("malformed", "response is not JSON"));
+              }
+            });
+            res.on("error", () => finish(new DecideError("network", "response failed")));
+          },
+        );
+        request.on("error", (err: NodeJS.ErrnoException) => {
+          if (timedOut || aborted || finished) return;
+          if (err.code === "EDECIDERBLOCKED") return finish(new DecideError("blocked_address", err.message));
+          // Never the URL, the address or the key: only that it failed.
+          finish(new DecideError("network", "request failed"));
+        });
+        request.end(payload);
+      });
+      return parseAnswers(body, req.asks);
     },
   };
 }
@@ -614,12 +713,25 @@ export function createRunDecider(
       off: "no operator config (set SWENY_DECIDER_URL and SWENY_DECIDER_MODEL, or decider: in .sweny.yml)",
     };
   }
-  const problem = deciderUrlProblem(operator.url, operator.allowPrivate === true);
+  const policy: AddressPolicy = operator.loopbackOnly
+    ? { loopbackOnly: true }
+    : { allowPrivate: operator.allowPrivate === true };
+  const problem = deciderUrlProblem(operator.url, policy);
   if (problem) return { decider: null, off: problem };
+  if (operator.loopbackOnly) {
+    // A repo-content URL may only be a local name; anything else needs operator env.
+    const host = bare(new URL(operator.url).hostname);
+    if (!classifyIp(host) && host !== "localhost" && !host.endsWith(".localhost")) {
+      return { decider: null, off: REPO_URL_NOT_LOOPBACK };
+    }
+  }
   const provider = systemOneProvider({
     baseUrl: operator.url,
     model: operator.model,
-    ...(operator.apiKey ? { apiKey: operator.apiKey } : {}),
+    policy,
+    // Never a key for a URL that repo content chose.
+    ...(operator.apiKey && !operator.loopbackOnly ? { apiKey: operator.apiKey } : {}),
+    ...(operator.lookup ? { lookup: operator.lookup } : {}),
   });
   return {
     decider: new RunDecider(provider, {

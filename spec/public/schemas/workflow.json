@@ -888,6 +888,11 @@
               }
             ]
           },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The condition in natural language. For an { expr } edge, what the next rung reads when the expression cannot be evaluated because a field it needs is missing or invalid."
+          },
           "max_iterations": {
             "type": "integer",
             "minimum": 1,

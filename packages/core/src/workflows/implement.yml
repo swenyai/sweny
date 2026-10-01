@@ -202,22 +202,27 @@ nodes:
         number: { input: issueIdentifier }
 edges:
   # Deterministic routing (#357), equivalent to the old natural-language
-  # conditions over declared fields: an open PR (has_open_pr, set together
-  # with existing_pr_url) goes to notify; otherwise risk low or medium with a
-  # clear plan goes to implement; anything else (high risk or an unclear plan)
-  # takes the default edge to skip. The two expressions are exclusive
-  # (has_open_pr true vs false), so at most one is true. The three fields are
-  # required: a missing one fails analyze, which halts the run.
+  # conditions over declared fields: an open PR (has_open_pr, or
+  # existing_pr_url set, as the old condition read it) goes to notify;
+  # otherwise risk low or medium with a clear plan goes to implement;
+  # anything else (high risk or an unclear plan) takes the default edge to
+  # skip. The two expressions are exclusive (the implement one requires no
+  # open PR by either signal). A routing field still missing or invalid after
+  # sweny's repair request falls through to the agent, which reads the
+  # descriptions.
   - from: analyze
     to: notify
     when:
-      expr: "analyze.has_open_pr == true"
+      expr: "analyze.has_open_pr == true || exists analyze.existing_pr_url"
+    description: an open PR for this issue already exists (analyze.existing_pr_url is set); skip the implement and create_pr nodes
   - from: analyze
     to: implement
     when:
-      expr: "analyze.has_open_pr == false && analyze.risk_level in ['low', 'medium'] && analyze.plan_is_clear == true"
+      expr: "analyze.has_open_pr == false && !(exists analyze.existing_pr_url) && analyze.risk_level in ['low', 'medium'] && analyze.plan_is_clear == true"
+    description: no open PR exists, the fix risk level is low or medium, and a clear plan exists
   - from: analyze
     to: skip
+    description: the fix is too complex, risky, or unclear
   - from: implement
     to: create_pr
   - from: skip

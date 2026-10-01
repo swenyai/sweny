@@ -264,27 +264,75 @@ describe("executor: expression routing (#461)", () => {
     expect(ran).toEqual(["a"]);
   });
 
-  it("a missing field is false with a warning, never a silent true", async () => {
+  it("a missing field is never a silent true or false: the route falls through to the agent (#357)", async () => {
     const w = wf([
-      { from: "a", to: "b", when: { expr: "!(a.label == 'safe')" } },
+      { from: "a", to: "b", when: { expr: "!(a.label == 'safe')" }, description: "the label is not safe" },
       { from: "a", to: "c" },
     ]);
     const events: ExecutionEvent[] = [];
     const { warnings, logger } = recordingLogger();
-    const { claude, ran } = scripted({ a: { n: 1 } });
-    await run(w, claude, {}, logger, (e) => events.push(e));
-    expect(ran).toEqual(["a", "c"]);
+    const asked: string[][] = [];
+    const { claude, ran, evaluateCalls } = scripted({ a: { n: 1 } }, async (opts) => {
+      asked.push(opts.choices.map((c) => c.description));
+      return "b";
+    });
+    const { trace } = await run(w, claude, {}, logger, (e) => events.push(e));
+    expect(ran).toEqual(["a", "b"]);
+    expect(evaluateCalls()).toBe(1);
+    expect(asked).toEqual([["the label is not safe", "None of the above / default path"]]);
+    expect(trace.edges[0]).toMatchObject({ from: "a", to: "b", rung: "agent" });
     expect(warnings.some((m) => /field 'a.label' is missing/.test(m))).toBe(true);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "node:warning",
         node: "a",
-        reason: expect.stringMatching(/a\.label' is missing/),
+        reason: expect.stringMatching(/a\.label' is missing.*falls through/),
       }),
     );
   });
 
-  it("does not read a failed node's data", async () => {
+  it("an expression edge without a description falls through with its expression as the condition", async () => {
+    const w = wf([
+      { from: "a", to: "b", when: { expr: "a.label == 'x'" } },
+      { from: "a", to: "c", when: { expr: "a.label != 'x'" } },
+    ]);
+    const asked: string[][] = [];
+    const { claude, ran } = scripted({ a: { n: 1 } }, async (opts) => {
+      asked.push(opts.choices.map((c) => c.description));
+      return "c";
+    });
+    await run(w, claude);
+    expect(ran).toEqual(["a", "c"]);
+    expect(asked).toEqual([["a.label == 'x'", "a.label != 'x'"]]);
+  });
+
+  it("a field of the wrong declared type reads as missing and falls through, never compared", async () => {
+    const w = wf([
+      { from: "a", to: "b", when: { expr: "a.n == 3" } },
+      { from: "a", to: "c", when: { expr: "a.n != 3" } },
+    ]);
+    const { claude, ran, evaluateCalls } = scripted({ a: { n: "3" } }, async () => "b");
+    await run(w, claude);
+    expect(evaluateCalls()).toBe(1);
+    expect(ran).toEqual(["a", "a", "b"]); // one repair request, then the agent decides
+  });
+
+  it("a dry run stops where an expression would fall through", async () => {
+    const { claude, ran, evaluateCalls } = scripted({ a: { label: "x" } });
+    const { results } = await run(
+      wf([
+        { from: "a", to: "b", when: { expr: "a.n > 0" } },
+        { from: "a", to: "c", when: { expr: "a.n <= 0" } },
+      ]),
+      claude,
+      { dryRun: true },
+    );
+    expect(ran).toEqual(["a"]);
+    expect(results.size).toBe(1);
+    expect(evaluateCalls()).toBe(0);
+  });
+
+  it("does not read a failed node's data: its expressions fall through to the agent", async () => {
     // `a` fails but continues; its partial data must not route.
     const w = wf(
       [
@@ -297,9 +345,13 @@ describe("executor: expression routing (#461)", () => {
         c: { name: "C", instruction: "NODE_C", skills: [] },
       },
     );
-    const { claude, ran } = scripted({ a: { status: "failed", data: { n: 5, error: "boom" }, toolCalls: [] } });
+    const { claude, ran, evaluateCalls } = scripted(
+      { a: { status: "failed", data: { n: 5, error: "boom" }, toolCalls: [] } },
+      async () => "c",
+    );
     await run(w, claude);
     expect(ran).toEqual(["a", "c"]);
+    expect(evaluateCalls()).toBe(1);
   });
 
   it("injection text in node output is compared as data, never obeyed", async () => {
@@ -395,7 +447,7 @@ describe("built-in triage routes its migrated edges without a model call (#461)"
       ]),
     ),
   };
-  const investigate = (novel_count: number, highest_severity: string, fixable_count = novel_count) => ({
+  const investigate = (novel_count: number, highest_severity: string, fixable_count = 0) => ({
     findings: [],
     novel_count,
     fixable_count,
@@ -449,7 +501,11 @@ describe("built-in triage routes its migrated edges without a model call (#461)"
   ])("a fixable medium novel finding, test_status %s: no route asks the model (#357)", async (status, tail) => {
     // The scripted model would say "notify": the route proves it was never asked.
     const { claude, ran, evaluated } = harness(
-      { investigate: investigate(1, "medium"), createissue: issue, implement: implement(status) },
+      {
+        investigate: { ...investigate(1, "medium", 1), findings: [fixable] },
+        createissue: issue,
+        implement: implement(status),
+      },
       "notify",
     );
     await run(stripped, claude);
@@ -478,12 +534,58 @@ describe("built-in triage routes its migrated edges without a model call (#461)"
     expect(evaluated).toEqual([]);
   });
 
-  it("fixable_count missing: investigate breaks its required output, the run halts before any write", async () => {
+  it("fixable_count missing twice: one repair request, then the agent decides on the description", async () => {
     const inv = { findings: [], novel_count: 2, highest_severity: "high", recommendation: "r" };
-    const { claude, ran, evaluated } = harness({ investigate: inv, createissue: issue }, "implement");
+    const { claude, ran, evaluated } = harness({ investigate: inv, createissue: issue }, "notify");
     await run(stripped, claude);
-    expect(ran).toEqual(["gather", "investigate"]);
-    expect(evaluated).toEqual([]);
+    expect(ran.map((r) => (r === "createissue" ? "create_issue" : r))).toEqual([
+      "gather",
+      "investigate",
+      "investigate",
+      "create_issue",
+      "notify",
+    ]);
+    expect(evaluated).toEqual([["implement", "notify"]]);
+  });
+
+  // The review's case: the old natural-language condition read the findings,
+  // so a count that contradicts them must not route on its own.
+  const fixable = {
+    title: "t",
+    root_cause: "r",
+    severity: "high",
+    is_duplicate: false,
+    fix_complexity: "simple",
+    fix_approach: "patch it",
+  };
+
+  it("fixable_count 0 while a finding is fixable: invalid, repaired once, then the agent decides", async () => {
+    const inv = { ...investigate(1, "high", 0), findings: [fixable] };
+    const { claude, ran, evaluated } = harness({ investigate: inv, createissue: issue }, "notify");
+    await run(stripped, claude);
+    expect(ran.filter((r) => r === "investigate")).toHaveLength(2);
+    expect(evaluated).toEqual([["implement", "notify"]]);
+  });
+
+  it("fixable_count consistent with the findings routes with no model call (old and new agree)", async () => {
+    const complex = { ...fixable, fix_complexity: "complex" };
+    const dup = { ...fixable, is_duplicate: true };
+    const noPlan = { ...fixable, fix_approach: "  " };
+    for (const [findings, count, next] of [
+      [[fixable], 1, "implement"],
+      [[complex, dup, noPlan], 0, "notify"],
+      [[fixable, complex], 1, "implement"],
+    ] as const) {
+      const inv = { ...investigate(findings.length, "high", count), findings: [...findings] };
+      const { claude, ran, evaluated } = harness(
+        { investigate: inv, createissue: issue, implement: implement("skipped") },
+        "skip",
+      );
+      await run(stripped, claude);
+      expect(ran.filter((r) => r === "investigate")).toHaveLength(1);
+      expect(ran[3]).toBe(next);
+      expect(evaluated).toEqual([]);
+    }
   });
 });
 
@@ -542,10 +644,50 @@ describe("built-in implement routes analyze without a model call (#357)", () => 
     expect(evaluated()).toBe(0);
   });
 
-  it("missing routing fields break analyze's required output: the run halts, nothing is implemented", async () => {
+  it("an open PR by existing_pr_url alone still goes to notify (the old condition's reading)", async () => {
+    const { claude, ran, evaluated } = harness({
+      ...analyze(false, "low", true),
+      existing_pr_url: "https://github.com/o/r/pull/1",
+    });
+    await run(stripped, claude);
+    expect(ran[1]).toBe("notify");
+    expect(evaluated()).toBe(0);
+  });
+
+  it("missing once: one repair request, then expressions route with no model call", async () => {
+    let calls = 0;
+    const ran: string[] = [];
+    let evaluated = 0;
+    const claude: Claude = {
+      async run(opts) {
+        const id = /NODE_([A-Z]+)/.exec(opts.instruction)?.[1]?.toLowerCase() ?? "?";
+        ran.push(id);
+        if (id !== "analyze") return { status: "success", data: {}, toolCalls: [] };
+        calls++;
+        if (calls === 2) expect(opts.instruction).toMatch(/has_open_pr: required but missing/);
+        return {
+          status: "success",
+          data: calls === 1 ? analyze(undefined, "low", true) : analyze(false, "low", true),
+          toolCalls: [],
+        };
+      },
+      async evaluate() {
+        evaluated++;
+        return null;
+      },
+      async ask() {
+        return "";
+      },
+    };
+    await run(stripped, claude);
+    expect(ran.slice(0, 3)).toEqual(["analyze", "analyze", "implement"]);
+    expect(evaluated).toBe(0);
+  });
+
+  it("missing twice: the run continues, the agent routes on the descriptions (default edge on its failure)", async () => {
     const { claude, ran, evaluated } = harness(analyze(undefined, undefined, undefined));
     await run(stripped, claude);
-    expect(ran).toEqual(["analyze"]);
-    expect(evaluated()).toBe(0);
+    expect(ran.slice(0, 3)).toEqual(["analyze", "analyze", "skip"]);
+    expect(evaluated()).toBe(1);
   });
 });

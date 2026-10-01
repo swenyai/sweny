@@ -74,25 +74,38 @@ export function applyAgentFileConfig(fileConfig: FileConfig, env: NodeJS.Process
 }
 
 /**
- * Operator config for the decision model (#357): `.sweny.yml`
- * `decider: { url, model, allow_private }`, with SWENY_DECIDER_URL and
- * SWENY_DECIDER_MODEL taking precedence, and the key only from
- * SWENY_DECIDER_API_KEY (never from a file). `noDecider` (`--no-decider`)
- * returns false. Undefined when no URL and model are configured.
+ * Operator config for the decision model (#357), one trust domain per
+ * credential. `.sweny.yml` is repo content a pull request can change, so:
+ *
+ *  - SWENY_DECIDER_URL (operator env) may point anywhere public; only then is
+ *    SWENY_DECIDER_API_KEY sent, and only SWENY_DECIDER_ALLOW_PRIVATE=true
+ *    (env) admits loopback or private addresses.
+ *  - A `.sweny.yml` `decider: { url, model }` URL must be loopback (local
+ *    Ollama) and never gets a key.
+ *
+ * `trusted(key)` reads an operator env value; it must not see values a
+ * committed `.env` supplied. `noDecider` (`--no-decider`) returns false.
+ * Undefined when no URL and model are configured.
  */
 export function operatorDeciderConfig(
   fileConfig: FileConfig,
   env: NodeJS.ProcessEnv,
   noDecider: boolean,
-): { url: string; model: string; apiKey?: string; allowPrivate?: boolean } | false | undefined {
+  trusted: (key: string) => string | undefined = (key) => env[key],
+): { url: string; model: string; apiKey?: string; allowPrivate?: boolean; loopbackOnly?: boolean } | false | undefined {
   if (noDecider) return false;
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
-  const url = str(env.SWENY_DECIDER_URL) ?? str(fileConfig["decider.url"]);
-  const model = str(env.SWENY_DECIDER_MODEL) ?? str(fileConfig["decider.model"]);
-  if (!url || !model) return undefined;
-  const apiKey = str(env.SWENY_DECIDER_API_KEY);
-  const allowPrivate = str(fileConfig["decider.allow_private"]) === "true";
-  return { url, model, ...(apiKey ? { apiKey } : {}), ...(allowPrivate ? { allowPrivate } : {}) };
+  const model = str(trusted("SWENY_DECIDER_MODEL")) ?? str(fileConfig["decider.model"]);
+  const envUrl = str(trusted("SWENY_DECIDER_URL"));
+  if (envUrl) {
+    if (!model) return undefined;
+    const apiKey = str(trusted("SWENY_DECIDER_API_KEY"));
+    const allowPrivate = ["1", "true"].includes((str(trusted("SWENY_DECIDER_ALLOW_PRIVATE")) ?? "").toLowerCase());
+    return { url: envUrl, model, ...(apiKey ? { apiKey } : {}), ...(allowPrivate ? { allowPrivate } : {}) };
+  }
+  const fileUrl = str(fileConfig["decider.url"]);
+  if (!fileUrl || !model) return undefined;
+  return { url: fileUrl, model, loopbackOnly: true };
 }
 
 /** Parsed config file — flat strings for scalar fields, arrays for list fields, objects for nested blocks. */
@@ -302,4 +315,12 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # Slack (notifications) — https://api.slack.com/apps
 #   NOTIFICATION_WEBHOOK_URL=https://hooks.slack.com/services/...
 #   # or use a bot token: SLACK_BOT_TOKEN=xoxb-...
+#
+# Decision model (optional) for nodes with route_by: decider. https://docs.sweny.ai/advanced/decision-models/
+#   Local Ollama: set it here (a URL in this file must be loopback and never gets a key):
+#     decider:
+#       url: http://localhost:11434
+#       model: nimble
+#   Remote server: set it in the CI or shell environment only, never in this file or .env:
+#     SWENY_DECIDER_URL=https://...  SWENY_DECIDER_MODEL=...  SWENY_DECIDER_API_KEY=...
 `;
