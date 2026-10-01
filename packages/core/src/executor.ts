@@ -318,7 +318,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       );
     }
 
-    const iteration = (nodeRunCounts.get(currentId) ?? 0) + 1;
+    const iteration: number = (nodeRunCounts.get(currentId) ?? 0) + 1;
     nodeRunCounts.set(currentId, iteration);
 
     const resolvedInstruction = resolvedSources[`nodes.${currentId}.instruction`].content;
