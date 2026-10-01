@@ -230,7 +230,17 @@ jobs:
 - `assess`: value gates on the risk level and that every reason has evidence, and the pack's only judge gate: every reason must cite a path or fact from the measured scope.
 - `post-comment`: function gate that the comment was requested, value gate on the result. SWEny posts it after the step.
 
-The Action's own sticky billboard (`pr-comment`, on by default) still posts the run receipt and DAG. The risk comment is separate and carries the findings. Only `opened`, `reopened`, and `ready_for_review` trigger it, so a busy PR does not collect a comment per push.
+The Action's own sticky billboard (`pr-comment`, on by default) still posts the run receipt and DAG. The risk comment is separate and carries the findings. By default, only `opened`, `reopened`, and `ready_for_review` trigger it, so a busy PR does not collect a comment per push. A review describes the scope at the time it ran; later commits can make it stale.
+
+To refresh the review when new commits are pushed, add `synchronize` to the event list in your generated `.github/workflows/sweny-pr-risk-review.yml`:
+
+```yaml
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+```
+
+This starts a new model run for each push and posts a separate risk comment for each completed review. It does not replace the previous findings. Keep the existing concurrency group to cancel superseded runs and the same-repo guard to skip forks. Edit an installed trigger directly; this option does not require regenerating the pack.
 
 ### Sample output
 
@@ -252,6 +262,8 @@ Read-only scope review. No code was changed.
 ## Failure alerts
 
 The two scheduled packs set `notify-on-failure: issue`. When a run fails or is refused, the Action opens one issue titled `SWEny run failed: <workflow>` labelled `sweny-failure`, and comments on it for later failures instead of opening more. Nothing is sent on success. It needs `issues: write`, which both triggers already request.
+
+Setup failures are reported as `did_not_start`, even if the checkout contains successful history from an earlier run. Each Action invocation creates its own history marker before auth validation and dependency setup. If no valid marker is available, old history cannot suppress the alert.
 
 For Slack, pass an incoming-webhook URL from a secret, or the name of an env var on the step that holds it:
 

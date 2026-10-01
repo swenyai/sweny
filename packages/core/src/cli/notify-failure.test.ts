@@ -32,6 +32,7 @@ function record(over: Record<string, unknown> = {}, ageSeconds = 0) {
   );
   const t = new Date(Date.now() - ageSeconds * 1000);
   fs.utimesSync(file, t, t);
+  return file;
 }
 
 function run(env: Record<string, string>, opts: { list?: unknown; ghFails?: boolean; curlFails?: boolean } = {}) {
@@ -199,12 +200,26 @@ describe("scripts/notify-failure.sh: trigger conditions and reason classes", () 
     (kind) => {
       record({ status: "success", nodes: [] }, 120);
       const marker = kind === "" ? "" : path.join(dir, kind);
-      if (kind === "directory-marker") fs.mkdirSync(marker);
+      if (kind === "directory-marker") {
+        fs.mkdirSync(marker);
+        const past = new Date(Date.now() - 300_000);
+        fs.utimesSync(marker, past, past);
+      }
       const result = run({ NOTIFY: HOOK, MARKER_FILE: marker });
       expect(result.status).toBe(0);
       expect(calls().find((c) => c.startsWith("curl"))).toContain("reason: did_not_start");
     },
   );
+
+  it.each(["success", "failed"])("uses the newest current record when its status is %s", (status) => {
+    const older = record({ status: status === "success" ? "failed" : "success", nodes: [] });
+    fs.renameSync(older, path.join(dir, "runs", "20260929-120000-old.json"));
+    record({ status, nodes: [] });
+    const result = run({ NOTIFY: HOOK });
+    expect(result.status).toBe(0);
+    if (status === "success") expect(calls()).toEqual([]);
+    else expect(calls().find((c) => c.startsWith("curl"))).toContain("reason: node_failed");
+  });
 
   it("reads a current failed record from a path containing spaces", () => {
     record();
