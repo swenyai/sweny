@@ -12,13 +12,18 @@
 
 import type { Workflow, ExecutionTrace } from "./types.js";
 import { whenLabel } from "./when.js";
+import { MERMAID_CLASS_DEFS, MERMAID_EDGE_STYLES, type DiagramNodeStatus } from "./theme.js";
 
-export type NodeStatus = "current" | "success" | "failed" | "skipped";
+/**
+ * A node's state in a diagram. `pending` is applied automatically to every
+ * node missing from a non-empty `state` map (the run never reached it).
+ */
+export type NodeStatus = DiagramNodeStatus;
 
 export interface MermaidOptions {
-  /** Execution state — nodes not in this map render as default (pending) */
+  /** Execution state. With a non-empty map, nodes missing from it render as `pending`. */
   state?: Record<string, NodeStatus>;
-  /** Execution trace — highlights taken/not-taken edges and loop counts */
+  /** Execution trace: highlights taken and not-taken edges and loop counts */
   trace?: ExecutionTrace;
   /** Graph direction: TB (top-bottom) or LR (left-right). Default: TB */
   direction?: "TB" | "LR";
@@ -26,8 +31,8 @@ export interface MermaidOptions {
   title?: string;
   /**
    * Override the `classDef` style body (the part after the class name) for
-   * specific statuses, e.g. `{ success: "fill:#2563eb,stroke:#1d4ed8,color:#fff" }`.
-   * Unset statuses keep the defaults.
+   * specific statuses. Unset statuses keep the brand defaults
+   * (`MERMAID_CLASS_DEFS` in theme.ts). SWEny's own surfaces pass none.
    */
   classDefs?: Partial<Record<NodeStatus, string>>;
 }
@@ -119,7 +124,7 @@ export function toMermaid(workflow: Workflow, options: MermaidOptions = {}): str
     }
   }
 
-  // Edges — track index for linkStyle directives
+  // Edges: track index for linkStyle directives
   const takenIndices: number[] = [];
   const notTakenIndices: number[] = [];
   let edgeIndex = 0;
@@ -157,19 +162,15 @@ export function toMermaid(workflow: Workflow, options: MermaidOptions = {}): str
     edgeIndex++;
   }
 
-  // Node status styling
+  // Node status styling (brand classDefs from theme.ts)
   const statusNodes = groupByStatus(state);
 
   if (statusNodes.size > 0) {
+    const unreached = Object.keys(workflow.nodes).filter((id) => !(id in state));
+    if (unreached.length > 0) statusNodes.set("pending", [...(statusNodes.get("pending") ?? []), ...unreached]);
     lines.push("");
-    const defaults: Record<NodeStatus, string> = {
-      current: "fill:#3b82f6,stroke:#2563eb,color:#fff,stroke-width:2px",
-      success: "fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:2px",
-      failed: "fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px",
-      skipped: "fill:#6b7280,stroke:#4b5563,color:#fff,stroke-dasharray:5 5",
-    };
-    for (const status of ["current", "success", "failed", "skipped"] as const) {
-      lines.push(`    classDef ${status} ${classDefs[status] ?? defaults[status]}`);
+    for (const status of ["current", "success", "failed", "skipped", "pending"] as const) {
+      lines.push(`    classDef ${status} ${classDefs[status] ?? MERMAID_CLASS_DEFS[status]}`);
     }
 
     for (const [status, ids] of statusNodes) {
@@ -178,14 +179,14 @@ export function toMermaid(workflow: Workflow, options: MermaidOptions = {}): str
     }
   }
 
-  // Edge styling — taken edges bold green, not-taken edges dashed gray
+  // Edge styling: taken edges bold brand blue, not-taken edges dashed slate
   if (trace) {
     lines.push("");
     if (takenIndices.length > 0) {
-      lines.push(`    linkStyle ${takenIndices.join(",")} stroke:#22c55e,stroke-width:3px`);
+      lines.push(`    linkStyle ${takenIndices.join(",")} ${MERMAID_EDGE_STYLES.taken}`);
     }
     if (notTakenIndices.length > 0) {
-      lines.push(`    linkStyle ${notTakenIndices.join(",")} stroke:#6b7280,stroke-width:1px,stroke-dasharray:5 5`);
+      lines.push(`    linkStyle ${notTakenIndices.join(",")} ${MERMAID_EDGE_STYLES.notTaken}`);
     }
   }
 

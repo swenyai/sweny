@@ -7,10 +7,11 @@
  */
 
 import fs from "node:fs";
-import chalk from "chalk";
 import { consoleLogger, type ExecutionTrace, type Logger, type NodeResult, type Workflow } from "../types.js";
 import { summarizeDecisions } from "../decider.js";
 import { toMermaidBlock, type NodeStatus } from "../mermaid.js";
+import { createPaint } from "./style.js";
+import { colorEnabled, glyphs } from "./terminal.js";
 
 // ── Receipt ─────────────────────────────────────────────────────
 
@@ -138,11 +139,11 @@ function decisionCounts(trace: ExecutionTrace): NonNullable<RunSummary["decider"
 }
 
 /**
- * `policy: env scoped, sandbox on, 1 output staged`. Only what the run knew:
- * no segment for a fact no node reported. Undefined when there is nothing to say.
+ * The policy facts the run knew, as short phrases: `env scoped`, `sandbox on`,
+ * `1 output staged`. No phrase for a fact no node reported.
  */
-export function formatPolicySegment(p: RunPolicy | undefined): string | undefined {
-  if (!p) return undefined;
+export function policyParts(p: RunPolicy | undefined): string[] {
+  if (!p) return [];
   const parts: string[] = [];
   if (p.envScope !== undefined) parts.push(p.envScope ? "env scoped" : "env unscoped");
   if (p.sandbox) {
@@ -159,6 +160,15 @@ export function formatPolicySegment(p: RunPolicy | undefined): string | undefine
     if (p.outputs.staged > 0) parts.push(`${n(p.outputs.staged)} staged`);
     if (p.outputs.applied > 0) parts.push(`${n(p.outputs.applied)} applied`);
   }
+  return parts;
+}
+
+/**
+ * `policy: env scoped, sandbox on, 1 output staged`. Only what the run knew:
+ * no segment for a fact no node reported. Undefined when there is nothing to say.
+ */
+export function formatPolicySegment(p: RunPolicy | undefined): string | undefined {
+  const parts = policyParts(p);
   return parts.length > 0 ? `policy: ${parts.join(", ")}` : undefined;
 }
 
@@ -181,12 +191,22 @@ export function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-/** `budget exceeded: tokens 52k of 50k (run, at node gather)`. */
-export function formatBudgetOverrun(b: NonNullable<RunSummary["budget"]>): string {
+/** `tokens 52k of 50k`: the overrun, in the budget's unit. */
+export function formatBudgetAmount(b: NonNullable<RunSummary["budget"]>): string {
   const amount = (n: number) =>
     b.unit === "cost_usd" ? (n < 0.01 ? `$${n.toFixed(4)}` : formatCost(n)) : formatTokenCount(n);
   const unit = b.unit === "cost_usd" ? "cost" : "tokens";
-  return `budget exceeded: ${unit} ${amount(b.spent)} of ${amount(b.limit)} (${b.scope}, at node ${b.node})`;
+  return `${unit} ${amount(b.spent)} of ${amount(b.limit)}`;
+}
+
+/** `budget exceeded: tokens 52k of 50k (run, at node gather)`. */
+export function formatBudgetOverrun(b: NonNullable<RunSummary["budget"]>): string {
+  return `budget exceeded: ${formatBudgetAmount(b)} (${b.scope}, at node ${b.node})`;
+}
+
+/** `agreed 4/5`, or `fell through 2/2` when no decision passed the gates. */
+export function formatDeciderCounts(d: NonNullable<RunSummary["decider"]>): string {
+  return d.compared > 0 ? `agreed ${d.agreed}/${d.compared}` : `fell through ${d.fellThrough}/${d.fellThrough}`;
 }
 
 /**
@@ -208,30 +228,20 @@ export function formatReceipt(s: RunSummary): string {
     ...(s.degraded && s.degraded.length > 0 ? [`degraded: ${s.degraded.join(", ")}`] : []),
     ...(formatPolicySegment(s.policy) ? [formatPolicySegment(s.policy)!] : []),
     ...(s.budget ? [formatBudgetOverrun(s.budget)] : []),
-    ...(s.decider
-      ? [
-          s.decider.compared > 0
-            ? `decider agreed ${s.decider.agreed}/${s.decider.compared}`
-            : `decider fell through ${s.decider.fellThrough}/${s.decider.fellThrough}`,
-        ]
-      : []),
+    ...(s.decider ? [`decider ${formatDeciderCounts(s.decider)}`] : []),
   ];
   return parts.join(" · ");
 }
 
-/** Receipt for a terminal: colored only when `color` is true. */
+/** Receipt for a terminal: in the success or error color only when `color` is true. */
 export function renderReceiptLine(s: RunSummary, color: boolean): string {
   const line = formatReceipt(s);
   if (!color) return line;
-  return s.ok ? chalk.green(line) : chalk.red(line);
+  const paint = createPaint(true);
+  return s.ok ? paint.success(line) : paint.error(line);
 }
 
 // ── Step summary ────────────────────────────────────────────────
-
-/** Brand blue (blue-600 / blue-700), not indigo. Applied to successful nodes. */
-export const STEP_SUMMARY_CLASS_DEFS = {
-  success: "fill:#2563eb,stroke:#1d4ed8,color:#fff,stroke-width:2px",
-} as const;
 
 /** Per-node Mermaid status from run results. */
 export function nodeStates(results: Map<string, NodeResult>): Record<string, NodeStatus> {
@@ -242,7 +252,7 @@ export function nodeStates(results: Map<string, NodeResult>): Record<string, Nod
   return state;
 }
 
-/** Markdown for `$GITHUB_STEP_SUMMARY`: receipt + status-colored Mermaid DAG. */
+/** Markdown for `$GITHUB_STEP_SUMMARY`: receipt + Mermaid DAG in the brand classDefs. */
 export function formatStepSummary(
   workflow: Workflow,
   results: Map<string, NodeResult>,
@@ -255,7 +265,7 @@ export function formatStepSummary(
     "",
     `\`${formatReceipt(summary)}\``,
     "",
-    toMermaidBlock(workflow, { state, trace, classDefs: STEP_SUMMARY_CLASS_DEFS }),
+    toMermaidBlock(workflow, { state, trace }),
     "",
     "",
   ].join("\n");
@@ -279,7 +289,9 @@ export function writeStepSummary(
     fs.appendFileSync(file, formatStepSummary(workflow, results, summary, trace));
     return true;
   } catch (err) {
-    process.stderr.write(`  ⚠ could not write GITHUB_STEP_SUMMARY: ${err instanceof Error ? err.message : err}\n`);
+    process.stderr.write(
+      `  ${glyphs().warning} could not write GITHUB_STEP_SUMMARY: ${err instanceof Error ? err.message : err}\n`,
+    );
     return false;
   }
 }
@@ -298,10 +310,18 @@ export interface RunLogger extends Logger {
  * while a node line is live (the progress line is redrawn in place) and written
  * by `flush()` after the node exits.
  */
-export function createRunLogger(opts: { verbose: boolean; tty: boolean; write?: (s: string) => void }): RunLogger {
+export function createRunLogger(opts: {
+  verbose: boolean;
+  tty: boolean;
+  /** Color the markers. Default: `tty` and color is enabled for stderr. */
+  color?: boolean;
+  write?: (s: string) => void;
+}): RunLogger {
   const write = opts.write ?? ((s: string) => void process.stderr.write(s));
   if (opts.verbose) return { ...consoleLogger, flush() {} };
 
+  const paint = createPaint(opts.color ?? (opts.tty && colorEnabled(process.stderr)));
+  const g = glyphs();
   const held: string[] = [];
   const emit = (line: string) => {
     if (opts.tty) held.push(line);
@@ -311,8 +331,8 @@ export function createRunLogger(opts: { verbose: boolean; tty: boolean; write?: 
   return {
     info: noop,
     debug: noop,
-    warn: (msg) => emit(`  ${chalk.yellow("⚠")} ${msg.trim()}\n`),
-    error: (msg) => emit(`  ${chalk.red("✗")} ${msg.trim()}\n`),
+    warn: (msg) => emit(`  ${paint.warning(g.warning)} ${msg.trim()}\n`),
+    error: (msg) => emit(`  ${paint.error(g.failure)} ${msg.trim()}\n`),
     flush() {
       while (held.length) write(held.shift()!);
     },

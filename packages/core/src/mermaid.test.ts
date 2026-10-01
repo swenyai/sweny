@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { toMermaid, toMermaidBlock } from "./mermaid.js";
+import { MERMAID_CLASS_DEFS, MERMAID_EDGE_STYLES } from "./theme.js";
 import type { Workflow, ExecutionTrace } from "./types.js";
 import { triageWorkflow, implementWorkflow } from "./workflows/index.js";
 
@@ -109,11 +110,11 @@ describe("toMermaid", () => {
     });
 
     expect(result).toContain("classDef current fill:#3b82f6");
-    expect(result).toContain("classDef success fill:#22c55e");
+    expect(result).toContain("classDef success fill:#2563eb");
     expect(result).toContain("class a success");
     expect(result).toContain("class b current");
-    // c has no state — no class applied
-    expect(result).not.toContain("class c");
+    // c has no state: the run never reached it, so it renders pending
+    expect(result).toContain("class c pending");
   });
 
   it("applies failed and skipped styling", () => {
@@ -125,8 +126,8 @@ describe("toMermaid", () => {
       },
     });
 
-    expect(result).toContain("classDef failed fill:#ef4444");
-    expect(result).toContain("classDef skipped fill:#6b7280");
+    expect(result).toContain("classDef failed fill:#dc2626");
+    expect(result).toContain("classDef skipped fill:#64748b");
     expect(result).toContain("class b failed");
     expect(result).toContain("class c skipped");
   });
@@ -282,11 +283,12 @@ describe("toMermaid", () => {
 
     const result = toMermaid(branching, { trace });
 
-    // Taken edges get green bold styling (edges 0 and 2 in the workflow)
+    // Taken edges get bold brand blue (edges 0 and 2 in the workflow)
     expect(result).toContain("linkStyle");
-    expect(result).toContain("stroke:#22c55e,stroke-width:3px");
-    // Not-taken edges get dashed gray
-    expect(result).toContain("stroke:#6b7280,stroke-width:1px,stroke-dasharray:5 5");
+    expect(result).toContain("stroke:#2563eb,stroke-width:3px");
+    // Not-taken edges get dashed slate
+    expect(result).toContain("stroke:#64748b,stroke-width:1px,stroke-dasharray:5 5");
+    expect(result).not.toContain("#22c55e");
   });
 
   it("shows iteration count on nodes and edges from trace", () => {
@@ -371,6 +373,36 @@ describe("toMermaidBlock", () => {
       classDefs: { success: "fill:#2563eb,stroke:#1d4ed8,color:#fff" },
     });
     expect(result).toContain("classDef success fill:#2563eb,stroke:#1d4ed8,color:#fff");
-    expect(result).toContain("classDef failed fill:#ef4444");
+    expect(result).toContain("classDef failed fill:#dc2626");
+  });
+});
+
+describe("brand classDefs (theme.ts)", () => {
+  it("are the default for every status, with no per-caller override", () => {
+    const result = toMermaid(simple, { state: { a: "success", b: "failed" } });
+    for (const [status, body] of Object.entries(MERMAID_CLASS_DEFS)) {
+      expect(result).toContain(`classDef ${status} ${body}`);
+    }
+  });
+
+  it("success is brand blue, current is blue with a thick stroke, failed red, skipped slate dashed, pending a slate outline", () => {
+    expect(MERMAID_CLASS_DEFS.success).toBe("fill:#2563eb,stroke:#1d4ed8,color:#fff,stroke-width:2px");
+    expect(MERMAID_CLASS_DEFS.current).toMatch(/^fill:#3b82f6,.*stroke-width:4px/);
+    expect(MERMAID_CLASS_DEFS.failed).toMatch(/^fill:#dc2626,/);
+    expect(MERMAID_CLASS_DEFS.skipped).toMatch(/^fill:#64748b,.*stroke-dasharray:5 5/);
+    // An outline, not a fill, so it reads on GitHub light and dark backgrounds.
+    expect(MERMAID_CLASS_DEFS.pending).toMatch(/^fill:none,stroke:#64748b,color:#64748b/);
+    expect(MERMAID_EDGE_STYLES.taken).toMatch(/^stroke:#2563eb,stroke-width:3px/);
+    expect(Object.values(MERMAID_CLASS_DEFS).join()).not.toMatch(/#22c55e|#16a34a|indigo/i);
+  });
+
+  it("marks every node the run never reached as pending", () => {
+    const result = toMermaid(simple, { state: { a: "failed" } });
+    expect(result).toContain("class a failed");
+    expect(result).toContain("class b,c pending");
+  });
+
+  it("emits no class lines without state", () => {
+    expect(toMermaid(simple)).not.toContain("pending");
   });
 });
