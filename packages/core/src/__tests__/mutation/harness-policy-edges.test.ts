@@ -325,3 +325,11 @@ describe("budgetGate", () => {
     expect(budgetGate(caps, { tokens: 10 }, true)).toStrictEqual({ degraded: [] });
   });
 });
+
+describe("budgetGate: strict refusal lists every unenforced budget", () => {
+  it("joins them with a semicolon", () => {
+    const tokens = "budget_tokens: harness cannot report token usage, so this budget is not enforced";
+    const cost = "budget_cost_usd: harness cannot report cost usage, so this budget is not enforced";
+    expect(budgetGate(weak, { tokens: 10, costUsd: 1 }, true).refuse).toBe(`strict policy: ${tokens}; ${cost}`);
+  });
+});

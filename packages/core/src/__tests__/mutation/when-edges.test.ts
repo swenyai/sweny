@@ -464,3 +464,45 @@ describe("checkExpression", () => {
     expect(check("a.flag && (a.i == 'x')")).toStrictEqual([`'a.i' is declared integer but is compared with "x"`]);
   });
 });
+
+describe("checkExpression and parser: second-pass edges", () => {
+  const nodeOut = {
+    a: { type: "object", properties: { i: { type: "integer" }, flag: { type: "boolean" } } },
+    m: { properties: { t: { type: ["string", 5] } } },
+  };
+  const ctx = {
+    from: "c",
+    ancestors: new Set(["a", "m"]),
+    outputs: nodeOut as unknown as Record<string, never>,
+  };
+
+  it("every keyword is refused where a field path is expected", () => {
+    for (const kw of ["in", "exists", "null", "false", "true"]) {
+      expect(syntaxError(`exists ${kw}`).message).toBe(`expected a field path but found '${kw}' (at position 7)`);
+    }
+  });
+
+  it("a string that spells an operator or keyword is still a string", () => {
+    expect(syntaxError("a.x 'in' [1]").message).toBe(
+      "unexpected string 'in' after a complete expression (at position 4)",
+    );
+    expect(syntaxError("a.x '==' 1").message).toBe(
+      "unexpected string '==' after a complete expression (at position 4)",
+    );
+  });
+
+  it("reports only path problems when a path is wrong, not the boolean-position ones too", () => {
+    expect(checkExpression("q.x && 5", ctx)).toStrictEqual(["'q.x': no node named 'q'"]);
+  });
+
+  it("ignores non-string entries in a declared type list", () => {
+    expect(checkExpression("m.t == 7", ctx)).toStrictEqual(["'m.t' is declared string but is compared with 7"]);
+  });
+
+  it("checks both sides of a comparison that holds a parenthesized comparison", () => {
+    const bad = `'a.i' is declared integer but is compared with "x"`;
+    expect(checkExpression("(a.i == 'x') == true", ctx)).toStrictEqual([bad]);
+    expect(checkExpression("true == (a.i == 'x')", ctx)).toStrictEqual([bad]);
+    expect(checkExpression("(a.i == 1) == (a.flag == true)", ctx)).toStrictEqual([]);
+  });
+});

@@ -1211,3 +1211,40 @@ describe("write stage: staged preview", () => {
     ]);
   });
 });
+
+describe("safe outputs: second-pass edges", () => {
+  it("the agent is told about a label allow-list only for label outputs", () => {
+    const lines = safeOutputsInstruction([{ type: "issue", labels: ["a"] }]).split("\n");
+    expect(lines[3]).toBe("- issue: at most 1");
+  });
+
+  it("a label or state change with no issue number is refused before anything else", async () => {
+    expect(
+      await receiptsOf({
+        declarations: [{ type: "label" }],
+        intents: [intent({ type: "label", labels: ["bug"] })],
+      }),
+    ).toStrictEqual([refused("label", "missing number", at)]);
+    expect(
+      await receiptsOf({
+        declarations: [{ type: "issue_state" }],
+        intents: [intent({ type: "issue_state", state: "reopen" })],
+      }),
+    ).toStrictEqual([refused("issue_state", "missing number", at)]);
+  });
+
+  it("labels the agent attaches to a comment are not carried into the write", async () => {
+    const screen = vi.fn(async () => "ALLOW");
+    const { o, gh } = setup({
+      policy: { screen: true },
+      screen,
+      declarations: [{ type: "comment", labels: ["x"] }],
+      intents: [intent({ type: "comment", number: "5", body: "hi", labels: ["y"] })],
+    });
+    await applySafeOutputs(o);
+    expect(screen.mock.calls[0]).toStrictEqual([
+      [{ type: "comment", via: "github", target: "acme/api", number: "5", body: "hi" }],
+    ]);
+    expect(gh.calls[0].input).toStrictEqual({ repo: "acme/api", issue_number: 5, body: "hi" });
+  });
+});

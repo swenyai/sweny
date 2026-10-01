@@ -1219,3 +1219,77 @@ describe("agent access and sandbox", () => {
 });
 
 afterEach(() => resetWithheldReport());
+
+describe("agent env: second-pass edges", () => {
+  it("pins every pi provider's credential names", () => {
+    expect(PI_PROVIDER_VARS).toStrictEqual({
+      anthropic: ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
+      openai: ["OPENAI_API_KEY"],
+      "azure-openai-responses": ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_BASE_URL", "AZURE_OPENAI_RESOURCE_NAME"],
+      google: ["GEMINI_API_KEY"],
+      "google-vertex": ["GOOGLE_CLOUD_API_KEY", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"],
+      "amazon-bedrock": [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+      ],
+      "cloudflare-ai-gateway": ["CLOUDFLARE_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_GATEWAY_ID"],
+      "cloudflare-workers-ai": ["CLOUDFLARE_API_KEY", "CLOUDFLARE_ACCOUNT_ID"],
+      "github-copilot": ["COPILOT_GITHUB_TOKEN"],
+      "vercel-ai-gateway": ["AI_GATEWAY_API_KEY"],
+      "ant-ling": ["ANT_LING_API_KEY"],
+      "zai-coding-cn": ["ZAI_CODING_CN_API_KEY"],
+      "opencode-go": ["OPENCODE_API_KEY"],
+      huggingface: ["HF_TOKEN"],
+      "kimi-coding": ["KIMI_API_KEY"],
+      "minimax-cn": ["MINIMAX_CN_API_KEY"],
+      "qwen-token-plan": ["QWEN_TOKEN_PLAN_API_KEY"],
+      "qwen-token-plan-individual": ["QWEN_TOKEN_PLAN_API_KEY"],
+      "qwen-token-plan-cn": ["QWEN_TOKEN_PLAN_CN_API_KEY"],
+      "xiaomi-token-plan-cn": ["XIAOMI_TOKEN_PLAN_CN_API_KEY"],
+      "xiaomi-token-plan-ams": ["XIAOMI_TOKEN_PLAN_AMS_API_KEY"],
+      "xiaomi-token-plan-sgp": ["XIAOMI_TOKEN_PLAN_SGP_API_KEY"],
+    });
+  });
+
+  it("a pi setting that is not a secret never selects a provider by itself", () => {
+    for (const v of [
+      "AZURE_OPENAI_BASE_URL",
+      "AZURE_OPENAI_RESOURCE_NAME",
+      "CLOUDFLARE_ACCOUNT_ID",
+      "CLOUDFLARE_GATEWAY_ID",
+      "GOOGLE_CLOUD_PROJECT",
+      "GCLOUD_PROJECT",
+      "GOOGLE_CLOUD_LOCATION",
+      "AWS_REGION",
+      "AWS_DEFAULT_REGION",
+    ]) {
+      expect(resolvePiProvider({ [v]: "x" }), v).toStrictEqual({ explicit: false, vars: [] });
+    }
+  });
+
+  it("an unset SWENY_ENV_SCOPE is not an unknown value", () => {
+    const warn = vi.fn();
+    expect(resolveEnvScope({ CI: "1" }, undefined, { warn })).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("lists every withheld credential name, comma separated, and needs no logger", () => {
+    resetWithheldReport();
+    const l = logger();
+    finishAgentEnv({ LINEAR_API_KEY: "l", GITHUB_TOKEN: "g" }, { logger: l });
+    expect(l.debug).toHaveBeenCalledWith(
+      "sweny: skill credentials withheld from the agent: GITHUB_TOKEN, LINEAR_API_KEY",
+    );
+    expect(() => finishAgentEnv({ GITHUB_TOKEN: "g" }, { passthrough: ["GITHUB_TOKEN"] })).not.toThrow();
+  });
+
+  it("names every dropped agent_env grant for a staged run", () => {
+    expect(grantedAgentEnv(["A", "B"], { readOnly: false, staged: true }).dropped).toBe(
+      "agent_env withheld in a staged or dry run: A, B",
+    );
+  });
+});

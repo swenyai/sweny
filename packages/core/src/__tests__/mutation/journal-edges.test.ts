@@ -1554,3 +1554,58 @@ describe("wrapWrites", () => {
     expect(fake.reads).toStrictEqual([]);
   });
 });
+
+describe("journal: second-pass edges", () => {
+  it("a record whose version is a string is damage, not a newer format", () => {
+    const file = journalFile(line(1, "run:start", {}, { v: "2" }) + "\n");
+    const r = readJournal(file);
+    expect(r.records).toHaveLength(0);
+    expect(r.truncatedBytes).toBeGreaterThan(0);
+  });
+
+  it("a journal that never began writes nothing on end", () => {
+    const j = RunJournal.create({ runId: RUN, cwd: tmp() });
+    j.end("success");
+    expect(existsSync(j.file)).toBe(false);
+  });
+
+  it("a process we may not signal still counts as alive", () => {
+    // pid 1 exists on every host; a non-root user gets EPERM from kill(1, 0).
+    const cwd = tmp();
+    mkdirSync(journalDir(cwd, RUN), { recursive: true });
+    writeFileSync(join(journalDir(cwd, RUN), "journal.lock"), "1");
+    expect(() => resumeFrom([matchingStart()], {}, cwd)).toThrow(JournalLockedError);
+  });
+
+  it("passes non-object arguments through untouched (no marker can be added)", async () => {
+    const fake = fakeProvider("github", { github_create_issue: {} });
+    const { j } = pendingJournal();
+    await call(j, fake, "github_create_issue", "raw" as never);
+    await call(j, fake, "github_create_issue", null as never);
+    expect(fake.writes.map((w) => w.args)).toStrictEqual(["raw", null]);
+  });
+
+  it("looks a pending write up with the search tool by name, not the first read tool", async () => {
+    const args = { repo: "o/r", title: "T" };
+    const key = keyOf("github_create_issue", args);
+    const hit = { number: 5, body: `x ${markerToken(key)}` };
+    const fake = fakeProvider(
+      "github",
+      { github_create_issue: {} },
+      { github_get_issue: { items: [] }, github_search_issues: { items: [hit] } },
+    );
+    await call(pendingJournal({ pending: [key] }).j, fake, "github_create_issue", args);
+    expect(fake.writes).toStrictEqual([]);
+    expect(fake.reads.map((r) => r.tool)).toStrictEqual(["github_search_issues"]);
+  });
+
+  it("keeps ids up to three levels deep in a receipt, and nothing deeper", async () => {
+    const fake = fakeProvider("github", {
+      github_create_issue: { id: 1, x: { b: { c: { id: 5 } } }, y: { b: { c: { d: { id: 6 } } } } },
+    });
+    const { j } = pendingJournal();
+    await call(j, fake, "github_create_issue", { repo: "o/r", title: "T" });
+    const applied = rawRecords(j.file).find((r) => r.type === "output:applied")!;
+    expect(applied.output).toStrictEqual({ id: 1, x: { b: { c: { id: 5 } } } });
+  });
+});
