@@ -296,7 +296,7 @@ describe("action.yml notify-on-failure wiring (#474)", () => {
     expect(calls().find((c) => c.startsWith("curl"))).toContain("reason: did_not_start");
 
     // A successful record belonging to the current invocation stays quiet.
-    fs.writeFileSync(log, "");
+    fs.rmSync(log);
     record({ status: "success", nodes: [] }, -1);
     const succeeded = run({ NOTIFY: HOOK, MARKER_FILE: second });
     expect(succeeded.status).toBe(0);
