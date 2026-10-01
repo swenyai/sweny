@@ -16,6 +16,7 @@ import {
   CODEX_ISOLATION_FEATURES_OFF,
   codexBackendHosts,
   isStrictCompatibleSchema,
+  TESTED_CODEX_VERSION,
   toTomlValue,
   translateDenyNames,
   type CodexHarnessOptions,
@@ -462,6 +463,22 @@ describe("CodexHarness preflight", () => {
   it("passes when codex is new enough and can authenticate", async () => {
     const { h } = harness({ authProbe: () => ({ ok: true, via: "OPENAI_API_KEY" }) });
     expect(await h.preflight()).toMatchObject({ ok: true });
+  });
+
+  it("warns once, and still passes, when codex is newer than the tested version", async () => {
+    const { h, log } = harness({ authProbe: () => ({ ok: true, via: "OPENAI_API_KEY" }) });
+    fakes.setVersion("9.0.0");
+    expect(await h.preflight()).toEqual({ ok: true, version: "9.0.0" });
+    await h.preflight();
+    const warns = log.warn.mock.calls.filter((c) => String(c[0]).includes(`newer than ${TESTED_CODEX_VERSION}`));
+    expect(warns).toHaveLength(1);
+  });
+
+  it("does not warn on the tested version", async () => {
+    const { h, log } = harness({ authProbe: () => ({ ok: true, via: "OPENAI_API_KEY" }) });
+    fakes.setVersion(TESTED_CODEX_VERSION);
+    expect(await h.preflight()).toMatchObject({ ok: true });
+    expect(log.warn.mock.calls.filter((c) => String(c[0]).includes("newer than"))).toHaveLength(0);
   });
 
   it("names the install command when codex is missing", async () => {
