@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Ignore the cached report and re-test every mutant"
+        type: boolean
+        default: false
   push:
     branches: [test/mutation] # TEMP: removed before merge (dispatch needs the file on main)
 
@@ -45,9 +50,14 @@ jobs:
           key: mutation-incremental-${{ github.run_id }}
           restore-keys: mutation-incremental-
 
+      # Incremental reuse is for quick manual checks. Mutants on module-level constants
+      # are not re-tested when only the tests change, so the weekly run is always full.
       - name: Run Stryker
         working-directory: packages/core
-        run: npx stryker run
+        env:
+          FORCE: ${{ github.event_name != 'workflow_dispatch' || inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ]; then npx stryker run --force; else npx stryker run; fi
 
       - name: Summary
         if: always()
