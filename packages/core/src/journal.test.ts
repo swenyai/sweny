@@ -1,5 +1,14 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -20,7 +29,12 @@ import {
   redact,
 } from "./journal.js";
 import { createWriteStageState } from "./safe-outputs.js";
-import type { NodeResult, Workflow } from "./types.js";
+import type { JournalRecord } from "./journal.js";
+import { toolsHash } from "./journal.js";
+import type { NodeResult, Skill, Tool, Workflow } from "./types.js";
+
+// Run keys go to a scratch state dir, never the real ~/.local/state.
+process.env.SWENY_STATE_DIR = mkdtempSync(join(tmpdir(), "sweny-state-"));
 
 const dirs: string[] = [];
 function tmp(): string {
@@ -221,5 +235,146 @@ describe("retention and locking", () => {
     expect(() => RunJournal.openForResume({ runId: RUN_ID, cwd, read, plan: buildResumePlan(read.records) })).toThrow(
       JournalLockedError,
     );
+  });
+});
+
+describe("record integrity", () => {
+  const AT = "2026-09-30T00:00:00.000Z";
+  const failed: NodeResult = { status: "failed", data: { error: "x" }, toolCalls: [] };
+  const ws = { counts: [], total: 0, seen: [] };
+
+  it("a record forged with the public sha256 checksum is refused, not replayed", () => {
+    const cwd = tmp();
+    const j = RunJournal.create({ runId: RUN_ID, cwd });
+    begin(j);
+    j.nodeStart("a", 1);
+    j.nodeEnd("a", 1, failed, createWriteStageState());
+    j.end("failed");
+    const file = join(journalDir(cwd, RUN_ID), JOURNAL_FILE);
+    const n = readFileSync(file, "utf-8").trim().split("\n").length;
+    const forge = (body: Record<string, unknown>) =>
+      JSON.stringify({ ...body, h: createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 16) }) +
+      "\n";
+    const v = JOURNAL_SCHEMA_VERSION;
+    appendFileSync(
+      file,
+      forge({ v, seq: n + 1, type: "node:end", at: AT, node: "a", iteration: 1, result: ok({}), write_state: ws }),
+    );
+    appendFileSync(file, forge({ v, seq: n + 2, type: "route", at: AT, from: "a", to: "b" }));
+
+    const read = readJournal(file, { repair: true });
+    expect(read.records).toHaveLength(n);
+    expect(read.corruptAtLine).toBe(n + 1);
+  });
+
+  it("control flow the executor never writes is refused", () => {
+    let seq = 0;
+    const rec = (type: string, f: Record<string, unknown> = {}) =>
+      ({ v: JOURNAL_SCHEMA_VERSION, seq: ++seq, type, at: AT, ...f }) as JournalRecord;
+    const start = () => {
+      seq = 0;
+      return rec("run:start", {
+        run_id: RUN_ID,
+        workflow_id: "w",
+        workflow_entry: "a",
+        workflow_hash: "x",
+        instruction_hash: "x",
+        input_hash: "x",
+        tools_hash: "x",
+        input: {},
+        input_redacted: false,
+      });
+    };
+    const startA = () => rec("node:start", { node: "a", iteration: 1 });
+    const endA = (r: NodeResult = ok({})) => rec("node:end", { node: "a", iteration: 1, result: r, write_state: ws });
+    const cases: Array<[string, () => JournalRecord[]]> = [
+      [
+        "records after run:end",
+        () => [
+          start(),
+          startA(),
+          endA(failed),
+          rec("run:end", { status: "failed" }),
+          endA(),
+          rec("route", { from: "a", to: "b" }),
+        ],
+      ],
+      ["node:end for a visit that never started", () => [start(), endA()]],
+      ["a node no route pointed to", () => [start(), rec("node:start", { node: "b", iteration: 1 })]],
+      [
+        "a route from a node that did not just end",
+        () => [start(), startA(), endA(), rec("route", { from: "b", to: "a" })],
+      ],
+      [
+        "two routes for one visit",
+        () => [start(), startA(), endA(), rec("route", { from: "a", to: "b" }), rec("route", { from: "a", to: "c" })],
+      ],
+      ["a second run:start", () => [start(), rec("run:start", { run_id: RUN_ID, workflow_entry: "a" })]],
+      ["an unknown record type", () => [start(), rec("node:teleport", { node: "b" })]],
+    ];
+    for (const [what, records] of cases) {
+      expect(() => buildResumePlan(records()), what).toThrow(/run journal record \d+/);
+    }
+  });
+
+  it("journal files are private to the user (0600)", () => {
+    if (process.platform === "win32") return;
+    const cwd = tmp();
+    const j = RunJournal.create({ runId: RUN_ID, cwd });
+    begin(j);
+    j.end("crashed");
+    expect(statSync(join(journalDir(cwd, RUN_ID), JOURNAL_FILE)).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("tools fingerprint", () => {
+  const tool = (over: Partial<Tool> = {}): Tool => ({
+    name: "tenant_read",
+    description: "",
+    input_schema: { type: "object" },
+    access: "read",
+    handler: async () => null,
+    ...over,
+  });
+  const skills = (over: Partial<Skill> = {}, mcp: Record<string, unknown> = {}) =>
+    new Map<string, Skill>([
+      [
+        "tenant",
+        {
+          id: "tenant",
+          name: "Tenant",
+          description: "",
+          category: "general",
+          config: {},
+          tools: [tool()],
+          mcp: { command: "server", args: ["--tenant", "prod"], ...mcp },
+          ...over,
+        },
+      ],
+    ]);
+
+  it("changes when MCP args, instructions, tool schemas or env var names change", () => {
+    const base = toolsHash(skills());
+    expect(toolsHash(skills({}, { args: ["--tenant", "staging"] }))).not.toBe(base);
+    expect(toolsHash(skills({ instruction: "only touch staging" }))).not.toBe(base);
+    expect(
+      toolsHash(
+        skills({ tools: [tool({ input_schema: { type: "object", properties: { id: { type: "string" } } } })] }),
+      ),
+    ).not.toBe(base);
+    expect(toolsHash(skills({}, { env: { TENANT_TOKEN: "x" } }))).not.toBe(
+      toolsHash(skills({}, { env: { OTHER_TOKEN: "x" } })),
+    );
+  });
+
+  it("never depends on secret values", () => {
+    expect(toolsHash(skills({}, { env: { TENANT_TOKEN: "value-one-123456" } }))).toBe(
+      toolsHash(skills({}, { env: { TENANT_TOKEN: "value-two-654321" } })),
+    );
+    expect(toolsHash(skills({}, { headers: { Authorization: "Bearer one" } }))).toBe(
+      toolsHash(skills({}, { headers: { Authorization: "Bearer two" } })),
+    );
+    const gh = (t: string) => ["--token", `ghp_${t.repeat(36)}`];
+    expect(toolsHash(skills({}, { args: gh("a") }))).toBe(toolsHash(skills({}, { args: gh("b") })));
   });
 });
