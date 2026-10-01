@@ -646,6 +646,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       const attemptBudget = budgetOn ? nodeBudget.attempt(signal) : undefined;
       try {
         result = await claude.run({
+          nodeId: currentId,
           instruction: currentInstruction,
           context,
           tools: trackedTools,

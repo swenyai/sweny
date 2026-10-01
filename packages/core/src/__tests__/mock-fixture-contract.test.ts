@@ -22,7 +22,7 @@ describe("public mock fixture contract", () => {
       workflow: graph,
       responses: { right: { data: { owner: "right" } }, left: { data: { owner: "left" } } },
     });
-    const run = await execute(graph, {}, { harness, skills: new Map() });
+    const run = await execute(graph, {}, { harness, skills: new Map(), env: {}, offline: true });
     expect(harness.executedNodes).toEqual(["left", "right"]);
     expect(run.results.get("left")?.data.owner).toBe("left");
     expect(run.results.get("right")?.data.owner).toBe("right");
@@ -45,7 +45,7 @@ describe("public mock fixture contract", () => {
         left: { data: { owner: "left" } },
       },
     });
-    const run = await execute(graph, {}, { harness, skills: new Map() });
+    const run = await execute(graph, {}, { harness, skills: new Map(), env: {}, offline: true });
     expect(harness.executedNodes).toEqual(["left", "right"]);
     expect(run.results.has("skip")).toBe(false);
     expect(run.results.get("right")?.data.owner).toBe("right");
@@ -60,7 +60,7 @@ describe("public mock fixture contract", () => {
       workflow: graph,
       responses: { left: { data: {} }, right: { data: { done: true } } },
     });
-    const run = await execute(graph, {}, { harness, skills: new Map() });
+    const run = await execute(graph, {}, { harness, skills: new Map(), env: {}, offline: true });
     expect(harness.executedNodes).toEqual(["left", "left"]);
     expect(run.results.get("left")?.status).toBe("failed");
     expect(run.results.has("right")).toBe(false);
@@ -71,7 +71,7 @@ describe("public mock fixture contract", () => {
     graph.nodes.left.fail_soft = true;
     const options = { strict: true, workflow: graph, responses: { right: { data: { ok: true } } } };
     const harness = new MockHarness(options);
-    const run = await execute(graph, {}, { harness, skills: new Map() });
+    const run = await execute(graph, {}, { harness, skills: new Map(), env: {}, offline: true });
     const result = run.results.get("left")!;
     expect(result.status).toBe("failed");
     expect(result.data).toMatchObject({ refused: true, error: expect.stringContaining("left") });
@@ -120,5 +120,39 @@ describe("public mock fixture contract", () => {
     const harness = new MockClaude({ responses: { first: { data: { value: 1 } } } });
     expect((await harness.run({ instruction: "unrelated", context: {}, tools: [] })).data.value).toBe(1);
     expect((await harness.run({ instruction: "unrelated", context: {}, tools: [] })).status).toBe("success");
+  });
+
+  it("strict unique manual matching still executes valid supplied handlers", async () => {
+    const graph = workflow();
+    graph.nodes.right.instruction = "Summarize the result";
+    const handler = vi.fn(async () => ({ count: 3 }));
+    const harness = new MockHarness({
+      strict: true,
+      workflow: graph,
+      responses: { left: { toolCalls: [{ tool: "read", input: { path: "fixture" } }], data: { ok: true } } },
+    });
+    const result = await harness.run({
+      instruction: "Inspect the repository",
+      context: {},
+      tools: [{ name: "read", description: "Read fixture", input_schema: { type: "object" }, handler }],
+    });
+    expect(result.status).toBe("success");
+    expect(handler).toHaveBeenCalledOnce();
+    expect(result.toolCalls).toEqual([{ tool: "read", input: { path: "fixture" }, output: { count: 3 } }]);
+  });
+
+  it("strict explicit identity does not borrow a fixture named in the instruction", async () => {
+    const harness = new MockHarness({ strict: true, responses: { right: { data: { ok: true } } } });
+    const result = await harness.run({ nodeId: "left", instruction: "right", context: {}, tools: [] });
+    expect(result.status).toBe("failed");
+    expect(result.data.error).toContain('node "left"');
+    expect(harness.executedNodes).toEqual(["left"]);
+  });
+
+  it("inherited object properties are not scripted responses", async () => {
+    const harness = new MockHarness({ strict: true, responses: {} });
+    const result = await harness.run({ nodeId: "constructor", instruction: "Inspect", context: {}, tools: [] });
+    expect(result.status).toBe("failed");
+    expect(result.data.error).toContain('node "constructor"');
   });
 });
