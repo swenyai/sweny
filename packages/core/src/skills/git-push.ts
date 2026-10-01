@@ -22,16 +22,35 @@
  *    The token goes to git as command-scope config in the child env, never
  *    argv, and only on this one invocation.
  *
+ * The git binary, its PATH, the proxy and CA settings and the server URL come
+ * from the environment captured at process startup (startup-env.ts), never
+ * from a value the workspace `.env` introduced, and git is run by an absolute
+ * path that lies outside the workspace, the temp dir and any directory this
+ * user can write (see {@link resolveTrustedGit}).
+ *
  * Guard rails: only a local branch that exists, only when origin is the PR's
- * own repo, never force, never the base branch or the remote's default branch.
+ * own repo, never force, never the base branch or the repo's default branch
+ * (from the GitHub API, not the checkout's `origin/HEAD`).
  * A push that fails is logged and the PR is still requested: the agent may
  * already have pushed (persisted credentials, an `agent_env` grant).
  */
 
 import { execFile } from "node:child_process";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  constants as fsConstants,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import * as path from "node:path";
+import { startupEnv, trustedEnvValue } from "../startup-env.js";
 import type { BranchPusher } from "../types.js";
 
 export interface GitRunResult {
@@ -42,17 +61,112 @@ export interface GitRunResult {
 
 export type GitRunner = (args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }) => Promise<GitRunResult>;
 
-const defaultGit: GitRunner = (args, opts) =>
-  new Promise((resolve) => {
-    execFile("git", args, { cwd: opts.cwd, env: opts.env, timeout: 120_000 }, (err, stdout, stderr) => {
-      const code = err
-        ? typeof (err as { code?: unknown }).code === "number"
-          ? (err as { code: number }).code
-          : 1
-        : 0;
-      resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+/** True when `child` is `dir` or inside it. */
+function inside(dir: string, child: string): boolean {
+  const rel = path.relative(dir, child);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+function real(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/** True when this user can write `dir` or any directory above it. */
+function writableChain(dir: string): boolean {
+  for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+    try {
+      accessSync(d, fsConstants.W_OK);
+      return true;
+    } catch {
+      // Not writable: check the parent.
+    }
+    if (path.dirname(d) === d) return false;
+  }
+}
+
+/**
+ * Whether `dir` may hold the git sweny runs with the token: absolute, outside
+ * the workspace and the temp dir, and not writable by this user at any level
+ * (the agent runs as this user). The writability check is skipped as root,
+ * where the agent could replace any binary anyway, and on Windows, where
+ * `access(W_OK)` only reads the read-only attribute: there the sandbox is the
+ * boundary.
+ */
+function trustedDir(dir: string, workspace: string): boolean {
+  if (!dir || !path.isAbsolute(dir)) return false;
+  const r = real(dir);
+  const ws = real(workspace);
+  const tmp = real(tmpdir());
+  for (const d of [path.resolve(dir), r]) {
+    if (inside(ws, d) || inside(path.resolve(workspace), d) || inside(tmp, d)) return false;
+  }
+  const root = typeof process.getuid === "function" && process.getuid() === 0;
+  if (!root && process.platform !== "win32" && (writableChain(dir) || writableChain(r))) return false;
+  return true;
+}
+
+/** The trusted entries of a PATH value, in order (see {@link trustedDir}). */
+export function trustedPathDirs(pathValue: string | undefined, workspace: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of (pathValue ?? "").split(path.delimiter)) {
+    if (seen.has(d) || !trustedDir(d, workspace)) continue;
+    seen.add(d);
+    out.push(d);
+  }
+  return out;
+}
+
+/**
+ * The absolute path of the first `git` on `pathValue` (the startup PATH) whose
+ * directory, and whose resolved file and its directory, pass
+ * {@link trustedDir}. Undefined when there is none: nothing is pushed.
+ */
+export function resolveTrustedGit(pathValue: string | undefined, workspace: string): string | undefined {
+  const names = process.platform === "win32" ? ["git.exe"] : ["git"];
+  for (const dir of trustedPathDirs(pathValue, workspace)) {
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      try {
+        if (!statSync(candidate).isFile()) continue;
+        accessSync(candidate, fsConstants.X_OK);
+      } catch {
+        continue;
+      }
+      const file = real(candidate);
+      if (!trustedDir(path.dirname(file), workspace)) continue;
+      if (process.platform !== "win32" && !(typeof process.getuid === "function" && process.getuid() === 0)) {
+        try {
+          accessSync(file, fsConstants.W_OK);
+          continue; // A git binary this user can rewrite is not trusted.
+        } catch {
+          // Not writable: trusted.
+        }
+      }
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+/** A runner that executes the git at `gitPath` (absolute), never a PATH lookup. */
+export function gitAt(gitPath: string): GitRunner {
+  return (args, opts) =>
+    new Promise((resolve) => {
+      execFile(gitPath, args, { cwd: opts.cwd, env: opts.env, timeout: 120_000 }, (err, stdout, stderr) => {
+        const code = err
+          ? typeof (err as { code?: unknown }).code === "number"
+            ? (err as { code: number }).code
+            : 1
+          : 0;
+        resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+      });
     });
-  });
+}
 
 export interface PushHeadOptions {
   /** `owner/repo` the PR is for. */
@@ -61,13 +175,23 @@ export interface PushHeadOptions {
   head: string;
   /** The PR's base branch. */
   base: string;
+  /**
+   * The repo's default branch, from the GitHub API. Without it nothing is
+   * pushed: the checkout's `origin/HEAD` is agent-written and not consulted.
+   */
+  defaultBranch?: string;
   /** The github skill's token. Without it nothing is pushed. */
   token?: string;
   /** The checkout (the run's `cwd`). */
   cwd: string;
-  /** The operator's env: `GITHUB_SERVER_URL`, proxy and CA settings. Default: `process.env`. */
+  /**
+   * The operator's env: `GITHUB_SERVER_URL`, proxy and CA settings. Default:
+   * `process.env`, read through the startup snapshot (startup-env.ts), so a
+   * value the workspace `.env` introduced is never used. PATH always comes from
+   * the startup snapshot.
+   */
   env?: NodeJS.ProcessEnv;
-  /** Test seam. */
+  /** Test seam. Default: the git {@link resolveTrustedGit} finds on the startup PATH. */
   git?: GitRunner;
 }
 
@@ -130,16 +254,27 @@ export function pushAuthConfig(server: string, token: string, env: NodeJS.Proces
   return out;
 }
 
-// What the operator's env may hand git: the path, locale, temp dirs, proxies
-// and CA bundles. Every other GIT_* setting (GIT_DIR, GIT_CONFIG_*, GIT_SSH*,
-// GIT_ASKPASS, GIT_TRACE*, ...) is dropped.
+// What the operator's env may hand git: locale, home, temp dirs, proxies and
+// CA bundles, each through the startup snapshot (trustedEnvValue). PATH is set
+// by the caller from the trusted startup PATH. Every other GIT_* setting
+// (GIT_DIR, GIT_CONFIG_*, GIT_SSH*, GIT_ASKPASS, GIT_TRACE*, ...) is dropped.
 const KEPT_ENV =
-  /^(PATH|Path|HOME|USERPROFILE|TMPDIR|TEMP|TMP|LANG|LANGUAGE|LC_[A-Z_]+|SYSTEMROOT|SystemRoot|COMSPEC|ComSpec|PATHEXT|(HTTPS?|ALL|NO)_PROXY|(https?|all|no)_proxy|SSL_CERT_FILE|SSL_CERT_DIR|GIT_SSL_CAINFO|GIT_SSL_CAPATH)$/;
+  /^(HOME|USERPROFILE|TMPDIR|TEMP|TMP|LANG|LANGUAGE|LC_[A-Z_]+|SYSTEMROOT|SystemRoot|COMSPEC|ComSpec|PATHEXT|(HTTPS?|ALL|NO)_PROXY|(https?|all|no)_proxy|SSL_CERT_FILE|SSL_CERT_DIR|GIT_SSL_CAINFO|GIT_SSL_CAPATH)$/;
 
-/** The env every sweny-side git call runs with: no system or global config, no prompts, no inherited git settings. */
-export function hardenedGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+/**
+ * The env every sweny-side git call runs with: the trusted PATH, no system or
+ * global config, no prompts, no inherited git settings, and no kept value the
+ * workspace `.env` introduced.
+ */
+export function hardenedGitEnv(env: NodeJS.ProcessEnv, trustedPath?: string): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(env)) if (v !== undefined && KEPT_ENV.test(k)) out[k] = v;
+  const keys = new Set([...Object.keys(env === process.env ? startupEnv() : env), ...Object.keys(startupEnv())]);
+  for (const k of keys) {
+    if (!KEPT_ENV.test(k)) continue;
+    const v = trustedEnvValue(env, k);
+    if (v !== undefined) out[k] = v;
+  }
+  if (trustedPath !== undefined) out.PATH = trustedPath;
   out.GIT_CONFIG_NOSYSTEM = "1";
   out.GIT_CONFIG_GLOBAL = devNull;
   out.GIT_TERMINAL_PROMPT = "0";
@@ -164,23 +299,42 @@ function hardenedArgs(hooksDir: string): string[] {
   ];
 }
 
+/** A branch name without a leading `refs/heads/`, so `refs/heads/develop` and `develop` compare equal. */
+export function branchName(ref: string): string {
+  return ref.trim().replace(/^refs\/heads\//, "");
+}
+
 /**
  * Push the PR's head branch from the sweny process. Never throws.
  */
 export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadResult> {
-  const git = opts.git ?? defaultGit;
-  const { head, base, token } = opts;
+  const { token } = opts;
+  const head = branchName(opts.head);
+  const base = branchName(opts.base);
+  const defaultBranch = opts.defaultBranch === undefined ? undefined : branchName(opts.defaultBranch);
   if (!isSafeRepo(opts.repo))
     return { pushed: false, attempted: false, reason: `repo "${opts.repo}" is not owner/repo` };
   if (!isSafeBranch(head))
     return { pushed: false, attempted: false, reason: `head "${head}" is not a plain branch name` };
   if (head === base) return { pushed: false, attempted: false, reason: "head is the base branch" };
+  if (!defaultBranch) return { pushed: false, attempted: false, reason: "the repo's default branch is unknown" };
+  if (head === defaultBranch || head === "main" || head === "master") {
+    return { pushed: false, attempted: false, reason: `head ${head} is the default branch` };
+  }
   if (!token) return { pushed: false, attempted: false, reason: "no GITHUB_TOKEN" };
 
   const opEnv = opts.env ?? process.env;
+  const cwd = path.resolve(opts.cwd);
+  // git and its PATH come from the startup snapshot, never the run's env or the workspace.
+  const startupPath = startupEnv().PATH ?? startupEnv().Path;
+  const gitPath = opts.git ? undefined : resolveTrustedGit(startupPath, cwd);
+  if (!opts.git && !gitPath) {
+    return { pushed: false, attempted: false, reason: "no git outside the workspace and writable dirs" };
+  }
+  const git: GitRunner = opts.git ?? gitAt(gitPath!);
   let server: URL;
   try {
-    server = new URL((opEnv.GITHUB_SERVER_URL || "https://github.com").replace(/\/+$/, ""));
+    server = new URL((trustedEnvValue(opEnv, "GITHUB_SERVER_URL") || "https://github.com").replace(/\/+$/, ""));
   } catch {
     return { pushed: false, attempted: false, reason: "GITHUB_SERVER_URL is not a URL" };
   }
@@ -191,8 +345,7 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
   const serverHost = server.hostname.toLowerCase();
   const destination = `${serverBase}/${opts.repo}.git`;
 
-  const cwd = path.resolve(opts.cwd);
-  const env = hardenedGitEnv(opEnv);
+  const env = hardenedGitEnv(opEnv, trustedPathDirs(startupPath, cwd).join(path.delimiter));
   let tmp: string | undefined;
   try {
     tmp = mkdtempSync(path.join(tmpdir(), "sweny-push-"));
@@ -224,12 +377,6 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
         return !p || p.repo !== wanted || p.host !== serverHost;
       });
     if (bad) return { pushed: false, attempted: false, reason: `origin is not ${opts.repo} on ${serverHost}` };
-
-    const originHead = await read(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]);
-    const defaultBranch = originHead.code === 0 ? originHead.stdout.trim().replace(/^origin\//, "") : undefined;
-    if (head === defaultBranch || head === "main" || head === "master") {
-      return { pushed: false, attempted: false, reason: `head ${head} is the default branch` };
-    }
 
     const objectsOut = await read(["rev-parse", "--git-path", "objects"]);
     const shallowOut = await read(["rev-parse", "--git-path", "shallow"]);

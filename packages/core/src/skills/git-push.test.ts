@@ -13,15 +13,20 @@ import {
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import {
+  branchName,
   hardenedGitEnv,
   isSafeBranch,
   isSafeRepo,
   pushAuthConfig,
   pushHeadBranch,
   repoFromRemote,
+  resolveTrustedGit,
+  trustedPathDirs,
   type GitRunner,
 } from "./git-push.js";
 import { github } from "./github.js";
+import { loadDotenv } from "../cli/config-file.js";
+import { startupEnv, unmarkWorkspaceEnv } from "../startup-env.js";
 
 // #473: with `persist-credentials: false` the checkout holds no token, so
 // sweny pushes the PR head itself, from its own process, with the github
@@ -108,6 +113,7 @@ const opts = (f: ReturnType<typeof fixture>) => ({
   repo: "Owner/Repo",
   head: "off-1-fix",
   base: "main",
+  defaultBranch: "main",
   token: TOKEN,
   cwd: f.work,
   env: f.env,
@@ -314,14 +320,110 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     expect(f.refs(f.remote)).toBe("");
   });
 
-  it("skips when head is the remote default branch", async () => {
+  it("skips when head is the default branch the API reports", async () => {
+    const f = make();
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
+    const r = await pushHeadBranch({ ...opts(f), defaultBranch: "off-1-fix", git: g.git });
+    expect(r).toMatchObject({ pushed: false, attempted: false, reason: "head off-1-fix is the default branch" });
+    expect(g.calls).toEqual([]);
+    expect(f.refs(f.remote)).toBe("");
+  });
+
+  it("skips when the default branch is unknown (no API answer)", async () => {
+    const f = make();
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
+    const r = await pushHeadBranch({ ...opts(f), defaultBranch: undefined, git: g.git });
+    expect(r).toMatchObject({ pushed: false, attempted: false, reason: "the repo's default branch is unknown" });
+    expect(g.calls).toEqual([]);
+  });
+
+  it("the checkout's origin/HEAD is not consulted: a planted one neither blocks nor steers", async () => {
     const f = make();
     expect(f.git(["update-ref", "refs/remotes/origin/off-1-fix", f.sha]).code).toBe(0);
     expect(f.git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/off-1-fix"]).code).toBe(0);
     const g = realGit({ [PUSH]: `file://${f.remote}` });
-    const r = await pushHeadBranch({ ...opts(f), git: g.git });
-    expect(r).toMatchObject({ pushed: false, attempted: false });
+    const r = await pushHeadBranch({ ...opts(f), defaultBranch: "develop", git: g.git });
+    expect(r).toEqual({ pushed: true, attempted: true });
+    expect(g.calls.some((c) => c.args.includes("symbolic-ref"))).toBe(false);
+  });
+
+  it.each([
+    ["head refs/heads/x vs base x", { head: "refs/heads/off-1-fix", base: "off-1-fix" }, "head is the base branch"],
+    ["head x vs base refs/heads/x", { head: "off-1-fix", base: "refs/heads/off-1-fix" }, "head is the base branch"],
+    ["head vs default refs/heads/x", { defaultBranch: "refs/heads/off-1-fix" }, "head off-1-fix is the default branch"],
+    ["head refs/heads/main", { head: "refs/heads/main", base: "develop" }, "head main is the default branch"],
+  ])("refs/heads/ prefixes compare equal: %s", async (_l, over, reason) => {
+    const f = make();
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
+    const r = await pushHeadBranch({ ...opts(f), ...over, git: g.git });
+    expect(r).toMatchObject({ pushed: false, attempted: false, reason });
     expect(g.pushes()).toEqual([]);
+  });
+
+  it("a refs/heads/ head is pushed as the plain branch", async () => {
+    const f = make();
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
+    const r = await pushHeadBranch({ ...opts(f), head: "refs/heads/off-1-fix", git: g.git });
+    expect(r).toEqual({ pushed: true, attempted: true });
+    expect(g.pushes()[0].args.at(-1)).toBe("refs/heads/off-1-fix:refs/heads/off-1-fix");
+    expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${f.sha}`);
+  });
+
+  it("a fake git first on the run's PATH never runs and never sees the token", async () => {
+    // No git seam: the real runner resolves git from the startup PATH. The
+    // server is a closed local port, so the push fails without any network.
+    const f = make({ origin: "https://127.0.0.1:9/owner/repo.git" });
+    const fake = path.join(f.root, "fakebin");
+    const canary = path.join(f.root, "fake-git-ran");
+    mkdirSync(fake);
+    writeFileSync(path.join(fake, "git"), `#!/bin/sh\nenv > "${canary}"\nexit 0\n`);
+    chmodSync(path.join(fake, "git"), 0o755);
+    const env = { ...f.env, PATH: `${fake}${path.delimiter}${f.env.PATH}`, GITHUB_SERVER_URL: "https://127.0.0.1:9" };
+    const r = await pushHeadBranch({ ...opts(f), env });
+    expect(existsSync(canary)).toBe(false);
+    // The trusted git ran: it read the checkout and attempted the push.
+    expect(r).toMatchObject({ pushed: false, attempted: true });
+    expect(r.reason).not.toContain(TOKEN);
+  }, 60_000);
+
+  it("transport settings and the server URL a workspace .env introduced are not used", async () => {
+    const f = make();
+    const introduced = ["HTTPS_PROXY", "https_proxy", "GIT_SSL_CAINFO", "SSL_CERT_FILE", "GITHUB_SERVER_URL"];
+    const fresh = introduced.filter((k) => startupEnv()[k] === undefined && process.env[k] === undefined);
+    const dotenvDir = path.join(f.root, "dotenv");
+    mkdirSync(dotenvDir);
+    writeFileSync(
+      path.join(dotenvDir, ".env"),
+      [
+        "HTTPS_PROXY=http://evil-proxy.invalid:3128",
+        "https_proxy=http://evil-proxy.invalid:3128",
+        "GIT_SSL_CAINFO=/workspace/evil-ca.pem",
+        "SSL_CERT_FILE=/workspace/evil-ca.pem",
+        "GITHUB_SERVER_URL=https://evil.invalid",
+      ].join("\n"),
+    );
+    loadDotenv(dotenvDir);
+    try {
+      for (const k of fresh) expect(process.env[k], k).toBeDefined();
+      for (const env of [process.env, { ...process.env }]) {
+        const g = realGit({ [PUSH]: `file://${f.remote}` });
+        const r = await pushHeadBranch({ ...opts(f), env, git: g.git });
+        // GITHUB_SERVER_URL=evil.invalid was ignored: origin github.com still matches.
+        if (fresh.includes("GITHUB_SERVER_URL")) expect(r).toEqual({ pushed: true, attempted: true });
+        expect(g.calls.length).toBeGreaterThan(0);
+        for (const c of g.calls) {
+          for (const k of fresh) expect(c.env[k], k).toBe(startupEnv()[k]);
+          expect(JSON.stringify(c.env)).not.toContain("evil");
+        }
+        if (fresh.includes("GITHUB_SERVER_URL")) expect(g.pushes()[0].args).toContain(PUSH);
+        run(["update-ref", "-d", "refs/heads/off-1-fix"], f.remote, f.env);
+      }
+    } finally {
+      for (const k of fresh) {
+        delete process.env[k];
+        unmarkWorkspaceEnv(k);
+      }
+    }
   });
 
   it("skips when there is no origin", async () => {
@@ -388,23 +490,26 @@ describe("helpers", () => {
     expect(env.GIT_CONFIG_KEY_1).toBe("http.https://github.com/.extraheader");
   });
 
-  it("hardenedGitEnv drops inherited git settings and keeps the path, proxies and CA", () => {
-    const env = hardenedGitEnv({
-      PATH: "/bin",
-      HOME: "/h",
-      HTTPS_PROXY: "http://proxy:3128",
-      GIT_SSL_CAINFO: "/ca.pem",
-      GIT_DIR: "/elsewhere",
-      GIT_SSH_COMMAND: "evil",
-      GIT_ASKPASS: "/evil",
-      GIT_CONFIG_COUNT: "1",
-      GIT_CONFIG_KEY_0: "core.hooksPath",
-      GIT_CONFIG_VALUE_0: "/evil",
-      GIT_TRACE: "1",
-      GITHUB_TOKEN: TOKEN,
-    });
+  it("hardenedGitEnv drops inherited git settings, keeps proxies and CA, and takes PATH only from the caller", () => {
+    const env = hardenedGitEnv(
+      {
+        PATH: "/workspace/evil-bin",
+        HOME: "/h",
+        HTTPS_PROXY: "http://proxy:3128",
+        GIT_SSL_CAINFO: "/ca.pem",
+        GIT_DIR: "/elsewhere",
+        GIT_SSH_COMMAND: "evil",
+        GIT_ASKPASS: "/evil",
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "core.hooksPath",
+        GIT_CONFIG_VALUE_0: "/evil",
+        GIT_TRACE: "1",
+        GITHUB_TOKEN: TOKEN,
+      },
+      "/usr/bin",
+    );
     expect(env).toMatchObject({
-      PATH: "/bin",
+      PATH: "/usr/bin",
       HOME: "/h",
       HTTPS_PROXY: "http://proxy:3128",
       GIT_SSL_CAINFO: "/ca.pem",
@@ -414,6 +519,53 @@ describe("helpers", () => {
     for (const k of ["GIT_DIR", "GIT_SSH_COMMAND", "GIT_ASKPASS", "GIT_CONFIG_COUNT", "GIT_TRACE", "GITHUB_TOKEN"]) {
       expect(env, k).not.toHaveProperty(k);
     }
+  });
+});
+
+describe.skipIf(!posix)("trusted git resolution", () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true });
+  });
+
+  it("never picks a git in the workspace, the temp dir or a writable dir, nor a relative entry", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "sweny-trusted-git-"));
+    roots.push(root);
+    const ws = path.join(root, "ws");
+    const wsBin = path.join(ws, "bin");
+    const tmpBin = path.join(root, "bin");
+    for (const d of [wsBin, tmpBin]) {
+      mkdirSync(d, { recursive: true });
+      writeFileSync(path.join(d, "git"), "#!/bin/sh\nexit 0\n");
+      chmodSync(path.join(d, "git"), 0o755);
+    }
+    const realPath = startupEnv().PATH ?? "";
+    const pathValue = [wsBin, tmpBin, "bin", ".", realPath].join(path.delimiter);
+    const dirs = trustedPathDirs(pathValue, ws);
+    expect(dirs).not.toContain(wsBin);
+    expect(dirs).not.toContain(tmpBin);
+    expect(dirs).not.toContain("bin");
+    expect(dirs).not.toContain(".");
+    const git = resolveTrustedGit(pathValue, ws);
+    expect(git).toBeDefined();
+    expect(path.isAbsolute(git!)).toBe(true);
+    expect(git!.startsWith(root)).toBe(false);
+    expect(git).toBe(resolveTrustedGit(realPath, ws));
+  });
+
+  it("no trusted git on the PATH: nothing is resolved", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "sweny-trusted-git-"));
+    roots.push(root);
+    expect(resolveTrustedGit(root, path.join(root, "ws"))).toBeUndefined();
+    expect(resolveTrustedGit("", root)).toBeUndefined();
+  });
+});
+
+describe("branchName", () => {
+  it("strips refs/heads/ only", () => {
+    expect(branchName("refs/heads/develop")).toBe("develop");
+    expect(branchName("develop")).toBe("develop");
+    expect(branchName("refs/tags/v1")).toBe("refs/tags/v1");
   });
 });
 
@@ -428,7 +580,11 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
       order.push("push");
       return { pushed: true, attempted: true };
     });
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      if (String(url) === "https://api.github.com/repos/o/r" && !init?.method) {
+        order.push("repo");
+        return new Response(JSON.stringify({ default_branch: "trunk" }), { status: 200 });
+      }
       order.push("api");
       return new Response(JSON.stringify({ number: 7, html_url: "https://github.com/o/r/pull/7" }), { status: 201 });
     });
@@ -438,9 +594,35 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
       { repo: "o/r", title: "t", head: "x-1-fix" },
       { config: { GITHUB_TOKEN: TOKEN }, logger, pushBranch: pusher },
     );
-    expect(pusher).toHaveBeenCalledWith({ repo: "o/r", head: "x-1-fix", base: "main", token: TOKEN });
-    expect(order[0]).toBe("push");
+    expect(pusher).toHaveBeenCalledWith({
+      repo: "o/r",
+      head: "x-1-fix",
+      base: "main",
+      defaultBranch: "trunk",
+      token: TOKEN,
+    });
+    expect(order.slice(0, 2)).toEqual(["repo", "push"]);
     expect(order).toContain("api");
+  });
+
+  it("a failed default-branch lookup hands the pusher no default branch (it then refuses)", async () => {
+    const pusher = vi.fn(async (_opts: { repo: string; head: string; base: string; defaultBranch?: string }) => ({
+      pushed: false,
+      attempted: false,
+    }));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) =>
+      String(url) === "https://api.github.com/repos/o/r" && !init?.method
+        ? new Response("boom", { status: 500 })
+        : new Response(JSON.stringify({ number: 7 }), { status: 201 }),
+    );
+    const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      { config: { GITHUB_TOKEN: TOKEN }, logger, pushBranch: pusher },
+    );
+    expect(pusher).toHaveBeenCalledTimes(1);
+    expect(pusher.mock.calls[0][0]).not.toHaveProperty("defaultBranch");
   });
 
   it("a failed push warns and still requests the PR", async () => {

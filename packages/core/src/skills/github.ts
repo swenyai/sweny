@@ -200,10 +200,20 @@ export const github: Skill = {
         // branch and the agent never holds a write token. Skipped unless the
         // branch exists locally and origin is this repo; never forced.
         if (ctx.pushBranch) {
+          // The default branch comes from the API, not the agent-written
+          // checkout's origin/HEAD. Unknown means no push.
+          let defaultBranch: string | undefined;
+          try {
+            const meta = (await gh(`/repos/${input.repo}`, ctx)) as { default_branch?: unknown };
+            if (typeof meta?.default_branch === "string") defaultBranch = meta.default_branch;
+          } catch {
+            // The pusher refuses without it; the PR request below reports the API error.
+          }
           const push = await ctx.pushBranch({
             repo: input.repo,
             head: input.head,
             base: input.base ?? "main",
+            ...(defaultBranch ? { defaultBranch } : {}),
             token: ctx.config.GITHUB_TOKEN,
           });
           if (push.pushed) ctx.logger?.info?.(`  github_create_pr: pushed ${input.head} to ${input.repo}`);

@@ -50,6 +50,8 @@ export type BranchPusher = (opts: {
   repo: string;
   head: string;
   base: string;
+  /** The repo's default branch from the GitHub API; without it nothing is pushed. */
+  defaultBranch?: string;
   token?: string;
 }) => Promise<{ pushed: boolean; attempted: boolean; reason?: string }>;
 

@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
+// Imported for its side effect too: the startup env snapshot is taken before loadDotenv runs.
+import { markWorkspaceEnv } from "../startup-env.js";
 
 /**
  * Auto-load a `.env` file from the given directory.
@@ -32,6 +34,7 @@ export function loadDotenv(cwd: string = process.cwd()): void {
 
     if (process.env[key] === undefined) {
       process.env[key] = value;
+      markWorkspaceEnv(key);
     }
   }
 }
