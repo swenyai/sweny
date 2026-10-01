@@ -279,7 +279,9 @@ describe("writeReceipt", () => {
   it("CI keeps the plain line even on a TTY", async () => {
     const s = sink(true);
     await writeReceipt(success.summary, { workflow: "explain-repo", stream: s.stream, env: { CI: "true" } });
-    expect(s.read()).toBe(`  ${formatReceipt(success.summary)}\n\n`);
+    // A TTY still gets color on the plain line; the shape is the plain receipt.
+    expect(visible(s.read())).toBe(`  ${formatReceipt(success.summary)}\n\n`);
+    expect(s.read()).not.toContain("╭");
   });
 
   it("a TTY gets the ticket; NO_COLOR keeps it free of ANSI", async () => {
