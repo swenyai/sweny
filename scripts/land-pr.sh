@@ -46,6 +46,18 @@ while :; do
   sleep 20
 done
 
-gh pr merge "$PR" -R "$REPO" --squash >/dev/null
+# main can move between "clean" and the merge call; update and retry a few times.
+merged=""
+for _ in 1 2 3; do
+  if gh pr merge "$PR" -R "$REPO" --squash >/dev/null 2>&1; then merged=1; break; fi
+  gh pr update-branch "$PR" -R "$REPO" >/dev/null 2>&1 || true
+  for _ in $(seq 1 60); do
+    ms=$(gh api "repos/$REPO/pulls/$PR" -q .mergeable_state)
+    [ "$ms" = clean ] && break
+    [ "$ms" = dirty ] && { echo "PR #$PR conflicts with main: rebase the branch, then rerun"; exit 2; }
+    sleep 20
+  done
+done
+[ -n "$merged" ] || { echo "PR #$PR could not be merged after 3 attempts"; exit 5; }
 sha=$(gh pr view "$PR" -R "$REPO" --json mergeCommit -q .mergeCommit.oid)
 echo "PR #$PR landed as ${sha:0:8}"
