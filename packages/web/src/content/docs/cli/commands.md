@@ -260,8 +260,8 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 |--------|-------------|---------|
 | `--dry-run` | Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld (on Codex, a shell confined to its OS read-only sandbox: no writes, no network), so nothing is created, posted, or sent. Stops at the first natural-language conditional edge. See [Dry run](/workflows/#dry-run). | `false` |
 | `--list-nodes` | Validate the workflow and print its node list without running | `false` |
-| `--json` | Output result as JSON to stdout; suppress progress rendering | `false` |
-| `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |
+| `--json` | Output result as JSON to stdout; suppress progress rendering. Redacted like the final answer (see below) | `false` |
+| `--stream` | Stream NDJSON events to stdout (for Studio / automation). Redacted like `--json` | `false` |
 | `--mermaid` | Print a Mermaid diagram with per-node execution state after the run finishes | `false` |
 | `--comment-file <path>` | Write a PR-comment markdown (run receipt, status-colored DAG, per-node table; metadata only) to `<path>` so any CI can post it | -- |
 | `--timeout <ms>` | Whole-run wall-clock budget for `workflow run` (one file, or per workflow in batch runs). `0` disables the budget. Non-numeric values are rejected | `3600000` (60 min) |
@@ -273,6 +273,8 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 | `--harness-policy <mode>` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and reports it as degraded. Env: `SWENY_HARNESS_POLICY` | `strict` under GitHub Actions, else `warn` |
 | `--no-journal` | Do not write the run journal (`.sweny/runs/<run-id>/journal.ndjson`). The run cannot be resumed. Or set `journal: off` in `.sweny.yml` | journal on |
 | `--show-output` | Print the final answer in CI too. In CI (`GITHUB_ACTIONS` or `CI` set) the answer is saved to `.sweny/runs/<run-id>/output.md` and only that path is printed, unless this flag is set. Outside CI the answer is always printed. Either way it is redacted first | off in CI |
+
+**`--json` and `--stream` are redacted.** Every value they print (node data, summaries, errors, tool call inputs and outputs) passes through the same redactor as the final answer and `output.md`: values of secret-named env vars and skill credentials, string fields with secret-looking names (`token`, `password`, `apiKey`, ...), and known token shapes (`ghp_...`, `sk-...`, `xox...`, AWS keys, private key blocks) become `[redacted]`. Keys and structure are unchanged, and non-secret values pass through as-is.
 
 With a file, loads the definition, validates its schema, then executes it with the same DAG renderer and skill infrastructure as the built-in `triage` and `implement` commands. With no file, it lists every `.sweny/e2e/*.yml` workflow, asks you to confirm (skip with `--yes`), runs them sequentially with template variables (`{base_url}`, `{run_id}`, ...) resolved, and exits `0` if all pass, `1` if any fail. Provider settings from `.sweny.yml` and `.env` apply.
 

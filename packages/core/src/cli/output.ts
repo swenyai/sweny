@@ -2,6 +2,7 @@ import chalk from "chalk";
 import type { CliConfig } from "./config.js";
 import type { CheckResult } from "./check.js";
 import type { NodeResult, ExecutionEvent, ExecutionTrace, TraceStep, TraceEdge, Workflow } from "../types.js";
+import { redact } from "../journal.js";
 import { toMermaidBlock, type NodeStatus as MermaidNodeStatus } from "../mermaid.js";
 import { PALETTE, ROLE_COLORS } from "../theme.js";
 
@@ -449,14 +450,18 @@ export function formatCheckResults(results: CheckResult[]): string {
 }
 
 // ── JSON output ─────────────────────────────────────────────────
-export function formatResultJson(results: Map<string, NodeResult>): string {
-  return JSON.stringify(Object.fromEntries(results), null, 2);
+/**
+ * Node results as JSON, redacted with the run journal's redactor (secret
+ * values, secret-named fields, known token shapes). Structure and keys stay.
+ */
+export function formatResultJson(results: Map<string, NodeResult>, secrets: string[] = []): string {
+  return JSON.stringify(redact(Object.fromEntries(results), secrets).value, null, 2);
 }
 
 /** Drain terminal JSON before process.exit(), including when stdout is a pipe. */
-export function writeResultJson(results: Map<string, NodeResult>): Promise<void> {
+export function writeResultJson(results: Map<string, NodeResult>, secrets: string[] = []): Promise<void> {
   return new Promise((resolve, reject) => {
-    process.stdout.write(formatResultJson(results) + "\n", (error) => {
+    process.stdout.write(formatResultJson(results, secrets) + "\n", (error) => {
       if (error) reject(error);
       else resolve();
     });
