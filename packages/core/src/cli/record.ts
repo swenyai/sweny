@@ -4,7 +4,7 @@
  * Runs the real `sweny try` replay (instant, no TTY) with color forced on,
  * captures the ANSI text, and lays it out as a slate terminal window whose
  * lines appear on a CSS keyframe timeline: the command, a spinner per node
- * until it settles, the answer, the DAG, the receipt ticket with its stamp
+ * until it settles, the answer, the receipt ticket with its stamp
  * landing last. Then it loops.
  *
  * Self-contained by construction: inline CSS only, a monospace font stack, no
@@ -273,7 +273,9 @@ export function renderRecordingSvg(lines: string[], fixture: TryFixture): string
 
   const css: string[] = [
     `text{font-family:${FONT_STACK};font-size:${FONT_SIZE}px;fill:${dark.text};white-space:pre}`,
-    `.r{opacity:0}`,
+    // No-animation default is the FINAL frame: lines visible, spinner frames hidden. Keyframes drive the replay.
+    `.r{opacity:1}`,
+    `.sp{opacity:0}`,
     `.b{font-weight:700}`,
     `.d{fill-opacity:.65}`,
     `.u{text-decoration:underline}`,
@@ -290,9 +292,9 @@ export function renderRecordingSvg(lines: string[], fixture: TryFixture): string
     css.push(`@keyframes ${name}{${keyframe}}`);
     css.push(`.${name}{animation:${name} ${total.toFixed(2)}s linear infinite}`);
   }
-  css.push(`@media (prefers-reduced-motion:reduce){.r{animation:none!important;opacity:1}.sp{display:none}}`);
+  css.push(`@media (prefers-reduced-motion:reduce){.r{animation:none!important}.sp{display:none}}`);
 
-  const label = "Recorded demo of sweny try: two nodes run, then the answer, the DAG and the receipt ticket.";
+  const label = "Recorded demo of sweny try: two nodes run, then the answer and the receipt ticket.";
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WINDOW_W} ${height}" width="${WINDOW_W}" height="${height}" role="img" aria-label="${esc(label)}">`,
     `<title>sweny try</title>`,
@@ -310,6 +312,20 @@ export function renderRecordingSvg(lines: string[], fixture: TryFixture): string
 }
 
 // ── Entry points ────────────────────────────────────────────────
+
+const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
+
+/**
+ * The PR-comment preview (heading plus DAG) sits between the answer and the
+ * ticket. The recording drops it to stay a README-sized hero: tagline, nodes,
+ * answer, ticket.
+ */
+export function dropCommentPreview(lines: string[]): string[] {
+  const from = lines.findIndex((l) => stripAnsi(l).includes("On a pull request, CI posts"));
+  const to = lines.findIndex((l, i) => i > from && stripAnsi(l).startsWith("  \u256D"));
+  if (from < 0 || to < 0) return lines;
+  return [...lines.slice(0, from), ...lines.slice(to)];
+}
 
 /** Run the demo and return the SVG text. */
 export async function recordTrySvg(fixture: TryFixture = loadTryFixture()): Promise<string> {
@@ -337,7 +353,7 @@ export async function recordTrySvg(fixture: TryFixture = loadTryFixture()): Prom
   const lines = out.split("\n");
   while (lines.length > 0 && lines[0].trim() === "") lines.shift();
   while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
-  return renderRecordingSvg(lines, fixture);
+  return renderRecordingSvg(dropCommentPreview(lines), fixture);
 }
 
 /** Record to `file`, creating its directory. Returns the byte size written. */

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SWENY_TAGLINE } from "../theme.js";
+import { SPINNER_FRAMES } from "../theme.js";
 import { RECORD_WRAP, parseAnsiLine, recordTrySvg, recordTrySvgToFile, wrapCells } from "./record.js";
 
 const tmp: string[] = [];
@@ -76,6 +77,45 @@ describe("recordTrySvg", () => {
       const visible = m[1].replace(/<[^>]+>/g, "").replace(/&amp;|&lt;|&gt;/g, "x");
       expect([...visible].length).toBeLessThanOrEqual(RECORD_WRAP);
     }
+  });
+
+  it("defaults to the final frame: persistent lines visible, spinner frames hidden, keyframes start hidden", async () => {
+    const svg = await recordTrySvg();
+    const css = /<style>(.*?)<\/style>/s.exec(svg)![1];
+    // Effective default opacity of a class list: the last rule that sets opacity wins.
+    const opacityRules = [...css.matchAll(/\.([a-z0-9]+)\{opacity:([\d.]+)\}/g)].map(
+      (m) => [m[1], Number(m[2])] as const,
+    );
+    const effective = (classes: string[]) => {
+      let o: number | undefined;
+      for (const [name, val] of opacityRules) if (classes.includes(name)) o = val;
+      return o;
+    };
+    const spinnerChars = new Set<string>(SPINNER_FRAMES.unicode);
+    let persistent = 0;
+    let transient = 0;
+    for (const m of svg.matchAll(/<text class="(r [^"]*)" x="\d+" y="\d+">(.*?)<\/text>/g)) {
+      const classes = m[1].split(" ");
+      const visible = m[2].replace(/<[^>]+>/g, "");
+      const isSpinner = [...visible].some((ch) => spinnerChars.has(ch));
+      expect(classes.includes("sp"), visible).toBe(isSpinner);
+      expect(effective(classes), visible).toBe(isSpinner ? 0 : 1);
+      const kf = classes.find((c) => /^k\d+$/.test(c))!;
+      expect(css).toMatch(new RegExp(`@keyframes ${kf}\\{0%,[\\d.]+%\\{opacity:0\\}`));
+      if (isSpinner) transient++;
+      else persistent++;
+    }
+    expect(persistent).toBeGreaterThan(10);
+    expect(transient).toBeGreaterThan(0);
+    expect(css).toMatch(/prefers-reduced-motion:reduce\)\{\.r\{animation:none!important\}\.sp\{display:none\}\}/);
+  });
+
+  it("is README-sized: no PR-comment preview, under 900px tall", async () => {
+    const svg = await recordTrySvg();
+    expect(svg).not.toContain("On a pull request");
+    expect(svg).toContain("passed");
+    const h = Number(/viewBox="0 0 \d+ (\d+)"/.exec(svg)![1]);
+    expect(h).toBeLessThan(900);
   });
 
   it("writes the file and reports its size", async () => {

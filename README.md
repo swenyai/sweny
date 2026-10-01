@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/demo.svg" alt="Animated terminal recording of sweny try: two nodes run, then the answer, the DAG and the receipt ticket." width="720" />
+  <img src="assets/demo.svg" alt="Animated terminal recording of sweny try: two nodes run, then the answer and the receipt ticket." width="720" />
 </p>
 
 <p align="center">
