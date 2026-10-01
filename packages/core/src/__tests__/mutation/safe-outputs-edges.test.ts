@@ -1243,7 +1243,7 @@ describe("safe outputs: second-pass edges", () => {
     });
     await applySafeOutputs(o);
     expect(screen.mock.calls[0]).toStrictEqual([
-      [{ type: "comment", via: "github", target: "acme/api", number: "5", body: "hi" }],
+      [{ type: "comment", via: "github", target: "acme/api", number: "5", title: "Crash on start", body: "hi" }],
     ]);
     expect(gh.calls[0].input).toStrictEqual({ repo: "acme/api", issue_number: 5, body: "hi" });
   });
