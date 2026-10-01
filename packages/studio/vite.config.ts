@@ -40,6 +40,11 @@ export default defineConfig({
         find: "@sweny-ai/core/testing",
         replacement: resolve(__dirname, "../../packages/core/dist/testing.js"),
       },
+      // Bundled into the lib build (not external): tiny and dependency-free.
+      {
+        find: "@sweny-ai/core/theme",
+        replacement: resolve(__dirname, "../../packages/core/dist/theme.js"),
+      },
       // Node-only executor entry. `execute` is intentionally NOT re-exported
       // from the browser entry (it pulls `node:fs` via source-resolver), so the
       // simulate panel lazy-imports it from this dedicated specifier — keeping

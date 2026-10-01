@@ -8,6 +8,7 @@ export default defineConfig({
       "@sweny-ai/core/studio": resolve(__dirname, "../core/dist/studio.js"),
       "@sweny-ai/core/schema": resolve(__dirname, "../core/dist/schema.js"),
       "@sweny-ai/core/testing": resolve(__dirname, "../core/dist/testing.js"),
+      "@sweny-ai/core/theme": resolve(__dirname, "../core/dist/theme.js"),
       "@sweny-ai/core": resolve(__dirname, "../core/dist/browser.js"),
     },
   },

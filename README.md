@@ -11,6 +11,10 @@
 </p>
 
 <p align="center">
+  <img src="assets/demo.svg" alt="Animated terminal recording of sweny try: two nodes run, then the answer and the receipt ticket." width="720" />
+</p>
+
+<p align="center">
   <a href="https://github.com/swenyai/sweny/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/swenyai/sweny/ci.yml?style=flat-square&label=CI" /></a>
   <a href="https://www.npmjs.com/package/@sweny-ai/core"><img alt="npm" src="https://img.shields.io/npm/v/@sweny-ai/core?style=flat-square&color=3b82f6" /></a>
   <a href="https://github.com/swenyai/sweny/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/swenyai/sweny?style=flat-square" /></a>
@@ -42,7 +46,7 @@ sweny workflow run .sweny/workflows/explain-repo.yml
 
 | Agent | Status |
 |-------|--------|
-| Claude Code | Supported. Passes the 15-case harness contract suite on every CI run, with skill tools in process and over the tool bridge. |
+| Claude Code | Supported. Passes the 22-case harness contract suite on every CI run, with skill tools in process and over the tool bridge. |
 | Codex | Shipped, contract suite green; not yet run against a live Codex (`--agent codex`, Codex CLI 0.159+). Passes the same suite against a scripted Codex. Reports as degraded: `max_turns` (kept by a sweny watchdog), `tools.deny: [write]` / `[edit]`, and per-host egress unless it runs inside the sandbox wrapper. See [Agent harnesses](#agent-harnesses). |
 | ACP agents (OpenCode, Hermes, goose, Gemini CLI, ...) | **Experimental** (`--agent "acp:<command>"`, for example `acp:opencode acp`). Runs any [Agent Client Protocol](https://agentclientprotocol.com) agent. ACP has no structured output, tool deny or sandbox, so most policies are degraded or refused in strict mode; see [ACP agents](#acp-agents-experimental). Not listed as supported. |
 | pi | Experimental, contract suite green (`--agent pi`, pi 0.99.2+, any model pi can call). Not run against a live pi yet. Reports as degraded: the process sandbox (pi has none; it runs only inside the sandbox wrapper, and strict refuses without it), `max_turns` (sweny watchdog), `tools.deny: [net]`, and `disallowed_tools` names pi has no tool for. See [pi (experimental)](#pi-experimental). |

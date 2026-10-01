@@ -66,6 +66,8 @@ It waits until npm serves exactly what the release published, and checks the fea
 
 Failure hints: E404 = NPM_TOKEN expired, E422 = a publishable package.json lacks `repository`, EOTP = token is not an Automation token.
 
+Generated brand assets (never generate locally): `assets/demo.svg` is checked by the quickstart job, which fails when it is stale and uploads the fresh copy as the `demo-svg` artifact; the social cards come from the `brand-assets` job (`social-cards` artifact). Fetch with `gh run download <run> -n <artifact>`, commit, push.
+
 ## 5. Close the loop
 
 - Tick the item in #366 (`gh issue view 366 --json body -q .body`, edit, `gh issue edit 366 --body-file`).

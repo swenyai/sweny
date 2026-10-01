@@ -231,6 +231,10 @@ export interface TryOptions {
   tty?: boolean;
   /** Draw with Unicode. Default: what the terminal supports. */
   unicode?: boolean;
+  /** Force ANSI color on or off. Default: on for a TTY that allows color. */
+  color?: boolean;
+  /** Force the receipt ticket (true) or the plain receipt line (false). Default: `tty`. */
+  rich?: boolean;
   /** Terminal width. Default: stdout's. */
   columns?: number;
   fixture?: TryFixture;
@@ -253,7 +257,7 @@ export async function runTry(opts: TryOptions = {}): Promise<number> {
 
   const env = process.env;
   const unicode = opts.unicode ?? supportsUnicode(env);
-  const color = tty && colorEnabled({ isTTY: true }, env);
+  const color = opts.color ?? (tty && colorEnabled({ isTTY: true }, env));
   const paint = createPaint(color);
   const g = glyphsFor(unicode);
   const columns = opts.columns ?? terminalColumns(process.stdout, env);
@@ -339,7 +343,7 @@ export async function runTry(opts: TryOptions = {}): Promise<number> {
     runId: "demo",
     stream: { write, isTTY: tty, columns },
     env,
-    rich: tty,
+    rich: opts.rich ?? tty,
     color,
     unicode,
     animate: !opts.fast,
@@ -366,8 +370,20 @@ export function registerTryCommand(program: Command): Command {
     .option("--fast", "Replay instantly instead of pacing the progress")
     .option("--pace <ms>", `Milliseconds each node takes to replay (default ${DEFAULT_TRY_PACE_MS})`)
     .option("--comment-file <path>", "Also write the PR-comment markdown to <path>")
+    .option("--record <file.svg>", "Write the demo as an animated, self-contained SVG terminal recording to <file.svg>")
     .addHelpText("after", `\n${TRY_HELP_NOTE}\n`)
-    .action(async (options: { fast?: boolean; pace?: string; commentFile?: string }) => {
+    .action(async (options: { fast?: boolean; pace?: string; commentFile?: string; record?: string }) => {
+      if (options.record) {
+        try {
+          const { recordTrySvgToFile } = await import("./record.js");
+          const bytes = await recordTrySvgToFile(options.record);
+          process.stdout.write(`  wrote ${options.record} (${bytes} bytes)\n`);
+        } catch (err) {
+          console.error(`\n  could not record the demo: ${err instanceof Error ? err.message : err}\n`);
+          process.exitCode = 1;
+        }
+        return;
+      }
       let paceMs: number | undefined;
       if (options.pace !== undefined) {
         paceMs = Number(options.pace);

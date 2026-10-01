@@ -26,17 +26,17 @@ const SIGNAL_LABELS: LabelDef[] = [
   {
     name: "agent-needs-input",
     color: "CA8A04",
-    description: "Agent hit a decision point — needs human clarification before it can proceed",
+    description: "Agent hit a decision point - needs human clarification before it can proceed",
   },
   {
     name: "agent-error",
     color: "B91C1C",
-    description: "Unexpected technical failure during agent execution — needs human investigation",
+    description: "Unexpected technical failure during agent execution - needs human investigation",
   },
   {
     name: "human-only",
     color: "6B7280",
-    description: "Guard rail — automation must not touch this issue or PR",
+    description: "Guard rail - automation must not touch this issue or PR",
   },
   {
     name: "needs-review",
@@ -67,7 +67,7 @@ const WORK_TYPE_LABELS: LabelDef[] = [
   {
     name: "research",
     color: "D97706",
-    description: "Spike, investigation, or report by the agent — exploratory work without a direct code change",
+    description: "Spike, investigation, or report by the agent - exploratory work without a direct code change",
     isWorkType: true,
   },
   {
@@ -79,7 +79,7 @@ const WORK_TYPE_LABELS: LabelDef[] = [
   {
     name: "spec",
     color: "BE185D",
-    description: "Spec generation — agent converted non-technical input into a structured spec",
+    description: "Spec generation - agent converted non-technical input into a structured spec",
     isWorkType: true,
   },
   {
@@ -93,7 +93,7 @@ const WORK_TYPE_LABELS: LabelDef[] = [
 const AGENT_PARENT: LabelDef = {
   name: "agent",
   color: "7C3AED",
-  description: "Parent group — marks all autonomous agent work",
+  description: "Parent group - marks all autonomous agent work",
 };
 
 const BUG_LABEL: LabelDef = {
@@ -316,7 +316,7 @@ ${chalk.cyan(`  source-control-provider: github
   pr-labels: agent,triage,needs-review
   issue-labels: agent`)}
 
-${chalk.dim("  GitHub labels are referenced by name — no UUIDs needed.")}
+${chalk.dim("  GitHub labels are referenced by name - no UUIDs needed.")}
 `);
 }
 

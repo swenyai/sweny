@@ -1,8 +1,9 @@
 /**
- * Studio brand tokens. Values mirror docs/brand-guide.md.
- * The shared theme module in @sweny-ai/core (#479) is the long-term home;
- * once it lands this file can re-export from there.
+ * Studio brand tokens, built from the shared theme in @sweny-ai/core (#479).
+ * Only Studio-specific surfaces (canvas, node, grid, label chip) live here;
+ * every brand, text, border and status color comes from core.
  */
+import { PALETTE, ROLE_COLORS, SURFACE_COLORS } from "@sweny-ai/core/theme";
 
 export interface StudioTokens {
   canvas: string;
@@ -27,42 +28,42 @@ export interface StudioTokens {
 
 export const darkTokens: StudioTokens = {
   canvas: "#0f1a2c",
-  surface: "#162032",
+  surface: SURFACE_COLORS.dark.surface,
   nodeBg: "rgba(8,14,26,0.92)",
-  border: "#334155",
+  border: SURFACE_COLORS.dark.border,
   grid: "#1e2840",
-  text: "#f1f5f9",
-  textSecondary: "#94a3b8",
-  textMuted: "#64748b",
-  primary: "#3b82f6",
-  primaryHover: "#2563eb",
-  accent: "#60a5fa",
-  success: "#60a5fa",
-  warning: "#facc15",
-  error: "#f87171",
+  text: SURFACE_COLORS.dark.text,
+  textSecondary: SURFACE_COLORS.dark.textSecondary,
+  textMuted: SURFACE_COLORS.dark.textMuted,
+  primary: ROLE_COLORS.brand,
+  primaryHover: ROLE_COLORS.brandStrong,
+  accent: ROLE_COLORS.info,
+  success: ROLE_COLORS.info,
+  warning: ROLE_COLORS.warning,
+  error: ROLE_COLORS.error,
   labelBg: "#eff6ff",
   labelBorder: "#bfdbfe",
-  labelText: "#1d4ed8",
+  labelText: PALETTE.blue700,
 };
 
 export const lightTokens: StudioTokens = {
-  canvas: "#f8fafc",
-  surface: "#ffffff",
-  nodeBg: "#ffffff",
-  border: "#e2e8f0",
-  grid: "#e2e8f0",
-  text: "#0f172a",
-  textSecondary: "#64748b",
-  textMuted: "#94a3b8",
-  primary: "#2563eb",
-  primaryHover: "#1d4ed8",
-  accent: "#3b82f6",
-  success: "#2563eb",
-  warning: "#ca8a04",
-  error: "#dc2626",
+  canvas: SURFACE_COLORS.light.background,
+  surface: SURFACE_COLORS.light.surface,
+  nodeBg: PALETTE.white,
+  border: SURFACE_COLORS.light.border,
+  grid: PALETTE.slate200,
+  text: SURFACE_COLORS.light.text,
+  textSecondary: SURFACE_COLORS.light.textSecondary,
+  textMuted: SURFACE_COLORS.light.textMuted,
+  primary: SURFACE_COLORS.light.primary,
+  primaryHover: PALETTE.blue700,
+  accent: PALETTE.blue500,
+  success: PALETTE.blue600,
+  warning: PALETTE.yellow600,
+  error: PALETTE.red600,
   labelBg: "#eff6ff",
   labelBorder: "#bfdbfe",
-  labelText: "#1d4ed8",
+  labelText: PALETTE.blue700,
 };
 
 function kebab(name: string): string {

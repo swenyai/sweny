@@ -16,9 +16,9 @@ export default defineConfig({
   integrations: [
     react(),
     starlight({
-      customCss: ["./src/styles/explorer-overrides.css", "./src/styles/mobile.css"],
+      customCss: ["./src/styles/brand.css", "./src/styles/explorer-overrides.css", "./src/styles/mobile.css"],
       title: "SWEny",
-      description: "Turn natural language into reliable AI workflows",
+      description: "Workflows for coding agents. One set of rules, a receipt for every run.",
       favicon: "/favicon.svg",
       head: [
         { tag: "link", attrs: { rel: "apple-touch-icon", href: "/apple-touch-icon.png" } },

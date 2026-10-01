@@ -323,7 +323,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
       const fromFile = f("cloud-token") || "";
       if (!fromEnv && fromFile) {
         console.warn(
-          "\x1b[33m⚠ cloud-token is set in .sweny.yml — consider using SWENY_CLOUD_TOKEN env var instead to avoid accidental commits.\x1b[0m",
+          "\x1b[33m⚠ cloud-token is set in .sweny.yml - consider using SWENY_CLOUD_TOKEN env var instead to avoid accidental commits.\x1b[0m",
         );
       }
       return fromEnv || fromFile;
@@ -422,7 +422,7 @@ export function validateInputs(config: CliConfig): string[] {
     case "claude":
       if (!config.anthropicApiKey && !config.claudeOauthToken) {
         errors.push(
-          "Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN — get a key at https://console.anthropic.com",
+          "Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN - get a key at https://console.anthropic.com",
         );
       }
       break;
@@ -458,16 +458,16 @@ export function validateInputs(config: CliConfig): string[] {
       case "datadog":
         if (!creds.apiKey)
           errors.push(
-            "Missing: DD_API_KEY — find API keys at https://app.datadoghq.com/organization-settings/api-keys",
+            "Missing: DD_API_KEY - find API keys at https://app.datadoghq.com/organization-settings/api-keys",
           );
         if (!creds.appKey)
           errors.push(
-            "Missing: DD_APP_KEY — find application keys at https://app.datadoghq.com/organization-settings/application-keys",
+            "Missing: DD_APP_KEY - find application keys at https://app.datadoghq.com/organization-settings/application-keys",
           );
         break;
       case "sentry":
         if (!creds.authToken)
-          errors.push("Missing: SENTRY_AUTH_TOKEN — create a token at https://sentry.io/settings/auth-tokens/");
+          errors.push("Missing: SENTRY_AUTH_TOKEN - create a token at https://sentry.io/settings/auth-tokens/");
         if (!creds.organization) errors.push("Missing: --sentry-org is required for sentry provider");
         if (!creds.project) errors.push("Missing: --sentry-project is required for sentry provider");
         break;
@@ -526,34 +526,34 @@ export function validateInputs(config: CliConfig): string[] {
           );
         break;
       case "vercel":
-        if (!creds.token) errors.push("Missing: VERCEL_TOKEN — create a token at https://vercel.com/account/tokens");
-        if (!creds.projectId) errors.push("Missing: VERCEL_PROJECT_ID — find it in your Vercel project settings");
+        if (!creds.token) errors.push("Missing: VERCEL_TOKEN - create a token at https://vercel.com/account/tokens");
+        if (!creds.projectId) errors.push("Missing: VERCEL_PROJECT_ID - find it in your Vercel project settings");
         break;
       case "supabase":
         if (!creds.managementApiKey)
           errors.push(
-            "Missing: SUPABASE_MANAGEMENT_KEY — create a token at https://supabase.com/dashboard/account/tokens",
+            "Missing: SUPABASE_MANAGEMENT_KEY - create a token at https://supabase.com/dashboard/account/tokens",
           );
         if (!creds.projectRef)
-          errors.push("Missing: SUPABASE_PROJECT_REF — find it in your Supabase project settings > General");
+          errors.push("Missing: SUPABASE_PROJECT_REF - find it in your Supabase project settings > General");
         break;
       case "netlify":
         if (!creds.token)
           errors.push(
-            "Missing: NETLIFY_TOKEN — create a token at https://app.netlify.com/user/applications#personal-access-tokens",
+            "Missing: NETLIFY_TOKEN - create a token at https://app.netlify.com/user/applications#personal-access-tokens",
           );
-        if (!creds.siteId) errors.push("Missing: NETLIFY_SITE_ID — find it in Site Settings > General > Site details");
+        if (!creds.siteId) errors.push("Missing: NETLIFY_SITE_ID - find it in Site Settings > General > Site details");
         break;
       case "fly":
         if (!creds.token)
-          errors.push("Missing: FLY_TOKEN — create a token at https://fly.io/user/personal_access_tokens");
-        if (!creds.appName) errors.push("Missing: FLY_APP_NAME — the name of your Fly.io application");
+          errors.push("Missing: FLY_TOKEN - create a token at https://fly.io/user/personal_access_tokens");
+        if (!creds.appName) errors.push("Missing: FLY_APP_NAME - the name of your Fly.io application");
         break;
       case "render":
         if (!creds.apiKey)
-          errors.push("Missing: RENDER_API_KEY — create an API key at https://dashboard.render.com/u/settings");
+          errors.push("Missing: RENDER_API_KEY - create an API key at https://dashboard.render.com/u/settings");
         if (!creds.serviceId)
-          errors.push("Missing: RENDER_SERVICE_ID — find it in your service's Settings page (srv-...)");
+          errors.push("Missing: RENDER_SERVICE_ID - find it in your service's Settings page (srv-...)");
         break;
       default:
         errors.push(
@@ -566,19 +566,19 @@ export function validateInputs(config: CliConfig): string[] {
   switch (config.issueTrackerProvider) {
     case "linear":
       if (!config.linearApiKey)
-        errors.push("Missing: LINEAR_API_KEY — find API keys at https://linear.app/settings/api");
+        errors.push("Missing: LINEAR_API_KEY - find API keys at https://linear.app/settings/api");
       if (!config.linearTeamId)
         errors.push(
-          "Missing: LINEAR_TEAM_ID — find it in Linear > Settings > Workspace > Teams > [your team] > copy the ID from the URL",
+          "Missing: LINEAR_TEAM_ID - find it in Linear > Settings > Workspace > Teams > [your team] > copy the ID from the URL",
         );
       break;
     case "jira":
       if (!config.jiraBaseUrl)
-        errors.push("Missing: JIRA_BASE_URL — set to your Atlassian domain, e.g. https://your-org.atlassian.net");
-      if (!config.jiraEmail) errors.push("Missing: JIRA_EMAIL — your Atlassian account email address");
+        errors.push("Missing: JIRA_BASE_URL - set to your Atlassian domain, e.g. https://your-org.atlassian.net");
+      if (!config.jiraEmail) errors.push("Missing: JIRA_EMAIL - your Atlassian account email address");
       if (!config.jiraApiToken)
         errors.push(
-          "Missing: JIRA_API_TOKEN — create a token at https://id.atlassian.com/manage-profile/security/api-tokens",
+          "Missing: JIRA_API_TOKEN - create a token at https://id.atlassian.com/manage-profile/security/api-tokens",
         );
       break;
     case "github-issues":
@@ -595,16 +595,16 @@ export function validateInputs(config: CliConfig): string[] {
   switch (config.sourceControlProvider) {
     case "github":
       if (!config.githubToken && !config.botToken)
-        errors.push("Missing: GITHUB_TOKEN — create a Personal Access Token at https://github.com/settings/tokens");
+        errors.push("Missing: GITHUB_TOKEN - create a Personal Access Token at https://github.com/settings/tokens");
       break;
     case "gitlab":
       if (!config.gitlabToken)
         errors.push(
-          "Missing: GITLAB_TOKEN — create a Personal Access Token at https://gitlab.com/-/user_settings/personal_access_tokens (api + read_repository + write_repository scopes)",
+          "Missing: GITLAB_TOKEN - create a Personal Access Token at https://gitlab.com/-/user_settings/personal_access_tokens (api + read_repository + write_repository scopes)",
         );
       if (!config.gitlabProjectId)
         errors.push(
-          "Missing: GITLAB_PROJECT_ID — find it in GitLab > [your project] > Settings > General (numeric ID at the top)",
+          "Missing: GITLAB_PROJECT_ID - find it in GitLab > [your project] > Settings > General (numeric ID at the top)",
         );
       break;
     case "file":
@@ -891,7 +891,7 @@ export function registerImplementCommand(program: Command): Command {
     .option("--coding-agent-provider <provider>", "Coding agent provider (alias for --agent)")
     .option("--issue-tracker-provider <provider>", "Issue tracker (linear|jira|github-issues|file)")
     .option("--source-control-provider <provider>", "Source control (github|gitlab|file)")
-    .option("--dry-run", "Skip creating PR — report only", false)
+    .option("--dry-run", "Skip creating PR - report only", false)
     .option("--stage", "Run normally, but preview the PR and issue comment instead of writing them", false)
     .option("--max-implement-turns <n>", "Max coding agent turns (default: 40)")
     .option("--base-branch <branch>", "Base branch for PRs (default: main)")
