@@ -18,7 +18,7 @@ npx @sweny-ai/core --help
 ```
 
 :::note[Prerequisites]
-SWEny uses [Claude](https://claude.ai/) as its AI engine. You'll need an Anthropic API key (`ANTHROPIC_API_KEY`), OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`), or authenticated Claude Code instance. If both keys are set, the OAuth token takes precedence. The runtime is installed automatically.
+SWEny runs nodes on Claude Code by default (see [Agents and policies](/getting-started/agents-and-policies/) for Codex, pi and ACP). For Claude Code you'll need an Anthropic API key (`ANTHROPIC_API_KEY`), OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`), or authenticated Claude Code instance. If both keys are set, the OAuth token takes precedence. The runtime is installed automatically.
 :::
 
 ## Build your first workflow

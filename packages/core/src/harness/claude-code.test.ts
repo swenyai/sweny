@@ -177,6 +177,30 @@ describe("ClaudeCodeHarness", () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
+  it("reports the floor it ran under: scoped env and a started sandbox", async () => {
+    mockQuery.mockReturnValueOnce(resultStream("done"));
+    const h = new mod.ClaudeCodeHarness({
+      logger: noopLogger(),
+      envScope: true,
+      sandbox: "auto",
+      sandboxProbe: () => undefined,
+    });
+    const r = await h.run({ instruction: "x", context: {}, tools: [] });
+    expect(r.policy).toEqual({ envScope: true, sandbox: "auto", sandboxStarted: true });
+  });
+
+  it("reports an auto sandbox that could not start, and an unscoped env", async () => {
+    mockQuery.mockReturnValueOnce(resultStream("done"));
+    const h = new mod.ClaudeCodeHarness({
+      logger: noopLogger(),
+      envScope: false,
+      sandbox: "auto",
+      sandboxProbe: () => "unsupported host",
+    });
+    const r = await h.run({ instruction: "x", context: {}, tools: [] });
+    expect(r.policy).toEqual({ envScope: false, sandbox: "auto", sandboxStarted: false });
+  });
+
   it("declares honest capabilities and preflights ok", async () => {
     const h = new mod.ClaudeCodeHarness({ logger: noopLogger(), authProbe: () => ({ ok: true, via: "test" }) });
     expect(h.id).toBe("claude-code");

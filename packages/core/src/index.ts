@@ -192,6 +192,8 @@ export type { WorkflowError } from "./schema.js";
 // Node-only: loader.ts imports `node:fs`, so this is NOT mirrored in browser.ts.
 export { loadAndValidateWorkflow, validateParsed } from "./loader.js";
 export type { LoaderResult, LoaderError, LoaderOptions } from "./loader.js";
+export { CURRENT_SPEC_VERSION, MIGRATIONS, migrateWorkflow } from "./migrations.js";
+export type { Migration, MigrationConfig, MigrateResult } from "./migrations.js";
 
 // Workflow input validation
 export { validateRuntimeInput, summarizeInputShape } from "./inputs.js";

@@ -228,7 +228,11 @@ export function pruneRuns(cwd: string = process.cwd(), keep: number = RUN_HISTOR
       .filter((f) => f.endsWith(".json") && RUN_ID_RE.test(f.slice(0, -5)))
       .sort();
     const extra = files.slice(0, Math.max(0, files.length - keep));
-    for (const f of extra) fs.rmSync(path.join(dir, f), { force: true });
+    for (const f of extra) {
+      fs.rmSync(path.join(dir, f), { force: true });
+      // output.md lives beside the record in <run-id>/ (final-output.ts)
+      fs.rmSync(path.join(dir, f.slice(0, -5)), { recursive: true, force: true });
+    }
     return extra.length;
   } catch {
     return 0;
