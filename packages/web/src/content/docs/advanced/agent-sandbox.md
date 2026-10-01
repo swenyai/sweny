@@ -111,7 +111,7 @@ Three modes:
 
 Env scoping is controlled separately by `env-scope`. Untrusted-input fencing always applies.
 
-On Ubuntu 23.10 and later, AppArmor can block the unprivileged user namespaces bubblewrap needs, and GitHub-hosted `ubuntu-24.04` runners do: there `auto` currently warns and runs unsandboxed. SWEny reports this in the warning. The fix is `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, which changes a host kernel setting, so the Action only applies it when you set `SWENY_SANDBOX: strict` in the step's `env`.
+On Ubuntu 23.10 and later, AppArmor can block the unprivileged user namespaces bubblewrap needs, and GitHub-hosted `ubuntu-24.04` runners do. On GitHub-hosted runners (ephemeral VMs) the Action runs `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` by default, so agents are sandboxed there with no setup. On self-hosted runners that setting belongs to a persistent host, so the Action only changes it when you set `SWENY_SANDBOX: strict` in the step's `env`; otherwise `auto` warns and runs unsandboxed. `off` never touches it.
 
 :::note[Scope]
 The sandbox covers the agent's shell commands. SWEny's own skill tools run in the SWEny process, and MCP servers run outside the sandbox; both only receive the credentials wired for them.
