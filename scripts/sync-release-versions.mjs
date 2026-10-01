@@ -58,7 +58,7 @@ function applyVersions(cwd, manifest) {
   return changed;
 }
 
-function syncVersions(manifestPath) {
+function syncVersions(manifestPath, shaFile) {
   const manifest = readJson(manifestPath);
   validateManifest(manifest);
   if (Object.keys(manifest).length === 0) return;
@@ -82,6 +82,8 @@ function syncVersions(manifestPath) {
       git(checkout, "commit", "-m", "chore: release packages [skip ci]");
       try {
         git(checkout, "push", "origin", "HEAD:refs/heads/main");
+        // The release workflow tags exactly this commit, not whatever main is later.
+        if (shaFile) writeFileSync(shaFile, `${git(checkout, "rev-parse", "HEAD")}\n`);
         return;
       } catch (error) {
         if (attempt === 3) throw error;
@@ -137,7 +139,7 @@ if (command === "record") {
   validateManifest(manifest);
   writeJson(manifestPath, manifest);
 } else if (command === "sync") {
-  syncVersions(resolve(manifestPath));
+  syncVersions(resolve(manifestPath), dir ? resolve(dir) : undefined); // dir = optional writeback-sha file
 } else if (command === "changed") {
   console.log(hasChanges(manifestPath, dir, before) ? "true" : "false");
 } else {

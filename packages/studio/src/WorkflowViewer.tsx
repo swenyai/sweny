@@ -16,6 +16,7 @@ import { StateNode, type StateNodeType, type StateNodeData, type NodeExecStatus 
 import { TransitionEdge, type TransitionEdgeData } from "./components/TransitionEdge.js";
 import { ContextMenu, type ContextMenuState } from "./components/ContextMenu.js";
 import { layoutWorkflow } from "./layout/elk.js";
+import { EmptyCanvasWatermark } from "./components/BrandMark.js";
 import { useEditorStore } from "./store/editor-store.js";
 import { validateWorkflow } from "@sweny-ai/core/schema";
 import type { NodeResult } from "@sweny-ai/core";
@@ -172,12 +173,7 @@ function WorkflowCanvas() {
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
-      {nodeCount === 0 && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-gray-400 pointer-events-none z-10">
-          <p className="text-sm">No nodes yet.</p>
-          <p className="text-xs">Use New or Import in the toolbar to start a workflow</p>
-        </div>
-      )}
+      {nodeCount === 0 && <EmptyCanvasWatermark />}
       {error ? (
         <div className="flex items-center justify-center w-full h-full bg-red-50 text-red-700 p-4">
           <p className="font-mono text-sm">{error}</p>
@@ -189,6 +185,8 @@ function WorkflowCanvas() {
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
+          colorMode="system"
+          style={{ background: "var(--sw-canvas, #0f1a2c)" }}
           fitView
           fitViewOptions={{ padding: 0.3 }}
           onNodeClick={onNodeClick}
@@ -200,7 +198,7 @@ function WorkflowCanvas() {
           snapToGrid
           snapGrid={[10, 10]}
         >
-          <Background />
+          <Background color="var(--sw-grid, #1e2840)" gap={22} size={1.5} />
           <Controls />
         </ReactFlow>
       )}

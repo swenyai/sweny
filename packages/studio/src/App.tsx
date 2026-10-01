@@ -169,7 +169,15 @@ export function App() {
   }, []);
 
   return (
-    <div style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column" }}>
+    <div
+      style={{
+        width: "100vw",
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--sw-canvas, #0f1a2c)",
+      }}
+    >
       <Toolbar
         availableWorkflows={PRESET_WORKFLOWS}
         activeWorkflowId={activeId}

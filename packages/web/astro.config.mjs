@@ -124,6 +124,7 @@ export default defineConfig({
             { label: "MCP Servers", slug: "advanced/mcp-servers" },
             { label: "Claude Code Plugin", slug: "advanced/mcp-plugin" },
             { label: "Troubleshooting", slug: "advanced/troubleshooting" },
+            { label: "Test a Workflow", slug: "advanced/workflow-testing" },
           ],
         },
       ],
