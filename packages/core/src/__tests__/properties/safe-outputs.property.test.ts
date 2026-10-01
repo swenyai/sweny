@@ -412,6 +412,9 @@ describe("safe outputs: a close only lands on the pinned issue", () => {
             // Close needs the declaration to pin the issue, and the state to allow it.
             expect(s.pin).toBeDefined();
             expect(pin).toBeDefined();
+            // ...and the repo is the declared target or GITHUB_REPOSITORY, never the agent's own field.
+            expect(pinnedRepo).toBeDefined();
+            expect(String(call.input.repo).toLowerCase()).toBe(pinnedRepo!.toLowerCase());
             expect(s.declState === undefined || s.declState === "close").toBe(true);
           }
           // Any write on a pinned declaration lands on the pin, and nowhere else.
@@ -427,6 +430,8 @@ describe("safe outputs: a close only lands on the pinned issue", () => {
           if (i.target && pinnedRepo && i.target.toLowerCase() !== pinnedRepo.toLowerCase()) return false;
           if (!(i.target ?? pinnedRepo)) return false;
           const asked = i.state?.trim().toLowerCase() || s.declState;
+          // A close never takes its repository from the intent.
+          if (asked === "close" && !pinnedRepo) return false;
           if (asked !== "close" && asked !== "reopen") return false;
           if (s.declState && asked !== s.declState) return false;
           return true;
