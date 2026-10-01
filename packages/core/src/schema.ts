@@ -12,6 +12,11 @@ import type { Workflow, WorkflowType } from "./types.js";
 import {
   AUTHOR_ASSOCIATIONS,
   CONTEXT_MODES,
+  DECIDER_CONFIDENCE_FLOOR,
+  DECIDER_MARGIN_FLOOR,
+  DECIDER_MIN_CONFIDENCE,
+  DECIDER_MIN_MARGIN,
+  DECIDER_MODE_REMOVED,
   EVALUATOR_KINDS,
   EVAL_POLICIES,
   MCP_TRANSPORTS,
@@ -334,26 +339,28 @@ export const budgetZ = z
   });
 
 /**
- * Decision model for route choices (#357). `shadow` needs a provider; the
- * state only ever goes to that `base_url`, there is no fallback. The key is
- * named by env var, never inlined.
+ * Decision model for route choices (#357). Presence enables it. The state
+ * only ever goes to `provider.base_url`, there is no fallback. The key is
+ * named by env var, never inlined. Thresholds may be raised, and lowered no
+ * further than the floors.
+ *
+ * `mode` was removed with shadow mode: a file that still declares it fails
+ * with {@link DECIDER_MODE_REMOVED}, never silently starts deciding routes.
  */
 export const deciderZ = z
   .object({
-    mode: z.enum(["off", "shadow"]),
+    mode: z.custom<never>(() => false, { message: DECIDER_MODE_REMOVED }).optional(),
     provider: z
       .object({
         base_url: z.string().url(),
         model: z.string().min(1),
         api_key_env: z.string().min(1).optional(),
       })
-      .strict()
-      .optional(),
+      .strict(),
+    min_confidence: z.number().min(DECIDER_CONFIDENCE_FLOOR).max(1).optional(),
+    min_margin: z.number().min(DECIDER_MARGIN_FLOOR).max(1).optional(),
   })
-  .strict()
-  .refine((d) => d.mode === "off" || d.provider !== undefined, {
-    message: "decider.provider is required when mode is shadow",
-  });
+  .strict();
 
 /** One typed write intent a node may emit (#365). */
 export const safeOutputDeclarationZ = z
@@ -1117,12 +1124,11 @@ export const workflowJsonSchema = {
     },
     Decider: {
       type: "object",
-      required: ["mode"],
+      required: ["provider"],
       additionalProperties: false,
       description:
-        "Decision model for route choices. 'shadow' asks it alongside the agent and logs whether they agree; the route is always the agent's. The workflow state goes only to provider.base_url, with no fallback.",
+        "Decision model for route choices. Presence enables it. For a node with natural-language conditions it is asked first; its answer is the route when the label is one of the node's edges and both gates pass, otherwise the agent routes. The routing state goes only to provider.base_url, with no fallback. The removed 'mode' key is rejected.",
       properties: {
-        mode: { type: "string", enum: ["off", "shadow"] },
         provider: {
           type: "object",
           required: ["base_url", "model"],
@@ -1137,9 +1143,21 @@ export const workflowJsonSchema = {
             api_key_env: { type: "string", minLength: 1, description: "Env var holding the bearer key." },
           },
         },
+        min_confidence: {
+          type: "number",
+          minimum: DECIDER_CONFIDENCE_FLOOR,
+          maximum: 1,
+          default: DECIDER_MIN_CONFIDENCE,
+          description: "Accept the decider's answer only at or above this confidence.",
+        },
+        min_margin: {
+          type: "number",
+          minimum: DECIDER_MARGIN_FLOOR,
+          maximum: 1,
+          default: DECIDER_MIN_MARGIN,
+          description: "Accept it only when the top label leads the runner-up by at least this much.",
+        },
       },
-      if: { properties: { mode: { const: "shadow" } } },
-      then: { required: ["provider"] },
     },
     SafeOutput: {
       type: "object",
@@ -1299,7 +1317,8 @@ export const workflowJsonSchema = {
     },
     decider: {
       $ref: "#/$defs/Decider",
-      description: "Decision model for route choices (shadow mode only). Default: off.",
+      description:
+        "Decision model that decides natural-language routes when confident, before the agent is asked. Default: none (the agent routes).",
     },
     context_mode: {
       type: "string",

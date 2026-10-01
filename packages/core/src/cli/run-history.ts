@@ -14,7 +14,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { ExecutionEvent, ExecutionTrace, NodeResult, Workflow } from "../types.js";
+import type { ExecutionEvent, ExecutionTrace, NodeResult, RouteRung, Workflow } from "../types.js";
 import { summarizeRun } from "./run-output.js";
 
 export const RUN_HISTORY_SCHEMA_VERSION = 1;
@@ -53,14 +53,13 @@ export interface RunRecord {
   duration_ms: number;
   status: RunStatus;
   nodes: RunNodeRecord[];
-  routes: Array<{ from: string; to: string }>;
+  /** Edges taken. `rung` says who chose a conditional route: expr, decider or agent (#357). */
+  routes: Array<{ from: string; to: string; rung?: RouteRung }>;
   totals: RunTotals;
   /** Harness that ran the nodes (id + version). Absent for runs with no harness-tagged result. */
   harness?: { id: string; version: string };
   /** Opinions the harness could not honor natively on some node, deduped. Absent when none. */
   degraded?: string[];
-  /** Shadow-mode decider agreement counts (#357). Absent when the decider was off. */
-  decider?: { compared: number; agreed: number; fell_through: number };
 }
 
 // ── Hash + ids ──────────────────────────────────────────────────
@@ -179,7 +178,7 @@ export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
     duration_ms: Math.max(0, Math.round(i.durationMs)),
     status: i.crashed ? "crashed" : summary.ok ? "success" : "failed",
     nodes,
-    routes: (i.trace?.edges ?? []).map((e) => ({ from: e.from, to: e.to })),
+    routes: (i.trace?.edges ?? []).map((e) => ({ from: e.from, to: e.to, ...(e.rung ? { rung: e.rung } : {}) })),
     totals: {
       nodes_total: summary.nodesTotal,
       nodes_ok: summary.nodesOk,
@@ -190,15 +189,6 @@ export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
     },
     ...(harness ? { harness: { id: harness.id, version: harness.version } } : {}),
     ...(degraded.length > 0 ? { degraded } : {}),
-    ...(summary.decider
-      ? {
-          decider: {
-            compared: summary.decider.compared,
-            agreed: summary.decider.agreed,
-            fell_through: summary.decider.fellThrough,
-          },
-        }
-      : {}),
   };
 }
 

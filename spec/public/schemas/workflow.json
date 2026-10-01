@@ -281,14 +281,10 @@
     },
     "Decider": {
       "type": "object",
-      "required": ["mode"],
+      "required": ["provider"],
       "additionalProperties": false,
-      "description": "Decision model for route choices. 'shadow' asks it alongside the agent and logs whether they agree; the route is always the agent's. The workflow state goes only to provider.base_url, with no fallback.",
+      "description": "Decision model for route choices. Presence enables it. For a node with natural-language conditions it is asked first; its answer is the route when the label is one of the node's edges and both gates pass, otherwise the agent routes. The routing state goes only to provider.base_url, with no fallback. The removed 'mode' key is rejected.",
       "properties": {
-        "mode": {
-          "type": "string",
-          "enum": ["off", "shadow"]
-        },
         "provider": {
           "type": "object",
           "required": ["base_url", "model"],
@@ -309,17 +305,21 @@
               "description": "Env var holding the bearer key."
             }
           }
+        },
+        "min_confidence": {
+          "type": "number",
+          "minimum": 0.7,
+          "maximum": 1,
+          "default": 0.85,
+          "description": "Accept the decider's answer only at or above this confidence."
+        },
+        "min_margin": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 1,
+          "default": 0.2,
+          "description": "Accept it only when the top label leads the runner-up by at least this much."
         }
-      },
-      "if": {
-        "properties": {
-          "mode": {
-            "const": "shadow"
-          }
-        }
-      },
-      "then": {
-        "required": ["provider"]
       }
     },
     "SafeOutput": {
@@ -513,7 +513,7 @@
     },
     "decider": {
       "$ref": "#/$defs/Decider",
-      "description": "Decision model for route choices (shadow mode only). Default: off."
+      "description": "Decision model that decides natural-language routes when confident, before the agent is asked. Default: none (the agent routes)."
     },
     "context_mode": {
       "type": "string",

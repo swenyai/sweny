@@ -1,37 +1,64 @@
 /**
- * Decision models (#357), shadow mode.
+ * Decision models (#357): a fast typed classifier that decides routes.
  *
  * A System One decision model (Ollama `/v1/systemone`, TypeSafe Jev) answers
- * one typed Choice question over a state in milliseconds. In shadow mode the
- * executor asks it the same route question the agent answers, in parallel,
- * and records whether they agree. The route is ALWAYS the agent's.
+ * one Choice question over a state in milliseconds. For a node whose
+ * conditional out-edges are natural language, the route ladder is:
+ *
+ *   1. `when` expressions: sweny evaluates them, no model call (executor.ts).
+ *   2. The decider, when the workflow declares `decider`: its answer is the
+ *      route only when the label is one of the node's out-edges, confidence is
+ *      at least `min_confidence` and the top label leads the runner-up by at
+ *      least `min_margin`. Then the agent is never asked.
+ *   3. The agent's route evaluation, exactly as without a decider.
+ *
+ * Any decider failure (timeout, HTTP error, malformed answer, unknown label,
+ * low confidence or margin, open breaker, spent cap) falls through to rung 3.
  *
  * Privacy: the state goes only to the provider the workflow configured, never
- * to a default or fallback URL. What this module logs is metadata only
- * (labels are edge target node ids, plus numbers and a hash).
+ * to a default or fallback URL. It is the routing view (declared output
+ * fields, eval verdicts, node statuses), redacted and fenced; never env,
+ * secrets or tool outputs. What this module logs is metadata only (edge target
+ * ids, numbers and a hash).
  */
 
 import crypto from "node:crypto";
+import {
+  DECIDER_CONFIDENCE_FLOOR,
+  DECIDER_MARGIN_FLOOR,
+  DECIDER_MIN_CONFIDENCE,
+  DECIDER_MIN_MARGIN,
+  DECIDER_MODE_REMOVED,
+} from "./types.js";
 
-/** Accept a decider answer only at or above this confidence. */
-export const DECIDER_MIN_CONFIDENCE = 0.85;
-/** ... and only when the top label leads the runner-up by at least this much. */
-export const DECIDER_MIN_MARGIN = 0.2;
-/** Per-call timeout when the provider does not set one. */
+export {
+  DECIDER_CONFIDENCE_FLOOR,
+  DECIDER_MARGIN_FLOOR,
+  DECIDER_MIN_CONFIDENCE,
+  DECIDER_MIN_MARGIN,
+  DECIDER_MODE_REMOVED,
+};
+
+/** Per-call timeout. */
 export const DECIDER_DEFAULT_TIMEOUT_MS = 2000;
+/** Consecutive failed calls that open the breaker for the rest of the run. */
+export const DECIDER_BREAKER_FAILURES = 3;
+/** Decider calls one run may make. */
+export const DECIDER_DEFAULT_MAX_CALLS = 200;
 
-export type DeciderMode = "off" | "shadow";
-
-/** Workflow-level `decider` block. */
+/** Workflow-level `decider` block. Presence enables it. */
 export interface DeciderConfig {
-  mode: DeciderMode;
-  provider?: {
+  provider: {
     /** Server root, e.g. `http://localhost:11434` or `https://api.typesafe.ai`. */
     base_url: string;
     model: string;
     /** Name of the env var holding the bearer key. Never the key itself. */
     api_key_env?: string;
   };
+  /** Default 0.85, never below 0.7. */
+  min_confidence?: number;
+  /** Default 0.2, never below 0.1. */
+  min_margin?: number;
 }
 
 // ─── Provider contract ──────────────────────────────────────────
@@ -214,6 +241,11 @@ function parseAnswers(body: unknown, asks: Record<string, Ask>): Record<string, 
 
 export type FallThroughReason = DecideErrorCode | "low_confidence" | "low_margin" | "label_outside_edge_set";
 
+export interface DeciderThresholds {
+  minConfidence: number;
+  minMargin: number;
+}
+
 export interface GateResult {
   accepted: boolean;
   reason?: FallThroughReason;
@@ -221,8 +253,25 @@ export interface GateResult {
   margin: number;
 }
 
+/**
+ * The thresholds a run uses: the workflow's, else the defaults, and never
+ * looser than the floors (a programmatic caller can skip schema validation).
+ */
+export function resolveThresholds(config?: Pick<DeciderConfig, "min_confidence" | "min_margin">): DeciderThresholds {
+  const pick = (v: number | undefined, dflt: number, floor: number) =>
+    typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(floor, v)) : dflt;
+  return {
+    minConfidence: pick(config?.min_confidence, DECIDER_MIN_CONFIDENCE, DECIDER_CONFIDENCE_FLOOR),
+    minMargin: pick(config?.min_margin, DECIDER_MIN_MARGIN, DECIDER_MARGIN_FLOOR),
+  };
+}
+
 /** All gates must pass: label in the edge set, confidence, then top-two margin. */
-export function gateVerdict(v: ChoiceVerdict, edgeSet: ReadonlySet<string>): GateResult {
+export function gateVerdict(
+  v: ChoiceVerdict,
+  edgeSet: ReadonlySet<string>,
+  thresholds: DeciderThresholds = resolveThresholds(),
+): GateResult {
   const top = v.probabilities[v.label] ?? 0;
   const second = Math.max(
     0,
@@ -232,38 +281,28 @@ export function gateVerdict(v: ChoiceVerdict, edgeSet: ReadonlySet<string>): Gat
   );
   const margin = top - second;
   if (!edgeSet.has(v.label)) return { accepted: false, reason: "label_outside_edge_set", margin };
-  if (!(v.confidence >= DECIDER_MIN_CONFIDENCE)) return { accepted: false, reason: "low_confidence", margin };
-  if (!(margin >= DECIDER_MIN_MARGIN)) return { accepted: false, reason: "low_margin", margin };
+  if (!(v.confidence >= thresholds.minConfidence)) return { accepted: false, reason: "low_confidence", margin };
+  if (!(margin >= thresholds.minMargin)) return { accepted: false, reason: "low_margin", margin };
   return { accepted: true, margin };
 }
 
-// ─── Shadow decision ────────────────────────────────────────────
+// ─── One run's decider ──────────────────────────────────────────
 
-/** One logged shadow decision. Metadata only: no state, no prompts, no prose. */
+/** One decider call. Metadata only: no state, no prompts, no prose. */
 export interface DeciderRecord {
   /** Node the route was decided at. */
   node: string;
+  /** `decided`: the decider's label is the route. `fell_through`: the agent was asked, see `reason`. */
+  outcome: "decided" | "fell_through";
+  reason?: FallThroughReason;
   /** Edge target the decider picked (a node id). Null when it gave no answer. */
-  decider_label: string | null;
-  /** Edge target the agent picked. Null when the agent's evaluation failed. */
-  agent_label: string | null;
+  label: string | null;
   confidence: number | null;
   margin: number | null;
-  /** `compared`: the decider passed every gate. `fell_through`: it did not, see `reason`. */
-  outcome: "compared" | "fell_through";
-  reason?: FallThroughReason | "agent_failed";
-  /** Decider label equals agent label. Null unless `outcome` is `compared`. */
-  agree: boolean | null;
   latency_ms: number;
   model: string;
   /** First 16 hex chars of sha256 over the state and criteria sent. */
   input_hash: string;
-}
-
-/** What the executor holds for one run in shadow mode. */
-export interface ShadowDecider {
-  provider: DecisionProvider;
-  records: DeciderRecord[];
 }
 
 export function hashDecisionInput(state: unknown, criteria: Record<string, string>): string {
@@ -276,119 +315,160 @@ export function hashDecisionInput(state: unknown, criteria: Record<string, strin
   return crypto.createHash("sha256").update(json).digest("hex").slice(0, 16);
 }
 
-export interface PendingShadow {
-  /** Never rejects. */
-  settled: Promise<Omit<DeciderRecord, "agent_label" | "agree" | "node">>;
-  edgeSet: ReadonlySet<string>;
+export interface RouteQuestion {
+  node: string;
+  question: string;
+  /** The fenced, redacted routing view. */
+  state: unknown;
+  /** Every live out-edge target of the node, with its condition. */
+  choices: { id: string; description: string }[];
+  signal?: AbortSignal;
+}
+
+export interface RunDeciderOptions {
+  thresholds?: DeciderThresholds;
+  maxCalls?: number;
+  breakerFailures?: number;
+  timeoutMs?: number;
+  /** Operator-facing messages (breaker opened, cap reached). Metadata only. */
+  warn?: (msg: string) => void;
+  /** Per-call log line. Metadata only. */
+  info?: (msg: string, data?: Record<string, unknown>) => void;
 }
 
 /**
- * Start the decider call. Returns at once; the promise never rejects, so the
- * agent's own evaluation is never delayed or failed by it.
+ * The decider for one run: thresholds, a circuit breaker and a call cap.
+ * `decide()` returns the edge target to take, or null to ask the agent. It
+ * never throws.
  */
-export function startShadowDecision(
-  provider: DecisionProvider,
-  req: { question: string; state: unknown; choices: { id: string; description: string }[]; signal?: AbortSignal },
-): PendingShadow {
-  const criteria: Record<string, string> = {};
-  for (const c of req.choices) if (!(c.id in criteria)) criteria[c.id] = c.description;
-  const edgeSet = new Set(Object.keys(criteria));
-  const input_hash = hashDecisionInput(req.state, criteria);
-  const started = Date.now();
-  const base = { model: provider.model, input_hash };
+export class RunDecider {
+  readonly records: DeciderRecord[] = [];
+  readonly thresholds: DeciderThresholds;
+  private calls = 0;
+  private failures = 0;
+  private open = false;
+  private capped = false;
+  private readonly maxCalls: number;
+  private readonly breakerFailures: number;
+  private readonly timeoutMs: number;
 
-  const settled = (async () => {
+  constructor(
+    readonly provider: DecisionProvider,
+    private readonly opts: RunDeciderOptions = {},
+  ) {
+    this.thresholds = opts.thresholds ?? resolveThresholds();
+    this.maxCalls = opts.maxCalls ?? DECIDER_DEFAULT_MAX_CALLS;
+    this.breakerFailures = opts.breakerFailures ?? DECIDER_BREAKER_FAILURES;
+    this.timeoutMs = opts.timeoutMs ?? DECIDER_DEFAULT_TIMEOUT_MS;
+  }
+
+  /** Calls made this run. */
+  get callCount(): number {
+    return this.calls;
+  }
+
+  /** True once the breaker opened: no further calls this run. */
+  get breakerOpen(): boolean {
+    return this.open;
+  }
+
+  async decide(q: RouteQuestion): Promise<string | null> {
+    if (this.open) return null;
+    if (this.calls >= this.maxCalls) {
+      if (!this.capped) {
+        this.capped = true;
+        this.opts.warn?.(`  decider: reached the ${this.maxCalls}-call cap for this run; the agent routes the rest.`);
+      }
+      return null;
+    }
+    this.calls++;
+
+    const criteria: Record<string, string> = {};
+    for (const c of q.choices) if (!(c.id in criteria)) criteria[c.id] = c.description;
+    const edgeSet = new Set(Object.keys(criteria));
+    const input_hash = hashDecisionInput(q.state, criteria);
+    const started = Date.now();
+    const base = { node: q.node, model: this.provider.model, input_hash };
+
+    let rec: DeciderRecord;
     try {
-      const out = await provider.decide({
-        state: req.state,
-        asks: { route: { kind: "choice", instructions: req.question, criteria } },
-        timeoutMs: DECIDER_DEFAULT_TIMEOUT_MS,
-        signal: req.signal,
+      const out = await this.provider.decide({
+        state: q.state,
+        asks: { route: { kind: "choice", instructions: q.question, criteria } },
+        timeoutMs: this.timeoutMs,
+        signal: q.signal,
       });
       const v = out.route;
       if (!v || v.kind !== "choice") throw new DecideError("malformed", "no route answer");
-      const gate = gateVerdict(v, edgeSet);
-      return {
+      this.failures = 0;
+      const gate = gateVerdict(v, edgeSet, this.thresholds);
+      rec = {
         ...base,
-        decider_label: v.label,
+        outcome: gate.accepted ? "decided" : "fell_through",
+        ...(gate.reason ? { reason: gate.reason } : {}),
+        label: v.label,
         confidence: v.confidence,
         margin: gate.margin,
-        outcome: gate.accepted ? ("compared" as const) : ("fell_through" as const),
-        ...(gate.reason ? { reason: gate.reason } : {}),
         latency_ms: Date.now() - started,
       };
     } catch (err) {
-      return {
+      const code: FallThroughReason = err instanceof DecideError ? err.code : "malformed";
+      // An aborted run is not the provider's fault.
+      if (code !== "aborted") this.failures++;
+      rec = {
         ...base,
-        decider_label: null,
+        outcome: "fell_through",
+        reason: code,
+        label: null,
         confidence: null,
         margin: null,
-        outcome: "fell_through" as const,
-        reason: err instanceof DecideError ? err.code : ("malformed" as const),
         latency_ms: Date.now() - started,
       };
+      if (this.failures >= this.breakerFailures && !this.open) {
+        this.open = true;
+        this.opts.warn?.(
+          `  decider: ${this.failures} failed calls in a row (last: ${code}); not calling it again this run.`,
+        );
+      }
     }
-  })();
 
-  return { settled, edgeSet };
-}
-
-/** Join the decider's settled result with the agent's choice. */
-export async function finishShadowDecision(
-  pending: PendingShadow,
-  node: string,
-  agentLabel: string | null,
-): Promise<DeciderRecord> {
-  const s = await pending.settled;
-  if (s.outcome === "fell_through") return { node, agent_label: agentLabel, agree: null, ...s };
-  if (agentLabel === null) {
-    return { node, agent_label: null, agree: null, ...s, outcome: "fell_through", reason: "agent_failed" };
-  }
-  return { node, agent_label: agentLabel, agree: s.decider_label === agentLabel, ...s };
-}
-
-/** `{ compared, agreed, fell_through }` over a run's records. */
-export function summarizeDecisions(records: readonly DeciderRecord[]): {
-  compared: number;
-  agreed: number;
-  fell_through: number;
-} {
-  let compared = 0;
-  let agreed = 0;
-  for (const r of records) {
-    if (r.outcome === "compared") {
-      compared++;
-      if (r.agree) agreed++;
+    this.records.push(rec);
+    try {
+      const what =
+        rec.outcome === "decided"
+          ? `'${q.node}' -> '${rec.label}'`
+          : `'${q.node}' fell through (${rec.reason}); asking the agent`;
+      this.opts.info?.(`  route decider: ${what}`, { ...rec });
+    } catch {
+      // logging never affects a route
     }
+    return rec.outcome === "decided" ? rec.label : null;
   }
-  return { compared, agreed, fell_through: records.length - compared };
 }
 
 /**
- * Resolve the run's shadow decider, or null (mode off, nothing configured, or
- * a declared key env var is unset). No hosted fallback exists: null means no
- * HTTP at all.
+ * Resolve the run's decider, or null (no `decider` block, disabled for the
+ * run, or a declared key env var is unset). No hosted fallback exists: null
+ * means no HTTP at all.
  */
-export function createShadowDecider(
+export function createRunDecider(
   config: DeciderConfig | undefined,
-  modeOverride: DeciderMode | undefined,
+  enabled: boolean | undefined,
   env: NodeJS.ProcessEnv,
-  warn: (msg: string) => void,
-): ShadowDecider | null {
-  const mode = modeOverride ?? config?.mode ?? "off";
-  if (mode !== "shadow") return null;
-  const p = config?.provider;
-  if (!p) {
-    warn("  decider: shadow mode needs decider.provider in the workflow; running without it.");
-    return null;
-  }
+  opts: Omit<RunDeciderOptions, "thresholds"> = {},
+): RunDecider | null {
+  if (enabled === false || !config?.provider) return null;
+  const p = config.provider;
   let apiKey: string | undefined;
   if (p.api_key_env) {
     apiKey = env[p.api_key_env];
     if (!apiKey) {
-      warn(`  decider: env var ${p.api_key_env} is not set; running without the decider.`);
+      opts.warn?.(`  decider: env var ${p.api_key_env} is not set; the agent routes this run.`);
       return null;
     }
   }
-  return { provider: systemOneProvider({ baseUrl: p.base_url, model: p.model, apiKey }), records: [] };
+  return new RunDecider(systemOneProvider({ baseUrl: p.base_url, model: p.model, apiKey }), {
+    ...opts,
+    thresholds: resolveThresholds(config),
+  });
 }
