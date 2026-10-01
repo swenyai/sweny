@@ -319,7 +319,7 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
   ["-y, --yes", "Skip the batch confirmation prompt (for CI)"],
   [
     "--dry-run",
-    "Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge. To inspect nodes without running, use --list-nodes.",
+    "Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first natural-language conditional edge. To inspect nodes without running, use --list-nodes.",
   ],
   [
     "--stage",
