@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 802 1066" width="802" height="1066" role="img" aria-label="Recorded demo of sweny try: two nodes run, then the answer, the DAG and the receipt ticket.">
+<title>sweny try</title>
+<style>text{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;font-size:13px;fill:#f1f5f9;white-space:pre}.r{opacity:0}.b{font-weight:700}.d{fill-opacity:.65}.u{text-decoration:underline}.t{fill:#94a3b8;font-size:12px}.c0{fill:#64748b}.c1{fill:#3b82f6}.c2{fill:#4ade80}@keyframes k0{0%,3.33%{opacity:0}3.34%,98%{opacity:1}100%{opacity:0}}.k0{animation:k0 15.00s linear infinite}@keyframes k1{0%,9.33%{opacity:0}9.34%,98%{opacity:1}100%{opacity:0}}.k1{animation:k1 15.00s linear infinite}@keyframes k2{0%,9.73%{opacity:0}9.74%,98%{opacity:1}100%{opacity:0}}.k2{animation:k2 15.00s linear infinite}@keyframes k3{0%,10.13%{opacity:0}10.14%,98%{opacity:1}100%{opacity:0}}.k3{animation:k3 15.00s linear infinite}@keyframes k4{0%,11.80%{opacity:0}11.81%,27.35%{opacity:1}27.36%,100%{opacity:0}}.k4{animation:k4 15.00s linear infinite}@keyframes k5{0%,27.35%{opacity:0}27.36%,98%{opacity:1}100%{opacity:0}}.k5{animation:k5 15.00s linear infinite}@keyframes k6{0%,27.75%{opacity:0}27.76%,38.14%{opacity:1}38.15%,100%{opacity:0}}.k6{animation:k6 15.00s linear infinite}@keyframes k7{0%,38.14%{opacity:0}38.15%,98%{opacity:1}100%{opacity:0}}.k7{animation:k7 15.00s linear infinite}@keyframes k8{0%,38.54%{opacity:0}38.55%,98%{opacity:1}100%{opacity:0}}.k8{animation:k8 15.00s linear infinite}@keyframes k9{0%,40.21%{opacity:0}40.22%,98%{opacity:1}100%{opacity:0}}.k9{animation:k9 15.00s linear infinite}@keyframes k10{0%,40.61%{opacity:0}40.62%,98%{opacity:1}100%{opacity:0}}.k10{animation:k10 15.00s linear infinite}@keyframes k11{0%,41.01%{opacity:0}41.02%,98%{opacity:1}100%{opacity:0}}.k11{animation:k11 15.00s linear infinite}@keyframes k12{0%,41.41%{opacity:0}41.42%,98%{opacity:1}100%{opacity:0}}.k12{animation:k12 15.00s linear infinite}@keyframes k13{0%,41.81%{opacity:0}41.82%,98%{opacity:1}100%{opacity:0}}.k13{animation:k13 15.00s linear infinite}@keyframes k14{0%,42.21%{opacity:0}42.22%,98%{opacity:1}100%{opacity:0}}.k14{animation:k14 15.00s linear infinite}@keyframes k15{0%,42.61%{opacity:0}42.62%,98%{opacity:1}100%{opacity:0}}.k15{animation:k15 15.00s linear infinite}@keyframes k16{0%,43.01%{opacity:0}43.02%,98%{opacity:1}100%{opacity:0}}.k16{animation:k16 15.00s linear infinite}@keyframes k17{0%,43.41%{opacity:0}43.42%,98%{opacity:1}100%{opacity:0}}.k17{animation:k17 15.00s linear infinite}@keyframes k18{0%,43.81%{opacity:0}43.82%,98%{opacity:1}100%{opacity:0}}.k18{animation:k18 15.00s linear infinite}@keyframes k19{0%,44.21%{opacity:0}44.22%,98%{opacity:1}100%{opacity:0}}.k19{animation:k19 15.00s linear infinite}@keyframes k20{0%,44.61%{opacity:0}44.62%,98%{opacity:1}100%{opacity:0}}.k20{animation:k20 15.00s linear infinite}@keyframes k21{0%,45.01%{opacity:0}45.02%,98%{opacity:1}100%{opacity:0}}.k21{animation:k21 15.00s linear infinite}@keyframes k22{0%,45.41%{opacity:0}45.42%,98%{opacity:1}100%{opacity:0}}.k22{animation:k22 15.00s linear infinite}@keyframes k23{0%,45.81%{opacity:0}45.82%,98%{opacity:1}100%{opacity:0}}.k23{animation:k23 15.00s linear infinite}@keyframes k24{0%,47.47%{opacity:0}47.48%,98%{opacity:1}100%{opacity:0}}.k24{animation:k24 15.00s linear infinite}@keyframes k25{0%,47.87%{opacity:0}47.88%,98%{opacity:1}100%{opacity:0}}.k25{animation:k25 15.00s linear infinite}@keyframes k26{0%,49.54%{opacity:0}49.55%,98%{opacity:1}100%{opacity:0}}.k26{animation:k26 15.00s linear infinite}@keyframes k27{0%,49.94%{opacity:0}49.95%,98%{opacity:1}100%{opacity:0}}.k27{animation:k27 15.00s linear infinite}@keyframes k28{0%,51.61%{opacity:0}51.62%,98%{opacity:1}100%{opacity:0}}.k28{animation:k28 15.00s linear infinite}@keyframes k29{0%,52.01%{opacity:0}52.02%,98%{opacity:1}100%{opacity:0}}.k29{animation:k29 15.00s linear infinite}@keyframes k30{0%,52.41%{opacity:0}52.42%,98%{opacity:1}100%{opacity:0}}.k30{animation:k30 15.00s linear infinite}@keyframes k31{0%,52.81%{opacity:0}52.82%,98%{opacity:1}100%{opacity:0}}.k31{animation:k31 15.00s linear infinite}@keyframes k32{0%,53.21%{opacity:0}53.22%,98%{opacity:1}100%{opacity:0}}.k32{animation:k32 15.00s linear infinite}@keyframes k33{0%,53.61%{opacity:0}53.62%,98%{opacity:1}100%{opacity:0}}.k33{animation:k33 15.00s linear infinite}@keyframes k34{0%,54.01%{opacity:0}54.02%,98%{opacity:1}100%{opacity:0}}.k34{animation:k34 15.00s linear infinite}@keyframes k35{0%,54.41%{opacity:0}54.42%,98%{opacity:1}100%{opacity:0}}.k35{animation:k35 15.00s linear infinite}@keyframes k36{0%,56.07%{opacity:0}56.08%,98%{opacity:1}100%{opacity:0}}.k36{animation:k36 15.00s linear infinite}@keyframes k37{0%,56.47%{opacity:0}56.48%,98%{opacity:1}100%{opacity:0}}.k37{animation:k37 15.00s linear infinite}@keyframes k38{0%,56.87%{opacity:0}56.88%,98%{opacity:1}100%{opacity:0}}.k38{animation:k38 15.00s linear infinite}@keyframes k39{0%,57.27%{opacity:0}57.28%,98%{opacity:1}100%{opacity:0}}.k39{animation:k39 15.00s linear infinite}@keyframes k40{0%,57.67%{opacity:0}57.68%,98%{opacity:1}100%{opacity:0}}.k40{animation:k40 15.00s linear infinite}@keyframes k41{0%,58.07%{opacity:0}58.08%,98%{opacity:1}100%{opacity:0}}.k41{animation:k41 15.00s linear infinite}@keyframes k42{0%,58.47%{opacity:0}58.48%,98%{opacity:1}100%{opacity:0}}.k42{animation:k42 15.00s linear infinite}@keyframes k43{0%,58.87%{opacity:0}58.88%,98%{opacity:1}100%{opacity:0}}.k43{animation:k43 15.00s linear infinite}@keyframes k44{0%,59.27%{opacity:0}59.28%,98%{opacity:1}100%{opacity:0}}.k44{animation:k44 15.00s linear infinite}@keyframes k45{0%,59.67%{opacity:0}59.68%,98%{opacity:1}100%{opacity:0}}.k45{animation:k45 15.00s linear infinite}@keyframes k46{0%,60.07%{opacity:0}60.08%,98%{opacity:1}100%{opacity:0}}.k46{animation:k46 15.00s linear infinite}@keyframes k47{0%,63.80%{opacity:0}63.81%,98%{opacity:1}100%{opacity:0}}.k47{animation:k47 15.00s linear infinite}@keyframes k48{0%,64.20%{opacity:0}64.21%,98%{opacity:1}100%{opacity:0}}.k48{animation:k48 15.00s linear infinite}@keyframes k49{0%,64.60%{opacity:0}64.61%,98%{opacity:1}100%{opacity:0}}.k49{animation:k49 15.00s linear infinite}@keyframes k50{0%,66.27%{opacity:0}66.28%,98%{opacity:1}100%{opacity:0}}.k50{animation:k50 15.00s linear infinite}@media (prefers-reduced-motion:reduce){.r{animation:none!important;opacity:1}.sp{display:none}}</style>
+<rect x="0.5" y="0.5" width="801" height="1065" rx="10" fill="#1e293b" stroke="#334155"/>
+<path d="M0.5 38V10.5A10 10 0 0 1 10.5 0.5H791.5A10 10 0 0 1 801.5 10.5V38Z" fill="#0f172a" stroke="#334155"/>
+<circle cx="20" cy="19" r="5.5" fill="#f87171"/>
+<circle cx="40" cy="19" r="5.5" fill="#facc15"/>
+<circle cx="60" cy="19" r="5.5" fill="#4ade80"/>
+<text class="t" x="401" y="23" text-anchor="middle">sweny try</text>
+<text class="r k0" x="24" y="69"><tspan class="c0">$ </tspan><tspan class="b">sweny try</tspan></text>
+<text class="r k1" x="24" y="88">  <tspan class="c1">▲</tspan> <tspan class="b">SWEny</tspan>  Workflows for coding agents. One set of rules, a receipt for every run.</text>
+<text class="r k2" x="24" y="107"><tspan class="c0">  Recorded demo of explain-repo on a sample repo (acme-notes-api), illustrative data. No agent,</tspan></text>
+<text class="r k2" x="24" y="126">    <tspan class="c0">network or credentials.</tspan></text>
+<text class="r k3" x="24" y="145"></text>
+<text class="r k4 sp" x="24" y="164">  <tspan class="c1">⠸</tspan> survey</text>
+<text class="r k5" x="24" y="164">  <tspan class="c2">✓</tspan> survey   <tspan class="c0">18s · 12 tool calls</tspan></text>
+<text class="r k6 sp" x="24" y="183">  <tspan class="c1">⠸</tspan> explain</text>
+<text class="r k7" x="24" y="183">  <tspan class="c2">✓</tspan> explain  <tspan class="c0">9s</tspan></text>
+<text class="r k8" x="24" y="202"></text>
+<text class="r k9" x="24" y="221">  What it is: A small REST API for storing and searching notes, built with Express and</text>
+<text class="r k9" x="24" y="240">    TypeScript on top of SQLite. Meant as the backend for a notes app.</text>
+<text class="r k10" x="24" y="259">  How to run it:</text>
+<text class="r k11" x="24" y="278">  - npm install</text>
+<text class="r k12" x="24" y="297">  - npm run build</text>
+<text class="r k13" x="24" y="316">  - npm test</text>
+<text class="r k14" x="24" y="335">  - npm start (serves on http://localhost:3000)</text>
+<text class="r k15" x="24" y="354">  Key files:</text>
+<text class="r k16" x="24" y="373">  - src/server.ts: the entry point, wires routes and the database</text>
+<text class="r k17" x="24" y="392">  - src/routes/notes.ts: the CRUD and search endpoints</text>
+<text class="r k18" x="24" y="411">  - src/db/schema.sql: the tables, applied on first start</text>
+<text class="r k19" x="24" y="430">  - test/notes.test.ts: the API tests, a good map of expected behavior</text>
+<text class="r k20" x="24" y="449">  Watch out for:</text>
+<text class="r k21" x="24" y="468">  - No auth on any route: fine locally, not safe to expose as is.</text>
+<text class="r k22" x="24" y="487">  - The README does not mention the PORT or DB_PATH environment variables that src/server.ts</text>
+<text class="r k22" x="24" y="506">    reads.</text>
+<text class="r k23" x="24" y="525"></text>
+<text class="r k24" x="24" y="544">  <tspan class="c0">On a pull request, CI posts this heading, this DAG and the receipt below:</tspan></text>
+<text class="r k25" x="24" y="563"></text>
+<text class="r k26" x="24" y="582">    <tspan class="c2">✓</tspan> <tspan class="b">Explain This Repo</tspan></text>
+<text class="r k27" x="24" y="601"></text>
+<text class="r k28" x="24" y="620">    ┌────────────────────┐</text>
+<text class="r k29" x="24" y="639">    │ <tspan class="c2">✓</tspan> Survey the Repo  │</text>
+<text class="r k30" x="24" y="658">    └──────────┬─────────┘</text>
+<text class="r k31" x="24" y="677">               │</text>
+<text class="r k32" x="24" y="696">    ┌──────────▼─────────┐</text>
+<text class="r k33" x="24" y="715">    │ <tspan class="c2">✓</tspan> Explain It       │</text>
+<text class="r k34" x="24" y="734">    └────────────────────┘</text>
+<text class="r k35" x="24" y="753"></text>
+<text class="r k36" x="24" y="772">  <tspan class="c0">╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮</tspan></text>
+<text class="r k37" x="24" y="791">  <tspan class="c0">┆</tspan> <tspan class="c2 b">✓ passed</tspan>                            <tspan class="c0">run demo</tspan> <tspan class="c0">┆</tspan></text>
+<text class="r k38" x="24" y="810">  <tspan class="c0">┆</tspan> explain-repo                                 <tspan class="c0">┆</tspan></text>
+<text class="r k39" x="24" y="829">  <tspan class="c0">┆</tspan>                                              <tspan class="c0">┆</tspan></text>
+<text class="r k40" x="24" y="848">  <tspan class="c0">┆</tspan> <tspan class="c0">nodes       </tspan>2/2                              <tspan class="c0">┆</tspan></text>
+<text class="r k41" x="24" y="867">  <tspan class="c0">┆</tspan> <tspan class="c0">tool calls  </tspan>12                               <tspan class="c0">┆</tspan></text>
+<text class="r k42" x="24" y="886">  <tspan class="c0">┆</tspan> <tspan class="c0">duration    </tspan>28s                              <tspan class="c0">┆</tspan></text>
+<text class="r k43" x="24" y="905">  <tspan class="c0">┆</tspan> <tspan class="c0">tokens      </tspan>30k                              <tspan class="c0">┆</tspan></text>
+<text class="r k44" x="24" y="924">  <tspan class="c0">┆</tspan> <tspan class="c0">cost        </tspan>$0.13                            <tspan class="c0">┆</tspan></text>
+<text class="r k45" x="24" y="943">  <tspan class="c0">┆</tspan> <tspan class="c0">policy      </tspan>env scoped, sandbox on           <tspan class="c0">┆</tspan></text>
+<text class="r k46" x="24" y="962">  <tspan class="c0">├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤</tspan></text>
+<text class="r k47" x="24" y="981">  <tspan class="c0">┆</tspan>          <tspan class="c1 b">[ ENV SCOPED · SANDBOXED ]</tspan>          <tspan class="c0">┆</tspan></text>
+<text class="r k48" x="24" y="1000">  <tspan class="c0">╰┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╯</tspan></text>
+<text class="r k49" x="24" y="1019"></text>
+<text class="r k50" x="24" y="1038">  <tspan class="c0">Run it on your repo:</tspan>  <tspan class="b">npx @sweny-ai/core new --template explain-repo</tspan></text>
+</svg>

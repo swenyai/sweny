@@ -50,21 +50,19 @@ async function generateIcon(size, outputPath) {
 
 // --- Social / OG Images ---
 
-const wordmarkSvg = readFileSync(join(assetsDir, "logo-wordmark-light.svg"), "utf8");
-
 async function generateSocialImage(width, height, outputPath) {
-  // Wordmark, a blue accent rule, then the tagline as two lines, on slate-800.
-  const wmW = Math.round(width * 0.4);
-  const wmH = Math.round(wmW * (52 / 310)); // preserve aspect ratio from viewBox
-  const wmX = Math.round((width - wmW) / 2);
-  const wmY = Math.round(height * 0.3);
+  // Wordmark (SWE in text color, ny in brand blue, as in assets/logo-wordmark-*.svg) drawn as
+  // centered text so it does not depend on the font's width, a blue accent rule, then the tagline
+  // as two lines, on slate-800.
+  const wmSize = Math.round(width * 0.075);
+  const wmBase = Math.round(height * 0.42);
 
   // "Workflows for coding agents." / "One set of rules, a receipt for every run."
   const [lead, ...restParts] = SWENY_TAGLINE.split(/(?<=\.)\s+/);
   const rest = restParts.join(" ");
   const font = "system-ui, -apple-system, 'Helvetica Neue', sans-serif";
   const size = Math.round(width * 0.024);
-  const ruleY = wmY + wmH + Math.round(height * 0.07);
+  const ruleY = wmBase + Math.round(height * 0.08);
   const ruleW = Math.round(width * 0.08);
   const line1Y = ruleY + Math.round(size * 2);
   const line2Y = line1Y + Math.round(size * 1.5);
@@ -72,8 +70,9 @@ async function generateSocialImage(width, height, outputPath) {
   const socialSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
     <rect width="${width}" height="${height}" fill="${PALETTE.slate800}"/>
     <rect y="${height - 8}" width="${width}" height="8" fill="${PALETTE.blue500}"/>
-    <image href="data:image/svg+xml;base64,${Buffer.from(wordmarkSvg).toString("base64")}"
-           x="${wmX}" y="${wmY}" width="${wmW}" height="${wmH}"/>
+    <text x="${width / 2}" y="${wmBase}" font-family="${font}" font-size="${wmSize}" font-weight="800"
+          letter-spacing="-${(wmSize * 0.03).toFixed(1)}" text-anchor="middle"
+          fill="${PALETTE.slate100}">SWE<tspan fill="${PALETTE.blue500}">ny</tspan></text>
     <rect x="${Math.round((width - ruleW) / 2)}" y="${ruleY}" width="${ruleW}" height="4" rx="2" fill="${PALETTE.blue500}"/>
     <text x="${width / 2}" y="${line1Y}" font-family="${font}" font-size="${size}" font-weight="600"
           fill="${PALETTE.slate100}" text-anchor="middle">${lead}</text>
