@@ -14,6 +14,7 @@ import {
   JOURNAL_FILE,
   JournalKeyError,
   JournalLockedError,
+  JournalRollbackError,
   JournalVersionError,
   RunJournal,
   buildResumePlan,
@@ -137,7 +138,9 @@ export function prepareResume(ref: string, opts: ResumeOptions, deps: PrepareRes
     // --plan stays read-only: a torn tail is reported, not cut.
     read = readJournal(file, { repair: !opts.plan });
   } catch (err) {
-    if (err instanceof JournalVersionError || err instanceof JournalKeyError) return fail(err.message);
+    if (err instanceof JournalVersionError || err instanceof JournalKeyError || err instanceof JournalRollbackError) {
+      return fail(err.message);
+    }
     return fail(`cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (read.forgedAtLine !== undefined) {
