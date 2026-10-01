@@ -6,6 +6,8 @@ on:
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
+  push:
+    branches: [test/mutation] # TEMP: first run before the file exists on main; removed before merge
 
 permissions:
   contents: read
