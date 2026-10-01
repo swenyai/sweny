@@ -1204,6 +1204,13 @@ describe("starter template", () => {
     const wf = parseWorkflow(parseYaml(starter.yaml));
     expect(wf.id).toBe("explain-repo");
   });
+
+  it("the final node declares an answer block: purpose, how to run, key files, risks", () => {
+    const wf = parseWorkflow(parseYaml(WORKFLOW_TEMPLATES[0].yaml));
+    const props = (wf.nodes.explain.output as { properties: Record<string, unknown> }).properties;
+    expect(Object.keys(props)).toEqual(["purpose", "how_to_run", "key_files", "risks"]);
+    expect(wf.nodes.survey.output).toBeUndefined();
+  });
 });
 
 describe("ensureGitignoreEnv", () => {
