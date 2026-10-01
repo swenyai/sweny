@@ -26,7 +26,7 @@ import {
 } from "./git-push.js";
 import { github } from "./github.js";
 import { loadDotenv } from "../cli/config-file.js";
-import { startupEnv, unmarkWorkspaceEnv } from "../startup-env.js";
+import { startupEnv, startupTmpdir, unmarkWorkspaceEnv } from "../startup-env.js";
 
 // #473: with `persist-credentials: false` the checkout holds no token, so
 // sweny pushes the PR head itself, from its own process, with the github
@@ -385,6 +385,31 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     expect(r).toMatchObject({ pushed: false, attempted: true });
     expect(r.reason).not.toContain(TOKEN);
   }, 60_000);
+
+  it("a TMPDIR the workspace .env introduced does not place the private push repo", async () => {
+    const f = make();
+    const evilTmp = path.join(f.work, "evil-tmp");
+    mkdirSync(evilTmp);
+    const dotenvDir = path.join(f.root, "dotenv-tmp");
+    mkdirSync(dotenvDir);
+    writeFileSync(path.join(dotenvDir, ".env"), `TMPDIR=${evilTmp}\n`);
+    const fresh = process.env.TMPDIR === undefined;
+    loadDotenv(dotenvDir);
+    try {
+      if (fresh) expect(process.env.TMPDIR).toBe(evilTmp);
+      const g = realGit({ [PUSH]: `file://${f.remote}` });
+      expect(await pushHeadBranch({ ...opts(f), git: g.git })).toEqual({ pushed: true, attempted: true });
+      const [push] = g.pushes();
+      expect(push.cwd.startsWith(evilTmp)).toBe(false);
+      expect(path.dirname(push.cwd)).toBe(startupTmpdir());
+      expect(readdirSync(evilTmp)).toEqual([]);
+    } finally {
+      if (fresh) {
+        delete process.env.TMPDIR;
+        unmarkWorkspaceEnv("TMPDIR");
+      }
+    }
+  });
 
   it("transport settings and the server URL a workspace .env introduced are not used", async () => {
     const f = make();

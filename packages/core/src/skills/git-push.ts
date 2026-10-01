@@ -48,9 +48,9 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { devNull, tmpdir } from "node:os";
+import { devNull } from "node:os";
 import * as path from "node:path";
-import { startupEnv, trustedEnvValue } from "../startup-env.js";
+import { startupEnv, startupTmpdir, trustedEnvValue } from "../startup-env.js";
 import type { BranchPusher } from "../types.js";
 
 export interface GitRunResult {
@@ -100,7 +100,7 @@ function trustedDir(dir: string, workspace: string): boolean {
   if (!dir || !path.isAbsolute(dir)) return false;
   const r = real(dir);
   const ws = real(workspace);
-  const tmp = real(tmpdir());
+  const tmp = real(startupTmpdir());
   for (const d of [path.resolve(dir), r]) {
     if (inside(ws, d) || inside(path.resolve(workspace), d) || inside(tmp, d)) return false;
   }
@@ -348,7 +348,7 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
   const env = hardenedGitEnv(opEnv, trustedPathDirs(startupPath, cwd).join(path.delimiter));
   let tmp: string | undefined;
   try {
-    tmp = mkdtempSync(path.join(tmpdir(), "sweny-push-"));
+    tmp = mkdtempSync(path.join(startupTmpdir(), "sweny-push-"));
     const hooks = path.join(tmp, "hooks");
     mkdirSync(hooks, { mode: 0o700 });
     const hard = hardenedArgs(hooks);

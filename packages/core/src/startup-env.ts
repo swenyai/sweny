@@ -11,7 +11,11 @@
  * Node only.
  */
 
+import { tmpdir } from "node:os";
+
 const SNAPSHOT: Readonly<NodeJS.ProcessEnv> = Object.freeze({ ...process.env });
+/** os.tmpdir() as resolved from the startup env (TMPDIR, TEMP, TMP), before any workspace file was read. */
+const TMP = tmpdir();
 
 /** Variable names a workspace file wrote into `process.env` after startup. */
 const introduced = new Set<string>();
@@ -19,6 +23,14 @@ const introduced = new Set<string>();
 /** The environment captured at process startup, before any workspace file was read. */
 export function startupEnv(): Readonly<NodeJS.ProcessEnv> {
   return SNAPSHOT;
+}
+
+/**
+ * The temp dir from the startup env. `os.tmpdir()` reads TMPDIR at call time,
+ * which a workspace `.env` can set; this never moves after startup.
+ */
+export function startupTmpdir(): string {
+  return TMP;
 }
 
 /** Record that a workspace file (`.env`) set `key` in `process.env`. */
