@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -32,9 +32,13 @@ function record(over: Record<string, unknown> = {}, ageSeconds = 0) {
   );
   const t = new Date(Date.now() - ageSeconds * 1000);
   fs.utimesSync(file, t, t);
+  return file;
 }
 
-function run(env: Record<string, string>, opts: { list?: unknown; ghFails?: boolean; curlFails?: boolean } = {}) {
+function run(
+  env: Record<string, string>,
+  opts: { list?: unknown; ghFails?: boolean; curlFails?: boolean; cwd?: string } = {},
+) {
   const bin = path.join(dir, "bin");
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(dir, "list.json"), JSON.stringify(opts.list ?? []));
@@ -64,6 +68,7 @@ ${opts.curlFails ? "echo 'curl: (22) The requested URL returned error: 404' >&2;
   fs.utimesSync(marker, t, t);
   return spawnSync("bash", [script], {
     encoding: "utf8",
+    cwd: opts.cwd,
     env: {
       PATH: `${bin}:${process.env.PATH}`,
       WORKFLOW_PATH: ".sweny/workflows/weekly-digest.yml",
@@ -82,6 +87,10 @@ const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().sp
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-notify-"));
   log = path.join(dir, "calls.log");
+});
+
+afterEach(() => {
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 describe("scripts/notify-failure.sh: issue", () => {
@@ -190,6 +199,41 @@ describe("scripts/notify-failure.sh: trigger conditions and reason classes", () 
     expect(calls()).toEqual([]);
   });
 
+  it.each(["", "missing-marker", "directory-marker"])(
+    "does not trust old success without a valid marker: %s",
+    (kind) => {
+      record({ status: "success", nodes: [] }, 120);
+      const marker = kind === "" ? "" : path.join(dir, kind);
+      if (kind === "directory-marker") {
+        fs.mkdirSync(marker);
+        const past = new Date(Date.now() - 300_000);
+        fs.utimesSync(marker, past, past);
+      }
+      const result = run({ NOTIFY: HOOK, MARKER_FILE: marker });
+      expect(result.status).toBe(0);
+      expect(calls().find((c) => c.startsWith("curl"))).toContain("reason: did_not_start");
+    },
+  );
+
+  it.each(["success", "failed"])("uses the newest current record when its status is %s", (status) => {
+    const older = record({ status: status === "success" ? "failed" : "success", nodes: [] });
+    fs.renameSync(older, path.join(dir, "runs", "20260929-120000-old.json"));
+    record({ status, nodes: [] });
+    const result = run({ NOTIFY: HOOK });
+    expect(result.status).toBe(0);
+    if (status === "success") expect(calls()).toEqual([]);
+    else expect(calls().find((c) => c.startsWith("curl"))).toContain("reason: node_failed");
+  });
+
+  it("reads a current failed record from a path containing spaces", () => {
+    record();
+    const runs = path.join(dir, "runs with spaces");
+    fs.renameSync(path.join(dir, "runs"), runs);
+    const result = run({ NOTIFY: HOOK, RUNS_DIR: runs });
+    expect(result.status).toBe(0);
+    expect(calls().find((c) => c.startsWith("curl"))).toContain("reason: node_failed");
+  });
+
   it("a crashed run is class crashed", () => {
     record({ status: "crashed" });
     run({ NOTIFY: HOOK });
@@ -235,6 +279,69 @@ describe("action.yml notify-on-failure wiring (#474)", () => {
     expect(steps.indexOf(step)).toBeGreaterThan(steps.findIndex((s) => s.name === "Run workflow"));
     const runStep = steps.find((s) => s.name === "Run workflow")!;
     expect(runStep.run).not.toContain("notify");
+  });
+
+  it.each(["missing", "existing"])("can notify when the workflow directory is %s", (kind) => {
+    const notify = steps.find((s) => s.name === "Notify on failure")!;
+    const requested = "checkout with spaces";
+    if (kind === "existing") {
+      record();
+      const swenyDir = path.join(dir, requested, ".sweny");
+      fs.mkdirSync(swenyDir, { recursive: true });
+      fs.renameSync(path.join(dir, "runs"), path.join(swenyDir, "runs"));
+    }
+    const render = (value: string) =>
+      value.replaceAll("${{ inputs.working-directory }}", requested).replaceAll("${{ github.workspace }}", dir);
+    const workingDirectory = render(notify["working-directory"] ?? "${{ github.workspace }}");
+    const result = run(
+      { NOTIFY: HOOK, RUNS_DIR: render(notify.env.RUNS_DIR ?? ".sweny/runs") },
+      { cwd: path.resolve(dir, workingDirectory) },
+    );
+    expect(result.status, result.error?.message ?? result.stderr).toBe(0);
+    expect(calls().find((c) => c.startsWith("curl"))).toContain(
+      kind === "existing" ? "reason: node_failed" : "reason: did_not_start",
+    );
+  });
+
+  it("marks the invocation before auth validation or dependency setup can fail", () => {
+    expect(steps[0].name).toBe("Mark run start");
+  });
+
+  it("a second invocation cannot reuse a prior marker or suppress its setup failure", () => {
+    const mark = steps.find((s) => s.name === "Mark run start")!;
+    const notify = steps.find((s) => s.name === "Notify on failure")!;
+    const markInvocation = () => {
+      const output = path.join(dir, "step-output");
+      fs.writeFileSync(output, "");
+      const result = spawnSync("bash", ["-e", "-c", mark.run.replaceAll("${{ runner.temp }}", dir)], {
+        encoding: "utf8",
+        env: { PATH: process.env.PATH, RUNNER_TEMP: dir, GITHUB_OUTPUT: output },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const marker = /^marker=(.+)$/m.exec(fs.readFileSync(output, "utf8"))?.[1];
+      expect(marker, "the marker must be an invocation-scoped step output").toBeDefined();
+      expect(fs.statSync(marker!).isFile()).toBe(true);
+      return marker!;
+    };
+
+    const first = markInvocation();
+    const past = new Date(Date.now() - 300_000);
+    fs.utimesSync(first, past, past);
+    record({ status: "success", nodes: [] }, 120);
+    const second = markInvocation();
+    expect(second).not.toBe(first);
+    expect(notify.env.MARKER_FILE).toBe("${{ steps." + mark.id + ".outputs.marker }}");
+    // Dependency setup fails before the second workflow creates any record.
+    const result = run({ NOTIFY: HOOK, MARKER_FILE: second });
+    expect(result.status).toBe(0);
+    expect(calls().find((c) => c.startsWith("curl"))).toContain("reason: did_not_start");
+
+    // A successful record belonging to the current invocation stays quiet.
+    fs.rmSync(log);
+    record({ status: "success", nodes: [] }, -1);
+    const succeeded = run({ NOTIFY: HOOK, MARKER_FILE: second });
+    expect(succeeded.status).toBe(0);
+    expect(calls()).toEqual([]);
   });
 
   it("marks the run start only when the input is set", () => {

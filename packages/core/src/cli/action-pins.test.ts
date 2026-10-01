@@ -27,6 +27,16 @@ describe("action.yml version pins", () => {
   });
 });
 
+describe("release verification checkout", () => {
+  it("does not persist credentials while running the agent policy tests", () => {
+    const release = parse(fs.readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8"));
+    const checkout = release.jobs.verify.steps.find((step: Record<string, any>) =>
+      String(step.uses).startsWith("actions/checkout@"),
+    );
+    expect(checkout.with?.["persist-credentials"]).toBe(false);
+  });
+});
+
 describe("scripts/stamp-action-version.mjs", () => {
   const script = path.join(repoRoot, "scripts/stamp-action-version.mjs");
 
