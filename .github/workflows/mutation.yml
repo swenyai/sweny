@@ -11,8 +11,6 @@ on:
         description: "Ignore the cached report and re-test every mutant"
         type: boolean
         default: false
-  push:
-    branches: [test/mutation] # TEMP: removed before merge (dispatch needs the file on main)
 
 permissions:
   contents: read

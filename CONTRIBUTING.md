@@ -48,7 +48,7 @@ gh workflow run mutation.yml --ref <branch>
 gh run watch
 ```
 
-The per-file scores and surviving mutants land in the run summary; the HTML and JSON reports are in the `mutation-report` artifact. Runs are incremental (the previous report is cached), and the job fails when the total score drops below the `break` threshold in `stryker.config.json`. Don't run it locally on a shared machine.
+The per-file scores and surviving mutants land in the run summary; the HTML and JSON reports are in the `mutation-report` artifact. A manual run reuses the cached report (incremental) unless you tick `force`; the weekly run is always full, because mutants on module-level constants are not re-tested when only the tests change. The job fails when the total score drops below the `break` threshold in `stryker.config.json` (first full run with these specs: 95.24, break 93). Specs written to kill survivors live in `packages/core/src/__tests__/mutation/`. Don't run it locally on a shared machine.
 
 ## Running the CLI locally
 
