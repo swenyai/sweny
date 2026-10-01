@@ -6,10 +6,11 @@
  * leave that file untouched. Real filesystem, temp dirs only.
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ensureDirNoFollow, openNoFollow, workspaceRoot, writeFileNoFollow } from "./safe-file.js";
+import { assertOpenedUnder, ensureDirNoFollow, openNoFollow, workspaceRoot, writeFileNoFollow } from "./safe-file.js";
 import { outputRelPath, writeFinalOutput } from "./cli/final-output.js";
 import { writeStepSummary, summarizeRun } from "./cli/run-output.js";
 import { writeRunRecord, type RunRecord } from "./cli/run-history.js";
@@ -135,6 +136,75 @@ describe.skipIf(!posix)("openNoFollow and friends", () => {
     } finally {
       fs.closeSync(fd);
     }
+  });
+
+  it("replace mode keeps a plain file's inode and truncates it through the descriptor", () => {
+    const s = setup();
+    const file = path.join(s.ws, "out.md");
+    fs.writeFileSync(file, "a much longer previous body\n");
+    const ino = fs.lstatSync(file).ino;
+    writeFileNoFollow(file, "new\n", { root: s.ws });
+    expect(fs.readFileSync(file, "utf-8")).toBe("new\n");
+    expect(fs.lstatSync(file).ino).toBe(ino);
+    expect(fs.lstatSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it("replace mode replaces a FIFO without blocking", () => {
+    const s = setup();
+    const file = path.join(s.ws, "out.md");
+    if (spawnSync("mkfifo", [file]).status !== 0) return;
+    writeFileNoFollow(file, "x", { root: s.ws });
+    expect(fs.lstatSync(file).isFile()).toBe(true);
+    expect(fs.readFileSync(file, "utf-8")).toBe("x");
+  });
+
+  describe("post-open verification (the directory-swap race)", () => {
+    // Node has no openat(2), so a swap between the parent check and the open
+    // cannot be ordered deterministically here. These drive the check that runs
+    // after every open with the two states such a swap leaves behind.
+    it("a parent that is a link out of the workspace after the open fails closed", () => {
+      const s = setup();
+      const outside = path.join(s.root, "outside");
+      fs.mkdirSync(outside);
+      fs.writeFileSync(path.join(outside, "f"), "victim\n");
+      fs.symlinkSync(outside, path.join(s.ws, "d"));
+      // The descriptor an open through the swapped directory would hold.
+      const fd = fs.openSync(path.join(outside, "f"), "r+");
+      try {
+        expect(() => assertOpenedUnder(fd, path.join(s.ws, "d", "f"), s.ws)).toThrow(/moved during the open/);
+      } finally {
+        fs.closeSync(fd);
+      }
+      expect(fs.readFileSync(path.join(outside, "f"), "utf-8")).toBe("victim\n");
+    });
+
+    it("a directory swapped back after the open (another inode at the path) fails closed", () => {
+      const s = setup();
+      fs.mkdirSync(path.join(s.ws, "d"));
+      const file = path.join(s.ws, "d", "f");
+      fs.writeFileSync(file, "");
+      const fd = fs.openSync(file, "r+");
+      try {
+        fs.renameSync(file, path.join(s.ws, "d", "moved"));
+        fs.writeFileSync(file, "");
+        expect(() => assertOpenedUnder(fd, file, s.ws)).toThrow(/changed during the open/);
+      } finally {
+        fs.closeSync(fd);
+      }
+    });
+
+    it("the file the path names, under real directories, passes", () => {
+      const s = setup();
+      fs.mkdirSync(path.join(s.ws, "d"));
+      const file = path.join(s.ws, "d", "f");
+      fs.writeFileSync(file, "");
+      const fd = fs.openSync(file, "r+");
+      try {
+        expect(() => assertOpenedUnder(fd, file, s.ws)).not.toThrow();
+      } finally {
+        fs.closeSync(fd);
+      }
+    });
   });
 
   it("workspaceRoot: inside the workspace pins the root, outside does not", () => {
