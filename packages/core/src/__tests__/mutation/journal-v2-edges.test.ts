@@ -1,6 +1,6 @@
 /**
  * Edge assertions found by mutation testing of the authenticated journal
- * (format v2): where run keys live, how a forged or impossible journal is
+ * (format v3): where run keys live, how a forged or impossible journal is
  * refused, usage journaling, and what the tool fingerprint covers. A resume
  * trusts this file, so each refusal is pinned with its message.
  */
@@ -32,7 +32,9 @@ import {
   journalDir,
   loadRunKey,
   readJournal,
-  runKeyDir,
+  acquireRunLock,
+  runStateRoot,
+  workspaceScope,
   runKeyFile,
   runSecretValues,
   swenyStateDir,
@@ -45,17 +47,20 @@ import type { NodeResult, Skill, Workflow } from "../../types.js";
 const RUN = "20260930-120000-0a0b0c";
 const KEY = Buffer.alloc(32, 7);
 const dirs: string[] = [];
-let KEYDIR = "";
 function tmp(): string {
   const d = mkdtempSync(join(tmpdir(), "sweny-journal-v2-"));
   dirs.push(d);
   return d;
 }
+// Each spec gets its own state dir: journals, keys and locks live there, never in the workspace.
+const savedStateDir = process.env.SWENY_STATE_DIR;
 beforeEach(() => {
-  KEYDIR = tmp();
+  process.env.SWENY_STATE_DIR = tmp();
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  if (savedStateDir === undefined) delete process.env.SWENY_STATE_DIR;
+  else process.env.SWENY_STATE_DIR = savedStateDir;
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -80,17 +85,19 @@ describe("run key location", () => {
     expect(swenyStateDir({})).toBe(home);
   });
 
-  it("keys sit under run-keys, one file per workspace and run, named by a hash of the real path", () => {
-    expect(runKeyDir({ SWENY_STATE_DIR: "/s" })).toBe(join("/s", "run-keys"));
+  it("keys sit in each run's private dir, under runs/<hash of the real workspace path>/<run id>", () => {
+    expect(runStateRoot({ SWENY_STATE_DIR: "/s" })).toBe(join("/s", "runs"));
     const cwd = tmp();
+    expect(workspaceScope(cwd)).toBe(sha256(realpathSync(cwd)).slice(0, 16));
     const file = runKeyFile(cwd, RUN, "/k");
-    expect(file).toBe(join("/k", `${sha256(realpathSync(cwd)).slice(0, 16)}-${RUN}.key`));
+    expect(file).toBe(join("/k", sha256(realpathSync(cwd)).slice(0, 16), RUN, "key"));
     expect(runKeyFile(tmp(), RUN, "/k")).not.toBe(file);
     expect(runKeyFile(cwd, "20260930-120000-ffffff", "/k")).not.toBe(file);
-    expect(runKeyFile(cwd, RUN).startsWith(runKeyDir())).toBe(true);
+    expect(runKeyFile(cwd, RUN).startsWith(runStateRoot())).toBe(true);
+    expect(journalDir(cwd, RUN, "/k")).toBe(join("/k", workspaceScope(cwd), RUN));
     // A workspace that does not exist yet still gets a stable name.
     expect(runKeyFile("/no/such/dir", RUN, "/k")).toBe(
-      join("/k", `${sha256(resolve("/no/such/dir")).slice(0, 16)}-${RUN}.key`),
+      join("/k", sha256(resolve("/no/such/dir")).slice(0, 16), RUN, "key"),
     );
   });
 });
@@ -139,20 +146,24 @@ describe("run key files", () => {
     const dir = journalDir(cwd, RUN);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, JOURNAL_FILE), signed(1, "run:start") + "\n");
-    expect(() => readJournal(join(dir, JOURNAL_FILE), { keyDir: KEYDIR })).toThrow(JournalKeyError);
-    writeFileSync(runKeyFile(cwd, RUN, KEYDIR), KEY.toString("hex") + "\n");
-    expect(readJournal(join(dir, JOURNAL_FILE), { keyDir: KEYDIR }).records).toHaveLength(1);
+    expect(() => readJournal(join(dir, JOURNAL_FILE), { head: false })).toThrow(JournalKeyError);
+    writeFileSync(runKeyFile(cwd, RUN), KEY.toString("hex") + "\n");
+    expect(readJournal(join(dir, JOURNAL_FILE), { head: false }).records).toHaveLength(1);
     const plan = buildResumePlan([startRec()]);
     const read = { file: join(dir, JOURNAL_FILE), records: [startRec()], truncatedBytes: 0 };
-    expect(() => RunJournal.openForResume({ runId: RUN, cwd: tmp(), keyDir: KEYDIR, read, plan })).toThrow(
-      JournalKeyError,
-    );
+    const other = journalDir(tmp(), RUN);
+    mkdirSync(other, { recursive: true });
+    const lock = acquireRunLock(other);
+    expect(() => RunJournal.openForResume({ runId: RUN, cwd: tmp(), read, plan, lock })).toThrow(JournalKeyError);
+    lock.release();
   });
 });
 
-function signed(seq: number, type: string, fields: Record<string, unknown> = {}): string {
+/** A record as the run writes it: its MAC chains the run id, its seq and the previous record's MAC. */
+function signed(seq: number, type: string, fields: Record<string, unknown> = {}, prev = ""): string {
   const body = { v: JOURNAL_SCHEMA_VERSION, seq, type, at: "t", ...fields };
-  return JSON.stringify({ ...body, h: createHmac("sha256", KEY).update(JSON.stringify(body)).digest("hex") });
+  const input = `sweny-journal\n${RUN}\n${seq}\n${prev}\n${JSON.stringify(body)}`;
+  return JSON.stringify({ ...body, h: createHmac("sha256", KEY).update(input).digest("hex") });
 }
 
 // ─── Records ──────────────────────────────────────────────────────
@@ -460,37 +471,36 @@ const beginInfo = () => ({
   config: {},
   writeState: createWriteStageState(),
 });
-const records = (j: RunJournal) => readJournal(j.file, { keyDir: KEYDIR }).records;
+const records = (j: RunJournal) => readJournal(j.file).records;
 const create = (over: Partial<Parameters<typeof RunJournal.create>[0]> = {}) =>
-  RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: tmp(), ...over });
+  RunJournal.create({ runId: RUN, cwd: tmp(), ...over });
 
 describe("a new run: private files", () => {
-  it("creates the key dir, the run dir and the lock private to the user", () => {
-    const keys = join(tmp(), "keys");
-    const j = create({ keyDir: keys });
+  it("creates the run's state dirs, its key, journal, head, meta and lock private to the user", () => {
+    const root = join(tmp(), "runs");
+    const j = create({ stateRoot: root });
     j.begin(beginInfo());
-    expect(statSync(keys).mode & 0o777).toBe(0o700);
+    expect(statSync(root).mode & 0o777).toBe(0o700);
     expect(statSync(j.dir).mode & 0o777).toBe(0o700);
-    expect(statSync(join(j.dir, "journal.lock")).mode & 0o777).toBe(0o600);
-    expect(statSync(j.file).mode & 0o777).toBe(0o600);
+    for (const f of ["lock", "key", "head.json", "meta.json", JOURNAL_FILE]) {
+      expect(statSync(join(j.dir, f)).mode & 0o777, f).toBe(0o600);
+    }
     j.end("success");
   });
 
-  it("without a writable key dir the run is not journaled, and says why", () => {
+  it("without a writable state dir the run stops before it starts, and says why", () => {
     const blocker = join(tmp(), "afile");
     writeFileSync(blocker, "x");
-    const warn = vi.fn();
-    const j = create({ keyDir: blocker, logger: { info() {}, warn, error() {}, debug() {} } });
-    j.begin(beginInfo());
-    expect(warn).toHaveBeenCalledTimes(2);
-    const first = warn.mock.calls[0][0] as string;
-    expect(first.startsWith(`  run journal: could not write the run key under ${blocker} (`)).toBe(true);
-    expect(first.endsWith("); set SWENY_STATE_DIR to a writable dir")).toBe(true);
-    expect(warn.mock.calls[1][0]).toBe("  run journal: no signing key for this run; this run cannot be resumed");
+    const error = vi.fn();
+    const j = create({ stateRoot: join(blocker, "runs"), logger: { info() {}, warn() {}, error, debug() {} } });
+    expect(() => j.begin(beginInfo())).toThrow(
+      /^run journal: could not set up the run's journal in .*; set SWENY_STATE_DIR to a writable dir, or pass --no-journal/,
+    );
+    expect(error).toHaveBeenCalledTimes(1);
     expect(j.active).toBe(false);
     expect(existsSync(j.file)).toBe(false);
-    j.nodeStart("a", 1);
-    expect(warn).toHaveBeenCalledTimes(2);
+    // Every later record fails the same way: the run cannot go on unjournaled.
+    expect(() => j.nodeStart("a", 1)).toThrow(/could not set up the run's journal/);
   });
 
   it("end() writes one run:end however often it is called", () => {
@@ -630,14 +640,14 @@ describe("usage records", () => {
     ];
     const plan = buildResumePlan(recs);
     const cwd = tmp();
-    mkdirSync(KEYDIR, { recursive: true });
-    writeFileSync(runKeyFile(cwd, RUN, KEYDIR), KEY.toString("hex") + "\n");
+    mkdirSync(journalDir(cwd, RUN), { recursive: true });
+    writeFileSync(runKeyFile(cwd, RUN), KEY.toString("hex") + "\n");
     const j = RunJournal.openForResume({
       runId: RUN,
       cwd,
-      keyDir: KEYDIR,
       read: { file: join(journalDir(cwd, RUN), JOURNAL_FILE), records: recs, truncatedBytes: 0 },
       plan,
+      lock: acquireRunLock(journalDir(cwd, RUN)),
     });
     expect(j.priorSpend()).toStrictEqual({ tokens: 3, costUsd: 0.5 });
     expect(j.priorSpend()).not.toBe(plan.priorSpend);
@@ -813,15 +823,16 @@ describe("toolsHash fingerprint", () => {
   });
 });
 
-// A read of the journal's own file leaves nothing behind in the workspace but the journal.
+// Nothing of the journal is written inside the workspace.
 describe("workspace contents", () => {
-  it("the signing key is never written inside the workspace", () => {
+  it("the journal, its key and its lock are written only in the state dir", () => {
     const cwd = tmp();
-    const j = RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd });
+    const j = RunJournal.create({ runId: RUN, cwd });
     j.begin(beginInfo());
     j.end("success");
-    const inWorkspace = readFileSync(j.file, "utf-8") + readFileSync(join(j.dir, ".gitignore"), "utf-8");
-    expect(inWorkspace).not.toContain(readFileSync(runKeyFile(cwd, RUN, KEYDIR), "utf-8").trim());
-    expect(runKeyFile(cwd, RUN, KEYDIR).startsWith(cwd)).toBe(false);
+    expect(j.dir.startsWith(cwd)).toBe(false);
+    expect(runKeyFile(cwd, RUN).startsWith(cwd)).toBe(false);
+    expect(readFileSync(j.file, "utf-8")).not.toContain(readFileSync(runKeyFile(cwd, RUN), "utf-8").trim());
+    expect(existsSync(join(cwd, ".sweny"))).toBe(false);
   });
 });
