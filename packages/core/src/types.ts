@@ -861,6 +861,8 @@ export interface Claude {
   readonly defaultJudgeModel?: string;
   /** Run a node: give Claude an instruction, context, and tools */
   run(opts: {
+    /** Stable workflow node identity, preserved across prompt wrapping and retries. */
+    nodeId?: string;
     instruction: string;
     context: Record<string, unknown>;
     tools: Tool[];

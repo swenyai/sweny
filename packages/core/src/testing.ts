@@ -1,20 +1,18 @@
 /**
  * Test Helpers
  *
- * MockClaude for running workflows without an API key.
+ * MockHarness for running workflows without an API key.
  * File-based skill for local testing.
  *
  * @example
  * ```ts
- * import { MockClaude, fileSkill } from '@sweny-ai/core/testing'
+ * import { MockHarness } from '@sweny-ai/core/testing'
  *
- * const claude = new MockClaude({
- *   gather: {
- *     toolCalls: [{ tool: 'fs_read_json', input: { path: 'logs.json' } }],
- *     data: { logs: [...] },
- *   },
- *   investigate: {
- *     data: { root_cause: 'NPE in handler', severity: 'high' },
+ * const harness = new MockHarness({
+ *   strict: true,
+ *   responses: {
+ *     gather: { data: { logs: [] } },
+ *     investigate: { data: { root_cause: 'NPE in handler', severity: 'high' } },
  *   },
  * })
  * ```
@@ -49,11 +47,13 @@ export interface MockNodeResponse {
 }
 
 export interface MockHarnessOptions {
+  /** Refuse incomplete or ambiguous fixtures. Does not isolate supplied tool handlers. */
+  strict?: boolean;
   /** Node ID → scripted response */
   responses: Record<string, MockNodeResponse>;
   /** Route decisions: "fromNode" → chosen target node ID */
   routes?: Record<string, string>;
-  /** Workflow definition — enables instruction-based node matching (required for branching workflows) */
+  /** Enables instruction matching for manual calls without nodeId; execute() supplies node IDs. */
   workflow?: Workflow;
   /** Scripted handler for `ask()` calls. */
   ask?: (instruction: string, context: Record<string, unknown>) => string;
@@ -73,10 +73,12 @@ export class MockHarness implements Claude, AgentHarness {
   private callOrder: string[] = [];
   private responses: Record<string, MockNodeResponse>;
   private routes: Record<string, string>;
-  private instructionMap: Map<string, string>; // instruction text → node ID
+  private instructionMap: Map<string, string[]>; // instruction text → matching node IDs
+  private strict: boolean;
   private askFn?: (i: string, c: Record<string, unknown>) => string;
 
   constructor(opts: MockHarnessOptions) {
+    this.strict = opts.strict ?? false;
     this.responses = opts.responses;
     this.routes = opts.routes ?? {};
     this.askFn = opts.ask;
@@ -86,7 +88,9 @@ export class MockHarness implements Claude, AgentHarness {
       for (const [id, node] of Object.entries(opts.workflow.nodes)) {
         // Source can be a string or an object — only index string instructions
         if (typeof node.instruction === "string") {
-          this.instructionMap.set(node.instruction, id);
+          const ids = this.instructionMap.get(node.instruction) ?? [];
+          ids.push(id);
+          this.instructionMap.set(node.instruction, ids);
         }
       }
     }
@@ -107,6 +111,7 @@ export class MockHarness implements Claude, AgentHarness {
   }
 
   async run(opts: {
+    nodeId?: string;
     instruction: string;
     context: Record<string, unknown>;
     tools: Tool[];
@@ -117,24 +122,36 @@ export class MockHarness implements Claude, AgentHarness {
   }
 
   private async runScripted(opts: {
+    nodeId?: string;
     instruction: string;
     context: Record<string, unknown>;
     tools: Tool[];
     outputSchema?: JSONSchema;
   }): Promise<NodeResult> {
-    // Identify which node this is by matching instruction text against responses
-    // The executor wraps tools with event tracking, so we can find the node
-    // by checking which response key's instruction appears
-    const nodeId = this.identifyNode(opts.instruction);
+    // Executor identity is authoritative. Text matching is for older manual callers.
+    const nodeId = opts.nodeId ?? this.identifyNode(opts.instruction);
+    if (nodeId === null) {
+      return this.fixtureFailure(
+        "ambiguous or unknown instruction; pass nodeId or provide a workflow with unique instructions",
+      );
+    }
     this.callOrder.push(nodeId);
 
-    const response = this.responses[nodeId];
+    const response = Object.hasOwn(this.responses, nodeId) ? this.responses[nodeId] : undefined;
     if (!response) {
+      if (this.strict) return this.fixtureFailure(`node "${nodeId}" has no scripted response`);
       return {
         status: "success",
         data: { summary: `Mock: no scripted response for "${nodeId}"` },
         toolCalls: [],
       };
+    }
+
+    // Check the entire script before executing any handler, so an incomplete
+    // fixture cannot perform an earlier write before discovering a missing tool.
+    if (this.strict) {
+      const missing = response.toolCalls?.find((tc) => !opts.tools.some((tool) => tool.name === tc.tool));
+      if (missing) return this.fixtureFailure(`node "${nodeId}" requests unavailable tool "${missing.tool}"`);
     }
 
     // Execute scripted tool calls
@@ -187,15 +204,27 @@ export class MockHarness implements Claude, AgentHarness {
    * Identify which node is being executed.
    *
    * Strategy:
-   * 1. If a workflow was provided, match by instruction text (accurate for branching)
-   * 2. Otherwise, fall back to sequential key matching (works for linear DAGs)
+   * Manual calls without nodeId can match a unique workflow instruction.
+   * Legacy mode also permits heuristic/sequential matching for compatibility.
+   * Strict mode never guesses from response order or instruction substrings.
    */
-  private identifyNode(instruction: string): string {
+  private fixtureFailure(reason: string): NodeResult {
+    return {
+      status: "failed",
+      data: { error: `MockHarness fixture error: ${reason}`, refused: true },
+      toolCalls: [],
+    };
+  }
+
+  private identifyNode(instruction: string): string | null {
     // 1. Instruction-based matching (accurate for branching workflows)
     if (this.instructionMap.size > 0) {
-      const nodeId = this.instructionMap.get(instruction);
-      if (nodeId && nodeId in this.responses) return nodeId;
+      const matches = this.instructionMap.get(instruction);
+      if (this.strict) return matches?.length === 1 ? matches[0]! : null;
+      const nodeId = matches?.at(-1);
+      if (nodeId && Object.hasOwn(this.responses, nodeId)) return nodeId;
     }
+    if (this.strict) return null;
 
     // 2. Check if any response key appears literally in the instruction
     const keys = Object.keys(this.responses);

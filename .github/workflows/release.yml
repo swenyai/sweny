@@ -19,8 +19,15 @@ jobs:
   verify:
     name: Verify
     runs-on: ubuntu-latest
+    outputs:
+      # The exact commit this run built and tested. Everything downstream
+      # (publish, tag-action) must act on this SHA, never on a newer main.
+      sha: ${{ steps.head.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Record verified commit
+        id: head
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -42,11 +49,22 @@ jobs:
       contents: write
       id-token: write
       issues: write
+    outputs:
+      # Commit the version-only writeback pushed to main, if any.
+      writeback_sha: ${{ steps.release.outputs.writeback_sha }}
+      # @sweny-ai/core version this run published, if it published core.
+      core_version: ${{ steps.release.outputs.core_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT || github.token }}
+
+      - name: Assert publish builds the verified commit
+        env:
+          VERIFIED_SHA: ${{ needs.verify.outputs.sha }}
+        run: |
+          [ "$(git rev-parse HEAD)" = "$VERIFIED_SHA" ] || { echo "::error::publish checkout is not the verified commit $VERIFIED_SHA"; exit 1; }
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -68,6 +86,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Detect changes and publish
+        id: release
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -132,7 +151,14 @@ jobs:
           fi
 
           if [ "$PUBLISHED" = true ]; then
-            node scripts/sync-release-versions.mjs sync "$SWENY_RELEASE_MANIFEST"
+            WRITEBACK_FILE="$RUNNER_TEMP/writeback-sha"
+            rm -f "$WRITEBACK_FILE"
+            node scripts/sync-release-versions.mjs sync "$SWENY_RELEASE_MANIFEST" "$WRITEBACK_FILE"
+            if [ -s "$WRITEBACK_FILE" ]; then
+              echo "writeback_sha=$(cat "$WRITEBACK_FILE")" >> "$GITHUB_OUTPUT"
+            fi
+            CORE_PUBLISHED=$(node -p "require(process.argv[1])['packages/core']?.published ?? ''" "$SWENY_RELEASE_MANIFEST")
+            echo "core_version=$CORE_PUBLISHED" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Advance release-latest diff base
@@ -168,7 +194,7 @@ jobs:
     name: Tag v5 action pointer
     runs-on: ubuntu-latest
     # Runs after publish for ordering, but advances the v5 tag whether or not
-    # publish succeeded — the composite action.yml is independent of the npm
+    # publish succeeded; the composite action.yml is independent of the npm
     # publish. Skipped only if the build/test gate failed or the run was
     # cancelled. This is what keeps a publish-credential blip from freezing
     # every swenyai/sweny@v5 consumer.
@@ -177,23 +203,55 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Check out exactly the commit verify tested, never the moving main. A
+      # commit that landed while this run was in flight is unverified and must
+      # not be stamped or tagged here.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Latest main, so we tag the publish bump commit when publish ran.
-          ref: main
+          ref: ${{ needs.verify.outputs.sha }}
           fetch-depth: 0
           token: ${{ secrets.GH_PAT || github.token }}
 
-      - name: Tag v5 moving tag and immutable v5.<core-version>
+      - name: Resolve tag source
+        id: source
+        env:
+          VERIFIED_SHA: ${{ needs.verify.outputs.sha }}
+          WRITEBACK_SHA: ${{ needs.publish.outputs.writeback_sha }}
         run: |
-          # The root action.yml is a composite action — no JS bundle to build.
-          # Just move the v5 tag forward so consumers pinned to swenyai/sweny@v5
-          # always get the latest engine wrapper, and cut an immutable
-          # v5.<core_version> for anyone who wants to pin precisely.
-          git tag -f v5
+          # The tag source is the verified commit, or the publish version
+          # writeback commit when it descends from it through version-only
+          # commits (scripts/verify-tag-source.mjs). Anything else, such as an
+          # unverified commit that landed in between, is ignored.
+          BASE="$VERIFIED_SHA"
+          if [ -n "$WRITEBACK_SHA" ]; then
+            if node scripts/verify-tag-source.mjs "$VERIFIED_SHA" "$WRITEBACK_SHA"; then
+              BASE="$WRITEBACK_SHA"
+              git checkout --detach "$BASE"
+            else
+              echo "::warning::writeback $WRITEBACK_SHA is not a version-only descendant of $VERIFIED_SHA; tagging the verified commit"
+            fi
+          fi
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: Tag v5 moving tag and immutable v5.<core-version>
+        env:
+          BASE_SHA: ${{ steps.source.outputs.base }}
+          PUBLISHED_CORE_VERSION: ${{ needs.publish.outputs.core_version }}
+        run: |
+          # The root action.yml is a composite action, no JS bundle to build.
+          # Move the v5 tag to the verified commit (never newer main) so
+          # consumers pinned to swenyai/sweny@v5 get the engine wrapper that
+          # passed verify, and cut an immutable v5.<core_version> for anyone
+          # who wants to pin precisely.
+          [ "$(git rev-parse HEAD)" = "$BASE_SHA" ] || { echo "::error::checkout is not $BASE_SHA"; exit 1; }
+          git tag -f v5 "$BASE_SHA"
           git push origin v5 --force
 
           CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
+          if [ -n "$PUBLISHED_CORE_VERSION" ] && [ "$PUBLISHED_CORE_VERSION" != "$CORE_VERSION" ]; then
+            echo "::warning::published core $PUBLISHED_CORE_VERSION is not in the verified tree ($CORE_VERSION); not cutting an immutable tag"
+            exit 0
+          fi
           VERSIONED_TAG="v5.${CORE_VERSION}"
           # Only cut the immutable tag if it does not already exist (it will
           # when publish was skipped/failed and core's version is unchanged).
