@@ -869,10 +869,15 @@ export async function workflowRunAction(
     maxTokens?: string;
     maxCost?: string;
     yes?: boolean;
+    decider?: string;
   },
   /** Set by `sweny workflow resume` (#363): the journal, run id and original input. */
   resume?: ResumeContext,
 ): Promise<void> {
+  if (options.decider !== undefined && options.decider !== "off" && options.decider !== "shadow") {
+    console.error(chalk.red(`\n  --decider must be off or shadow, got "${options.decider}"\n`));
+    process.exit(1);
+  }
   // Reject junk --timeout/--max-steps up front (both paths) instead of
   // silently falling back to a default.
   let budget: ReturnType<typeof parseRunBudgetFlags>;
@@ -1196,6 +1201,7 @@ export async function workflowRunAction(
           fileRoot: config.fileRoot || undefined,
           signal,
           max_steps: wfMaxSteps,
+          ...(options.decider ? { decider: options.decider as "off" | "shadow" } : {}),
           stageOutputs: options.stage === true,
           journal,
           ...(spendBudget ? { budget: spendBudget } : {}),
@@ -1226,7 +1232,7 @@ export async function workflowRunAction(
     // PR billboard markdown (metadata only). Written before any early exit so
     // --json runs and failed runs still get a comment.
     if (options.commentFile) {
-      writeRunComment(options.commentFile, workflow, results, summarizeRun(results, wfDurationMs), {
+      writeRunComment(options.commentFile, workflow, results, summarizeRun(results, wfDurationMs, false, trace), {
         trace,
         durationsMs: Object.fromEntries(nodeTimer.durations),
       });
@@ -1256,7 +1262,7 @@ export async function workflowRunAction(
 
     // Run receipt (metadata only) + optional $GITHUB_STEP_SUMMARY.
     runLogger.flush();
-    const receipt = summarizeRun(results, wfDurationMs);
+    const receipt = summarizeRun(results, wfDurationMs, false, trace);
     writeStepSummary(workflow, results, receipt, trace);
 
     // The answer, above the receipt: the terminal node's result, or the failed node's error.

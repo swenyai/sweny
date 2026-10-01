@@ -262,6 +262,37 @@ jobs:
           SWENY_REQUIRE_SANDBOX_WRAPPER: "1"
         run: npx vitest run src/harness/sandbox
 
+  # The composite Action on a clean runner with a non-Claude agent, in setup-only
+  # mode (no model call): proves the pinned Codex and srt install, srt probes, and
+  # the CLI loads and validates a workflow.
+  action-codex-setup:
+    name: Action setup (agent codex, no model call)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./
+        with:
+          workflow: examples/monitor.yml
+          agent: codex
+          openai-api-key: ci-not-a-real-key
+          setup-only: "true"
+
+      - name: Installed what the Action promised
+        run: |
+          echo "codex: $(codex --version)"
+          codex --version | grep -F "$(grep -o 'TESTED_CODEX_VERSION = "[0-9.]*"' packages/core/src/harness/codex.ts | grep -o '[0-9][0-9.]*')"
+          echo "srt: $(srt --version)"
+          command -v rg
+          srt_settings="$RUNNER_TEMP/srt-check.json"
+          echo '{"network":{"allowedDomains":[],"deniedDomains":[]},"filesystem":{"denyRead":[],"allowRead":[],"allowWrite":[],"denyWrite":[]}}' > "$srt_settings"
+          srt --settings "$srt_settings" -- true
+          sweny workflow validate examples/monitor.yml
+
   workflow-lint:
     name: Workflow lint
     runs-on: ubuntu-latest

@@ -54,6 +54,8 @@ import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./har
 import type { HarnessPolicyMode } from "./harness/policy.js";
 import type { AgentHarness } from "./harness/types.js";
 import { BudgetGuard, describeOverrun, minLimits, toLimits } from "./budget.js";
+import { createShadowDecider, finishShadowDecision, startShadowDecision } from "./decider.js";
+import type { DeciderMode, ShadowDecider } from "./decider.js";
 import type { Budget, BudgetOverrun } from "./budget.js";
 import { buildNodePolicy, resolveNodePermissions } from "./node-policy.js";
 import {
@@ -155,6 +157,12 @@ export interface ExecuteOptions {
    * all (cost on Codex). Default: {@link resolveHarnessPolicy} from the run env.
    */
   harnessPolicy?: HarnessPolicyMode;
+  /**
+   * Override `workflow.decider.mode` (CLI `--decider`). `shadow` still needs
+   * `decider.provider` in the workflow; there is no default URL. Default: the
+   * workflow's own mode, else off (zero HTTP calls).
+   */
+  decider?: DeciderMode;
 }
 
 /**
@@ -169,6 +177,8 @@ export const DEFAULT_MAX_STEPS = 200;
 interface AbortOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Shadow-mode decision model (#357). Observes route choices, never changes them. */
+  shadow?: ShadowDecider | null;
 }
 
 /**
@@ -231,6 +241,9 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   // `budget` and the caller's (`--max-tokens`, `--max-cost`).
   const budgetGuard = new BudgetGuard(minLimits(toLimits(workflow.budget), toLimits(options.budget)));
   const harnessPolicy = options.harnessPolicy ?? resolveHarnessPolicy(runEnv);
+  // Decision model (#357): shadow only. Null (the default) means no HTTP at all.
+  const shadow = createShadowDecider(workflow.decider, options.decider, runEnv, (m) => logger.warn(m));
+  if (shadow) trace.decisions = shadow.records;
 
   // Build an eval-time alias table from the loaded skills. Each skill owns
   // its own mapping between skill-tool names and equivalent MCP names. Core
@@ -479,7 +492,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         edgeCounts,
         logger,
         trace,
-        { signal, timeoutMs },
+        { signal, timeoutMs, shadow },
       );
       journal?.route(currentId, next);
       currentId = next;
@@ -891,6 +904,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       {
         signal,
         timeoutMs,
+        shadow,
       },
     );
     journal?.route(routedFrom, currentId);
@@ -1662,13 +1676,33 @@ async function resolveNext(
     choices.push({ id: defaultEdge.to, description: "None of the above / default path" });
   }
 
+  const question = "Based on the results so far, which condition is true?";
+  // Shadow mode (#357): the decider gets the same question in parallel. Its
+  // promise never rejects and its answer is only logged, so the route below
+  // is the agent's in every case.
+  const pending = abort?.shadow
+    ? startShadowDecision(abort.shadow.provider, { question, state: context, choices, signal: abort.signal })
+    : undefined;
+
   const chosen = await claude.evaluate({
-    question: "Based on the results so far, which condition is true?",
+    question,
     context,
     choices,
     signal: abort?.signal,
     timeoutMs: abort?.timeoutMs,
   });
+
+  if (pending && abort?.shadow) {
+    try {
+      const rec = await finishShadowDecision(pending, current, chosen);
+      abort.shadow.records.push(rec);
+      const verdict =
+        rec.outcome === "compared" ? (rec.agree ? "agreed" : "disagreed") : `fell through (${rec.reason})`;
+      logger?.info(`  decider (shadow): node '${current}' ${verdict}`, { ...rec });
+    } catch {
+      // shadow logging must never affect a route
+    }
+  }
 
   // Fail closed. `evaluate` returns null when the routing decision could not
   // be made (SDK error, timeout, non-success subtype, or an unparseable
