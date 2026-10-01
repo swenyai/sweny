@@ -30,7 +30,10 @@ import { github } from "./github.js";
 // injected agent would. No network.
 const TOKEN = "ghs_pushCanaryPushCanary0473";
 const BASIC = Buffer.from(`x-access-token:${TOKEN}`).toString("base64");
+/** The checkout's origin. */
 const DEST = "https://github.com/owner/repo.git";
+/** Where sweny pushes for repo `Owner/Repo` (built from the PR's repo, not from origin). */
+const PUSH = "https://github.com/Owner/Repo.git";
 const posix = process.platform !== "win32";
 
 type Call = { args: string[]; cwd: string; env: NodeJS.ProcessEnv };
@@ -48,6 +51,10 @@ function realGit(rewrite: Record<string, string>) {
   const calls: Call[] = [];
   const git: GitRunner = async (args, o) => {
     calls.push({ args, cwd: o.cwd, env: o.env });
+    // Never reach the network: an un-rewritten remote URL fails the call.
+    if (args.some((a) => /^(https?|ssh):\/\//.test(a) && !(a in rewrite))) {
+      return { code: 99, stdout: "", stderr: `test: network URL not rewritten: ${args.join(" ")}` };
+    }
     return run(
       args.map((a) => rewrite[a] ?? a),
       o.cwd,
@@ -163,7 +170,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     rmSync(canary, { recursive: true });
     mkdirSync(canary);
 
-    const g = realGit({ [DEST]: remoteUrl });
+    const g = realGit({ [PUSH]: remoteUrl });
     // The operator env holds the token too (a CI job's GITHUB_TOKEN).
     const r = await pushHeadBranch({ ...opts(f), env: { ...f.env, GITHUB_TOKEN: TOKEN }, git: g.git });
     expect(r).toEqual({ pushed: true, attempted: true });
@@ -178,7 +185,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     // One push: explicit URL and refspec, hooks off, never forced, token never in argv.
     const [push, ...more] = g.pushes();
     expect(more).toEqual([]);
-    expect(push.args).toContain(DEST);
+    expect(push.args).toContain(PUSH);
     expect(push.args).toContain("--no-verify");
     expect(push.args.at(-1)).toBe("refs/heads/off-1-fix:refs/heads/off-1-fix");
     expect(push.args.join(" ")).not.toContain(TOKEN);
@@ -204,7 +211,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
   it("a push URL that differs from the PR's repo refuses the push", async () => {
     const f = make();
     expect(f.git(["config", "remote.origin.pushurl", `file://${f.decoy}`]).code).toBe(0);
-    const g = realGit({ [DEST]: `file://${f.remote}` });
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
     const r = await pushHeadBranch({ ...opts(f), git: g.git });
     expect(r).toMatchObject({ pushed: false, attempted: false });
     expect(r.reason).toContain("origin is not");
@@ -216,23 +223,23 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
   it("a second fetch URL for another repo refuses the push", async () => {
     const f = make();
     expect(f.git(["remote", "set-url", "--add", "origin", "https://github.com/evil/other.git"]).code).toBe(0);
-    const g = realGit({ [DEST]: `file://${f.remote}` });
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
     expect((await pushHeadBranch({ ...opts(f), git: g.git })).attempted).toBe(false);
     expect(g.pushes()).toEqual([]);
   });
 
   it("an scp-form origin of the same repo pushes over https with the token", async () => {
     const f = make({ origin: "git@github.com:owner/repo.git" });
-    const g = realGit({ [DEST]: `file://${f.remote}` });
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
     expect(await pushHeadBranch({ ...opts(f), git: g.git })).toEqual({ pushed: true, attempted: true });
-    expect(g.pushes()[0].args).toContain(DEST);
+    expect(g.pushes()[0].args).toContain(PUSH);
     expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${f.sha}`);
   });
 
   it("pushes from the checkout it is given, not process.cwd()", async () => {
     const f = make();
     expect(path.resolve(process.cwd())).not.toBe(path.resolve(f.work));
-    const g = realGit({ [DEST]: `file://${f.remote}` });
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
     expect((await pushHeadBranch({ ...opts(f), git: g.git })).pushed).toBe(true);
     expect(g.calls.filter((c) => c.args.includes("rev-parse")).every((c) => c.cwd === path.resolve(f.work))).toBe(true);
     expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${f.sha}`);
@@ -256,7 +263,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     expect(run([...id, "commit", "-q", "-m", "b"], shallow, f.env).code).toBe(0);
     const sha = run(["rev-parse", "HEAD"], shallow, f.env).stdout.trim();
 
-    const g = realGit({ [DEST]: `file://${f.remote}` });
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
     const r = await pushHeadBranch({ ...opts(f), head: "off-2-fix", cwd: shallow, git: g.git });
     expect(r).toEqual({ pushed: true, attempted: true });
     expect(run(["rev-parse", "refs/heads/off-2-fix"], f.remote, f.env).stdout.trim()).toBe(sha);
@@ -267,7 +274,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     const f = make();
     const wt = path.join(f.root, "wt");
     expect(f.git(["worktree", "add", "-q", "-b", "off-3-fix", wt, "off-1-fix"]).code).toBe(0);
-    const g = realGit({ [DEST]: `file://${f.remote}` });
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
     const r = await pushHeadBranch({ ...opts(f), head: "off-3-fix", cwd: wt, git: g.git });
     expect(r).toEqual({ pushed: true, attempted: true });
     expect(f.refs(f.remote)).toBe(`refs/heads/off-3-fix ${f.sha}`);
@@ -275,7 +282,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
 
   it("GITHUB_SERVER_URL sets the destination and scopes the header to a GHES host", async () => {
     const f = make({ origin: "https://ghe.example.com/owner/repo.git" });
-    const dest = "https://ghe.example.com/owner/repo.git";
+    const dest = "https://ghe.example.com/Owner/Repo.git";
     const g = realGit({ [dest]: `file://${f.remote}` });
     const env = { ...f.env, GITHUB_SERVER_URL: "https://ghe.example.com" };
     expect((await pushHeadBranch({ ...opts(f), env, git: g.git })).pushed).toBe(true);
@@ -297,7 +304,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     ["server is not https", {}, { env: { GITHUB_SERVER_URL: "http://github.com" } }],
   ])("skips without pushing: %s", async (_label, fx, over) => {
     const f = make(fx);
-    const g = realGit({ [DEST]: `file://${f.remote}` });
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
     const o = { ...opts(f), ...over } as Parameters<typeof pushHeadBranch>[0];
     if ("env" in over) o.env = { ...f.env, ...(over as { env: NodeJS.ProcessEnv }).env };
     const r = await pushHeadBranch({ ...o, git: g.git });
@@ -311,7 +318,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     const f = make();
     expect(f.git(["update-ref", "refs/remotes/origin/off-1-fix", f.sha]).code).toBe(0);
     expect(f.git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/off-1-fix"]).code).toBe(0);
-    const g = realGit({ [DEST]: `file://${f.remote}` });
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
     const r = await pushHeadBranch({ ...opts(f), git: g.git });
     expect(r).toMatchObject({ pushed: false, attempted: false });
     expect(g.pushes()).toEqual([]);
@@ -327,7 +334,7 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
 
   it("a failed push is reported with the token redacted", async () => {
     const f = make();
-    const g = realGit({ [DEST]: `file://${f.remote}` });
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
     const failing: GitRunner = async (args, o) =>
       args.includes("push")
         ? {
