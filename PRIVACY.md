@@ -9,6 +9,13 @@ SWEny is an open-source CLI and GitHub Action. It does not collect telemetry by 
 - No reading or exfiltrating your code
 - No forwarding of `GITHUB_TOKEN` to any third party
 
+## Local files
+
+`sweny workflow run` writes two kinds of files under `.sweny/runs/` in your working directory. Neither is ever sent anywhere.
+
+- A run history record (`<run-id>.json`): metadata only (statuses, durations, counts).
+- A run journal (`<run-id>/journal.ndjson`), so `sweny workflow resume` can continue a killed run: node results, eval verdicts, safe-output requests and receipts, and the run input. Secret-looking values and the values of secret environment variables are replaced with `[redacted]`; environment variables are never written. Each run directory is git-ignored. Turn it off with `--no-journal` or `journal: off` in `.sweny.yml`.
+
 ## What we DO do (only when you opt in)
 
 > **Not currently available.** The hosted reporting service is in active development and there is no way to mint a `SWENY_CLOUD_TOKEN` today. Without a token this code path returns immediately and no request is made. The behavior below is documented because the code ships in the CLI, not because the service is open.
