@@ -9,10 +9,13 @@
  *
  * Each case passes, or is skipped only where the adapter's declared
  * `capabilities` say the opinion is not native (the skip must match the
- * declaration). Twenty cases, one `it` each, so a report reads "20 passed".
+ * declaration). Twenty-one cases, one `it` each, so a report reads "21 passed".
  * Cases 16 to 18 (#365) prove the node policy reaches the agent, which safe
- * outputs depend on. Case 19 (#442) proves a staged run cannot push. Case 20
- * (#449) proves live usage reaches `onUsage` and that stopping on it stops the agent.
+ * outputs depend on. Case 19 (#442) proves a staged run cannot push through
+ * the env it hands the agent. Case 20 (#449) proves live usage reaches
+ * `onUsage` and that stopping on it stops the agent. Case 21 (security review
+ * 2026-09-30) proves skill credentials never reach the agent unless a node
+ * grants one with `agent_env`.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -119,6 +122,7 @@ export const CONTRACT_CASE_NAMES = [
   "18 policy read-only: policy.readOnly alone is enforced and the skill tool channel survives",
   "19 stage no push: under noPush a git push from the agent's env fails and write tokens are withheld; normal mode pushes",
   "20 live usage: onUsage gets cumulative usage while the node runs, and aborting on it stops the agent",
+  "21 credentials: skill credentials never reach a read, staged or default write node; agent_env grants one to that node only",
 ] as const;
 
 export interface ContractSuiteOptions {
@@ -749,6 +753,64 @@ export function runContractSuite(
         expect(r.status).toBe("failed");
         expect(fakes.captured().stopped).toBe(true);
         expect(fakes.leftovers()).toEqual([]);
+      },
+
+      // 21 (security review 2026-09-30, findings 1 and 3): skill tools run in
+      // sweny, so the agent process never holds a skill credential: not on a
+      // read node, not on a staged node (even with a grant), not on a write
+      // node that did not opt in, not in complete(). `agent_env` grants one
+      // name to exactly that node.
+      async () => {
+        vi.stubEnv("GITHUB_TOKEN", "canary-github-token");
+        vi.stubEnv("GH_TOKEN", "canary-gh-token");
+        vi.stubEnv("LINEAR_API_KEY", "canary-linear-key");
+        vi.stubEnv("SLACK_BOT_TOKEN", "canary-slack-token");
+        vi.stubEnv("CUSTOM_SKILL_SECRET", "canary-custom-secret");
+        const withhold = ["GITHUB_TOKEN", "LINEAR_API_KEY", "SLACK_BOT_TOKEN", "CUSTOM_SKILL_SECRET"];
+        const canaries = [
+          "canary-github-token",
+          "canary-gh-token",
+          "canary-linear-key",
+          "canary-slack-token",
+          "canary-custom-secret",
+        ];
+        const leaked = () => Object.values(fakes.captured().env).filter((v) => canaries.includes(v));
+        const { h } = await fresh();
+
+        const nodes: [string, Partial<HarnessRunRequest>][] = [
+          [
+            "read node",
+            { readOnly: true, policy: readOnlyPolicy, agentAccess: { envVars: [], domains: [], withhold } },
+          ],
+          [
+            "staged node with a grant",
+            { agentAccess: { envVars: ["GITHUB_TOKEN"], domains: [], withhold, noPush: true } },
+          ],
+          ["write node without opt-in", { agentAccess: { envVars: [], domains: [], withhold } }],
+          ["no access declared", {}],
+        ];
+        for (const [label, over] of nodes) {
+          fakes.script(DONE);
+          const before = fakes.captured().invocations;
+          await h.run(req(over));
+          expect(fakes.captured().invocations, `${label}: agent started`).toBe(before + 1);
+          expect(leaked(), label).toEqual([]);
+        }
+        fakes.script(DONE);
+        const beforeComplete = fakes.captured().invocations;
+        await h.complete({ prompt: "p" });
+        expect(fakes.captured().invocations, "complete(): agent started").toBe(beforeComplete + 1);
+        expect(leaked(), "complete()").toEqual([]);
+
+        // Opt-in: the granted name only, on that node only.
+        fakes.script(DONE);
+        await h.run(req({ agentAccess: { envVars: ["GITHUB_TOKEN"], domains: [], withhold } }));
+        const granted = fakes.captured().env;
+        expect(granted.GITHUB_TOKEN).toBe("canary-github-token");
+        expect(Object.values(granted).filter((v) => canaries.includes(v))).toEqual(["canary-github-token"]);
+        fakes.script(DONE);
+        await h.run(req({ agentAccess: { envVars: [], domains: [], withhold } }));
+        expect(leaked(), "the next node does not inherit the grant").toEqual([]);
       },
     ];
 

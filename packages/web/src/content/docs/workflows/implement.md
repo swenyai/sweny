@@ -181,7 +181,7 @@ sweny implement --dry-run ENG-123 # analyze without making changes
 sweny implement --stage ENG-123   # run, but preview the PR and comment instead of writing them
 ```
 
-Under `--stage` and `--dry-run` the branch cannot be pushed: sweny makes `git push` fail in every node and withholds write tokens (`GITHUB_TOKEN`, `GH_TOKEN`) from the agent, so `gh pr create` fails too. Commits still work, so the staged run shows the change. See [No push under --stage](/cli/commands/#no-push-under---stage-and---dry-run).
+Under `--stage` and `--dry-run` sweny blocks the push: `git push` fails in every node and write tokens (`GITHUB_TOKEN`, `GH_TOKEN`) are withheld from the agent, so `gh pr create` fails too. Commits still work, so the staged run shows the change. The block is environment variables and git hooks, so a deliberate agent can bypass it unless the run is sandboxed; in CI with the sandbox on and no push credential in the agent's reach, it cannot push, and under a strict harness policy an unsandboxed staged write node is refused. See [No push under --stage](/cli/commands/#no-push-under---stage-and---dry-run).
 
 **From GitHub Actions:**
 

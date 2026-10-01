@@ -47,7 +47,7 @@ import { buildRetryPreamble } from "./retry.js";
 import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
 import { validateWorkflow } from "./schema.js";
-import { resolveAgentAccess } from "./agent-env.js";
+import { grantedAgentEnv, resolveAgentAccess } from "./agent-env.js";
 import { fenceUntrusted } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
 import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
@@ -406,7 +406,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       }
     }
     const skillInstructions = resolveSkillInstructions(node.skills, skills);
-    const skillMcpServers = resolveSkillMcpServers(node.skills, skills);
+    const skillMcpServers = resolveSkillMcpServers(node.skills, skills, config);
 
     // Runtime guard: if this node declares skills but none resolved, the node
     // cannot do its job (e.g. "create a Linear issue" with no linear skill).
@@ -561,8 +561,12 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     let degradedLogged = false;
     // #442: a staged or dry run cannot push. The harness blocks git push and
     // withholds write tokens in this node's agent env (see withPushBlocked).
+    // Skill credentials stay in sweny: the agent gets only what the node grants
+    // with `agent_env`, never on a read-only node or in a staged run.
+    const granted = grantedAgentEnv(node.agent_env, { readOnly: readOnlyNode, staged: stageOutputs });
+    if (granted.dropped) logger.warn(`  ${granted.dropped}`, { node: currentId });
     const agentAccess = {
-      ...resolveAgentAccess(node.skills, skills),
+      ...resolveAgentAccess(node.skills, skills, granted.grant),
       ...(stageOutputs ? { noPush: true } : {}),
     };
     // #365: a node or workflow that declares `permissions` or `outputs` gets
@@ -1366,14 +1370,35 @@ function dryRunNotice(skippedWrites: string[]): string {
   );
 }
 
-/** Only this node's resolved skills contribute external servers. */
-function resolveSkillMcpServers(skillIds: string[], skills: Map<string, Skill>): Record<string, McpServerConfig> {
-  return Object.fromEntries(
-    skillIds.flatMap((id) => {
-      const mcp = skills.get(id)?.mcp;
-      return mcp ? [[id, { ...mcp, type: mcp.type ?? (mcp.command ? "stdio" : "http") }]] : [];
-    }),
-  );
+/**
+ * Only this node's resolved skills contribute external servers. A stdio
+ * server gets its skill's declared credentials in its own `env` (explicit
+ * server env wins): the agent env no longer carries them, so the server must
+ * not rely on inheriting them from the agent process.
+ */
+function resolveSkillMcpServers(
+  skillIds: string[],
+  skills: Map<string, Skill>,
+  config: Record<string, string> = {},
+): Record<string, McpServerConfig> {
+  const servers: Record<string, McpServerConfig> = {};
+  for (const id of skillIds) {
+    const skill = skills.get(id);
+    const mcp = skill?.mcp;
+    if (!skill || !mcp) continue;
+    const type = mcp.type ?? (mcp.command ? "stdio" : "http");
+    if (type !== "stdio") {
+      servers[id] = { ...mcp, type };
+      continue;
+    }
+    const declared: Record<string, string> = {};
+    for (const [key, field] of Object.entries(skill.config ?? {})) {
+      if (field.env && config[key] !== undefined) declared[field.env] = config[key];
+    }
+    const env = { ...declared, ...(mcp.env ?? {}) };
+    servers[id] = { ...mcp, type, ...(Object.keys(env).length > 0 ? { env } : {}) };
+  }
+  return servers;
 }
 
 function resolveTools(skillIds: string[], skills: Map<string, Skill>): Tool[] {

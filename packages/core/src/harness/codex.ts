@@ -34,6 +34,8 @@ import {
   CODEX_AUTH_VARS,
   CODEX_ENV_PREFIXES,
   checkSandboxSupport,
+  finishAgentEnv,
+  heldCredentials,
   parseList,
   reportWithheldEnv,
   resolveCodexAuthEnv,
@@ -41,6 +43,7 @@ import {
   resolveSandboxMode,
   scopeAgentEnv,
   withPushBlocked,
+  type AgentAccess,
   type SandboxMode,
 } from "../agent-env.js";
 import type {
@@ -469,22 +472,30 @@ export class CodexHarness implements AgentHarness {
     return this.preflightResult;
   }
 
-  /** Env for the Codex process: scoped like Claude Code's, with Codex's auth vars instead of Anthropic's. */
-  private buildEnv(extraVars: readonly string[] = []): Record<string, string> {
+  /**
+   * Env for the Codex process: scoped like Claude Code's, with Codex's auth
+   * vars instead of Anthropic's. Skill credentials are dropped either way
+   * ({@link finishAgentEnv}) unless the node granted them with `agent_env`.
+   */
+  private buildEnv(access?: Pick<AgentAccess, "envVars" | "withhold">): Record<string, string> {
     const full: Record<string, string> = Object.fromEntries(
       Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
     );
     const authed = resolveCodexAuthEnv(full);
-    if (!resolveEnvScope(process.env, this.envScope, this.logger)) return authed;
-    const { env, withheld } = scopeAgentEnv(authed, {
-      extraVars,
-      passthrough: this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH),
-      authVars: CODEX_AUTH_VARS,
-      prefixes: CODEX_ENV_PREFIXES,
-      logger: this.logger,
-    });
-    reportWithheldEnv(withheld, this.logger);
-    return env;
+    const passthrough = this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH);
+    let env = authed;
+    if (resolveEnvScope(process.env, this.envScope, this.logger)) {
+      const scoped = scopeAgentEnv(authed, {
+        extraVars: access?.envVars ?? [],
+        passthrough,
+        authVars: CODEX_AUTH_VARS,
+        prefixes: CODEX_ENV_PREFIXES,
+        logger: this.logger,
+      });
+      reportWithheldEnv(scoped.withheld, this.logger);
+      env = scoped.env;
+    }
+    return finishAgentEnv(env, { access, keep: CODEX_AUTH_VARS, passthrough, logger: this.logger }).env;
   }
 
   /** The node policy after `disallowed_tools` names are translated into Codex classes. */
@@ -837,7 +848,15 @@ export class CodexHarness implements AgentHarness {
   async run(req: HarnessRunRequest): Promise<HarnessRunResult> {
     const maxTurns = req.maxTurns ?? this.maxTurns;
     const mode: SandboxMode = req.policy?.sandbox ?? resolveSandboxMode(process.env, this.sandboxMode, this.logger);
-    const policy: NodePolicy = { ...this.compilePolicy(req, maxTurns), sandbox: mode };
+    const env = withPushBlocked(this.buildEnv(req.agentAccess), req.agentAccess?.noPush);
+    const compiled = this.compilePolicy(req, maxTurns);
+    const held = heldCredentials(env, req.agentAccess?.withhold);
+    const policy: NodePolicy = {
+      ...compiled,
+      sandbox: mode,
+      ...(held.length > 0 ? { agentCredentials: held } : {}),
+      ...(req.agentAccess?.noPush && !compiled.readOnly ? { stagedWrite: true } : {}),
+    };
     // Codex's network is one switch, not a host list, so any sandbox mode but
     // off needs the process wrapper for full containment.
     const needsWrapper = mode !== "off" && !(this.capabilities.sandbox.fs && this.capabilities.sandbox.network);
@@ -898,7 +917,6 @@ export class CodexHarness implements AgentHarness {
       }
     }
 
-    const env = withPushBlocked(this.buildEnv(req.agentAccess?.envVars), req.agentAccess?.noPush);
     if (wrapper && !env.CODEX_API_KEY && !env.CODEX_ACCESS_TOKEN && !this.loginWarned) {
       this.loginWarned = true;
       this.logger.warn(

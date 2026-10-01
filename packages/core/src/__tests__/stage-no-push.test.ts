@@ -231,7 +231,7 @@ describe("executor marks staged and dry-run nodes noPush (#442)", () => {
       { skills: createSkillMap([github]), claude, config: { GITHUB_TOKEN: "x" }, stageOutputs: true },
     );
     expect(noPushOf(runs)).toBe(true);
-    expect(runs[0].agentAccess?.envVars).toContain("GITHUB_TOKEN");
+    expect(runs[0].agentAccess?.withhold).toContain("GITHUB_TOKEN");
   });
 
   it("a dry run sets noPush", async () => {

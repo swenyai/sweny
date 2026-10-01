@@ -251,6 +251,7 @@ A conforming validator MUST enforce the following rules:
 | `UNKNOWN_SKILL`            | A node references a skill not in the registry.                                                                                                   |
 | `INVALID_INLINE_SKILL`     | An inline skill provides neither `instruction` nor `mcp`.                                                                                        |
 | `PERMISSION_CEILING`       | A node declares `permissions: write` under a workflow `read`.                                                                                    |
+| `AGENT_ENV_READ_ONLY`      | A node whose permissions resolve to `read` declares `agent_env`.                                                                                 |
 | `BUDGET_CEILING`           | A node's `budget` is above the workflow's `budget` for the same unit.                                                                            |
 | `OUTPUT_NOT_ALLOWED`       | A node declares an output type outside `safe_outputs.allow`.                                                                                     |
 | `DUPLICATE_OUTPUT`         | A node declares the same output type twice.                                                                                                      |

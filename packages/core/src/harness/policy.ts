@@ -67,6 +67,16 @@ export function policyGate(
   if (policy.readOnly && caps.readOnly === "none" && !wrappers.readOnlyMount) {
     unenforced.push("read-only: harness cannot enforce it and no read-only mount is active");
   }
+  // A read-only mount stops file writes, not API writes: an agent that holds a
+  // write credential and can reach the network can still change remote state
+  // without asking (security review 2026-09-30, finding 1).
+  const held = policy.agentCredentials ?? [];
+  if (policy.readOnly && caps.readOnly === "none" && held.length > 0) {
+    unenforced.push(
+      `read-only: the agent process holds write credentials (${held.join(", ")}) and network access; ` +
+        `a read-only filesystem mount does not stop API writes`,
+    );
+  }
 
   if (policy.deny.length > 0) {
     const native = nativeDenyClasses(caps);
@@ -105,6 +115,16 @@ export function policyGate(
   }
 
   const sandboxMode = policy.sandbox ?? "off";
+  // #442 + finding 3: a staged write node's push block is env and git hooks.
+  // Only fs and network containment stops a deliberate agent from undoing it.
+  if (policy.stagedWrite) {
+    const contained = sandboxMode !== "off" && ((caps.sandbox.fs && caps.sandbox.network) || wrappers.sandbox === true);
+    if (!contained) {
+      unenforced.push(
+        "no push (staged run): blocked by env and git hooks only; with no sandbox a deliberate agent can undo them and push",
+      );
+    }
+  }
   let sandboxGap: string | undefined;
   if (sandboxMode !== "off" && !(caps.sandbox.fs && caps.sandbox.network) && !wrappers.sandbox) {
     sandboxGap = "sandbox: harness has no native fs and network sandbox and no process sandbox wrapper is available";

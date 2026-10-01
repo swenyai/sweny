@@ -555,6 +555,32 @@ const fixtures: Fixture[] = [
     expected: true,
   },
   {
+    name: "node with agent_env",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: { ...baseNode(), agent_env: ["GITHUB_TOKEN"] },
+      },
+      edges: [],
+    },
+    expected: true,
+  },
+  {
+    name: "agent_env with a name that is not an env var",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: {
+        a: { ...baseNode(), agent_env: ["GITHUB TOKEN"] },
+      },
+      edges: [],
+    },
+    expected: false,
+  },
+  {
     name: "node with a skill-tool deny filter",
     input: {
       id: "d",

@@ -75,6 +75,22 @@ export interface NodePolicy {
    * Unset means `off`: no requirement.
    */
   sandbox?: "off" | "auto" | "strict";
+  /**
+   * Credential names the agent process holds (a node's `agent_env` grant, or
+   * a harness auth var that is also a write token, such as an ACP agent run
+   * on `GITHUB_TOKEN`). A read-only node on a harness with no native read-only
+   * mode cannot be held read-only by a filesystem mount alone while the agent
+   * holds one of these and can reach the network: reported, refused under
+   * `strict`. Set by adapters from the finished env.
+   */
+  agentCredentials?: string[];
+  /**
+   * A write node in a staged or dry run (#442). Its push block is env and git
+   * hooks the agent can undo, so without fs and network containment (native,
+   * or the process wrapper) it is reported, and refused under `strict`. Set by
+   * adapters, which know whether the run is sandboxed.
+   */
+  stagedWrite?: boolean;
 }
 
 /** Process-level wrappers the host provides (OS sandbox, egress proxy, read-only mount). */

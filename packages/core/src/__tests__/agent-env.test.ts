@@ -97,17 +97,22 @@ describe("buildAgentEnv", () => {
 });
 
 describe("resolveAgentAccess", () => {
-  it("returns a node's declared skill env vars and provider hosts", () => {
+  it("grants no skill env var, withholds every skill's, and keeps the node's provider hosts", () => {
     const skills = createSkillMap([github, linear]);
     const access = resolveAgentAccess(["github"], skills);
-    expect(access.envVars).toContain("GITHUB_TOKEN");
-    expect(access.envVars).not.toContain("LINEAR_API_KEY");
+    expect(access.envVars).toEqual([]);
+    expect(access.withhold).toEqual(expect.arrayContaining(["GITHUB_TOKEN", "LINEAR_API_KEY"]));
     expect(access.domains).toContain("api.github.com");
     expect(access.domains).not.toContain("api.linear.app");
   });
 
+  it("grants only what agent_env names", () => {
+    const access = resolveAgentAccess(["github"], createSkillMap([github]), ["GITHUB_TOKEN"]);
+    expect(access.envVars).toEqual(["GITHUB_TOKEN"]);
+  });
+
   it("ignores unknown skills", () => {
-    expect(resolveAgentAccess(["nope"], createSkillMap([]))).toEqual({ envVars: [], domains: [] });
+    expect(resolveAgentAccess(["nope"], createSkillMap([]))).toEqual({ envVars: [], domains: [], withhold: [] });
   });
 });
 
@@ -283,7 +288,7 @@ describe("ClaudeClient scoped env + sandbox wiring", () => {
   const supported = () => undefined;
   const logger = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() });
 
-  it("run: env excludes a random unlisted var; declared skill vars are present", async () => {
+  it("run: env excludes a random unlisted var; a granted (agent_env) skill var is present", async () => {
     const client = new ClaudeClient({ sandboxProbe: supported });
     await client.run({
       instruction: "x",
@@ -307,12 +312,31 @@ describe("ClaudeClient scoped env + sandbox wiring", () => {
     await new ClaudeClient({ sandboxProbe: supported }).run({ instruction: "x", context: {}, tools: [] });
     expect(opts().env.SWENY_RANDOM_UNLISTED_7f3a).toBe("leak-me");
 
+    // A skill credential never rides on passthrough: only a node's agent_env grants it.
     mockQuery.mockClear();
     vi.stubEnv("SWENY_ENV_PASSTHROUGH", "");
-    await new ClaudeClient({ envPassthrough: ["GITHUB_TOKEN"], sandboxProbe: supported }).run({
+    const log = logger();
+    await new ClaudeClient({ envPassthrough: ["GITHUB_TOKEN"], sandboxProbe: supported, logger: log }).run({
       instruction: "x",
       context: {},
       tools: [],
+    });
+    expect(opts().env.GITHUB_TOKEN).toBeUndefined();
+    expect(log.warn.mock.calls.some((c: unknown[]) => /agent_env/.test(String(c[0])))).toBe(true);
+  });
+
+  it("run: with scoping off a skill credential is still withheld unless granted", async () => {
+    vi.stubEnv("SWENY_ENV_SCOPE", "off");
+    await new ClaudeClient({ sandboxProbe: supported }).run({ instruction: "x", context: {}, tools: [] });
+    expect(opts().env.GITHUB_TOKEN).toBeUndefined();
+    expect(opts().env.SWENY_RANDOM_UNLISTED_7f3a).toBe("leak-me");
+
+    mockQuery.mockClear();
+    await new ClaudeClient({ sandboxProbe: supported }).run({
+      instruction: "x",
+      context: {},
+      tools: [],
+      agentAccess: { envVars: ["GITHUB_TOKEN"], domains: [] },
     });
     expect(opts().env.GITHUB_TOKEN).toBe("ghp_secret");
   });
