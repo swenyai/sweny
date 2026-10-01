@@ -80,6 +80,15 @@ describe("agent sandbox wrapper step", () => {
     expect(step.run).toContain("::error title=SWEny sandbox wrapper::");
   });
 
+  it("relaxes AppArmor only on GitHub-hosted runners or strict, with the same env", () => {
+    expect(step.env.RUNNER_ENVIRONMENT).toBe("${{ runner.environment }}");
+    expect(step.run).toContain(
+      '[ "${SWENY_SANDBOX:-}" = "strict" ] || [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]',
+    );
+    expect(step.run).toContain("::notice title=SWEny agent sandbox::");
+    expect(step.run).toContain("::warning title=SWEny agent sandbox::srt still cannot");
+  });
+
   it("setup-only skips the run and the PR comment", () => {
     expect(steps.find((s) => s.name === "Run workflow")!.if).toBe("inputs.setup-only != 'true'");
     expect(steps.find((s) => s.name === "Post PR comment")!.if).toContain("inputs.setup-only != 'true'");

@@ -195,7 +195,10 @@ jobs:
       # hosted runner would (default auto mode), then asserts bwrap works.
       - name: Run the Action's sandbox step, then probe bwrap
         run: |
-          yq '.runs.steps[] | select(.name == "Install agent sandbox dependencies") | .run' action.yml > "$RUNNER_TEMP/sandbox-step.sh"
+          # Dependency-free extraction: the step's `run: |` block (10-space body) up to the next step.
+          awk '/- name: Install agent sandbox dependencies/{f=1} f&&/^      run: \|/{r=1;next} r&&/^$/{print;next} r&&/^        /{sub(/^        /,"");print;next} r{exit}' action.yml > "$RUNNER_TEMP/sandbox-step.sh"
+          test -s "$RUNNER_TEMP/sandbox-step.sh"
+          grep -q apparmor_restrict_unprivileged_userns "$RUNNER_TEMP/sandbox-step.sh"
           RUNNER_ENVIRONMENT=github-hosted SWENY_SANDBOX=auto bash "$RUNNER_TEMP/sandbox-step.sh"
           echo "PROBE apparmor_restrict_unprivileged_userns=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo n/a)"
           if out=$(bwrap --ro-bind / / --dev /dev --proc /proc true 2>&1); then

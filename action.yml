@@ -259,6 +259,7 @@ runs:
       env:
         SRT_VERSION: "0.0.78"
         AGENT: ${{ inputs.agent }}
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       run: |
         if [ "${SWENY_SANDBOX:-}" = "off" ]; then
           echo "::notice title=SWEny sandbox wrapper::SWENY_SANDBOX=off; skipping srt install"
@@ -284,7 +285,15 @@ runs:
         probe() { srt --settings "$SETTINGS" -- true >/dev/null 2>&1; }
         if ! probe && [ "$RUNNER_OS" = "Linux" ]; then
           # Ubuntu 23.10+ restricts unprivileged user namespaces, which bubblewrap needs.
-          $SUDO sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+          # Same rule as the dependencies step: GitHub-hosted (ephemeral VM) or strict only.
+          if [ "${SWENY_SANDBOX:-}" = "strict" ] || [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
+            $SUDO sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+            if probe; then
+              echo "::notice title=SWEny agent sandbox::Relaxed kernel.apparmor_restrict_unprivileged_userns; agent commands will be sandboxed."
+            else
+              echo "::warning title=SWEny agent sandbox::srt still cannot wrap a command after relaxing kernel.apparmor_restrict_unprivileged_userns."
+            fi
+          fi
         fi
         if ! probe; then
           echo "::error title=SWEny sandbox wrapper::srt ${SRT_VERSION} is installed but cannot wrap a command on this runner (needs bubblewrap, socat, ripgrep and unprivileged user namespaces). Fix the runner, or set SWENY_SANDBOX=off and harness-policy: warn to run agent commands unsandboxed."
