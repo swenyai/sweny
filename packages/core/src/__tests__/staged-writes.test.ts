@@ -8,7 +8,7 @@
  * to it (never process.cwd()). No network, no LLM calls.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { execute, guardStagedWrite } from "../executor.js";
@@ -16,14 +16,24 @@ import { createSkillMap } from "../skills/index.js";
 import { github } from "../skills/github.js";
 import type { Claude, Skill, ToolContext, Workflow } from "../types.js";
 
-type Seen = { tools: string[]; result?: unknown; error?: string };
+type Seen = {
+  tools: string[];
+  mcpServers?: Record<string, unknown>;
+  agentAccess?: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+};
 
 /** An agent that calls `toolName` with `args` when the node offers it. */
 function agentCalling(toolName: string, args: unknown) {
   const seen: Seen[] = [];
   const claude: Claude = {
     async run(opts) {
-      const entry: Seen = { tools: opts.tools.map((t) => t.name) };
+      const entry: Seen = {
+        tools: opts.tools.map((t) => t.name),
+        mcpServers: opts.mcpServers,
+        agentAccess: opts.agentAccess as Record<string, unknown> | undefined,
+      };
       seen.push(entry);
       const t = opts.tools.find((x) => x.name === toolName);
       if (t) {
@@ -134,6 +144,74 @@ describe("tool handlers run against the run's checkout (#473)", () => {
       expect(typeof ctx?.pushBranch).toBe("function");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a staged run loads no MCP server that could write", () => {
+  const mcpSkill: Skill = {
+    id: "writer",
+    name: "Writer",
+    description: "a skill whose MCP server can write",
+    category: "general",
+    config: {},
+    tools: [],
+    mcp: { type: "stdio", command: "write-capable-mcp-server" },
+  };
+
+  it.each([
+    ["--stage", {}, { stageOutputs: true }, false],
+    ["safe_outputs.staged", {}, {}, true],
+    ["dry run", { dryRun: true }, {}, false],
+  ])("%s: a write node gets no skill MCP server and is marked noMcp", async (_l, input, over, staged) => {
+    const { claude, seen } = agentCalling("none", {});
+    await execute(wf(["writer"], staged), input, { skills: createSkillMap([mcpSkill]), claude, ...over });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].mcpServers ?? {}).toEqual({});
+    expect(seen[0].agentAccess?.noMcp).toBe(true);
+  });
+
+  it("control: a normal write node gets its skill's MCP server", async () => {
+    const { claude, seen } = agentCalling("none", {});
+    await execute(wf(["writer"]), {}, { skills: createSkillMap([mcpSkill]), claude });
+    expect(Object.keys(seen[0].mcpServers ?? {})).toEqual(["writer"]);
+    expect(seen[0].agentAccess?.noMcp).toBeUndefined();
+  });
+});
+
+describe("the run-start credential scan reads the run's checkout", () => {
+  it("scans ExecuteOptions.cwd, not process.cwd()", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "sweny-cred-cwd-"));
+    try {
+      const repo = path.join(root, "repo");
+      mkdirSync(path.join(repo, ".git"), { recursive: true });
+      writeFileSync(
+        path.join(repo, ".git", "config"),
+        '[http "https://github.com/"]\n\textraheader = AUTHORIZATION: basic Y2FuYXJ5\n',
+      );
+      const globalCfg = path.join(root, "gitconfig");
+      writeFileSync(globalCfg, "");
+      const env = { PATH: process.env.PATH ?? "", HOME: root, GIT_CONFIG_GLOBAL: globalCfg };
+      expect(path.resolve(process.cwd())).not.toBe(path.resolve(repo));
+
+      const warnings = (cwd?: string) => {
+        const lines: string[] = [];
+        const logger = { info() {}, debug() {}, error() {}, warn: (m: string) => void lines.push(m) };
+        return { lines, opts: { ...(cwd ? { cwd } : {}), env, logger } };
+      };
+      const inRepo = warnings(repo);
+      await execute(wf([]), {}, { skills: new Map(), claude: agentCalling("none", {}).claude, ...inRepo.opts });
+      const hit = inRepo.lines.filter((l) => l.includes("persisted git credential"));
+      expect(hit).toHaveLength(1);
+      expect(hit[0]).toContain(path.join(repo, ".git", "config"));
+      expect(hit[0]).not.toContain("Y2FuYXJ5");
+
+      // Without cwd the scan reads process.cwd(), which is not this repo.
+      const elsewhere = warnings();
+      await execute(wf([]), {}, { skills: new Map(), claude: agentCalling("none", {}).claude, ...elsewhere.opts });
+      expect(elsewhere.lines.join("\n")).not.toContain(repo);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

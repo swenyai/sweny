@@ -249,7 +249,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   // default). Each harness masks it for read-only and staged nodes, or reports
   // the node degraded; this says so once per run. Paths and keys, never values.
   try {
-    const credentialWarning = gitCredentialWarning(scanGitCredentials(process.cwd(), { env: runEnv }));
+    // The run's checkout (ExecuteOptions.cwd), not the embedding process's cwd.
+    const credentialWarning = gitCredentialWarning(scanGitCredentials(options.cwd ?? process.cwd(), { env: runEnv }));
     if (credentialWarning) logger.warn(credentialWarning);
   } catch {
     // A scan failure never stops a run; each node scans again before it starts.
@@ -606,7 +607,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     if (granted.dropped) logger.warn(`  ${granted.dropped}`, { node: currentId });
     const agentAccess = {
       ...resolveAgentAccess(node.skills, skills, granted.grant),
-      ...(stageOutputs ? { noPush: true } : {}),
+      // A staged run loads no skill or external MCP server either: it may write.
+      ...(stageOutputs ? { noPush: true, noMcp: true } : {}),
     };
     // #365: a node or workflow that declares `permissions` or `outputs` gets
     // one portable policy, compiled by each adapter. The gate also runs here so
@@ -716,7 +718,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
           timeoutMs,
           agentAccess,
           ...(nodePolicy ? { policy: nodePolicy } : {}),
-          ...(readOnlyNode ? {} : { mcpServers: skillMcpServers }),
+          ...(readOnlyNode || stageOutputs ? {} : { mcpServers: skillMcpServers }),
           ...(readOnlyNode ? { readOnly: true } : {}),
           ...(onUsage ? { onUsage } : {}),
           onProgress: (message) => {

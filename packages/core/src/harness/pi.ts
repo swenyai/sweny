@@ -48,6 +48,7 @@ import {
   resolveSandboxMode,
   scopeAgentEnv,
   withPushBlocked,
+  mcpWithheld,
   type AgentAccess,
   type PiProviderResolution,
   type SandboxMode,
@@ -936,7 +937,7 @@ export class PiHarness implements AgentHarness {
       // Dry run: external MCP servers cannot be classified per tool (and a
       // `--tools` allowlist cannot name tools it has not seen), so only sweny's
       // own (already read-filtered) skill tools remain.
-      const servers: Record<string, McpServerConfig> = readOnly
+      const servers: Record<string, McpServerConfig> = mcpWithheld(readOnly, req.agentAccess)
         ? {}
         : { ...this.defaultMcpServers, ...req.mcpServers, ...this.mcpServers };
       const { entries, unsupported } = piMcpServers(servers);
