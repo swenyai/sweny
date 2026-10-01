@@ -48,6 +48,7 @@ import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import { DEFAULT_SANDBOX_DOMAINS, parseList, resolveSandboxMode, type SandboxMode } from "../agent-env.js";
+import { JOURNAL_DIR, runKeyDir } from "../journal.js";
 import { policyGate } from "./policy.js";
 import type { HarnessCapabilities, NodePolicy, PolicyWrappers } from "./types.js";
 
@@ -185,10 +186,16 @@ export function buildSrtSettings(
   // Deny the parent, not a snapshot of sibling homes: later-created runs
   // must stay hidden too. srt allowRead carves out only our own HOME.
   if (opts.isolationRoot) denyRead.push(opts.isolationRoot);
+  // Run journal keys (outside the workspace) are never readable by the agent,
+  // and the journals themselves are not writable.
+  const keyDir = runKeyDir();
+  if (exists(keyDir)) denyRead.push(keyDir);
+  const journals = path.join(real(req.cwd), JOURNAL_DIR);
+  const denyWrite = !req.readOnly && exists(journals) ? [journals] : [];
   const allowWrite = req.readOnly ? [opts.home] : [real(req.cwd), opts.home];
   return {
     network: { allowedDomains, deniedDomains: [], strictAllowlist: true, allowLocalBinding: false },
-    filesystem: { denyRead, allowRead: opts.isolationRoot ? [opts.home] : [], allowWrite, denyWrite: [] },
+    filesystem: { denyRead, allowRead: opts.isolationRoot ? [opts.home] : [], allowWrite, denyWrite },
   };
 }
 

@@ -272,6 +272,7 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 | `--agent <id>` | Coding agent that runs the nodes: `claude`, `codex` or `pi` (experimental) | `claude` |
 | `--harness-policy <mode>` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and reports it as degraded. Env: `SWENY_HARNESS_POLICY` | `strict` under GitHub Actions, else `warn` |
 | `--no-journal` | Do not write the run journal (`.sweny/runs/<run-id>/journal.ndjson`). The run cannot be resumed. Or set `journal: off` in `.sweny.yml` | journal on |
+| `--show-output` | Print the final answer in CI too. In CI (`GITHUB_ACTIONS` or `CI` set) the answer is saved to `.sweny/runs/<run-id>/output.md` and only that path is printed, unless this flag is set. Outside CI the answer is always printed. Either way it is redacted first | off in CI |
 
 With a file, loads the definition, validates its schema, then executes it with the same DAG renderer and skill infrastructure as the built-in `triage` and `implement` commands. With no file, it lists every `.sweny/e2e/*.yml` workflow, asks you to confirm (skip with `--yes`), runs them sequentially with template variables (`{base_url}`, `{run_id}`, ...) resolved, and exits `0` if all pass, `1` if any fail. Provider settings from `.sweny.yml` and `.env` apply.
 
@@ -292,7 +293,7 @@ sweny workflow resume <run-id> --plan    # show what would replay and re-run, ru
 | `--workflow <file>` | Workflow file to load when it moved (its content must still match) | the path the run used |
 | `--input <json>` | The run's original input, required when the journal redacted secrets from it | the journaled input |
 
-`--timeout`, `--max-steps`, `--json`, `--stream`, `--verbose`, `--mermaid`, `--comment-file`, `--agent`, `--harness-policy` and `--no-history` work as on `workflow run`. A run id prefix is enough when it is unique.
+`--timeout`, `--max-steps`, `--json`, `--stream`, `--verbose`, `--mermaid`, `--comment-file`, `--agent`, `--harness-policy`, `--show-output` and `--no-history` work as on `workflow run`. A run id prefix is enough when it is unique.
 
 ### sweny workflow diagram
 

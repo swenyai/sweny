@@ -16,6 +16,8 @@
  *   the attempt's signal, which stops the agent (harness cancel).
  * - between nodes: usage on the finished result is checked; a crossing fails the
  *   node, and the run halts before the next node starts.
+ * - across a resume: the run journal records each attempt's spend (live and
+ *   final), and `sweny workflow resume` seeds the run total with it.
  */
 
 import type { NodeUsage } from "./types.js";
@@ -133,6 +135,16 @@ export class BudgetGuard {
 
   node(nodeLimits: SpendLimits): NodeBudget {
     return new NodeBudget(this, nodeLimits);
+  }
+
+  /**
+   * Spend the run made before this process (a resumed run's journaled usage).
+   * Counted against the run ceiling like any other spend, so a crash never
+   * resets the whole-run budget.
+   */
+  seed(s: Spend): void {
+    const ok = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
+    this.commit({ tokens: ok(s.tokens), costUsd: ok(s.costUsd) });
   }
 
   /** @internal */

@@ -51,7 +51,7 @@ nodes:
     budget: { tokens: 200000 }   # one visit to this node
 ```
 
-Tokens are input plus output as the agent reports them (cache tokens are not counted); cost is the agent's own reported USD, never estimated. `sweny workflow run --max-tokens` and `--max-cost` (Action inputs `max-tokens`, `max-cost`) tighten the run ceiling; the lowest value wins.
+Tokens are input plus output as the agent reports them (cache tokens are not counted); cost is the agent's own reported USD, never estimated. `sweny workflow run --max-tokens` and `--max-cost` (Action inputs `max-tokens`, `max-cost`) tighten the run ceiling; the lowest value wins. The ceiling covers the whole logical run: [`sweny workflow resume`](/cli/resume/) starts from the spend the journal recorded before the crash.
 
 When a node's spend crosses its budget, or the run's, sweny stops the agent, fails the node with a budget reason (`fail_soft` and `on_fail: continue` do not apply), and ends the run without starting another node. The receipt shows the overrun. A node is not started once the run's budget is already spent.
 

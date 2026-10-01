@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import {
   JOURNAL_FILE,
   JOURNAL_SCHEMA_VERSION,
@@ -24,9 +24,11 @@ import {
   collectSecretValues,
   journalDir,
   listJournalRuns,
+  loadRunKey,
   pruneJournals,
   readJournal,
   redact,
+  runKeyFile,
 } from "./journal.js";
 import { createWriteStageState } from "./safe-outputs.js";
 import type { JournalRecord } from "./journal.js";
@@ -69,7 +71,7 @@ function begin(j: RunJournal, input: unknown = {}, config: Record<string, string
 }
 
 describe("journal records", () => {
-  it("are versioned, sequenced, checksummed, one per line", () => {
+  it("are versioned, sequenced, authenticated with a key outside the workspace, one per line", () => {
     const cwd = tmp();
     const j = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "w.yml" });
     begin(j);
@@ -85,11 +87,13 @@ describe("journal records", () => {
       .split("\n")
       .map((l) => JSON.parse(l));
     expect(lines.map((l) => l.type)).toEqual(["run:start", "node:start", "node:end", "route", "run:end"]);
+    const key = loadRunKey(runKeyFile(cwd, RUN_ID));
+    expect(runKeyFile(cwd, RUN_ID).startsWith(cwd)).toBe(false);
     lines.forEach((l, i) => {
       expect(l.v).toBe(JOURNAL_SCHEMA_VERSION);
       expect(l.seq).toBe(i + 1);
       const { h, ...body } = l;
-      expect(h).toBe(createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 16));
+      expect(h).toBe(createHmac("sha256", key).update(JSON.stringify(body)).digest("hex"));
     });
     expect(lines[0]).toMatchObject({
       run_id: RUN_ID,
@@ -123,8 +127,19 @@ describe("journal records", () => {
     const cwd = tmp();
     const dir = journalDir(cwd, RUN_ID);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, JOURNAL_FILE), JSON.stringify({ v: 2, seq: 1, type: "run:start", h: "x" }) + "\n");
+    const v = JOURNAL_SCHEMA_VERSION + 1;
+    writeFileSync(join(dir, JOURNAL_FILE), JSON.stringify({ v, seq: 1, type: "run:start", h: "x" }) + "\n");
     expect(() => readJournal(join(dir, JOURNAL_FILE))).toThrow(JournalVersionError);
+  });
+
+  it("a v1 journal (public checksums) is refused, never repaired away", () => {
+    const cwd = tmp();
+    const dir = journalDir(cwd, RUN_ID);
+    mkdirSync(dir, { recursive: true });
+    const text = JSON.stringify({ v: 1, seq: 1, type: "run:start", h: "x" }) + "\n";
+    writeFileSync(join(dir, JOURNAL_FILE), text);
+    expect(() => readJournal(join(dir, JOURNAL_FILE), { repair: true })).toThrow(/predates authenticated records/);
+    expect(readFileSync(join(dir, JOURNAL_FILE), "utf-8")).toBe(text);
   });
 });
 
