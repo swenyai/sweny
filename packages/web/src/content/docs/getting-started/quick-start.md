@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: Install SWEny and choose how to run it: Claude Code plugin, CLI, GitHub Action, or Studio.
+description: "Install SWEny and choose how to run it: Claude Code plugin, CLI, GitHub Action, or Studio."
 ---
 
 SWEny is one tool with multiple surfaces. Install it once, then pick the way that fits your workflow.
