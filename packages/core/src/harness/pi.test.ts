@@ -301,19 +301,101 @@ describe("PiHarness strict sandbox", () => {
     expect(fs.existsSync(cap.env.PI_CODING_AGENT_DIR)).toBe(false);
   });
 
-  it("the model's API host is allowed through the wrapper", async () => {
+  it("the model's API host is allowed through the wrapper, and no other provider's", async () => {
     vi.stubEnv("OPENAI_API_KEY", "k");
     const rec = createRecordingWrapper();
     const { h } = harness({ sandbox: "auto", sandboxWrapper: rec, model: "openrouter/m" });
     fakes.script(DONE);
     await h.run({ instruction: "x", context: {}, tools: [] });
-    expect(rec.requests[0].egress).toEqual(expect.arrayContaining(["api.openai.com", "openrouter.ai"]));
+    expect(rec.requests[0].egress).toContain("openrouter.ai");
+    // The OpenAI key does not reach an OpenRouter run, so neither does its host.
+    expect(rec.requests[0].egress).not.toContain("api.openai.com");
   });
 
   it("piBackendHosts reads the provider keys and the model prefix", () => {
     expect(piBackendHosts({ ANTHROPIC_API_KEY: "k" })).toEqual(["api.anthropic.com"]);
     expect(piBackendHosts({}, "groq/llama")).toEqual(["api.groq.com"]);
     expect(piBackendHosts({}, "sonnet:high")).toEqual([]);
+  });
+});
+
+// Security review 2026-09-30, finding 2: pi's bash tool inherits pi's env, so
+// pi gets the selected provider's credential and no other provider's.
+describe("PiHarness provider credentials", () => {
+  const stubKeys = () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "canary-anthropic");
+    vi.stubEnv("OPENAI_API_KEY", "canary-openai");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "canary-aws");
+    vi.stubEnv("GITHUB_TOKEN", "canary-github");
+  };
+
+  for (const envScope of [true, false]) {
+    it(`a provider/model run gets only that provider's key (env scope ${envScope ? "on" : "off"})`, async () => {
+      stubKeys();
+      const { h } = harness({ envScope, model: "openai/gpt-5" });
+      fakes.script(DONE);
+      expect((await h.run({ instruction: "x", context: {}, tools: [] })).status).toBe("success");
+      const env = fakes.raw().at(-1)!.env;
+      expect(env.OPENAI_API_KEY).toBe("canary-openai");
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+      expect(env.GITHUB_TOKEN).toBeUndefined();
+      expect(fakes.raw().at(-1)!.args).not.toContain("--provider");
+    });
+  }
+
+  it("pi_provider passes --provider and only that provider's key, in run() and complete()", async () => {
+    stubKeys();
+    const { h } = harness({ provider: "anthropic", model: "claude-sonnet-4-5" });
+    fakes.script(DONE);
+    await h.run({ instruction: "x", context: {}, tools: [] });
+    let cap = fakes.raw().at(-1)!;
+    expect(cap.args).toEqual(expect.arrayContaining(["--provider", "anthropic", "--model", "claude-sonnet-4-5"]));
+    expect(cap.env.ANTHROPIC_API_KEY).toBe("canary-anthropic");
+    expect(cap.env.OPENAI_API_KEY).toBeUndefined();
+    expect(cap.env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+
+    fakes.script([{ kind: "final", text: "a" }]);
+    expect(await h.complete({ prompt: "p" })).toBe("a");
+    cap = fakes.raw().at(-1)!;
+    expect(cap.env.ANTHROPIC_API_KEY).toBe("canary-anthropic");
+    expect(cap.env.OPENAI_API_KEY).toBeUndefined();
+  });
+
+  it("SWENY_PI_PROVIDER works like the option", async () => {
+    stubKeys();
+    vi.stubEnv("SWENY_PI_PROVIDER", "openai");
+    const { h } = harness();
+    fakes.script(DONE);
+    await h.run({ instruction: "x", context: {}, tools: [] });
+    const cap = fakes.raw().at(-1)!;
+    expect(cap.env.OPENAI_API_KEY).toBe("canary-openai");
+    expect(cap.env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("several providers' keys and no named provider: the node fails before pi starts and asks for pi_provider", async () => {
+    stubKeys();
+    const { h } = harness({ model: "sonnet:high" });
+    fakes.script(DONE);
+    const r = await h.run({ instruction: "x", context: {}, tools: [] });
+    expect(r.status).toBe("failed");
+    expect(String(r.data.error)).toMatch(/SWENY_PI_PROVIDER/);
+    expect(fakes.raw()).toHaveLength(0);
+    fakes.script([{ kind: "final", text: "a" }]);
+    expect(await h.complete({ prompt: "p" })).toBeNull();
+    expect(fakes.raw()).toHaveLength(0);
+  });
+
+  it("one provider key set: that key only, no --provider", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "canary-anthropic");
+    vi.stubEnv("GITHUB_TOKEN", "canary-github");
+    const { h } = harness({ model: "sonnet:high" });
+    fakes.script(DONE);
+    await h.run({ instruction: "x", context: {}, tools: [] });
+    const cap = fakes.raw().at(-1)!;
+    expect(cap.env.ANTHROPIC_API_KEY).toBe("canary-anthropic");
+    expect(cap.env.GITHUB_TOKEN).toBeUndefined();
+    expect(cap.args).not.toContain("--provider");
   });
 });
 

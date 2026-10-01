@@ -31,6 +31,7 @@ import {
   WORKFLOW_TYPES,
 } from "./types.js";
 import { sourceZ } from "./sources.js";
+import { resolveNodePermissions } from "./node-policy.js";
 import { workflowInputsZ, WORKFLOW_INPUT_TYPES } from "./inputs.js";
 export { sourceZ };
 export { workflowInputsZ };
@@ -357,6 +358,9 @@ export const safeOutputsPolicyZ = z
   })
   .strict();
 
+/** An environment variable name (`agent_env` entries). */
+export const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 export const nodeZ = z
   .object({
     name: z.string().min(1),
@@ -366,6 +370,7 @@ export const nodeZ = z
     max_turns: z.number().int().min(1).optional(),
     budget: budgetZ.optional(),
     disallowed_tools: z.array(z.string().min(1)).optional(),
+    agent_env: z.array(z.string().regex(ENV_VAR_NAME_PATTERN)).min(1).optional(),
     tools: nodeToolsZ.optional(),
     fail_soft: z.boolean().optional(),
     on_fail: z.enum(NODE_ON_FAIL).optional(),
@@ -491,6 +496,7 @@ export interface WorkflowError {
     | "EDGE_ITERATIONS_EXCEEDED"
     | "RETRY_MAX_EXCEEDED"
     | "PERMISSION_CEILING"
+    | "AGENT_ENV_READ_ONLY"
     | "BUDGET_CEILING"
     | "OUTPUT_NOT_ALLOWED"
     | "DUPLICATE_OUTPUT"
@@ -725,6 +731,18 @@ export function validateWorkflow(
       errors.push({
         code: "PERMISSION_CEILING",
         message: `Node "${nodeId}" asks for permissions write, above the workflow's permissions read`,
+        nodeId,
+      });
+    }
+    // A read-only node's agent never holds a credential: a filesystem mount
+    // does not stop an API write (security review 2026-09-30).
+    if ((node.agent_env?.length ?? 0) > 0 && resolveNodePermissions(node, workflow).access === "read") {
+      errors.push({
+        code: "AGENT_ENV_READ_ONLY",
+        message:
+          `Node "${nodeId}" grants agent_env [${node.agent_env!.join(", ")}] but its permissions are read. ` +
+          `A read-only node's agent never holds a credential; its skill tools already have them. ` +
+          `Remove agent_env, or make the node permissions: write.`,
         nodeId,
       });
     }
@@ -1281,6 +1299,13 @@ export const workflowJsonSchema = {
             items: { type: "string", minLength: 1 },
             description:
               "Built-in tool names the agent cannot use at this node, in the harness's own names (Claude Code: ['Bash']). Passed through to the harness: Claude Code removes them from the model context; Codex maps known names to tool classes and reports what it cannot deny as degraded. For portable workflows prefer tool classes in tools.deny.",
+          },
+          agent_env: {
+            type: "array",
+            items: { type: "string", pattern: ENV_VAR_NAME_PATTERN.source },
+            minItems: 1,
+            description:
+              "Secrets this node's agent process gets in its env. Skill tools run in sweny, so by default the agent never holds a skill credential (GITHUB_TOKEN, LINEAR_API_KEY, ...). Name one here only when the agent's own shell needs it: the agent can use it outside sweny's opinions (any API call, any push). Not allowed on a permissions: read node; withheld in a staged or dry run.",
           },
           tools: {
             type: "object",

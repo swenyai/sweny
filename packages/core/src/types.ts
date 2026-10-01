@@ -367,6 +367,15 @@ export interface Node {
    */
   disallowed_tools?: string[];
   /**
+   * Secrets this node's agent process receives in its env. Skill tools run
+   * in the sweny process, so by default the agent never holds a skill
+   * credential (`GITHUB_TOKEN`, `LINEAR_API_KEY`, ...) on any harness. Name a
+   * variable here only when the agent's own shell needs it: the agent can use
+   * it outside sweny's opinions (any API call, any push). Refused on a
+   * `permissions: read` node; withheld in a staged or dry run.
+   */
+  agent_env?: string[];
+  /**
    * Per-node filter over skill-provided tools. Complements
    * `disallowed_tools` (which covers built-in agent tools only): this field
    * restricts which of the node's skill tools are registered for the run.
@@ -835,11 +844,13 @@ export interface Claude {
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
     /**
-     * What this node's agent may see (#360): env var names declared by the
-     * node's skills (added to the scoped subprocess env) and the provider
-     * hosts its sandboxed commands may reach. Absent = allowlist only.
+     * What this node's agent may see (#360): `envVars` are the names the node
+     * granted with `agent_env` (the only skill credentials that reach the
+     * agent), `withhold` the run's skill credential names (never passed
+     * otherwise), and `domains` the provider hosts its sandboxed commands may
+     * reach. Absent = allowlist only, known credentials withheld.
      */
-    agentAccess?: { envVars: string[]; domains: string[] };
+    agentAccess?: { envVars: string[]; domains: string[]; withhold?: string[] };
     /**
      * Dry-run: the node must not change anything. `tools` is already filtered
      * to reads; implementations MUST NOT add any other write-capable tool

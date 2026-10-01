@@ -45,7 +45,7 @@ import { buildRetryPreamble } from "./retry.js";
 import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
 import { validateWorkflow } from "./schema.js";
-import { resolveAgentAccess } from "./agent-env.js";
+import { grantedAgentEnv, resolveAgentAccess } from "./agent-env.js";
 import { fenceUntrusted } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
 import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
@@ -499,8 +499,12 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     let degradedLogged = false;
     // #442: a staged or dry run cannot push. The harness blocks git push and
     // withholds write tokens in this node's agent env (see withPushBlocked).
+    // Skill credentials stay in sweny: the agent gets only what the node grants
+    // with `agent_env`, never on a read-only node or in a staged run.
+    const granted = grantedAgentEnv(node.agent_env, { readOnly: readOnlyNode, staged: stageOutputs });
+    if (granted.dropped) logger.warn(`  ${granted.dropped}`, { node: currentId });
     const agentAccess = {
-      ...resolveAgentAccess(node.skills, skills),
+      ...resolveAgentAccess(node.skills, skills, granted.grant),
       ...(stageOutputs ? { noPush: true } : {}),
     };
     // #365: a node or workflow that declares `permissions` or `outputs` gets

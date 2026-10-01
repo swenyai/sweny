@@ -46,6 +46,8 @@ const AGENT_FILE_KEYS: ReadonlyArray<readonly [string[], string]> = [
   [["env-scope", "env_scope"], "SWENY_ENV_SCOPE"],
   [["sandbox"], "SWENY_SANDBOX"],
   [["sandbox-allowed-domains", "sandbox_allowed_domains"], "SWENY_SANDBOX_ALLOWED_DOMAINS"],
+  // The one model provider whose credential a pi run gets (agent-env.ts resolvePiProvider).
+  [["pi-provider", "pi_provider"], "SWENY_PI_PROVIDER"],
 ];
 
 /**

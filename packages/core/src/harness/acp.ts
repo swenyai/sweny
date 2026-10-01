@@ -51,12 +51,15 @@ import * as path from "node:path";
 import type { JSONSchema, Logger, McpServerConfig, NodeResult, NodeUsage, ToolCall, ToolContext } from "../types.js";
 import { consoleLogger } from "../types.js";
 import {
+  finishAgentEnv,
+  heldCredentials,
   parseList,
   reportWithheldEnv,
   resolveEnvScope,
   resolveSandboxMode,
   scopeAgentEnv,
   withPushBlocked,
+  type AgentAccess,
   type SandboxMode,
 } from "../agent-env.js";
 import type {
@@ -417,21 +420,30 @@ export class AcpHarness implements AgentHarness {
     return { ok: true, version: this.agentVersion };
   }
 
-  /** Env for the agent process: scoped like Claude Code's, with only the auth vars the operator named. */
-  private buildEnv(extraVars: readonly string[] = []): Record<string, string> {
+  /**
+   * Env for the agent process: scoped like Claude Code's, with only the auth
+   * vars the operator named. Skill credentials are dropped either way
+   * ({@link finishAgentEnv}) unless the node granted them with `agent_env`; an
+   * operator-named auth var stays, and the gate counts it if it is a write token.
+   */
+  private buildEnv(access?: Pick<AgentAccess, "envVars" | "withhold">): Record<string, string> {
     const full: Record<string, string> = Object.fromEntries(
       Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
     );
-    if (!resolveEnvScope(process.env, this.envScope, this.logger)) return full;
-    const { env, withheld } = scopeAgentEnv(full, {
-      extraVars,
-      passthrough: this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH),
-      authVars: this.authVars,
-      prefixes: ["LC_"],
-      logger: this.logger,
-    });
-    reportWithheldEnv(withheld, this.logger);
-    return env;
+    const passthrough = this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH);
+    let env = full;
+    if (resolveEnvScope(process.env, this.envScope, this.logger)) {
+      const scoped = scopeAgentEnv(full, {
+        extraVars: access?.envVars ?? [],
+        passthrough,
+        authVars: this.authVars,
+        prefixes: ["LC_"],
+        logger: this.logger,
+      });
+      reportWithheldEnv(scoped.withheld, this.logger);
+      env = scoped.env;
+    }
+    return finishAgentEnv(env, { access, keep: this.authVars, passthrough, logger: this.logger }).env;
   }
 
   /** The node policy, with the harness policy mode and the watchdog budget applied. */
@@ -848,7 +860,15 @@ export class AcpHarness implements AgentHarness {
   async run(req: HarnessRunRequest): Promise<HarnessRunResult> {
     const maxTurns = req.maxTurns ?? this.maxTurns;
     const mode: SandboxMode = req.policy?.sandbox ?? resolveSandboxMode(process.env, this.sandboxMode, this.logger);
-    const policy: NodePolicy = { ...this.compilePolicy(req, maxTurns), sandbox: mode };
+    const env = withPushBlocked(this.buildEnv(req.agentAccess), req.agentAccess?.noPush);
+    const compiled = this.compilePolicy(req, maxTurns);
+    const held = heldCredentials(env, req.agentAccess?.withhold);
+    const policy: NodePolicy = {
+      ...compiled,
+      sandbox: mode,
+      ...(held.length > 0 ? { agentCredentials: held } : {}),
+      ...(req.agentAccess?.noPush && !compiled.readOnly ? { stagedWrite: true } : {}),
+    };
     // ACP has no sandbox of its own: any mode but off needs the process wrapper.
     const wrapper =
       mode !== "off" && this.sandboxWrapper !== null
@@ -884,7 +904,6 @@ export class AcpHarness implements AgentHarness {
     // Permission answers: the node's deny list, plus legacy `disallowed_tools` names that map to a class.
     const deny = new Set<ToolClass>([...policy.deny, ...translateDenyNames(policy.nativeDeny).classes]);
 
-    const env = withPushBlocked(this.buildEnv(req.agentAccess?.envVars), req.agentAccess?.noPush);
     let bridge: ToolBridge | undefined;
     try {
       // Dry run: external MCP servers cannot be classified per tool, so only
@@ -1061,6 +1080,8 @@ export class AcpHarness implements AgentHarness {
 
     // A judge call is a dry run with nothing allowed: same gate, same wrapper.
     const mode: SandboxMode = resolveSandboxMode(process.env, this.sandboxMode, this.logger);
+    const env = this.buildEnv();
+    const held = heldCredentials(env);
     const policy: NodePolicy = {
       readOnly: true,
       // Nothing to deny at the gate: there is no MCP server and every permission request is rejected below.
@@ -1068,6 +1089,7 @@ export class AcpHarness implements AgentHarness {
       egress: [],
       strict: this.policyMode === "strict",
       sandbox: mode,
+      ...(held.length > 0 ? { agentCredentials: held } : {}),
     };
     const wrapper =
       mode !== "off" && this.sandboxWrapper !== null
@@ -1076,7 +1098,7 @@ export class AcpHarness implements AgentHarness {
     const prep = await prepareAgentSpawn({
       caps: this.capabilities,
       policy,
-      spawn: { command: this.agent.command, args: this.agent.args, env: this.buildEnv(), cwd: this.cwd },
+      spawn: { command: this.agent.command, args: this.agent.args, env, cwd: this.cwd },
       wrapper: wrapper ?? null,
       harnessEgress: this.egress,
       env: process.env,

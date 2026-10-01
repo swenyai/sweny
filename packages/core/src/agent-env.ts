@@ -4,12 +4,16 @@
  * Threat: the Claude Code subprocess runs model-chosen shell commands over
  * attacker-influenceable input (issue bodies, alerts, fetched pages). Before
  * this module it inherited the full `process.env` (every CI secret) and ran
- * Bash with unrestricted network egress. Two controls live here:
+ * Bash with unrestricted network egress. Three controls live here:
  *
  *  1. {@link scopeAgentEnv}: the subprocess env is an allowlist, not a copy.
  *     On by default in CI, off locally (full env, as before); see
  *     {@link resolveEnvScope}.
- *  2. {@link resolveAgentSandbox}: the SDK `sandbox` option is enabled with a
+ *  2. {@link withholdCredentials}: skill credentials (`GITHUB_TOKEN`,
+ *     `LINEAR_API_KEY`, ...) never reach the agent on any harness, scoped or
+ *     not, unless the node grants one with `agent_env`. Skill tools run in the
+ *     sweny process, so the agent does not need them.
+ *  3. {@link resolveAgentSandbox}: the SDK `sandbox` option is enabled with a
  *     network allowlist and the agent's own credentials denied to sandboxed
  *     commands. `auto` (default in CI) falls back to unsandboxed with one loud
  *     warning when the host cannot sandbox; `strict` fails closed.
@@ -232,6 +236,137 @@ export const PI_AUTH_VARS: readonly string[] = [
 /** Prefixes for a pi run: locale only. `ANTHROPIC_*` / `CLAUDE_*` beyond the names above never reach pi. */
 export const PI_ENV_PREFIXES: readonly string[] = ["LC_"];
 
+/**
+ * pi provider id to the {@link PI_AUTH_VARS} that carry its credential and
+ * settings (pi docs/providers.md, `envMap` in packages/ai/src/env-api-keys.ts).
+ * A provider not listed here maps by convention to `<ID>_API_KEY` when that
+ * name is in {@link PI_AUTH_VARS} (`meta` to `META_API_KEY`).
+ */
+export const PI_PROVIDER_VARS: Readonly<Record<string, readonly string[]>> = {
+  anthropic: ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
+  openai: ["OPENAI_API_KEY"],
+  "azure-openai-responses": ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_BASE_URL", "AZURE_OPENAI_RESOURCE_NAME"],
+  google: ["GEMINI_API_KEY"],
+  "google-vertex": ["GOOGLE_CLOUD_API_KEY", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"],
+  "amazon-bedrock": [
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+  ],
+  "cloudflare-ai-gateway": ["CLOUDFLARE_API_KEY", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_GATEWAY_ID"],
+  "cloudflare-workers-ai": ["CLOUDFLARE_API_KEY", "CLOUDFLARE_ACCOUNT_ID"],
+  "github-copilot": ["COPILOT_GITHUB_TOKEN"],
+  "vercel-ai-gateway": ["AI_GATEWAY_API_KEY"],
+  "ant-ling": ["ANT_LING_API_KEY"],
+  "zai-coding-cn": ["ZAI_CODING_CN_API_KEY"],
+  "opencode-go": ["OPENCODE_API_KEY"],
+  huggingface: ["HF_TOKEN"],
+  "kimi-coding": ["KIMI_API_KEY"],
+  "minimax-cn": ["MINIMAX_CN_API_KEY"],
+  "qwen-token-plan": ["QWEN_TOKEN_PLAN_API_KEY"],
+  "qwen-token-plan-individual": ["QWEN_TOKEN_PLAN_API_KEY"],
+  "qwen-token-plan-cn": ["QWEN_TOKEN_PLAN_CN_API_KEY"],
+  "xiaomi-token-plan-cn": ["XIAOMI_TOKEN_PLAN_CN_API_KEY"],
+  "xiaomi-token-plan-ams": ["XIAOMI_TOKEN_PLAN_AMS_API_KEY"],
+  "xiaomi-token-plan-sgp": ["XIAOMI_TOKEN_PLAN_SGP_API_KEY"],
+};
+
+/** pi settings that are not secrets: their presence alone never selects a provider. */
+const PI_NON_SECRET_VARS: ReadonlySet<string> = new Set([
+  "AZURE_OPENAI_BASE_URL",
+  "AZURE_OPENAI_RESOURCE_NAME",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_GATEWAY_ID",
+  "GOOGLE_CLOUD_PROJECT",
+  "GCLOUD_PROJECT",
+  "GOOGLE_CLOUD_LOCATION",
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION",
+]);
+
+/** The {@link PI_AUTH_VARS} names for one pi provider id (empty for a custom `models.json` provider). */
+export function piProviderVars(provider: string): string[] {
+  const id = provider.trim().toLowerCase();
+  const known = PI_PROVIDER_VARS[id];
+  if (known) return [...known];
+  const conventional = `${id.replace(/[^a-z0-9]+/g, "_").toUpperCase()}_API_KEY`;
+  return PI_AUTH_VARS.includes(conventional) ? [conventional] : [];
+}
+
+/** True when `id` is a pi provider sweny knows a credential for. */
+function isKnownPiProvider(id: string): boolean {
+  return piProviderVars(id).length > 0;
+}
+
+export interface PiProviderResolution {
+  /** The provider, when named (explicitly or by the model) or the only one with a credential set. */
+  provider?: string;
+  /** Whether `provider` came from `pi_provider` (so pi gets `--provider`). */
+  explicit: boolean;
+  /** The only {@link PI_AUTH_VARS} names that reach pi. */
+  vars: string[];
+  /** Set when the provider cannot be told apart; the node must not run. */
+  error?: string;
+}
+
+/**
+ * Which provider's credential a pi run gets (security review 2026-09-30,
+ * finding 2). pi's bash tool inherits pi's env, so pi receives one provider's
+ * credential, never every key in the environment.
+ *
+ * In order: `explicit` (`pi_provider`, `SWENY_PI_PROVIDER`); the `provider/`
+ * prefix of the model when it names a provider sweny knows; else the one
+ * provider whose secret is set. Several set and none named is an error that
+ * asks for `pi_provider`. None set: nothing is passed (a custom provider in
+ * `models.json` reads its own variables through env-passthrough).
+ */
+export function resolvePiProvider(
+  env: Record<string, string | undefined>,
+  model?: string,
+  explicit?: string,
+): PiProviderResolution {
+  const named = (explicit ?? env.SWENY_PI_PROVIDER ?? "").trim().toLowerCase();
+  const prefix = model && model.includes("/") ? model.split("/")[0].trim().toLowerCase() : "";
+  const fromModel = prefix && isKnownPiProvider(prefix) ? prefix : "";
+  if (named) {
+    if (fromModel && fromModel !== named) {
+      return {
+        explicit: true,
+        vars: [],
+        error: `pi_provider "${named}" does not match the model "${model}" (provider "${fromModel}"); set one of them`,
+      };
+    }
+    return { provider: named, explicit: true, vars: piProviderVars(named) };
+  }
+  if (fromModel) return { provider: fromModel, explicit: false, vars: piProviderVars(fromModel) };
+
+  const set = PI_AUTH_VARS.filter((v) => !PI_NON_SECRET_VARS.has(v) && !!env[v]);
+  if (set.length === 0) return { explicit: false, vars: [] };
+  const groups = [
+    ...Object.entries(PI_PROVIDER_VARS).map(([id, vars]) => ({ id, vars: [...vars] })),
+    ...PI_AUTH_VARS.filter((v) => !Object.values(PI_PROVIDER_VARS).some((vs) => vs.includes(v))).map((v) => ({
+      id: v.replace(/_API_KEY$|_TOKEN$/, "").toLowerCase(),
+      vars: [v],
+    })),
+  ];
+  const covering = groups.filter((g) => set.every((v) => g.vars.includes(v)));
+  if (covering.length > 0) {
+    // Several ids can share one key (opencode, opencode-go): the vars are what matter.
+    const vars = [...new Set(covering.flatMap((g) => g.vars))];
+    return { provider: covering.length === 1 ? covering[0].id : undefined, explicit: false, vars };
+  }
+  return {
+    explicit: false,
+    vars: [],
+    error:
+      `pi: credentials for several providers are set (${set.join(", ")}) and the model does not name one. ` +
+      `Set SWENY_PI_PROVIDER (pi_provider) or a provider/model, so only that provider's credential reaches pi.`,
+  };
+}
+
 /** A stored Codex login (`codex login`): `auth.json` under `CODEX_HOME`, default `~/.codex`. */
 export function hasCodexLogin(
   env: Record<string, string | undefined> = process.env,
@@ -404,6 +539,7 @@ let withheldReported = false;
 /** Test seam: forget that the withheld notice was already emitted. */
 export function resetWithheldReport(): void {
   withheldReported = false;
+  passthroughCredentialWarned = false;
 }
 
 /**
@@ -422,7 +558,10 @@ export function reportWithheldEnv(
 ): void {
   if (withheld.length === 0 || withheldReported) return;
   withheldReported = true;
-  const { baseline, other } = classifyWithheld(withheld);
+  const { baseline, other: rest } = classifyWithheld(withheld);
+  // Skill credentials are withheld by design and env-passthrough cannot add
+  // them back, so they are not "fix it with passthrough" material.
+  const other = rest.filter((n) => !isAgentCredential(n));
   logger.info(formatScopeSummary(withheld.length, baseline.length));
   if (other.length > 0) {
     const prefix = env.GITHUB_ACTIONS === "true" ? "::warning title=SWEny agent env::" : "";
@@ -577,7 +716,9 @@ export function noPushGitConfig(dir: string): Array<[string, string]> {
 /**
  * The agent env with pushes blocked (#442). Applied to every node's agent
  * env when a run is staged or a dry run, on every harness, whether or not env
- * scoping is on. Withholds {@link PUSH_TOKEN_VARS}, appends
+ * scoping is on. Withholds {@link PUSH_TOKEN_VARS} (the ssh agent socket and
+ * askpass programs among them) and every {@link isAgentCredential} name, even
+ * one a node granted with `agent_env`, appends
  * {@link noPushGitConfig} after any `GIT_CONFIG_*` entries already present,
  * sets `GIT_ASKPASS` to a refusing program, turns off git's terminal prompt,
  * routes git's ssh through a wrapper that refuses `git-receive-pack` (so an
@@ -585,18 +726,22 @@ export function noPushGitConfig(dir: string): Array<[string, string]> {
  * `--no-verify`; ssh fetches still run the operator's own ssh command), and
  * gives `gh` an empty config dir so a stored `gh auth login` is not used.
  *
- * Not a sandbox: a process that rewrites its own env or git config and
- * finds a credential on disk (an ssh key without a passphrase, a keychain
- * entry) is outside what env can stop. The sandbox wrapper hides credential
- * files such as `~/.ssh`. `enabled` false returns `env` unchanged. Pure apart from
- * creating {@link noPushDir} once.
+ * Not a sandbox: these are env vars and a git hook, and the agent can unset
+ * them. A deliberate agent on an unsandboxed run that finds a credential on
+ * disk (an ssh key without a passphrase, a keychain entry, a token persisted
+ * in `.git/config` by a checkout) can still push. Run sandboxed (the sandbox
+ * hides credential files such as `~/.ssh`) and without push credentials in CI
+ * for a guarantee; under a strict harness policy an unsandboxed staged write
+ * node is refused (`stagedWrite` in policy.ts). `enabled` false returns `env`
+ * unchanged. Pure apart from creating {@link noPushDir} once.
  */
 export function withPushBlocked(env: Record<string, string>, enabled: boolean | undefined): Record<string, string> {
   if (!enabled) return env;
   const dir = noPushDir();
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) {
-    if (PUSH_TOKEN_VARS.includes(k)) continue;
+    // Every skill credential too, even one a node granted with `agent_env`.
+    if (PUSH_TOKEN_VARS.includes(k) || isAgentCredential(k)) continue;
     out[k] = v;
   }
   const base = Number.parseInt(out.GIT_CONFIG_COUNT ?? "0", 10);
@@ -618,15 +763,181 @@ export function withPushBlocked(env: Record<string, string>, enabled: boolean | 
   return out;
 }
 
+// ─── Skill credentials stay in the sweny process ─────────────────
+
+/**
+ * Credentials the agent process never receives by default, on any harness,
+ * whether env scoping is on or off and even under `env-passthrough: "*"`.
+ *
+ * Skill tools run in the sweny process (in-process, or through the tool
+ * bridge), so the agent never needs them. An agent that holds one can use it
+ * outside every sweny opinion: a read-only node could still POST to GitHub
+ * with `GITHUB_TOKEN` and network access (security review 2026-09-30,
+ * finding 1). The list is the source-hosting write tokens plus every config
+ * variable of the built-in skills (`skills/*.ts`, checked by a unit test). A
+ * run also withholds its custom skills' config names
+ * ({@link AgentAccess.withhold}). A node grants one back with `agent_env`.
+ */
+export const AGENT_CREDENTIAL_VARS: readonly string[] = [
+  // source hosting: gh, the GitHub/GitLab REST APIs and git's HTTPS auth read these
+  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN",
+  "GITHUB_PAT",
+  "GITLAB_TOKEN",
+  "GL_TOKEN",
+  "CI_JOB_TOKEN",
+  "BITBUCKET_TOKEN",
+  // built-in skills (config fields of skills/*.ts)
+  "LINEAR_API_KEY",
+  "SENTRY_AUTH_TOKEN",
+  "SENTRY_ORG",
+  "SENTRY_BASE_URL",
+  "DD_API_KEY",
+  "DD_APP_KEY",
+  "DD_SITE",
+  "BETTERSTACK_API_TOKEN",
+  "BETTERSTACK_QUERY_ENDPOINT",
+  "BETTERSTACK_QUERY_USERNAME",
+  "BETTERSTACK_QUERY_PASSWORD",
+  "NOTIFICATION_WEBHOOK_URL",
+  "NOTIFICATION_WEBHOOK_ALLOWED_HOSTS",
+  "DISCORD_WEBHOOK_URL",
+  "TEAMS_WEBHOOK_URL",
+  "SMTP_URL",
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_ALLOWED_TABLES",
+  "SUPABASE_ALLOWED_FUNCTIONS",
+];
+
+/** Credential families withheld by prefix (`SLACK_BOT_TOKEN`, `SLACK_WEBHOOK_URL`, ...). */
+export const AGENT_CREDENTIAL_PREFIXES: readonly string[] = ["SLACK_"];
+
+/** Is `name` a credential the agent never gets by default ({@link AGENT_CREDENTIAL_VARS}, plus `extra`)? */
+export function isAgentCredential(name: string, extra: readonly string[] = []): boolean {
+  return (
+    AGENT_CREDENTIAL_VARS.includes(name) ||
+    AGENT_CREDENTIAL_PREFIXES.some((p) => name.startsWith(p)) ||
+    extra.includes(name)
+  );
+}
+
+export interface WithholdCredentialsOpts {
+  /** Names the node granted with `agent_env`. They pass even when they are credentials. */
+  grant?: readonly string[];
+  /** The run's own skill credential names (custom skills included). */
+  withhold?: readonly string[];
+  /** The harness's own auth vars. Never dropped: the agent cannot start without them. */
+  keep?: readonly string[];
+}
+
+/**
+ * Drop every skill credential from an agent env, after scoping (on or off).
+ * Only `grant` and `keep` survive. Returns the env, the names dropped, and
+ * `held`: the credential names still in the env (granted or kept), which the
+ * policy gate weighs against a read-only node. Pure: values never leave `env`.
+ */
+export function withholdCredentials(
+  env: Record<string, string>,
+  opts: WithholdCredentialsOpts = {},
+): { env: Record<string, string>; withheld: string[]; held: string[] } {
+  const grant = opts.grant ?? [];
+  const keep = opts.keep ?? [];
+  const extra = opts.withhold ?? [];
+  const out: Record<string, string> = {};
+  const withheld: string[] = [];
+  const held: string[] = [];
+  for (const [k, v] of Object.entries(env)) {
+    if (!isAgentCredential(k, extra)) {
+      out[k] = v;
+    } else if (grant.includes(k) || keep.includes(k)) {
+      out[k] = v;
+      held.push(k);
+    } else {
+      withheld.push(k);
+    }
+  }
+  return { env: out, withheld: withheld.sort(), held: held.sort() };
+}
+
+/** The credential names present in a finished agent env (granted, or a harness's own auth var). */
+export function heldCredentials(env: Record<string, string>, extra: readonly string[] = []): string[] {
+  return Object.keys(env)
+    .filter((k) => isAgentCredential(k, extra))
+    .sort();
+}
+
+let passthroughCredentialWarned = false;
+
+/**
+ * The last step of every harness's agent env: {@link withholdCredentials}
+ * with the node's grants and the harness's own auth vars, plus one warning
+ * per process when `env-passthrough` names a credential (passthrough never
+ * carries one; `agent_env` on the node that needs it does). Withheld names go
+ * to `debug`, never values.
+ */
+export function finishAgentEnv(
+  env: Record<string, string>,
+  opts: {
+    access?: Pick<AgentAccess, "envVars" | "withhold">;
+    keep?: readonly string[];
+    passthrough?: readonly string[];
+    logger?: Pick<Logger, "warn" | "debug">;
+  } = {},
+): { env: Record<string, string>; held: string[] } {
+  const grant = opts.access?.envVars ?? [];
+  const keep = opts.keep ?? [];
+  const result = withholdCredentials(env, { grant, withhold: opts.access?.withhold, keep });
+  const asked = (opts.passthrough ?? []).filter(
+    (n) => isAgentCredential(n, opts.access?.withhold) && !grant.includes(n) && !keep.includes(n),
+  );
+  if (asked.length > 0 && !passthroughCredentialWarned) {
+    passthroughCredentialWarned = true;
+    opts.logger?.warn(
+      `[sweny] env-passthrough names skill credentials (${asked.sort().join(", ")}); they never reach the agent. ` +
+        `Skill tools run in sweny and already have them. If a node's own shell needs one, add it to that node's agent_env.`,
+    );
+  }
+  if (result.withheld.length > 0) {
+    opts.logger?.debug(`sweny: skill credentials withheld from the agent: ${result.withheld.join(", ")}`);
+  }
+  return { env: result.env, held: result.held };
+}
+
+/**
+ * The names a node's `agent_env` may actually grant. A read-only node and a
+ * staged or dry run get none: the first is refused at load time (validate),
+ * this is the runtime backstop, and the second must not push or write.
+ */
+export function grantedAgentEnv(
+  agentEnv: readonly string[] | undefined,
+  opts: { readOnly: boolean; staged: boolean },
+): { grant: string[]; dropped?: string } {
+  const names = [...new Set(agentEnv ?? [])];
+  if (names.length === 0) return { grant: [] };
+  if (opts.readOnly) return { grant: [], dropped: `agent_env withheld on a read-only node: ${names.join(", ")}` };
+  if (opts.staged) return { grant: [], dropped: `agent_env withheld in a staged or dry run: ${names.join(", ")}` };
+  return { grant: names };
+}
+
 // ─── Per-node access (env vars + network) ────────────────────────
 
 /** What one node's agent call may see: env var names and network hosts. */
 export interface AgentAccess {
+  /**
+   * Names the node granted with `agent_env`: added to a scoped env, and the
+   * only credentials ({@link isAgentCredential}) that reach the agent.
+   */
   envVars: string[];
   domains: string[];
+  /** The run's skill config names (every configured skill), never passed unless granted. */
+  withhold?: string[];
   /**
    * The run is staged or a dry run (#442): the harness applies
-   * {@link withPushBlocked} to the agent env, so no push can leave the node.
+   * {@link withPushBlocked} to the agent env. That blocks git push by env and
+   * hooks; only a sandbox stops a deliberate agent from undoing it.
    */
   noPush?: boolean;
 }
@@ -663,21 +974,29 @@ export const SKILL_SANDBOX_DOMAINS: Readonly<Record<string, readonly string[]>> 
 };
 
 /**
- * Resolve a node's access from its `skills:` list: every env var named by a
- * referenced skill's config fields, plus that skill's provider hosts.
- * Unknown skill ids contribute nothing (the executor validates them).
+ * Resolve a node's access: the referenced skills' provider hosts, the names
+ * the node granted with `agent_env` (`grant`, see {@link grantedAgentEnv}),
+ * and every config variable of every skill in the run (`withhold`), which the
+ * harness keeps out of the agent env unless granted. Skill tools run in the
+ * sweny process, so the agent never needs a skill's own credential. Unknown
+ * skill ids contribute nothing (the executor validates them).
  */
-export function resolveAgentAccess(skillIds: readonly string[], skills: Map<string, Skill>): AgentAccess {
-  const envVars = new Set<string>();
+export function resolveAgentAccess(
+  skillIds: readonly string[],
+  skills: Map<string, Skill>,
+  grant: readonly string[] = [],
+): AgentAccess {
+  const withhold = new Set<string>();
   const domains = new Set<string>();
-  for (const id of skillIds) {
-    const skill = skills.get(id);
-    for (const field of Object.values(skill?.config ?? {})) {
-      if (field.env) envVars.add(field.env);
+  for (const skill of skills.values()) {
+    for (const field of Object.values(skill.config ?? {})) {
+      if (field.env) withhold.add(field.env);
     }
+  }
+  for (const id of skillIds) {
     for (const d of SKILL_SANDBOX_DOMAINS[id] ?? []) domains.add(d);
   }
-  return { envVars: [...envVars], domains: [...domains] };
+  return { envVars: [...grant], domains: [...domains], withhold: [...withhold].sort() };
 }
 
 // ─── SDK sandbox ─────────────────────────────────────────────────

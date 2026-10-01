@@ -39,12 +39,17 @@ import { consoleLogger } from "../types.js";
 import {
   PI_AUTH_VARS,
   PI_ENV_PREFIXES,
+  finishAgentEnv,
+  heldCredentials,
   parseList,
   reportWithheldEnv,
   resolveEnvScope,
+  resolvePiProvider,
   resolveSandboxMode,
   scopeAgentEnv,
   withPushBlocked,
+  type AgentAccess,
+  type PiProviderResolution,
   type SandboxMode,
 } from "../agent-env.js";
 import type {
@@ -174,6 +179,13 @@ export function piBackendHosts(env: Record<string, string | undefined> = process
 export interface PiHarnessOptions {
   /** Model passed to `--model`. Free text (`provider/id`, `id:thinking`); sweny has no model opinion. */
   model?: string;
+  /**
+   * The model provider (`pi_provider`, passed as `--provider`). Only this
+   * provider's credential reaches pi. Default: `SWENY_PI_PROVIDER`, else the
+   * model's `provider/` prefix, else the one provider whose key is set.
+   * Required when several providers' keys are set and the model names none.
+   */
+  provider?: string;
   /** Tool-call budget the watchdog enforces when a node sets no `max_turns` (default: 20). */
   maxTurns?: number;
   /** Working directory (default: process.cwd()). */
@@ -436,6 +448,7 @@ export class PiHarness implements AgentHarness {
   readonly defaultJudgeModel = "";
   readonly logger: Logger;
   private model: string | undefined;
+  private provider: string | undefined;
   private maxTurns: number;
   private cwd: string;
   private defaultContext: ToolContext;
@@ -458,6 +471,7 @@ export class PiHarness implements AgentHarness {
 
   constructor(opts: PiHarnessOptions = {}) {
     this.model = opts.model;
+    this.provider = opts.provider;
     this.maxTurns = opts.maxTurns ?? 20;
     this.cwd = opts.cwd ?? process.cwd();
     this.logger = opts.logger ?? consoleLogger;
@@ -514,25 +528,44 @@ export class PiHarness implements AgentHarness {
     return this.preflightResult;
   }
 
-  /** Env for the pi process: scoped like Claude Code's, with pi's provider credentials instead of Anthropic's. */
-  private buildEnv(extraVars: readonly string[] = []): Record<string, string> {
+  /** Which provider's credential this call gets ({@link resolvePiProvider}). */
+  private resolveProvider(model: string | undefined): PiProviderResolution {
+    return resolvePiProvider(process.env, model, this.provider);
+  }
+
+  /**
+   * Env for the pi process: scoped like Claude Code's, with ONE provider's
+   * credentials instead of Anthropic's (`providerVars`, from
+   * {@link resolvePiProvider}). Every other provider key is dropped, scoped or
+   * not, since pi's bash tool inherits this env. Skill credentials are dropped
+   * too ({@link finishAgentEnv}) unless the node granted them with `agent_env`.
+   */
+  private buildEnv(
+    access: Pick<AgentAccess, "envVars" | "withhold"> | undefined,
+    providerVars: readonly string[],
+  ): Record<string, string> {
     const full: Record<string, string> = Object.fromEntries(
       Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
     );
+    const passthrough = this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH);
     let env = full;
     if (resolveEnvScope(process.env, this.envScope, this.logger)) {
       const scoped = scopeAgentEnv(full, {
-        extraVars,
-        passthrough: this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH),
-        authVars: PI_AUTH_VARS,
+        extraVars: access?.envVars ?? [],
+        passthrough,
+        authVars: providerVars,
         prefixes: PI_ENV_PREFIXES,
         logger: this.logger,
       });
       reportWithheldEnv(scoped.withheld, this.logger);
       env = scoped.env;
     }
+    // Other providers' keys never reach pi, even when scoping is off, passed through or granted.
+    const otherProviders = PI_AUTH_VARS.filter((v) => !providerVars.includes(v));
+    env = Object.fromEntries(Object.entries(env).filter(([k]) => !otherProviders.includes(k)));
+    const finished = finishAgentEnv(env, { access, keep: providerVars, passthrough, logger: this.logger }).env;
     // pi must not phone home or look for updates; the agent dir is set per spawn.
-    return { ...env, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0" };
+    return { ...finished, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0" };
   }
 
   /** The node policy after `disallowed_tools` names are translated into pi classes. */
@@ -560,7 +593,7 @@ export class PiHarness implements AgentHarness {
   }
 
   /** argv shared by run() and complete(); the prompt travels as an RPC command, never in argv. */
-  private baseArgs(model: string | undefined, withMcp: boolean): string[] {
+  private baseArgs(model: string | undefined, withMcp: boolean, provider?: string): string[] {
     const args = [
       ...this.piCommand.args,
       "--mode",
@@ -578,6 +611,7 @@ export class PiHarness implements AgentHarness {
       SYSTEM_PROMPT,
     ];
     if (withMcp) args.push("-e", "builtin:mcp");
+    if (provider) args.push("--provider", provider);
     if (model) args.push("--model", model);
     return args;
   }
@@ -845,7 +879,16 @@ export class PiHarness implements AgentHarness {
     const maxTurns = req.maxTurns ?? this.maxTurns;
     const mode: SandboxMode = req.policy?.sandbox ?? resolveSandboxMode(process.env, this.sandboxMode, this.logger);
     const compiled = this.compilePolicy(req, maxTurns);
-    const policy: NodePolicy = { ...compiled.policy, sandbox: mode };
+    const model = req.model ?? this.model;
+    const provider = this.resolveProvider(model);
+    const env = withPushBlocked(this.buildEnv(req.agentAccess, provider.vars), req.agentAccess?.noPush);
+    const held = heldCredentials(env, req.agentAccess?.withhold);
+    const policy: NodePolicy = {
+      ...compiled.policy,
+      sandbox: mode,
+      ...(held.length > 0 ? { agentCredentials: held } : {}),
+      ...(req.agentAccess?.noPush && !compiled.policy.readOnly ? { stagedWrite: true } : {}),
+    };
     const needsWrapper = mode !== "off";
     const wrapper =
       needsWrapper && this.sandboxWrapper !== null
@@ -867,6 +910,10 @@ export class PiHarness implements AgentHarness {
     };
 
     if (gate.refuse) return refused(gate.refuse);
+    if (provider.error) {
+      this.logger.error(provider.error);
+      return tag({ status: "failed", data: { error: provider.error }, toolCalls: [] });
+    }
 
     const pre = await this.preflight();
     if (!pre.ok) {
@@ -878,8 +925,6 @@ export class PiHarness implements AgentHarness {
     const deny = new Set<ToolClass>(policy.deny);
     if (readOnly) for (const c of ["shell", "write", "edit"] as ToolClass[]) deny.add(c);
 
-    const env = withPushBlocked(this.buildEnv(req.agentAccess?.envVars), req.agentAccess?.noPush);
-    const model = req.model ?? this.model;
     let bridge: ToolBridge | undefined;
     let agentDir: string | undefined;
     let prepCleanup: (() => Promise<void>) | undefined;
@@ -942,8 +987,12 @@ export class PiHarness implements AgentHarness {
         toolArgs.push("--exclude-tools", [...excluded].join(","));
       }
 
-      const args = [...this.baseArgs(model, Object.keys(entries).length > 0), ...toolArgs];
-      const backendHosts = piBackendHosts(process.env, model);
+      const args = [
+        ...this.baseArgs(model, Object.keys(entries).length > 0, provider.explicit ? provider.provider : undefined),
+        ...toolArgs,
+      ];
+      // Only the selected provider's host: its key is the only one pi holds.
+      const backendHosts = piBackendHosts(env, model);
       // The bridge's loopback endpoint (wrapped runs only): the one extra host the shim needs.
       const harnessEgress = [...backendHosts, ...(bridge?.egress ?? [])];
       if (mode !== "off" && backendHosts.length === 0 && !this.egressWarned) {
@@ -1064,16 +1113,20 @@ export class PiHarness implements AgentHarness {
     const pre = await this.preflight();
     if (!pre.ok) return failClosed(pre.reason);
 
+    // An empty model (the judge default) means pi's own default model.
+    const model = req.model || this.model;
+    const provider = this.resolveProvider(model);
+    if (provider.error) return failClosed(provider.error);
+
     let agentDir: string | undefined;
     try {
       agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-pi-"));
       this.writeAgentDir(agentDir);
-      const env = { ...this.buildEnv(), PI_CODING_AGENT_DIR: agentDir };
+      const env = { ...this.buildEnv(undefined, provider.vars), PI_CODING_AGENT_DIR: agentDir };
       const out = await this.exec({
         spawn: {
           command: this.piCommand.command,
-          // An empty model (the judge default) means pi's own default model.
-          args: [...this.baseArgs(req.model || this.model, false), "--no-tools"],
+          args: [...this.baseArgs(model, false, provider.explicit ? provider.provider : undefined), "--no-tools"],
           env,
           cwd: this.cwd,
         },

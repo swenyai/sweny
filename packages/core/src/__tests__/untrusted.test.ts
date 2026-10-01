@@ -156,7 +156,7 @@ describe("executor fences fetched/background context and passes node access", ()
     expect(instr.trim().endsWith("Base instruction.")).toBe(true);
   });
 
-  it("passes the node's declared skill env vars and hosts as agentAccess", async () => {
+  it("withholds the node's skill env vars from the agent and passes its hosts as agentAccess", async () => {
     const { claude, runs } = recordingClaude();
     await execute(
       workflow([], ["github"]),
@@ -167,7 +167,8 @@ describe("executor fences fetched/background context and passes node access", ()
         config: { GITHUB_TOKEN: "x" },
       },
     );
-    expect(runs[0].agentAccess?.envVars).toContain("GITHUB_TOKEN");
+    expect(runs[0].agentAccess?.envVars).toEqual([]);
+    expect(runs[0].agentAccess?.withhold).toContain("GITHUB_TOKEN");
     expect(runs[0].agentAccess?.domains).toContain("api.github.com");
   });
 });

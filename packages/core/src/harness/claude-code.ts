@@ -24,6 +24,8 @@ import type {
 } from "../types.js";
 import { consoleLogger } from "../types.js";
 import {
+  AGENT_AUTH_VARS,
+  finishAgentEnv,
   reportWithheldEnv,
   parseList,
   resolveEnvScope,
@@ -43,7 +45,7 @@ import type {
   NodePolicy,
   ToolClass,
 } from "./types.js";
-import { policyGate } from "./policy.js";
+import { policyGate, type HarnessPolicyMode } from "./policy.js";
 import { CLAUDE_CODE_CAPABILITIES } from "./capabilities.js";
 import { ask as coreAsk, evaluate as coreEvaluate, buildEvaluatePrompt, buildNodePrompt } from "./prompts.js";
 import { jsonSchemaToZodShape, toolErrorToMcpResult, toolOutputToMcpResult } from "./tool-bridge/protocol.js";
@@ -254,6 +256,14 @@ export interface ClaudeCodeHarnessOptions {
   toolBridge?: boolean;
   /** Shim command override for the bridge (test seam). Default: this package's `sweny tool-bridge`. */
   toolBridgeShim?: { command: string; args: string[] };
+  /**
+   * Harness policy mode. Claude Code honors every node opinion natively, so
+   * this only decides one case: a staged or dry-run write node whose agent
+   * runs unsandboxed is refused under `strict` (its push block is env and git
+   * hooks, which a deliberate agent can undo) and reported under `warn`.
+   * Default: `warn`; the CLI passes `resolveHarnessPolicy()` (strict under GitHub Actions).
+   */
+  policy?: HarnessPolicyMode;
 }
 
 /**
@@ -329,6 +339,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
   private toolBridge: boolean;
   private toolBridgeShim: { command: string; args: string[] } | undefined;
   private authProbe: AuthProbe;
+  private policyMode: HarnessPolicyMode;
 
   constructor(opts: ClaudeCodeHarnessOptions = {}) {
     this.model = opts.model;
@@ -346,6 +357,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     this.toolBridge = opts.toolBridge ?? process.env.SWENY_TOOL_BRIDGE === "1";
     this.toolBridgeShim = opts.toolBridgeShim;
     this.authProbe = opts.authProbe ?? (() => claudeCodeAuth(process.env));
+    this.policyMode = opts.policy ?? "warn";
   }
 
   /**
@@ -356,20 +368,22 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
    * `extraVars` (the node's declared skill env vars) and the operator
    * passthrough list, and the withheld names (never values) are reported once
    * per process ({@link reportWithheldEnv}). When off, the full env passes through as before.
+   * Either way, skill credentials are then dropped ({@link finishAgentEnv}):
+   * only the names the node granted with `agent_env` reach the agent.
    */
-  private buildEnv(extraVars: readonly string[] = []): Record<string, string> {
+  private buildEnv(access?: Pick<AgentAccess, "envVars" | "withhold">): Record<string, string> {
     const full: Record<string, string> = Object.fromEntries(
       Object.entries(process.env).filter((e): e is [string, string] => e[1] != null),
     );
     const authed = resolveAuthEnv(full, { logger: this.logger });
-    if (!resolveEnvScope(process.env, this.envScope, this.logger)) return authed;
-    const { env, withheld } = scopeAgentEnv(authed, {
-      extraVars,
-      passthrough: this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH),
-      logger: this.logger,
-    });
-    reportWithheldEnv(withheld, this.logger);
-    return env;
+    const passthrough = this.envPassthrough ?? parseList(process.env.SWENY_ENV_PASSTHROUGH);
+    let env = authed;
+    if (resolveEnvScope(process.env, this.envScope, this.logger)) {
+      const scoped = scopeAgentEnv(authed, { extraVars: access?.envVars ?? [], passthrough, logger: this.logger });
+      reportWithheldEnv(scoped.withheld, this.logger);
+      env = scoped.env;
+    }
+    return finishAgentEnv(env, { access, keep: AGENT_AUTH_VARS, passthrough, logger: this.logger }).env;
   }
 
   /** Which harness (and SDK version) produced a result. */
@@ -418,15 +432,24 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     }
     const readOnly = !!req.readOnly || policy.readOnly;
     const disallowedTools = compileClaudeCodeDeny(policy, req.disallowedTools ?? []);
+    const degraded = [...gate.degraded];
     const result = await this.runQuery({
       ...req,
       readOnly,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
       strictMcp: readOnly || policy.strict || policy.exclusiveMcp === true,
       sandboxMode: policy.sandbox,
-      agentAccess: { envVars: req.agentAccess?.envVars ?? [], domains: policy.egress, noPush: req.agentAccess?.noPush },
+      agentAccess: {
+        envVars: req.agentAccess?.envVars ?? [],
+        domains: policy.egress,
+        withhold: req.agentAccess?.withhold,
+        noPush: req.agentAccess?.noPush,
+      },
+      stagedWrite: !!req.agentAccess?.noPush && !readOnly,
+      strict: policy.strict || this.policyMode === "strict",
+      degraded,
     });
-    return { ...result, harness: this.info(), degraded: gate.degraded };
+    return { ...result, harness: this.info(), degraded };
   }
 
   private async runQuery(opts: {
@@ -454,6 +477,12 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     sandboxMode?: SandboxMode;
     /** Live token usage (#449), reported as assistant messages arrive. */
     onUsage?: (usage: NodeUsage) => void;
+    /** A write node in a staged or dry run (#442): its push block needs the sandbox to hold. */
+    stagedWrite?: boolean;
+    /** Refuse instead of degrade (node `permissions.strict`, or the harness policy). */
+    strict?: boolean;
+    /** Collects what this run cannot honor, for `HarnessRunResult.degraded`. */
+    degraded?: string[];
   }): Promise<NodeResult> {
     const {
       instruction,
@@ -497,6 +526,18 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       // GitHub Actions renders `::warning::` as a run annotation.
       const prefix = process.env.GITHUB_ACTIONS === "true" ? "::warning title=SWEny agent sandbox::" : "";
       this.logger.warn(`${prefix}${sandbox.warning}`);
+    }
+    // #442 + security review 2026-09-30 finding 3: with no sandbox, a staged
+    // write node's push block is only env and git hooks the agent can undo.
+    if (opts.stagedWrite && !sandbox.settings) {
+      const gap =
+        "no push (staged run): blocked by env and git hooks only; with no sandbox a deliberate agent can undo them and push";
+      if (opts.strict) {
+        const error = `strict policy: ${gap}`;
+        this.logger.error(error);
+        return { status: "failed", data: { error, refused: true }, toolCalls: [] };
+      }
+      opts.degraded?.push(gap);
     }
 
     // Tool-call accounting (Fix #1).
@@ -544,7 +585,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     // node outputs) is fenced as untrusted data (#360).
     const prompt = buildNodePrompt(instruction, context, outputSchema);
 
-    const env = withPushBlocked(this.buildEnv(agentAccess?.envVars), agentAccess?.noPush);
+    const env = withPushBlocked(this.buildEnv(agentAccess), agentAccess?.noPush);
 
     let response = "";
     // CC-08: when the SDK populates typed structured output (because we passed
