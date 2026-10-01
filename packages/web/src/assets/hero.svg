@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" width="640" height="360" role="img" aria-label="A two-node SWEny workflow, survey then explain, and the receipt ticket its run prints: passed, 2 of 2 nodes, policy stamp ENV SCOPED and SANDBOXED.">
+  <title>A SWEny workflow and its receipt</title>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 14px; fill: #f1f5f9; }
+    .muted { fill: #64748b; }
+    .ok { fill: #4ade80; font-weight: 700; }
+    .brand { fill: #3b82f6; font-weight: 700; }
+    .node { fill: #2563eb; stroke: #1d4ed8; stroke-width: 2; }
+    .current { fill: #3b82f6; stroke: #1d4ed8; stroke-width: 4; }
+    .node-label { fill: #ffffff; font-weight: 700; }
+  </style>
+  <rect width="640" height="360" rx="14" fill="#1e293b"/>
+  <rect x="0.5" y="0.5" width="639" height="359" rx="13.5" fill="none" stroke="#334155"/>
+
+  <!-- DAG: survey, then explain (the current node) -->
+  <rect class="node" x="40" y="70" width="190" height="52" rx="10"/>
+  <text class="node-label" x="135" y="102" text-anchor="middle">survey</text>
+  <path d="M135 122V196" stroke="#2563eb" stroke-width="3" fill="none"/>
+  <path d="M127 188L135 200L143 188Z" fill="#2563eb"/>
+  <rect class="current" x="40" y="204" width="190" height="52" rx="10"/>
+  <text class="node-label" x="135" y="236" text-anchor="middle">explain</text>
+  <text class="muted" x="40" y="300">explain-repo</text>
+  <text class="muted" x="40" y="322">DAG of agent steps</text>
+
+  <!-- Receipt ticket: perforated frame, tear line, policy stamp -->
+  <rect x="290" y="40" width="320" height="280" rx="12" fill="#162032" stroke="#64748b" stroke-width="2" stroke-dasharray="4 5"/>
+  <text class="ok" x="314" y="76">&#10003; passed</text>
+  <text class="muted" x="496" y="76">run 3f9a2c</text>
+  <text x="314" y="102">explain-repo</text>
+  <text class="muted" x="314" y="146">nodes</text>
+  <text x="414" y="146">2/2</text>
+  <text class="muted" x="314" y="172">tool calls</text>
+  <text x="414" y="172">12</text>
+  <text class="muted" x="314" y="198">duration</text>
+  <text x="414" y="198">28s</text>
+  <text class="muted" x="314" y="224">policy</text>
+  <text x="414" y="224">env scoped,</text>
+  <text x="414" y="244">sandbox on</text>
+  <path d="M290 266H610" stroke="#64748b" stroke-width="2" stroke-dasharray="6 6"/>
+  <text class="brand" x="450" y="298" text-anchor="middle">[ ENV SCOPED &#183; SANDBOXED ]</text>
+</svg>

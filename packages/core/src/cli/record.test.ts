@@ -1,0 +1,89 @@
+import { describe, it, expect, afterEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { SWENY_TAGLINE } from "../theme.js";
+import { RECORD_WRAP, parseAnsiLine, recordTrySvg, recordTrySvgToFile, wrapCells } from "./record.js";
+
+const tmp: string[] = [];
+afterEach(() => {
+  for (const d of tmp.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+});
+
+describe("parseAnsiLine", () => {
+  it("turns truecolor, bold and dim into styled cells and drops cursor codes", () => {
+    const cells = parseAnsiLine("\x1B[38;2;59;130;246mab\x1B[39m \x1B[1mc\x1B[22m\x1B[2m\x1B[2Kd\x1B[22m");
+    expect(cells.map((c) => c.ch).join("")).toBe("ab cd");
+    expect(cells[0].style.fg).toBe("#3b82f6");
+    expect(cells[2].style.fg).toBeUndefined();
+    expect(cells[3].style.bold).toBe(true);
+    expect(cells[4].style.dim).toBe(true);
+    expect(cells[4].style.bold).toBeUndefined();
+  });
+});
+
+describe("wrapCells", () => {
+  it("wraps long lines on spaces with an indented continuation, and leaves short ones alone", () => {
+    const text = "  " + "word ".repeat(30).trim();
+    const rows = wrapCells(parseAnsiLine(text), 40);
+    expect(rows.length).toBeGreaterThan(1);
+    for (const r of rows) expect(r.length).toBeLessThanOrEqual(40);
+    expect(rows[1].map((c) => c.ch).join("")).toMatch(/^ {4}word/);
+    expect(wrapCells(parseAnsiLine("short"), 40)).toHaveLength(1);
+  });
+});
+
+describe("recordTrySvg", () => {
+  it("is deterministic: two recordings are byte-identical", async () => {
+    expect(await recordTrySvg()).toBe(await recordTrySvg());
+  });
+
+  it("is self-contained: no scripts, fonts, images, links or external references", async () => {
+    const svg = await recordTrySvg();
+    expect(svg.startsWith("<svg ")).toBe(true);
+    for (const banned of ["<script", "@import", "<image", "href=", "font-face", "url(", "<foreignObject"]) {
+      expect(svg).not.toContain(banned);
+    }
+    // The only URLs are the SVG namespace and text in the sample answer; nothing is fetched.
+    const urls = (svg.match(/https?:\/\/[^"'\s)<]+/g) ?? []).filter((u) => !u.startsWith("http://localhost"));
+    expect(urls).toEqual(["http://www.w3.org/2000/svg"]);
+  });
+
+  it("animates with CSS keyframes, respects reduced motion, and stays small", async () => {
+    const svg = await recordTrySvg();
+    expect(svg).toContain("@keyframes");
+    expect(svg).toContain("prefers-reduced-motion");
+    expect(svg).toContain("monospace");
+    expect(Buffer.byteLength(svg)).toBeLessThan(60_000);
+  });
+
+  it("shows the real demo: tagline, both nodes, the answer, the ticket and the stamp, in brand colors", async () => {
+    const svg = await recordTrySvg();
+    expect(svg).toContain(SWENY_TAGLINE);
+    expect(svg).toContain("survey");
+    expect(svg).toContain("explain");
+    expect(svg).toContain("What it is:");
+    expect(svg).toContain("passed");
+    expect(svg).toContain("ENV SCOPED");
+    expect(svg).toContain("#3b82f6");
+    expect(svg).toContain("#1e293b");
+  });
+
+  it("has no em dashes and nothing wider than the window wraps to", async () => {
+    const svg = await recordTrySvg();
+    expect(svg).not.toContain(String.fromCharCode(0x2014));
+    for (const m of svg.matchAll(/<text class="r [^"]*" x="\d+" y="\d+">(.*?)<\/text>/g)) {
+      const visible = m[1].replace(/<[^>]+>/g, "").replace(/&amp;|&lt;|&gt;/g, "x");
+      expect([...visible].length).toBeLessThanOrEqual(RECORD_WRAP);
+    }
+  });
+
+  it("writes the file and reports its size", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-record-"));
+    tmp.push(dir);
+    const file = path.join(dir, "nested", "demo.svg");
+    const bytes = await recordTrySvgToFile(file);
+    expect(fs.readFileSync(file, "utf-8")).toBe(await recordTrySvg());
+    expect(fs.statSync(file).size).toBe(bytes);
+  });
+});

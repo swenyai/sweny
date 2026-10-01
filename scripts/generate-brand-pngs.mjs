@@ -11,6 +11,8 @@ import { readFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
+// Built first in CI (`npm run build --workspace=packages/core`); the tagline and palette come from the theme.
+import { PALETTE, SWENY_TAGLINE } from "../packages/core/dist/theme.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
@@ -51,22 +53,32 @@ async function generateIcon(size, outputPath) {
 const wordmarkSvg = readFileSync(join(assetsDir, "logo-wordmark-light.svg"), "utf8");
 
 async function generateSocialImage(width, height, outputPath) {
-  // Wordmark centered, tagline below, on slate-800 background
+  // Wordmark, a blue accent rule, then the tagline as two lines, on slate-800.
   const wmW = Math.round(width * 0.4);
   const wmH = Math.round(wmW * (52 / 310)); // preserve aspect ratio from viewBox
   const wmX = Math.round((width - wmW) / 2);
-  const wmY = Math.round(height * 0.35);
+  const wmY = Math.round(height * 0.3);
 
-  const tagline = "Workflow orchestration for AI-powered engineering.";
+  // "Workflows for coding agents." / "One set of rules, a receipt for every run."
+  const [lead, ...restParts] = SWENY_TAGLINE.split(/(?<=\.)\s+/);
+  const rest = restParts.join(" ");
+  const font = "system-ui, -apple-system, 'Helvetica Neue', sans-serif";
+  const size = Math.round(width * 0.024);
+  const ruleY = wmY + wmH + Math.round(height * 0.07);
+  const ruleW = Math.round(width * 0.08);
+  const line1Y = ruleY + Math.round(size * 2);
+  const line2Y = line1Y + Math.round(size * 1.5);
 
   const socialSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-    <rect width="${width}" height="${height}" fill="#1e293b"/>
+    <rect width="${width}" height="${height}" fill="${PALETTE.slate800}"/>
+    <rect y="${height - 8}" width="${width}" height="8" fill="${PALETTE.blue500}"/>
     <image href="data:image/svg+xml;base64,${Buffer.from(wordmarkSvg).toString("base64")}"
            x="${wmX}" y="${wmY}" width="${wmW}" height="${wmH}"/>
-    <text x="${width / 2}" y="${wmY + wmH + 48}"
-          font-family="system-ui, -apple-system, 'Helvetica Neue', sans-serif"
-          font-size="${Math.round(width * 0.018)}" fill="#94a3b8"
-          text-anchor="middle">${tagline}</text>
+    <rect x="${Math.round((width - ruleW) / 2)}" y="${ruleY}" width="${ruleW}" height="4" rx="2" fill="${PALETTE.blue500}"/>
+    <text x="${width / 2}" y="${line1Y}" font-family="${font}" font-size="${size}" font-weight="600"
+          fill="${PALETTE.slate100}" text-anchor="middle">${lead}</text>
+    <text x="${width / 2}" y="${line2Y}" font-family="${font}" font-size="${size}"
+          fill="${PALETTE.blue400}" text-anchor="middle">${rest}</text>
   </svg>`;
 
   await sharp(Buffer.from(socialSvg)).png().toFile(outputPath);
