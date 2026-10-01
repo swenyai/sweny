@@ -53,7 +53,7 @@ export interface MockHarnessOptions {
   responses: Record<string, MockNodeResponse>;
   /** Route decisions: "fromNode" → chosen target node ID */
   routes?: Record<string, string>;
-  /** Workflow definition — enables instruction-based node matching (required for branching workflows) */
+  /** Enables instruction matching for manual calls without nodeId; execute() supplies node IDs. */
   workflow?: Workflow;
   /** Scripted handler for `ask()` calls. */
   ask?: (instruction: string, context: Record<string, unknown>) => string;
