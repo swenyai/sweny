@@ -7,10 +7,11 @@ import { createClaudeSdkFake } from "./__contract__/fakes.js";
 const fakes = createClaudeSdkFake();
 
 runContractSuite(
-  async ({ logger, sandbox }) => {
+  async ({ logger, sandbox, cwd }) => {
     const { ClaudeCodeHarness } = await import("./claude-code.js");
     return new ClaudeCodeHarness({
       logger,
+      ...(cwd ? { cwd } : {}),
       envScope: true,
       // No host login probe in tests (#339): the suite drives a fake SDK.
       authProbe: () => ({ ok: true, via: "test" }),

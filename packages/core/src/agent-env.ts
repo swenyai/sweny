@@ -730,7 +730,8 @@ export function noPushGitConfig(dir: string): Array<[string, string]> {
  * them. A deliberate agent on an unsandboxed run that finds a credential on
  * disk (an ssh key without a passphrase, a keychain entry, a token persisted
  * in `.git/config` by a checkout) can still push. Run sandboxed (the sandbox
- * hides credential files such as `~/.ssh`) and without push credentials in CI
+ * hides credential files such as `~/.ssh`, and a checkout's persisted token,
+ * see git-credentials.ts) and without push credentials in CI
  * for a guarantee; under a strict harness policy an unsandboxed staged write
  * node is refused (`stagedWrite` in policy.ts). `enabled` false returns `env`
  * unchanged. Pure apart from creating {@link noPushDir} once.

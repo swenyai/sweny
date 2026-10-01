@@ -716,7 +716,8 @@ nodes:
       `context.create_issue.issueIdentifier`. The branch is `context.implement.branch`.
 
 
-      1. Push the branch to the remote.
+      1. Push the branch to the remote. If the push fails for lack of credentials (a checkout made with
+      `persist-credentials: false`), go on: sweny pushes the head branch itself before it opens the PR.
 
       2. Request the PR: with `emit_output` (type `pr`, `head` = the branch, `base` = the base branch,
       default `main`) when you have it; sweny opens it after this step and reuses an open PR for the same

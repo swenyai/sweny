@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { nativeDenyClasses, policyGate, resolveHarnessPolicy, isToolClass } from "./policy.js";
+import { gitCredentialGap, nativeDenyClasses, policyGate, resolveHarnessPolicy, isToolClass } from "./policy.js";
 import { CLAUDE_CODE_CAPABILITIES, CODEX_CAPABILITIES } from "./capabilities.js";
 import type { HarnessCapabilities, NodePolicy } from "./types.js";
 
@@ -199,5 +199,34 @@ describe("policyGate sandbox (#360 step 2)", () => {
     expect(policyGate(CLAUDE_CODE_CAPABILITIES, sandboxOnly("strict"))).toEqual({ degraded: [] });
     const fsOnly: HarnessCapabilities = { ...weak, sandbox: { fs: true, network: false } };
     expect(policyGate(fsOnly, sandboxOnly("strict")).refuse).toMatch(/sandbox/);
+  });
+});
+
+// #473: a git credential the checkout persisted. Only a read deny keeps it from the agent.
+describe("policyGate: persisted git credentials", () => {
+  const files = ["/w/.git/config"];
+
+  it("no read deny: degraded, naming the file, never a value; strict refuses", () => {
+    const warn = policyGate(weak, { ...base, readOnly: true, gitCredentials: files });
+    expect(warn.degraded).toContain(gitCredentialGap(files));
+    expect(gitCredentialGap(files)).toMatch(/\/w\/\.git\/config.*persist-credentials: false/);
+    expect(warn.refuse).toBeUndefined();
+    const strict = policyGate(weak, { ...base, readOnly: true, strict: true, gitCredentials: files });
+    expect(strict.refuse).toContain("git credential");
+  });
+
+  it("a wrapper with a read deny enforces it", () => {
+    const r = policyGate(
+      weak,
+      { ...base, stagedWrite: false, gitCredentials: files, strict: true },
+      { readDeny: true },
+    );
+    expect(r).toEqual({ degraded: [] });
+  });
+
+  it("no credential files: nothing to report", () => {
+    expect(policyGate(weak, { ...base, readOnly: true, gitCredentials: [] }).degraded.join(" ")).not.toMatch(
+      /git credential/,
+    );
   });
 });
