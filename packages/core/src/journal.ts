@@ -2,23 +2,38 @@
  * Run journal (#363): an append-only log of one workflow run, enough to resume
  * a killed or failed run without re-running the nodes that already finished.
  *
- * File: `.sweny/runs/<run-id>/journal.ndjson` (mode 0600), one JSON record per
- * line. Every record carries the format version (`v`), a sequence number (`seq`)
- * and an authentication code (`h`, HMAC-SHA256 of the record without `h`, under
- * a per-run key). Each append is written and fsync'd before the executor moves
- * on, so a record on disk is a fact.
+ * Location: the journal never lives in the workspace. Each run gets a private
+ * directory in the user's sweny state dir (`$SWENY_STATE_DIR`, else
+ * `$XDG_STATE_HOME/sweny`, else `~/.local/state/sweny`):
  *
- * Integrity: the key is 32 random bytes made when the run starts and kept
- * OUTSIDE the workspace, in the user's sweny state dir
- * (`$SWENY_STATE_DIR`, else `$XDG_STATE_HOME/sweny`, else
- * `~/.local/state/sweny`), under `run-keys/` (dir 0700, file 0600). Anything
- * that can write the workspace but not that dir (an agent confined to the
- * workspace, a checked-out branch, an artifact) cannot mint a record resume
- * accepts. Both sandboxes deny reading the key dir; an unsandboxed agent
- * running as the same OS user can still read it, which is why resume also
- * checks the record sequence (see {@link buildResumePlan}) and every replayed
- * route against the workflow's real edges. A resume on another machine needs
- * the same state dir.
+ *   runs/<workspace-hash>/<run-id>/   (dirs 0700, files 0600, opened O_NOFOLLOW)
+ *     key             32 random bytes, the run's HMAC key
+ *     journal.ndjson  one JSON record per line, fsync'd per append
+ *     head.json       the record being appended, written (atomically) first
+ *     meta.json       run id, workspace hash, creation time; authenticated, drives retention
+ *     lock            the process that owns the run (pid + start time)
+ *
+ * Both agent sandboxes deny reading AND writing the whole `runs/` tree, so an
+ * agent confined to the workspace cannot read the key, edit or cut the
+ * journal, delete the lock or fake a run. The workspace keeps only user-facing
+ * artifacts (`.sweny/runs/<run-id>/output.md` and the run history record).
+ * Journals an older sweny wrote in the workspace are refused for resume.
+ *
+ * Integrity: every record carries the format version (`v`), a sequence number
+ * (`seq`) and `h`, an HMAC-SHA256 under the run key over the run id, the seq,
+ * the previous record's `h` and the record body. The chain means records
+ * cannot be reordered, duplicated, or spliced in from another run. The head
+ * file holds the full record being appended, written and renamed into place
+ * BEFORE the journal append: a crash between the two leaves a journal exactly
+ * one record short, and resume restores that record from the head. A journal
+ * shorter than that, or one that disagrees with the head, is refused, so the
+ * end of the journal cannot be cut away even by something that can write the
+ * state dir but not read the key.
+ *
+ * An unsandboxed agent running as the same OS user can still read and write
+ * the state dir; that is why resume also checks the record sequence (see
+ * {@link buildResumePlan}) and every replayed route against the workflow's
+ * real edges. A resume on another machine needs the same state dir.
  *
  * Records, in run order:
  *   run:start        workflow / instruction / input / tool hashes, harness id, input (redacted)
@@ -33,26 +48,26 @@
  *   usage            spend of one agent attempt (cumulative; live while it runs, final when it returns)
  *   run:end          success | failed | crashed
  *
+ * Failure: an append that cannot be written (head or journal) is fatal. The
+ * executor stops the run before the next model call or side effect and fails
+ * the node with the reason, so a resume never under-counts spend or repeats a
+ * write the journal did not see.
+ *
  * Spend: a resume seeds the run budget with every attempt's journaled usage,
- * so a crash never resets the whole-run ceiling.
+ * from authenticated records only, so a crash never resets the whole-run ceiling.
  *
- * Length: HMACs alone cannot show that records were cut from the END (every
- * remaining record still verifies), so next to the key sits a head pointer
- * (`<scope>-<run-id>.head`, 0600, itself MAC'd): the seq and MAC of the last
- * record appended, replaced atomically after each append's fsync. Resume
- * refuses a journal whose last record is not the head, with one exception for
- * the crash window between the two writes (see {@link checkJournalHead}): one
- * whole authenticated record past the head is accepted. Spend is seeded only
- * from authenticated records, so it cannot be rolled back either.
+ * Recovery: an unterminated tail that is not complete JSON (power loss
+ * mid-append) is truncated. An unterminated tail that IS complete JSON is
+ * never assumed torn: it must authenticate as the next record, or the journal
+ * is refused. Corruption in the middle of the file is refused.
  *
- * Recovery: a torn tail (power loss mid-append) that is not complete JSON is
- * truncated back to the last valid record, and only when that record is the
- * head. An unterminated tail that IS complete JSON is never assumed torn: it
- * must authenticate as the next record, or the journal is refused. Corruption
- * in the middle of the file is refused.
+ * Lock: taken with O_CREAT|O_EXCL before anything is read or repaired, and
+ * held for the whole run or resume. A lock whose process is gone (pid not
+ * alive, or alive with a different start time) is taken over under a
+ * second exclusive lock, re-checked first, so two resumes cannot both win.
  *
- * Privacy: the journal is local and holds what the run needs to continue (node
- * data, eval verdicts, safe-output intents). It never holds environment values:
+ * Privacy: the journal holds what the run needs to continue (node data, eval
+ * verdicts, safe-output intents). It never holds environment values:
  * secret-looking keys, known token shapes, and the values of secret env vars
  * and skill credentials are replaced with `[redacted]` before anything is
  * written. Tool call inputs and outputs are not journaled.
@@ -75,12 +90,19 @@ import { resolveNodePermissions } from "./node-policy.js";
 import { CURRENT_SPEC_VERSION } from "./migrations.js";
 import { spendOf, type Spend } from "./budget.js";
 
-/** v2: records are authenticated with a per-run HMAC key (v1 used a public checksum and is refused). */
-export const JOURNAL_SCHEMA_VERSION = 2;
-export const JOURNAL_DIR = path.join(".sweny", "runs");
+/**
+ * v3: each record's HMAC chains the run id and the previous record's HMAC.
+ * (v2 authenticated records one by one; v1 used a public checksum. Both are refused.)
+ */
+export const JOURNAL_SCHEMA_VERSION = 3;
+/** Where journals lived before v3: in the workspace. Never read for resume, only recognized to refuse. */
+export const LEGACY_JOURNAL_DIR = path.join(".sweny", "runs");
 export const JOURNAL_FILE = "journal.ndjson";
-const LOCK_FILE = "journal.lock";
-/** Journals kept on disk; the oldest beyond this are deleted when a new run starts. */
+const KEY_FILE = "key";
+const HEAD_FILE = "head.json";
+const META_FILE = "meta.json";
+const LOCK_FILE = "lock";
+/** Journals kept per workspace; the oldest beyond this are deleted when a new run starts. */
 export const JOURNAL_KEEP = 20;
 export const REDACTED = "[redacted]";
 
@@ -181,7 +203,7 @@ function recordMac(key: Buffer, body: string): string {
   return crypto.createHmac("sha256", key).update(body).digest("hex");
 }
 
-// ─── Run keys ─────────────────────────────────────────────────────
+// ─── State dir layout ─────────────────────────────────────────────
 
 /** sweny's per-user state dir: `$SWENY_STATE_DIR`, else `$XDG_STATE_HOME/sweny`, else `~/.local/state/sweny`. */
 export function swenyStateDir(env: Record<string, string | undefined> = process.env): string {
@@ -191,9 +213,9 @@ export function swenyStateDir(env: Record<string, string | undefined> = process.
   return path.join(base, "sweny");
 }
 
-/** Where run keys live. Never inside the workspace. */
-export function runKeyDir(env: Record<string, string | undefined> = process.env): string {
-  return path.join(swenyStateDir(env), "run-keys");
+/** Where every run journal (and its key, head, meta and lock) lives. Agents can neither read nor write it. */
+export function runStateRoot(env: Record<string, string | undefined> = process.env): string {
+  return path.join(swenyStateDir(env), "runs");
 }
 
 function realOr(p: string): string {
@@ -204,15 +226,76 @@ function realOr(p: string): string {
   }
 }
 
-/** The key file for one run in one workspace (the workspace path is hashed, not stored). */
-export function runKeyFile(cwd: string, runId: string, keyDir: string = runKeyDir()): string {
-  const scope = sha256(realOr(cwd)).slice(0, 16);
-  return path.join(keyDir, `${scope}-${runId}.key`);
+/** The workspace's directory name under {@link runStateRoot}: its real path hashed, never stored. */
+export function workspaceScope(cwd: string): string {
+  return sha256(realOr(cwd)).slice(0, 16);
 }
 
-/** The head pointer file for one run: next to its key, outside the workspace. */
-export function runHeadFile(cwd: string, runId: string, keyDir: string = runKeyDir()): string {
-  return runKeyFile(cwd, runId, keyDir).replace(/\.key$/, ".head");
+/** One run's private directory: `<state>/runs/<workspace-hash>/<run-id>/`. */
+export function journalDir(cwd: string, runId: string, root: string = runStateRoot()): string {
+  return path.join(root, workspaceScope(cwd), runId);
+}
+
+/** The run's key file (inside its private directory). */
+export function runKeyFile(cwd: string, runId: string, root: string = runStateRoot()): string {
+  return path.join(journalDir(cwd, runId, root), KEY_FILE);
+}
+
+const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
+
+/** Read a file without following a symlink at its last component. */
+function readNoFollow(file: string): Buffer {
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW);
+  try {
+    return fs.readFileSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** Create a new file (never an existing one, never through a symlink), write it and fsync it. */
+function writeNew(file: string, data: string): void {
+  const c = fs.constants;
+  const fd = fs.openSync(file, c.O_WRONLY | c.O_CREAT | c.O_EXCL | NOFOLLOW, 0o600);
+  try {
+    fs.writeSync(fd, data);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function fsyncDir(dir: string): void {
+  try {
+    const fd = fs.openSync(dir, "r");
+    try {
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    // Not every platform can fsync a directory.
+  }
+}
+
+/** Replace a file atomically: write a new temp file, fsync, rename over, fsync the dir. */
+function writeAtomic(file: string, data: string): void {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.rmSync(tmp, { force: true });
+  try {
+    writeNew(tmp, data);
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  }
+  fsyncDir(path.dirname(file));
+}
+
+/** Make a run's private directory (and its parents) 0700. */
+function makePrivateDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(dir, 0o700);
 }
 
 /** Thrown when a journal's key is missing or unreadable: its records cannot be checked. */
@@ -228,9 +311,7 @@ export class JournalKeyError extends Error {
 
 function createRunKey(file: string): Buffer {
   const key = crypto.randomBytes(32);
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(file, key.toString("hex") + "\n", { mode: 0o600 });
-  fs.chmodSync(file, 0o600);
+  writeNew(file, key.toString("hex") + "\n");
   return key;
 }
 
@@ -238,7 +319,7 @@ function createRunKey(file: string): Buffer {
 export function loadRunKey(file: string): Buffer {
   let text: string;
   try {
-    text = fs.readFileSync(file, "utf-8").trim();
+    text = readNoFollow(file).toString("utf-8").trim();
   } catch {
     throw new JournalKeyError(file, "missing");
   }
@@ -246,34 +327,22 @@ export function loadRunKey(file: string): Buffer {
   return Buffer.from(text, "hex");
 }
 
-// ─── Head pointer ─────────────────────────────────────────────────
-
-/**
- * The run's head pointer: the sequence number and MAC of the last record the
- * run appended. It lives next to the run key, outside the workspace, so a
- * journal cut back at a record boundary (every remaining record still
- * authenticates) no longer matches it.
- *
- * Write order, per append: the record is written and fsync'd to the journal,
- * then the head is replaced atomically (temp file, fsync, rename, dir fsync).
- * A crash between the two leaves the journal exactly one whole record ahead of
- * the head, and that is the only gap resume accepts (see {@link checkJournalHead}).
- * A run's first head (seq 0) is written with its key, before any record.
- */
-export interface JournalHead {
-  seq: number;
-  /** MAC (`h`) of record `seq`; empty for seq 0. */
-  mac: string;
+/** MAC of one record: run id, seq and the previous record's MAC chained in, so records cannot move. */
+function chainMac(key: Buffer, runId: string, seq: number, prev: string, body: Record<string, unknown>): string {
+  return recordMac(key, `sweny-journal\n${runId}\n${seq}\n${prev}\n${JSON.stringify(body)}`);
 }
 
-const HEAD_VERSION = 1;
-
-function headMac(key: Buffer, body: Record<string, unknown>): string {
-  // Domain-separated from records, whose MAC input is a JSON object.
-  return recordMac(key, `sweny-journal-head\n${JSON.stringify(body)}`);
+/** MAC of a side file (head, meta): domain-separated from records. */
+function sideMac(key: Buffer, kind: string, body: Record<string, unknown>): string {
+  return recordMac(key, `sweny-journal-${kind}\n${JSON.stringify(body)}`);
 }
 
-/** Thrown when the journal is shorter than, or diverges from, the run's head pointer (or the pointer is missing or invalid). */
+function sameMac(given: unknown, expected: string): boolean {
+  if (typeof given !== "string" || !/^[0-9a-f]{64}$/.test(given)) return false;
+  return crypto.timingSafeEqual(Buffer.from(given, "hex"), Buffer.from(expected, "hex"));
+}
+
+/** Thrown when the journal is shorter than, or disagrees with, the record its head file holds. */
 export class JournalRollbackError extends Error {
   constructor(message: string) {
     super(`${message}. Refusing to resume (not overridable by --force); start a new run.`);
@@ -281,104 +350,215 @@ export class JournalRollbackError extends Error {
   }
 }
 
-/** Replace the head pointer atomically (mode 0600). Throws on any I/O failure. */
-export function writeJournalHead(file: string, key: Buffer, runId: string, head: JournalHead): void {
-  const body = { v: HEAD_VERSION, run_id: runId, seq: head.seq, mac: head.mac };
-  const text = JSON.stringify({ ...body, h: headMac(key, body) }) + "\n";
-  const tmp = `${file}.${process.pid}.tmp`;
-  const c = fs.constants;
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  fs.rmSync(tmp, { force: true });
-  try {
-    const fd = fs.openSync(tmp, c.O_WRONLY | c.O_CREAT | c.O_EXCL | (c.O_NOFOLLOW ?? 0), 0o600);
-    try {
-      fs.writeSync(fd, text);
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.renameSync(tmp, file);
-  } catch (err) {
-    fs.rmSync(tmp, { force: true });
-    throw err;
-  }
-  try {
-    // Make the rename itself durable. Not every platform can fsync a directory.
-    const dfd = fs.openSync(path.dirname(file), "r");
-    try {
-      fs.fsyncSync(dfd);
-    } finally {
-      fs.closeSync(dfd);
-    }
-  } catch {
-    // best effort
-  }
+// ─── Head ─────────────────────────────────────────────────────────
+
+/**
+ * The record being appended (seq 0 and no record before the first append).
+ * Written atomically BEFORE the record goes to the journal, so the journal is
+ * either at the head or exactly one record short of it (a crash in between),
+ * never anything else.
+ */
+export interface JournalHead {
+  seq: number;
+  record: JournalRecord | null;
 }
 
-/** Read and authenticate a head pointer. Throws {@link JournalRollbackError}. */
-export function loadJournalHead(file: string, key: Buffer, runId: string): JournalHead {
+const SIDE_VERSION = 1;
+
+function writeJournalHead(dir: string, key: Buffer, runId: string, head: JournalHead): void {
+  const body = { v: SIDE_VERSION, run_id: runId, seq: head.seq, record: head.record };
+  writeAtomic(path.join(dir, HEAD_FILE), JSON.stringify({ ...body, h: sideMac(key, "head", body) }) + "\n");
+}
+
+/** Read and authenticate a run's head file. Throws {@link JournalRollbackError}. */
+export function loadJournalHead(dir: string, key: Buffer, runId: string): JournalHead {
+  const file = path.join(dir, HEAD_FILE);
   let text: string;
   try {
-    text = fs.readFileSync(file, "utf-8");
+    text = readNoFollow(file).toString("utf-8");
   } catch {
-    throw new JournalRollbackError(
-      `cannot check the run journal's length: its head pointer ${file} is missing (runs started before ` +
-        `head pointers existed cannot be resumed)`,
-    );
+    throw new JournalRollbackError(`cannot check the run journal's length: its head file ${file} is missing`);
   }
-  const invalid = () => new JournalRollbackError(`the run journal's head pointer ${file} is not valid`);
-  let parsed: Record<string, unknown>;
+  const invalid = () => new JournalRollbackError(`the run journal's head file ${file} is not valid`);
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(text) as Record<string, unknown>;
+    parsed = JSON.parse(text);
   } catch {
     throw invalid();
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw invalid();
-  const { h, ...body } = parsed;
-  if (typeof h !== "string" || !/^[0-9a-f]{64}$/.test(h)) throw invalid();
-  const expected = Buffer.from(headMac(key, body), "hex");
-  if (!crypto.timingSafeEqual(Buffer.from(h, "hex"), expected)) throw invalid();
-  const { v, run_id, seq, mac } = body;
-  if (v !== HEAD_VERSION || run_id !== runId) throw invalid();
-  if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0 || typeof mac !== "string") throw invalid();
-  if (seq === 0 ? mac !== "" : !/^[0-9a-f]{64}$/.test(mac)) throw invalid();
-  return { seq, mac };
+  const { h, ...body } = parsed as Record<string, unknown>;
+  if (!sameMac(h, sideMac(key, "head", body))) throw invalid();
+  const { v, run_id, seq, record } = body;
+  if (v !== SIDE_VERSION || run_id !== runId) throw invalid();
+  if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0) throw invalid();
+  if (seq === 0 ? record !== null : !record || typeof record !== "object" || Array.isArray(record)) throw invalid();
+  return { seq, record: record as JournalRecord | null };
 }
 
+// ─── Meta (retention) ─────────────────────────────────────────────
+
+interface RunMeta {
+  runId: string;
+  createdAt: string;
+}
+
+function writeRunMeta(dir: string, key: Buffer, runId: string, scope: string): void {
+  const body = { v: SIDE_VERSION, run_id: runId, scope, created_at: new Date().toISOString() };
+  writeNew(path.join(dir, META_FILE), JSON.stringify({ ...body, h: sideMac(key, "meta", body) }) + "\n");
+}
+
+/** A run's authenticated metadata, or undefined when it is missing, unreadable or not this run's. */
+function loadRunMeta(dir: string, runId: string, scope: string): RunMeta | undefined {
+  try {
+    const key = loadRunKey(path.join(dir, KEY_FILE));
+    const parsed = JSON.parse(readNoFollow(path.join(dir, META_FILE)).toString("utf-8")) as Record<string, unknown>;
+    const { h, ...body } = parsed;
+    if (!sameMac(h, sideMac(key, "meta", body))) return undefined;
+    if (body.v !== SIDE_VERSION || body.run_id !== runId || body.scope !== scope) return undefined;
+    if (typeof body.created_at !== "string" || Number.isNaN(Date.parse(body.created_at))) return undefined;
+    return { runId, createdAt: body.created_at };
+  } catch {
+    return undefined;
+  }
+}
+
+// ─── Lock ─────────────────────────────────────────────────────────
+
+/** Thrown when another live process holds the run. */
+export class JournalLockedError extends Error {
+  constructor(public readonly pid: number) {
+    super(`run journal is in use by process ${pid}; wait for it to finish (or stop it) before resuming`);
+    this.name = "JournalLockedError";
+  }
+}
+
+/** Start time (ms since epoch) of a process, where the OS exposes it cheaply (Linux); else undefined. */
+export function processStartTime(pid: number): number | undefined {
+  if (process.platform !== "linux") return undefined;
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf-8");
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    const ticks = Number(fields[19]);
+    const btime = Number(/^btime (\d+)$/m.exec(fs.readFileSync("/proc/stat", "utf-8"))?.[1]);
+    if (!Number.isFinite(ticks) || !Number.isFinite(btime)) return undefined;
+    return btime * 1000 + ticks * 10;
+  } catch {
+    return undefined;
+  }
+}
+
+const SELF_STARTED = processStartTime(process.pid) ?? Math.round(Date.now() - process.uptime() * 1000);
+/** Start times are compared with this much slack (clock ticks, boot time rounding). */
+const START_SLACK_MS = 5000;
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+interface LockHolder {
+  pid: number;
+  started: number;
+}
+
+function parseHolder(raw: string): LockHolder | undefined {
+  try {
+    const p = JSON.parse(raw) as Record<string, unknown>;
+    if (!Number.isInteger(p.pid) || (p.pid as number) <= 0 || typeof p.started !== "number") return undefined;
+    return { pid: p.pid as number, started: p.started };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Is the process that wrote this lock still running? A reused pid (other start time) is not. */
+function holderAlive(h: LockHolder): boolean {
+  if (h.pid === process.pid) return Math.abs(h.started - SELF_STARTED) <= START_SLACK_MS;
+  if (!pidAlive(h.pid)) return false;
+  const started = processStartTime(h.pid);
+  return started === undefined || Math.abs(started - h.started) <= START_SLACK_MS;
+}
+
+/** Test seam for the lock: called after a stale lock was read, before it is taken over. */
+export interface LockHooks {
+  afterStaleRead?(): void;
+}
+
+/** An acquired run lock. */
+export interface RunLock {
+  readonly file: string;
+  release(): void;
+}
+
+function readText(file: string): string | undefined {
+  try {
+    return readNoFollow(file).toString("utf-8");
+  } catch {
+    return undefined;
+  }
+}
+
+/** A takeover lock older than this belongs to a process that died mid-takeover. */
+const TAKEOVER_STALE_MS = 10_000;
+
 /**
- * Compare an authenticated journal with its head pointer. Accepted:
- *   - the last record is the head (`seq` and MAC match), with or without a
- *     torn (unparseable) tail after it: a crash during the next append;
- *   - one whole record past the head, nothing torn after it: a crash after an
- *     append was fsync'd but before the head was replaced. Record `head.seq`
- *     must still carry the head's MAC.
- * Anything else is refused: fewer records than the head (rolled back), two or
- * more past it, a different record at the head's position, or a torn tail
- * after an unacknowledged record (the next append never starts before the
- * head moves). Throws {@link JournalRollbackError}.
+ * Take a run's lock: O_CREAT|O_EXCL in the run's private dir. A lock whose
+ * process is gone is taken over under a second exclusive lock, and only if it
+ * still holds the exact bytes judged stale, so two processes racing for a
+ * stale lock cannot both win. Throws {@link JournalLockedError}.
  */
-export function checkJournalHead(records: JournalRecord[], torn: boolean, head: JournalHead): void {
-  const n = records.length;
-  if (n < head.seq) {
-    throw new JournalRollbackError(
-      `the run journal ends at record ${n}, but the run had written ${head.seq}: records were removed from its end (rolled back)`,
-    );
+export function acquireRunLock(dir: string, hooks: LockHooks = {}): RunLock {
+  const file = path.join(dir, LOCK_FILE);
+  const mine = JSON.stringify({
+    pid: process.pid,
+    started: SELF_STARTED,
+    nonce: crypto.randomBytes(8).toString("hex"),
+  });
+  let lastPid = 0;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      writeNew(file, mine);
+      return {
+        file,
+        release() {
+          // Only ever remove our own lock.
+          if (readText(file) === mine) fs.rmSync(file, { force: true });
+        },
+      };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+    const stale = readText(file);
+    if (stale === undefined) continue; // released meanwhile: try again
+    const holder = parseHolder(stale);
+    if (holder) lastPid = holder.pid;
+    if (holder && holderAlive(holder)) throw new JournalLockedError(holder.pid);
+    hooks.afterStaleRead?.();
+    const takeover = `${file}.takeover`;
+    try {
+      writeNew(takeover, mine);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      try {
+        if (Date.now() - fs.lstatSync(takeover).mtimeMs > TAKEOVER_STALE_MS) fs.rmSync(takeover, { force: true });
+      } catch {
+        // gone already
+      }
+      continue;
+    }
+    try {
+      // Re-read under the takeover lock: remove it only if nobody replaced it since.
+      if (readText(file) === stale) fs.rmSync(file, { force: true });
+    } finally {
+      fs.rmSync(takeover, { force: true });
+    }
   }
-  if (n > head.seq + 1) {
-    throw new JournalRollbackError(
-      `the run journal has ${n} records, but the run acknowledged only ${head.seq}: it was not written by this run alone`,
-    );
-  }
-  if (head.seq > 0 && records[head.seq - 1].h !== head.mac) {
-    throw new JournalRollbackError(
-      `run journal record ${head.seq} is not the record the run wrote there: its history was replaced`,
-    );
-  }
-  if (n === head.seq + 1 && torn) {
-    throw new JournalRollbackError(
-      `the run journal has a torn record after record ${n}, which the run never acknowledged: that is not a crash the run can leave`,
-    );
-  }
+  throw new JournalLockedError(lastPid);
 }
 
 // ─── Redaction ────────────────────────────────────────────────────
@@ -547,7 +727,7 @@ export class JournalVersionError extends Error {
   constructor(version: unknown) {
     super(
       typeof version === "number" && version < JOURNAL_SCHEMA_VERSION
-        ? `run journal format v${version} predates authenticated records (v${JOURNAL_SCHEMA_VERSION}); it cannot be ` +
+        ? `run journal format v${version} predates chained records (v${JOURNAL_SCHEMA_VERSION}); it cannot be ` +
             `resumed safely. Start a new run.`
         : `run journal format v${String(version)} is newer than this sweny understands (v${JOURNAL_SCHEMA_VERSION}); upgrade sweny to resume it`,
     );
@@ -574,11 +754,11 @@ export class JournalMismatchError extends Error {
   }
 }
 
-/** Thrown when another live process holds the run's journal. */
-export class JournalLockedError extends Error {
-  constructor(pid: number) {
-    super(`run journal is in use by process ${pid}; wait for it to finish (or stop it) before resuming`);
-    this.name = "JournalLockedError";
+/** Thrown when the journal cannot be written. Fatal: the executor stops the run before anything else happens. */
+export class JournalWriteError extends Error {
+  constructor(message: string) {
+    super(`run journal: ${message}; the run stopped so a resume cannot lose spend or repeat a write`);
+    this.name = "JournalWriteError";
   }
 }
 
@@ -586,12 +766,14 @@ export class JournalLockedError extends Error {
 
 export interface JournalRead {
   file: string;
-  /** Authenticated records only: everything a resume replays or seeds spend from. */
+  /** Authenticated, chained records only: everything a resume replays or seeds spend from. */
   records: JournalRecord[];
-  /** Bytes dropped from a torn / corrupt tail (0 when the file was clean). */
+  /** Bytes dropped from a torn tail (0 when the file was clean). */
   truncatedBytes: number;
   /** The last record is whole and authenticated but lost its line end (repair restores it). */
   missingNewline?: boolean;
+  /** The last record was missing from the journal (a crash after the head write) and was restored from the head. */
+  restored?: boolean;
   /**
    * Set when an invalid record sits before valid ones (not a torn tail), or when
    * a whole record fails authentication (tampering, never a torn write). Not repairable.
@@ -603,7 +785,8 @@ export interface JournalRead {
 
 type LineCheck = JournalRecord | "version" | "forged" | undefined;
 
-function verifyLine(line: string, expectedSeq: number, key: () => Buffer): LineCheck {
+/** Check one line as record `expectedSeq` following a record whose MAC is `prev`. Undefined = not complete JSON. */
+function verifyLine(line: string, expectedSeq: number, prev: string, runId: string, key: () => Buffer): LineCheck {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -617,19 +800,10 @@ function verifyLine(line: string, expectedSeq: number, key: () => Buffer): LineC
   if (typeof rec.v === "number" && rec.v !== JOURNAL_SCHEMA_VERSION && expectedSeq === 1) return "version";
   if (typeof rec.v === "number" && rec.v > JOURNAL_SCHEMA_VERSION) return "version";
   if (rec.v !== JOURNAL_SCHEMA_VERSION || typeof rec.type !== "string" || typeof rec.h !== "string") return "forged";
-  const { h, ...body } = rec;
-  const expected = Buffer.from(recordMac(key(), JSON.stringify(body)), "hex");
-  const given = /^[0-9a-f]{64}$/.test(h as string) ? Buffer.from(h as string, "hex") : Buffer.alloc(0);
-  // A whole, well-formed line that fails its MAC is tampering, not a torn append.
-  if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return "forged";
   if (rec.seq !== expectedSeq) return "forged";
+  const { h, ...body } = rec;
+  if (!sameMac(h, chainMac(key(), runId, expectedSeq, prev, body))) return "forged";
   return rec as JournalRecord;
-}
-
-/** `<cwd>/.sweny/runs/<run-id>/journal.ndjson` -> cwd and run id. */
-function journalLocation(file: string): { cwd: string; runId: string } {
-  const runDir = path.dirname(path.resolve(file));
-  return { runId: path.basename(runDir), cwd: path.dirname(path.dirname(path.dirname(runDir))) };
 }
 
 function looksLikeRecord(text: string): boolean {
@@ -642,42 +816,41 @@ function looksLikeRecord(text: string): boolean {
 }
 
 export interface ReadJournalOptions {
-  /** Truncate a torn tail on disk (and restore a lost final line end). */
+  /** Truncate a torn tail on disk, restore a lost final line end, and re-append a record restored from the head. */
   repair?: boolean;
-  /** The run key; default: loaded from the state dir for the run the path names. */
+  /** The run key; default: the `key` file next to the journal. */
   key?: Buffer;
-  keyDir?: string;
+  /** The run id the records are chained to; default: the journal's directory name. */
+  runId?: string;
   /**
-   * The run's head pointer; default: loaded (and authenticated) from next to
-   * the key. `false` skips the length check: only for inspecting raw bytes,
-   * never on a path that resumes.
+   * The run's head; default: the authenticated `head.json` next to the journal.
+   * `false` skips the length check: only for inspecting raw bytes, never on a
+   * path that resumes.
    */
   head?: JournalHead | false;
 }
 
 /**
- * Read a journal. Records are authenticated with the run's key, and the
- * result must agree with the run's head pointer ({@link checkJournalHead}).
- * Only an unterminated final segment that is not complete JSON is a torn
- * append; with `repair` it is truncated on disk back to the last valid record.
- * An unterminated segment that IS complete JSON must authenticate as the next
- * record, or the journal is refused as forged. Throws
+ * Read a journal from a run's private directory. Records are authenticated
+ * and chained with the run key, then checked against the head: the journal
+ * must end at the head's record, or one short of it (then that record is
+ * restored from the head). Only an unterminated final segment that is not
+ * complete JSON is a torn append; with `repair` it is cut. Throws
  * {@link JournalVersionError} for another format, {@link JournalKeyError}
  * when the key is missing and {@link JournalRollbackError} when the journal
- * does not end where the run's head pointer says it does.
+ * was cut back or does not match its head.
  */
 export function readJournal(file: string, opts: ReadJournalOptions = {}): JournalRead {
-  const buf = fs.readFileSync(file);
-  const loc = () => journalLocation(file);
+  const dir = path.dirname(path.resolve(file));
+  const runId = opts.runId ?? path.basename(dir);
+  const buf = readNoFollow(file);
   let key = opts.key;
   const getKey = (): Buffer => {
-    if (!key) {
-      const { cwd, runId } = loc();
-      key = loadRunKey(runKeyFile(cwd, runId, opts.keyDir ?? runKeyDir()));
-    }
-    return key as Buffer;
+    key ??= loadRunKey(path.join(dir, KEY_FILE));
+    return key;
   };
   const records: JournalRecord[] = [];
+  const prevMac = () => (records.length > 0 ? (records[records.length - 1].h as string) : "");
   let offset = 0;
   let validBytes = 0;
   let line = 0;
@@ -685,75 +858,85 @@ export function readJournal(file: string, opts: ReadJournalOptions = {}): Journa
   let corruptAtLine: number | undefined;
   let forgedAtLine: number | undefined;
   let missingNewline = false;
+  const forged = (at: number) => {
+    firstBad = at;
+    corruptAtLine = at;
+    forgedAtLine = at;
+  };
   while (offset < buf.length) {
     const nl = buf.indexOf(0x0a, offset);
     line++;
-    if (nl === -1) {
-      const text = buf.subarray(offset).toString("utf-8");
-      if (firstBad !== undefined) {
-        if (corruptAtLine === undefined && looksLikeRecord(text)) corruptAtLine = firstBad;
-      } else {
-        // Complete JSON here is the next record without its line end, and must
-        // authenticate as one. Only a segment that is not complete JSON is a
-        // torn append, and that is checked against the head pointer below.
-        const rec = verifyLine(text, records.length + 1, getKey);
-        if (rec === "version") throw new JournalVersionError((JSON.parse(text) as { v?: unknown }).v);
-        if (rec === undefined) {
-          firstBad = line;
-        } else if (rec === "forged") {
-          firstBad = line;
-          corruptAtLine = line;
-          forgedAtLine = line;
-        } else {
-          records.push(rec);
-          validBytes = buf.length;
-          missingNewline = true;
-        }
-      }
-      break;
-    }
-    const text = buf.subarray(offset, nl).toString("utf-8");
-    offset = nl + 1;
-    if (firstBad === undefined) {
-      const rec = verifyLine(text, records.length + 1, getKey);
-      if (rec === "version") throw new JournalVersionError((JSON.parse(text) as { v?: unknown }).v);
-      if (rec === "forged") {
-        firstBad = line;
-        corruptAtLine = line;
-        forgedAtLine = line;
-      } else if (rec) {
-        records.push(rec);
-        validBytes = offset;
-      } else {
-        firstBad = line;
-      }
-    } else if (corruptAtLine === undefined && looksLikeRecord(text)) {
+    const end = nl === -1 ? buf.length : nl;
+    const text = buf.subarray(offset, end).toString("utf-8");
+    offset = end + 1;
+    if (firstBad !== undefined) {
       // A well-formed record after a bad line: the damage is not a torn tail.
-      corruptAtLine = firstBad;
+      if (corruptAtLine === undefined && looksLikeRecord(text)) corruptAtLine = firstBad;
+      continue;
+    }
+    const rec = verifyLine(text, records.length + 1, prevMac(), runId, getKey);
+    if (rec === "version") throw new JournalVersionError((JSON.parse(text) as { v?: unknown }).v);
+    if (rec === "forged") forged(line);
+    else if (rec === undefined) firstBad = line;
+    else {
+      records.push(rec);
+      validBytes = Math.min(offset, buf.length);
+      // Complete JSON without its line end is the next record, authenticated like any other.
+      if (nl === -1) missingNewline = true;
     }
   }
   const truncatedBytes = buf.length - validBytes;
+
+  let restored: JournalRecord | undefined;
   if (corruptAtLine === undefined && opts.head !== false) {
-    // Before any repair: a refused journal stays exactly as it was found.
-    let head = opts.head;
-    if (!head) {
-      const { cwd, runId } = loc();
-      head = loadJournalHead(runHeadFile(cwd, runId, opts.keyDir ?? runKeyDir()), getKey(), runId);
+    const head = opts.head ?? loadJournalHead(dir, getKey(), runId);
+    const n = records.length;
+    if (n === head.seq - 1 && head.record) {
+      // A crash after the head was written, before the journal append: the record is in the head.
+      const rec = verifyLine(JSON.stringify(head.record), head.seq, prevMac(), runId, getKey);
+      if (!rec || rec === "version" || rec === "forged") {
+        throw new JournalRollbackError(`the run journal's head holds a record that does not follow record ${n}`);
+      }
+      restored = rec;
+    } else if (n < head.seq) {
+      throw new JournalRollbackError(
+        `the run journal ends at record ${n}, but the run had written ${head.seq}: records were removed from its end (rolled back)`,
+      );
+    } else if (n > head.seq) {
+      throw new JournalRollbackError(
+        `the run journal has ${n} records, but its head is record ${head.seq}: it was not written by this run alone`,
+      );
+    } else if (n > 0 && records[n - 1].h !== head.record?.h) {
+      throw new JournalRollbackError(`run journal record ${n} is not the record the run wrote there`);
     }
-    checkJournalHead(records, truncatedBytes > 0, head);
   }
+  if (restored) records.push(restored);
+
   if (opts.repair && corruptAtLine === undefined) {
     if (truncatedBytes > 0) fs.truncateSync(file, validBytes);
-    else if (missingNewline) fs.appendFileSync(file, "\n");
+    const tail = (missingNewline ? "\n" : "") + (restored ? JSON.stringify(restored) + "\n" : "");
+    if (tail) appendDurably(file, tail);
   }
   return {
     file,
     records,
     truncatedBytes,
     ...(missingNewline ? { missingNewline } : {}),
+    ...(restored ? { restored: true } : {}),
     ...(corruptAtLine !== undefined ? { corruptAtLine } : {}),
     ...(forgedAtLine !== undefined ? { forgedAtLine } : {}),
   };
+}
+
+function appendDurably(file: string, text: string): void {
+  const c = fs.constants;
+  const fd = fs.openSync(file, c.O_WRONLY | c.O_APPEND | NOFOLLOW);
+  try {
+    fs.writeSync(fd, text);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 // ─── Resume plan ──────────────────────────────────────────────────
@@ -1278,8 +1461,9 @@ export type JournalReplay =
   { kind: "complete"; result: NodeResult; next?: string | null } | ({ kind: "checkpoint" } & JournalCheckpoint);
 
 /**
- * The executor's view of a journal (`ExecuteOptions.journal`). Every hook is
- * best effort except at resume, where `begin` refuses a changed run.
+ * The executor's view of a journal (`ExecuteOptions.journal`). A hook that
+ * cannot write its record throws {@link JournalWriteError}: the executor
+ * stops the run there. At resume, `begin` refuses a changed run.
  */
 export interface ExecutionJournal {
   begin(info: JournalBeginInfo): void;
@@ -1303,16 +1487,19 @@ export interface ExecutionJournal {
 /** Minimum gap between two live usage records of one attempt. Final reports are always written. */
 export const USAGE_JOURNAL_INTERVAL_MS = 2000;
 
-/** Test seam: called before each append; a throw simulates the process dying there. */
+/** Test seams: a throw simulates the process dying at that point of an append. */
 export interface JournalFaults {
+  /** Before anything of the record reaches the disk. */
   beforeAppend?(record: JournalRecord): void;
-  /** Called after a record is fsync'd to the journal, before the head pointer moves to it. */
-  beforeHeadUpdate?(record: JournalRecord): void;
+  /** After the head holds the record, before the journal append. */
+  afterHeadUpdate?(record: JournalRecord): void;
+  /** Replaces the journal write (a throw is an I/O failure, not a process death). */
+  writeJournal?(fd: number, line: string): void;
 }
 
 export interface RunJournalOptions {
   runId: string;
-  /** Base directory; the journal goes in `<cwd>/.sweny/runs/<run-id>/`. Default: process.cwd(). */
+  /** The workspace the run belongs to (its real path, hashed, names the run's state dir). Default: process.cwd(). */
   cwd?: string;
   /** Workflow file the run came from, so `resume` can load it again. */
   workflowFile?: string;
@@ -1321,60 +1508,96 @@ export interface RunJournalOptions {
   env?: Record<string, string | undefined>;
   logger?: Logger;
   faults?: JournalFaults;
-  /** Journals kept on disk (default {@link JOURNAL_KEEP}). */
+  /** Journals kept per workspace (default {@link JOURNAL_KEEP}). */
   keep?: number;
-  /** Where run keys live (default {@link runKeyDir}). Never inside the workspace. */
-  keyDir?: string;
+  /** Where run journals live (default {@link runStateRoot}). Never inside the workspace. */
+  stateRoot?: string;
 }
 
 export interface ResumeJournalOptions extends RunJournalOptions {
   read: JournalRead;
   plan: ResumePlan;
+  /** The run's lock, taken before the journal was read ({@link lockRun}). */
+  lock: RunLock;
   /** Resume even though the workflow, instructions, input or tools changed. */
   force?: boolean;
   /** Re-send writes whose outcome cannot be confirmed on the provider. */
   allowRepeatWrites?: boolean;
 }
 
-export function journalDir(cwd: string, runId: string): string {
-  return path.join(cwd, JOURNAL_DIR, runId);
+/** A run's journal file. */
+export function journalFile(cwd: string, runId: string, root: string = runStateRoot()): string {
+  return path.join(journalDir(cwd, runId, root), JOURNAL_FILE);
 }
 
-/** Run ids with a journal on disk, oldest first. */
-export function listJournalRuns(cwd: string = process.cwd()): string[] {
+/**
+ * Runs of this workspace with a journal, oldest first. Only the state dir is
+ * read, and only runs whose metadata authenticates count: nothing in the
+ * workspace can add, hide or reorder a run.
+ */
+export function listJournalRuns(cwd: string = process.cwd(), root: string = runStateRoot()): string[] {
+  const scope = workspaceScope(cwd);
+  const base = path.join(root, scope);
+  let names: string[];
   try {
-    return fs
-      .readdirSync(path.join(cwd, JOURNAL_DIR))
-      .filter((d) => RUN_ID_RE.test(d) && fs.existsSync(path.join(cwd, JOURNAL_DIR, d, JOURNAL_FILE)))
-      .sort();
+    names = fs.readdirSync(base);
   } catch {
     return [];
   }
+  const runs: RunMeta[] = [];
+  for (const name of names) {
+    if (!RUN_ID_RE.test(name)) continue;
+    const meta = loadRunMeta(path.join(base, name), name, scope);
+    if (meta) runs.push(meta);
+  }
+  return runs
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.runId.localeCompare(b.runId))
+    .map((r) => r.runId);
 }
 
-/** Exact run id, or a unique prefix. */
-export function findJournalRun(ref: string, cwd: string = process.cwd()): string | undefined {
-  const runs = listJournalRuns(cwd);
+/** Exact run id, or a unique prefix, among this workspace's journaled runs. */
+export function findJournalRun(
+  ref: string,
+  cwd: string = process.cwd(),
+  root: string = runStateRoot(),
+): string | undefined {
+  const runs = listJournalRuns(cwd, root);
   if (runs.includes(ref)) return ref;
   const matches = runs.filter((r) => r.startsWith(ref));
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-/** Delete the oldest journals (and their keys) beyond `keep`, never `except`. Never throws. */
+/** A journal an older sweny left in the workspace for this run id (or unique prefix), if any. Never read. */
+export function findLegacyJournal(ref: string, cwd: string = process.cwd()): string | undefined {
+  try {
+    const base = path.join(cwd, LEGACY_JOURNAL_DIR);
+    const hits = fs
+      .readdirSync(base)
+      .filter((d) => RUN_ID_RE.test(d) && (d === ref || d.startsWith(ref)))
+      .filter((d) => fs.existsSync(path.join(base, d, JOURNAL_FILE)));
+    return hits.length === 1 ? path.join(base, hits[0], JOURNAL_FILE) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Delete this workspace's oldest journals beyond `keep`, never `except`, by
+ * their authenticated creation time. Runs whose metadata does not
+ * authenticate are never deleted. Never throws.
+ */
 export function pruneJournals(
   cwd: string,
   keep: number = JOURNAL_KEEP,
   except?: string,
-  keyDir: string = runKeyDir(),
+  root: string = runStateRoot(),
 ): number {
-  const runs = listJournalRuns(cwd).filter((r) => r !== except);
+  const runs = listJournalRuns(cwd, root).filter((r) => r !== except);
   const extra = runs.slice(0, Math.max(0, runs.length - Math.max(0, keep - (except ? 1 : 0))));
   let removed = 0;
   for (const r of extra) {
     try {
-      fs.rmSync(journalDir(cwd, r), { recursive: true, force: true });
-      fs.rmSync(runKeyFile(cwd, r, keyDir), { force: true });
-      fs.rmSync(runHeadFile(cwd, r, keyDir), { force: true });
+      fs.rmSync(journalDir(cwd, r, root), { recursive: true, force: true });
       removed++;
     } catch {
       // leave it
@@ -1383,37 +1606,39 @@ export function pruneJournals(
   return removed;
 }
 
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
+/** Take a run's lock before reading its journal (resume). Throws {@link JournalLockedError}. */
+export function lockRun(cwd: string, runId: string, root: string = runStateRoot(), hooks?: LockHooks): RunLock {
+  return acquireRunLock(journalDir(cwd, runId, root), hooks);
 }
 
 const quietLogger: Logger = { info() {}, warn() {}, error() {}, debug() {} };
+
+const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export class RunJournal implements ExecutionJournal {
   readonly runId: string;
   readonly dir: string;
   readonly file: string;
   private readonly cwd: string;
+  private readonly root: string;
   private readonly opts: RunJournalOptions;
   private readonly logger: Logger;
   private readonly resume?: { plan: ResumePlan; force: boolean; allowRepeatWrites: boolean };
   private fd: number | undefined;
   private seq = 0;
-  private dead = false;
+  /** MAC of the last record written: the next record chains to it. */
+  private prev = "";
+  /** Set once an append failed: every later append throws it again. */
+  private failure: JournalWriteError | undefined;
+  /** Set when a fault seam simulated the process dying: nothing more is written. */
+  private killed = false;
   private began = false;
   private closed = false;
   private secrets: string[] = [];
   private consumed = new Set<string>();
-  /** Per-run HMAC key; lives only here and in the key file outside the workspace. */
+  /** Per-run HMAC key; lives only here and in the run's private state dir. */
   private key: Buffer | undefined;
-  private readonly keyFile: string;
-  /** Head pointer next to the key: seq + MAC of the last record appended. */
-  private readonly headFile: string;
+  private lock: RunLock | undefined;
   /** Last live usage record per attempt: time and spend, for throttling. */
   private lastUsage = new Map<string, { at: number; tokens: number; costUsd: number }>();
 
@@ -1421,19 +1646,21 @@ export class RunJournal implements ExecutionJournal {
     this.opts = opts;
     this.runId = opts.runId;
     this.cwd = opts.cwd ?? process.cwd();
-    this.dir = journalDir(this.cwd, opts.runId);
+    this.root = opts.stateRoot ?? runStateRoot();
+    this.dir = journalDir(this.cwd, opts.runId, this.root);
     this.file = path.join(this.dir, JOURNAL_FILE);
     this.logger = opts.logger ?? quietLogger;
-    this.keyFile = runKeyFile(this.cwd, opts.runId, opts.keyDir ?? runKeyDir());
-    this.headFile = runHeadFile(this.cwd, opts.runId, opts.keyDir ?? runKeyDir());
     if (resume) {
       this.resume = {
         plan: resume.plan,
         force: resume.force === true,
         allowRepeatWrites: resume.allowRepeatWrites === true,
       };
-      this.seq = resume.read.records.length;
-      this.key = loadRunKey(this.keyFile);
+      this.lock = resume.lock;
+      const records = resume.read.records;
+      this.seq = records.length;
+      this.prev = records.length > 0 ? (records[records.length - 1].h as string) : "";
+      this.key = loadRunKey(path.join(this.dir, KEY_FILE));
     }
   }
 
@@ -1442,52 +1669,45 @@ export class RunJournal implements ExecutionJournal {
     return new RunJournal(opts);
   }
 
-  /** A journal that continues `opts.read` (already repaired) under the resume plan. */
+  /** A journal that continues `opts.read` (already repaired, under `opts.lock`) under the resume plan. */
   static openForResume(opts: ResumeJournalOptions): RunJournal {
-    const j = new RunJournal(opts, opts);
-    j.takeLock();
-    return j;
+    return new RunJournal(opts, opts);
   }
 
-  /** False once an append failed: the rest of the run is not journaled. */
+  /** False once an append failed (or the process was simulated dead): the run cannot be resumed past that point. */
   get active(): boolean {
-    return !this.dead;
-  }
-
-  private takeLock(): void {
-    const lock = path.join(this.dir, LOCK_FILE);
-    try {
-      const pid = Number(fs.readFileSync(lock, "utf-8").trim());
-      if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && pidAlive(pid)) throw new JournalLockedError(pid);
-    } catch (err) {
-      if (err instanceof JournalLockedError) throw err;
-    }
-    this.makeDir();
-    fs.writeFileSync(lock, String(process.pid), { mode: 0o600 });
-  }
-
-  /** The run dir is private (0700); its parents are created as usual. */
-  private makeDir(): void {
-    fs.mkdirSync(path.dirname(this.dir), { recursive: true });
-    fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    return !this.failure && !this.killed;
   }
 
   private releaseLock(): void {
     try {
-      fs.rmSync(path.join(this.dir, LOCK_FILE), { force: true });
+      this.lock?.release();
     } catch {
       // nothing to do
     }
+    this.lock = undefined;
+  }
+
+  /** Mark the journal failed and throw: the run must stop here. */
+  private fail(what: string, err?: unknown): never {
+    this.failure = new JournalWriteError(err === undefined ? what : `${what} (${errText(err)})`);
+    this.closeFd();
+    this.logger.error(`  ${this.failure.message}`);
+    throw this.failure;
+  }
+
+  private simulatedDeath(err: unknown): never {
+    // Test seam: nothing after this point reaches the disk.
+    this.killed = true;
+    this.closeFd();
+    this.releaseLock();
+    throw err;
   }
 
   private append(type: string, fields: Record<string, unknown>): void {
-    if (this.dead) return;
-    if (!this.key) {
-      // No key, no record resume could trust: stop journaling rather than write unauthenticated records.
-      this.dead = true;
-      this.logger.warn(`  run journal: no signing key for this run; this run cannot be resumed`);
-      return;
-    }
+    if (this.failure) throw this.failure;
+    if (this.killed) return;
+    if (!this.key) return this.fail("no signing key for this run");
     const body: Record<string, unknown> = {
       v: JOURNAL_SCHEMA_VERSION,
       seq: this.seq + 1,
@@ -1495,59 +1715,42 @@ export class RunJournal implements ExecutionJournal {
       at: new Date().toISOString(),
       ...fields,
     };
-    const record = { ...body, h: recordMac(this.key, JSON.stringify(body)) } as unknown as JournalRecord;
+    const h = chainMac(this.key, this.runId, this.seq + 1, this.prev, body);
+    const record = { ...body, h } as unknown as JournalRecord;
     if (this.opts.faults?.beforeAppend) {
       try {
         this.opts.faults.beforeAppend(record);
       } catch (err) {
-        // Simulated process death: nothing after this point reaches the disk.
-        this.dead = true;
-        this.closeFd();
-        this.releaseLock();
-        throw err;
+        this.simulatedDeath(err);
+      }
+    }
+    // Head first: a crash before the journal append leaves the record recoverable, never lost.
+    try {
+      writeJournalHead(this.dir, this.key, this.runId, { seq: this.seq + 1, record });
+    } catch (err) {
+      this.fail(`could not write the head file in ${this.dir}`, err);
+    }
+    if (this.opts.faults?.afterHeadUpdate) {
+      try {
+        this.opts.faults.afterHeadUpdate(record);
+      } catch (err) {
+        this.simulatedDeath(err);
       }
     }
     try {
       if (this.fd === undefined) {
-        this.makeDir();
-        this.fd = fs.openSync(this.file, "a", 0o600);
-        fs.fchmodSync(this.fd, 0o600);
+        const c = fs.constants;
+        this.fd = fs.openSync(this.file, c.O_WRONLY | c.O_APPEND | c.O_CREAT | NOFOLLOW, 0o600);
       }
-      fs.writeSync(this.fd, JSON.stringify(record) + "\n");
+      const line = JSON.stringify(record) + "\n";
+      if (this.opts.faults?.writeJournal) this.opts.faults.writeJournal(this.fd, line);
+      else fs.writeSync(this.fd, line);
       fs.fsyncSync(this.fd);
-      this.seq++;
     } catch (err) {
-      this.dead = true;
-      this.closeFd();
-      this.logger.warn(
-        `  run journal: could not write ${this.file} (${err instanceof Error ? err.message : String(err)}); ` +
-          `this run cannot be resumed past this point`,
-      );
-      return;
+      this.fail(`could not write ${this.file}`, err);
     }
-    if (this.opts.faults?.beforeHeadUpdate) {
-      try {
-        this.opts.faults.beforeHeadUpdate(record);
-      } catch (err) {
-        // Simulated process death after the record reached the disk, before the head moved.
-        this.dead = true;
-        this.closeFd();
-        this.releaseLock();
-        throw err;
-      }
-    }
-    try {
-      writeJournalHead(this.headFile, this.key, this.runId, { seq: this.seq, mac: record.h as string });
-    } catch (err) {
-      // The journal is now one record past the head: resume accepts exactly that, and no more,
-      // so stop here rather than append records it would refuse.
-      this.dead = true;
-      this.closeFd();
-      this.logger.warn(
-        `  run journal: could not update the head pointer ${this.headFile} ` +
-          `(${err instanceof Error ? err.message : String(err)}); this run cannot be resumed past this point`,
-      );
-    }
+    this.seq++;
+    this.prev = h;
   }
 
   private closeFd(): void {
@@ -1582,7 +1785,7 @@ export class RunJournal implements ExecutionJournal {
       if (changed.length > 0) {
         if (!this.resume.force) {
           // Nothing is appended for a refused resume: the journal stays as the crash left it.
-          this.dead = true;
+          this.killed = true;
           this.closeFd();
           this.releaseLock();
           throw new JournalMismatchError(changed);
@@ -1605,25 +1808,21 @@ export class RunJournal implements ExecutionJournal {
     }
 
     try {
-      this.makeDir();
-      // Journals hold node output: keep them out of commits (an agent's `git add -A` included).
-      fs.writeFileSync(path.join(this.dir, ".gitignore"), "*\n");
-      this.takeLock();
-    } catch {
-      // append() reports the failure
-    }
-    try {
-      const key = createRunKey(this.keyFile);
-      // The first head (no records yet) goes down with the key, so a missing head is never "new run".
-      writeJournalHead(this.headFile, key, this.runId, { seq: 0, mac: "" });
+      makePrivateDir(this.dir);
+      this.lock = acquireRunLock(this.dir);
+      const key = createRunKey(path.join(this.dir, KEY_FILE));
+      writeRunMeta(this.dir, key, this.runId, workspaceScope(this.cwd));
+      writeJournalHead(this.dir, key, this.runId, { seq: 0, record: null });
       this.key = key;
     } catch (err) {
-      this.logger.warn(
-        `  run journal: could not write the run key under ${path.dirname(this.keyFile)} ` +
-          `(${err instanceof Error ? err.message : String(err)}); set SWENY_STATE_DIR to a writable dir`,
+      this.releaseLock();
+      this.fail(
+        `could not set up the run's journal in ${this.dir}; set SWENY_STATE_DIR to a writable dir, ` +
+          `or pass --no-journal (the run then cannot be resumed)`,
+        err,
       );
     }
-    pruneJournals(this.cwd, this.opts.keep ?? JOURNAL_KEEP, this.runId, this.opts.keyDir ?? runKeyDir());
+    pruneJournals(this.cwd, this.opts.keep ?? JOURNAL_KEEP, this.runId, this.root);
     const input = redact(info.input, this.secrets);
     this.append("run:start", {
       run_id: this.runId,
@@ -1724,9 +1923,15 @@ export class RunJournal implements ExecutionJournal {
     return this.resume ? { ...this.resume.plan.priorSpend } : undefined;
   }
 
-  /** Close the run: `run:end`, then release the lock. Safe to call twice (one run:end). */
+  /** Close the run: `run:end` (when the journal still works), then release the lock. Never throws. */
   end(status: "success" | "failed" | "crashed"): void {
-    if (this.began && !this.closed) this.append("run:end", { status });
+    if (this.began && !this.closed && this.active) {
+      try {
+        this.append("run:end", { status });
+      } catch {
+        // already reported by append
+      }
+    }
     this.closed = true;
     this.closeFd();
     this.releaseLock();
@@ -1771,6 +1976,7 @@ export class RunJournal implements ExecutionJournal {
             );
           }
         }
+        // A write the journal cannot record is never sent: append throws first.
         this.append("output:intent", { node, iteration, key, tool: tool.name });
         const output = await tool.handler(withMarker(tool.name, args, key), ctx);
         this.append("output:applied", { node, iteration, key, tool: tool.name, output: slimOutput(output) });

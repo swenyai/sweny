@@ -1336,8 +1336,9 @@ export async function workflowRunAction(
     progress.stop();
     console.error(formatCrashError(err));
     runLogger.flush();
+    const resumable = journal?.active === true;
     journal?.end("crashed");
-    if (journal) console.error(c.subtle(`  resume with: sweny workflow resume ${runId}`));
+    if (resumable) console.error(c.subtle(`  resume with: sweny workflow resume ${runId}`));
     recordHistory(nodeTimer.lastResults, undefined, true);
     const crashSummary = summarizeRun(new Map(), Date.now() - runStart, true);
     await writeReceipt(crashSummary, { workflow: workflow.id, runId, crashed: true, stream: process.stderr });
@@ -1459,7 +1460,7 @@ workflowRunCmd.option(
 );
 workflowRunCmd.option(
   "--no-journal",
-  "Do not write a run journal to .sweny/runs/<run-id>/ (or set `journal: off` in .sweny.yml); the run cannot be resumed",
+  "Do not write a run journal (kept in the sweny state dir; or set `journal: off` in .sweny.yml); the run cannot be resumed",
 );
 
 const workflowResumeCmd = workflowCmd

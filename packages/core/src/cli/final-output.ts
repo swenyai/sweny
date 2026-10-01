@@ -230,6 +230,8 @@ export function writeFinalOutput(runId: string, markdown: string, cwd: string = 
     const file = path.join(cwd, rel);
     fs.mkdirSync(path.dirname(path.dirname(file)), { recursive: true });
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    // Node output: keep the run dir out of commits (an agent's `git add -A` included).
+    fs.writeFileSync(path.join(path.dirname(file), ".gitignore"), "*\n");
     fs.writeFileSync(file, markdown, { mode: 0o600 });
     // mode only applies on create: a resumed run overwrites an existing file.
     fs.chmodSync(file, 0o600);

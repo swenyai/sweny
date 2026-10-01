@@ -16,14 +16,21 @@ SWEny is an open-source CLI and GitHub Action. It does not collect telemetry by 
 In `.sweny/runs/` in your working directory:
 
 - **Run history record** (`<run-id>.json`): metadata only (statuses, durations, counts). The 200 most recent are kept. Turn it off with `--no-history` or `history: off` in `.sweny.yml`.
-- **Final answer** (`<run-id>/output.md`, mode `0600`): the run's answer, the final node's declared output fields or summary, or the failed node's error. Secret-looking values are redacted first (see below). It is deleted with its run directory: when its history record is pruned, or when its journal is pruned (the 20 most recent journals are kept). `--no-history` skips it. In CI it is not printed to the log unless you pass `--show-output` (Action input `show-output: true`); only its path is.
-- **Run journal** (`<run-id>/journal.ndjson`, mode `0600`), so `sweny workflow resume` can continue a killed run: node results, eval verdicts, safe-output requests and receipts, token and cost usage, routing decisions, and the run input. Secret-looking values are redacted; environment variables are never written. The 20 most recent journals are kept. Turn it off with `--no-journal` or `journal: off` in `.sweny.yml`.
-- **Journal lock** (`<run-id>/journal.lock`): the process id holding the journal, removed when the run ends.
+- **Final answer** (`<run-id>/output.md`, mode `0600`): the run's answer, the final node's declared output fields or summary, or the failed node's error. Secret-looking values are redacted first (see below). It is deleted with its run directory when its history record is pruned. `--no-history` skips it. In CI it is not printed to the log unless you pass `--show-output` (Action input `show-output: true`); only its path is.
 - **`<run-id>/.gitignore`**: `*`, so an agent's `git add -A` never commits a run directory.
 
-Outside the working directory:
+Outside the working directory, in the sweny state dir (`$SWENY_STATE_DIR`, default `$XDG_STATE_HOME/sweny`, else `~/.local/state/sweny`), under `runs/<hash of the working directory path>/<run-id>/` (directories `0700`, files `0600`; agents can neither read nor write it):
 
-- **Run journal key** (`$SWENY_STATE_DIR/run-keys/`, default `~/.local/state/sweny/run-keys/`, file mode `0600`): 32 random bytes per journaled run that authenticate its journal records. The file name is a hash of the working directory path plus the run id. Deleted when its journal is pruned.
+- **Run journal** (`journal.ndjson`), so `sweny workflow resume` can continue a killed run: node results, eval verdicts, safe-output requests and receipts, token and cost usage, routing decisions, and the run input. Secret-looking values are redacted; environment variables are never written. The 20 most recent journals per working directory are kept. Turn it off with `--no-journal` or `journal: off` in `.sweny.yml`.
+- **Journal head** (`head.json`): a copy of the record being appended, so a crash mid-append loses nothing.
+- **Run key** (`key`): 32 random bytes per journaled run that authenticate its journal records.
+- **Run metadata** (`meta.json`): run id, working directory hash and creation time, used for retention.
+- **Run lock** (`lock`): the process id and start time of the process holding the run, removed when the run ends.
+
+Everything for a run is deleted together when its journal is pruned.
+
+Also outside the working directory:
+
 - **Version check cache** (`$XDG_CACHE_HOME/sweny/version-check.json`, default `~/.cache/sweny/`): the latest published version and when it was checked.
 - **PR comment file**, only with `--comment-file <path>` (the Action sets it on pull requests): metadata only, no prompts, tool inputs or model output.
 - **GitHub step summary**, only under GitHub Actions: the run receipt and a status-colored workflow diagram, appended to `$GITHUB_STEP_SUMMARY`. No node output.

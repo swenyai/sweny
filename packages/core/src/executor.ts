@@ -73,7 +73,7 @@ import {
   type ActorInfo,
   type SafeOutputIntent,
 } from "./safe-outputs.js";
-import type { ExecutionJournal, JournalReplay } from "./journal.js";
+import { JournalWriteError, type ExecutionJournal, type JournalReplay } from "./journal.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -204,6 +204,44 @@ function throwIfAborted(signal?: AbortSignal): void {
  * - `trace`: full ordered execution trace including loops and routing decisions
  */
 export async function execute(workflow: Workflow, input: unknown, options: ExecuteOptions): Promise<ExecutionResult> {
+  const results = new Map<string, NodeResult>();
+  const trace: ExecutionTrace = { steps: [], edges: [], sources: {} };
+  const at: VisitCursor = { node: null, iteration: 0 };
+  try {
+    return await executeRun(workflow, input, options, results, trace, at);
+  } catch (err) {
+    // Resume (#363): a journal that cannot record the run stops it. The node
+    // fails with the reason; nothing after it runs (no model call, no write).
+    if (!(err instanceof JournalWriteError) || at.node === null) throw err;
+    const logger = options.logger ?? consoleLogger;
+    const result: NodeResult = {
+      ...(results.get(at.node) ?? { toolCalls: [] }),
+      status: "failed",
+      data: { ...(results.get(at.node)?.data ?? {}), error: err.message, journal_failed: true },
+    };
+    results.set(at.node, result);
+    trace.steps.push({ node: at.node, status: "failed", iteration: at.iteration });
+    safeObserve(options.observer, { type: "node:exit", node: at.node, result }, logger);
+    logger.error(`  ${err.message}`, { node: at.node });
+    safeObserve(options.observer, { type: "workflow:end", results: Object.fromEntries(results) }, logger);
+    return { results, trace };
+  }
+}
+
+/** The visit the executor is on, for {@link execute}'s journal-failure stop. */
+interface VisitCursor {
+  node: string | null;
+  iteration: number;
+}
+
+async function executeRun(
+  workflow: Workflow,
+  input: unknown,
+  options: ExecuteOptions,
+  results: Map<string, NodeResult>,
+  trace: ExecutionTrace,
+  at: VisitCursor,
+): Promise<ExecutionResult> {
   const { observer, signal, timeoutMs, journal } = options;
   // `harness` is the seam; a legacy `claude` object is used as-is (what `asClaude(claudeCompat(claude))` yields).
   const claude: Claude = options.harness ? asClaude(options.harness) : (options.claude as Claude);
@@ -223,12 +261,10 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
 
   const config = resolveConfig(skills, options.config, options.env ?? process.env);
   const logger = options.logger ?? consoleLogger;
-  const results = new Map<string, NodeResult>();
   const edgeCounts = new Map<string, number>(); // "from→to" → times followed
   const nodeRunCounts = new Map<string, number>(); // node → times executed
   const maxSteps = options.max_steps ?? DEFAULT_MAX_STEPS;
   let stepCount = 0; // total node executions across the run (loop iterations included)
-  const trace: ExecutionTrace = { steps: [], edges: [], sources: {} };
 
   validate(workflow, skills);
 
@@ -352,6 +388,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
 
     const iteration: number = (nodeRunCounts.get(currentId) ?? 0) + 1;
     nodeRunCounts.set(currentId, iteration);
+    at.node = currentId;
+    at.iteration = iteration;
 
     const resolvedInstruction = resolvedSources[`nodes.${currentId}.instruction`].content;
     safeObserve(observer, { type: "node:enter", node: currentId, instruction: resolvedInstruction }, logger);
@@ -673,10 +711,26 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       const usageNode: string = currentId;
       const usageAttempt = attempt;
       let liveUsage: NodeUsage | undefined;
+      // A live usage record the journal cannot write stops the agent at once:
+      // its spend would be invisible to a resume.
+      let journalFault: unknown;
+      const journalStop = journal?.usage ? new AbortController() : undefined;
+      const parentSignal = attemptBudget?.signal ?? signal;
+      const onParentAbort = () => journalStop?.abort(parentSignal?.reason);
+      if (journalStop && parentSignal) {
+        if (parentSignal.aborted) journalStop.abort(parentSignal.reason);
+        else parentSignal.addEventListener("abort", onParentAbort, { once: true });
+      }
       const journalUsage = journal?.usage
         ? (u: NodeUsage) => {
             liveUsage = { ...liveUsage, ...u };
-            journal!.usage!(usageNode, iteration, usageAttempt, liveUsage, false);
+            if (journalFault) return;
+            try {
+              journal!.usage!(usageNode, iteration, usageAttempt, liveUsage, false);
+            } catch (err) {
+              journalFault = err;
+              journalStop?.abort(err);
+            }
           }
         : undefined;
       const onUsage =
@@ -697,7 +751,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
           disallowedTools: node.disallowed_tools,
           ...(denyClasses.length > 0 ? { deny: denyClasses } : {}),
           model: nodeModel,
-          signal: attemptBudget?.signal ?? signal,
+          signal: journalStop?.signal ?? parentSignal,
           timeoutMs,
           agentAccess,
           ...(nodePolicy ? { policy: nodePolicy } : {}),
@@ -708,9 +762,14 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
             safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
           },
         });
+      } catch (err) {
+        if (journalFault) throw journalFault;
+        throw err;
       } finally {
+        parentSignal?.removeEventListener("abort", onParentAbort);
         attemptBudget?.dispose();
       }
+      if (journalFault) throw journalFault;
       previous = result;
       // The attempt's final spend: the larger of the result's usage and the last live report, per unit.
       if (journal?.usage) {

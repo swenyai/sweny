@@ -271,7 +271,7 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 | `-y, --yes` | Skip the batch confirmation prompt (use in CI) | `false` |
 | `--agent <id>` | Coding agent that runs the nodes: `claude`, `codex` or `pi` (experimental) | `claude` |
 | `--harness-policy <mode>` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and reports it as degraded. Env: `SWENY_HARNESS_POLICY` | `strict` under GitHub Actions, else `warn` |
-| `--no-journal` | Do not write the run journal (`.sweny/runs/<run-id>/journal.ndjson`). The run cannot be resumed. Or set `journal: off` in `.sweny.yml` | journal on |
+| `--no-journal` | Do not write the run journal (kept in the sweny state dir, see [Resume a run](/cli/resume/#the-journal)). The run cannot be resumed. Or set `journal: off` in `.sweny.yml` | journal on |
 | `--show-output` | Print the final answer in CI too. In CI (`GITHUB_ACTIONS` or `CI` set) the answer is saved to `.sweny/runs/<run-id>/output.md` and only that path is printed, unless this flag is set. Outside CI the answer is always printed. Either way it is redacted first | off in CI |
 
 **`--json` and `--stream` are redacted.** Every value they print (node data, summaries, errors, tool call inputs and outputs) passes through the same redactor as the final answer and `output.md`: values of secret-named env vars and skill credentials, string fields with secret-looking names (`token`, `password`, `apiKey`, ...), and known token shapes (`ghp_...`, `sk-...`, `xox...`, AWS keys, private key blocks) become `[redacted]`. Keys and structure are unchanged, and non-secret values pass through as-is.

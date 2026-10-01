@@ -10,8 +10,6 @@ import path from "node:path";
 import type { Logger, Workflow } from "../types.js";
 import { validateRuntimeInput } from "../inputs.js";
 import {
-  JOURNAL_DIR,
-  JOURNAL_FILE,
   JournalKeyError,
   JournalLockedError,
   JournalRollbackError,
@@ -21,12 +19,17 @@ import {
   canonicalHash,
   checkJournalAgainstWorkflow,
   findJournalRun,
-  journalDir,
+  findLegacyJournal,
+  journalFile,
+  lockRun,
   mayRepeatWrites,
   readJournal,
+  runStateRoot,
   workflowHashOf,
   type JournalRead,
+  type LockHooks,
   type ResumePlan,
+  type RunLock,
 } from "../journal.js";
 import { parseInputFlag } from "./workflow-input.js";
 
@@ -89,6 +92,10 @@ export interface PrepareResumeDeps {
   swenyVersion?: string;
   env?: Record<string, string | undefined>;
   logger?: Logger;
+  /** Where run journals live (default: {@link runStateRoot} of `env`). */
+  stateRoot?: string;
+  /** Test seam for the run lock. */
+  lockHooks?: LockHooks;
 }
 
 /** One line per planned visit, for humans. */
@@ -120,18 +127,68 @@ export function formatResumePlan(plan: ResumePlan, mayRepeat: string[]): string[
   return lines;
 }
 
+/**
+ * Check a run journal and build the resume. The run's lock is taken first,
+ * before anything is read or repaired, and is kept by the returned journal
+ * (released on every other outcome, `--plan` included).
+ */
 export function prepareResume(ref: string, opts: ResumeOptions, deps: PrepareResumeDeps): PrepareResumeResult {
   const cwd = deps.cwd ?? process.cwd();
+  const root = deps.stateRoot ?? runStateRoot(deps.env ?? process.env);
+  const runId = findJournalRun(ref, cwd, root);
+  if (!runId) {
+    const legacy = findLegacyJournal(ref, cwd);
+    if (legacy) {
+      return {
+        ok: false,
+        lines: [],
+        error:
+          `run ${ref} has a journal in the workspace (${path.relative(cwd, legacy)}), written by an older sweny. ` +
+          `Journals now live in the sweny state dir, where agents cannot edit them; a workspace journal cannot ` +
+          `be resumed safely. Start a new run.`,
+      };
+    }
+    return {
+      ok: false,
+      lines: [],
+      error:
+        `no run journal matches "${ref}" for this workspace in ${root}. Runs started with --no-journal ` +
+        `(or by another user or state dir) cannot be resumed.`,
+    };
+  }
+  let lock: RunLock;
+  try {
+    lock = lockRun(cwd, runId, root, deps.lockHooks);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      lines: [],
+      error: err instanceof JournalLockedError ? error : `cannot lock run ${runId}: ${error}`,
+    };
+  }
+  let result: PrepareResumeResult;
+  try {
+    result = prepareLocked(runId, journalFile(cwd, runId, root), lock, opts, deps, cwd, root);
+  } catch (err) {
+    lock.release();
+    throw err;
+  }
+  if (!(result.ok && "ctx" in result)) lock.release();
+  return result;
+}
+
+function prepareLocked(
+  runId: string,
+  file: string,
+  lock: RunLock,
+  opts: ResumeOptions,
+  deps: PrepareResumeDeps,
+  cwd: string,
+  root: string,
+): PrepareResumeResult {
   const lines: string[] = [];
   const fail = (error: string): PrepareResumeResult => ({ ok: false, error, lines });
-
-  const runId = findJournalRun(ref, cwd);
-  if (!runId) {
-    return fail(
-      `no run journal matches "${ref}" in ${JOURNAL_DIR}/. Runs started with --no-journal (or before journals existed) cannot be resumed.`,
-    );
-  }
-  const file = path.join(journalDir(cwd, runId), JOURNAL_FILE);
 
   let read: JournalRead;
   try {
@@ -160,6 +217,13 @@ export function prepareResume(ref: string, opts: ResumeOptions, deps: PrepareRes
       opts.plan
         ? `note: the journal ends in a torn record (${read.truncatedBytes} bytes); resuming drops it`
         : `note: dropped a torn record at the end of the journal (${read.truncatedBytes} bytes)`,
+    );
+  }
+  if (read.restored) {
+    lines.push(
+      opts.plan
+        ? `note: the journal's last record was not appended before the crash; resuming restores it from the head`
+        : `note: restored the journal's last record from the head (the run stopped before appending it)`,
     );
   }
 
@@ -229,8 +293,10 @@ export function prepareResume(ref: string, opts: ResumeOptions, deps: PrepareRes
       swenyVersion: deps.swenyVersion,
       env: deps.env,
       logger: deps.logger,
+      stateRoot: root,
       read,
       plan,
+      lock,
       force: opts.force === true,
       allowRepeatWrites: opts.allowRepeatWrites === true,
     });
