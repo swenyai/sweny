@@ -271,7 +271,7 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 | `-y, --yes` | Skip the batch confirmation prompt (use in CI) | `false` |
 | `--agent <id>` | Coding agent that runs the nodes: `claude`, `codex` or `pi` (experimental) | `claude` |
 | `--harness-policy <mode>` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and reports it as degraded. Env: `SWENY_HARNESS_POLICY` | `strict` under GitHub Actions, else `warn` |
-| `--no-decider` | Skip the workflow's decision model (`decider:`) for this run: the agent decides every natural-language route. See [Decision models](/advanced/decision-models/) | decider on when declared |
+| `--no-decider` | Skip the decision model for this run: the agent decides the routes of `route_by: decider` nodes. See [Decision models](/advanced/decision-models/) | decider on when configured |
 | `--no-journal` | Do not write the run journal (`.sweny/runs/<run-id>/journal.ndjson`). The run cannot be resumed. Or set `journal: off` in `.sweny.yml` | journal on |
 | `--show-output` | Print the final answer in CI too. In CI (`GITHUB_ACTIONS` or `CI` set) the answer is saved to `.sweny/runs/<run-id>/output.md` and only that path is printed, unless this flag is set. Outside CI the answer is always printed. Either way it is redacted first | off in CI |
 

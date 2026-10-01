@@ -23,7 +23,7 @@ After a node completes, a conforming executor MUST resolve the next node using t
 3. **If zero edges remain:** execution is complete. The current node is a **terminal node**.
 4. **If exactly one edge remains and it has no `when` clause:** follow it unconditionally. The executor MUST NOT invoke the AI model.
 5. **If every remaining conditional edge is an [expression](#expressions):** evaluate them in the executor. The executor MUST NOT invoke the AI model.
-6. **If the workflow declares a [decider](#decision-models):** ask it to choose among the remaining edges. If its answer passes every gate, follow that edge. The executor MUST NOT invoke the AI model for this route.
+6. **If the node sets `route_by: decider` and the executor has a [decider](#decision-models):** ask it to choose among the remaining edges. If its answer passes every gate, follow that edge. The executor MUST NOT invoke the AI model for this route.
 7. **Otherwise:** present all remaining edge conditions to the AI model. The model evaluates each `when` clause against the accumulated context (workflow input + all prior node results) and selects one edge. The executor follows the selected edge.
 
 ## Unconditional Edges
@@ -138,34 +138,32 @@ Under a dry run every node already runs read-only. Because an expression needs n
 
 ## Decision models
 
-A workflow MAY declare a top-level `decider`: a fast classifier that answers one multiple-choice question per route. It applies only to nodes whose conditional edges are natural language (expression nodes never consult it).
+Write an [expression](#expressions) first: it needs no model at all. A decision model is a fast classifier for the natural-language conditions no declared field can express. It answers one multiple-choice question per route.
+
+A node opts in with `route_by: decider` (default `agent`). Nodes that do not opt in never consult it, so safety conditions belong in expressions. The provider (endpoint, model, key) is **operator config** supplied to the executor, never part of the workflow. The workflow MAY only tighten the gates:
 
 ```yaml
 decider:
-  provider:
-    base_url: http://localhost:11434
-    model: nimble
-    api_key_env: DECIDER_KEY # optional: env var holding a bearer key
-  min_confidence: 0.85 # optional, 0.7 to 1
-  min_margin: 0.2 # optional, 0.1 to 1
+  min_confidence: 0.9 # optional, 0.7 to 1, default 0.85
+  min_margin: 0.25 # optional, 0.1 to 1, default 0.2
 ```
 
-| Field            | Type   | Required | Default | Description                                                                                |
-| ---------------- | ------ | -------- | ------- | ------------------------------------------------------------------------------------------ |
-| `provider`       | object | REQUIRED | none    | `base_url` and `model` of a server answering `POST /v1/systemone`; optional `api_key_env`. |
-| `min_confidence` | number | OPTIONAL | `0.85`  | Lowest confidence accepted. MUST be at least `0.7`.                                        |
-| `min_margin`     | number | OPTIONAL | `0.2`   | Lowest lead of the top label over the runner-up. MUST be at least `0.1`.                   |
+| Field            | Type   | Required | Default | Description                                                              |
+| ---------------- | ------ | -------- | ------- | ------------------------------------------------------------------------ |
+| `min_confidence` | number | OPTIONAL | `0.85`  | Lowest confidence accepted. MUST be at least `0.7`.                      |
+| `min_margin`     | number | OPTIONAL | `0.2`   | Lowest lead of the top label over the runner-up. MUST be at least `0.1`. |
 
-A conforming executor with a decider:
+A workflow that declares `decider.provider` or the removed `decider.mode` is invalid.
 
-- **MUST** ask it with the node's remaining out-edge targets (the default edge included) as the only labels, and **MUST** follow its label only when the label is one of those targets, its confidence is at least `min_confidence`, and its top-two margin is at least `min_margin`.
+For a `route_by: decider` node whose conditional edges are natural language, a conforming executor with a decider:
+
+- **MUST** ask it with the node's remaining out-edge targets (the default edge included, exhausted `max_iterations` edges excluded) as the only labels.
+- **MUST** follow its label only when the label is exactly one of those targets, the probabilities cover exactly those targets, are each in [0, 1] and sum to 1 within 0.01, the label is the unique most probable one, its confidence is at least `min_confidence`, and its top-two margin is at least `min_margin`.
 - **MUST** fall through to the AI model, with unchanged semantics, on any other outcome: a timeout, an HTTP error, a malformed response, an unknown label, or a failed gate.
-- **MUST** send the decider only the routing view: each prior node's status, its declared `output` fields and its eval verdicts, redacted and fenced as untrusted data. It **MUST NOT** send the run input, undeclared node data, tool outputs, environment values or secrets.
-- **MUST NOT** send state to any URL other than `provider.base_url`, and **MUST NOT** fall back to another provider.
-- **SHOULD** stop calling a decider that failed several times in a row, and cap calls per run.
-- **MUST** record in the trace which rung chose each conditional route (`expr`, `decider` or `agent`), and a resumed run **MUST** replay a recorded route without asking the decider or the AI model again.
-
-A workflow that declares the removed `decider.mode` key is invalid.
+- **MUST** send only an explicit projection of declared typed fields: each prior node's status, its `output` properties typed `number`, `integer`, `boolean` or string `enum` (a value outside its type sent as null) and its eval verdicts, redacted and fenced as untrusted data. It **MUST NOT** send free-text strings, undeclared fields, the run input, tool outputs, environment values or secrets. When a condition reads `input.*` or names a node with no such field, it **MUST** skip the decider.
+- **MUST NOT** send state anywhere but the operator's URL, **MUST NOT** fall back to another provider, and **SHOULD** refuse private, link-local and metadata addresses unless the operator allows private ones.
+- **SHOULD** stop calling a decider that failed several times in a row, and cap calls per run; both are per logical run, continued across a resume.
+- **MUST** record in the trace which rung chose each conditional route (`expr`, `decider` or `agent`). A resumed run **MUST** replay each recorded route without asking the decider or the AI model again; replay is deterministic for recorded routes only.
 
 ## Terminal Nodes
 

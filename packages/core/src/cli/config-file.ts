@@ -73,6 +73,28 @@ export function applyAgentFileConfig(fileConfig: FileConfig, env: NodeJS.Process
   }
 }
 
+/**
+ * Operator config for the decision model (#357): `.sweny.yml`
+ * `decider: { url, model, allow_private }`, with SWENY_DECIDER_URL and
+ * SWENY_DECIDER_MODEL taking precedence, and the key only from
+ * SWENY_DECIDER_API_KEY (never from a file). `noDecider` (`--no-decider`)
+ * returns false. Undefined when no URL and model are configured.
+ */
+export function operatorDeciderConfig(
+  fileConfig: FileConfig,
+  env: NodeJS.ProcessEnv,
+  noDecider: boolean,
+): { url: string; model: string; apiKey?: string; allowPrivate?: boolean } | false | undefined {
+  if (noDecider) return false;
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const url = str(env.SWENY_DECIDER_URL) ?? str(fileConfig["decider.url"]);
+  const model = str(env.SWENY_DECIDER_MODEL) ?? str(fileConfig["decider.model"]);
+  if (!url || !model) return undefined;
+  const apiKey = str(env.SWENY_DECIDER_API_KEY);
+  const allowPrivate = str(fileConfig["decider.allow_private"]) === "true";
+  return { url, model, ...(apiKey ? { apiKey } : {}), ...(allowPrivate ? { allowPrivate } : {}) };
+}
+
 /** Parsed config file — flat strings for scalar fields, arrays for list fields, objects for nested blocks. */
 export type FileConfig = Record<string, string | string[] | Record<string, unknown>>;
 

@@ -42,10 +42,12 @@ export interface RunSummary {
   budget?: { node: string; scope: "node" | "run"; unit: "tokens" | "cost_usd"; limit: number; spent: number };
   /**
    * Who decided the run's conditional routes (#357), counts only: a `when`
-   * expression, the decision model, or the agent. Present when the run had a
-   * decider; the decider and expression counts are routes with no agent call.
+   * expression, the decision model, or the agent. The decider and expression
+   * counts are routes with no agent call. Absent when no route was a decision.
    */
   routes?: RouteCounts;
+  /** Why the decider did not run for some or all routes (missing config, breaker, cap). */
+  deciderOff?: string;
 }
 
 export interface RouteCounts {
@@ -135,7 +137,8 @@ export function summarizeRun(
     ...(degraded.size > 0 ? { degraded: [...degraded] } : {}),
     ...(Object.keys(policy).length > 0 ? { policy } : {}),
     ...(budget ? { budget } : {}),
-    ...(trace?.decisions !== undefined ? { routes: countRoutes(trace) } : {}),
+    ...(trace && countRoutes(trace).total > 0 ? { routes: countRoutes(trace) } : {}),
+    ...(trace?.deciderOff ? { deciderOff: trace.deciderOff } : {}),
   };
 }
 
@@ -242,6 +245,7 @@ export function formatReceipt(s: RunSummary): string {
     ...(formatPolicySegment(s.policy) ? [formatPolicySegment(s.policy)!] : []),
     ...(s.budget ? [formatBudgetOverrun(s.budget)] : []),
     ...(s.routes && s.routes.total > 0 ? [`routes ${formatRouteCounts(s.routes)}`] : []),
+    ...(s.deciderOff ? [`decider off: ${s.deciderOff}`] : []),
   ];
   return parts.join(" · ");
 }
@@ -401,8 +405,5 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
     "--harness-policy <mode>",
     "strict: refuse a node whose policy the agent cannot enforce; warn: run it and report what was not enforced (default: strict under GitHub Actions, warn elsewhere; env SWENY_HARNESS_POLICY)",
   ],
-  [
-    "--no-decider",
-    "Skip the workflow's decision model (decider:) for this run: the agent decides every natural-language route",
-  ],
+  ["--no-decider", "Skip the decision model for this run: the agent decides the routes of route_by: decider nodes"],
 ];

@@ -420,6 +420,13 @@ export interface Node {
    */
   on_fail?: NodeOnFail;
   /**
+   * Who picks this node's natural-language route (#357). `agent` (default):
+   * the agent's route evaluation. `decider`: the operator's decision model is
+   * asked first and its confident answer is the route; otherwise the agent.
+   * Expressions always win over both. Safety conditions belong in expressions.
+   */
+  route_by?: RouteBy;
+  /**
    * What this node's agent may do (#365). `read` runs the node read-only:
    * only `access: "read"` skill tools, no external skill MCP servers, no
    * shell / file-write / edit / fetch / subagent built-ins. Absent: `read`
@@ -620,11 +627,19 @@ export const DECIDER_MIN_MARGIN = 0.2;
 export const DECIDER_CONFIDENCE_FLOOR = 0.7;
 /** A workflow may lower `min_margin` to this and no further. */
 export const DECIDER_MARGIN_FLOOR = 0.1;
+/** `route_by` values: who picks a node's natural-language route. */
+export const ROUTE_BY = ["agent", "decider"] as const;
+export type RouteBy = (typeof ROUTE_BY)[number];
 /** Load error for a workflow that still declares the removed `decider.mode`. */
 export const DECIDER_MODE_REMOVED =
-  "decider.mode was removed: shadow mode is gone, and a declared decider now decides routes. " +
-  "To use it, delete the mode line (the decider block's presence enables it; `sweny workflow run --no-decider` skips it for one run). " +
-  "To keep routing with the agent only, delete the whole decider block.";
+  "decider.mode was removed with shadow mode. A decider now decides the routes of nodes that set `route_by: decider`, " +
+  "using the provider from operator config (.sweny.yml `decider:` or SWENY_DECIDER_URL and SWENY_DECIDER_MODEL). " +
+  "Delete the mode line; to keep routing with the agent only, delete the whole decider block.";
+/** Load error for a workflow that declares the provider itself. */
+export const DECIDER_PROVIDER_MOVED =
+  "decider.provider is not allowed in a workflow: the endpoint and key come only from operator config " +
+  "(.sweny.yml `decider: { url, model }`, or SWENY_DECIDER_URL and SWENY_DECIDER_MODEL; the key only from SWENY_DECIDER_API_KEY). " +
+  "Move it there. A workflow may only set min_confidence and min_margin here, and `route_by: decider` on nodes.";
 
 /** A complete workflow definition. Pure data, fully serializable. */
 export interface Workflow {
@@ -655,9 +670,9 @@ export interface Workflow {
    */
   budget?: Budget;
   /**
-   * Decision model for route choices (#357). When declared, it decides a
-   * natural-language route whenever its answer passes the confidence and
-   * margin gates; otherwise the agent routes. Default: none.
+   * Decision model thresholds (#357) for the nodes that set `route_by:
+   * decider`. Never looser than the floors. The provider itself comes only
+   * from operator config, never from the workflow.
    */
   decider?: DeciderConfig;
   /**
@@ -861,8 +876,14 @@ export interface ExecutionTrace {
   edges: TraceEdge[];
   /** Resolved sources keyed by field path (e.g. "nodes.gather.instruction") */
   sources: Record<string, _ResolvedSource>;
-  /** One record per decision-model call (#357). Metadata only. Absent when no decider runs. */
+  /** One record per decision-model consultation (#357). Metadata only. Absent when no decider runs. */
   decisions?: DeciderRecord[];
+  /**
+   * Why the decider did not run for some or all of this run's `route_by:
+   * decider` nodes (#357): missing operator config, `--no-decider`, a rejected
+   * URL, an open breaker or a spent call cap. Absent when nothing turned it off.
+   */
+  deciderOff?: string;
 }
 
 /** Result of execute() — final node results + full execution trace */

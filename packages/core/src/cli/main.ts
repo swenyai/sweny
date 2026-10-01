@@ -46,7 +46,7 @@ import { runWorkflowDiagram } from "./diagram.js";
 import { DagRenderer } from "./renderer.js";
 import * as readline from "node:readline";
 
-import { loadDotenv, loadConfigFile, applyAgentFileConfig } from "./config-file.js";
+import { loadDotenv, loadConfigFile, applyAgentFileConfig, operatorDeciderConfig } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { nonInteractiveUsage, runNew } from "./new.js";
 import {
@@ -1231,7 +1231,7 @@ export async function workflowRunAction(
           fileRoot: config.fileRoot || undefined,
           signal,
           max_steps: wfMaxSteps,
-          ...(options.decider === false ? { decider: false } : {}),
+          decider: operatorDeciderConfig(fileConfig, process.env, options.decider === false),
           stageOutputs: options.stage === true,
           journal,
           ...(spendBudget ? { budget: spendBudget } : {}),

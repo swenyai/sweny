@@ -74,7 +74,9 @@ export function buildSystemPrompt(skills: Skill[], existingWorkflow?: Workflow):
     "- Use snake_case for node IDs (e.g. gather_errors, create_ticket)",
     "- Set `entry` to the first node in the flow",
     "- Only reference skill IDs from the list above in node `skills` arrays",
-    "- Use natural language for edge `when` conditions",
+    '- Prefer `when: { expr: "..." }` expressions for edge conditions: declare the deciding values as enum, number, integer or boolean properties in the source node\'s `output`, then compare them (e.g. `{ "expr": "triage.severity in [\'high\', \'critical\']" }`). Expressions route with no model call and always the same way',
+    "- Use a natural-language `when` only for a fuzzy condition no declared field can express",
+    "- Put safety conditions (anything that gates a write, a PR or an issue) in expressions, never in natural language",
     "- Every node must be reachable from the entry node",
     "- Return ONLY the workflow JSON object — no markdown fences, no explanation",
   ];

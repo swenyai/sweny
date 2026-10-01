@@ -109,20 +109,9 @@ export { consoleLogger } from "./types.js";
 export { execute, RouteEvaluationError } from "./executor.js";
 export type { ExecuteOptions } from "./executor.js";
 
-// Decision models (#357): decide routes before the agent when confident
-export {
-  systemOneProvider,
-  DecideError,
-  gateVerdict,
-  resolveThresholds,
-  RunDecider,
-  DECIDER_MIN_CONFIDENCE,
-  DECIDER_MIN_MARGIN,
-  DECIDER_CONFIDENCE_FLOOR,
-  DECIDER_MARGIN_FLOOR,
-} from "./decider.js";
-export type { DecisionProvider, DeciderConfig, DeciderRecord, DeciderThresholds, SystemOneOptions } from "./decider.js";
-export type { RouteRung } from "./types.js";
+// Decision models (#357): config types and the provider adapter only
+export { systemOneProvider } from "./decider.js";
+export type { DeciderConfig, DeciderOperatorConfig } from "./decider.js";
 
 // Least-privilege nodes and safe outputs (#365)
 export { BudgetGuard, describeOverrun, minLimits, toLimits } from "./budget.js";

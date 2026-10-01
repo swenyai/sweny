@@ -17,12 +17,14 @@ import {
   DECIDER_MIN_CONFIDENCE,
   DECIDER_MIN_MARGIN,
   DECIDER_MODE_REMOVED,
+  DECIDER_PROVIDER_MOVED,
   EVALUATOR_KINDS,
   EVAL_POLICIES,
   MCP_TRANSPORTS,
   NODE_ACCESS,
   NODE_ON_FAIL,
   REQUIRES_ON_FAIL,
+  ROUTE_BY,
   SAFE_OUTPUT_APPLIERS,
   SAFE_OUTPUT_EXPIRES_PATTERN,
   SAFE_OUTPUT_MAX_CEILING,
@@ -339,24 +341,18 @@ export const budgetZ = z
   });
 
 /**
- * Decision model for route choices (#357). Presence enables it. The state
- * only ever goes to `provider.base_url`, there is no fallback. The key is
- * named by env var, never inlined. Thresholds may be raised, and lowered no
- * further than the floors.
+ * Decision model thresholds (#357) for the nodes that set `route_by:
+ * decider`. Thresholds may be raised, and lowered no further than the floors.
+ * The provider (endpoint, model, key) comes only from operator config.
  *
- * `mode` was removed with shadow mode: a file that still declares it fails
- * with {@link DECIDER_MODE_REMOVED}, never silently starts deciding routes.
+ * Shapes from the shadow-mode release fail with an explanation instead of
+ * silently changing routing: `mode` ({@link DECIDER_MODE_REMOVED}) and
+ * `provider` ({@link DECIDER_PROVIDER_MOVED}).
  */
 export const deciderZ = z
   .object({
     mode: z.custom<never>(() => false, { message: DECIDER_MODE_REMOVED }).optional(),
-    provider: z
-      .object({
-        base_url: z.string().url(),
-        model: z.string().min(1),
-        api_key_env: z.string().min(1).optional(),
-      })
-      .strict(),
+    provider: z.custom<never>(() => false, { message: DECIDER_PROVIDER_MOVED }).optional(),
     min_confidence: z.number().min(DECIDER_CONFIDENCE_FLOOR).max(1).optional(),
     min_margin: z.number().min(DECIDER_MARGIN_FLOOR).max(1).optional(),
   })
@@ -407,6 +403,7 @@ export const nodeZ = z
     tools: nodeToolsZ.optional(),
     fail_soft: z.boolean().optional(),
     on_fail: z.enum(NODE_ON_FAIL).optional(),
+    route_by: z.enum(ROUTE_BY).optional(),
     permissions: nodePermissionsZ.optional(),
     outputs: z.array(safeOutputDeclarationZ).min(1).optional(),
     rules: nodeSourcesZ.optional(),
@@ -542,7 +539,8 @@ export interface WorkflowError {
     | "DUPLICATE_OUTPUT"
     | "UNSUPPORTED_OUTPUT"
     | "INVALID_WHEN_EXPRESSION"
-    | "MIXED_EDGE_CONDITIONS";
+    | "MIXED_EDGE_CONDITIONS"
+    | "DUPLICATE_EDGE";
   message: string;
   nodeId?: string;
 }
@@ -586,6 +584,23 @@ export function validateWorkflow(
     if (l) l.push(v);
     else m.set(k, [v]);
   };
+
+  // One edge per (from, to) pair (#357). A route picks a target node, so two
+  // edges to the same target would make their conditions ambiguous (which
+  // one's max_iterations counts, which one's condition the router saw). Write
+  // one edge whose condition covers both cases instead.
+  const seenPairs = new Set<string>();
+  for (const edge of workflow.edges) {
+    const key = JSON.stringify([edge.from, edge.to]);
+    if (seenPairs.has(key)) {
+      errors.push({
+        code: "DUPLICATE_EDGE",
+        message: `More than one edge from "${edge.from}" to "${edge.to}"; merge them into one edge (combine the conditions with OR)`,
+        nodeId: edge.from,
+      });
+    }
+    seenPairs.add(key);
+  }
 
   // Edge targets must exist
   for (const edge of workflow.edges) {
@@ -1124,25 +1139,10 @@ export const workflowJsonSchema = {
     },
     Decider: {
       type: "object",
-      required: ["provider"],
       additionalProperties: false,
       description:
-        "Decision model for route choices. Presence enables it. For a node with natural-language conditions it is asked first; its answer is the route when the label is one of the node's edges and both gates pass, otherwise the agent routes. The routing state goes only to provider.base_url, with no fallback. The removed 'mode' key is rejected.",
+        "Decision model thresholds for the nodes that set route_by: decider. The provider (URL, model, key) comes only from operator config (.sweny.yml or SWENY_DECIDER_* env), never from the workflow; 'provider' and the removed 'mode' key are rejected.",
       properties: {
-        provider: {
-          type: "object",
-          required: ["base_url", "model"],
-          additionalProperties: false,
-          properties: {
-            base_url: {
-              type: "string",
-              format: "uri",
-              description: "Server root serving POST /v1/systemone (Ollama or TypeSafe Jev).",
-            },
-            model: { type: "string", minLength: 1 },
-            api_key_env: { type: "string", minLength: 1, description: "Env var holding the bearer key." },
-          },
-        },
         min_confidence: {
           type: "number",
           minimum: DECIDER_CONFIDENCE_FLOOR,
@@ -1318,7 +1318,7 @@ export const workflowJsonSchema = {
     decider: {
       $ref: "#/$defs/Decider",
       description:
-        "Decision model that decides natural-language routes when confident, before the agent is asked. Default: none (the agent routes).",
+        "Thresholds for the decision model that decides the routes of route_by: decider nodes when confident. Default: 0.85 confidence, 0.2 margin.",
     },
     context_mode: {
       type: "string",
@@ -1487,6 +1487,12 @@ export const workflowJsonSchema = {
             enum: [...NODE_ON_FAIL],
             description:
               "What to do when this node finishes 'failed' (agent-level failure, or an eval failure that exhausted retries and was not softened by fail_soft). 'halt' (default) stops the workflow with the failure surfaced so a broken node never advances down a conditional edge; 'continue' preserves the legacy fall-through where routing proceeds from the failed node. Distinct from requires.on_fail (the pre-condition gate).",
+          },
+          route_by: {
+            type: "string",
+            enum: [...ROUTE_BY],
+            description:
+              "Who picks this node's natural-language route. 'agent' (default): the agent's route evaluation. 'decider': the operator's decision model first, the agent when it is not confident. Expressions always win over both; put safety conditions in expressions.",
           },
           permissions: {
             $ref: "#/$defs/Permissions",

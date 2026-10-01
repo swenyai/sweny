@@ -281,31 +281,9 @@
     },
     "Decider": {
       "type": "object",
-      "required": ["provider"],
       "additionalProperties": false,
-      "description": "Decision model for route choices. Presence enables it. For a node with natural-language conditions it is asked first; its answer is the route when the label is one of the node's edges and both gates pass, otherwise the agent routes. The routing state goes only to provider.base_url, with no fallback. The removed 'mode' key is rejected.",
+      "description": "Decision model thresholds for the nodes that set route_by: decider. The provider (URL, model, key) comes only from operator config (.sweny.yml or SWENY_DECIDER_* env), never from the workflow; 'provider' and the removed 'mode' key are rejected.",
       "properties": {
-        "provider": {
-          "type": "object",
-          "required": ["base_url", "model"],
-          "additionalProperties": false,
-          "properties": {
-            "base_url": {
-              "type": "string",
-              "format": "uri",
-              "description": "Server root serving POST /v1/systemone (Ollama or TypeSafe Jev)."
-            },
-            "model": {
-              "type": "string",
-              "minLength": 1
-            },
-            "api_key_env": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Env var holding the bearer key."
-            }
-          }
-        },
         "min_confidence": {
           "type": "number",
           "minimum": 0.7,
@@ -513,7 +491,7 @@
     },
     "decider": {
       "$ref": "#/$defs/Decider",
-      "description": "Decision model that decides natural-language routes when confident, before the agent is asked. Default: none (the agent routes)."
+      "description": "Thresholds for the decision model that decides the routes of route_by: decider nodes when confident. Default: 0.85 confidence, 0.2 margin."
     },
     "context_mode": {
       "type": "string",
@@ -746,6 +724,11 @@
             "type": "string",
             "enum": ["halt", "continue"],
             "description": "What to do when this node finishes 'failed' (agent-level failure, or an eval failure that exhausted retries and was not softened by fail_soft). 'halt' (default) stops the workflow with the failure surfaced so a broken node never advances down a conditional edge; 'continue' preserves the legacy fall-through where routing proceeds from the failed node. Distinct from requires.on_fail (the pre-condition gate)."
+          },
+          "route_by": {
+            "type": "string",
+            "enum": ["agent", "decider"],
+            "description": "Who picks this node's natural-language route. 'agent' (default): the agent's route evaluation. 'decider': the operator's decision model first, the agent when it is not confident. Expressions always win over both; put safety conditions in expressions."
           },
           "permissions": {
             "$ref": "#/$defs/Permissions",

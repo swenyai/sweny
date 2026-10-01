@@ -420,7 +420,7 @@ describe("workflow run help text", () => {
         "--input <json>  JSON string of input data to pass to the workflow",
         "--agent <id>  Coding agent that runs the nodes: claude (default), codex, or pi (experimental)",
         "--harness-policy <mode>  strict: refuse a node whose policy the agent cannot enforce; warn: run it and report what was not enforced (default: strict under GitHub Actions, warn elsewhere; env SWENY_HARNESS_POLICY)",
-        "--no-decider  Skip the workflow's decision model (decider:) for this run: the agent decides every natural-language route",
+        "--no-decider  Skip the decision model for this run: the agent decides the routes of route_by: decider nodes",
       ]
     `);
   });

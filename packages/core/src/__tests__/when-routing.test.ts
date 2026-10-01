@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import { execute, RouteEvaluationError } from "../executor.js";
 import { parseWorkflow, validateWorkflow, workflowZ } from "../schema.js";
 import { createSkillMap } from "../skills/index.js";
-import { triageWorkflow } from "../workflows/index.js";
+import { implementWorkflow, triageWorkflow } from "../workflows/index.js";
 import type { Claude, Edge, ExecutionEvent, Logger, Node, NodeResult, Workflow } from "../types.js";
 
 const silent: Logger = { info() {}, warn() {}, error() {}, debug() {} };
@@ -395,9 +395,10 @@ describe("built-in triage routes its migrated edges without a model call (#461)"
       ]),
     ),
   };
-  const investigate = (novel_count: number, highest_severity: string) => ({
+  const investigate = (novel_count: number, highest_severity: string, fixable_count = novel_count) => ({
     findings: [],
     novel_count,
+    fixable_count,
     highest_severity,
     recommendation: "r",
   });
@@ -445,10 +446,11 @@ describe("built-in triage routes its migrated edges without a model call (#461)"
     ["pass", ["create_pr", "notify"]],
     ["no-framework", ["create_pr", "notify"]],
     ["skipped", ["notify"]],
-  ])("a medium novel finding, test_status %s: only create_issue asks the model", async (status, tail) => {
+  ])("a fixable medium novel finding, test_status %s: no route asks the model (#357)", async (status, tail) => {
+    // The scripted model would say "notify": the route proves it was never asked.
     const { claude, ran, evaluated } = harness(
       { investigate: investigate(1, "medium"), createissue: issue, implement: implement(status) },
-      "implement",
+      "notify",
     );
     await run(stripped, claude);
     expect(ran.map((r) => (r === "createissue" ? "create_issue" : r === "createpr" ? "create_pr" : r))).toEqual([
@@ -458,7 +460,78 @@ describe("built-in triage routes its migrated edges without a model call (#461)"
       "implement",
       ...tail,
     ]);
-    // Exactly one model routing call: create_issue's natural-language edges.
-    expect(evaluated).toEqual([["implement", "notify"]]);
+    expect(evaluated).toEqual([]);
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ["fixable_count 0", investigate(2, "high", 0)],
+    ["fixable_count missing", { findings: [], novel_count: 2, highest_severity: "high", recommendation: "r" }],
+  ])("%s: create_issue goes to notify (no fix attempted) with no model call", async (_n, inv) => {
+    const { claude, ran, evaluated } = harness({ investigate: inv, createissue: issue }, "implement");
+    await run(stripped, claude);
+    expect(ran.map((r) => (r === "createissue" ? "create_issue" : r))).toEqual([
+      "gather",
+      "investigate",
+      "create_issue",
+      "notify",
+    ]);
+    expect(evaluated).toEqual([]);
+  });
+});
+
+// ─── Built-in implement routing ──────────────────────────────────
+
+describe("built-in implement routes analyze without a model call (#357)", () => {
+  const stripped: Workflow = {
+    ...implementWorkflow,
+    nodes: Object.fromEntries(
+      Object.entries(implementWorkflow.nodes).map(([id, n]) => [
+        id,
+        { name: n.name, instruction: `NODE_${id.toUpperCase().replace(/_/g, "")}`, skills: [], output: n.output },
+      ]),
+    ),
+  };
+
+  function harness(analyze: Record<string, unknown>) {
+    const ran: string[] = [];
+    let evaluated = 0;
+    const claude: Claude = {
+      async run(opts) {
+        const id = /NODE_([A-Z]+)/.exec(opts.instruction)?.[1]?.toLowerCase() ?? "?";
+        ran.push(id);
+        return { status: "success", data: id === "analyze" ? analyze : {}, toolCalls: [] };
+      },
+      async evaluate() {
+        evaluated++;
+        return null;
+      },
+      async ask() {
+        return "";
+      },
+    };
+    return { claude, ran, evaluated: () => evaluated };
+  }
+
+  const analyze = (has_open_pr: unknown, risk_level: unknown, plan_is_clear: unknown) => ({
+    issue_summary: "s",
+    fix_plan: "p",
+    ...(has_open_pr === undefined ? {} : { has_open_pr }),
+    ...(risk_level === undefined ? {} : { risk_level }),
+    ...(plan_is_clear === undefined ? {} : { plan_is_clear }),
+  });
+
+  it.each<[string, Record<string, unknown>, string]>([
+    ["an open PR goes to notify", analyze(true, "low", true), "notify"],
+    ["low risk, clear plan goes to implement", analyze(false, "low", true), "implement"],
+    ["medium risk, clear plan goes to implement", analyze(false, "medium", true), "implement"],
+    ["high risk goes to skip", analyze(false, "high", true), "skip"],
+    ["an unclear plan goes to skip", analyze(false, "low", false), "skip"],
+    ["missing routing fields go to skip", analyze(undefined, undefined, undefined), "skip"],
+  ])("%s", async (_n, data, next) => {
+    const { claude, ran, evaluated } = harness(data);
+    await run(stripped, claude);
+    expect(ran[0]).toBe("analyze");
+    expect(ran[1]).toBe(next);
+    expect(evaluated()).toBe(0);
   });
 });
