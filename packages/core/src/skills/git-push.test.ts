@@ -738,10 +738,12 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
         githubApiUrl: "https://ghe.example.com/api/v3/",
       },
     );
-    expect(urls).toEqual([
+    expect(urls.slice(0, 2)).toEqual([
       "https://ghe.example.com/api/v3/repos/o/r",
       "https://ghe.example.com/api/v3/repos/o/r/pulls",
     ]);
+    // Every call, including the follow-up label request, goes to the GHES API.
+    for (const u of urls) expect(u.startsWith("https://ghe.example.com/api/v3/")).toBe(true);
     expect(pusher.mock.calls[0][0].defaultBranch).toBe("trunk");
   });
 
