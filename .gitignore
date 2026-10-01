@@ -26,3 +26,7 @@ packages/create-sweny/dist/
 spec/dist/
 spec/.astro/
 .vercel
+
+# Mutation testing
+.stryker-tmp/
+packages/core/reports/

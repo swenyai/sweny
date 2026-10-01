@@ -171,7 +171,7 @@ jobs:
         run: npm run check:schema-drift --workspace=packages/core
 
   # Evidence for #360: does SWENY_SANDBOX=auto actually sandbox on a
-  # GitHub-hosted runner? Non-required; always green, the log is the result.
+  # GitHub-hosted runner once the Action's sandbox step has run? Non-required.
   sandbox-probe:
     name: Sandbox probe (bubblewrap on hosted runner)
     runs-on: ubuntu-latest
@@ -187,23 +187,25 @@ jobs:
           echo "PROBE os: $(. /etc/os-release && echo "$PRETTY_NAME"), kernel $(uname -r)"
           echo "PROBE apparmor_restrict_unprivileged_userns=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo n/a)"
 
-      - name: Probe bwrap
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Runs the Action's own "Install agent sandbox dependencies" script as a
+      # hosted runner would (default auto mode), then asserts bwrap works.
+      - name: Run the Action's sandbox step, then probe bwrap
         run: |
-          probe() { bwrap --ro-bind / / --dev /dev --proc /proc true 2>&1; }
-          if out=$(probe); then
-            echo "PROBE RESULT: bwrap works as-is (auto sandboxes on hosted runners)"
-            exit 0
-          fi
-          echo "PROBE first attempt failed: $out"
-          if echo "$out" | grep -qiE "user namespace|uid map|setting up uid|Operation not permitted|Permission denied"; then
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-            if out2=$(probe); then
-              echo "PROBE RESULT: bwrap works only after sysctl kernel.apparmor_restrict_unprivileged_userns=0"
-            else
-              echo "PROBE RESULT: bwrap still fails after sysctl: $out2"
-            fi
+          # Dependency-free extraction: the step's `run: |` block (10-space body) up to the next step.
+          awk '/- name: Install agent sandbox dependencies/{f=1} f&&/^      run: \|/{r=1;next} r&&/^$/{print;next} r&&/^        /{sub(/^        /,"");print;next} r{exit}' action.yml > "$RUNNER_TEMP/sandbox-step.sh"
+          test -s "$RUNNER_TEMP/sandbox-step.sh"
+          grep -q apparmor_restrict_unprivileged_userns "$RUNNER_TEMP/sandbox-step.sh"
+          RUNNER_ENVIRONMENT=github-hosted SWENY_SANDBOX=auto bash "$RUNNER_TEMP/sandbox-step.sh"
+          echo "PROBE apparmor_restrict_unprivileged_userns=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo n/a)"
+          if out=$(bwrap --ro-bind / / --dev /dev --proc /proc true 2>&1); then
+            echo "PROBE RESULT: bwrap works after the Action step (auto sandboxes on hosted runners)"
           else
-            echo "PROBE RESULT: bwrap fails for a non-userns reason"
+            echo "PROBE RESULT: bwrap still fails after the Action step: $out"
+            exit 1
           fi
 
   # #360 step 2: the harness-agnostic process wrapper (harness/sandbox-wrapper.ts)
