@@ -363,6 +363,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
       - uses: swenyai/sweny@v5
         with:
@@ -711,6 +712,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: swenyai/sweny@v5
         with:
           workflow: .sweny/workflows/dependency-drift.yml
@@ -1005,6 +1008,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: swenyai/sweny@v5
         with:
           workflow: .sweny/workflows/pr-risk-review.yml

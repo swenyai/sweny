@@ -40,6 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - uses: swenyai/triage@v1
@@ -69,6 +70,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: swenyai/sweny@v5
         with:
@@ -103,6 +106,8 @@ permissions:
 ```
 
 For read-only analysis (dry run), `contents: read` and `issues: write` are sufficient.
+
+Check out with `persist-credentials: false`, as every example here does. Otherwise `actions/checkout` leaves the job token on disk where the agents can read it. SWEny pushes the PR branch itself with `GITHUB_TOKEN`, so `contents: write` is still what lets the PR ship. See [the checkout's persisted token](/advanced/agent-sandbox/#the-checkouts-persisted-token).
 
 ## First run
 

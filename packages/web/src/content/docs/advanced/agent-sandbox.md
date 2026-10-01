@@ -41,7 +41,41 @@ nodes:
     agent_env: [GITHUB_TOKEN]
 ```
 
-That node's agent process gets the secret and can use it outside sweny's opinions: any API call, any push, none of it gated by `permissions`, `outputs` or `tools.deny`. Only that node gets it. A `permissions: read` node cannot declare `agent_env` (the workflow fails to load), and a staged or dry run withholds it. The built-in workflows need none: `git push` uses the checkout's own credential (`actions/checkout` persists one by default) or your local git credential helper, not an env token.
+That node's agent process gets the secret and can use it outside sweny's opinions: any API call, any push, none of it gated by `permissions`, `outputs` or `tools.deny`. Only that node gets it. A `permissions: read` node cannot declare `agent_env` (the workflow fails to load), and a staged or dry run withholds it. The built-in workflows need none: `github_create_pr` pushes the PR's head branch itself, from the SWEny process, with the `github` skill's `GITHUB_TOKEN`, before it opens the PR. Locally, your own git credential helper still works too.
+
+### The checkout's persisted token
+
+By default `actions/checkout` keeps the job token on disk (`persist-credentials: true`): in `.git/config` (v4, v5) or in a file under `$RUNNER_TEMP` that `.git/config` includes (v6 and later). Env scoping cannot reach a file, so any agent that can read the repo could read a token that pushes to it. Check out without it:
+
+```yaml
+permissions:
+  contents: write       # sweny pushes the PR branch with this token
+  pull-requests: write
+  issues: write
+
+steps:
+  - uses: actions/checkout@v4
+    with:
+      persist-credentials: false
+      fetch-depth: 0
+  - uses: swenyai/sweny@v5
+    with:
+      workflow: triage
+      claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    env:
+      GITHUB_TOKEN: ${{ github.token }}   # the github skill's token; sweny pushes and opens the PR with it
+```
+
+With that, no agent holds a push credential: the built-in `create_pr` node's own `git push` fails and SWEny pushes the head branch (`origin` only, the PR's own repo, never forced, never the base or default branch). A custom node whose shell must push itself declares `agent_env: [GITHUB_TOKEN]` and runs `gh auth setup-git` (or uses a credential helper that reads the token) before `git push`.
+
+When a run does start with a persisted credential (an `http.*.extraheader`, a credential helper holding a token, a `store` helper's file, or a URL with a password or token in it, in the repo, worktree or global git config or any file they include), SWEny warns once with the file and key (never the value), then keeps it from every read-only and staged node's agent:
+
+| Agent | Read-only and staged nodes |
+|-------|----------------------------|
+| `claude` | `Read(...)` deny rules for the file (Read, Grep, Glob). A read-only node has no Bash. A staged node's Bash needs the sandbox, whose filesystem `denyRead` and `denyWrite` cover the file; with no sandbox the node is reported `degraded`, and refused under a strict harness policy. |
+| `codex`, `pi`, ACP | The process sandbox (`srt`) denies reads and writes of the file. With no sandbox the node is reported `degraded`, and refused under a strict harness policy. |
+
+On Linux the masked file reads as empty, so `git` in that node sees no remotes for a v4/v5 checkout; on macOS reading it fails. `persist-credentials: false` avoids both. Default write nodes are not masked: they keep today's behavior.
 
 CI images set many variables of their own (`ANDROID_HOME`, `CHROME_BIN`, `JAVA_HOME_*`, `DOTNET_*`, `ACTIONS_*`, `RUNNER_*`, `ACCEPT_EULA`, and so on). SWEny treats these as the runner baseline and does not warn about them. Once per process it logs one plain line:
 
