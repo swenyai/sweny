@@ -320,6 +320,8 @@ describe("workflow run help text", () => {
       [
         "--timeout <ms>  Whole-run wall-clock timeout in ms. Applies to batch runs (.sweny/e2e/) and to a single workflow file (default: 3600000 = 60 min; 0 = no wall-clock budget)",
         "--max-steps <n>  Hard cap on total node executions for a single workflow file, including eval-failure retries (default: 200)",
+        "--max-tokens <n>  Run-wide token budget (input plus output) for a single workflow file. The lowest of this and the workflow's budget.tokens wins. A crossing stops the agent, fails the node and halts the run",
+        "--max-cost <usd>  Run-wide cost budget in US dollars for a single workflow file, from harness-reported cost (never estimated). The lowest of this and the workflow's budget.cost_usd wins",
         "-y, --yes  Skip the batch confirmation prompt (for CI)",
         "--dry-run  Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge. To inspect nodes without running, use --list-nodes.",
         "--stage  Run normally, but preview every safe output (nodes with outputs:) instead of writing it: print what would be written and write nothing",

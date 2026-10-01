@@ -138,6 +138,22 @@ function toSdkMessage(step: FakeStep): Record<string, unknown> | undefined {
           ],
         },
       };
+    case "usage": {
+      // One API message id for every live report: the adapter keeps the latest
+      // per id, so each report is cumulative, as the neutral step says.
+      const u = step.usage;
+      return {
+        type: "assistant",
+        message: {
+          id: "live-usage",
+          content: [],
+          usage: {
+            ...(u.inputTokens !== undefined ? { input_tokens: u.inputTokens } : {}),
+            ...(u.outputTokens !== undefined ? { output_tokens: u.outputTokens } : {}),
+          },
+        },
+      };
+    }
     case "final": {
       const u = step.usage;
       const tokenUsage = {

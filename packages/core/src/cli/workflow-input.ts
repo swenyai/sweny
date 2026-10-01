@@ -66,6 +66,32 @@ export function parseRunBudgetFlags(
 }
 
 /**
+ * Parse `--max-tokens <n>` and `--max-cost <usd>` (#449) into a run budget.
+ * Both are optional; junk is rejected up front instead of silently running
+ * with no ceiling. Returns `undefined` when neither flag is set.
+ */
+export function parseSpendFlags(
+  maxTokens: string | undefined,
+  maxCost: string | undefined,
+): { tokens?: number; cost_usd?: number } | undefined {
+  const parse = (raw: string, flag: string, integer: boolean): number => {
+    const t = raw.trim();
+    const n = t === "" ? Number.NaN : Number(t);
+    if (!Number.isFinite(n) || n <= 0 || (integer && !Number.isInteger(n))) {
+      throw new Error(
+        `${flag} must be a positive ${integer ? "integer" : "number"}, got "${raw}"` +
+          (integer ? " (input plus output tokens)" : " (US dollars, for example 2.50)"),
+      );
+    }
+    return n;
+  };
+  const tokens = maxTokens === undefined ? undefined : parse(maxTokens, "--max-tokens", true);
+  const cost = maxCost === undefined ? undefined : parse(maxCost, "--max-cost", false);
+  if (tokens === undefined && cost === undefined) return undefined;
+  return { ...(tokens !== undefined ? { tokens } : {}), ...(cost !== undefined ? { cost_usd: cost } : {}) };
+}
+
+/**
  * Parse the `--input` flag (#339). The old catch printed only "--input must be
  * valid JSON" and dropped the parser's reason, so a stray quote from shell
  * escaping left the user guessing. Returns the parsed value, or the lines to
