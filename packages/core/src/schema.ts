@@ -11,6 +11,7 @@ import { z } from "zod";
 import type { Workflow, WorkflowType } from "./types.js";
 import {
   AUTHOR_ASSOCIATIONS,
+  CONTEXT_MODES,
   EVALUATOR_KINDS,
   EVAL_POLICIES,
   MCP_TRANSPORTS,
@@ -413,6 +414,7 @@ export const workflowZ = z.object({
   judge_model: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   judge_budget: z.number().int().min(0).optional(),
+  context_mode: z.enum(CONTEXT_MODES).optional(),
   inputs: workflowInputsZ.optional(),
   permissions: nodePermissionsZ.optional(),
   safe_outputs: safeOutputsPolicyZ.optional(),
@@ -1094,6 +1096,12 @@ export const workflowJsonSchema = {
       // applies the soft-cap default at use-time. See judge_model above.
       description:
         "Soft cap on expected judge calls per workflow run. Executor warns at load time if exceeded; not a hard runtime cap in v1.",
+    },
+    context_mode: {
+      type: "string",
+      enum: [...CONTEXT_MODES],
+      description:
+        "What prior results a node's prompt receives. bounded (default): only nodes it can depend on, and a schema'd node's declared fields instead of its free-text summary. full: every prior node's complete data.",
     },
     inputs: {
       type: "object",
