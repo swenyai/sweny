@@ -12,6 +12,7 @@ import { summarizeDecisions } from "../decider.js";
 import { toMermaidBlock, type NodeStatus } from "../mermaid.js";
 import { createPaint } from "./style.js";
 import { colorEnabled, glyphs } from "./terminal.js";
+import { trustedEnvValue } from "../startup-env.js";
 
 // ── Receipt ─────────────────────────────────────────────────────
 
@@ -283,7 +284,8 @@ export function writeStepSummary(
   trace?: ExecutionTrace,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  const file = env.GITHUB_STEP_SUMMARY;
+  // The operator's value only: never one a workspace `.env` introduced.
+  const file = trustedEnvValue(env, "GITHUB_STEP_SUMMARY");
   if (!file) return false;
   try {
     // Never through a link, in case the path sits in the agent-writable workspace.

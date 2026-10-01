@@ -5,7 +5,7 @@
  * symlink (or hard link) to a file outside the workspace; sweny's write must
  * leave that file untouched. Real filesystem, temp dirs only.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -16,6 +16,8 @@ import { writeStepSummary, summarizeRun } from "./cli/run-output.js";
 import { writeRunRecord, type RunRecord } from "./cli/run-history.js";
 import { JOURNAL_FILE, RunJournal, journalDir } from "./journal.js";
 import { execute } from "./executor.js";
+import { loadDotenv } from "./cli/config-file.js";
+import { markWorkspaceEnv, startupEnv, unmarkWorkspaceEnv } from "./startup-env.js";
 import type { Claude, NodeResult, Workflow } from "./types.js";
 
 const posix = process.platform !== "win32";
@@ -233,6 +235,49 @@ describe.skipIf(!posix)("other workspace files", () => {
     }
     expect(s.read()).toBe("original\n");
   });
+
+  it("a workspace .env pointing GITHUB_STEP_SUMMARY outside the workspace writes nothing there", () => {
+    const s = setup();
+    fs.writeFileSync(path.join(s.ws, ".env"), `GITHUB_STEP_SUMMARY=${s.victim}\n`);
+    const before = fs.readFileSync(s.victim);
+    const saved = process.env.GITHUB_STEP_SUMMARY;
+    delete process.env.GITHUB_STEP_SUMMARY;
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      loadDotenv(s.ws);
+      expect(process.env.GITHUB_STEP_SUMMARY).toBeUndefined();
+      const results = new Map<string, NodeResult>();
+      // A copy of process.env (the run's env as a caller would pass it).
+      writeStepSummary(workflow, results, summarizeRun(results, 1), undefined, { ...process.env });
+      // process.env itself reads the startup value; only safe to call when that is unset.
+      if (startupEnv().GITHUB_STEP_SUMMARY === undefined) {
+        expect(writeStepSummary(workflow, results, summarizeRun(results, 1))).toBe(false);
+      }
+    } finally {
+      err.mockRestore();
+      if (saved !== undefined) process.env.GITHUB_STEP_SUMMARY = saved;
+      else delete process.env.GITHUB_STEP_SUMMARY;
+    }
+    expect(fs.readFileSync(s.victim).equals(before)).toBe(true);
+  });
+
+  it.skipIf(startupEnv().GITHUB_STEP_SUMMARY !== undefined)(
+    "a GITHUB_STEP_SUMMARY a workspace file introduced is not used, even if it got past the .env denylist",
+    () => {
+      const s = setup();
+      const before = fs.readFileSync(s.victim);
+      markWorkspaceEnv("GITHUB_STEP_SUMMARY");
+      try {
+        const results = new Map<string, NodeResult>();
+        expect(
+          writeStepSummary(workflow, results, summarizeRun(results, 1), undefined, { GITHUB_STEP_SUMMARY: s.victim }),
+        ).toBe(false);
+      } finally {
+        unmarkWorkspaceEnv("GITHUB_STEP_SUMMARY");
+      }
+      expect(fs.readFileSync(s.victim).equals(before)).toBe(true);
+    },
+  );
 
   it("a run record is not written through a symlinked runs dir", () => {
     const s = setup();
