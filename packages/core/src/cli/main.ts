@@ -44,6 +44,7 @@ import { nonInteractiveUsage, runNew } from "./new.js";
 import { formatFinalMarkdown, formatFinalOutput, resolveFinalOutput, writeFinalOutput } from "./final-output.js";
 import { buildRunRecord, createNodeTimer, historyDisabled, newRunId, recordRun } from "./run-history.js";
 import { registerRunsCommand } from "./runs.js";
+import { registerTryCommand } from "./try.js";
 import { JournalLockedError, JournalMismatchError, RunJournal } from "../journal.js";
 import {
   journalDisabled,
@@ -126,9 +127,12 @@ function composeObservers(...observers: (Observer | undefined)[]): Observer | un
 }
 
 // Auto-load .env before Commander parses (so env vars are available for defaults)
-loadDotenv();
-// Agent sandbox / env-passthrough keys from .sweny.yml -> SWENY_* env (#360).
-applyAgentFileConfig(loadConfigFile());
+// `sweny try` (#475) reads no .env and no config: it is a recording replay with no credentials.
+if (process.argv[2] !== "try") {
+  loadDotenv();
+  // Agent sandbox / env-passthrough keys from .sweny.yml -> SWENY_* env (#360).
+  applyAgentFileConfig(loadConfigFile());
+}
 
 const program = new Command()
   .name("sweny")
@@ -153,6 +157,9 @@ program
     }
     await runNew({ marketplaceId: id, template: options.template, yes: options.yes, ci: options.ci });
   });
+
+// ── sweny try ─────────────────────────────────────────────────────────
+registerTryCommand(program);
 
 // ── sweny check ───────────────────────────────────────────────────────
 /** validateInputs' generic agent-auth lines, replaced by the harness preflight reason (#339). */

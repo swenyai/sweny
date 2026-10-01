@@ -52,7 +52,16 @@ read-only dry run, output checks, timeouts, untrusted-input fencing, cleanup.
 
 ## Quickstart
 
-Requires Node 20+ and a Claude login (`claude` signed in) or an `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` (SWEny runs its nodes on the Claude Code agent).
+Want to see a run first? `sweny try` replays a recorded demo with no login, no credentials, no network and no
+model calls, and prints the same progress, answer, receipt and PR comment a real run does (the sample data is
+illustrative):
+
+```bash
+npm install -g @sweny-ai/core
+sweny try                                 # recorded demo; add --fast to skip the pacing
+```
+
+Then run it for real. Requires Node 20+ and a Claude login (`claude` signed in) or an `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` (SWEny runs its nodes on the Claude Code agent).
 
 ```bash
 npm install -g @sweny-ai/core
@@ -64,7 +73,7 @@ sweny workflow run .sweny/workflows/explain-repo.yml
 
 `sweny new` with no flags opens the interactive picker. `--template <id> --yes` skips every prompt (no
 terminal needed). It writes `.sweny.yml`, `.env` (added to `.gitignore`), and the workflow file.
-CI runs everything above except `run` in a clean container on every PR (`scripts/quickstart-smoke.sh`).
+CI runs everything above except `run` (and runs `sweny try`) in a clean container on every PR (`scripts/quickstart-smoke.sh`).
 
 Templates that use skills such as GitHub need their token first. `sweny new` writes blank values for
 credentials it can't infer:
