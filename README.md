@@ -127,9 +127,12 @@ $ sweny workflow create "audit our repo for security issues, \
 
 Nodes run on Claude Code by default. `--agent codex` (Action input `agent: codex`) runs the same workflow on the Codex CLI (0.159 or newer, `CODEX_API_KEY` / `OPENAI_API_KEY` or `codex login`). Each row below is checked by the harness contract suite against a scripted fake of that agent, in CI, with no model calls.
 
+Skill tools run in the sweny process, so on every agent the agent process never receives a skill credential (`GITHUB_TOKEN`, `GH_TOKEN`, `LINEAR_API_KEY`, `SLACK_*`, any skill's config variable), scoped or not. A write node whose own shell needs one names it in `agent_env`; that node's agent can then use it outside sweny's opinions. Read-only nodes cannot opt in, and staged or dry runs withhold it.
+
 | Policy | Claude Code | Codex |
 |---|---|---|
 | Scoped env (no stray secrets) | enforced | enforced |
+| Skill credentials kept out of the agent | enforced | enforced |
 | Read-only dry run | enforced | enforced (`--sandbox read-only`, no shell, web search or subagents) |
 | Only the MCP servers sweny injects | enforced | enforced (`--ignore-user-config`) |
 | `tools.deny` tool classes | shell, write, edit, net, subagent | shell, net, subagent |
@@ -147,7 +150,7 @@ What Codex cannot enforce itself is never dropped silently: it is listed as `deg
 `--agent "acp:<command>"` runs any [Agent Client Protocol](https://agentclientprotocol.com) agent over stdio: `acp:opencode acp`, `acp:hermes acp`, `acp:goose acp`, `acp:gemini --experimental-acp`. The contract suite runs against a scripted fake ACP agent on every CI run; no real agent is tested there. The protocol carries a prompt and a stream of updates, not sweny's policies, so this is the degraded list (always reported in `degraded`, or, in strict mode, the node is refused):
 
 - `tools.deny` and `disallowed_tools`: ACP has no deny list. sweny rejects the agent's `session/request_permission` for denied classes, but an agent that never asks is not stopped.
-- Read-only dry run: same. sweny rejects every non-read permission request and every `fs/write_text_file`, and enforces it fully only with the sandbox wrapper's read-only mount.
+- Read-only dry run: same. sweny rejects every non-read permission request and every `fs/write_text_file`, and enforces it only with the sandbox wrapper's read-only mount, and only while the agent holds no write credential: the mount stops file writes, not API calls. Skill credentials never reach the agent (see above); an ACP auth var that is also a write token (`GITHUB_TOKEN` for a Copilot-style agent) makes a read-only node degraded, or refused in strict.
 - Sandbox and per-host egress: none in the protocol. The agent process runs inside the sandbox wrapper (srt) when `SWENY_SANDBOX` is `auto` or `strict`; strict refuses without it. Add the agent's model API host to `SWENY_SANDBOX_ALLOWED_DOMAINS`.
 - Only the MCP servers sweny injects: sweny passes its skill tools in `session/new`, but whether the agent also loads its own MCP config is up to the agent.
 - Structured output: sweny asks for the JSON in the prompt, parses and checks it, and asks once more on a mismatch.
@@ -164,6 +167,7 @@ sweny cannot run an interactive login: pass the agent's API key env var through 
 - Kept by SWEny: structured output (prompted, parsed and checked), the `max_turns` watchdog, env scoping, untrusted-input fencing, skill tools over the tool bridge.
 - Reported as degraded, or refused in strict: the sandbox without the wrapper, `max_turns`, `tools.deny: [net]` (pi has no network tool, but its shell can still reach the network), `disallowed_tools` names pi has no tool for.
 - pi runs with an empty config dir: your `~/.pi/agent`, project `.pi/`, context files, skills and extensions are not loaded. Provider keys come from the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, ...); point `SWENY_PI_MODELS_JSON` at a `models.json` for custom endpoints.
+- pi gets one provider's key, never all of them (its bash tool inherits pi's env): `SWENY_PI_PROVIDER` or `pi-provider` in `.sweny.yml` (passed as `--provider`, and it must agree with a `provider/` model), else the provider in `--model provider/id`, else the only provider whose key is set. With several providers' keys set and none named, the node fails and asks for `SWENY_PI_PROVIDER`.
 
 ## Use it anywhere
 

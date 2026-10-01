@@ -105,7 +105,7 @@ sweny triage [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--dry-run` | Analyze only. Every node runs with read-only tools: write tools, external MCP servers, and shell/file-edit tools are withheld by the executor (on Codex, a shell confined to its OS read-only sandbox: no writes, no network), so no issues are created, no PRs opened, no notifications sent. Stops at the first conditional edge. See [Dry run](/workflows/#dry-run). | `false` |
-| `--stage` | Run normally, but preview every issue, comment and PR instead of filing it; the run stops before any code is pushed. The push is blocked by sweny, not left to the agent: see [No push under --stage](#no-push-under---stage-and---dry-run). See [Permissions and safe outputs](/workflows/yaml-reference/#permissions-and-safe-outputs). | `false` |
+| `--stage` | Run normally, but preview every issue, comment and PR instead of filing it; sweny blocks the push (env and git hooks; a guarantee only on a sandboxed run): see [No push under --stage](#no-push-under---stage-and---dry-run). See [Permissions and safe outputs](/workflows/yaml-reference/#permissions-and-safe-outputs). | `false` |
 | `--no-novelty-mode` | Allow +1 on existing issues instead of skipping duplicates | -- |
 | `--issue-override <issue>` | Work on a specific existing issue instead of scanning for new ones | -- |
 | `--additional-instructions <text>` | Extra instructions passed to the coding agent | -- |
@@ -195,13 +195,15 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 
 ### No push under --stage and --dry-run
 
-With `--stage` or `--dry-run` (or `safe_outputs.staged: true` in a workflow), sweny sets up every node's agent environment so a push fails, whatever the agent tries and on every agent (`claude`, `codex`, `pi`, ACP):
+With `--stage` or `--dry-run` (or `safe_outputs.staged: true` in a workflow), sweny sets up every node's agent environment so a push fails, on every agent (`claude`, `codex`, `pi`, ACP). The block is environment variables and a git hook: it stops an agent that pushes the normal way, but a deliberate agent can undo it unless the run is sandboxed. In CI with the sandbox on and no push credential in the agent's reach, it cannot push.
 
 - **`git push`** fails. A bare `git push`, a push to any remote or URL (https, ssh, `git@`, `file://`, a local path), `--force` and `--no-verify` are all refused, through git config sweny sets for the agent and a sweny `pre-push` hook. Git's ssh transport refuses to push; ssh fetches still work.
 - **No credential reaches git.** Credential helpers (keychain, `gh auth git-credential`, stored credentials) are reset and git's password prompt is off.
-- **`gh` and raw API calls have no write token.** `GITHUB_TOKEN`, `GH_TOKEN`, GitLab and Bitbucket tokens and the ssh agent socket are withheld from the agent, and `gh` gets an empty config, so `gh pr create` and a `curl` to the API with a token both fail. Skill tools (the `github` and `linear` skills) run inside sweny, not in the agent, so reads through them keep working.
+- **`gh` and raw API calls have no write token.** `GITHUB_TOKEN`, `GH_TOKEN`, GitLab and Bitbucket tokens, every skill credential (even one a node grants with `agent_env`) and the ssh agent socket are withheld from the agent, and `gh` gets an empty config, so `gh pr create` and a `curl` to the API with a token both fail. Skill tools (the `github` and `linear` skills) run inside sweny, not in the agent, so reads through them keep working.
 
-Commits, diffs and fetches still work, so a staged run shows the change it would have pushed. The repository's own git hooks do not run in a staged node. This is not a sandbox: an agent that deliberately rewrites its own environment and finds a credential on disk (an ssh key without a passphrase) is out of reach of environment settings. The process sandbox wrapper, where it runs, also hides credential files such as `~/.ssh` and `~/.git-credentials` from the agent.
+Commits, diffs and fetches still work, so a staged run shows the change it would have pushed. The repository's own git hooks do not run in a staged node.
+
+What this does not stop: an agent that deliberately unsets these variables (or passes `-c core.hooksPath=/dev/null`) and finds a credential on disk, such as an ssh key without a passphrase, a keychain entry, or a token a checkout persisted in `.git/config`, can still push on an unsandboxed run. Local runs are unsandboxed by default. The process sandbox wrapper, where it runs, hides credential files such as `~/.ssh` and `~/.git-credentials` and limits the network. Under a strict harness policy (`--harness-policy strict`, the default under GitHub Actions) a staged write node whose agent would run unsandboxed is refused instead of run; under `warn` it runs and the gap is listed in `degraded`.
 
 ## sweny workflow
 

@@ -28,6 +28,7 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 | `on_fail`          | `halt` \| `continue`             | OPTIONAL | `halt`                          | What happens when this node ends `failed`. See [Failure Handling](#failure-handling-on_fail).                       |
 | `permissions`      | [Permissions](#permissions)      | OPTIONAL | see [Permissions](#permissions) | What this node's agent may do: `read` or `write`, plus denied tool classes and strict mode.                         |
 | `outputs`          | [SafeOutput](#safe-outputs)[]    | OPTIONAL | none                            | Typed write intents the node may emit. The executor applies them after the node. See [Safe Outputs](#safe-outputs). |
+| `agent_env`        | string[]                         | OPTIONAL | none                            | Secrets the agent process receives at this node. See [Agent Env](#agent-env).                                       |
 
 ## Max Turns Semantics
 
@@ -111,6 +112,25 @@ implement:
 ```
 
 The exact set of names the runtime recognizes is **implementation-defined** and tracks the agent SDK in use. Workflow authors SHOULD verify a name is honored before relying on it; a typo silently no-ops because there is no built-in tool of that name to remove.
+
+## Agent Env
+
+Skill-provided tools run in the executor's own process, so the agent process never needs a skill's credentials. An executor:
+
+- **MUST NOT** pass any skill configuration variable (a skill's `config.*.env`) or known source-hosting write token (`GITHUB_TOKEN`, `GH_TOKEN`, GitLab and Bitbucket tokens) to the agent process of a node, unless that node names it in `agent_env`.
+- **MUST** pass a name listed in `agent_env` to that node's agent process only, never to another node's.
+- **MUST** reject a workflow where a node whose permissions resolve to `read` declares `agent_env` (`AGENT_ENV_READ_ONLY`).
+- **MUST NOT** pass `agent_env` names in a staged or dry run.
+
+A name in `agent_env` is usable outside every other node opinion: the agent can make any API call or push with it. Entries MUST match `^[A-Za-z_][A-Za-z0-9_]*$`.
+
+```yaml
+publish:
+  name: Publish
+  instruction: Run the release script.
+  permissions: write
+  agent_env: [GITHUB_TOKEN]
+```
 
 ## Tool Filter
 

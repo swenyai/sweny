@@ -38,6 +38,7 @@ Each key in the `nodes` object is a node ID (an arbitrary string you choose). Th
 | `budget` | object | No | -- | `{ tokens, cost_usd }`: spend ceiling for one visit to this node, retries included. Never above the workflow's. See [Spend budgets](#spend-budgets). |
 | `permissions` | string \| object | No | see below | `read` or `write`, or `{ access, deny, strict }`. See [Permissions and safe outputs](#permissions-and-safe-outputs). |
 | `outputs` | array | No | -- | Typed writes (`comment`, `issue`, `pr`, `label`, `issue_state`) the node may request. sweny applies them after the node. |
+| `agent_env` | string[] | No | -- | Secrets this node's agent process gets in its env. By default the agent never holds a skill credential (`GITHUB_TOKEN`, `LINEAR_API_KEY`, ...): skill tools run in sweny. A name here can be used outside sweny's opinions (any API call, any push). Not allowed on a `permissions: read` node; withheld in a staged or dry run. See [Skill credentials stay in SWEny](/advanced/agent-sandbox/#skill-credentials-stay-in-sweny). |
 
 ### Spend budgets
 
@@ -277,6 +278,7 @@ SWEny validates workflows before execution. The `sweny workflow validate` comman
 | Valid inline skills | `INVALID_INLINE_SKILL` | Inline `skills` entries in a workflow must declare `instruction`, `mcp`, or both. |
 | Budget ceiling | `BUDGET_CEILING` | A node's `budget.tokens` or `budget.cost_usd` may not exceed the workflow's. |
 | Permission ceiling | `PERMISSION_CEILING` | A node may not declare `permissions: write` when the workflow declares `read`. |
+| No secrets on read nodes | `AGENT_ENV_READ_ONLY` | A node whose permissions resolve to `read` may not declare `agent_env`. |
 | Allowed outputs | `OUTPUT_NOT_ALLOWED` | A node's output type must be in `safe_outputs.allow` when that is set. |
 | One entry per output type | `DUPLICATE_OUTPUT` | A node may declare each output type once. |
 | Supported output skill | `UNSUPPORTED_OUTPUT` | An output's `via` must name a skill that can apply it (`github`: all types; `linear`: `comment`, `issue`). |

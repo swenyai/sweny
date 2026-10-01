@@ -23,10 +23,25 @@ When scoped, the agent gets:
 
 | Per node | |
 |----------|---|
-| Every env var declared by the node's skills (for example `GITHUB_TOKEN` for a node with `skills: [github]`) | So `gh` and friends work where the node asked for them |
-| Your `env-passthrough` list | Anything else a node's commands need |
+| Your `env-passthrough` list | Anything else a node's commands need (never a skill credential, see below) |
+| The node's `agent_env` list | A skill credential this one node's shell genuinely needs |
 
-Everything else is withheld. A node without the `linear` skill never sees `LINEAR_API_KEY`; nothing sees `NPM_TOKEN` unless you pass it through. Add any a node needs to `env-passthrough`.
+Everything else is withheld. Nothing sees `NPM_TOKEN` unless you pass it through. Add any a node needs to `env-passthrough`.
+
+### Skill credentials stay in SWEny
+
+Skill tools (`github_*`, `linear_*`, ...) run in the SWEny process, so the agent never needs their credentials. On every agent (`claude`, `codex`, `pi`, ACP), scoped or not, locally and in CI, the agent process never receives `GITHUB_TOKEN`, `GH_TOKEN`, GitLab and Bitbucket tokens, `LINEAR_API_KEY`, `SLACK_*`, or any config variable of a skill the run uses. `env-passthrough` (even `"*"`) does not bring them back.
+
+A node whose own shell needs one (say, a script that calls an API sweny has no skill for) names it in `agent_env`:
+
+```yaml
+nodes:
+  publish:
+    permissions: write
+    agent_env: [GITHUB_TOKEN]
+```
+
+That node's agent process gets the secret and can use it outside sweny's opinions: any API call, any push, none of it gated by `permissions`, `outputs` or `tools.deny`. Only that node gets it. A `permissions: read` node cannot declare `agent_env` (the workflow fails to load), and a staged or dry run withholds it. The built-in workflows need none: `git push` uses the checkout's own credential (`actions/checkout` persists one by default) or your local git credential helper, not an env token.
 
 CI images set many variables of their own (`ANDROID_HOME`, `CHROME_BIN`, `JAVA_HOME_*`, `DOTNET_*`, `ACTIONS_*`, `RUNNER_*`, `ACCEPT_EULA`, and so on). SWEny treats these as the runner baseline and does not warn about them. Once per process it logs one plain line:
 
@@ -81,7 +96,8 @@ Workflow input (issues, alerts, tickets), earlier steps' output, and `context:` 
 | `sandbox` | `SWENY_SANDBOX` | `auto`, `strict`, `off` (see [Sandbox](#sandbox)) | `auto` in CI, `off` locally |
 | `sandbox-allowed-domains` | `SWENY_SANDBOX_ALLOWED_DOMAINS` | List of hosts; `*.example.com` wildcards allowed | none |
 | `env-scope` | `SWENY_ENV_SCOPE` | `on`, `off` | `on` in CI, `off` locally |
-| `env-passthrough` | `SWENY_ENV_PASSTHROUGH` | List of env var names; `"*"` inherits everything (not recommended) | none |
+| `env-passthrough` | `SWENY_ENV_PASSTHROUGH` | List of env var names; `"*"` inherits everything except skill credentials (not recommended) | none |
+| `pi-provider` | `SWENY_PI_PROVIDER` | The pi model provider (`anthropic`, `openai`, `amazon-bedrock`, ...); only its key reaches pi | the model's `provider/` prefix, else the only provider whose key is set |
 
 ```yaml
 # .sweny.yml
