@@ -13,7 +13,7 @@
  */
 
 import fs from "node:fs";
-import path from "node:path";
+import { workspaceRoot, writeFileNoFollow } from "../safe-file.js";
 import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
 import { parse as parseYaml } from "yaml";
@@ -350,8 +350,7 @@ export async function runTry(opts: TryOptions = {}): Promise<number> {
   });
   if (opts.commentFile) {
     try {
-      fs.mkdirSync(path.dirname(path.resolve(opts.commentFile)), { recursive: true });
-      fs.writeFileSync(opts.commentFile, comment);
+      writeFileNoFollow(opts.commentFile, comment, { ...workspaceRoot(opts.commentFile), mode: 0o644, dirMode: 0o755 });
     } catch (err) {
       process.stderr.write(
         `  ${g.warning} could not write comment file: ${err instanceof Error ? err.message : err}\n`,

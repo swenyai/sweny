@@ -2,6 +2,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
+import { workspaceRoot, writeFileNoFollow } from "../safe-file.js";
 import { Command } from "commander";
 
 const _require = createRequire(import.meta.url);
@@ -120,6 +121,17 @@ import { beginCloudLifecycle, finishCloudLifecycle, createCloudStreamObserver } 
 import { runUpgrade, fetchLatestFromNpm } from "./upgrade.js";
 import { maybeNudge, defaultCachePath } from "./version-check.js";
 import { spawnSync } from "node:child_process";
+import { trustedEnvValue } from "../startup-env.js";
+
+/** GITHUB_STEP_SUMMARY as the operator set it: never a value a workspace `.env` introduced. */
+function stepSummaryPath(): string | undefined {
+  return trustedEnvValue(process.env, "GITHUB_STEP_SUMMARY") || undefined;
+}
+
+/** Append to GITHUB_STEP_SUMMARY without following a link (the path may sit in the workspace). */
+function appendStepSummary(file: string, md: string): void {
+  writeFileNoFollow(file, md, { ...workspaceRoot(file), append: true, mkdirs: false, mode: 0o644 });
+}
 
 /** Secret values a run can see, for redacting everything that prints node output. */
 function outputSecrets(skills?: Map<string, Skill>): string[] {
@@ -580,13 +592,13 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     }
 
     // GitHub Actions step summary
-    if (config.notificationProvider === "github-summary" && process.env.GITHUB_STEP_SUMMARY) {
+    if (config.notificationProvider === "github-summary" && stepSummaryPath()) {
       try {
         const md = formatDagResultMarkdown(results, durationMs, config, {
           workflow: triageWorkflow,
           trace,
         });
-        fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+        appendStepSummary(stepSummaryPath()!, md);
       } catch (err) {
         // Don't fail the run if the summary file can't be written
         console.error(c.subtle(`  ⚠ could not write GITHUB_STEP_SUMMARY: ${err instanceof Error ? err.message : err}`));
@@ -643,12 +655,9 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     }
 
     // Best-effort GitHub Actions step summary on crash
-    if (config.notificationProvider === "github-summary" && process.env.GITHUB_STEP_SUMMARY) {
+    if (config.notificationProvider === "github-summary" && stepSummaryPath()) {
       try {
-        fs.appendFileSync(
-          process.env.GITHUB_STEP_SUMMARY,
-          `## ❌ SWEny Triage Crashed\n\n\`\`\`\n${crashMsg}\n\`\`\`\n`,
-        );
+        appendStepSummary(stepSummaryPath()!, `## ❌ SWEny Triage Crashed\n\n\`\`\`\n${crashMsg}\n\`\`\`\n`);
       } catch {
         // ignore
       }

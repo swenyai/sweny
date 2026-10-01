@@ -59,6 +59,7 @@ import {
   resolveSandboxMode,
   scopeAgentEnv,
   withPushBlocked,
+  mcpWithheld,
   type AgentAccess,
   type SandboxMode,
 } from "../agent-env.js";
@@ -911,7 +912,7 @@ export class AcpHarness implements AgentHarness {
     try {
       // Dry run: external MCP servers cannot be classified per tool, so only
       // sweny's own (already read-filtered) skill tools remain.
-      const servers: Record<string, McpServerConfig> = readOnly
+      const servers: Record<string, McpServerConfig> = mcpWithheld(readOnly, req.agentAccess)
         ? {}
         : { ...this.defaultMcpServers, ...req.mcpServers, ...this.mcpServers };
       if (req.tools.length > 0) {

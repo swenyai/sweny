@@ -17,6 +17,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type {
+  BranchPusher,
   Logger,
   SafeOutputDeclaration,
   SafeOutputPin,
@@ -441,6 +442,12 @@ export interface ApplySafeOutputsOptions {
   actor: ActorInfo;
   /** Preview only: print what would be written, write nothing. */
   staged: boolean;
+  /** The run's checkout, for the PR head push (#473). */
+  cwd?: string;
+  /** The PR head push, bound to `cwd` (#473). */
+  pushBranch?: BranchPusher;
+  /** The operator's GITHUB_API_URL for the github skill (GHES). */
+  githubApiUrl?: string;
   state: WriteStageState;
   logger: Logger;
   /** The run input, for `number: { input }` pins. */
@@ -691,7 +698,13 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       continue;
     }
     try {
-      const output = await tool.handler(applier.build(write), { config: o.config, logger: o.logger });
+      const output = await tool.handler(applier.build(write), {
+        config: o.config,
+        logger: o.logger,
+        ...(o.cwd ? { cwd: o.cwd } : {}),
+        ...(o.pushBranch ? { pushBranch: o.pushBranch } : {}),
+        ...(o.githubApiUrl ? { githubApiUrl: o.githubApiUrl } : {}),
+      });
       const ref = refOf(output);
       const url = urlOf(output);
       receipts[index] = { ...receipts[index], ...(ref !== undefined ? { ref } : {}), ...(url ? { url } : {}) };

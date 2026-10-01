@@ -129,6 +129,8 @@ describe("action.yml wiring", () => {
     const post = steps.find((s) => s.name === "Post PR comment")!;
     expect(post.if).toContain("!cancelled()");
     expect(post.if).toContain("inputs.pr-comment != 'false'");
+    // A dry run posts nothing (#498).
+    expect(post.if).toContain('!contains(fromJSON(\'["true","1","yes"]\'), inputs.dry-run)');
     expect(post.run).toContain("scripts/post-run-comment.sh");
     expect(steps.indexOf(post)).toBeGreaterThan(steps.indexOf(runStep));
   });

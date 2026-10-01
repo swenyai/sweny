@@ -7,8 +7,7 @@
  * tool inputs, node outputs, errors, or model prose.
  */
 
-import fs from "node:fs";
-import path from "node:path";
+import { workspaceRoot, writeFileNoFollow } from "../safe-file.js";
 import type { ExecutionTrace, NodeResult, Workflow } from "../types.js";
 import { toMermaidBlock } from "../mermaid.js";
 import { formatReceiptDuration, nodeStates, type RunSummary } from "./run-output.js";
@@ -107,12 +106,13 @@ export function writeRunComment(
   opts: RunCommentOptions & { crashed?: boolean } = {},
 ): boolean {
   try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(
+    // The file may sit in the agent-writable workspace: no link on the path is followed.
+    writeFileNoFollow(
       file,
       opts.crashed
         ? formatCrashComment(workflow, summary, opts.runId)
         : formatRunComment(workflow, results, summary, opts),
+      { ...workspaceRoot(file), mode: 0o644, dirMode: 0o755 },
     );
     return true;
   } catch (err) {

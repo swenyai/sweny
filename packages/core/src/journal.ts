@@ -62,6 +62,7 @@ import type { SafeOutputIntent, WriteStageState } from "./safe-outputs.js";
 import { resolveNodePermissions } from "./node-policy.js";
 import { CURRENT_SPEC_VERSION } from "./migrations.js";
 import { spendOf, type Spend } from "./budget.js";
+import { ensureDirNoFollow, openNoFollow, writeFileNoFollow } from "./safe-file.js";
 
 /** v2: records are authenticated with a per-run HMAC key (v1 used a public checksum and is refused). */
 export const JOURNAL_SCHEMA_VERSION = 2;
@@ -1250,13 +1251,12 @@ export class RunJournal implements ExecutionJournal {
       if (err instanceof JournalLockedError) throw err;
     }
     this.makeDir();
-    fs.writeFileSync(lock, String(process.pid), { mode: 0o600 });
+    writeFileNoFollow(lock, String(process.pid), { root: this.cwd, mode: 0o600 });
   }
 
-  /** The run dir is private (0700); its parents are created as usual. */
+  /** The run dir is private (0700); no link on the path from cwd is followed (safe-file.ts). */
   private makeDir(): void {
-    fs.mkdirSync(path.dirname(this.dir), { recursive: true });
-    fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    ensureDirNoFollow(this.dir, this.cwd);
   }
 
   private releaseLock(): void {
@@ -1297,8 +1297,7 @@ export class RunJournal implements ExecutionJournal {
     try {
       if (this.fd === undefined) {
         this.makeDir();
-        this.fd = fs.openSync(this.file, "a", 0o600);
-        fs.fchmodSync(this.fd, 0o600);
+        this.fd = openNoFollow(this.file, { root: this.cwd, append: true, mode: 0o600 });
       }
       fs.writeSync(this.fd, JSON.stringify(record) + "\n");
       fs.fsyncSync(this.fd);
@@ -1370,7 +1369,7 @@ export class RunJournal implements ExecutionJournal {
     try {
       this.makeDir();
       // Journals hold node output: keep them out of commits (an agent's `git add -A` included).
-      fs.writeFileSync(path.join(this.dir, ".gitignore"), "*\n");
+      writeFileNoFollow(path.join(this.dir, ".gitignore"), "*\n", { root: this.cwd, mode: 0o644 });
       this.takeLock();
     } catch {
       // append() reports the failure
