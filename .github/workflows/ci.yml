@@ -329,7 +329,8 @@ jobs:
         run: npm run build --workspace=packages/core
 
       # Packs core, installs the tarball into an empty prefix with a scrubbed
-      # env (no credentials, no LLM calls) and runs the README quickstart.
+      # env (no credentials, no LLM calls) and runs the README quickstart,
+      # including `sweny try` (asserts banner, answer block, receipt line, exit 0).
       - name: Run README quickstart
         run: sh scripts/quickstart-smoke.sh
 
