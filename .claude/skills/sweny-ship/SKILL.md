@@ -38,7 +38,11 @@ A lane's report is a claim. Before landing:
 - **Local behavior stays back-compatible**: heavier sandboxing and env scoping default on in CI only.
 - Behavior changes get one line in the PR body saying who is affected.
 
-Send defects back to the same lane (it keeps its context). Merge only reviewed PRs the owner has approved to land.
+- **Day-one value:** does this deliver value the moment it ships, or is it scaffolding (observe-only, shadow, preview-only)? Ship gated live behavior with fall-through, never an observe-only mode.
+- **Trust boundary:** what does the sweny process read, execute or write that an agent could have touched (workspace files, git config and hooks, journals, locks)? Privileged state lives outside the workspace; privileged operations never consume agent-writable config.
+- **Security-sensitive PRs** (credentials, sandbox, git, journal, safe outputs, release) get a cross-pool adversarial review on the exact final diff before landing; new features get three reviews (cross-pool security, product value, test quality). Fix or reject each finding with evidence, then re-review the new head.
+
+Send defects back to the same lane (it keeps its context). A lane cut off by a rate limit resumes the same way: its worktree keeps the progress. Merge only reviewed PRs the owner has approved to land.
 
 ## 3. Land (one at a time)
 
