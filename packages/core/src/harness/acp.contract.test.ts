@@ -16,9 +16,10 @@ afterAll(() => fakes.destroy());
 // skips cases 2 and 17 (mcp exclusive is "none") and checks the gate for cases 3, 4, 16 and 18;
 // case 15 proves the agent only ever runs inside the wrapper.
 runContractSuite(
-  ({ logger, sandboxWrapper }) =>
+  ({ logger, sandboxWrapper, cwd }) =>
     new AcpHarness({
       logger,
+      ...(cwd ? { cwd } : {}),
       envScope: true,
       policy: "warn",
       acpCommand: fakes.command,

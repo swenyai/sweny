@@ -91,6 +91,14 @@ export interface NodePolicy {
    * adapters, which know whether the run is sandboxed.
    */
   stagedWrite?: boolean;
+  /**
+   * Files holding a persisted git credential (#473: the token
+   * `actions/checkout` writes by default) that this node's agent must not
+   * read. Set by adapters for a read-only node or a staged write node when
+   * the checkout has one (see git-credentials.ts). The process wrapper denies
+   * reads of them; without it, reported, and refused under `strict`.
+   */
+  gitCredentials?: string[];
 }
 
 /** Process-level wrappers the host provides (OS sandbox, egress proxy, read-only mount). */
@@ -99,6 +107,8 @@ export interface PolicyWrappers {
   sandbox?: boolean;
   egress?: boolean;
   readOnlyMount?: boolean;
+  /** The wrapper can make named files unreadable to the agent (srt `denyRead`). */
+  readDeny?: boolean;
 }
 
 export interface PolicyGateResult {

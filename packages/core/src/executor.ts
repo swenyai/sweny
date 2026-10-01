@@ -48,6 +48,9 @@ import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
 import { validateWorkflow } from "./schema.js";
 import { grantedAgentEnv, resolveAgentAccess } from "./agent-env.js";
+import { gitCredentialWarning, scanGitCredentials } from "./git-credentials.js";
+// #473: arms the sweny-side branch push in `github_create_pr` (Node only; skills/ stays browser-safe).
+import "./skills/git-push.js";
 import { fenceUntrusted } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
 import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
@@ -241,6 +244,15 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   // `budget` and the caller's (`--max-tokens`, `--max-cost`).
   const budgetGuard = new BudgetGuard(minLimits(toLimits(workflow.budget), toLimits(options.budget)));
   const harnessPolicy = options.harnessPolicy ?? resolveHarnessPolicy(runEnv);
+  // #473: a checkout that persisted a git credential (actions/checkout's
+  // default). Each harness masks it for read-only and staged nodes, or reports
+  // the node degraded; this says so once per run. Paths and keys, never values.
+  try {
+    const credentialWarning = gitCredentialWarning(scanGitCredentials(process.cwd(), { env: runEnv }));
+    if (credentialWarning) logger.warn(credentialWarning);
+  } catch {
+    // A scan failure never stops a run; each node scans again before it starts.
+  }
   // Decision model (#357): shadow only. Null (the default) means no HTTP at all.
   const shadow = createShadowDecider(workflow.decider, options.decider, runEnv, (m) => logger.warn(m));
   if (shadow) trace.decisions = shadow.records;
@@ -1202,8 +1214,12 @@ function contextDependencies(workflow: Workflow, nodeId: string, instruction = "
   return deps;
 }
 
-/** The bounded prompt context for one node: `input` plus its dependencies' entries. */
-function buildBoundedContext(
+/**
+ * The bounded prompt context for one node: `input` plus its dependencies' entries.
+ * Exported for the property tests only; not part of the package API (index.ts does not re-export it).
+ * @internal
+ */
+export function buildBoundedContext(
   workflow: Workflow,
   nodeId: string,
   results: Map<string, NodeResult>,
