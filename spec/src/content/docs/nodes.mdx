@@ -26,6 +26,7 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 | `requires`         | [Requires](#requires)            | OPTIONAL | —                               | Machine-checked pre-conditions evaluated before the AI starts the node.                                             |
 | `retry`            | [Retry](#retry)                  | OPTIONAL | —                               | Node-local retry on eval failure with optional autonomous reflection.                                               |
 | `on_fail`          | `halt` \| `continue`             | OPTIONAL | `halt`                          | What happens when this node ends `failed`. See [Failure Handling](#failure-handling-on_fail).                       |
+| `route_by`         | `agent` \| `decider`             | OPTIONAL | `agent`                         | Who picks this node's natural-language route. See [Decision models](/edges#decision-models).                        |
 | `permissions`      | [Permissions](#permissions)      | OPTIONAL | see [Permissions](#permissions) | What this node's agent may do: `read` or `write`, plus denied tool classes and strict mode.                         |
 | `outputs`          | [SafeOutput](#safe-outputs)[]    | OPTIONAL | none                            | Typed write intents the node may emit. The executor applies them after the node. See [Safe Outputs](#safe-outputs). |
 | `agent_env`        | string[]                         | OPTIONAL | none                            | Secrets the agent process receives at this node. See [Agent Env](#agent-env).                                       |
@@ -454,6 +455,8 @@ A conforming executor:
 - **MUST** request structured output from the AI model conforming to this schema when `output` is present.
 - The structured output becomes the node's result data, available to downstream nodes via [context accumulation](/execution#context-accumulation).
 - When `output` is absent, the node's result data is implementation-defined.
+- **SHOULD** check the result against the contract (every `required` field present, every top-level property of its declared `type` and inside its `enum`) and, when it is broken, ask the agent once more, naming each broken field. See [Routing outcome](/edges#routing-outcome) for what a still-broken routing field does.
+- **MAY** honor `x-sweny-count-of` on an integer property: `{ array, where?, non_empty? }` names a top-level array of objects, the values each counted item's fields must have (`where: { field: [allowed, ...] }`) and the fields that must be non-empty strings (`non_empty: [field]`). A value that differs from that count is broken. Keywords starting with `x-` are removed from the schema handed to the AI model.
 
 ## Requires
 

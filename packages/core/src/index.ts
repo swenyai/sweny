@@ -109,9 +109,9 @@ export { consoleLogger } from "./types.js";
 export { execute, RouteEvaluationError } from "./executor.js";
 export type { ExecuteOptions } from "./executor.js";
 
-// Decision models, shadow mode (#357)
-export { systemOneProvider, DecideError, gateVerdict, DECIDER_MIN_CONFIDENCE, DECIDER_MIN_MARGIN } from "./decider.js";
-export type { DecisionProvider, DeciderConfig, DeciderMode, DeciderRecord, SystemOneOptions } from "./decider.js";
+// Decision models (#357): config types and the provider adapter only
+export { systemOneProvider } from "./decider.js";
+export type { DeciderConfig, DeciderOperatorConfig } from "./decider.js";
 
 // Least-privilege nodes and safe outputs (#365)
 export { BudgetGuard, describeOverrun, minLimits, toLimits } from "./budget.js";

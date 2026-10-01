@@ -7,12 +7,13 @@ Edges define the execution flow between [Nodes](/nodes) in a [Workflow](/workflo
 
 ## Fields
 
-| Field            | Type               | Required | Default   | Description                                                             |
-| ---------------- | ------------------ | -------- | --------- | ----------------------------------------------------------------------- |
-| `from`           | string             | REQUIRED | —         | Source node ID. MUST reference a key in `nodes`.                        |
-| `to`             | string             | REQUIRED | —         | Target node ID. MUST reference a key in `nodes`.                        |
-| `when`           | string \| object   | OPTIONAL | none      | Routing condition: natural language, or `{ expr }` (see Expressions).   |
-| `max_iterations` | integer (1 to 100) | OPTIONAL | unlimited | Maximum times this edge can be followed. Values above 100 are rejected. |
+| Field            | Type               | Required | Default   | Description                                                                                                                              |
+| ---------------- | ------------------ | -------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `from`           | string             | REQUIRED | —         | Source node ID. MUST reference a key in `nodes`.                                                                                         |
+| `to`             | string             | REQUIRED | —         | Target node ID. MUST reference a key in `nodes`.                                                                                         |
+| `when`           | string \| object   | OPTIONAL | none      | Routing condition: natural language, or `{ expr }` (see Expressions).                                                                    |
+| `description`    | string             | OPTIONAL | none      | The condition in natural language. For an `{ expr }` edge, what the next rung reads when the expression falls through (see Expressions). |
+| `max_iterations` | integer (1 to 100) | OPTIONAL | unlimited | Maximum times this edge can be followed. Values above 100 are rejected.                                                                  |
 
 ## Routing Algorithm
 
@@ -23,7 +24,8 @@ After a node completes, a conforming executor MUST resolve the next node using t
 3. **If zero edges remain:** execution is complete. The current node is a **terminal node**.
 4. **If exactly one edge remains and it has no `when` clause:** follow it unconditionally. The executor MUST NOT invoke the AI model.
 5. **If every remaining conditional edge is an [expression](#expressions):** evaluate them in the executor. The executor MUST NOT invoke the AI model.
-6. **Otherwise:** present all remaining edge conditions to the AI model. The model evaluates each `when` clause against the accumulated context (workflow input + all prior node results) and selects one edge. The executor follows the selected edge.
+6. **If the node sets `route_by: decider` and the executor has a [decider](#decision-models):** ask it to choose among the remaining edges. If its answer passes every gate, follow that edge. The executor MUST NOT invoke the AI model for this route.
+7. **Otherwise:** present all remaining edge conditions to the AI model. The model evaluates each `when` clause against the accumulated context (workflow input + all prior node results) and selects one edge. The executor follows the selected edge.
 
 ## Unconditional Edges
 
@@ -108,13 +110,17 @@ There are no function calls, no arithmetic, no assignment, and no list indexing.
 ### Semantics
 
 - **Strict types, no coercion.** `==` and `!=` compare strings, numbers, booleans, and null by value and type (`3 == '3'` is false). `<`, `<=`, `>`, `>=` need two numbers or two strings. `!`, `&&`, `||`, and the expression as a whole need booleans; there is no truthiness.
-- **Missing means false.** A path whose value is absent (the field was not emitted, or the node did not run or did not succeed) makes the **whole** expression false, and the executor MUST log a warning. A type mismatch is treated the same way. A negation can therefore never turn a missing field into a true.
+- **Missing never routes.** A path whose value is absent (the field was not emitted, or the node did not run or did not succeed) makes the expression unevaluable, and the executor MUST log a warning. A type mismatch at runtime is treated the same way. Neither a negation nor a default edge can turn a missing field into a route: see Routing outcome.
+- **Invalid is unknown, not absent.** A field whose value breaks its declared `type` or `enum` makes ANY expression that references it unevaluable, `exists` included. Only a field that is genuinely absent (and not required) reads as not existing.
 - **`exists` is the explicit presence test** and never warns. `&&` and `||` short-circuit, so `exists a.url && a.url != ''` is safe.
 
 ### Routing outcome
 
+Before routing, a node whose output breaks its declared contract (a `required` field missing, a property outside its declared `type` or `enum`, or an `x-sweny-count-of` count that disagrees with its array) gets one repair request: the executor SHOULD run the node's agent once more, naming each broken field. A required field that is still missing fails the node as before, unless an expression in the workflow reads it.
+
 When every conditional out-edge of a node is an expression, the executor evaluates them all and:
 
+- **any is unevaluable** (see Missing never routes) and at most one is true: the route **falls through** to the next rung (the [decider](#decision-models) for a `route_by: decider` node, else the AI model), which reads each edge's `description`, or its expression when it has none. It is offered only the edges that could still be the answer: every unevaluable edge, plus the true edge when there is one, or else the default edge. A definitely false edge MUST NOT be offered, and an answer naming one MUST be rejected (the default edge, when offered, is the fallback; otherwise the branch ends). A dry run stops here;
 - **exactly one is true:** follow it;
 - **none is true:** follow the node's unconditional (default) edge if it has one;
 - **otherwise** (none true and no default, or two or more true): fail closed. The run stops with a route evaluation error, the same as a failed model route evaluation. The executor MUST NOT guess an edge.
@@ -134,6 +140,35 @@ A node's conditional out-edges MUST be all expressions or all natural language (
 ### Dry runs
 
 Under a dry run every node already runs read-only. Because an expression needs no model call, a dry run follows expression edges and stops only at the first node whose routing would need the AI model. Routing on a dry run stays reproducible from the node outputs alone.
+
+## Decision models
+
+Write an [expression](#expressions) first: it needs no model at all. A decision model is a fast classifier for the natural-language conditions no declared field can express. It answers one multiple-choice question per route.
+
+A node opts in with `route_by: decider` (default `agent`). Nodes that do not opt in never consult it, so safety conditions belong in expressions. The provider (endpoint, model, key) is **operator config** supplied to the executor, never part of the workflow. The workflow MAY only tighten the gates:
+
+```yaml
+decider:
+  min_confidence: 0.9 # optional, 0.7 to 1, default 0.85
+  min_margin: 0.25 # optional, 0.1 to 1, default 0.2
+```
+
+| Field            | Type   | Required | Default | Description                                                              |
+| ---------------- | ------ | -------- | ------- | ------------------------------------------------------------------------ |
+| `min_confidence` | number | OPTIONAL | `0.85`  | Lowest confidence accepted. MUST be at least `0.7`.                      |
+| `min_margin`     | number | OPTIONAL | `0.2`   | Lowest lead of the top label over the runner-up. MUST be at least `0.1`. |
+
+A workflow that declares `decider.provider` or the removed `decider.mode` is invalid.
+
+For a `route_by: decider` node whose conditional edges are natural language, a conforming executor with a decider:
+
+- **MUST** ask it with the node's remaining out-edge targets (the default edge included, exhausted `max_iterations` edges excluded) as the only labels.
+- **MUST** follow its label only when the label is exactly one of those targets, the probabilities cover exactly those targets, are each in [0, 1] and sum to 1 within 0.01, the label is the unique most probable one, its confidence is at least `min_confidence`, and its top-two margin is at least `min_margin`.
+- **MUST** fall through to the AI model, with unchanged semantics, on any other outcome: a timeout, an HTTP error, a malformed response, an unknown label, or a failed gate.
+- **MUST** send only an explicit projection of declared typed fields: each prior node's status, its `output` properties typed `number`, `integer`, `boolean` or string `enum` (a value outside its type sent as null) and its eval verdicts, redacted and fenced as untrusted data. It **MUST NOT** send free-text strings, undeclared fields, the run input, tool outputs, environment values or secrets. When a condition reads `input.*` or names a node with no such field, it **MUST** skip the decider.
+- **MUST NOT** send state anywhere but the operator's URL and **MUST NOT** fall back to another provider. A URL that repository content can set **MUST** be limited to loopback and **MUST NOT** receive a credential. The executor **SHOULD** check the addresses a host name resolves to (not its text), connect to the checked address, and refuse link-local and metadata addresses always and private ones unless the operator's environment allows them.
+- **SHOULD** stop calling a decider that failed several times in a row, and cap calls per run; both are per logical run, continued across a resume.
+- **MUST** record in the trace which rung chose each conditional route (`expr`, `decider` or `agent`). A resumed run **MUST** replay each recorded route without asking the decider or the AI model again; replay is deterministic for recorded routes only.
 
 ## Terminal Nodes
 

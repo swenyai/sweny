@@ -453,6 +453,13 @@ export interface Node {
    */
   on_fail?: NodeOnFail;
   /**
+   * Who picks this node's natural-language route (#357). `agent` (default):
+   * the agent's route evaluation. `decider`: the operator's decision model is
+   * asked first and its confident answer is the route; otherwise the agent.
+   * Expressions always win over both. Safety conditions belong in expressions.
+   */
+  route_by?: RouteBy;
+  /**
    * What this node's agent may do (#365). `read` runs the node read-only:
    * only `access: "read"` skill tools, no external skill MCP servers, no
    * shell / file-write / edit / fetch / subagent built-ins. Absent: `read`
@@ -618,6 +625,12 @@ export interface Edge {
    * evaluated by sweny with no model call.
    */
   when?: EdgeWhen;
+  /**
+   * The condition in natural language (#357). For an `{ expr }` edge it is
+   * what the next rung (decider or agent) reads when the expression cannot be
+   * evaluated because a field it needs is missing or invalid.
+   */
+  description?: string;
   /** Max times this edge can be followed (enables retry loops). Default: unlimited. */
   max_iterations?: number;
 }
@@ -640,6 +653,32 @@ export const WORKFLOW_TYPES = [
   "generic",
 ] as const;
 export type WorkflowType = (typeof WORKFLOW_TYPES)[number];
+
+/**
+ * Decision model gates (#357). Shared by the Zod schema, the JSON schema and
+ * the executor; kept here so schema-only (browser) consumers need no Node code.
+ */
+/** Default: accept a decider answer only at or above this confidence. */
+export const DECIDER_MIN_CONFIDENCE = 0.85;
+/** Default: ... and only when the top label leads the runner-up by at least this much. */
+export const DECIDER_MIN_MARGIN = 0.2;
+/** A workflow may lower `min_confidence` to this and no further. */
+export const DECIDER_CONFIDENCE_FLOOR = 0.7;
+/** A workflow may lower `min_margin` to this and no further. */
+export const DECIDER_MARGIN_FLOOR = 0.1;
+/** `route_by` values: who picks a node's natural-language route. */
+export const ROUTE_BY = ["agent", "decider"] as const;
+export type RouteBy = (typeof ROUTE_BY)[number];
+/** Load error for a workflow that still declares the removed `decider.mode`. */
+export const DECIDER_MODE_REMOVED =
+  "decider.mode was removed with shadow mode. A decider now decides the routes of nodes that set `route_by: decider`, " +
+  "using the provider from operator config (.sweny.yml `decider:` or SWENY_DECIDER_URL and SWENY_DECIDER_MODEL). " +
+  "Delete the mode line; to keep routing with the agent only, delete the whole decider block.";
+/** Load error for a workflow that declares the provider itself. */
+export const DECIDER_PROVIDER_MOVED =
+  "decider.provider is not allowed in a workflow: the endpoint and key come only from operator config " +
+  "(.sweny.yml `decider: { url, model }`, or SWENY_DECIDER_URL and SWENY_DECIDER_MODEL; the key only from SWENY_DECIDER_API_KEY). " +
+  "Move it there. A workflow may only set min_confidence and min_margin here, and `route_by: decider` on nodes.";
 
 /** A complete workflow definition. Pure data, fully serializable. */
 export interface Workflow {
@@ -670,8 +709,9 @@ export interface Workflow {
    */
   budget?: Budget;
   /**
-   * Decision model for route choices (#357). `shadow` asks it alongside the
-   * agent and logs agreement; the route is always the agent's. Default: off.
+   * Decision model thresholds (#357) for the nodes that set `route_by:
+   * decider`. Never looser than the floors. The provider itself comes only
+   * from operator config, never from the workflow.
    */
   decider?: DeciderConfig;
   /**
@@ -857,12 +897,20 @@ export interface TraceStep {
   retryAttempt?: number;
 }
 
+/**
+ * Which rung of the route ladder chose a conditional route (#357): a `when`
+ * expression, the decision model, or the agent's route evaluation.
+ */
+export type RouteRung = "expr" | "decider" | "agent";
+
 /** A routing decision between nodes */
 export interface TraceEdge {
   from: string;
   to: string;
   /** Why this edge was chosen (condition text or "only path") */
   reason: string;
+  /** Who chose it. Absent for an unconditional edge (nothing to decide). */
+  rung?: RouteRung;
 }
 
 /** Full execution trace — ordered steps + edges taken */
@@ -873,8 +921,14 @@ export interface ExecutionTrace {
   edges: TraceEdge[];
   /** Resolved sources keyed by field path (e.g. "nodes.gather.instruction") */
   sources: Record<string, _ResolvedSource>;
-  /** Shadow-mode decider records, one per route decision (#357). Metadata only. Absent when the decider is off. */
+  /** One record per decision-model consultation (#357). Metadata only. Absent when no decider runs. */
   decisions?: DeciderRecord[];
+  /**
+   * Why the decider did not run for some or all of this run's `route_by:
+   * decider` nodes (#357): missing operator config, `--no-decider`, a rejected
+   * URL, an open breaker or a spent call cap. Absent when nothing turned it off.
+   */
+  deciderOff?: string;
 }
 
 /** Result of execute() — final node results + full execution trace */

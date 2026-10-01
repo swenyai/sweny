@@ -380,8 +380,25 @@ function lookup(scope: ExpressionScope, segments: string[]): unknown {
  * Evaluate a parsed expression against node outputs. Never throws: a missing
  * field or a type mismatch yields `{ value: false, problem }`.
  */
-export function evaluateExpression(ast: ExprNode, scope: ExpressionScope): ExpressionResult {
+export function evaluateExpression(
+  ast: ExprNode,
+  scope: ExpressionScope,
+  opts: {
+    /**
+     * `node.field` paths whose value broke its declared type or enum. Any
+     * reference to one (or below it), `exists` included, is a problem: the
+     * value is unknown, which is neither present nor absent.
+     */
+    invalid?: ReadonlySet<string>;
+  } = {},
+): ExpressionResult {
+  const checkInvalid = (path: string[]) => {
+    if (opts.invalid && path.length >= 2 && opts.invalid.has(`${path[0]}.${path[1]}`)) {
+      throw new Abort(`field '${path[0]}.${path[1]}' does not match its declared type`);
+    }
+  };
   const read = (path: string[]): unknown => {
+    checkInvalid(path);
     const v = lookup(scope, path);
     if (v === undefined) throw new Abort(`field '${path.join(".")}' is missing`);
     return v;
@@ -400,6 +417,7 @@ export function evaluateExpression(ast: ExprNode, scope: ExpressionScope): Expre
       case "path":
         return read(node.segments);
       case "exists": {
+        checkInvalid(node.path.segments);
         const v = lookup(scope, node.path.segments);
         return v !== undefined && v !== null;
       }

@@ -23,7 +23,7 @@ nodes:
          identifier wrapped in brackets — e.g. query
          `[OFF-1234] in:title type:pr state:open`. If the response contains
          one or more PRs whose title starts with `[<issueIdentifier>]`,
-         STOP analysis. Output `existing_pr_url`
+         STOP analysis. Output `has_open_pr: true`, `existing_pr_url`
          (the URL of the open PR) and a short `issue_summary` noting the
          skip; leave `fix_plan` set to a one-line "Skip: open PR
          <url> already exists". The workflow will route to `notify` and
@@ -37,7 +37,12 @@ nodes:
       4. Identify the exact files and lines that need to change.
       5. Plan the fix approach.
 
-      Output a clear analysis of what needs to change and why.
+      Output a clear analysis of what needs to change and why, plus three
+      routing fields: `has_open_pr` (true only when step 2 found an open PR),
+      `risk_level` (low, medium or high), and `plan_is_clear` (true only when
+      the plan names the exact files and changes). sweny implements the fix
+      only when there is no open PR, the risk is low or medium, and the plan
+      is clear; otherwise it skips.
     skills:
       - github
       - linear
@@ -68,9 +73,23 @@ nodes:
             and the analyze node is short-circuiting. Triggers the
             `analyze → notify` edge.
           pattern: "^https?://"
+        has_open_pr:
+          type: boolean
+          description: |
+            true when step 2 found an open PR for this issue (and
+            existing_pr_url is set), else false. Routes analyze to notify.
+        plan_is_clear:
+          type: boolean
+          description: |
+            true when fix_plan names the exact files and changes, so the fix
+            can be implemented without guessing; false when the fix is
+            unclear or needs a decision first.
       required:
         - issue_summary
         - fix_plan
+        - has_open_pr
+        - risk_level
+        - plan_is_clear
   implement:
     name: Implement Fix
     instruction: |-
@@ -182,15 +201,28 @@ nodes:
         max: 1
         number: { input: issueIdentifier }
 edges:
+  # Deterministic routing (#357), equivalent to the old natural-language
+  # conditions over declared fields: an open PR (has_open_pr, or
+  # existing_pr_url set, as the old condition read it) goes to notify;
+  # otherwise risk low or medium with a clear plan goes to implement;
+  # anything else (high risk or an unclear plan) takes the default edge to
+  # skip. The two expressions are exclusive (the implement one requires no
+  # open PR by either signal). A routing field still missing or invalid after
+  # sweny's repair request falls through to the agent, which reads the
+  # descriptions.
   - from: analyze
     to: notify
-    when: analyze.existing_pr_url is set (an open PR for this issue already exists; skip the implement and create_pr nodes)
+    when:
+      expr: "analyze.has_open_pr == true || exists analyze.existing_pr_url"
+    description: an open PR for this issue already exists (analyze.existing_pr_url is set); skip the implement and create_pr nodes
   - from: analyze
     to: implement
-    when: Fix risk level is low or medium and a clear plan exists
+    when:
+      expr: "analyze.has_open_pr == false && !(exists analyze.existing_pr_url) && analyze.risk_level in ['low', 'medium'] && analyze.plan_is_clear == true"
+    description: no open PR exists, the fix risk level is low or medium, and a clear plan exists
   - from: analyze
     to: skip
-    when: Fix is too complex, risky, or unclear
+    description: the fix is too complex, risky, or unclear
   - from: implement
     to: create_pr
   - from: skip

@@ -8,7 +8,6 @@
 
 import { workspaceRoot, writeFileNoFollow } from "../safe-file.js";
 import { consoleLogger, type ExecutionTrace, type Logger, type NodeResult, type Workflow } from "../types.js";
-import { summarizeDecisions } from "../decider.js";
 import { toMermaidBlock, type NodeStatus } from "../mermaid.js";
 import { createPaint } from "./style.js";
 import { colorEnabled, glyphs } from "./terminal.js";
@@ -43,11 +42,20 @@ export interface RunSummary {
   /** The spend budget a node crossed (#449). Absent when none was. */
   budget?: { node: string; scope: "node" | "run"; unit: "tokens" | "cost_usd"; limit: number; spent: number };
   /**
-   * Shadow-mode decider agreement (#357), counts only. `compared` decisions
-   * passed every gate; `agreed` matched the agent; the rest fell through.
-   * Absent when the decider was off or never consulted.
+   * Who decided the run's conditional routes (#357), counts only: a `when`
+   * expression, the decision model, or the agent. The decider and expression
+   * counts are routes with no agent call. Absent when no route was a decision.
    */
-  decider?: { compared: number; agreed: number; fellThrough: number };
+  routes?: RouteCounts;
+  /** Why the decider did not run for some or all routes (missing config, breaker, cap). */
+  deciderOff?: string;
+}
+
+export interface RouteCounts {
+  total: number;
+  decider: number;
+  expr: number;
+  agent: number;
 }
 
 export interface RunPolicy {
@@ -130,13 +138,20 @@ export function summarizeRun(
     ...(degraded.size > 0 ? { degraded: [...degraded] } : {}),
     ...(Object.keys(policy).length > 0 ? { policy } : {}),
     ...(budget ? { budget } : {}),
-    ...(trace?.decisions && trace.decisions.length > 0 ? { decider: decisionCounts(trace) } : {}),
+    ...(trace && countRoutes(trace).total > 0 ? { routes: countRoutes(trace) } : {}),
+    ...(trace?.deciderOff ? { deciderOff: trace.deciderOff } : {}),
   };
 }
 
-function decisionCounts(trace: ExecutionTrace): NonNullable<RunSummary["decider"]> {
-  const d = summarizeDecisions(trace.decisions ?? []);
-  return { compared: d.compared, agreed: d.agreed, fellThrough: d.fell_through };
+/** Conditional routes by rung. Unconditional edges decide nothing and are not counted. */
+export function countRoutes(trace: ExecutionTrace): RouteCounts {
+  const c: RouteCounts = { total: 0, decider: 0, expr: 0, agent: 0 };
+  for (const e of trace.edges) {
+    if (!e.rung) continue;
+    c.total++;
+    c[e.rung]++;
+  }
+  return c;
 }
 
 /**
@@ -205,9 +220,10 @@ export function formatBudgetOverrun(b: NonNullable<RunSummary["budget"]>): strin
   return `budget exceeded: ${formatBudgetAmount(b)} (${b.scope}, at node ${b.node})`;
 }
 
-/** `agreed 4/5`, or `fell through 2/2` when no decision passed the gates. */
-export function formatDeciderCounts(d: NonNullable<RunSummary["decider"]>): string {
-  return d.compared > 0 ? `agreed ${d.agreed}/${d.compared}` : `fell through ${d.fellThrough}/${d.fellThrough}`;
+/** `5 (3 decider, 1 expr, 1 agent)`: zero rungs are left out. */
+export function formatRouteCounts(r: RouteCounts): string {
+  const parts = (["decider", "expr", "agent"] as const).filter((k) => r[k] > 0).map((k) => `${r[k]} ${k}`);
+  return parts.length > 0 ? `${r.total} (${parts.join(", ")})` : String(r.total);
 }
 
 /**
@@ -229,7 +245,8 @@ export function formatReceipt(s: RunSummary): string {
     ...(s.degraded && s.degraded.length > 0 ? [`degraded: ${s.degraded.join(", ")}`] : []),
     ...(formatPolicySegment(s.policy) ? [formatPolicySegment(s.policy)!] : []),
     ...(s.budget ? [formatBudgetOverrun(s.budget)] : []),
-    ...(s.decider ? [`decider ${formatDeciderCounts(s.decider)}`] : []),
+    ...(s.routes && s.routes.total > 0 ? [`routes ${formatRouteCounts(s.routes)}`] : []),
+    ...(s.deciderOff ? [`decider off: ${s.deciderOff}`] : []),
   ];
   return parts.join(" · ");
 }
@@ -396,8 +413,5 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
     "--harness-policy <mode>",
     "strict: refuse a node whose policy the agent cannot enforce; warn: run it and report what was not enforced (default: strict under GitHub Actions, warn elsewhere; env SWENY_HARNESS_POLICY)",
   ],
-  [
-    "--decider <mode>",
-    "Decision model for route choices: off (default) or shadow. Shadow asks the workflow's decider.provider alongside the agent and reports agreement; the route is always the agent's. Needs decider.provider in the workflow (no default URL)",
-  ],
+  ["--no-decider", "Skip the decision model for this run: the agent decides the routes of route_by: decider nodes"],
 ];

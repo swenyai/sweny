@@ -127,11 +127,12 @@ A conforming executor MUST produce an `ExecutionTrace` after execution completes
 
 ### TraceEdge
 
-| Field    | Type   | Description                                                                                       |
-| -------- | ------ | ------------------------------------------------------------------------------------------------- |
-| `from`   | string | Source node ID.                                                                                   |
-| `to`     | string | Target node ID.                                                                                   |
-| `reason` | string | Why this edge was followed — the `when` condition text, or `"only path"` for unconditional edges. |
+| Field    | Type   | Description                                                                                                                                         |
+| -------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `from`   | string | Source node ID.                                                                                                                                     |
+| `to`     | string | Target node ID.                                                                                                                                     |
+| `reason` | string | Why this edge was followed — the `when` condition text, or `"only path"` for unconditional edges.                                                   |
+| `rung`   | string | For a conditional route, who chose it: `expr`, `decider` or `agent`. Absent for unconditional edges. See [Decision models](/edges#decision-models). |
 
 ### ExecutionResult
 

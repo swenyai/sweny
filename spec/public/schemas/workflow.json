@@ -281,45 +281,23 @@
     },
     "Decider": {
       "type": "object",
-      "required": ["mode"],
       "additionalProperties": false,
-      "description": "Decision model for route choices. 'shadow' asks it alongside the agent and logs whether they agree; the route is always the agent's. The workflow state goes only to provider.base_url, with no fallback.",
+      "description": "Decision model thresholds for the nodes that set route_by: decider. The provider (URL, model, key) comes only from operator config (.sweny.yml or SWENY_DECIDER_* env), never from the workflow; 'provider' and the removed 'mode' key are rejected.",
       "properties": {
-        "mode": {
-          "type": "string",
-          "enum": ["off", "shadow"]
+        "min_confidence": {
+          "type": "number",
+          "minimum": 0.7,
+          "maximum": 1,
+          "default": 0.85,
+          "description": "Accept the decider's answer only at or above this confidence."
         },
-        "provider": {
-          "type": "object",
-          "required": ["base_url", "model"],
-          "additionalProperties": false,
-          "properties": {
-            "base_url": {
-              "type": "string",
-              "format": "uri",
-              "description": "Server root serving POST /v1/systemone (Ollama or TypeSafe Jev)."
-            },
-            "model": {
-              "type": "string",
-              "minLength": 1
-            },
-            "api_key_env": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Env var holding the bearer key."
-            }
-          }
+        "min_margin": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 1,
+          "default": 0.2,
+          "description": "Accept it only when the top label leads the runner-up by at least this much."
         }
-      },
-      "if": {
-        "properties": {
-          "mode": {
-            "const": "shadow"
-          }
-        }
-      },
-      "then": {
-        "required": ["provider"]
       }
     },
     "SafeOutput": {
@@ -513,7 +491,7 @@
     },
     "decider": {
       "$ref": "#/$defs/Decider",
-      "description": "Decision model for route choices (shadow mode only). Default: off."
+      "description": "Thresholds for the decision model that decides the routes of route_by: decider nodes when confident. Default: 0.85 confidence, 0.2 margin."
     },
     "context_mode": {
       "type": "string",
@@ -747,6 +725,11 @@
             "enum": ["halt", "continue"],
             "description": "What to do when this node finishes 'failed' (agent-level failure, or an eval failure that exhausted retries and was not softened by fail_soft). 'halt' (default) stops the workflow with the failure surfaced so a broken node never advances down a conditional edge; 'continue' preserves the legacy fall-through where routing proceeds from the failed node. Distinct from requires.on_fail (the pre-condition gate)."
           },
+          "route_by": {
+            "type": "string",
+            "enum": ["agent", "decider"],
+            "description": "Who picks this node's natural-language route. 'agent' (default): the agent's route evaluation. 'decider': the operator's decision model first, the agent when it is not confident. Expressions always win over both; put safety conditions in expressions."
+          },
           "permissions": {
             "$ref": "#/$defs/Permissions",
             "description": "What this node's agent may do. Absent: read when the node declares outputs, else the workflow's permissions, else write."
@@ -904,6 +887,11 @@
                 }
               }
             ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The condition in natural language. For an { expr } edge, what the next rung reads when the expression cannot be evaluated because a field it needs is missing or invalid."
           },
           "max_iterations": {
             "type": "integer",

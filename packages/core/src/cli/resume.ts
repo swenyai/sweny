@@ -74,6 +74,7 @@ export const RESUME_SHARED_RUN_FLAGS = [
   "--input <json>",
   "--agent <id>",
   "--harness-policy <mode>",
+  "--no-decider",
 ];
 
 export interface ResumeContext {
