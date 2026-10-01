@@ -81,7 +81,7 @@ export async function checkProviderConnectivity(config: CliConfig, opts: CheckOp
     } else if (provider === "sentry") {
       results.push(await checkSentry(creds));
     } else if (provider === "file") {
-      results.push({ name: "Observability (file)", status: "skip", detail: "File provider — no network check needed" });
+      results.push({ name: "Observability (file)", status: "skip", detail: "File provider - no network check needed" });
     } else {
       results.push({
         name: `Observability (${provider})`,
@@ -104,7 +104,7 @@ export async function checkProviderConnectivity(config: CliConfig, opts: CheckOp
     results.push({
       name: "Issue tracker (file)",
       status: "skip",
-      detail: "File provider — no network check needed",
+      detail: "File provider - no network check needed",
     });
   } else {
     results.push({
@@ -130,7 +130,7 @@ export async function checkProviderConnectivity(config: CliConfig, opts: CheckOp
     results.push({
       name: "Source control (file)",
       status: "skip",
-      detail: "File provider — no network check needed",
+      detail: "File provider - no network check needed",
     });
   } else {
     results.push({
@@ -159,7 +159,7 @@ async function checkAnthropic(apiKey: string): Promise<CheckResult> {
       return {
         name,
         status: "fail",
-        detail: "401 Unauthorized — check ANTHROPIC_API_KEY at https://console.anthropic.com",
+        detail: "401 Unauthorized - check ANTHROPIC_API_KEY at https://console.anthropic.com",
       };
     }
     return { name, status: "fail", detail: `Unexpected HTTP ${res.status}` };
@@ -238,7 +238,7 @@ export async function checkDatadog(creds: Record<string, string>): Promise<Check
     return {
       name,
       status: "fail",
-      detail: `Invalid DD_SITE "${site}" — expected a hostname like datadoghq.com or datadoghq.eu`,
+      detail: `Invalid DD_SITE "${site}" - expected a hostname like datadoghq.com or datadoghq.eu`,
     };
   }
   try {
@@ -254,7 +254,7 @@ export async function checkDatadog(creds: Record<string, string>): Promise<Check
         name,
         status: "fail",
         detail:
-          "403 Forbidden — check DD_API_KEY and DD_APP_KEY at https://app.datadoghq.com/organization-settings/api-keys",
+          "403 Forbidden - check DD_API_KEY and DD_APP_KEY at https://app.datadoghq.com/organization-settings/api-keys",
       };
     }
     return { name, status: "fail", detail: `Unexpected HTTP ${res.status}` };
@@ -281,7 +281,7 @@ async function checkSentry(creds: Record<string, string>): Promise<CheckResult> 
       return {
         name,
         status: "fail",
-        detail: "401 Unauthorized — check SENTRY_AUTH_TOKEN at https://sentry.io/settings/auth-tokens/",
+        detail: "401 Unauthorized - check SENTRY_AUTH_TOKEN at https://sentry.io/settings/auth-tokens/",
       };
     }
     return { name, status: "fail", detail: `Unexpected HTTP ${res.status}` };
@@ -305,7 +305,7 @@ async function checkLinear(apiKey: string): Promise<CheckResult> {
     if (res.status === 200) {
       const body = (await res.json()) as { data?: { viewer?: { name?: string } }; errors?: unknown[] };
       if (body.errors?.length) {
-        return { name, status: "fail", detail: "GraphQL error — check LINEAR_API_KEY" };
+        return { name, status: "fail", detail: "GraphQL error - check LINEAR_API_KEY" };
       }
       const displayName = body.data?.viewer?.name ?? "authenticated";
       return { name, status: "ok", detail: `Authenticated as ${displayName}` };
@@ -314,7 +314,7 @@ async function checkLinear(apiKey: string): Promise<CheckResult> {
       return {
         name,
         status: "fail",
-        detail: "401 Unauthorized — check LINEAR_API_KEY at https://linear.app/settings/api",
+        detail: "401 Unauthorized - check LINEAR_API_KEY at https://linear.app/settings/api",
       };
     }
     return { name, status: "fail", detail: `Unexpected HTTP ${res.status}` };
@@ -340,7 +340,7 @@ async function checkGitHub(token: string, name: string): Promise<CheckResult> {
       return {
         name,
         status: "fail",
-        detail: "401 Bad credentials — check GITHUB_TOKEN at https://github.com/settings/tokens",
+        detail: "401 Bad credentials - check GITHUB_TOKEN at https://github.com/settings/tokens",
       };
     }
     return { name, status: "fail", detail: `Unexpected HTTP ${res.status}` };
@@ -354,11 +354,11 @@ function networkErrorMessage(err: unknown): string {
   // explicit abort surfaces as "AbortError". Either means we gave up waiting.
   const errName = err instanceof Error ? err.name : "";
   if (errName === "TimeoutError" || errName === "AbortError") {
-    return `Connection timed out after ${CHECK_TIMEOUT_MS}ms — host unreachable or too slow`;
+    return `Connection timed out after ${CHECK_TIMEOUT_MS}ms - host unreachable or too slow`;
   }
   const msg = err instanceof Error ? err.message : String(err);
   if (/ENOTFOUND|ETIMEDOUT|ECONNREFUSED/i.test(msg)) {
-    return `Network error — check your internet connection (${msg})`;
+    return `Network error - check your internet connection (${msg})`;
   }
   return msg;
 }

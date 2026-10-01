@@ -4,12 +4,19 @@
  *
  * Unlike run-history and the receipt, this DOES read node output. It is
  * local-only: printed to the terminal and saved to
- * `.sweny/runs/<run-id>/output.md`. Nothing here is sent to the cloud.
+ * `.sweny/runs/<run-id>/output.md` (mode 0600). Nothing here is sent to the cloud.
+ *
+ * Secrets: node data is redacted with the run journal's redactor before
+ * anything renders (secret env and skill credential values, secret-named
+ * fields, known token shapes). In CI the answer is not printed unless asked
+ * (`--show-output`), since CI logs are often visible to more people than the
+ * repo's secrets are.
  */
 
 import fs from "node:fs";
 import path from "node:path";
-import type { JSONSchema, NodeResult, Workflow } from "../types.js";
+import type { ExecutionTrace, JSONSchema, NodeResult, Workflow } from "../types.js";
+import { collectSecretValues, redact } from "../journal.js";
 import { RUN_HISTORY_DIR } from "./run-history.js";
 
 /** Lines of the answer printed to the terminal before the rest is left in output.md. */
@@ -102,35 +109,85 @@ function trimBlock(text: string): string[] {
   return lines.map((l) => l.replace(/\s+$/, ""));
 }
 
+export interface ResolveFinalOutputOptions {
+  /** The run's trace: the answer comes from the last successful visit in execution order. */
+  trace?: Pick<ExecutionTrace, "steps">;
+  /** Secret values to redact (default: secret-named values in `process.env`). */
+  secrets?: string[];
+}
+
 /**
- * Pick what the user should see: the last-run terminal node's result on
- * success, the first failed node's error on failure. Null when there is
+ * Pick what the user should see: the result of the last successful visit
+ * (from the trace, so a loop that ends on an earlier node shows that node) on
+ * success, the first failed node's error on failure. Without a trace, terminal
+ * nodes in result order. Everything is redacted first. Null when there is
  * nothing to show (no schema fields and no summary text).
  */
-export function resolveFinalOutput(workflow: Workflow, results: Map<string, NodeResult>): FinalOutput | null {
+export function resolveFinalOutput(
+  workflow: Workflow,
+  results: Map<string, NodeResult>,
+  opts: ResolveFinalOutputOptions = {},
+): FinalOutput | null {
+  const secrets = opts.secrets ?? collectSecretValues(process.env);
+  const clean = <T>(v: T): T => redact(v, secrets).value as T;
+
   for (const [id, r] of results) {
     if (r.status !== "failed") continue;
     const err = r.data?.error;
-    const text = typeof err === "string" && err.trim() !== "" ? err : "node failed";
+    const text = typeof err === "string" && err.trim() !== "" ? clean(err) : "node failed";
     return { kind: "error", node: id, lines: trimBlock(text) };
   }
 
-  const hasOutgoing = new Set(workflow.edges.map((e) => e.from));
-  const succeeded = [...results].filter(([, r]) => r.status === "success");
-  const terminal = succeeded.filter(([id]) => !hasOutgoing.has(id));
-  // Walk back from the end: the last node that actually yields something wins.
-  const candidates = [...(terminal.length > 0 ? terminal : succeeded)].reverse();
+  let candidates: Array<[string, NodeResult]>;
+  if (opts.trace && opts.trace.steps.length > 0) {
+    // Last successful visit first: walk the trace backwards, each node once.
+    const seen = new Set<string>();
+    candidates = [];
+    for (let i = opts.trace.steps.length - 1; i >= 0; i--) {
+      const step = opts.trace.steps[i];
+      if (step.status !== "success" || seen.has(step.node)) continue;
+      seen.add(step.node);
+      const r = results.get(step.node);
+      if (r?.status === "success") candidates.push([step.node, r]);
+    }
+  } else {
+    const hasOutgoing = new Set(workflow.edges.map((e) => e.from));
+    const succeeded = [...results].filter(([, r]) => r.status === "success");
+    const terminal = succeeded.filter(([id]) => !hasOutgoing.has(id));
+    // Walk back from the end: the last node that actually yields something wins.
+    candidates = [...(terminal.length > 0 ? terminal : succeeded)].reverse();
+  }
   for (const [id, r] of candidates) {
+    const data = clean(r.data ?? {});
     const schema = workflow.nodes[id]?.output;
     let lines: string[] = [];
-    if (schema) lines = renderSchemaOutput(r.data ?? {}, schema);
+    if (schema) lines = renderSchemaOutput(data, schema);
     if (lines.length === 0) {
-      const summary = r.data?.summary;
+      const summary = data.summary;
       if (typeof summary === "string" && summary.trim() !== "") lines = trimBlock(summary);
     }
     if (lines.length > 0) return { kind: "result", node: id, lines };
   }
   return null;
+}
+
+/** True when the environment is CI (GitHub Actions, or a truthy `CI`). */
+export function isCiEnv(env: Record<string, string | undefined>): boolean {
+  if (env.GITHUB_ACTIONS === "true") return true;
+  const ci = env.CI?.trim().toLowerCase();
+  return !!ci && ci !== "false" && ci !== "0";
+}
+
+/** Print the answer block? Always outside CI; in CI only with `--show-output`. */
+export function shouldPrintFinalOutput(showOutput: boolean, env: Record<string, string | undefined>): boolean {
+  return showOutput || !isCiEnv(env);
+}
+
+/** The one line printed in CI instead of the answer. */
+export function formatSavedOutputLine(savedTo: string | null): string {
+  return savedTo
+    ? `  answer saved to ${savedTo} (pass --show-output to print it in CI)`
+    : "  answer not printed in CI (pass --show-output to print it)";
 }
 
 /**
@@ -166,13 +223,16 @@ export function outputRelPath(runId: string): string {
   return path.posix.join(...RUN_HISTORY_DIR.split(path.sep), runId, "output.md");
 }
 
-/** Write output.md. Local only. Returns the relative path, or null on failure. Never throws. */
+/** Write output.md (mode 0600). Local only. Returns the relative path, or null on failure. Never throws. */
 export function writeFinalOutput(runId: string, markdown: string, cwd: string = process.cwd()): string | null {
   try {
     const rel = outputRelPath(runId);
     const file = path.join(cwd, rel);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, markdown);
+    fs.mkdirSync(path.dirname(path.dirname(file)), { recursive: true });
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, markdown, { mode: 0o600 });
+    // mode only applies on create: a resumed run overwrites an existing file.
+    fs.chmodSync(file, 0o600);
     return rel;
   } catch {
     return null;

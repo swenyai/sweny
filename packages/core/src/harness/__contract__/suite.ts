@@ -9,18 +9,21 @@
  *
  * Each case passes, or is skipped only where the adapter's declared
  * `capabilities` say the opinion is not native (the skip must match the
- * declaration). Twenty-one cases, one `it` each, so a report reads "21 passed".
+ * declaration). Twenty-two cases, one `it` each, so a report reads "22 passed".
  * Cases 16 to 18 (#365) prove the node policy reaches the agent, which safe
  * outputs depend on. Case 19 (#442) proves a staged run cannot push through
  * the env it hands the agent. Case 20 (#449) proves live usage reaches
  * `onUsage` and that stopping on it stops the agent. Case 21 (security review
  * 2026-09-30) proves skill credentials never reach the agent unless a node
- * grants one with `agent_env`.
+ * grants one with `agent_env`. Case 22 (#473) proves a git credential the
+ * checkout persisted is unreadable to read-only and staged nodes wherever the
+ * harness (natively or through the process wrapper) can enforce it, and is
+ * reported, or refused under strict, where it cannot.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import type { Logger, NodeUsage, Tool } from "../../types.js";
@@ -31,7 +34,7 @@ import { nativeDenyClasses, policyGate } from "../policy.js";
 import type { AgentHarness, HarnessRunRequest, NodePolicy, ToolClass } from "../types.js";
 import type { SandboxWrapper } from "../sandbox-wrapper.js";
 import { AMBIENT_MCP_CANARY, type FakeCapture, type HarnessFakes } from "./fakes.js";
-import { sandboxWrapperCase } from "./sandbox.js";
+import { createRecordingWrapper, sandboxWrapperCase } from "./sandbox.js";
 import {
   EXIT_CASES,
   FULL_USAGE,
@@ -53,6 +56,8 @@ export interface MakeOptions {
    * `undefined` = the adapter's default. Only case 15 sets it.
    */
   sandboxWrapper?: SandboxWrapper | null;
+  /** The adapter's working directory (case 22 points it at a checkout). Default: the adapter's own. */
+  cwd?: string;
 }
 
 /**
@@ -123,6 +128,7 @@ export const CONTRACT_CASE_NAMES = [
   "19 stage no push: under noPush a git push from the agent's env fails and write tokens are withheld; normal mode pushes",
   "20 live usage: onUsage gets cumulative usage while the node runs, and aborting on it stops the agent",
   "21 credentials: skill credentials never reach a read, staged or default write node; agent_env grants one to that node only",
+  "22 checkout token: a persisted git credential is unreadable to read-only and staged nodes where enforceable, else degraded or refused",
 ] as const;
 
 export interface ContractSuiteOptions {
@@ -811,6 +817,84 @@ export function runContractSuite(
         fakes.script(DONE);
         await h.run(req({ agentAccess: { envVars: [], domains: [], withhold } }));
         expect(leaked(), "the next node does not inherit the grant").toEqual([]);
+      },
+      // 22 (#473): actions/checkout persists the job token in the checkout
+      // (`persist-credentials: true`, the default). Env scoping cannot reach a
+      // file, so a read-only or staged node's agent must be denied the file
+      // itself: natively (the fake reports `unreadable`) or by the process
+      // wrapper (`denyRead` on the wrap request). Where neither holds, the node
+      // is reported degraded and refused under strict. A default write node is
+      // left as it was. The canary value never appears in any result.
+      async (skip) => {
+        if (process.platform === "win32") return skip("posix paths");
+        const CANARY = "contract-473-canary-token";
+        const root = mkdtempSync(path.join(tmpdir(), "sweny-contract-473-"));
+        try {
+          const repo = path.join(root, "checkout");
+          mkdirSync(path.join(repo, ".git"), { recursive: true });
+          const configPath = path.join(repo, ".git", "config");
+          writeFileSync(
+            configPath,
+            `[core]\n\trepositoryformatversion = 0\n[http "https://github.com/"]\n\textraheader = AUTHORIZATION: basic ${CANARY}\n`,
+          );
+          const config = realpathSync(configPath);
+          const gap = (d: string[]) => d.filter((x) => x.startsWith("git credential"));
+          const masked = (cap: FakeCapture, denyRead?: readonly string[]) =>
+            cap.unreadable?.(config) === true || (denyRead ?? []).some((p) => realpathSync(p) === config);
+          const build = async (o: { sandbox?: boolean; sandboxWrapper?: SandboxWrapper | null } = {}) => {
+            await fakes.reset();
+            return make({ logger: mkLogger(), cwd: repo, sandboxWrapper: o.sandboxWrapper ?? null, ...o });
+          };
+          const write: NodePolicy = { readOnly: false, deny: [], egress: [], strict: false };
+          const nodes: [string, Partial<HarnessRunRequest>, NodePolicy][] = [
+            ["read-only node", { readOnly: true }, readOnlyPolicy],
+            ["staged node", { agentAccess: { envVars: [], domains: [], noPush: true } }, write],
+          ];
+
+          // 1. No wrapper, no sandbox: masked natively, or reported (and refused under strict).
+          const bare = await build();
+          for (const [label, over, policy] of nodes) {
+            fakes.script(DONE);
+            const r = await bare.run(req({ ...over, policy }));
+            expect(JSON.stringify(r), `${label}: canary in the result`).not.toContain(CANARY);
+            const native = masked(fakes.captured());
+            if (native) {
+              expect(gap(r.degraded), `${label}: masked natively`).toEqual([]);
+              continue;
+            }
+            expect(gap(r.degraded).length, `${label}: unmasked must be reported`).toBeGreaterThan(0);
+            expect(gap(r.degraded).join(" "), `${label}: names the file`).toContain(config);
+            fakes.script(DONE);
+            const before = fakes.captured().invocations;
+            const strict = await bare.run(req({ ...over, policy: { ...policy, strict: true } }));
+            expect(strict.status, `${label}: strict refuses`).toBe("failed");
+            expect(fakes.captured().invocations, `${label}: strict, agent not started`).toBe(before);
+          }
+
+          // 2. With containment (the native sandbox, or the process wrapper): masked, strict passes.
+          const native = bare.capabilities.sandbox.fs && bare.capabilities.sandbox.network;
+          const rec = createRecordingWrapper();
+          const contained = native ? await build({ sandbox: true }) : await build({ sandboxWrapper: rec });
+          for (const [label, over, policy] of nodes) {
+            fakes.script(DONE);
+            const p: NodePolicy = { ...policy, strict: true, sandbox: "strict" };
+            const r = await contained.run(req({ ...over, policy: p }));
+            expect(r.status, `${label} contained: ${JSON.stringify(r.data)}`).toBe("success");
+            expect(masked(fakes.captured(), rec.requests.at(-1)?.denyRead), `${label}: unreadable`).toBe(true);
+            expect(gap(r.degraded), `${label}: nothing to report`).toEqual([]);
+            expect(JSON.stringify(r)).not.toContain(CANARY);
+          }
+
+          // 3. A default write node keeps today's behavior: no mask, nothing reported.
+          fakes.script(DONE);
+          const before = rec.requests.length;
+          const w = await contained.run(req({ policy: { ...write, sandbox: native ? undefined : "strict" } }));
+          expect(w.status).toBe("success");
+          expect(gap(w.degraded)).toEqual([]);
+          if (!native) expect(rec.requests.slice(before).every((q) => !q.denyRead?.length)).toBe(true);
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
       },
     ];
 

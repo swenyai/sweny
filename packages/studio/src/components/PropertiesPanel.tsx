@@ -130,7 +130,7 @@ function WorkflowMetaPanel() {
   const nodeIds = Object.keys(workflow.nodes);
 
   return (
-    <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
+    <div className="sw-panel w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
       <h2 className="font-semibold text-gray-800 mb-3 text-sm">Workflow</h2>
 
       <div className="mb-3">
@@ -259,7 +259,7 @@ function NodePanel({
   const [aiError, setAiError] = useState<string | null>(null);
 
   return (
-    <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
+    <div className="sw-panel w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
       <h2 className="font-semibold text-gray-800 mb-3 text-sm">Node</h2>
 
       {/* Unreachable warning */}
@@ -575,7 +575,7 @@ function EdgePanel({
   const [editMaxIter, setEditMaxIter] = useState(maxIterations?.toString() ?? "");
 
   return (
-    <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
+    <div className="sw-panel w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
       <h2 className="font-semibold text-gray-800 mb-3 text-sm">Edge</h2>
 
       <div className="mb-3">
@@ -670,7 +670,7 @@ function EdgePanel({
 
 function EmptyPanel() {
   return (
-    <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
+    <div className="sw-panel w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 p-4">
       <p className="text-xs text-gray-400">Node not found.</p>
     </div>
   );

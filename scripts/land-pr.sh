@@ -37,6 +37,14 @@ while :; do
       fi
       ;;
     behind) gh pr update-branch "$PR" -R "$REPO" >/dev/null 2>&1 || true ;;
+    blocked)
+      # Required checks pending or failed. Pending: keep waiting. Failed: stop now.
+      if gh pr checks "$PR" -R "$REPO" 2>/dev/null | awk -F'\t' '$2=="fail"{f=1} END{exit !f}'; then
+        echo "PR #$PR has failing checks:"
+        gh pr checks "$PR" -R "$REPO" | awk -F'\t' '$2=="fail"'
+        exit 3
+      fi
+      ;;
   esac
   if [ "$(date +%s)" -ge "$deadline" ]; then
     echo "PR #$PR not mergeable after ${TIMEOUT_MIN}m (state: $ms)"

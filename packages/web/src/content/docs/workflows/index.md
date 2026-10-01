@@ -199,6 +199,27 @@ sweny workflow diagram my-workflow.yml
 sweny workflow diagram my-workflow.yml -o diagram.mmd
 ```
 
+Diagrams on this site render with the SWEny brand: the current node is bold blue, passed nodes solid blue, failed red, skipped dashed slate, nodes not reached an outline. The same styles ship in every diagram SWEny prints for a run:
+
+```mermaid
+graph TB
+    survey[Survey the repo]
+    explain([Explain it ▶])
+    review[Review the answer]
+
+    survey --> explain
+    explain --> review
+
+    classDef current fill:#3b82f6,stroke:#1d4ed8,color:#fff,stroke-width:4px
+    classDef success fill:#2563eb,stroke:#1d4ed8,color:#fff,stroke-width:2px
+    classDef pending fill:none,stroke:#64748b,color:#64748b,stroke-width:1px
+    class survey success
+    class explain current
+    class review pending
+    linkStyle 0 stroke:#2563eb,stroke-width:3px
+    linkStyle 1 stroke:#64748b,stroke-width:1px,stroke-dasharray:5 5
+```
+
 See [`sweny workflow diagram`](/cli/commands/#sweny-workflow-diagram) for all options.
 
 ## What's next?

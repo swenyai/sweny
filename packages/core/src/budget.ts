@@ -16,6 +16,8 @@
  *   the attempt's signal, which stops the agent (harness cancel).
  * - between nodes: usage on the finished result is checked; a crossing fails the
  *   node, and the run halts before the next node starts.
+ * - across a resume: the run journal records each attempt's spend (live and
+ *   final), and `sweny workflow resume` seeds the run total with it.
  */
 
 import type { NodeUsage } from "./types.js";
@@ -75,8 +77,11 @@ export function hasLimits(l: SpendLimits): boolean {
 /** Tokens and cost a usage report carries. A field the harness did not report stays undefined. */
 export function spendOf(u: NodeUsage | undefined): { tokens?: number; costUsd?: number } {
   if (!u) return {};
-  const tokens =
-    isNum(u.inputTokens) || isNum(u.outputTokens) ? (u.inputTokens ?? 0) + (u.outputTokens ?? 0) : undefined;
+  // Count only finite fields: a NaN beside a real count must not turn the sum into NaN,
+  // which no limit compares as crossed (the run would pass its budget without stopping).
+  const inTokens = isNum(u.inputTokens) ? u.inputTokens : undefined;
+  const outTokens = isNum(u.outputTokens) ? u.outputTokens : undefined;
+  const tokens = inTokens !== undefined || outTokens !== undefined ? (inTokens ?? 0) + (outTokens ?? 0) : undefined;
   return { ...(tokens !== undefined ? { tokens } : {}), ...(isNum(u.costUsd) ? { costUsd: u.costUsd } : {}) };
 }
 
@@ -133,6 +138,16 @@ export class BudgetGuard {
 
   node(nodeLimits: SpendLimits): NodeBudget {
     return new NodeBudget(this, nodeLimits);
+  }
+
+  /**
+   * Spend the run made before this process (a resumed run's journaled usage).
+   * Counted against the run ceiling like any other spend, so a crash never
+   * resets the whole-run budget.
+   */
+  seed(s: Spend): void {
+    const ok = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
+    this.commit({ tokens: ok(s.tokens), costUsd: ok(s.costUsd) });
   }
 
   /** @internal */

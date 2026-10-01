@@ -284,6 +284,8 @@ describe("buildActionWorkflow", () => {
     expect(workflow).toContain('cron: "0 8 * * 1"');
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("actions/checkout@v4");
+    // #473: the generated checkout keeps no token on disk.
+    expect(workflow).toContain("persist-credentials: false");
     expect(workflow).toContain("swenyai/sweny@v5");
   });
 

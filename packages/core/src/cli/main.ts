@@ -11,7 +11,15 @@ import chalk from "chalk";
 import { execute } from "../executor.js";
 import type { ExecuteOptions } from "../executor.js";
 import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workflows/index.js";
-import type { ExecutionEvent, ExecutionTrace, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
+import type {
+  ExecutionEvent,
+  ExecutionTrace,
+  NodeResult,
+  Workflow,
+  McpServerConfig,
+  Observer,
+  Skill,
+} from "../types.js";
 import { consoleLogger } from "../types.js";
 import { createHarness } from "../harness/index.js";
 import { bindBuiltinWorkflow } from "./builtin-workflows.js";
@@ -41,11 +49,18 @@ import * as readline from "node:readline";
 import { loadDotenv, loadConfigFile, applyAgentFileConfig } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { nonInteractiveUsage, runNew } from "./new.js";
-import { formatFinalMarkdown, formatFinalOutput, resolveFinalOutput, writeFinalOutput } from "./final-output.js";
+import {
+  formatFinalMarkdown,
+  formatFinalOutput,
+  formatSavedOutputLine,
+  resolveFinalOutput,
+  shouldPrintFinalOutput,
+  writeFinalOutput,
+} from "./final-output.js";
 import { buildRunRecord, createNodeTimer, historyDisabled, newRunId, recordRun } from "./run-history.js";
 import { registerRunsCommand } from "./runs.js";
 import { registerTryCommand } from "./try.js";
-import { JournalLockedError, JournalMismatchError, RunJournal } from "../journal.js";
+import { JournalLockedError, JournalMismatchError, RunJournal, runSecretValues } from "../journal.js";
 import {
   journalDisabled,
   prepareResume,
@@ -55,15 +70,19 @@ import {
 } from "./resume.js";
 import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "./e2e.js";
 import { createVerboseToolObserver } from "./verbose-observer.js";
+import { createStreamObserver } from "./stream-observer.js";
 import {
   createRunLogger,
-  renderReceiptLine,
   summarizeRun,
   writeStepSummary,
   WORKFLOW_RUN_DESCRIPTION,
   WORKFLOW_RUN_OPTIONS,
 } from "./run-output.js";
 import { writeRunComment } from "./comment-output.js";
+import { writeReceipt } from "./ticket.js";
+import { createNodeProgress, toolCallsText } from "./progress.js";
+import { applyNoColor, createPaint } from "./style.js";
+import { colorEnabled, glyphsFor, richOutput, spinnerFramesFor, supportsUnicode } from "./terminal.js";
 import {
   registerTriageCommand,
   registerImplementCommand,
@@ -102,15 +121,9 @@ import { runUpgrade, fetchLatestFromNpm } from "./upgrade.js";
 import { maybeNudge, defaultCachePath } from "./version-check.js";
 import { spawnSync } from "node:child_process";
 
-// ── Stream observer (NDJSON) ────────────────────────────────────────
-/**
- * Create an observer that writes NDJSON ExecutionEvents to stdout.
- * Studio and other consumers parse these line-by-line.
- */
-function createStreamObserver(): Observer {
-  return (event: ExecutionEvent) => {
-    process.stdout.write(JSON.stringify(event) + "\n");
-  };
+/** Secret values a run can see, for redacting everything that prints node output. */
+function outputSecrets(skills?: Map<string, Skill>): string[] {
+  return runSecretValues([...(skills?.values() ?? []), ...builtinSkills], process.env);
 }
 
 // Verbose tool-detail observer lives in ./verbose-observer.ts so tests can
@@ -133,6 +146,9 @@ if (process.argv[2] !== "try") {
   // Agent sandbox / env-passthrough keys from .sweny.yml -> SWENY_* env (#360).
   applyAgentFileConfig(loadConfigFile());
 }
+
+// NO_COLOR (https://no-color.org) turns off every color, including direct chalk calls.
+applyNoColor();
 
 const program = new Command()
   .name("sweny")
@@ -352,7 +368,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   });
 
   // ── Progress display state ─────────────────────────────────
-  const FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
+  const FRAMES = spinnerFramesFor(supportsUnicode());
   const isTTY = !config.json && (process.stderr.isTTY ?? false);
   const MAX_ACTIVITY = 3;
   let spinnerInterval: ReturnType<typeof setInterval> | undefined;
@@ -375,7 +391,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   /** Render the multi-line progress block (spinner + activity lines). */
   function renderProgressBlock() {
     const cols = process.stderr.columns || 80;
-    const frame = chalk.cyan(FRAMES[frameIdx++ % FRAMES.length]);
+    const frame = c.brand(FRAMES[frameIdx++ % FRAMES.length]);
     const counter = c.subtle(`[${stepIndex}/${totalNodes}]`);
     const elapsed = c.subtle(formatElapsed(Date.now() - stepStart));
     const headerLine = `  ${frame} ${counter} ${stepLabel}  ${elapsed}`;
@@ -532,7 +548,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   const observer = composeObservers(
     progressObserver,
     config.verbose ? createVerboseToolObserver() : undefined,
-    config.stream ? createStreamObserver() : undefined,
+    config.stream ? createStreamObserver(outputSecrets(skills)) : undefined,
     createCloudStreamObserver(config, cloudHandle),
   );
 
@@ -558,7 +574,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 
     // Output
     if (config.json) {
-      await writeResultJson(results);
+      await writeResultJson(results, outputSecrets(skills));
     } else {
       console.log(formatDagResultHuman(results, durationMs, config));
     }
@@ -705,7 +721,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   const implProgressObserver: Observer = (event: ExecutionEvent) => {
     switch (event.type) {
       case "workflow:start":
-        process.stderr.write(`\n  \u25B2 ${chalk.bold(event.workflow)}\n\n`);
+        process.stderr.write(`\n  ${c.brand("\u25B2")} ${chalk.bold(event.workflow)}\n\n`);
         break;
       case "node:enter":
         process.stderr.write(`  ${c.subtle("\u25CB")} ${chalk.dim(event.node)}\u2026\n`);
@@ -765,7 +781,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   const observer = composeObservers(
     implProgressObserver,
     config.verbose ? createVerboseToolObserver() : undefined,
-    Boolean(options.stream) ? createStreamObserver() : undefined,
+    Boolean(options.stream) ? createStreamObserver(outputSecrets(skills)) : undefined,
     createCloudStreamObserver(config, implCloudHandle),
   );
 
@@ -798,7 +814,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     }
 
     if (config.json) {
-      await writeResultJson(results);
+      await writeResultJson(results, outputSecrets(skills));
     }
     if (hasFailed) {
       console.error(chalk.red(`\n  Implement workflow failed\n`));
@@ -1011,32 +1027,41 @@ export async function workflowRunAction(
   // Track per-node entry time to compute elapsed on exit
   const nodeEnterTimes = new Map<string, number>();
 
+  // Node progress (#479): a spinner on the running node when stderr is live,
+  // then one settled line per node. Verbose and stream output interleave with
+  // it, so those runs get plain lines.
+  const unicode = supportsUnicode();
+  const g = glyphsFor(unicode);
+  const progressPaint = createPaint(!isJson && colorEnabled(process.stderr));
+  const progress = createNodeProgress({
+    write: (s) => void process.stderr.write(s),
+    live: !isJson && richOutput(process.stderr) && !options.verbose && !options.stream,
+    unicode,
+    paint: progressPaint,
+    announce: true,
+  });
+
   const wfProgressObserver: Observer | undefined = isJson
     ? undefined
     : (event: ExecutionEvent) => {
         switch (event.type) {
           case "workflow:start":
-            process.stderr.write(`\n  \u25B2 ${chalk.bold(event.workflow)}\n\n`);
+            process.stderr.write(`\n  ${progressPaint.brand(g.brand)} ${progressPaint.strong(event.workflow)}\n\n`);
             break;
           case "node:enter":
             nodeEnterTimes.set(event.node, Date.now());
-            process.stderr.write(`  ${c.subtle("\u25CB")} ${chalk.dim(event.node)}\u2026\n`);
+            progress.enter(event.node);
+            break;
+          case "node:progress":
+            progress.tick(event.node);
             break;
           case "node:exit": {
-            const icon =
-              event.result.status === "success"
-                ? c.ok("\u2713")
-                : event.result.status === "skipped"
-                  ? c.subtle("\u2212")
-                  : c.fail("\u2717");
             const enterTime = nodeEnterTimes.get(event.node) ?? Date.now();
             const elapsedMs = Date.now() - enterTime;
-            const elapsed = chalk.dim(elapsedMs < 1000 ? `${elapsedMs}ms` : `${Math.round(elapsedMs / 100) / 10}s`);
-            if (isTTY) {
-              process.stderr.write(`\x1B[1A\x1B[2K  ${icon} ${event.node}  ${elapsed}\n`);
-            } else {
-              process.stderr.write(`  ${icon} ${event.node}  ${elapsed}\n`);
-            }
+            const elapsed = elapsedMs < 1000 ? `${elapsedMs}ms` : `${Math.round(elapsedMs / 100) / 10}s`;
+            const calls = event.result.toolCalls.length;
+            const detail = [elapsed, ...(calls > 0 ? [toolCallsText(calls)] : [])].join(` ${g.sep} `);
+            progress.exit(event.node, event.result.status, detail);
             runLogger.flush();
             break;
           }
@@ -1178,7 +1203,7 @@ export async function workflowRunAction(
     wfProgressObserver,
     nodeTimer.observer,
     options.verbose ? createVerboseToolObserver() : undefined,
-    options.stream ? createStreamObserver() : undefined,
+    options.stream ? createStreamObserver(outputSecrets(skills)) : undefined,
     createCloudStreamObserver(config, wfCloudHandle),
   );
 
@@ -1243,11 +1268,12 @@ export async function workflowRunAction(
       writeRunComment(options.commentFile, workflow, results, summarizeRun(results, wfDurationMs, false, trace), {
         trace,
         durationsMs: Object.fromEntries(nodeTimer.durations),
+        runId,
       });
     }
 
     if (isJson) {
-      await writeResultJson(results);
+      await writeResultJson(results, outputSecrets(skills));
       process.exit(wfHasFailed ? 1 : 0);
       return;
     }
@@ -1275,23 +1301,30 @@ export async function workflowRunAction(
 
     // The answer, above the receipt: the terminal node's result, or the failed node's error.
     // Also saved to .sweny/runs/<id>/output.md (local only; --no-history skips the file).
-    const finalOutput = resolveFinalOutput(workflow, results);
+    // Redacted with the journal's redactor; in CI printed only with --show-output.
+    const finalOutput = resolveFinalOutput(workflow, results, {
+      trace,
+      secrets: runSecretValues([...skills.values(), ...builtinSkills], process.env),
+    });
     if (finalOutput) {
       const savedTo = historyDisabled(options.history, fileConfig["history"])
         ? null
         : writeFinalOutput(runId, formatFinalMarkdown(workflow, finalOutput));
-      const block = formatFinalOutput(finalOutput, { outputPath: savedTo });
+      const block = shouldPrintFinalOutput(options.showOutput === true, process.env)
+        ? formatFinalOutput(finalOutput, { outputPath: savedTo })
+        : formatSavedOutputLine(savedTo);
       if (wfHasFailed) console.error(`${block}\n`);
       else console.log(`${block}\n`);
     }
 
+    // The receipt: a ticket on a TTY, one plain line in CI and pipes.
     if (wfHasFailed) {
-      console.error(`  ${renderReceiptLine(receipt, isTTY)}\n`);
+      await writeReceipt(receipt, { workflow: workflow.id, runId, stream: process.stderr });
       if (journal?.active) console.error(c.subtle(`  resume with: sweny workflow resume ${runId}\n`));
       process.exit(1);
       return;
     }
-    console.log(`  ${renderReceiptLine(receipt, isTTY)}\n`);
+    await writeReceipt(receipt, { workflow: workflow.id, runId, stream: process.stdout });
     process.exit(0);
   } catch (err) {
     // A refused resume ran nothing: leave the run's journal and history as they were.
@@ -1300,17 +1333,17 @@ export async function workflowRunAction(
       process.exit(1);
       return;
     }
+    progress.stop();
     console.error(formatCrashError(err));
     runLogger.flush();
     journal?.end("crashed");
     if (journal) console.error(c.subtle(`  resume with: sweny workflow resume ${runId}`));
     recordHistory(nodeTimer.lastResults, undefined, true);
-    console.error(`  ${renderReceiptLine(summarizeRun(new Map(), Date.now() - runStart, true), isTTY)}\n`);
+    const crashSummary = summarizeRun(new Map(), Date.now() - runStart, true);
+    await writeReceipt(crashSummary, { workflow: workflow.id, runId, crashed: true, stream: process.stderr });
     // A crash must not leave a stale success comment behind.
     if (options.commentFile) {
-      writeRunComment(options.commentFile, workflow, new Map(), summarizeRun(new Map(), Date.now() - runStart, true), {
-        crashed: true,
-      });
+      writeRunComment(options.commentFile, workflow, new Map(), crashSummary, { crashed: true, runId });
     }
     // Finalize the cloud run as failed (covers thrown errors, incl.
     // RouteEvaluationError). Without this a crashed workflow run stays
@@ -1421,6 +1454,10 @@ workflowRunCmd.option(
   "Do not record this run or save its output.md in .sweny/runs/ (or set `history: off` in .sweny.yml)",
 );
 workflowRunCmd.option(
+  "--show-output",
+  "Print the final answer in CI too (off by default in CI: only the path to output.md is printed)",
+);
+workflowRunCmd.option(
   "--no-journal",
   "Do not write a run journal to .sweny/runs/<run-id>/ (or set `journal: off` in .sweny.yml); the run cannot be resumed",
 );
@@ -1465,13 +1502,14 @@ for (const [flags, description] of WORKFLOW_RUN_OPTIONS) {
   if (RESUME_SHARED_RUN_FLAGS.includes(flags)) workflowResumeCmd.option(flags, description);
 }
 workflowResumeCmd.option("--no-history", "Do not update this run's record in .sweny/runs/");
+workflowResumeCmd.option("--show-output", "Print the final answer in CI too (off by default in CI)");
 registerRunsCommand(program);
 
 workflowCmd
   .command("diagram <file>")
   .description("Render a workflow as a Mermaid diagram (raw .mmd by default; .md output auto-fences)")
   .option("--direction <dir>", "Graph direction: TB (top-bottom) or LR (left-right)", "TB")
-  .option("--title <title>", "Inject a title header (off by default — raw Mermaid has no title)")
+  .option("--title <title>", "Inject a title header (off by default: raw Mermaid has no title)")
   .option("--block", "Wrap in ```mermaid fenced code block (forces fencing in any output)")
   .option("--no-block", "Force raw Mermaid even when writing to a .md file")
   .option("-o, --output <path>", "Write to a file instead of stdout (.mmd/.mermaid raw; .md fenced)")
@@ -1688,7 +1726,7 @@ program
           shell: process.platform === "win32",
         });
         if (res.error) {
-          process.stderr.write(chalk.red(`  Error: couldn't run ${cmd} — ${res.error.message}`) + "\n");
+          process.stderr.write(chalk.red(`  Error: couldn't run ${cmd}: ${res.error.message}`) + "\n");
           return 127;
         }
         return typeof res.status === "number" ? res.status : 1;

@@ -1,6 +1,6 @@
 {
   "name": "@sweny-ai/core",
-  "version": "0.1.170",
+  "version": "0.1.174",
   "type": "module",
   "bin": {
     "sweny": "./dist/cli/main.js"
@@ -13,6 +13,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./browser": "./dist/browser.js",
+    "./theme": "./dist/theme.js",
     "./studio": "./dist/studio.js",
     "./skills": "./dist/skills/index.js",
     "./workflows": "./dist/workflows/index.js",
@@ -25,6 +26,9 @@
     "*": {
       "browser": [
         "dist/browser.d.ts"
+      ],
+      "theme": [
+        "dist/theme.d.ts"
       ],
       "studio": [
         "dist/studio.d.ts"
@@ -72,6 +76,7 @@
     "@stryker-mutator/vitest-runner": "^10.0.0",
     "ajv": "^8.20.0",
     "esbuild": "^0.28.1",
+    "fast-check": "^3.23.2",
     "prettier": "^3.9.6",
     "vitest": "^4.1.11"
   },

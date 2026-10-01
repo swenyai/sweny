@@ -7,6 +7,9 @@ import { createWriteStageState } from "../safe-outputs.js";
 import { journalDisabled, prepareResume } from "./resume.js";
 import type { Workflow } from "../types.js";
 
+// Run keys go to a scratch state dir, never the real ~/.local/state.
+process.env.SWENY_STATE_DIR = mkdtempSync(join(tmpdir(), "sweny-state-"));
+
 const RUN_ID = "20260930-130000-0d0e0f";
 const dirs: string[] = [];
 afterEach(() => {

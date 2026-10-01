@@ -29,7 +29,7 @@ function fakeWorkflow(): Workflow {
   return {
     id: "test",
     name: "Test Workflow",
-    description: "Minimal fixture for output.test.ts — not a real DAG.",
+    description: "Minimal fixture for output.test.ts, not a real DAG.",
     entry: "investigate",
     nodes: {
       investigate: { name: "Investigate", instruction: "noop", skills: [] },
@@ -56,6 +56,19 @@ function fakeTrace(steps: Array<{ node: string; iteration?: number }>): Executio
 }
 
 describe("formatDagResultMarkdown", () => {
+  it("carries no em dashes in any header or table (#479)", () => {
+    for (const results of [
+      new Map<string, NodeResult>([["investigate", failed({ error: "x" })]]),
+      new Map<string, NodeResult>([
+        ["investigate", success({ findings: [{ title: "t" }], novel_count: 1 })],
+        ["create_issue", success({ issueIdentifier: "OFF-1", issueTitle: "T", issueUrl: "https://x" })],
+      ]),
+    ]) {
+      const md = formatDagResultMarkdown(results, 1000, minimalConfig({ dryRun: true }) as CliConfig);
+      expect(md).not.toContain("\u2014");
+    }
+  });
+
   it("renders a success header with issue + PR when both exist", () => {
     const results = new Map<string, NodeResult>([
       [
@@ -75,7 +88,7 @@ describe("formatDagResultMarkdown", () => {
 
     const md = formatDagResultMarkdown(results, 15_000, minimalConfig() as CliConfig);
 
-    expect(md).toContain("## ✅ SWEny Triage — PR opened");
+    expect(md).toContain("## ✅ SWEny Triage: PR opened");
     expect(md).toContain("| Duration | 15s |");
     expect(md).toContain("| Service filter | `permit-service` |");
     expect(md).toContain("| Highest severity | high |");
@@ -97,7 +110,7 @@ describe("formatDagResultMarkdown", () => {
     ]);
 
     const md = formatDagResultMarkdown(results, 5_000, minimalConfig() as CliConfig);
-    expect(md).toContain("## ✅ SWEny Triage — Issue created");
+    expect(md).toContain("## ✅ SWEny Triage: Issue created");
     expect(md).toContain("OFF-5");
     expect(md).not.toContain("**PR opened:**");
   });
@@ -106,7 +119,7 @@ describe("formatDagResultMarkdown", () => {
     const results = new Map<string, NodeResult>([["investigate", success({ novel_count: 0 })]]);
 
     const md = formatDagResultMarkdown(results, 3_000, minimalConfig() as CliConfig);
-    expect(md).toContain("## ✅ SWEny Triage — No new incidents");
+    expect(md).toContain("## ✅ SWEny Triage: No new incidents");
     expect(md).toContain("| Novel findings | 0 |");
   });
 
@@ -127,11 +140,11 @@ describe("formatDagResultMarkdown", () => {
 
     const md = formatDagResultMarkdown(results, 9_000, minimalConfig({ dryRun: true }) as CliConfig);
 
-    expect(md).toContain("## 🔍 SWEny Triage — Dry run complete");
+    expect(md).toContain("## 🔍 SWEny Triage: Dry run complete");
     expect(md).toContain("| # | Severity | Title | Complexity | Status |");
     expect(md).toContain("| 1 | high | OOM in worker | medium | novel |");
-    expect(md).toContain("| 2 | low | Stale metric | — | dup of OFF-99 |");
-    expect(md).toContain("_Dry run mode — no side effects were taken._");
+    expect(md).toContain("| 2 | low | Stale metric | - | dup of OFF-99 |");
+    expect(md).toContain("_Dry run mode: no side effects were taken._");
     expect(md).toContain("| Mode | dry run |");
   });
 

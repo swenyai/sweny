@@ -2,19 +2,22 @@ import chalk from "chalk";
 import type { CliConfig } from "./config.js";
 import type { CheckResult } from "./check.js";
 import type { NodeResult, ExecutionEvent, ExecutionTrace, TraceStep, TraceEdge, Workflow } from "../types.js";
+import { redact } from "../journal.js";
 import { toMermaidBlock, type NodeStatus as MermaidNodeStatus } from "../mermaid.js";
+import { PALETTE, ROLE_COLORS } from "../theme.js";
 
-// ── Color palette ───────────────────────────────────────────────
+// ── Color palette (tokens from theme.ts; one color per meaning) ─
 export const c = {
-  brand: chalk.hex("#FF6B2B"),
-  brandDim: chalk.hex("#CC5522"),
-  learn: chalk.hex("#60A5FA"),
-  act: chalk.hex("#F59E0B"),
-  report: chalk.hex("#A78BFA"),
-  ok: chalk.hex("#34D399"),
-  fail: chalk.hex("#F87171"),
-  subtle: chalk.hex("#6B7280"),
-  link: chalk.hex("#60A5FA").underline,
+  brand: chalk.hex(ROLE_COLORS.brand),
+  brandDim: chalk.hex(ROLE_COLORS.brandDeep),
+  learn: chalk.hex(ROLE_COLORS.info),
+  act: chalk.hex(ROLE_COLORS.warning),
+  report: chalk.hex(PALETTE.slate400),
+  ok: chalk.hex(ROLE_COLORS.success),
+  fail: chalk.hex(ROLE_COLORS.error),
+  warn: chalk.hex(ROLE_COLORS.warning),
+  subtle: chalk.hex(ROLE_COLORS.muted),
+  link: chalk.hex(ROLE_COLORS.info).underline,
 };
 
 export function phaseColor(phase: string): (s: string) => string {
@@ -102,7 +105,7 @@ export function formatBanner(config: CliConfig, version: string): string {
   const ver = c.subtle(`v${version}`);
   const titlePad = BOX_WIDTH - 4 - visLen(title) - visLen(ver);
 
-  const mode = config.dryRun ? chalk.hex("#F59E0B")("dry run") : c.ok("live");
+  const mode = config.dryRun ? c.warn("dry run") : c.ok("live");
 
   const header = [title + " ".repeat(Math.max(1, titlePad)) + ver];
 
@@ -152,7 +155,7 @@ export function getStepDetails(name: string, data?: Record<string, unknown>): st
     }
     case "novelty-gate": {
       const action = data.action as string | undefined;
-      if (action === "dry-run") details.push("Dry run — analysis only");
+      if (action === "dry-run") details.push("Dry run: analysis only");
       else if (action === "skip") details.push("No novel issues found");
       else if (action === "+1") details.push(`+1 on existing ${(data.issueIdentifier as string) || "issue"}`);
       else if (action === "implement") details.push("Proceeding with implementation");
@@ -192,7 +195,7 @@ export function getStepDetails(name: string, data?: Record<string, unknown>): st
 export function formatStepLine(icon: string, counter: string, name: string, elapsed: string, reason?: string): string {
   const label = `${counter} ${name}`;
   const pad = Math.max(1, 40 - visLen(label));
-  const suffix = reason ? c.subtle(` \u2014 ${reason}`) : "";
+  const suffix = reason ? c.subtle(`  ${reason}`) : "";
   return `  ${icon} ${c.subtle(counter)} ${name}${" ".repeat(pad)}${c.subtle(elapsed)}${suffix}`;
 }
 
@@ -217,7 +220,7 @@ export function formatDagResultHuman(results: Map<string, NodeResult>, durationM
     return formatDagSuccessResult(results, duration);
   }
 
-  // Dry run — show findings summary, no side effects taken
+  // Dry run: show findings summary, no side effects taken
   if (config?.dryRun) {
     return formatDagDryRunResult(results, duration);
   }
@@ -311,7 +314,7 @@ function formatDagDryRunResult(results: Map<string, NodeResult>, duration: strin
   if (rec) body.push(`${c.subtle("Next")}${" ".repeat(6)}${String(rec)}`);
 
   body.push("");
-  body.push(c.subtle("No side effects — dry run mode"));
+  body.push(c.subtle("No side effects: dry run mode"));
 
   return ["", boxTop(), ...boxSection(header), boxDivider(), ...boxSection(body), boxBottom(), ""].join("\n");
 }
@@ -379,19 +382,19 @@ export function formatValidationErrors(errors: string[]): string {
 export function extractCredentialHint(err: unknown): string | null {
   const msg = err instanceof Error ? err.message : String(err);
   if (/401|unauthorized|authentication/i.test(msg) && /anthropic/i.test(msg)) {
-    return "Check your ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN — get a key at https://console.anthropic.com";
+    return "Check your ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN. Get a key at https://console.anthropic.com";
   }
   if (/401|403|unauthorized/i.test(msg) && /datadog/i.test(msg)) {
-    return "Check your DD_API_KEY and DD_APP_KEY — find them at https://app.datadoghq.com/organization-settings/api-keys";
+    return "Check your DD_API_KEY and DD_APP_KEY. Find them at https://app.datadoghq.com/organization-settings/api-keys";
   }
   if (/401|403|unauthorized/i.test(msg) && /linear/i.test(msg)) {
-    return "Check your LINEAR_API_KEY — find it at https://linear.app/settings/api";
+    return "Check your LINEAR_API_KEY. Find it at https://linear.app/settings/api";
   }
   if (/401|403|unauthorized/i.test(msg) && /github/i.test(msg)) {
-    return "Check your GITHUB_TOKEN — create a Personal Access Token at https://github.com/settings/tokens";
+    return "Check your GITHUB_TOKEN. Create a Personal Access Token at https://github.com/settings/tokens";
   }
   if (/ENOTFOUND|ETIMEDOUT|network/i.test(msg)) {
-    return "Network error — check your internet connection and provider endpoint URL.";
+    return "Network error: check your internet connection and provider endpoint URL.";
   }
   return null;
 }
@@ -422,16 +425,15 @@ export function formatCheckResults(results: CheckResult[]): string {
   const body: string[] = results.map((r) => {
     const icon = r.status === "ok" ? c.ok("\u2713") : r.status === "fail" ? c.fail("\u2717") : c.subtle("\u2212");
     const name = chalk.white(r.name);
-    const detail =
-      r.status === "ok" ? c.subtle(r.detail) : r.status === "fail" ? chalk.red(r.detail) : c.subtle(r.detail);
+    const detail = r.status === "ok" ? c.subtle(r.detail) : r.status === "fail" ? c.fail(r.detail) : c.subtle(r.detail);
     return `${icon}  ${name}\n     ${detail}`;
   });
 
   const hasFailure = results.some((r) => r.status === "fail");
   const summary = hasFailure
-    ? c.fail("One or more checks failed — fix the issues above before running sweny triage.")
+    ? c.fail("One or more checks failed. Fix the issues above before running sweny triage.")
     : results.every((r) => r.status === "skip")
-      ? c.subtle("All providers set to file mode — no network checks performed.")
+      ? c.subtle("All providers set to file mode: no network checks performed.")
       : c.ok("All checks passed.");
 
   return [
@@ -448,14 +450,18 @@ export function formatCheckResults(results: CheckResult[]): string {
 }
 
 // ── JSON output ─────────────────────────────────────────────────
-export function formatResultJson(results: Map<string, NodeResult>): string {
-  return JSON.stringify(Object.fromEntries(results), null, 2);
+/**
+ * Node results as JSON, redacted with the run journal's redactor (secret
+ * values, secret-named fields, known token shapes). Structure and keys stay.
+ */
+export function formatResultJson(results: Map<string, NodeResult>, secrets: string[] = []): string {
+  return JSON.stringify(redact(Object.fromEntries(results), secrets).value, null, 2);
 }
 
 /** Drain terminal JSON before process.exit(), including when stdout is a pipe. */
-export function writeResultJson(results: Map<string, NodeResult>): Promise<void> {
+export function writeResultJson(results: Map<string, NodeResult>, secrets: string[] = []): Promise<void> {
   return new Promise((resolve, reject) => {
-    process.stdout.write(formatResultJson(results) + "\n", (error) => {
+    process.stdout.write(formatResultJson(results, secrets) + "\n", (error) => {
       if (error) reject(error);
       else resolve();
     });
@@ -480,9 +486,9 @@ export function writeResultJson(results: Map<string, NodeResult>): Promise<void>
  *   - Node execution details (collapsible) with tool-call summaries
  */
 export interface FormatMarkdownOptions {
-  /** Workflow definition — required for the Mermaid diagram. */
+  /** Workflow definition: required for the Mermaid diagram. */
   workflow?: Workflow;
-  /** Execution trace from `execute()` — colors the diagram and drives the path/routing sections. */
+  /** Execution trace from `execute()`: colors the diagram and drives the path/routing sections. */
   trace?: ExecutionTrace;
 }
 
@@ -520,15 +526,15 @@ export function formatDagResultMarkdown(
   if (failedResult) {
     lines.push(`## ❌ SWEny Triage Failed`);
   } else if (prData?.prUrl) {
-    lines.push(`## ✅ SWEny Triage — PR opened`);
+    lines.push(`## ✅ SWEny Triage: PR opened`);
   } else if (issueData?.issueIdentifier || issueData?.issueUrl) {
-    lines.push(`## ✅ SWEny Triage — Issue created`);
+    lines.push(`## ✅ SWEny Triage: Issue created`);
   } else if (isDryRun) {
-    lines.push(`## 🔍 SWEny Triage — Dry run complete`);
+    lines.push(`## 🔍 SWEny Triage: Dry run complete`);
   } else if (novelCount === 0) {
-    lines.push(`## ✅ SWEny Triage — No new incidents`);
+    lines.push(`## ✅ SWEny Triage: No new incidents`);
   } else {
-    lines.push(`## ℹ️ SWEny Triage — No action taken`);
+    lines.push(`## ℹ️ SWEny Triage: No action taken`);
   }
   lines.push("");
 
@@ -607,9 +613,9 @@ export function formatDagResultMarkdown(
     lines.push("| --- | --- | --- | --- | --- |");
     for (let i = 0; i < findings.length; i++) {
       const f = findings[i];
-      const sev = String(f.severity ?? "—");
-      const title = String(f.title ?? "—").replace(/\|/g, "\\|");
-      const complexity = String(f.fix_complexity ?? "—");
+      const sev = String(f.severity ?? "-");
+      const title = String(f.title ?? "-").replace(/\|/g, "\\|");
+      const complexity = String(f.fix_complexity ?? "-");
       const status = f.is_duplicate ? `dup of ${f.duplicate_of ?? "existing"}` : "novel";
       lines.push(`| ${i + 1} | ${sev} | ${title} | ${complexity} | ${status} |`);
     }
@@ -625,7 +631,7 @@ export function formatDagResultMarkdown(
       const title = issueData.issueTitle ? String(issueData.issueTitle) : "";
       const url = issueData.issueUrl ? String(issueData.issueUrl) : "";
       const link = url ? `[${id || url}](${url})` : id;
-      lines.push(`- **Issue created:** ${link}${title ? ` — ${title}` : ""}`);
+      lines.push(`- **Issue created:** ${link}${title ? `: ${title}` : ""}`);
     }
     if (prData?.prUrl) {
       const num = prData.prNumber ? `#${String(prData.prNumber)}` : "";
@@ -643,7 +649,7 @@ export function formatDagResultMarkdown(
   }
 
   if (isDryRun) {
-    lines.push("_Dry run mode — no side effects were taken._");
+    lines.push("_Dry run mode: no side effects were taken._");
     lines.push("");
   }
 
@@ -658,17 +664,17 @@ function appendNodeDetails(lines: string[], results: Map<string, NodeResult>): v
   lines.push("<details><summary>Node execution details</summary>");
   lines.push("");
   for (const [nodeId, result] of results) {
-    const icon = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "—";
+    const icon = result.status === "success" ? "✓" : result.status === "failed" ? "✗" : "−";
     const toolCount = result.toolCalls?.length ?? 0;
-    lines.push(`#### ${icon} \`${nodeId}\` — ${toolCount} tool call${toolCount === 1 ? "" : "s"}`);
+    lines.push(`#### ${icon} \`${nodeId}\` · ${toolCount} tool call${toolCount === 1 ? "" : "s"}`);
     lines.push("");
     if (toolCount > 0 && result.toolCalls) {
       lines.push("| Tool | Input (truncated) |");
       lines.push("| --- | --- |");
       for (const tc of result.toolCalls.slice(0, 20)) {
-        const name = tc.tool ?? "—";
+        const name = tc.tool ?? "-";
         const input = summarizeToolInput(tc.input).replace(/\|/g, "\\|");
-        lines.push(`| \`${name}\` | ${input || "—"} |`);
+        lines.push(`| \`${name}\` | ${input || "-"} |`);
       }
       if (toolCount > 20) {
         lines.push(`| … | _${toolCount - 20} more tool calls_ |`);

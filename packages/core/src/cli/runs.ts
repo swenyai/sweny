@@ -3,10 +3,12 @@
  * Metadata only. Color only when `color` is true (TTY).
  */
 
-import chalk from "chalk";
 import type { Command } from "commander";
 import { findRun, listRuns, type RunNodeRecord, type RunRecord } from "./run-history.js";
 import { formatCost, formatReceiptDuration, formatTokenCount } from "./run-output.js";
+import { createPaint } from "./style.js";
+import { colorEnabled } from "./terminal.js";
+import { GLYPHS } from "../theme.js";
 
 // ── Small formatters ────────────────────────────────────────────
 
@@ -20,13 +22,16 @@ export function formatAge(startedAt: string, nowMs: number = Date.now()): string
   return `${Math.floor(h / 24)}d ago`;
 }
 
-const ICON: Record<string, string> = { success: "✓", failed: "✗", crashed: "✗", skipped: "−" };
+const G = GLYPHS.unicode;
+const ICON: Record<string, string> = { success: G.success, failed: G.failure, crashed: G.failure, skipped: G.skipped };
 
+/** Status text in its role color: success, error, or muted for skipped. */
 function paint(text: string, status: string, color: boolean): string {
   if (!color) return text;
-  if (status === "success") return chalk.green(text);
-  if (status === "skipped") return chalk.dim(text);
-  return chalk.red(text);
+  const p = createPaint(true);
+  if (status === "success") return p.success(text);
+  if (status === "skipped") return p.muted(text);
+  return p.error(text);
 }
 
 const tokensText = (n: number | null) => (n === null ? "-" : formatTokenCount(n));
@@ -66,7 +71,10 @@ export function formatRunsTable(runs: RunRecord[], color: boolean, nowMs: number
       .join("  ")
       .trimEnd();
   const headLine = line(head);
-  return [color ? chalk.dim(headLine) : headLine, ...rows.map((r) => line(r.cells, r.status))].join("\n") + "\n";
+  return (
+    [color ? createPaint(true).muted(headLine) : headLine, ...rows.map((r) => line(r.cells, r.status))].join("\n") +
+    "\n"
+  );
 }
 
 // ── sweny runs diff ─────────────────────────────────────────────
@@ -109,7 +117,7 @@ function nodeChanges(a: RunNodeRecord, b: RunNodeRecord): string[] {
 const routeKey = (r: { from: string; to: string }) => `${r.from} → ${r.to}`;
 
 export function formatRunDiff(a: RunRecord, b: RunRecord, color: boolean): string {
-  const dim = (s: string) => (color ? chalk.dim(s) : s);
+  const dim = createPaint(color).muted;
   const out: string[] = [];
   const hdr = (tag: string, r: RunRecord) =>
     `  ${tag}  ${r.run_id}  ${r.workflow_id}  ${paint(`${ICON[r.status] ?? "?"} ${r.status}`, r.status, color)}  ${formatReceiptDuration(r.duration_ms)}`;
@@ -203,7 +211,7 @@ export function registerRunsCommand(program: Command): Command {
     .action((opts: { workflow?: string; limit?: string; json?: boolean }) => {
       const limit = Number(opts.limit ?? "20");
       if (!Number.isInteger(limit) || limit < 1) {
-        console.error(chalk.red("  --limit must be a positive integer"));
+        console.error(createPaint(colorEnabled(process.stderr)).error("  --limit must be a positive integer"));
         process.exitCode = 1;
         return;
       }
@@ -214,7 +222,7 @@ export function registerRunsCommand(program: Command): Command {
         process.stdout.write(JSON.stringify(runs, null, 2) + "\n");
         return;
       }
-      process.stdout.write("\n" + formatRunsTable(runs, process.stdout.isTTY ?? false) + "\n");
+      process.stdout.write("\n" + formatRunsTable(runs, colorEnabled(process.stdout)) + "\n");
     });
 
   runsCmd
@@ -226,11 +234,11 @@ export function registerRunsCommand(program: Command): Command {
       const runs = listRuns();
       const picked = pickRunsForDiff(runs, refs, opts.workflow);
       if ("error" in picked) {
-        console.error(chalk.red(`  ${picked.error}`));
+        console.error(createPaint(colorEnabled(process.stderr)).error(`  ${picked.error}`));
         process.exitCode = 1;
         return;
       }
-      process.stdout.write("\n" + formatRunDiff(picked.a, picked.b, process.stdout.isTTY ?? false) + "\n");
+      process.stdout.write("\n" + formatRunDiff(picked.a, picked.b, colorEnabled(process.stdout)) + "\n");
     });
 
   return runsCmd;

@@ -94,6 +94,11 @@ inputs:
     required: false
     default: "false"
 
+  show-output:
+    description: "When 'true', print the workflow's final answer in the job log. Off by default: in CI the CLI prints only the path of the saved answer (.sweny/runs/<run-id>/output.md), because job logs are often readable by more people than the repo's secrets. The answer is redacted either way. Forwarded as `--show-output` only when set."
+    required: false
+    default: "false"
+
   input:
     description: |
       JSON object of per-run inputs for the workflow. Forwarded verbatim to
@@ -146,6 +151,16 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Scope history before auth validation or dependency setup can fail. Step
+    # outputs belong to this invocation, including when this Action runs twice.
+    - name: Mark run start
+      id: run_start
+      if: ${{ inputs.setup-only != 'true' && inputs.notify-on-failure != '' }}
+      shell: bash
+      run: |
+        MARKER=$(mktemp "${RUNNER_TEMP}/sweny-run-start.XXXXXX")
+        printf 'marker=%s\n' "$MARKER" >> "$GITHUB_OUTPUT"
+
     - name: Validate auth inputs
       shell: bash
       env:
@@ -268,11 +283,6 @@ runs:
         fi
         echo "srt ${SRT_VERSION} wraps commands on this runner"
 
-    - name: Mark run start
-      if: ${{ inputs.setup-only != 'true' && inputs.notify-on-failure != '' }}
-      shell: bash
-      run: touch "${{ runner.temp }}/sweny-run-start"
-
     - name: Run workflow
       if: inputs.setup-only != 'true'
       shell: bash
@@ -289,6 +299,7 @@ runs:
         WORKFLOW_PATH: ${{ inputs.workflow }}
         DRY_RUN: ${{ inputs.dry-run }}
         VERBOSE: ${{ inputs.verbose }}
+        SHOW_OUTPUT: ${{ inputs.show-output }}
         INPUT_TIMEOUT: ${{ inputs.timeout }}
         INPUT_MAX_STEPS: ${{ inputs.max-steps }}
         INPUT_MAX_TOKENS: ${{ inputs.max-tokens }}
@@ -332,6 +343,14 @@ runs:
         fi
         [ "$DRY_NORM" = "true" ] && FLAGS+=("--dry-run")
         [ "$VERBOSE_NORM" = "true" ] && FLAGS+=("--verbose")
+        # Final answer in the job log: opt-in, forwarded only when set. An older
+        # CLI has no flag and prints the answer anyway, so skip it there.
+        if [ "$(normalize "$SHOW_OUTPUT")" = "true" ]; then
+          RUN_HELP_SHOW=$(sweny workflow run --help 2>/dev/null || true)
+          if grep -q -- '--show-output' <<< "$RUN_HELP_SHOW"; then
+            FLAGS+=("--show-output")
+          fi
+        fi
         if [ -n "$INPUT_TIMEOUT" ]; then
           FLAGS+=("--timeout" "$INPUT_TIMEOUT")
         fi
@@ -395,12 +414,14 @@ runs:
     - name: Notify on failure
       if: ${{ failure() && inputs.setup-only != 'true' && inputs.notify-on-failure != '' }}
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
+      # The requested workflow directory may be the reason the run failed.
+      working-directory: ${{ github.workspace }}
       env:
         GH_TOKEN: ${{ github.token }}
         NOTIFY: ${{ inputs.notify-on-failure }}
         WORKFLOW_PATH: ${{ inputs.workflow }}
-        MARKER_FILE: ${{ runner.temp }}/sweny-run-start
+        MARKER_FILE: ${{ steps.run_start.outputs.marker }}
+        RUNS_DIR: ${{ inputs.working-directory }}/.sweny/runs
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         GITHUB_REPOSITORY: ${{ github.repository }}
       run: bash "${{ github.action_path }}/scripts/notify-failure.sh"

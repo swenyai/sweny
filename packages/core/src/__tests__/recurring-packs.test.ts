@@ -232,6 +232,9 @@ describe("recurring packs: GitHub Action triggers", () => {
       const run = steps.find((s) => typeof s.uses === "string" && s.uses.startsWith("swenyai/sweny@"));
       expect(run, `${id} has no swenyai/sweny step`).toBeDefined();
       expect(run.with.workflow).toBe(`.sweny/workflows/${id}.yml`);
+      // #473: the checkout keeps no token on disk for the agents to read.
+      const checkout = steps.find((s) => typeof s.uses === "string" && s.uses.startsWith("actions/checkout@"));
+      expect(checkout?.with?.["persist-credentials"], `${id} checkout`).toBe(false);
     });
   }
 
@@ -266,6 +269,7 @@ describe("recurring packs: GitHub Action triggers", () => {
   it("pr-risk-review runs on pull_request, skips forks, and cancels superseded runs", () => {
     const wf = byId["pr-risk-review"];
     expect(Object.keys(wf.on)).toContain("pull_request");
+    expect(wf.on.pull_request.types).toEqual(["opened", "reopened", "ready_for_review"]);
     expect(wf.concurrency["cancel-in-progress"]).toBe(true);
     expect(JSON.stringify(wf.jobs)).toContain("head.repo.full_name");
     expect(JSON.stringify(wf)).not.toContain("pull_request_target");

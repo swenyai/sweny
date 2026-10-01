@@ -2,8 +2,8 @@
  * `sweny try`: a zero-credential demo (#475).
  *
  * Replays a recorded explain-repo run through the REAL executor, with a replay
- * harness standing in for the agent, so the real progress line, answer block
- * (#460), receipt, policy segment and PR-comment markdown (#396) are what a
+ * harness standing in for the agent, so the real progress lines, answer block
+ * (#460), receipt ticket, policy stamp and PR comment (#396, #479) are what a
  * user sees. No agent, no model, no network, no env credentials, no files
  * written (no `.sweny/runs`, no journal). The environment handed to the
  * executor is empty by construction.
@@ -15,7 +15,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import chalk from "chalk";
 import type { Command } from "commander";
 import { parse as parseYaml } from "yaml";
 import { execute } from "../executor.js";
@@ -25,8 +24,13 @@ import type { ExecutionEvent, Logger, NodeResult, Observer, ToolCall, Workflow }
 import { WORKFLOW_TEMPLATES } from "./templates.js";
 import { formatFinalOutput, resolveFinalOutput } from "./final-output.js";
 import { formatRunComment } from "./comment-output.js";
-import { formatReceiptDuration, renderReceiptLine, summarizeRun } from "./run-output.js";
-import { c } from "./output.js";
+import { formatReceiptDuration, summarizeRun } from "./run-output.js";
+import { DagRenderer } from "./renderer.js";
+import { createNodeProgress, toolCallsText } from "./progress.js";
+import { createPaint, type Paint } from "./style.js";
+import { colorEnabled, glyphsFor, supportsUnicode, terminalColumns } from "./terminal.js";
+import { writeReceipt } from "./ticket.js";
+import { SWENY_TAGLINE } from "../theme.js";
 
 // ── Fixture ─────────────────────────────────────────────────────
 
@@ -187,45 +191,35 @@ export function createReplayHarness(fixture: TryFixture, opts: { paceMs: number 
 
 export const TRY_BANNER_TITLE = "Recorded demo";
 
-/** The real commands, same as the README quickstart. */
-export const TRY_NEXT_COMMANDS = [
-  "npm install -g @sweny-ai/core",
-  "sweny new --template explain-repo --yes",
-  "sweny workflow run .sweny/workflows/explain-repo.yml",
-] as const;
+/** The one command to run next: scaffolds the same workflow on the user's repo and says how to run it. */
+export const TRY_NEXT_COMMAND = "npx @sweny-ai/core new --template explain-repo";
 
 /** Appended to `sweny try --help`. */
 export const TRY_HELP_NOTE =
   "The recording is ILLUSTRATIVE SAMPLE DATA (a fictional repo, hand-written timings and token counts), not output from a real run. " +
   "Nothing runs: no agent, no network, no credentials read, no files written.";
 
-export function formatTryBanner(fixture: TryFixture): string {
-  const lines = [
-    `${c.brand("▲")} ${chalk.bold("sweny try")}  ${chalk.bold.yellow(TRY_BANNER_TITLE)}, not a live run`,
-    chalk.dim(`  A replay of an ${fixture.workflow} run on a sample repo (${fixture.sample_repo}).`),
-    chalk.dim(
-      fixture.illustrative
-        ? "  The sample data is illustrative, not output from your code. No agent, no network, no credentials."
-        : "  No agent, no network, no credentials.",
+/** The tagline, then the demo notice as one dim line. */
+export function formatTryBanner(fixture: TryFixture, paint: Paint = createPaint(false), unicode = true): string {
+  const g = glyphsFor(unicode);
+  const data = fixture.illustrative ? ", illustrative data" : "";
+  return [
+    `  ${paint.brand(g.brand)} ${paint.strong("SWEny")}  ${SWENY_TAGLINE}`,
+    paint.muted(
+      `  ${TRY_BANNER_TITLE} of ${fixture.workflow} on a sample repo (${fixture.sample_repo})${data}. No agent, network or credentials.`,
     ),
-  ];
-  return lines.map((l, i) => (i === 0 ? `  ${l}` : l)).join("\n");
+  ].join("\n");
 }
 
-export function formatTryNext(): string {
-  return [
-    `  ${chalk.bold("Run it for real")} on your own repo:`,
-    "",
-    ...TRY_NEXT_COMMANDS.map((cmd) => `    ${cmd}`),
-    "",
-    chalk.dim("  Needs a Claude login (`claude` signed in) or ANTHROPIC_API_KEY. Your run ends with the same receipt."),
-  ].join("\n");
+/** The closing line: one command. */
+export function formatTryNext(paint: Paint = createPaint(false)): string {
+  return `  ${paint.muted("Run it on your repo:")}  ${paint.strong(TRY_NEXT_COMMAND)}`;
 }
 
 // ── Run ─────────────────────────────────────────────────────────
 
 export interface TryOptions {
-  /** Replay instantly. */
+  /** Replay instantly (and land the stamp without the one-frame pause). */
   fast?: boolean;
   /** Milliseconds each node takes to replay. Default 1200. Ignored with `fast`. */
   paceMs?: number;
@@ -233,8 +227,16 @@ export interface TryOptions {
   commentFile?: string;
   /** Output sink. Default stdout. */
   write?: (s: string) => void;
-  /** Rewrite progress lines in place. Default: stdout is a TTY. */
+  /** Rich output: spinner, ticket, color. Default: stdout is a TTY. */
   tty?: boolean;
+  /** Draw with Unicode. Default: what the terminal supports. */
+  unicode?: boolean;
+  /** Force ANSI color on or off. Default: on for a TTY that allows color. */
+  color?: boolean;
+  /** Force the receipt ticket (true) or the plain receipt line (false). Default: `tty`. */
+  rich?: boolean;
+  /** Terminal width. Default: stdout's. */
+  columns?: number;
   fixture?: TryFixture;
 }
 
@@ -253,83 +255,111 @@ export async function runTry(opts: TryOptions = {}): Promise<number> {
     if (!workflow.nodes[id]) throw new Error(`try-fixture.json: node "${id}" is not in ${fixture.workflow}`);
   }
 
-  write(`\n${formatTryBanner(fixture)}\n\n`);
+  const env = process.env;
+  const unicode = opts.unicode ?? supportsUnicode(env);
+  const color = opts.color ?? (tty && colorEnabled({ isTTY: true }, env));
+  const paint = createPaint(color);
+  const g = glyphsFor(unicode);
+  const columns = opts.columns ?? terminalColumns(process.stdout, env);
 
-  const ticks = new Map<string, number>();
+  write(`\n${formatTryBanner(fixture, paint, unicode)}\n\n`);
+
+  const progress = createNodeProgress({
+    write,
+    live: tty,
+    unicode,
+    paint,
+    idWidth: Math.max(...Object.keys(fixture.nodes).map((id) => id.length)),
+  });
+  // The same events drive the DAG in the comment preview.
+  const dag = new DagRenderer(workflow, { legend: false, unicode });
   const observer: Observer = (event: ExecutionEvent) => {
+    dag.update(event);
     switch (event.type) {
-      case "workflow:start":
-        write(`  ${c.brand("▲")} ${chalk.bold(event.workflow)}\n\n`);
-        break;
       case "node:enter":
-        ticks.set(event.node, 0);
-        if (tty) write(`  ${c.subtle("○")} ${chalk.dim(event.node)}…`);
+        progress.enter(event.node);
         break;
-      case "node:progress": {
-        const n = (ticks.get(event.node) ?? 0) + 1;
-        ticks.set(event.node, n);
-        if (tty) {
-          write(
-            `\r\x1B[2K  ${c.subtle("○")} ${chalk.dim(event.node)}… ${chalk.dim(`${n} tool ${n === 1 ? "call" : "calls"}`)}`,
-          );
-        }
+      case "node:progress":
+        progress.tick(event.node);
         break;
-      }
       case "node:exit": {
         const rec = fixture.nodes[event.node];
-        const ok = event.result.status === "success";
-        const icon = ok ? c.ok("✓") : c.fail("✗");
         const calls = event.result.toolCalls.length;
-        const detail = [formatReceiptDuration(rec?.duration_ms ?? 0), ...(calls > 0 ? [`${calls} tool calls`] : [])];
-        write(`${tty ? "\r\x1B[2K" : ""}  ${icon} ${event.node}  ${chalk.dim(detail.join(" · "))}\n`);
+        // The recording's timing, not the replay's wall clock.
+        const detail = [formatReceiptDuration(rec?.duration_ms ?? 0), ...(calls > 0 ? [toolCallsText(calls)] : [])];
+        const status =
+          event.result.status === "success" ? "success" : event.result.status === "failed" ? "failed" : "skipped";
+        progress.exit(event.node, status, detail.join(` ${g.sep} `));
         break;
       }
     }
   };
 
-  const { results, trace } = await execute(
-    workflow,
-    {},
-    {
-      skills: new Map(),
-      harness: createReplayHarness(fixture, { paceMs }),
-      observer,
-      logger: silentLogger,
-      // Nothing for the executor to read: no credentials, no PATH, no config.
-      env: {},
-      offline: true,
-      harnessPolicy: "warn",
-    },
-  );
+  let executed: Awaited<ReturnType<typeof execute>>;
+  try {
+    executed = await execute(
+      workflow,
+      {},
+      {
+        skills: new Map(),
+        harness: createReplayHarness(fixture, { paceMs }),
+        observer,
+        logger: silentLogger,
+        // Nothing for the executor to read: no credentials, no PATH, no config.
+        env: {},
+        offline: true,
+        harnessPolicy: "warn",
+      },
+    );
+  } finally {
+    progress.stop();
+  }
+  const { results, trace } = executed;
   write("\n");
 
-  // The recording's timings, not the replay's wall clock.
   const durationsMs = Object.fromEntries(Object.entries(fixture.nodes).map(([id, n]) => [id, n.duration_ms]));
   const totalMs = Object.values(durationsMs).reduce((a, b) => a + b, 0);
   const receipt = summarizeRun(results, totalMs, false, trace);
 
   const answer = resolveFinalOutput(workflow, results);
   if (answer) write(`${formatFinalOutput(answer)}\n\n`);
-  write(`  ${renderReceiptLine(receipt, tty)}\n\n`);
 
+  // Compact preview of the PR comment: its heading and DAG here, its ticket (the receipt) below.
   const comment = formatRunComment(workflow, results as Map<string, NodeResult>, receipt, { trace, durationsMs });
-  write(`  ${chalk.dim("What CI posts on a pull request (sweny workflow run --comment-file):")}\n\n`);
+  write(`  ${paint.muted("On a pull request, CI posts this heading, this DAG and the receipt below:")}\n\n`);
+  const tone = receipt.ok ? paint.success : paint.error;
+  write(`    ${tone(receipt.ok ? g.success : g.failure)} ${paint.strong(workflow.name)}\n\n`);
   write(
-    `${comment
+    `${dag
+      .renderToString()
       .split("\n")
-      .map((l) => (l === "" ? l : `    ${l}`))
-      .join("\n")}\n`,
+      .slice(2)
+      .map((l) => (l === "" ? l : `  ${l}`))
+      .join("\n")}\n\n`,
   );
+
+  await writeReceipt(receipt, {
+    workflow: workflow.id,
+    runId: "demo",
+    stream: { write, isTTY: tty, columns },
+    env,
+    rich: opts.rich ?? tty,
+    color,
+    unicode,
+    animate: !opts.fast,
+  });
   if (opts.commentFile) {
     try {
       fs.mkdirSync(path.dirname(path.resolve(opts.commentFile)), { recursive: true });
       fs.writeFileSync(opts.commentFile, comment);
     } catch (err) {
-      process.stderr.write(`  ⚠ could not write comment file: ${err instanceof Error ? err.message : err}\n`);
+      process.stderr.write(
+        `  ${g.warning} could not write comment file: ${err instanceof Error ? err.message : err}\n`,
+      );
     }
   }
 
-  write(`${formatTryNext()}\n\n`);
+  write(`${formatTryNext(paint)}\n\n`);
   return receipt.ok ? 0 : 1;
 }
 
@@ -340,13 +370,29 @@ export function registerTryCommand(program: Command): Command {
     .option("--fast", "Replay instantly instead of pacing the progress")
     .option("--pace <ms>", `Milliseconds each node takes to replay (default ${DEFAULT_TRY_PACE_MS})`)
     .option("--comment-file <path>", "Also write the PR-comment markdown to <path>")
+    .option("--record <file.svg>", "Write the demo as an animated, self-contained SVG terminal recording to <file.svg>")
     .addHelpText("after", `\n${TRY_HELP_NOTE}\n`)
-    .action(async (options: { fast?: boolean; pace?: string; commentFile?: string }) => {
+    .action(async (options: { fast?: boolean; pace?: string; commentFile?: string; record?: string }) => {
+      if (options.record) {
+        try {
+          const { recordTrySvgToFile } = await import("./record.js");
+          const bytes = await recordTrySvgToFile(options.record);
+          process.stdout.write(`  wrote ${options.record} (${bytes} bytes)\n`);
+        } catch (err) {
+          console.error(`\n  could not record the demo: ${err instanceof Error ? err.message : err}\n`);
+          process.exitCode = 1;
+        }
+        return;
+      }
       let paceMs: number | undefined;
       if (options.pace !== undefined) {
         paceMs = Number(options.pace);
         if (!Number.isFinite(paceMs) || paceMs < 0) {
-          console.error(chalk.red(`\n  --pace must be a non-negative number of milliseconds, got "${options.pace}"\n`));
+          console.error(
+            createPaint(colorEnabled(process.stderr)).error(
+              `\n  --pace must be a non-negative number of milliseconds, got "${options.pace}"\n`,
+            ),
+          );
           process.exitCode = 1;
           return;
         }

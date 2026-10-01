@@ -56,6 +56,17 @@ export function nativeDenyClasses(caps: HarnessCapabilities): ToolClass[] {
   return TOOL_CLASSES.filter((c) => set.has(c));
 }
 
+/**
+ * One `degraded` line for credential files nobody keeps from the agent (#473).
+ * Paths only, never values.
+ */
+export function gitCredentialGap(files: readonly string[]): string {
+  return (
+    `git credential: ${files.join(", ")} holds a persisted git credential (actions/checkout persist-credentials) ` +
+    `and nothing keeps this node's agent from reading it; set persist-credentials: false, or run under the sandbox`
+  );
+}
+
 export function policyGate(
   caps: HarnessCapabilities,
   policy: NodePolicy,
@@ -76,6 +87,13 @@ export function policyGate(
       `read-only: the agent process holds write credentials (${held.join(", ")}) and network access; ` +
         `a read-only filesystem mount does not stop API writes`,
     );
+  }
+
+  // #473: a credential the checkout persisted on disk. Only a read deny
+  // keeps it from the agent; env scoping cannot reach a file.
+  const gitCredentials = policy.gitCredentials ?? [];
+  if (gitCredentials.length > 0 && !wrappers.readDeny) {
+    unenforced.push(gitCredentialGap(gitCredentials));
   }
 
   if (policy.deny.length > 0) {

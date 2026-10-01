@@ -52,7 +52,7 @@ export async function fetchMarketplaceWorkflow(id: string): Promise<FetchedWorkf
   try {
     res = await fetch(url);
   } catch {
-    const err = new Error(`Could not reach github.com — check your connection`) as FetchError;
+    const err = new Error(`Could not reach github.com - check your connection`) as FetchError;
     err.kind = "network";
     throw err;
   }
@@ -212,8 +212,8 @@ export async function adaptWorkflowInteractive(workflow: Workflow, options: Adap
     const action = await p.select({
       message: "Looks good?",
       options: [
-        { value: "accept", label: "Yes — use this workflow" },
-        { value: "refine", label: "Refine — describe what to change" },
+        { value: "accept", label: "Yes - use this workflow" },
+        { value: "refine", label: "Refine - describe what to change" },
         { value: "cancel", label: "Cancel" },
       ],
     });

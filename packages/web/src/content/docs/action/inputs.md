@@ -28,6 +28,7 @@ SWEny ships three GitHub Actions, each with its own input surface. This page doc
 | `harness-policy` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and lists it as degraded in the receipt. Empty uses the CLI default (`strict` under GitHub Actions) | -- |
 | `max-tokens` | Run-wide token budget (input plus output). Forwarded as `--max-tokens` only when set; the lowest of this and the workflow's `budget.tokens` wins. The step fails on a CLI too old to enforce it, so a cap is never silently dropped | -- |
 | `max-cost` | Run-wide cost budget in US dollars (harness-reported cost, never estimated). Forwarded as `--max-cost` only when set. See [Spend budgets](/workflows/yaml-reference/#spend-budgets) | -- |
+| `show-output` | Print the workflow's final answer in the job log. Off by default: the CLI prints only the path of the saved answer (`.sweny/runs/<run-id>/output.md`), since job logs are often readable by more people than the repo's secrets. Redacted either way. Forwarded as `--show-output` only when set | `false` |
 | `cli-version` | Version of `@sweny-ai/core` to install. The floating `v5` tag defaults to `latest`; an immutable `v5.<version>` tag defaults to that exact version | `latest` |
 | `node-version` | Node.js version to install | `24` |
 | `working-directory` | Working directory to run from | `.` |
@@ -392,6 +393,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - uses: swenyai/triage@v1

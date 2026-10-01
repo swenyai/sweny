@@ -77,8 +77,9 @@ describe("formatRunsTable", () => {
 
   it("colors status only when color is on", () => {
     const out = formatRunsTable([run()], true, NOW);
-    // chalk may be disabled in non-TTY test env; if enabled it must wrap the status only
-    if (/\x1b\[/.test(out)) expect(out).toMatch(/\x1b\[\d+m.*success/);
+    // color on means the status carries its role color (any chalk level: 16, 256 or truecolor)
+    expect(out).toMatch(/\x1b\[[\d;]+m✓ success/);
+    expect(formatRunsTable([run()], false, NOW)).not.toMatch(/\x1b\[/);
   });
 
   it("explains an empty history", () => {

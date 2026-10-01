@@ -1,6 +1,6 @@
 /**
  * PR billboard: the markdown a CI runner posts as one sticky comment on a
- * pull request. Pure and runner-agnostic; the CLI writes it with
+ * pull request. Leads with the receipt ticket, then the run's DAG. Pure and runner-agnostic; the CLI writes it with
  * `--comment-file`, and any runner (the GitHub Action, GitLab, a script) posts it.
  *
  * METADATA ONLY. Node names, statuses, counts, and durations. Never prompts,
@@ -11,13 +11,9 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExecutionTrace, NodeResult, Workflow } from "../types.js";
 import { toMermaidBlock } from "../mermaid.js";
-import {
-  STEP_SUMMARY_CLASS_DEFS,
-  formatReceipt,
-  formatReceiptDuration,
-  nodeStates,
-  type RunSummary,
-} from "./run-output.js";
+import { formatReceiptDuration, nodeStates, type RunSummary } from "./run-output.js";
+import { formatTicketText } from "./ticket.js";
+import { glyphs } from "./terminal.js";
 
 export const RUN_COMMENT_FOOTER = "Run with [SWEny](https://github.com/swenyai/sweny): `npx @sweny-ai/core new`";
 
@@ -25,6 +21,13 @@ export interface RunCommentOptions {
   trace?: ExecutionTrace;
   /** Per-node wall-clock duration in ms, keyed by node id. Missing entries render as "-". */
   durationsMs?: Record<string, number>;
+  /** Run id; the ticket shows its short hash. */
+  runId?: string;
+}
+
+/** The receipt ticket as a fenced block, the same card a TTY run ends on. */
+function ticketBlock(workflow: Workflow, summary: RunSummary, runId?: string, crashed?: boolean): string {
+  return ["```text", formatTicketText({ summary, workflow: workflow.id, runId, crashed }), "```"].join("\n");
 }
 
 /** Hidden marker the poster searches for to update the comment in place. */
@@ -58,9 +61,9 @@ export function formatRunComment(
     runCommentMarker(workflow.id),
     `## ${summary.ok ? "✅" : "❌"} ${cell(workflow.name)}`,
     "",
-    `\`${formatReceipt(summary)}\``,
+    ticketBlock(workflow, summary, opts.runId),
     "",
-    toMermaidBlock(workflow, { state, trace: opts.trace, classDefs: STEP_SUMMARY_CLASS_DEFS }),
+    toMermaidBlock(workflow, { state, trace: opts.trace }),
     "",
     "<details>",
     "<summary>Nodes</summary>",
@@ -81,12 +84,12 @@ export function formatRunComment(
  * and no error text (thrown messages can embed model prose). Replaces any stale
  * success comment for the same workflow.
  */
-export function formatCrashComment(workflow: Workflow, summary: RunSummary): string {
+export function formatCrashComment(workflow: Workflow, summary: RunSummary, runId?: string): string {
   return [
     runCommentMarker(workflow.id),
     `## ❌ ${cell(workflow.name)}`,
     "",
-    `\`${formatReceipt(summary)} · crashed\``,
+    ticketBlock(workflow, summary, runId, true),
     "",
     "The run stopped before finishing. See the job log for details.",
     "",
@@ -107,11 +110,15 @@ export function writeRunComment(
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(
       file,
-      opts.crashed ? formatCrashComment(workflow, summary) : formatRunComment(workflow, results, summary, opts),
+      opts.crashed
+        ? formatCrashComment(workflow, summary, opts.runId)
+        : formatRunComment(workflow, results, summary, opts),
     );
     return true;
   } catch (err) {
-    process.stderr.write(`  ⚠ could not write comment file: ${err instanceof Error ? err.message : err}\n`);
+    process.stderr.write(
+      `  ${glyphs().warning} could not write comment file: ${err instanceof Error ? err.message : err}\n`,
+    );
     return false;
   }
 }

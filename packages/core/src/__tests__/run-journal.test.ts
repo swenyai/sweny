@@ -28,7 +28,11 @@ import {
   type JournalRecord,
 } from "../journal.js";
 import { prepareResume, type ResumeOptions } from "../cli/resume.js";
-import type { Claude, NodeResult, Skill, Workflow } from "../types.js";
+import { createWriteStageState } from "../safe-outputs.js";
+import type { Claude, NodeResult, NodeUsage, Skill, Workflow } from "../types.js";
+
+// Run keys go to a scratch state dir, never the real ~/.local/state.
+process.env.SWENY_STATE_DIR = mkdtempSync(join(tmpdir(), "sweny-state-"));
 
 const RUN_ID = "20260930-120000-abc123";
 const silent = { info() {}, warn() {}, error() {}, debug() {} };
@@ -65,6 +69,10 @@ function fakeAgent(
     kill?: (node: string, nth: number) => boolean;
     emit?: Record<string, object[]>;
     data?: (node: string, nth: number) => Record<string, unknown> | undefined;
+    /** Usage on the node's final result. */
+    usage?: (node: string, nth: number) => NodeUsage | undefined;
+    /** Usage reported live through `onUsage`, before anything else (and before a kill). */
+    live?: (node: string, nth: number) => NodeUsage | undefined;
   } = {},
 ) {
   const calls: string[] = [];
@@ -72,12 +80,15 @@ function fakeAgent(
     async run(req) {
       const node = /NODE:(\w+)/.exec(req.instruction)![1];
       calls.push(node);
+      const live = opts.live?.(node, calls.filter((c) => c === node).length);
+      if (live) req.onUsage?.(live);
       if (opts.kill?.(node, calls.filter((c) => c === node).length)) throw new Kill(`agent ${node}`);
       const emitter = req.tools.find((t) => t.name === "emit_output");
       for (const e of opts.emit?.[node] ?? []) await emitter!.handler(e, { config: {}, logger: silent });
       const nth = calls.filter((c) => c === node).length;
       const data = opts.data?.(node, nth) ?? { value: `${node}-out` };
-      return { status: "success", data, toolCalls: [] } as NodeResult;
+      const usage = opts.usage?.(node, nth);
+      return { status: "success", data, toolCalls: [], ...(usage ? { usage } : {}) } as NodeResult;
     },
     async evaluate() {
       throw new Error("no conditional routing in these specs");
@@ -478,5 +489,66 @@ describe("run journal crash boundaries (#363)", () => {
     expect(prepared.lines[0]).toMatch(/attempt 3/);
     expect(agent.calls).toEqual(["a", "b", "b", "c", "d", "d"]);
     expect(results!.get("d")!.status).toBe("success");
+  });
+});
+
+describe("resume keeps the run's spend", () => {
+  it("90 tokens journaled, then 20 on resume: the resumed node fails a 100-token run budget at 110", async () => {
+    const cwd = tmp();
+    const wf = chain({ budget: { tokens: 100 } });
+    const agent = fakeAgent({ usage: (node) => ({ inputTokens: node === "a" ? 90 : 20, outputTokens: 0 }) });
+    expect(await firstRun(cwd, wf, agent, [], killAt("node:start", "b"))).toBe(true);
+
+    const { results } = await resumeRun(cwd, wf, agent);
+    expect(agent.calls).toEqual(["a", "b"]);
+    const b = results!.get("b")!;
+    expect(b.status).toBe("failed");
+    expect(b.data.budget_exceeded).toBe(true);
+    expect(b.budget).toEqual({ scope: "run", unit: "tokens", limit: 100, spent: 110 });
+    expect(results!.has("c")).toBe(false);
+  });
+
+  it("spend reported live before a crash mid-node still counts: the node does not start again", async () => {
+    const cwd = tmp();
+    const wf = chain({ budget: { tokens: 100 } });
+    const agent = fakeAgent({
+      usage: (node) => (node === "a" ? { inputTokens: 50, outputTokens: 0 } : undefined),
+      live: (node, nth) => (node === "b" && nth === 1 ? { inputTokens: 60, outputTokens: 0 } : undefined),
+      kill: (node, nth) => node === "b" && nth === 1,
+    });
+    expect(await firstRun(cwd, wf, agent)).toBe(true);
+    expect(agent.calls).toEqual(["a", "b"]);
+
+    const { results } = await resumeRun(cwd, wf, agent);
+    expect(agent.calls).toEqual(["a", "b"]);
+    const b = results!.get("b")!;
+    expect(b.status).toBe("failed");
+    expect(b.budget).toEqual({ scope: "run", unit: "tokens", limit: 100, spent: 110 });
+  });
+});
+
+describe("replayed control flow must be real", () => {
+  it("a journaled route that is not an edge of the workflow is refused before any node runs", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml" });
+    journal.begin({
+      workflow: chain(),
+      input: {},
+      sources: {},
+      skills: new Map(),
+      config: {},
+      writeState: createWriteStageState(),
+    });
+    journal.nodeStart("a", 1);
+    journal.nodeEnd("a", 1, { status: "success", data: {}, toolCalls: [] }, createWriteStageState());
+    // a -> d skips b and c: no such edge.
+    journal.route("a", "d");
+    journal.end("crashed");
+
+    const { prepared } = await resumeRun(cwd, chain(), agent);
+    expect(prepared.ok).toBe(false);
+    expect(prepared.ok === false && prepared.error).toMatch(/a -> d.*not an edge/);
+    expect(agent.calls).toEqual([]);
   });
 });

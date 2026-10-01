@@ -370,7 +370,7 @@ export function inferObservability(skills: string[]): string | null {
 export function buildSwenyYml(sourceControl: string, observability: string | null, issueTracker: string): string {
   const lines: string[] = [];
 
-  lines.push("# .sweny.yml — SWEny project configuration");
+  lines.push("# .sweny.yml - SWEny project configuration");
   lines.push("# Secrets (API keys, tokens) go in .env (gitignored).");
   lines.push("# Docs: https://docs.sweny.ai/cli");
   lines.push("");
@@ -393,7 +393,7 @@ export function buildSwenyYml(sourceControl: string, observability: string | nul
 export function buildEnvTemplate(credentials: Credential[]): string {
   const lines: string[] = [];
 
-  lines.push("# .env — SWEny credentials (DO NOT COMMIT)");
+  lines.push("# .env - SWEny credentials (DO NOT COMMIT)");
   lines.push("# Fill in each value, then run: sweny check");
   lines.push("");
 
@@ -437,6 +437,9 @@ export function buildActionWorkflow(credentials: Credential[], cronExpression: s
   lines.push("    runs-on: ubuntu-latest");
   lines.push("    steps:");
   lines.push("      - uses: actions/checkout@v4");
+  // #473: no token on disk for the agents to read; sweny pushes the PR branch itself.
+  lines.push("        with:");
+  lines.push("          persist-credentials: false");
   lines.push("      - uses: swenyai/sweny@v5");
   lines.push("        with:");
   lines.push("          workflow: triage");
@@ -845,7 +848,7 @@ export async function runNew(options?: {
     summaryLines.push("");
   }
   if (hasExistingConfig) {
-    summaryLines.push(chalk.dim("(.sweny.yml already exists — keeping your existing config)"));
+    summaryLines.push(chalk.dim("(.sweny.yml already exists - keeping your existing config)"));
     summaryLines.push("");
   }
   summaryLines.push(chalk.bold(hasExistingConfig ? "Workflow uses:" : "Inferred from workflow:"));
@@ -878,7 +881,7 @@ export async function runNew(options?: {
   if (writeSwenyYmlIfMissing(cwd, sourceControl, observability, issueTracker)) {
     p.log.success("Created .sweny.yml");
   } else {
-    p.log.info(".sweny.yml already exists — keeping existing config");
+    p.log.info(".sweny.yml already exists - keeping existing config");
   }
 
   // 2. Append missing .env keys
@@ -890,7 +893,7 @@ export async function runNew(options?: {
   } else if (addedCount > 0) {
     p.log.success(`Appended ${addedCount} new key(s) to .env`);
   } else {
-    p.log.info(".env already contains all required keys — skipped");
+    p.log.info(".env already contains all required keys - skipped");
   }
 
   // The pack's Actions trigger (#474): never overwritten, skipped with --no-ci.
@@ -917,7 +920,7 @@ export async function runNew(options?: {
       });
       if (p.isCancel(overwrite)) cancel();
       if (!overwrite) {
-        p.log.info("Workflow file preserved — no changes");
+        p.log.info("Workflow file preserved - no changes");
         p.outro("Done.");
         return;
       }
@@ -1024,8 +1027,8 @@ async function runCustomWorkflowBuilder(skills: Skill[]): Promise<WorkflowTempla
     const action = await p.select({
       message: "Looks good?",
       options: [
-        { value: "accept", label: "Yes — use this workflow" },
-        { value: "refine", label: "Refine — describe what to change" },
+        { value: "accept", label: "Yes - use this workflow" },
+        { value: "refine", label: "Refine - describe what to change" },
         { value: "cancel", label: "Cancel" },
       ],
     });
