@@ -34,13 +34,10 @@ function mkLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 }
 
-interface FakeTool {
-  access?: "read" | "write";
-  out?: unknown;
-}
-type ToolOut = FakeTool["out"] | ((input: Record<string, unknown>, call: number) => unknown);
+type ToolOut = unknown;
+type Tools = Record<string, { access?: "read" | "write"; out?: ToolOut }>;
 
-function fakeSkill(id: string, tools: Record<string, { access?: "read" | "write"; out?: ToolOut }>) {
+function fakeSkill(id: string, tools: Tools) {
   const calls: { tool: string; input: Record<string, unknown> }[] = [];
   const skill: Skill = {
     id,
@@ -64,7 +61,7 @@ function fakeSkill(id: string, tools: Record<string, { access?: "read" | "write"
   return { skill, calls };
 }
 
-const githubTools = () => ({
+const githubTools = (): Tools => ({
   github_add_comment: { out: { id: 99 } },
   github_create_issue: { out: { number: 7, html_url: "https://example.test/7" } },
   github_create_pr: { out: { number: 8 } },
@@ -76,10 +73,7 @@ function intent(over: Partial<SafeOutputIntent> = {}): SafeOutputIntent {
   return { type: "issue", title: "Crash on start", body: "Details", recordedAt: T0, ...over };
 }
 
-function setup(
-  over: Partial<ApplySafeOutputsOptions> = {},
-  tools: ReturnType<typeof githubTools> | Record<string, never> = githubTools(),
-) {
+function setup(over: Partial<ApplySafeOutputsOptions> = {}, tools: Tools = githubTools()) {
   const gh = fakeSkill("github", tools);
   const logger = mkLogger();
   const o: ApplySafeOutputsOptions = {
@@ -392,7 +386,7 @@ describe("skill resolution", () => {
   it("ignores node skills that cannot apply the type", () => {
     expect(resolveOutputSkill({ type: "issue" }, ["slack", "github"], new Map([["github", gh]]))).toBe("github");
     expect(resolveOutputSkill({ type: "pr" }, ["linear", "github"], new Map([["github", gh]]))).toBe("github");
-    expect(resolveOutputSkill({ type: "pr" }, ["linear"], new Map())).toBe("github");
+    expect(resolveOutputSkill({ type: "pr" }, ["linear"], new Map())).toBeUndefined();
     expect(resolveOutputSkill({ type: "issue", via: "linear" }, ["github"], new Map())).toBe("linear");
   });
 
@@ -881,7 +875,7 @@ describe("write stage: dedupe and caps", () => {
       "applied",
       "duplicate",
     ]);
-    expect(await statuses(d, issues({ target: "acme/one" }, { target: "acme/two" }))).toStrictEqual([
+    expect(await statuses(d, issues({ target: "acme/one" }, { target: "acme/two" }), { env: {} })).toStrictEqual([
       "applied",
       "applied",
     ]);
@@ -920,7 +914,9 @@ describe("write stage: dedupe and caps", () => {
       await statuses(d, issues({ dedupe_key: "k", target: "Acme/Api" }, { dedupe_key: "k", target: "acme/api" })),
     ).toStrictEqual(["applied", "duplicate"]);
     expect(
-      await statuses(d, issues({ dedupe_key: "k", target: "a/one" }, { dedupe_key: "k", target: "a/two" })),
+      await statuses(d, issues({ dedupe_key: "k", target: "a/one" }, { dedupe_key: "k", target: "a/two" }), {
+        env: {},
+      }),
     ).toStrictEqual(["applied", "applied"]);
   });
 
@@ -1048,7 +1044,7 @@ describe("write stage: applied results", () => {
   });
 
   it("a failing write stops the rest with fixed reasons and a named error", async () => {
-    const out: ToolOut = (_input, call) => {
+    const out = (_input: Record<string, unknown>, call: number) => {
       if (call === 2) throw new Error("boom");
       return { number: call };
     };
