@@ -143,14 +143,15 @@ program
   )
   .option("--template <id>", "Use a built-in template without the picker")
   .option("-y, --yes", "Skip every prompt (never overwrites existing files)")
-  .action(async (id: string | undefined, options: { template?: string; yes?: boolean }) => {
+  .option("--no-ci", "Do not write a pack's GitHub Actions trigger to .github/workflows/")
+  .action(async (id: string | undefined, options: { template?: string; yes?: boolean; ci?: boolean }) => {
     // Prompts need a terminal. Without one (CI, pipes), a prompt never
     // settles, so print usage and exit 2 instead of hanging.
     if (!options.yes && !process.stdin.isTTY) {
       console.error(nonInteractiveUsage());
       process.exit(2);
     }
-    await runNew({ marketplaceId: id, template: options.template, yes: options.yes });
+    await runNew({ marketplaceId: id, template: options.template, yes: options.yes, ci: options.ci });
   });
 
 // ── sweny check ───────────────────────────────────────────────────────

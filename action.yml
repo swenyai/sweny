@@ -126,6 +126,19 @@ inputs:
     required: false
     default: "true"
 
+  notify-on-failure:
+    description: |
+      Tell someone when the run fails or is refused, and only then. Set to
+      `issue` to open (or comment on) one sticky issue per workflow labelled
+      `sweny-failure` (the job needs `permissions: issues: write`), or to a
+      Slack incoming-webhook: pass the URL from a secret, or the NAME of an
+      env var on this step that holds it (for example SLACK_WEBHOOK_URL). Metadata only: workflow id, failed node ids, a
+      reason class (node_failed, crashed, did_not_start), and the run link.
+      Never error text or model output. A failed notification warns and never
+      fails the job. Empty (the default) sends nothing. Needs no CLI support.
+    required: false
+    default: ""
+
   cloud-token:
     description: "Project token (sweny_pk_...) enabling opt-in run reporting. Optional, and not currently available. Token minting is not yet exposed, so leaving this unset (the default) means no outbound reporting request is made. Equivalent to setting the SWENY_CLOUD_TOKEN env var; either form is accepted."
     required: false
@@ -255,6 +268,11 @@ runs:
         fi
         echo "srt ${SRT_VERSION} wraps commands on this runner"
 
+    - name: Mark run start
+      if: ${{ inputs.setup-only != 'true' && inputs.notify-on-failure != '' }}
+      shell: bash
+      run: touch "${{ runner.temp }}/sweny-run-start"
+
     - name: Run workflow
       if: inputs.setup-only != 'true'
       shell: bash
@@ -373,3 +391,16 @@ runs:
         COMMENT_FILE: ${{ runner.temp }}/sweny-run-comment.md
         GITHUB_REPOSITORY: ${{ github.repository }}
       run: bash "${{ github.action_path }}/scripts/post-run-comment.sh"
+
+    - name: Notify on failure
+      if: ${{ failure() && inputs.setup-only != 'true' && inputs.notify-on-failure != '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+        NOTIFY: ${{ inputs.notify-on-failure }}
+        WORKFLOW_PATH: ${{ inputs.workflow }}
+        MARKER_FILE: ${{ runner.temp }}/sweny-run-start
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: bash "${{ github.action_path }}/scripts/notify-failure.sh"
