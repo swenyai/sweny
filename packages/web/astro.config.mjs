@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   site: "https://docs.sweny.ai",
   vite: {
+    // Keep Astro's cookie version in the prerender bundle; the workspace root
+    // also has an older cookie package for Express with a different API.
+    ssr: { noExternal: ["cookie"] },
     resolve: {
       alias: {
         "@sweny-ai/core/workflows": fileURLToPath(new URL("../core/dist/workflows/browser.js", import.meta.url)),
