@@ -59,7 +59,7 @@ export interface EditorState extends ExecutionSlice {
 
   // Edge mutations
   addEdge(from: string, to: string, when?: string): void;
-  updateEdge(edgeIndex: number, patch: { when?: string; to?: string; max_iterations?: number }): void;
+  updateEdge(edgeIndex: number, patch: { when?: Edge["when"]; to?: string; max_iterations?: number }): void;
   deleteEdge(edgeIndex: number): void;
 
   markLayoutFresh(): void;
@@ -304,13 +304,15 @@ export const useEditorStore = create<EditorState>()(
           }),
         ),
 
-      updateEdge: (edgeIndex: number, patch: { when?: string; to?: string; max_iterations?: number }) =>
+      updateEdge: (edgeIndex: number, patch: { when?: Edge["when"]; to?: string; max_iterations?: number }) =>
         set(
           produce((s: EditorState) => {
             const edge = s.workflow.edges[edgeIndex];
             if (!edge) return;
             if (patch.when !== undefined) {
-              if (patch.when) {
+              // An empty condition (NL text or expression source) means unconditional.
+              const text = typeof patch.when === "string" ? patch.when : patch.when.expr;
+              if (text.trim()) {
                 edge.when = patch.when;
               } else {
                 delete edge.when;

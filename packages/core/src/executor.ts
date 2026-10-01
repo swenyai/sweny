@@ -41,6 +41,8 @@ import { resolveSources } from "./source-resolver.js";
 import { evaluateAll, aggregateEval } from "./eval/index.js";
 import type { AggregateOutcome } from "./eval/index.js";
 import { evaluateRequires } from "./requires.js";
+import { evaluateExpression, isWhenExpression, parseExpression, whenLabel } from "./when.js";
+import type { ExpressionResult, ExpressionScope } from "./when.js";
 import { buildRetryPreamble } from "./retry.js";
 import { resolveExecutionModel } from "./model.js";
 import { buildToolAliases } from "./skills/index.js";
@@ -52,6 +54,8 @@ import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./har
 import type { HarnessPolicyMode } from "./harness/policy.js";
 import type { AgentHarness } from "./harness/types.js";
 import { BudgetGuard, describeOverrun, minLimits, toLimits } from "./budget.js";
+import { createShadowDecider, finishShadowDecision, startShadowDecision } from "./decider.js";
+import type { DeciderMode, ShadowDecider } from "./decider.js";
 import type { Budget, BudgetOverrun } from "./budget.js";
 import { buildNodePolicy, resolveNodePermissions } from "./node-policy.js";
 import {
@@ -146,6 +150,12 @@ export interface ExecuteOptions {
    * all (cost on Codex). Default: {@link resolveHarnessPolicy} from the run env.
    */
   harnessPolicy?: HarnessPolicyMode;
+  /**
+   * Override `workflow.decider.mode` (CLI `--decider`). `shadow` still needs
+   * `decider.provider` in the workflow; there is no default URL. Default: the
+   * workflow's own mode, else off (zero HTTP calls).
+   */
+  decider?: DeciderMode;
 }
 
 /**
@@ -160,6 +170,8 @@ export const DEFAULT_MAX_STEPS = 200;
 interface AbortOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Shadow-mode decision model (#357). Observes route choices, never changes them. */
+  shadow?: ShadowDecider | null;
 }
 
 /**
@@ -222,6 +234,9 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   // `budget` and the caller's (`--max-tokens`, `--max-cost`).
   const budgetGuard = new BudgetGuard(minLimits(toLimits(workflow.budget), toLimits(options.budget)));
   const harnessPolicy = options.harnessPolicy ?? resolveHarnessPolicy(runEnv);
+  // Decision model (#357): shadow only. Null (the default) means no HTTP at all.
+  const shadow = createShadowDecider(workflow.decider, options.decider, runEnv, (m) => logger.warn(m));
+  if (shadow) trace.decisions = shadow.records;
 
   // Build an eval-time alias table from the loaded skills. Each skill owns
   // its own mapping between skill-tool names and equivalent MCP names. Core
@@ -431,7 +446,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         edgeCounts,
         logger,
         trace,
-        { signal, timeoutMs },
+        { signal, timeoutMs, shadow },
       );
       currentId = next;
       continue;
@@ -832,6 +847,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       {
         signal,
         timeoutMs,
+        shadow,
       },
     );
   }
@@ -1439,15 +1455,17 @@ async function advanceFromNode(
   trace: ExecutionTrace,
   abort?: AbortOptions,
 ): Promise<string | null> {
-  // Dry run path gate: stop at the first conditional routing decision.
+  // Dry run path gate: stop at the first natural-language routing decision.
   // Safety does not depend on this (#380): under dry-run every node already
-  // runs read-only (see execute()). The stop keeps the dry-run path a pure
-  // function of the graph (no LLM route evaluation, so the same workflow
-  // always visits the same nodes) and skips action branches whose output
-  // would only describe writes that cannot happen.
+  // runs read-only (see execute()). The stop keeps dry-run routing free of
+  // model route evaluation, so the path is reproducible from the node outputs
+  // alone. Expression edges (#461) are evaluated by sweny with no model call,
+  // so dry-run follows them: a preview can reach the nodes past a
+  // deterministic branch (still read-only, outputs staged) and stops only
+  // where a model would have to pick the branch.
   if (isDryRunInput(input)) {
     const outEdges = workflow.edges.filter((e) => e.from === currentId);
-    if (outEdges.some((e) => e.when)) {
+    if (outEdges.some((e) => e.when && !isWhenExpression(e.when))) {
       safeObserve(observer, { type: "route", from: currentId, to: "(end)", reason: "dry run" }, logger);
       return null;
     }
@@ -1456,7 +1474,7 @@ async function advanceFromNode(
   const prevId = currentId;
   const nextId = await resolveNext(workflow, currentId, results, input, claude, observer, edgeCounts, logger, abort);
   if (nextId) {
-    const reason = workflow.edges.find((e) => e.from === prevId && e.to === nextId)?.when ?? "only path";
+    const reason = whenLabel(workflow.edges.find((e) => e.from === prevId && e.to === nextId)?.when) ?? "only path";
     trace.edges.push({ from: prevId, to: nextId, reason });
   }
   return nextId;
@@ -1467,7 +1485,8 @@ async function advanceFromNode(
  *
  * - 0 out-edges → terminal (return null)
  * - 1 unconditional edge → follow it
- * - Multiple or conditional → Claude evaluates
+ * - Every conditional edge is an `{ expr }` expression → sweny evaluates them, no model call
+ * - Otherwise multiple or conditional → Claude evaluates
  *
  * Edges with max_iterations are filtered out once exhausted.
  */
@@ -1530,6 +1549,22 @@ async function resolveNext(
     return defaultEdge.to;
   }
 
+  // Deterministic routing (#461): every conditional out-edge is an expression,
+  // so sweny decides without a model call. validateWorkflow rejects a node
+  // that mixes expression and natural-language edges.
+  if (conditionalEdges.every((e) => isWhenExpression(e.when))) {
+    return resolveByExpressions(
+      workflow,
+      current,
+      results,
+      conditionalEdges,
+      defaultEdge,
+      observer,
+      edgeCounts,
+      logger,
+    );
+  }
+
   // Claude evaluates which condition matches. Include input so conditions
   // can reference workflow-level flags like dryRun, and expose evals so
   // routing edges can read `priorNode.evals.X.pass`.
@@ -1576,20 +1611,40 @@ async function resolveNext(
 
   const choices = conditionalEdges.map((e) => ({
     id: e.to,
-    description: e.when!,
+    description: whenLabel(e.when)!,
   }));
 
   if (defaultEdge) {
     choices.push({ id: defaultEdge.to, description: "None of the above / default path" });
   }
 
+  const question = "Based on the results so far, which condition is true?";
+  // Shadow mode (#357): the decider gets the same question in parallel. Its
+  // promise never rejects and its answer is only logged, so the route below
+  // is the agent's in every case.
+  const pending = abort?.shadow
+    ? startShadowDecision(abort.shadow.provider, { question, state: context, choices, signal: abort.signal })
+    : undefined;
+
   const chosen = await claude.evaluate({
-    question: "Based on the results so far, which condition is true?",
+    question,
     context,
     choices,
     signal: abort?.signal,
     timeoutMs: abort?.timeoutMs,
   });
+
+  if (pending && abort?.shadow) {
+    try {
+      const rec = await finishShadowDecision(pending, current, chosen);
+      abort.shadow.records.push(rec);
+      const verdict =
+        rec.outcome === "compared" ? (rec.agree ? "agreed" : "disagreed") : `fell through (${rec.reason})`;
+      logger?.info(`  decider (shadow): node '${current}' ${verdict}`, { ...rec });
+    } catch {
+      // shadow logging must never affect a route
+    }
+  }
 
   // Fail closed. `evaluate` returns null when the routing decision could not
   // be made (SDK error, timeout, non-success subtype, or an unparseable
@@ -1684,6 +1739,92 @@ async function resolveNext(
   );
 
   return resolved;
+}
+
+/**
+ * Pick the out-edge whose `{ expr }` condition is true, with no model call
+ * (#461). Exactly one true edge is taken. None true takes the unconditional
+ * default edge when there is one. Otherwise (no edge true and no default, or
+ * two or more true) it fails closed with a RouteEvaluationError, the same
+ * contract as a failed model route evaluation: sweny never guesses an edge.
+ *
+ * An expression reads only successful nodes' outputs. A missing field, or a
+ * node that did not run or did not succeed, makes that expression false and
+ * is logged as a warning, never a silent true.
+ */
+function resolveByExpressions(
+  workflow: Workflow,
+  current: string,
+  results: Map<string, NodeResult>,
+  conditionalEdges: Workflow["edges"],
+  defaultEdge: Workflow["edges"][number] | undefined,
+  observer: Observer | undefined,
+  edgeCounts: Map<string, number> | undefined,
+  logger: Logger | undefined,
+): string {
+  const scope: ExpressionScope = {};
+  for (const [id, r] of results.entries()) {
+    if (r.status === "success") scope[id] = buildPriorNodeContext(r);
+  }
+
+  const matched: Array<{ to: string; expr: string }> = [];
+  for (const edge of conditionalEdges) {
+    const expr = whenLabel(edge.when)!;
+    let outcome: ExpressionResult;
+    try {
+      outcome = evaluateExpression(parseExpression(expr), scope);
+    } catch (err) {
+      // validateWorkflow parses every expression before a run, so this only
+      // fires for a workflow that skipped validation. Fail closed.
+      const msg = err instanceof Error ? err.message : String(err);
+      safeObserve(observer, { type: "route", from: current, to: "(end)", reason: `invalid when expression` }, logger);
+      throw new RouteEvaluationError(current, `invalid when expression on edge '${current}' -> '${edge.to}': ${msg}`);
+    }
+    if (outcome.problem) {
+      logger?.warn(`  route expr: '${current}' -> '${edge.to}' is false: ${outcome.problem} (${expr})`, {
+        node: current,
+        to: edge.to,
+      });
+      safeObserve(
+        observer,
+        {
+          type: "node:warning",
+          node: current,
+          reason: `when expression on edge to '${edge.to}' evaluated false: ${outcome.problem}`,
+          fields: [],
+        },
+        logger,
+      );
+    }
+    if (outcome.value) matched.push({ to: edge.to, expr });
+  }
+
+  const take = (to: string, reason: string): string => {
+    if (edgeCounts) {
+      const key = `${current}→${to}`;
+      edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+    }
+    safeObserve(observer, { type: "route", from: current, to, reason }, logger);
+    return to;
+  };
+
+  if (matched.length === 1) return take(matched[0].to, matched[0].expr);
+
+  if (matched.length === 0 && defaultEdge) {
+    logger?.info(`  route expr: no expression matched for '${current}'; taking default edge '${defaultEdge.to}'`, {
+      node: current,
+    });
+    return take(defaultEdge.to, "no expression matched; default edge");
+  }
+
+  const why =
+    matched.length === 0
+      ? `no when expression on node '${current}' is true and there is no default (unconditional) edge`
+      : `${matched.length} when expressions on node '${current}' are true (to ${matched.map((m) => m.to).join(", ")}); ` +
+        `exactly one may match`;
+  logger?.error(`  route expr: ${why}; refusing to guess. Terminating the run.`, { node: current });
+  safeObserve(observer, { type: "route", from: current, to: "(end)", reason: why }, logger);
+  throw new RouteEvaluationError(current, `${why}; refusing to guess`);
 }
 
 /**

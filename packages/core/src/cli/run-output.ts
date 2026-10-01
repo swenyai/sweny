@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import chalk from "chalk";
 import { consoleLogger, type ExecutionTrace, type Logger, type NodeResult, type Workflow } from "../types.js";
+import { summarizeDecisions } from "../decider.js";
 import { toMermaidBlock, type NodeStatus } from "../mermaid.js";
 
 // ── Receipt ─────────────────────────────────────────────────────
@@ -39,6 +40,12 @@ export interface RunSummary {
   policy?: RunPolicy;
   /** The spend budget a node crossed (#449). Absent when none was. */
   budget?: { node: string; scope: "node" | "run"; unit: "tokens" | "cost_usd"; limit: number; spent: number };
+  /**
+   * Shadow-mode decider agreement (#357), counts only. `compared` decisions
+   * passed every gate; `agreed` matched the agent; the rest fell through.
+   * Absent when the decider was off or never consulted.
+   */
+  decider?: { compared: number; agreed: number; fellThrough: number };
 }
 
 export interface RunPolicy {
@@ -57,7 +64,12 @@ export function degradedKey(entry: string): string {
 }
 
 /** Sum the per-node results into one run summary. */
-export function summarizeRun(results: Map<string, NodeResult>, durationMs: number, crashed = false): RunSummary {
+export function summarizeRun(
+  results: Map<string, NodeResult>,
+  durationMs: number,
+  crashed = false,
+  trace?: ExecutionTrace,
+): RunSummary {
   let nodesOk = 0;
   let nodesSkipped = 0;
   let failed = crashed;
@@ -116,7 +128,13 @@ export function summarizeRun(results: Map<string, NodeResult>, durationMs: numbe
     ...(degraded.size > 0 ? { degraded: [...degraded] } : {}),
     ...(Object.keys(policy).length > 0 ? { policy } : {}),
     ...(budget ? { budget } : {}),
+    ...(trace?.decisions && trace.decisions.length > 0 ? { decider: decisionCounts(trace) } : {}),
   };
+}
+
+function decisionCounts(trace: ExecutionTrace): NonNullable<RunSummary["decider"]> {
+  const d = summarizeDecisions(trace.decisions ?? []);
+  return { compared: d.compared, agreed: d.agreed, fellThrough: d.fell_through };
 }
 
 /**
@@ -190,6 +208,13 @@ export function formatReceipt(s: RunSummary): string {
     ...(s.degraded && s.degraded.length > 0 ? [`degraded: ${s.degraded.join(", ")}`] : []),
     ...(formatPolicySegment(s.policy) ? [formatPolicySegment(s.policy)!] : []),
     ...(s.budget ? [formatBudgetOverrun(s.budget)] : []),
+    ...(s.decider
+      ? [
+          s.decider.compared > 0
+            ? `decider agreed ${s.decider.agreed}/${s.decider.compared}`
+            : `decider fell through ${s.decider.fellThrough}/${s.decider.fellThrough}`,
+        ]
+      : []),
   ];
   return parts.join(" · ");
 }
@@ -319,7 +344,7 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
   ["-y, --yes", "Skip the batch confirmation prompt (for CI)"],
   [
     "--dry-run",
-    "Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge. To inspect nodes without running, use --list-nodes.",
+    "Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first natural-language conditional edge. To inspect nodes without running, use --list-nodes.",
   ],
   [
     "--stage",
@@ -342,5 +367,9 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
   [
     "--harness-policy <mode>",
     "strict: refuse a node whose policy the agent cannot enforce; warn: run it and report what was not enforced (default: strict under GitHub Actions, warn elsewhere; env SWENY_HARNESS_POLICY)",
+  ],
+  [
+    "--decider <mode>",
+    "Decision model for route choices: off (default) or shadow. Shadow asks the workflow's decider.provider alongside the agent and reports agreement; the route is always the agent's. Needs decider.provider in the workflow (no default URL)",
   ],
 ];

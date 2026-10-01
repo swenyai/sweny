@@ -65,7 +65,7 @@ inputs:
     default: "false"
 
   dry-run:
-    description: "When 'true', run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge."
+    description: "When 'true', run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first natural-language conditional edge."
     required: false
     default: "false"
 
