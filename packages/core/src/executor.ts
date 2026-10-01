@@ -65,7 +65,7 @@ import {
   type ActorInfo,
   type SafeOutputIntent,
 } from "./safe-outputs.js";
-import type { ExecutionJournal } from "./journal.js";
+import type { ExecutionJournal, JournalReplay } from "./journal.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -326,7 +326,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     logger.info(`→ ${node.name}`, { node: currentId });
 
     // Resume (#363): a visit an earlier attempt finished is replayed from the journal, not re-run.
-    const replay = journal?.replay(currentId, iteration);
+    const replay: JournalReplay | undefined = journal?.replay(currentId, iteration);
     if (replay?.kind === "complete") {
       results.set(currentId, replay.result);
       trace.steps.push({ node: currentId, status: replay.result.status, iteration });

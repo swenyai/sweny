@@ -853,7 +853,7 @@ export class RunJournal implements ExecutionJournal {
       at: new Date().toISOString(),
       ...fields,
     };
-    const record = { ...body, h: recordHash(JSON.stringify(body)) } as JournalRecord;
+    const record = { ...body, h: recordHash(JSON.stringify(body)) } as unknown as JournalRecord;
     if (this.opts.faults?.beforeAppend) {
       try {
         this.opts.faults.beforeAppend(record);
