@@ -11,7 +11,7 @@
  * network: the allowlisted and blocked hosts are two local HTTP servers.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
@@ -21,6 +21,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildAgentEnv } from "../../agent-env.js";
+import { gitCredentialMask } from "../../git-credentials.js";
 import {
   detectSandboxWrapper,
   prepareAgentSpawn,
@@ -72,6 +73,8 @@ type Probe =
   | { kind: "http"; url: string; via: "proxy" | "direct" }
   | { kind: "write"; path: string }
   | { kind: "read"; path: string }
+  | { kind: "contains"; path: string; needle: string }
+  | { kind: "vcs"; args: string[]; needle: string }
   | { kind: "env"; names: string[] }
   | { kind: "procScan"; needle: string }
   | {
@@ -124,12 +127,16 @@ function parseResults(stdout: string, stderr: string): ProbeResult[] {
 }
 
 /** The fake agent, unwrapped: the control that proves each probe can succeed. */
-async function runUnwrapped(plan: Probe[], extraEnv: Record<string, string> = {}): Promise<ProbeResult[]> {
+async function runUnwrapped(
+  plan: Probe[],
+  extraEnv: Record<string, string> = {},
+  cwd: string = workspace,
+): Promise<ProbeResult[]> {
   const r = await runChild({
     command: process.execPath,
     args: [FAKE_AGENT, JSON.stringify(plan)],
     env: { ...scopedEnv(), [CANARY_NAME]: CANARY_VALUE, ...extraEnv },
-    cwd: workspace,
+    cwd,
   });
   return parseResults(r.stdout, r.stderr);
 }
@@ -137,7 +144,13 @@ async function runUnwrapped(plan: Probe[], extraEnv: Record<string, string> = {}
 /** The fake agent through prepareAgentSpawn with the host's wrapper, strict sandbox mode. */
 async function runWrapped(
   plan: Probe[],
-  opts: { egress?: string[]; readOnly?: boolean; extraEnv?: Record<string, string> } = {},
+  opts: {
+    egress?: string[];
+    readOnly?: boolean;
+    extraEnv?: Record<string, string>;
+    cwd?: string;
+    gitCredentials?: string[];
+  } = {},
 ): Promise<{ results: ProbeResult[]; home?: string; homeExistsAfterCleanup: boolean }> {
   const policy: NodePolicy = {
     readOnly: opts.readOnly ?? false,
@@ -145,6 +158,7 @@ async function runWrapped(
     egress: opts.egress ?? [],
     strict: false,
     sandbox: "strict",
+    ...(opts.gitCredentials ? { gitCredentials: opts.gitCredentials } : {}),
   };
   const prep = await prepareAgentSpawn({
     caps: NO_NATIVE_SANDBOX,
@@ -155,7 +169,7 @@ async function runWrapped(
       command: process.execPath,
       args: [FAKE_AGENT, JSON.stringify(plan)],
       env: { ...scopedEnv(), ...opts.extraEnv },
-      cwd: workspace,
+      cwd: opts.cwd ?? workspace,
     },
   });
   expect(prep.refuse).toBeUndefined();
@@ -449,6 +463,44 @@ describe.skipIf(!wrapper)(`wrapped fake agent (${process.platform}, srt)`, () =>
         await bridge.close();
       }
     }, 60_000);
+  });
+
+  // #473: actions/checkout persists the job token in `.git/config` (v4, v5)
+  // or in an included file (v6+). A read-only or staged node must not read it,
+  // by any route: the file itself, the included file, or git.
+  it("a persisted git credential is unreadable to a read-only node, by file or by git", async () => {
+    const repo = path.join(root, "checkout");
+    const header = `AUTHORIZATION: basic ${CANARY_VALUE}-header`;
+    const included = path.join(outside, "git-credentials-test.config");
+    const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: path.join(root, "no-global") };
+    const g = (args: string[]) => spawnSync("git", args, { cwd: repo, encoding: "utf8", env: gitEnv });
+    await mkdir(repo, { recursive: true });
+    await writeFile(gitEnv.GIT_CONFIG_GLOBAL, "");
+    expect(g(["init", "-q"]).status).toBe(0);
+    expect(g(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"]).status).toBe(0);
+    expect(g(["config", "http.https://github.com/.extraheader", header]).status).toBe(0);
+    await writeFile(included, `[http "https://example.test/"]\n\textraheader = ${header}-included\n`);
+    expect(g(["config", "include.path", included]).status).toBe(0);
+    const files = gitCredentialMask(repo, { readOnly: true, staged: false }, { env: { HOME: root } });
+    expect(files.length, `scan: ${files.join(", ")}`).toBe(2);
+
+    const plan: Probe[] = [
+      { kind: "contains", path: path.join(repo, ".git", "config"), needle: CANARY_VALUE },
+      { kind: "contains", path: included, needle: CANARY_VALUE },
+      { kind: "vcs", args: ["config", "--show-origin", "--list"], needle: CANARY_VALUE },
+    ];
+    // Control: unwrapped, every route shows the canary.
+    const control = await runUnwrapped(plan, {}, repo);
+    expect(
+      control.map((r) => r.found),
+      JSON.stringify(control),
+    ).toEqual([true, true, true]);
+
+    const { results } = await runWrapped(plan, { readOnly: true, cwd: repo, gitCredentials: files });
+    expect(
+      results.map((r) => r.found),
+      JSON.stringify(results),
+    ).toEqual([false, false, false]);
   });
 
   it("a dry run cannot write the workspace either", async () => {

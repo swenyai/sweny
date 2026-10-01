@@ -14,14 +14,14 @@ const fakes = createPiProcessFake();
 afterAll(() => fakes.destroy());
 
 runContractSuite(
-  ({ logger, sandboxWrapper }) =>
+  ({ logger, sandboxWrapper, cwd }) =>
     new PiHarness({
       logger,
       envScope: true,
       policy: "warn",
       piCommand: fakes.command,
       // A project with its own `.pi/mcp.json`, which pi must never load (--no-approve).
-      cwd: fakes.projectDir,
+      cwd: cwd ?? fakes.projectDir,
       abortGraceMs: 500,
       killGraceMs: 500,
       // pi has no native sandbox. No host srt probe in tests: case 15 hands in its
