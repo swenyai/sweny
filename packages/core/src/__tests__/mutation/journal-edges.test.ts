@@ -3,15 +3,17 @@
  * (what must never reach disk), record verification and torn-tail repair, the
  * resume plan, and the provider lookup that stops a resume from writing twice.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash, createHmac } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   JOURNAL_DIR,
   JOURNAL_FILE,
+  JOURNAL_SCHEMA_VERSION,
+  JournalIntegrityError,
   JournalLockedError,
   JournalMismatchError,
   JournalVersionError,
@@ -30,6 +32,7 @@ import {
   pruneJournals,
   readJournal,
   redact,
+  runKeyFile,
   toolsHash,
   workflowHashOf,
   type JournalRecord,
@@ -52,6 +55,13 @@ afterEach(() => {
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const RUN = "20260930-120000-0a0b0c";
+/** Records are authenticated with a per-run key; hand-built files use this one. */
+const KEY = Buffer.alloc(32, 7);
+let KEYDIR = "";
+beforeEach(() => {
+  KEYDIR = tmp();
+});
+const readHand = (file: string, opts: { repair?: boolean } = {}) => readJournal(file, { key: KEY, ...opts });
 
 describe("hashing", () => {
   it("canonicalHash is sha256 of key-sorted JSON with undefined dropped", () => {
@@ -78,58 +88,59 @@ describe("hashing", () => {
     expect(instructionHash({})).toBe(canonicalHash({}));
   });
 
-  it("toolsHash covers skill ids, sorted tool names with access, mcp presence, versions", () => {
-    const skill = (id: string, tools: [string, "read" | "write" | undefined][], mcp?: Skill["mcp"]): Skill => ({
+  it("toolsHash is order independent and changes with the version, the harness, a tool or a secret-free MCP shape", () => {
+    const skill = (id: string, toolNames: string[], mcp?: Skill["mcp"]): Skill => ({
       id,
       name: id,
       description: "",
       category: "git",
       config: {},
-      tools: tools.map(([name, access]) => ({
+      tools: toolNames.map((name) => ({
         name,
         description: "",
         input_schema: { type: "object" },
-        ...(access ? { access } : {}),
+        access: "read" as const,
         handler: async () => null,
       })),
       ...(mcp ? { mcp } : {}),
     });
-    const b = skill(
-      "b",
-      [
-        ["t2", undefined],
-        ["t1", "read"],
-      ],
-      { url: "https://m.test" },
-    );
-    const a = skill("a", [["x", "write"]], { command: "npx" });
-    const c = skill("c", [], { type: "stdio" });
+    const a = skill("a", ["x"]);
+    const b = skill("b", ["t1", "t2"], { url: "https://m.test" });
     const forward = new Map([
-      ["b", b],
       ["a", a],
-      ["c", c],
+      ["b", b],
     ]);
     const reverse = new Map([
-      ["c", c],
-      ["a", a],
       ["b", b],
+      ["a", a],
     ]);
-    const expected = canonicalHash({
-      skills: [
-        { id: "a", tools: ["x:write"], mcp: "npx" },
-        { id: "b", tools: ["t1:read", "t2:unclassified"], mcp: "https://m.test" },
-        { id: "c", tools: [], mcp: "mcp" },
-      ],
-      sweny: "1.2.3",
-      harness: "codex",
-    });
-    expect(toolsHash(forward, "1.2.3", "codex")).toBe(expected);
-    expect(toolsHash(reverse, "1.2.3", "codex")).toBe(expected);
-    expect(toolsHash(new Map([["d", skill("d", [])]]))).toBe(
-      canonicalHash({ skills: [{ id: "d", tools: [], mcp: null }], sweny: null, harness: null }),
-    );
-    expect(toolsHash(forward, "1.2.3", "codex")).not.toBe(toolsHash(forward, "1.2.4", "codex"));
-    expect(toolsHash(forward, "1.2.3", "codex")).not.toBe(toolsHash(forward, "1.2.3", "pi"));
+    const base = toolsHash(forward, "1.2.3", "codex");
+    expect(base).toMatch(/^[0-9a-f]{64}$/);
+    expect(toolsHash(reverse, "1.2.3", "codex")).toBe(base);
+    expect(toolsHash(forward, "1.2.4", "codex")).not.toBe(base);
+    expect(toolsHash(forward, "1.2.3", "pi")).not.toBe(base);
+    expect(toolsHash(forward, "1.2.3")).not.toBe(base);
+    expect(toolsHash(new Map([["a", a]]), "1.2.3", "codex")).not.toBe(base);
+    expect(
+      toolsHash(
+        new Map([
+          ["a", skill("a", ["x", "y"])],
+          ["b", b],
+        ]),
+        "1.2.3",
+        "codex",
+      ),
+    ).not.toBe(base);
+    expect(
+      toolsHash(
+        new Map([
+          ["a", a],
+          ["b", skill("b", ["t1", "t2"], { url: "https://other.test" })],
+        ]),
+        "1.2.3",
+        "codex",
+      ),
+    ).not.toBe(base);
   });
 
   it("markerToken is a fixed prefix plus the first 24 key characters", () => {
@@ -295,14 +306,16 @@ describe("redact", () => {
 
 // ─── Record verification ──────────────────────────────────────────
 
+const mac = (body: string) => createHmac("sha256", KEY).update(body).digest("hex");
+
 function line(
   seq: number,
   type: string,
   fields: Record<string, unknown> = {},
   over: Record<string, unknown> = {},
 ): string {
-  const body = { v: 1, seq, type, at: "2026-01-01T00:00:00.000Z", ...fields };
-  return JSON.stringify({ ...body, h: sha(JSON.stringify(body)).slice(0, 16), ...over });
+  const body = { v: JOURNAL_SCHEMA_VERSION, seq, type, at: "2026-01-01T00:00:00.000Z", ...fields };
+  return JSON.stringify({ ...body, h: mac(JSON.stringify(body)), ...over });
 }
 
 function journalFile(text: string): string {
@@ -319,27 +332,27 @@ describe("readJournal", () => {
       line(3, "route", { from: "a", to: null }),
     ];
     const file = journalFile(lines.join("\n") + "\n");
-    expect(readJournal(file)).toStrictEqual({ file, records: lines.map((l) => JSON.parse(l)), truncatedBytes: 0 });
+    expect(readHand(file)).toStrictEqual({ file, records: lines.map((l) => JSON.parse(l)), truncatedBytes: 0 });
   });
 
   it("drops a torn tail, and only truncates the file when asked", () => {
     const good = [line(1, "run:start"), line(2, "route")].join("\n") + "\n";
     const torn = '{"v":1,"seq":3,"type":"no';
     const file = journalFile(good + torn);
-    const r = readJournal(file);
+    const r = readHand(file);
     expect(r.records).toHaveLength(2);
     expect(r.truncatedBytes).toBe(Buffer.byteLength(torn));
     expect("corruptAtLine" in r).toBe(false);
     expect(readFileSync(file, "utf-8")).toBe(good + torn);
-    readJournal(file, { repair: true });
+    readHand(file, { repair: true });
     expect(readFileSync(file, "utf-8")).toBe(good);
-    expect(readJournal(file, { repair: true }).truncatedBytes).toBe(0);
+    expect(readHand(file, { repair: true }).truncatedBytes).toBe(0);
   });
 
   it("treats a whole record with no trailing newline as torn", () => {
     const first = line(1, "run:start") + "\n";
     const second = line(2, "route");
-    const r = readJournal(journalFile(first + second));
+    const r = readHand(journalFile(first + second));
     expect(r.records).toHaveLength(1);
     expect(r.truncatedBytes).toBe(Buffer.byteLength(second));
   });
@@ -347,7 +360,7 @@ describe("readJournal", () => {
   it("a bad line with garbage after it is a torn tail: repairable", () => {
     const good = line(1, "run:start") + "\n";
     const file = journalFile(good + "garbage\n" + "more garbage\n");
-    const r = readJournal(file, { repair: true });
+    const r = readHand(file, { repair: true });
     expect(r.records).toHaveLength(1);
     expect("corruptAtLine" in r).toBe(false);
     expect(readFileSync(file, "utf-8")).toBe(good);
@@ -355,35 +368,36 @@ describe("readJournal", () => {
 
   it("a bad line followed by a record-shaped line is mid-file damage: reported, never repaired", () => {
     const l1 = line(1, "run:start");
-    const l2 = line(2, "route", {}, { h: "0000000000000000" });
+    const l2 = line(2, "route", {}, { h: "0".repeat(64) });
     const l3 = line(3, "route");
     const text = [l1, l2, l3].join("\n") + "\n";
     const file = journalFile(text);
-    const r = readJournal(file, { repair: true });
+    const r = readHand(file, { repair: true });
     expect(r.records).toHaveLength(1);
     expect(r.corruptAtLine).toBe(2);
+    expect(r.forgedAtLine).toBe(2);
     expect(r.truncatedBytes).toBe(Buffer.byteLength(l2) + Buffer.byteLength(l3) + 2);
     expect(readFileSync(file, "utf-8")).toBe(text);
   });
 
   it("reports the first bad line when several come before a record-shaped one", () => {
     const text = [line(1, "run:start"), "bad one", "bad two", '{"v":1,"h":"abc"}'].join("\n") + "\n";
-    expect(readJournal(journalFile(text)).corruptAtLine).toBe(2);
+    expect(readHand(journalFile(text)).corruptAtLine).toBe(2);
   });
 
   it("only a JSON object with a numeric v and a string h looks like a record", () => {
     for (const after of ['{"v":"1","h":"x"}', '{"v":1}', '{"v":1,"h":5}', "null", "[]", "7", "not json"]) {
-      const r = readJournal(journalFile([line(1, "run:start"), "bad", after].join("\n") + "\n"));
+      const r = readHand(journalFile([line(1, "run:start"), "bad", after].join("\n") + "\n"));
       expect("corruptAtLine" in r, after).toBe(false);
     }
     expect(
-      readJournal(journalFile([line(1, "run:start"), "bad", '{"v":1,"h":"abc"}'].join("\n") + "\n")).corruptAtLine,
+      readHand(journalFile([line(1, "run:start"), "bad", '{"v":1,"h":"abc"}'].join("\n") + "\n")).corruptAtLine,
     ).toBe(2);
   });
 
   it("rejects records that are not objects, are out of sequence, mis-versioned, mistyped or unsigned", () => {
-    const body = { v: 1, seq: 1, type: "run:start", at: "t" };
-    const signed = (b: object) => JSON.stringify({ ...b, h: sha(JSON.stringify(b)).slice(0, 16) });
+    const body = { v: JOURNAL_SCHEMA_VERSION, seq: 1, type: "run:start", at: "t" };
+    const signed = (b: object) => JSON.stringify({ ...b, h: mac(JSON.stringify(b)) });
     const bad = [
       "[]",
       "null",
@@ -391,15 +405,15 @@ describe("readJournal", () => {
       '"s"',
       signed({ ...body, seq: 2 }),
       signed({ ...body, seq: "1" }),
-      signed({ ...body, v: 0 }),
       signed({ ...body, v: "1" }),
       signed({ ...body, type: 5 }),
       JSON.stringify(body),
       JSON.stringify({ ...body, h: 5 }),
       JSON.stringify({ ...body, h: "0000000000000000" }),
+      JSON.stringify({ ...body, h: "Z".repeat(64) }),
     ];
     for (const b of bad) {
-      const r = readJournal(journalFile(b + "\n"));
+      const r = readHand(journalFile(b + "\n"));
       expect(r.records, b).toHaveLength(0);
       expect(r.truncatedBytes, b).toBe(Buffer.byteLength(b) + 1);
     }
@@ -407,20 +421,46 @@ describe("readJournal", () => {
 
   it("an edited field fails the checksum", () => {
     const edited = line(1, "route", { from: "a", to: "b" }).replace('"to":"b"', '"to":"c"');
-    expect(readJournal(journalFile(edited + "\n")).records).toHaveLength(0);
+    expect(readHand(journalFile(edited + "\n")).records).toHaveLength(0);
   });
 
   it("refuses a newer format with the version in the message", () => {
-    const file = journalFile(line(1, "run:start") + "\n" + line(2, "route", {}, { v: 2 }) + "\n");
-    expect(() => readJournal(file)).toThrow(JournalVersionError);
-    expect(() => readJournal(file)).toThrow(
-      "run journal format v2 is newer than this sweny understands (v1); upgrade sweny to resume it",
+    const file = journalFile(line(1, "run:start") + "\n" + line(2, "route", {}, { v: 3 }) + "\n");
+    expect(() => readHand(file)).toThrow(JournalVersionError);
+    expect(() => readHand(file)).toThrow(
+      "run journal format v3 is newer than this sweny understands (v2); upgrade sweny to resume it",
     );
     try {
-      readJournal(file);
+      readHand(file);
     } catch (e) {
       expect((e as Error).name).toBe("JournalVersionError");
     }
+  });
+
+  it("refuses an older, unauthenticated format from its first record", () => {
+    const old = JSON.stringify({ v: 1, seq: 1, type: "run:start", at: "t", h: "abc" });
+    expect(() => readHand(journalFile(old + "\n"))).toThrow(
+      "run journal format v1 predates authenticated records (v2); it cannot be resumed safely. Start a new run.",
+    );
+    // A later record with an old version is damage, not a format change.
+    const later =
+      line(1, "run:start") + "\n" + JSON.stringify({ v: 1, seq: 2, type: "route", at: "t", h: "abc" }) + "\n";
+    expect(() => readHand(journalFile(later))).not.toThrow();
+  });
+
+  it("authenticates with the run's own key: another key forges every record", () => {
+    const file = journalFile(line(1, "run:start") + "\n");
+    const r = readJournal(file, { key: Buffer.alloc(32, 9) });
+    expect(r.records).toHaveLength(0);
+    expect(r.forgedAtLine).toBe(1);
+    expect(r.corruptAtLine).toBe(1);
+  });
+
+  it("a record signed over a different sequence number is forged, not torn", () => {
+    const file = journalFile(line(1, "run:start") + "\n" + line(5, "route") + "\n");
+    const r = readHand(file, { repair: true });
+    expect(r.forgedAtLine).toBe(2);
+    expect(readFileSync(file, "utf-8")).toContain('"seq":5');
   });
 });
 
@@ -488,15 +528,22 @@ describe("journal directory", () => {
       "20260105-000000-000005",
     ];
     seedRuns(cwd, ids);
+    for (const id of ids) {
+      mkdirSync(KEYDIR, { recursive: true });
+      writeFileSync(runKeyFile(cwd, id, KEYDIR), "k");
+    }
     writeFileSync(join(cwd, JOURNAL_DIR, ids[0], "extra.txt"), "x");
-    expect(pruneJournals(cwd, 3)).toBe(2);
+    expect(pruneJournals(cwd, 3, undefined, KEYDIR)).toBe(2);
+    expect(existsSync(runKeyFile(cwd, ids[0], KEYDIR))).toBe(false);
+    expect(existsSync(runKeyFile(cwd, ids[1], KEYDIR))).toBe(false);
+    expect(existsSync(runKeyFile(cwd, ids[2], KEYDIR))).toBe(true);
     expect(listJournalRuns(cwd)).toStrictEqual(ids.slice(2));
     expect(existsSync(journalDir(cwd, ids[0]))).toBe(false);
-    expect(pruneJournals(cwd, 3)).toBe(0);
+    expect(pruneJournals(cwd, 3, undefined, KEYDIR)).toBe(0);
     // The current run counts toward the cap and is never removed, even when it is the oldest.
-    expect(pruneJournals(cwd, 2, ids[2])).toBe(1);
+    expect(pruneJournals(cwd, 2, ids[2], KEYDIR)).toBe(1);
     expect(listJournalRuns(cwd)).toStrictEqual([ids[2], ids[4]]);
-    expect(pruneJournals(cwd, 0, ids[4])).toBe(1);
+    expect(pruneJournals(cwd, 0, ids[4], KEYDIR)).toBe(1);
     expect(listJournalRuns(cwd)).toStrictEqual([ids[4]]);
   });
 });
@@ -505,7 +552,7 @@ describe("journal directory", () => {
 
 let seqCounter = 0;
 function rec(type: string, fields: Record<string, unknown> = {}): JournalRecord {
-  return { v: 1, seq: ++seqCounter, type, at: "t", ...fields };
+  return { v: JOURNAL_SCHEMA_VERSION, seq: ++seqCounter, type, at: "t", ...fields };
 }
 const startRec = (over: Record<string, unknown> = {}) =>
   rec("run:start", {
@@ -523,16 +570,16 @@ const startRec = (over: Record<string, unknown> = {}) =>
 const ok = (data: Record<string, unknown> = {}): NodeResult => ({ status: "success", data, toolCalls: [] });
 const failed = (): NodeResult => ({ status: "failed", data: {}, toolCalls: [] });
 const ws = (total: number) => ({ counts: [["a:issue", total]], total, seen: ["k"] });
-const nodeStart = (node: string, iteration = 0) => rec("node:start", { node, iteration });
-const nodeEnd = (node: string, result: NodeResult, iteration = 0, total = 1) =>
+const nodeStart = (node: string, iteration = 1) => rec("node:start", { node, iteration });
+const nodeEnd = (node: string, result: NodeResult, iteration = 1, total = 1) =>
   rec("node:end", { node, iteration, result, write_state: ws(total) });
-const checkpoint = (node: string, iteration = 0) =>
+const checkpoint = (node: string, iteration = 1) =>
   rec("node:checkpoint", { node, iteration, result: ok(), intents: [], agent_failed: false, attempt: 1 });
 const route = (from: string, to: string | null | undefined) => rec("route", { from, to });
 
 describe("buildResumePlan", () => {
   it("refuses a journal with no run:start", () => {
-    expect(() => buildResumePlan([rec("node:start", { node: "a", iteration: 0 })])).toThrow(
+    expect(() => buildResumePlan([rec("node:start", { node: "a", iteration: 1 })])).toThrow(
       "run journal has no run:start record; nothing to resume",
     );
   });
@@ -552,27 +599,25 @@ describe("buildResumePlan", () => {
     const plan = buildResumePlan([
       startRec(),
       nodeStart("a"),
-      nodeEnd("a", ok(), 0, 1),
+      nodeEnd("a", ok(), 1, 1),
       route("a", "b"),
       nodeStart("b"),
       checkpoint("b"),
-      nodeStart("c"),
-      nodeEnd("c", ok(), 0, 9),
     ]);
     expect(plan.visits).toStrictEqual([
-      { node: "a", iteration: 0, action: "replay", status: "success", next: "b", applied: 0, unconfirmed: 0 },
-      { node: "b", iteration: 0, action: "write-stage", applied: 0, unconfirmed: 0 },
+      { node: "a", iteration: 1, action: "replay", status: "success", next: "b", applied: 0, unconfirmed: 0 },
+      { node: "b", iteration: 1, action: "write-stage", applied: 0, unconfirmed: 0 },
     ]);
     expect(plan.freshNode).toBeUndefined();
     expect(plan.finished).toBe(false);
     expect(plan.writeState).toStrictEqual(ws(1));
-    expect([...plan.checkpoints.keys()]).toStrictEqual(["b#0"]);
-    expect([...plan.ends.keys()]).toStrictEqual(["a#0", "c#0"]);
+    expect([...plan.checkpoints.keys()]).toStrictEqual(["b#1"]);
+    expect([...plan.ends.keys()]).toStrictEqual(["a#1"]);
   });
 
   it("an unfinished visit with no checkpoint re-runs", () => {
     const plan = buildResumePlan([startRec(), nodeStart("a")]);
-    expect(plan.visits).toStrictEqual([{ node: "a", iteration: 0, action: "rerun", applied: 0, unconfirmed: 0 }]);
+    expect(plan.visits).toStrictEqual([{ node: "a", iteration: 1, action: "rerun", applied: 0, unconfirmed: 0 }]);
     expect(plan.freshNode).toBeUndefined();
   });
 
@@ -581,8 +626,6 @@ describe("buildResumePlan", () => {
     expect(done.finished).toBe(true);
     expect(done.visits[0].next).toBeNull();
     expect(done.freshNode).toBeUndefined();
-    const undefinedTo = buildResumePlan([startRec(), nodeStart("a"), nodeEnd("a", ok()), route("a", undefined)]);
-    expect(undefinedTo.finished).toBe(true);
     const routed = buildResumePlan([startRec(), nodeStart("a"), nodeEnd("a", ok()), route("a", "b")]);
     expect(routed.finished).toBe(false);
     expect(routed.freshNode).toBe("b");
@@ -604,6 +647,7 @@ describe("buildResumePlan", () => {
       startRec(),
       nodeStart("a"),
       nodeEnd("a", failed()),
+      route("a", "b"),
       nodeStart("b"),
       nodeEnd("b", ok()),
       route("b", null),
@@ -615,34 +659,33 @@ describe("buildResumePlan", () => {
   it("a route belongs to the latest visit of its node", () => {
     const plan = buildResumePlan([
       startRec(),
-      nodeStart("a", 0),
-      nodeEnd("a", ok(), 0),
-      route("a", "b"),
-      nodeStart("b", 0),
-      nodeEnd("b", ok(), 0),
-      route("b", "a"),
       nodeStart("a", 1),
       nodeEnd("a", ok(), 1),
+      route("a", "b"),
+      nodeStart("b", 1),
+      nodeEnd("b", ok(), 1),
+      route("b", "a"),
+      nodeStart("a", 2),
+      nodeEnd("a", ok(), 2),
       route("a", "done"),
     ]);
     expect(plan.visits.map((v) => [v.node, v.iteration, v.next])).toStrictEqual([
-      ["a", 0, "b"],
-      ["b", 0, "a"],
-      ["a", 1, "done"],
+      ["a", 1, "b"],
+      ["b", 1, "a"],
+      ["a", 2, "done"],
     ]);
     expect(plan.freshNode).toBe("done");
   });
 
-  it("a visit started again drops its earlier end and route", () => {
+  it("a visit started again after a resume drops its earlier end", () => {
     const plan = buildResumePlan([
       startRec(),
       nodeStart("a"),
       nodeEnd("a", failed()),
-      route("a", "b"),
       rec("run:resume", { attempt: 2 }),
       nodeStart("a"),
     ]);
-    expect(plan.visits).toStrictEqual([{ node: "a", iteration: 0, action: "rerun", applied: 0, unconfirmed: 0 }]);
+    expect(plan.visits).toStrictEqual([{ node: "a", iteration: 1, action: "rerun", applied: 0, unconfirmed: 0 }]);
     expect(plan.ends.size).toBe(0);
     const again = buildResumePlan([
       startRec(),
@@ -655,20 +698,25 @@ describe("buildResumePlan", () => {
     ]);
     expect(again.visits[0]).toMatchObject({ action: "replay", status: "success", next: null });
     expect(again.finished).toBe(true);
-    expect((again.ends.get("a#0")!.result as NodeResult).data).toStrictEqual({ v: 2 });
+    expect((again.ends.get("a#1")!.result as NodeResult).data).toStrictEqual({ v: 2 });
   });
 
-  it("ignores checkpoints, ends and routes for visits that never started", () => {
-    const plan = buildResumePlan([
-      startRec(),
-      checkpoint("ghost"),
-      nodeEnd("ghost", ok()),
-      route("ghost", "x"),
-      nodeStart("a"),
-    ]);
-    expect(plan.checkpoints.size).toBe(0);
-    expect(plan.ends.size).toBe(0);
-    expect(plan.visits.map((v) => v.node)).toStrictEqual(["a"]);
+  it("refuses records no executor writes: a checkpoint, end or route for a visit that never started", () => {
+    const refuse = (...recs: JournalRecord[]) => {
+      expect(() => buildResumePlan([startRec(), ...recs])).toThrow(JournalIntegrityError);
+    };
+    refuse(checkpoint("ghost"));
+    refuse(nodeEnd("ghost", ok()));
+    refuse(route("ghost", "x"));
+    refuse(nodeStart("zzz"));
+    refuse(nodeStart("a"), nodeStart("b"));
+    refuse(nodeStart("a"), nodeEnd("a", ok()), nodeStart("b"));
+    refuse(nodeStart("a", 2));
+    refuse(rec("mystery"));
+    refuse(startRec());
+    expect(() => buildResumePlan([rec("node:start", { node: "a", iteration: 1 }), startRec()])).toThrow(
+      /record \d+ \(node:start\) is not run:start/,
+    );
   });
 
   it("counts resumes and tracks the last run:end", () => {
@@ -686,21 +734,48 @@ describe("buildResumePlan", () => {
     expect(twice.lastStatus).toBe("success");
   });
 
-  it("counts a visit's own receipts and unconfirmed intents only", () => {
-    const out = (type: string, node: string, iteration: number, key: string) =>
-      rec(type, { node, iteration, key, tool: "github_create_issue" });
+  it("counts a visit's own receipts and unconfirmed intents", () => {
+    const out = (type: string, key: string) => rec(type, { node: "a", iteration: 1, key, tool: "github_create_issue" });
     const plan = buildResumePlan([
       startRec(),
       nodeStart("a"),
-      out("output:intent", "a", 0, "k1"),
-      out("output:applied", "a", 0, "k1"),
-      out("output:intent", "a", 0, "k2"),
-      out("output:intent", "a", 1, "k3"),
-      out("output:applied", "b", 0, "k4"),
+      checkpoint("a"),
+      out("output:intent", "k1"),
+      out("output:applied", "k1"),
+      out("output:intent", "k2"),
     ]);
     expect(plan.visits[0]).toMatchObject({ applied: 1, unconfirmed: 1 });
-    expect([...plan.intents.keys()]).toStrictEqual(["k1", "k2", "k3"]);
-    expect([...plan.receipts.keys()]).toStrictEqual(["k1", "k4"]);
+    expect([...plan.intents.keys()]).toStrictEqual(["k1", "k2"]);
+    expect([...plan.receipts.keys()]).toStrictEqual(["k1"]);
+  });
+
+  it("sums the largest usage each attempt reported, per run segment", () => {
+    const usage = (attempt: number, tokens: number, cost: number) =>
+      rec("usage", { node: "a", iteration: 1, attempt, tokens, cost_usd: cost, final: false });
+    const plan = buildResumePlan([
+      startRec(),
+      nodeStart("a"),
+      usage(0, 10, 0.5),
+      usage(0, 30, 0.25),
+      usage(1, 5, 1),
+      rec("run:end", { status: "crashed" }),
+      rec("run:resume"),
+      nodeStart("a"),
+      usage(0, 7, 0.125),
+    ]);
+    expect(plan.priorSpend).toStrictEqual({ tokens: 30 + 5 + 7, costUsd: 0.5 + 1 + 0.125 });
+    expect(buildResumePlan([startRec()]).priorSpend).toStrictEqual({ tokens: 0, costUsd: 0 });
+  });
+
+  it("refuses a usage record with invalid amounts or outside a visit", () => {
+    const usage = (over: Record<string, unknown>) =>
+      rec("usage", { node: "a", iteration: 1, attempt: 0, tokens: 1, cost_usd: 1, ...over });
+    for (const bad of [{ tokens: -1 }, { cost_usd: NaN }, { tokens: "1" }, { attempt: -2 }]) {
+      expect(() => buildResumePlan([startRec(), nodeStart("a"), usage(bad)]), JSON.stringify(bad)).toThrow(
+        /has invalid amounts/,
+      );
+    }
+    expect(() => buildResumePlan([startRec(), usage({})])).toThrow(/is outside any open node visit/);
   });
 });
 
@@ -761,7 +836,7 @@ function beginInfo(over: Partial<Parameters<RunJournal["begin"]>[0]> = {}) {
 }
 
 function records(j: RunJournal): JournalRecord[] {
-  return readJournal(j.file).records;
+  return readJournal(j.file, { keyDir: KEYDIR }).records;
 }
 
 /** Records appended by a resumed journal: their seq continues the old file, so they are read unverified. */
@@ -776,6 +851,7 @@ describe("RunJournal: a new run", () => {
   it("records the start with hashes and a redacted input, and keeps the journal out of commits", () => {
     const cwd = tmp();
     const j = RunJournal.create({
+      keyDir: KEYDIR,
       runId: RUN,
       cwd,
       workflowFile: "wf.yml",
@@ -798,13 +874,24 @@ describe("RunJournal: a new run", () => {
       workflow_hash: workflowHashOf(wf),
       instruction_hash: instructionHash(info.sources),
       input_hash: canonicalHash(info.input),
-      tools_hash: toolsHash(info.skills, "1.2.3", "claude-code"),
+      tools_hash: toolsHash(
+        info.skills,
+        "1.2.3",
+        "claude-code",
+        collectSecretValues({ GITHUB_TOKEN: "super-secret-value" }, info.config),
+      ),
       harness: { id: "claude-code" },
       sweny_version: "1.2.3",
       input: { token: REDACTED, n: 1, note: `has ${REDACTED} inside` },
       input_redacted: true,
     });
     expect(readFileSync(join(j.dir, ".gitignore"), "utf-8")).toBe("*\n");
+    // The signing key lives outside the workspace, private to the user; the journal itself is private too.
+    const keyFile = runKeyFile(cwd, RUN, KEYDIR);
+    expect(keyFile.startsWith(cwd)).toBe(false);
+    expect(readFileSync(keyFile, "utf-8")).toMatch(/^[0-9a-f]{64}\n$/);
+    expect(statSync(keyFile).mode & 0o777).toBe(0o600);
+    expect(statSync(j.file).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(j.dir, "journal.lock"), "utf-8")).toBe(String(process.pid));
     j.end("success");
     expect(existsSync(join(j.dir, "journal.lock"))).toBe(false);
@@ -816,7 +903,7 @@ describe("RunJournal: a new run", () => {
   });
 
   it("omits the optional start fields when they are not set, and starts only once", () => {
-    const j = RunJournal.create({ runId: RUN, cwd: tmp() });
+    const j = RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: tmp() });
     j.begin(beginInfo());
     j.begin(beginInfo());
     const [start, ...rest] = records(j);
@@ -828,16 +915,16 @@ describe("RunJournal: a new run", () => {
   it("prunes older journals beyond keep when a run begins", () => {
     const cwd = tmp();
     seedRuns(cwd, ["20260101-000000-000001", "20260102-000000-000002", "20260103-000000-000003"]);
-    RunJournal.create({ runId: RUN, cwd, keep: 2 }).begin(beginInfo());
+    RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd, keep: 2 }).begin(beginInfo());
     expect(listJournalRuns(cwd)).toStrictEqual(["20260103-000000-000003", RUN]);
     const cwd2 = tmp();
     seedRuns(cwd2, ["20260101-000000-000001"]);
-    RunJournal.create({ runId: RUN, cwd: cwd2 }).begin(beginInfo());
+    RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: cwd2 }).begin(beginInfo());
     expect(listJournalRuns(cwd2)).toHaveLength(2);
   });
 
   it("journals node records with secrets scrubbed and tool inputs dropped", () => {
-    const j = RunJournal.create({ runId: RUN, cwd: tmp(), env: { API_TOKEN: "env-secret-value" } });
+    const j = RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: tmp(), env: { API_TOKEN: "env-secret-value" } });
     j.begin(beginInfo());
     j.nodeStart("a", 0);
     const result = {
@@ -902,7 +989,7 @@ describe("RunJournal: a new run", () => {
   });
 
   it("a minimal result carries only status, data and tool calls", () => {
-    const j = RunJournal.create({ runId: RUN, cwd: tmp() });
+    const j = RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: tmp() });
     j.begin(beginInfo());
     j.nodeEnd("a", 0, { status: "success", toolCalls: [{ tool: "t", input: 1 }] } as never, createWriteStageState());
     expect(records(j)[1].result).toStrictEqual({
@@ -918,7 +1005,12 @@ describe("RunJournal: a new run", () => {
     const cwd = tmp();
     writeFileSync(join(cwd, ".sweny"), "a file where the directory should be");
     const warn = vi.fn();
-    const j = RunJournal.create({ runId: RUN, cwd, logger: { info() {}, warn, error() {}, debug() {} } });
+    const j = RunJournal.create({
+      keyDir: KEYDIR,
+      runId: RUN,
+      cwd,
+      logger: { info() {}, warn, error() {}, debug() {} },
+    });
     j.begin(beginInfo());
     expect(j.active).toBe(false);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -932,6 +1024,7 @@ describe("RunJournal: a new run", () => {
   it("a fault at an append stops everything after it and releases the lock", () => {
     class Kill extends Error {}
     const j = RunJournal.create({
+      keyDir: KEYDIR,
       runId: RUN,
       cwd: tmp(),
       faults: {
@@ -954,9 +1047,12 @@ function resumeFrom(recs: JournalRecord[], over: Partial<ResumeJournalOptions> =
   const plan = buildResumePlan(recs);
   const warn = vi.fn();
   const info = vi.fn();
+  mkdirSync(KEYDIR, { recursive: true });
+  writeFileSync(runKeyFile(cwd, RUN, KEYDIR), KEY.toString("hex") + "\n");
   const j = RunJournal.openForResume({
     runId: RUN,
     cwd,
+    keyDir: KEYDIR,
     read: { file: join(journalDir(cwd, RUN), JOURNAL_FILE), records: recs, truncatedBytes: 0 },
     plan,
     logger: { info, warn, error() {}, debug() {} },
@@ -1026,7 +1122,7 @@ describe("RunJournal: resume", () => {
     const recs = [
       matchingStart(),
       nodeStart("a"),
-      rec("node:end", { node: "a", iteration: 0, result: ok(), write_state: ws }),
+      rec("node:end", { node: "a", iteration: 1, result: ok(), write_state: ws }),
       route("a", "b"),
     ];
     const { j, warn } = resumeFrom(recs);
@@ -1077,7 +1173,7 @@ describe("RunJournal: resume", () => {
       nodeStart("b"),
       rec("node:checkpoint", {
         node: "b",
-        iteration: 0,
+        iteration: 1,
         result: ok({ cp: 1 }),
         intents: [{ type: "issue", recordedAt: 1 }],
         agent_failed: true,
@@ -1085,44 +1181,44 @@ describe("RunJournal: resume", () => {
       }),
     ];
     const { j } = resumeFrom(recs);
-    const first = j.replay("a", 0);
+    const first = j.replay("a", 1);
     expect(first).toStrictEqual({ kind: "complete", result, next: "b" });
     expect((first as { result: NodeResult }).result).not.toBe(result);
-    expect(j.replay("a", 0)).toBeUndefined();
     expect(j.replay("a", 1)).toBeUndefined();
-    expect(j.replay("zzz", 0)).toBeUndefined();
-    expect(j.replay("b", 0)).toStrictEqual({
+    expect(j.replay("a", 2)).toBeUndefined();
+    expect(j.replay("zzz", 1)).toBeUndefined();
+    expect(j.replay("b", 1)).toStrictEqual({
       kind: "checkpoint",
       result: ok({ cp: 1 }),
       intents: [{ type: "issue", recordedAt: 1 }],
       agentRunFailed: true,
       attempt: 3,
     });
-    expect(RunJournal.create({ runId: RUN, cwd: tmp() }).replay("a", 0)).toBeUndefined();
+    expect(RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: tmp() }).replay("a", 1)).toBeUndefined();
   });
 
   it("replay carries next only when the route was journaled, null included", () => {
     const withNull = resumeFrom([matchingStart(), nodeStart("a"), nodeEnd("a", ok()), route("a", null)]).j.replay(
       "a",
-      0,
+      1,
     );
     expect(withNull).toStrictEqual({ kind: "complete", result: ok(), next: null });
-    const without = resumeFrom([matchingStart(), nodeStart("a"), nodeEnd("a", ok())]).j.replay("a", 0);
+    const without = resumeFrom([matchingStart(), nodeStart("a"), nodeEnd("a", ok())]).j.replay("a", 1);
     expect(without).toStrictEqual({ kind: "complete", result: ok() });
     expect("next" in (without as object)).toBe(false);
-    const rerun = resumeFrom([matchingStart(), nodeStart("a")]).j.replay("a", 0);
+    const rerun = resumeFrom([matchingStart(), nodeStart("a")]).j.replay("a", 1);
     expect(rerun).toBeUndefined();
   });
 
   it("does not write a checkpoint the journal already has", () => {
     const { j } = resumeFrom([matchingStart(), nodeStart("a"), checkpoint("a")]);
     j.begin(beginInfo());
-    j.checkpoint("a", 0, { result: ok(), intents: [], agentRunFailed: false, attempt: 1 });
     j.checkpoint("a", 1, { result: ok(), intents: [], agentRunFailed: false, attempt: 1 });
+    j.checkpoint("a", 2, { result: ok(), intents: [], agentRunFailed: false, attempt: 1 });
     const types = rawRecords(j.file).map((r) => [r.type, r.iteration]);
     expect(types).toStrictEqual([
       ["run:resume", undefined],
-      ["node:checkpoint", 1],
+      ["node:checkpoint", 2],
     ]);
   });
 
@@ -1558,13 +1654,13 @@ describe("wrapWrites", () => {
 describe("journal: second-pass edges", () => {
   it("a record whose version is a string is damage, not a newer format", () => {
     const file = journalFile(line(1, "run:start", {}, { v: "2" }) + "\n");
-    const r = readJournal(file);
+    const r = readHand(file);
     expect(r.records).toHaveLength(0);
     expect(r.truncatedBytes).toBeGreaterThan(0);
   });
 
   it("a journal that never began writes nothing on end", () => {
-    const j = RunJournal.create({ runId: RUN, cwd: tmp() });
+    const j = RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: tmp() });
     j.end("success");
     expect(existsSync(j.file)).toBe(false);
   });

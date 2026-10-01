@@ -55,6 +55,7 @@ import {
   withPushBlocked,
   withholdCredentials,
 } from "../../agent-env.js";
+import { runKeyDir } from "../../journal.js";
 import type { Skill } from "../../types.js";
 
 const names = (list: readonly string[]) => Object.fromEntries(list.map((n) => [n, `v-${n}`]));
@@ -1140,7 +1141,11 @@ describe("agent access and sandbox", () => {
             { name: "ANTHROPIC_AUTH_TOKEN", mode: "deny" },
             { name: "CLAUDE_CODE_OAUTH_TOKEN", mode: "deny" },
           ],
-          files: [{ path: path.join("/h", ".claude", ".credentials.json"), mode: "deny" }],
+          files: [
+            { path: path.join("/h", ".claude", ".credentials.json"), mode: "deny" },
+            // Run journal keys: an agent that could read them could forge journal records.
+            { path: runKeyDir(), mode: "deny" },
+          ],
         },
       });
     });
@@ -1151,6 +1156,7 @@ describe("agent access and sandbox", () => {
       expect(buildSandboxSettings([], { failIfUnavailable: true }).failIfUnavailable).toBe(true);
       expect(buildSandboxSettings([]).credentials?.files).toStrictEqual([
         { path: path.join(homedir(), ".claude", ".credentials.json"), mode: "deny" },
+        { path: runKeyDir(), mode: "deny" },
       ]);
     });
   });
