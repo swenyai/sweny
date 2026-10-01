@@ -1,7 +1,9 @@
 // Property-based and adversarial tests for the run journal (journal.ts):
 // any truncation recovers to the last complete record, damage in the middle is
-// refused (never a silently skipped node), and replay never marks a visit
-// succeeded unless the journal recorded it as succeeded.
+// refused (never a silently skipped node), replay never marks a visit
+// succeeded unless the journal recorded it as succeeded, records chained to
+// their run never move, and (checked against the run's head) no more of the
+// journal's end can be lost than the one record the head itself holds.
 
 import { describe, it, expect, afterAll } from "vitest";
 import * as fc from "fast-check";
@@ -12,6 +14,7 @@ import { join } from "node:path";
 import {
   JOURNAL_FILE,
   JOURNAL_SCHEMA_VERSION,
+  JournalRollbackError,
   JournalVersionError,
   RunJournal,
   buildResumePlan,
@@ -19,6 +22,7 @@ import {
   loadRunKey,
   readJournal,
   runKeyFile,
+  type JournalHead,
   type JournalRecord,
 } from "../../journal.js";
 import { createWriteStageState } from "../../safe-outputs.js";
@@ -30,6 +34,8 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 const file = join(root, "journal.ndjson");
 // Records are authenticated with a per-run key; built journals use this one.
 const KEY = randomBytes(32);
+// The run id built journals are chained to.
+const RUN = "20260930-120000-0a0b0c";
 // The two exhaustive specs read the journal once per byte (a few thousand
 // authenticated reads, each a file write + read); 5s is too tight on slow runners.
 const EXHAUSTIVE_TIMEOUT_MS = 60_000;
@@ -84,7 +90,7 @@ interface Built {
   records: JournalRecord[];
 }
 
-function buildJournal(script: { steps: Step[]; runEnd?: "success" | "failed" | "crashed" }): Built {
+function buildJournal(script: { steps: Step[]; runEnd?: "success" | "failed" | "crashed" }, runId = RUN): Built {
   const raw: Array<{ type: string; fields: Record<string, unknown> }> = [
     {
       type: "run:start",
@@ -151,17 +157,44 @@ function buildJournal(script: { steps: Step[]; runEnd?: "success" | "failed" | "
   }
   if (script.runEnd) raw.push({ type: "run:end", fields: { status: script.runEnd } });
 
+  // Each MAC chains the run id, the seq and the previous record's MAC.
+  let prevMac = "";
   const lines = raw.map((r, i) => {
     const body = { v: JOURNAL_SCHEMA_VERSION, seq: i + 1, type: r.type, at: "2026-09-30T00:00:00.000Z", ...r.fields };
-    const h = createHmac("sha256", KEY).update(JSON.stringify(body)).digest("hex");
+    const input = `sweny-journal\n${runId}\n${i + 1}\n${prevMac}\n${JSON.stringify(body)}`;
+    const h = createHmac("sha256", KEY).update(input).digest("hex");
+    prevMac = h;
     return JSON.stringify({ ...body, h }) + "\n";
   });
   return { lines, records: lines.map((l) => JSON.parse(l) as JournalRecord) };
 }
 
-function readBytes(buf: Buffer, opts?: { repair?: boolean }, key: Buffer = KEY) {
+/**
+ * Parse raw bytes with the key but without a head: the record-level
+ * invariants hold whatever the head says. The head properties pass one.
+ */
+function readBytes(
+  buf: Buffer,
+  opts?: { repair?: boolean; head?: JournalHead | false; runId?: string },
+  key: Buffer = KEY,
+) {
   writeFileSync(file, buf);
-  return readJournal(file, { ...opts, key });
+  return readJournal(file, { head: false, runId: RUN, ...opts, key });
+}
+
+/** Records complete in a prefix of a built journal: whole lines, plus a final record that only lost its newline. */
+function completeIn(prefix: Buffer, lines: string[]): { n: number; validBytes: number; whole: boolean } {
+  let n = 0;
+  let validBytes = 0;
+  for (let i = 0; i < prefix.length; i++) {
+    if (prefix[i] === 0x0a) {
+      n++;
+      validBytes = i + 1;
+    }
+  }
+  const tail = prefix.subarray(validBytes).toString("utf-8");
+  const whole = tail.length > 0 && n < lines.length && tail === lines[n].slice(0, -1);
+  return { n: whole ? n + 1 : n, validBytes, whole };
 }
 
 /** The replay invariants, checked against the records the plan was built from. */
@@ -221,26 +254,21 @@ describe("journal: truncation recovers to the last complete record", () => {
         const cut = cutRaw % (buf.length + 1);
         const prefix = buf.subarray(0, cut);
 
-        // Records complete in the prefix = newlines in the prefix.
-        let n = 0;
-        let validBytes = 0;
-        for (let i = 0; i < prefix.length; i++) {
-          if (prefix[i] === 0x0a) {
-            n++;
-            validBytes = i + 1;
-          }
-        }
+        // Records complete in the prefix = newlines in the prefix, plus a final
+        // record cut exactly at its newline (complete JSON is never torn).
+        const { n, validBytes, whole } = completeIn(prefix, lines);
 
         const read = readBytes(prefix);
         expect(read.records).toEqual(records.slice(0, n));
-        expect(read.truncatedBytes).toBe(cut - validBytes);
+        expect(read.truncatedBytes).toBe(whole ? 0 : cut - validBytes);
         expect(read.corruptAtLine).toBeUndefined();
 
-        // Repair cuts the file back to the last complete record and is stable.
+        // Repair cuts a torn tail back to the last complete record (or restores
+        // a lost final newline) and is stable.
         const repaired = readBytes(prefix, { repair: true });
         expect(repaired.records).toEqual(records.slice(0, n));
-        expect(statSync(file).size).toBe(validBytes);
-        const again = readJournal(file, { key: KEY });
+        expect(statSync(file).size).toBe(whole ? cut + 1 : validBytes);
+        const again = readJournal(file, { key: KEY, runId: RUN, head: false });
         expect(again.truncatedBytes).toBe(0);
         expect(again.records).toEqual(records.slice(0, n));
 
@@ -283,7 +311,7 @@ describe("journal: truncation recovers to the last complete record", () => {
 
       const full = readFileSync(join(journalDir(cwd, runId), JOURNAL_FILE));
       const runKey = loadRunKey(runKeyFile(cwd, runId));
-      const whole = readBytes(full, undefined, runKey);
+      const whole = readBytes(full, { runId }, runKey);
       expect(whole.truncatedBytes).toBe(0);
       expect(whole.records.map((r) => r.type)).toEqual([
         "run:start",
@@ -298,9 +326,11 @@ describe("journal: truncation recovers to the last complete record", () => {
       let complete = 0;
       for (let cut = 0; cut <= full.length; cut++) {
         if (cut > 0 && full[cut - 1] === 0x0a) complete++;
-        const read = readBytes(full.subarray(0, cut), undefined, runKey);
-        expect(read.records).toHaveLength(complete);
-        expect(read.records).toEqual(whole.records.slice(0, complete));
+        // Cut exactly before a newline: that record is whole and authenticates.
+        const n = cut > 0 && full[cut] === 0x0a ? complete + 1 : complete;
+        const read = readBytes(full.subarray(0, cut), { runId }, runKey);
+        expect(read.records).toHaveLength(n);
+        expect(read.records).toEqual(whole.records.slice(0, n));
         expect(read.corruptAtLine).toBeUndefined();
       }
     },
@@ -354,7 +384,7 @@ describe("journal: byte corruption is detected, never silently skipped", () => {
           if (repaired.corruptAtLine !== undefined) {
             expect(readFileSync(file).equals(mutated)).toBe(true);
           } else {
-            expect(readJournal(file, { key: KEY }).truncatedBytes).toBe(0);
+            expect(readJournal(file, { key: KEY, runId: RUN, head: false }).truncatedBytes).toBe(0);
           }
         },
       ),
@@ -415,4 +445,190 @@ describe("journal: replay never marks a node succeeded that was not recorded as 
       params(10),
     );
   });
+});
+
+describe("journal: the end cannot be cut, and records cannot move", () => {
+  /** The head as the writer leaves it: the last record appended. */
+  const headOf = (records: JournalRecord[]): JournalHead => ({
+    seq: records.length,
+    record: records.length > 0 ? records[records.length - 1] : null,
+  });
+
+  it("any byte-level truncation is refused unless at most the head's own record is missing (then it is restored)", () => {
+    fc.assert(
+      fc.property(scriptArb, fc.integer({ min: 0, max: 1_000_000 }), (script, cutRaw) => {
+        const { lines, records } = buildJournal(script);
+        const N = lines.length;
+        const head = headOf(records);
+        const buf = Buffer.from(lines.join(""), "utf-8");
+        const cut = cutRaw % (buf.length + 1);
+        const prefix = buf.subarray(0, cut);
+        const { n } = completeIn(prefix, lines);
+
+        let read: ReturnType<typeof readJournal> | undefined;
+        let error: unknown;
+        try {
+          read = readBytes(prefix, { repair: true, head });
+        } catch (err) {
+          error = err;
+        }
+        if (n >= N - 1) {
+          // At the head, or one short (a crash between the head write and the append): the whole history.
+          expect(error).toBeUndefined();
+          expect(read!.records).toEqual(records);
+          expect(read!.restored === true).toBe(n === N - 1);
+          // Repair leaves the full journal on disk.
+          expect(readFileSync(file).equals(buf)).toBe(true);
+        } else {
+          // Anything shorter is a rollback, refused and left exactly as found.
+          expect(error).toBeInstanceOf(JournalRollbackError);
+          expect(readFileSync(file).equals(prefix)).toBe(true);
+        }
+      }),
+      params(300),
+    );
+  });
+
+  it("a journal accepted against a head always ends with exactly the head's record", () => {
+    fc.assert(
+      fc.property(scriptArb, scriptArb, (scriptA, scriptB) => {
+        const a = buildJournal(scriptA);
+        const b = buildJournal(scriptB);
+        const head = headOf(a.records);
+        let read: ReturnType<typeof readJournal> | undefined;
+        try {
+          read = readBytes(Buffer.from(b.lines.join(""), "utf-8"), { head });
+        } catch (err) {
+          expect(err).toBeInstanceOf(JournalRollbackError);
+          return;
+        }
+        if (read.corruptAtLine !== undefined) return;
+        expect(read.records).toHaveLength(head.seq);
+        if (head.seq > 0) expect(read.records[head.seq - 1]).toEqual(head.record);
+      }),
+      params(300),
+    );
+  });
+
+  it("any splice of whole lines (this run's, or another run's under the same key) reads back as an exact prefix", () => {
+    fc.assert(
+      fc.property(
+        scriptArb,
+        scriptArb,
+        fc.array(fc.tuple(fc.boolean(), fc.nat()), { minLength: 1, maxLength: 14 }),
+        (scriptA, scriptB, picks) => {
+          const a = buildJournal(scriptA);
+          // Same key, another run id: only the chain tells the records apart.
+          const b = buildJournal(scriptB, "20260930-120000-0d0e0f");
+          const spliced = picks.map(([fromB, i]) =>
+            fromB ? b.lines[i % b.lines.length] : a.lines[i % a.lines.length],
+          );
+          let read: ReturnType<typeof readJournal>;
+          try {
+            read = readBytes(Buffer.from(spliced.join(""), "utf-8"));
+          } catch (err) {
+            expect(err).toBeInstanceOf(JournalVersionError);
+            return;
+          }
+          // Never a record out of place: what is accepted is the original run's own history, in order, from the start.
+          read.records.forEach((r, i) => expect(r).toEqual(a.records[i]));
+          // And it is accepted only as far as the splice really is that history.
+          read.records.forEach((_, i) => expect(spliced[i]).toBe(a.lines[i]));
+        },
+      ),
+      params(300),
+    );
+  });
+
+  it("an unterminated tail that is complete JSON must authenticate; it is never trimmed as torn", () => {
+    const tailArb = fc.oneof(
+      // The next record, well formed, with a wrong MAC.
+      fc
+        .uint8Array({ minLength: 32, maxLength: 32 })
+        .map((b) => ({ forgedRecord: true as const, h: Buffer.from(b).toString("hex") })),
+      // Any other complete JSON value.
+      fc.jsonValue().map((value) => ({ forgedRecord: false as const, value })),
+    );
+    fc.assert(
+      fc.property(scriptArb, tailArb, (script, tail) => {
+        const { lines, records } = buildJournal(script);
+        const N = lines.length;
+        const text = tail.forgedRecord
+          ? JSON.stringify({
+              v: JOURNAL_SCHEMA_VERSION,
+              seq: N + 1,
+              type: "route",
+              at: "x",
+              from: "a",
+              to: null,
+              h: tail.h,
+            })
+          : JSON.stringify(tail.value);
+        const buf = Buffer.concat([Buffer.from(lines.join(""), "utf-8"), Buffer.from(text, "utf-8")]);
+        let read: ReturnType<typeof readJournal>;
+        try {
+          read = readBytes(buf, { repair: true, head: headOf(records) });
+        } catch (err) {
+          // A JSON object whose `v` is a number above the format: refused as a newer format.
+          expect(err).toBeInstanceOf(JournalVersionError);
+          return;
+        }
+        expect(read.forgedAtLine).toBe(N + 1);
+        expect(read.records).toEqual(records);
+        expect(readFileSync(file).equals(buf)).toBe(true);
+      }),
+      params(300),
+    );
+  });
+
+  it(
+    "a real RunJournal: every truncation past its head's own record is refused, so journaled spend is never lost",
+    () => {
+      const wf: Workflow = {
+        id: "w",
+        name: "W",
+        description: "",
+        entry: "a",
+        nodes: { a: { name: "A", instruction: "do a", skills: [] }, b: { name: "B", instruction: "do b", skills: [] } },
+        edges: [{ from: "a", to: "b" }],
+      };
+      const cwd = mkdtempSync(join(root, "head-"));
+      const runId = "20261001-120000-0d0e0f";
+      const j = RunJournal.create({ runId, cwd });
+      j.begin({
+        workflow: wf,
+        input: {},
+        sources: {},
+        skills: new Map(),
+        config: {},
+        writeState: createWriteStageState(),
+      });
+      j.nodeStart("a", 1);
+      j.usage("a", 1, 1, { inputTokens: 90, outputTokens: 0, costUsd: 0.5 }, true);
+      j.nodeEnd("a", 1, result("success"), createWriteStageState());
+      j.route("a", "b");
+      j.nodeStart("b", 1);
+      j.usage("b", 1, 1, { inputTokens: 20, outputTokens: 0 }, true);
+      j.end("crashed");
+
+      const real = join(journalDir(cwd, runId), JOURNAL_FILE);
+      const full = readFileSync(real);
+      const spend = buildResumePlan(readJournal(real).records).priorSpend;
+      expect(spend).toEqual({ tokens: 110, costUsd: 0.5 });
+      const lineEnds = [...full.entries()].filter(([, b]) => b === 0x0a).map(([i]) => i + 1);
+      // Cut anywhere from the end of the second-to-last record on (its newline included or not):
+      // the last record is restored from the head.
+      const lastLineStart = lineEnds[lineEnds.length - 2] - 1;
+
+      for (let cut = 0; cut <= full.length; cut++) {
+        writeFileSync(real, full.subarray(0, cut));
+        if (cut >= lastLineStart) {
+          expect(buildResumePlan(readJournal(real).records).priorSpend, `cut at ${cut}`).toEqual(spend);
+        } else {
+          expect(() => readJournal(real), `cut at ${cut}`).toThrow(JournalRollbackError);
+        }
+      }
+    },
+    EXHAUSTIVE_TIMEOUT_MS,
+  );
 });

@@ -33,6 +33,8 @@ SWEny never stores credentials in code. All secrets are read from environment va
 
 SWEny runs entirely in your environment: your terminal, your CI runner, your compute.
 
+Run journals (what `sweny workflow resume` continues from) live in the sweny state dir, outside the workspace, with a per-run HMAC key. They are protected from the agent only while the agent runs under an enforced sandbox, which denies it the state dir. An agent run without one (`SWENY_SANDBOX=off`, or `auto` on a host that cannot sandbox) can read the key and rewrite the journal; sweny records such nodes, and resuming that run warns and marks the receipt `journal_unsandboxed`. See [Resume a run](https://docs.sweny.ai/cli/resume/#the-journal).
+
 The CLI ships an opt-in run reporting path that sends structured metadata only (run status, duration, recommendations) and never source code, diffs, or secrets. It is gated on `SWENY_CLOUD_TOKEN` and returns immediately when that variable is unset, so a default install makes no outbound request. Token minting is not currently exposed; the hosted service is in active development. See [PRIVACY.md](./PRIVACY.md) for the exact payload.
 
 ## Open-Source Worker Audit Path (aws-cloud — not yet live)

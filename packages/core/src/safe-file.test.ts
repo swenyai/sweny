@@ -292,15 +292,16 @@ describe.skipIf(!posix)("other workspace files", () => {
 
   it("the run journal does not append through a symlinked journal file", async () => {
     const s = setup();
-    const dir = journalDir(s.ws, RUN_ID);
+    // The journal lives in the state dir, outside the workspace; a planted link there is still refused.
+    const stateRoot = path.join(s.root, "state", "runs");
+    const dir = journalDir(s.ws, RUN_ID, stateRoot);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.symlinkSync(s.victim, path.join(dir, JOURNAL_FILE));
-    const keyDir = path.join(s.root, "keys");
     const journal = RunJournal.create({
       runId: RUN_ID,
       cwd: s.ws,
       workflowFile: "wf.yml",
-      keyDir,
+      stateRoot,
       logger: { info() {}, warn() {}, error() {}, debug() {} },
     });
     const claude: Claude = {
@@ -322,7 +323,10 @@ describe.skipIf(!posix)("other workspace files", () => {
       edges: [],
       nodes: { a: { name: "A", instruction: "x", skills: [] } },
     };
-    await execute(wf, {}, { skills: new Map(), claude, cwd: s.ws, journal });
+    // A journal that cannot be written stops the run before its first node.
+    await expect(execute(wf, {}, { skills: new Map(), claude, cwd: s.ws, journal })).rejects.toThrow(
+      /run journal: could not write/,
+    );
     journal.end("success");
     expect(journal.active).toBe(false);
     expect(s.read()).toBe("original\n");

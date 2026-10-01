@@ -42,8 +42,8 @@ A unique prefix of the run id is enough. `sweny runs` lists recent runs.
 A write through safe outputs (`outputs:` on a node) gets an idempotency key built from the node, its visit, the tool and the exact arguments. Before the call sweny journals the key, after the call it journals what the call produced. On resume:
 
 - **Key with a receipt**: the write is not sent. The receipt (issue number, URL) is reused.
-- **Key without a receipt**: the process died between the API call and the receipt. sweny looks for the write on the provider before sending anything. Issue and comment bodies carry a hidden marker with the key (`<!-- sweny-output ... -->`), which sweny finds with GitHub issue search, Linear issue search, or the Linear issue's comment list. Label and state changes, and pull requests for the same branch, are idempotent and are simply applied again.
-- **Cannot confirm** (the lookup failed or the provider has no lookup): the node fails instead of risking a duplicate. Check the target, then resume with `--allow-repeat-writes`.
+- **Key without a receipt**: the process died between the API call and the receipt. sweny looks for the write on the provider before sending anything. Issue and comment bodies carry a hidden marker with the key (`<!-- sweny-output ... -->`). GitHub issues and comments are looked up through the listing endpoints, which see a write the moment it lands, page by page until the marker is found or the listing reaches back past the write (a page that cannot be read means "cannot confirm"); GitHub search (used only when the skill has no listing tool) can lag, so a search miss counts as "cannot confirm", not as absent. Linear comments are looked up in the issue's comment list, Linear issues with Linear search. Label and state changes, and pull requests for the same branch, are idempotent and are simply applied again.
+- **Cannot confirm** (the lookup failed, missed in a lagging index, or the provider has no lookup): the node fails instead of risking a duplicate. Check the target, then resume with `--allow-repeat-writes`. With that flag the write is sent again: delivery is at least once, not exactly once.
 
 Nodes that write outside safe outputs (an agent with write tools, shell or `git push`) are different: sweny cannot see what the agent did before the crash. If such a node had started, the plan flags it as **may repeat writes** and the resume refuses until you pass `--allow-repeat-writes`. Nodes with `permissions: read` or `outputs:` are never flagged.
 
@@ -58,30 +58,46 @@ Nodes that write outside safe outputs (an agent with write tools, shell or `git 
 | may repeat writes | A node that writes outside safe outputs had started. | Check what it did, then `--allow-repeat-writes`. |
 | already finished successfully | Nothing to resume. | Nothing. |
 | damaged journal | A record in the middle of the file is unreadable. | Start a new run. |
-| fails authentication | A whole record does not match the run's key: it was edited or written by something other than the run. | Start a new run. |
+| fails authentication | A whole record does not match the run's key and its place in the chain: it was edited, moved, copied from another run, or written by something other than the run. This includes a final segment with no line end that is complete JSON: it is never treated as a torn write. | Start a new run. |
+| rolled back | The journal ends earlier than the run's head says it wrote, or its head file is missing or edited. Not overridable by `--force`. | Start a new run. |
 | impossible record sequence, or a route that is not an edge | The journal describes control flow the executor never writes (a record after `run:end`, a node that no route pointed to, a second route for one visit), or a route the workflow does not have or whose `max_iterations` is used up. Not overridable by `--force`. | Start a new run. |
 | key missing | The run's key is not in this user's state dir. | Resume as the user that started the run, or point `SWENY_STATE_DIR` at its state dir. |
-| in use by process N | Another resume of the same run is still running. | Wait for it, or stop it. |
+| in use by process N | Another run or resume of the same run is still running. | Wait for it, or stop it. |
+| state dir inside the workspace | `SWENY_STATE_DIR` (or the default state dir) resolves inside the workspace, directly or through a symlink, where an agent could edit it. A new run refuses to journal for the same reason. | Point `SWENY_STATE_DIR` outside the workspace. |
+| journal in the workspace | The run was journaled by an older sweny, which kept journals in `.sweny/runs/`. A workspace journal can be edited by the agent, so it is never resumed. | Start a new run. |
 
 ## The journal
 
-Location: `.sweny/runs/<run-id>/journal.ndjson` (mode `0600`, in a `0700` run directory), next to the run's history record. One JSON record per line, each with a format version, a sequence number and an HMAC-SHA256 under a per-run key. Every record is fsync'd before the run moves on.
+Location: the sweny state dir, never the workspace: `$SWENY_STATE_DIR/runs/<workspace-hash>/<run-id>/` (default `$XDG_STATE_HOME/sweny/runs/...`, else `~/.local/state/sweny/runs/...`). Directories are `0700`, files `0600`, and every file is opened without following symlinks. The run directory holds:
 
-- **The key**: 32 random bytes made when the run starts, kept outside the workspace in `$SWENY_STATE_DIR/run-keys/` (default `$XDG_STATE_HOME/sweny/run-keys/`, else `~/.local/state/sweny/run-keys/`; directory `0700`, file `0600`). Anything that can write the workspace but not your state dir cannot forge a record a resume accepts. Sandboxed agents cannot read the key directory (the agent sandbox and the process sandbox both deny it), and the process sandbox also denies writes to `.sweny/runs/`. An agent running unsandboxed as your user can read the key, so resume also checks the record sequence and every replayed route against the workflow's edges. Journals written before keys existed (format v1) cannot be resumed.
-- **Spend**: each agent attempt's token and cost usage is journaled as it is reported (live reports at most every 2 seconds, plus the final figure). A resume starts the run budget from that total, so `budget:` and `--max-tokens` / `--max-cost` cap the whole logical run, not each attempt.
+| File | What |
+|------|------|
+| `journal.ndjson` | One JSON record per line, each with a format version, a sequence number and an HMAC-SHA256 under the run's key. Every record is fsync'd before the run moves on. |
+| `key` | 32 random bytes made when the run starts. |
+| `head.json` | The record being appended, written (atomically) before the journal append. |
+| `meta.json` | Run id, workspace and creation time, authenticated with the key. Retention reads only this. |
+| `lock` | The process that owns the run: its pid and start time. |
 
-- **Torn last record** (power loss mid-write): dropped on resume, with a note. The run resumes from the last whole record.
+The workspace keeps only what is meant for you: the run history record and `.sweny/runs/<run-id>/output.md`.
+
+- **Only a sandboxed agent is kept out**: with the sandbox enforced, both sandboxes (the agent's own and the process sandbox) deny reading and writing the whole `runs/` tree (and for Claude Code, deny rules keep its built-in Read, Grep, Glob, Edit and Write tools out of it too), so the agent cannot read a key, edit or cut a journal, delete a lock, or plant a run. **These guarantees hold only while every agent node runs under an enforced sandbox.** An agent running unsandboxed as your user (`SWENY_SANDBOX=off`, or `auto` on a host whose sandbox preflight fails) can read the key and rewrite the journal. Once the preflight passes, `auto` enforces the sandbox like `strict`: a sandbox that then fails to start fails the node instead of running it unsandboxed. Claude Code nodes load only the MCP servers sweny passes: no user or project settings, `.mcp.json` or plugins, since a filesystem MCP server would reach around the sandbox. sweny records every such node in the journal; resuming that run prints a warning and the receipt carries `journal_unsandboxed`: its spend and write records are only as trustworthy as that agent. Resume still checks the record sequence and every replayed route against the workflow's edges.
+- **Never inside the workspace**: a state dir whose real path is inside the workspace (directly or through a symlink) is refused, and the run stops before its first node.
+- **Chained records**: each record's HMAC covers the run id, its sequence number and the previous record's HMAC. Records cannot be reordered, dropped from the middle, or spliced in from another run.
+- **The end cannot be cut**: before a record is appended, `head.json` is replaced with it (temp file, fsync, rename). A crash between the two leaves the journal one record short, and resume restores that record from the head (with a note). A journal any shorter than that is refused as rolled back.
+- **A failed write stops the run**: if a record cannot be written (full disk, unwritable state dir), the run stops before the next model call or write, and the node fails with the reason. A live usage record that fails also stops the agent at once, so at most the spend of that last moment is missing.
+- **One process at a time**: the lock is created exclusively before the journal is read. A lock left by a process that is gone (or whose pid now belongs to a different process) is taken over, and two resumes racing for it cannot both win.
+- **Spend**: each agent attempt's token and cost usage is journaled as it is reported, synchronously, whenever it raises the attempt's spend, plus the final figure. Harnesses report once per model turn (Claude Code per assistant message, ACP per usage update), so a process killed at any point has lost at most the spend of the turn it was in. A resume starts the run budget from that total, so `budget:` and `--max-tokens` / `--max-cost` cap the whole logical run, not each attempt. Claude Code (tokens) and ACP agents (cost) report live. Codex and pi report usage only when the node finishes, so a crash in the middle of one of their nodes records no spend for it.
+- **Torn last record** (power loss mid-write): dropped on resume, with a note, when it is not complete JSON. A last record that is complete JSON must authenticate; one that does not is refused, never dropped.
 - **Damage in the middle**: refused, never "repaired" by cutting valid records.
 - **What it holds**: workflow, instruction, input and tool hashes, the run input, each node's result data and eval verdicts, safe-output intents and receipts, and routing decisions. Not tool call inputs or outputs.
 - **What it never holds**: environment values. Secret-looking keys (`token`, `secret`, `password`, `api_key`, ...), known token shapes, and the values of secret environment variables and skill credentials are replaced with `[redacted]`.
-- **Git**: each run directory has a `.gitignore` of `*`, so an agent's `git add -A` never commits a journal.
-- **Retention**: the 20 most recent journals are kept; pruning a journal deletes its run directory and its key.
+- **Retention**: the 20 most recent journals per workspace are kept, ordered by the authenticated creation time in `meta.json`. Nothing in the workspace can add, hide or prune a run.
 
-Turn it off with `--no-journal`, or `journal: off` in `.sweny.yml`. A run without a journal cannot be resumed.
+Turn it off with `--no-journal`, or `journal: off` in `.sweny.yml`. A run without a journal cannot be resumed. With the journal on, a state dir that cannot be written stops the run before its first node: set `SWENY_STATE_DIR` to a writable dir, or pass `--no-journal`.
 
 ## In GitHub Actions
 
-A fresh runner starts without `.sweny/runs/`, so the Action cannot resume yet. Persisting the journal between workflow attempts is planned.
+A fresh runner starts without the state dir, so the Action cannot resume yet. Persisting the journal between workflow attempts is planned.
 
 ## Options
 

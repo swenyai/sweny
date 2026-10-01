@@ -32,7 +32,7 @@ import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import type { SandboxSettings } from "@anthropic-ai/claude-agent-sdk";
 import type { Logger, Skill } from "./types.js";
-import { runKeyDir } from "./journal.js";
+import { runStateRoot } from "./journal.js";
 
 // ─── Scoped env ──────────────────────────────────────────────────
 
@@ -1105,9 +1105,11 @@ function defaultProbe(): string | undefined {
 /**
  * The SDK sandbox settings used when the sandbox is on.
  *
- * - `failIfUnavailable`: true under `strict` (the SDK errors instead of
- *   running unsandboxed); false under `auto`, so a host that passes the
- *   preflight but still cannot start the sandbox degrades instead of failing.
+ * - `failIfUnavailable`: true whenever settings are built, `auto` included:
+ *   the preflight already passed, so a sandbox that then fails to start
+ *   fails the node instead of silently running the agent unsandboxed (which
+ *   the run would otherwise report as contained). `auto` on a host whose
+ *   preflight fails builds no settings and runs unsandboxed, reported as such.
  * - `allowUnsandboxedCommands: false`: the model cannot escape via the
  *   `dangerouslyDisableSandbox` parameter. Required, because nodes run under
  *   `bypassPermissions` (#365) which would otherwise auto-approve the escape.
@@ -1133,10 +1135,12 @@ export function buildSandboxSettings(
       envVars: AGENT_AUTH_VARS.map((name) => ({ name, mode: "deny" as const })),
       files: [
         { path: path.join(opts.home ?? homedir(), ".claude", ".credentials.json"), mode: "deny" as const },
-        // Run journal keys: an agent that could read them could forge journal records.
-        { path: runKeyDir(), mode: "deny" as const },
+        // Run journals and their keys: an agent that could read a key could forge records.
+        { path: runStateRoot(), mode: "deny" as const },
       ],
     },
+    // Nor may it write there: cut a journal, delete a lock, or plant a run.
+    filesystem: { denyRead: [runStateRoot()], denyWrite: [runStateRoot()] },
   };
 }
 
@@ -1200,7 +1204,8 @@ export function resolveAgentSandbox(opts: ResolveAgentSandboxOpts): AgentSandbox
   return {
     mode,
     settings: buildSandboxSettings([...DEFAULT_SANDBOX_DOMAINS, ...(opts.nodeDomains ?? []), ...extra], {
-      failIfUnavailable: mode === "strict",
+      // Preflight passed: from here the sandbox is enforced or the node fails.
+      failIfUnavailable: true,
     }),
   };
 }

@@ -12,9 +12,20 @@
  * applied twice.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { execute } from "../executor.js";
 import { createSkillMap } from "../skills/index.js";
 import {
@@ -73,6 +84,8 @@ function fakeAgent(
     usage?: (node: string, nth: number) => NodeUsage | undefined;
     /** Usage reported live through `onUsage`, before anything else (and before a kill). */
     live?: (node: string, nth: number) => NodeUsage | undefined;
+    /** Whether the agent ran inside an enforced sandbox (default: yes). */
+    contained?: (node: string) => boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -88,7 +101,8 @@ function fakeAgent(
       const nth = calls.filter((c) => c === node).length;
       const data = opts.data?.(node, nth) ?? { value: `${node}-out` };
       const usage = opts.usage?.(node, nth);
-      return { status: "success", data, toolCalls: [], ...(usage ? { usage } : {}) } as NodeResult;
+      const contained = opts.contained?.(node) ?? true;
+      return { status: "success", data, toolCalls: [], contained, ...(usage ? { usage } : {}) } as NodeResult;
     },
     async evaluate() {
       throw new Error("no conditional routing in these specs");
@@ -100,10 +114,24 @@ function fakeAgent(
   return { claude, calls, count: (node: string) => calls.filter((c) => c === node).length };
 }
 
-/** A GitHub-shaped provider: issues live in memory, search finds a token in the body. */
-function fakeProvider(opts: { searchFails?: boolean } = {}) {
-  const issues: { number: number; title: string; body: string; html_url: string }[] = [];
+/**
+ * A GitHub-shaped provider: issues live in memory, search finds a token in the
+ * body. With `listing`, it also has `github_list_issues` (newest first).
+ */
+function fakeProvider(opts: { searchFails?: boolean; listing?: boolean } = {}) {
+  const issues: { number: number; title: string; body: string; html_url: string; created_at: string }[] = [];
   let searches = 0;
+  let lists = 0;
+  const listTool = {
+    name: "github_list_issues",
+    description: "",
+    input_schema: { type: "object" },
+    access: "read" as const,
+    handler: async () => {
+      lists++;
+      return [...issues].reverse();
+    },
+  };
   const skill: Skill = {
     id: "github",
     name: "GitHub",
@@ -135,14 +163,16 @@ function fakeProvider(opts: { searchFails?: boolean } = {}) {
             title: input.title,
             body: input.body ?? "",
             html_url: `https://github.test/acme/api/issues/${n}`,
+            created_at: new Date().toISOString(),
           };
           issues.push(issue);
           return issue;
         },
       },
+      ...(opts.listing ? [listTool] : []),
     ],
   };
-  return { skill, issues, searches: () => searches };
+  return { skill, issues, searches: () => searches, lists: () => lists };
 }
 
 /** a -> b -> c -> d, every node read-only. */
@@ -211,9 +241,24 @@ async function firstRun(
     journal.end([...results.values()].some((r) => r.status === "failed") ? "failed" : "success");
     return killed;
   } catch (err) {
-    if (err instanceof Kill) return true;
+    if (err instanceof Kill) {
+      processDied(cwd);
+      return true;
+    }
     throw err;
   }
+}
+
+/**
+ * A killed process never releases its lock: it leaves it behind with a pid
+ * that no longer runs. (These specs kill the run in-process, so the lock
+ * would otherwise still name this live process.)
+ */
+function processDied(cwd: string): void {
+  const lock = join(journalDir(cwd, RUN_ID), "lock");
+  if (!existsSync(lock)) return;
+  const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+  writeFileSync(lock, JSON.stringify({ pid: dead, started: 0, nonce: "dead" }));
 }
 
 /** Resume the way `sweny workflow resume` does. */
@@ -226,10 +271,16 @@ async function resumeRun(
 ) {
   const prepared = prepareResume(RUN_ID, opts, { cwd, loadWorkflow: () => workflow });
   if (!prepared.ok || "planOnly" in prepared) return { prepared, results: undefined };
-  const { results } = await execute(workflow, prepared.ctx.input, {
-    ...execOpts(agent, skills, cwd),
-    journal: prepared.ctx.journal,
-  });
+  let results: Map<string, NodeResult>;
+  try {
+    ({ results } = await execute(workflow, prepared.ctx.input, {
+      ...execOpts(agent, skills, cwd),
+      journal: prepared.ctx.journal,
+    }));
+  } catch (err) {
+    if (err instanceof Kill) processDied(cwd);
+    throw err;
+  }
   prepared.ctx.journal.end([...results.values()].some((r) => r.status === "failed") ? "failed" : "success");
   return { prepared, results };
 }
@@ -524,6 +575,337 @@ describe("resume keeps the run's spend", () => {
     const b = results!.get("b")!;
     expect(b.status).toBe("failed");
     expect(b.budget).toEqual({ scope: "run", unit: "tokens", limit: 100, spent: 110 });
+  });
+});
+
+describe("journal integrity (security review 3, finding 3)", () => {
+  const lines = (cwd: string) => readFileSync(journalFile(cwd), "utf-8").split("\n").filter(Boolean);
+  /** Every file under `dir`, recursively. */
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],
+    );
+  /** Crash on the final usage append of node a: the head holds the record, the journal never got it. */
+  const crashOnUsage = (): JournalFaults => ({
+    afterHeadUpdate(rec) {
+      if (rec.type === "usage") throw new Kill("usage append");
+    },
+  });
+
+  it("crash on a usage append: nothing in the workspace can cut it, and the spend is restored", async () => {
+    const cwd = tmp();
+    const wf = chain({ budget: { tokens: 100 } });
+    const agent = fakeAgent({ usage: (node) => ({ inputTokens: node === "a" ? 90 : 20, outputTokens: 0 }) });
+    expect(await firstRun(cwd, wf, agent, [], crashOnUsage())).toBe(true);
+    // The reviewer's attack needs a journal line to delete. The workspace has none.
+    expect(walk(cwd).filter((f) => f.endsWith(JOURNAL_FILE))).toEqual([]);
+    expect(journalFile(cwd).startsWith(cwd)).toBe(false);
+    // Whatever an agent does to the workspace's .sweny dir changes nothing.
+    rmSync(join(cwd, ".sweny"), { recursive: true, force: true });
+
+    const { prepared, results } = await resumeRun(cwd, wf, agent);
+    expect(prepared.ok).toBe(true);
+    expect(prepared.lines.join("\n")).toMatch(/restored the journal's last record from the head/);
+    // 90 journaled (restored from the head) + 90 for re-running a: the 100-token budget fails instead of resetting.
+    const a = results!.get("a")!;
+    expect(a.status).toBe("failed");
+    expect(a.budget).toEqual(expect.objectContaining({ scope: "run", limit: 100 }));
+    expect(results!.has("b")).toBe(false);
+  });
+
+  it("the same attack on the state file itself (delete the final line, then one more) is refused", async () => {
+    const cwd = tmp();
+    const wf = chain({ budget: { tokens: 100 } });
+    const agent = fakeAgent({ usage: (node) => ({ inputTokens: node === "a" ? 90 : 20, outputTokens: 0 }) });
+    await firstRun(cwd, wf, agent, [], crashOnUsage());
+    const all = lines(cwd);
+    const cut = all.slice(0, -1).join("\n") + "\n";
+    writeFileSync(journalFile(cwd), cut);
+
+    const { prepared } = await resumeRun(cwd, wf, agent);
+    expect(prepared.ok === false && prepared.error).toMatch(/rolled back/);
+    expect(agent.calls).toEqual(["a"]);
+    expect(readFileSync(journalFile(cwd), "utf-8")).toBe(cut);
+    // --force does not bypass it.
+    const forced = await resumeRun(cwd, wf, agent, [], { force: true });
+    expect(forced.prepared.ok === false && forced.prepared.error).toMatch(/rolled back/);
+  });
+
+  it("a journal cut back at a prior newline after a clean stop is refused", async () => {
+    const cwd = tmp();
+    const wf = chain({ budget: { tokens: 100 } });
+    const agent = fakeAgent({ usage: (node) => ({ inputTokens: node === "a" ? 90 : 20, outputTokens: 0 }) });
+    expect(await firstRun(cwd, wf, agent, [], killAt("node:start", "b"))).toBe(true);
+    const all = lines(cwd);
+    const usageAt = all.findIndex((l) => JSON.parse(l).type === "usage");
+    writeFileSync(journalFile(cwd), all.slice(0, usageAt).join("\n") + "\n");
+    const { prepared } = await resumeRun(cwd, wf, agent);
+    expect(prepared.ok === false && prepared.error).toMatch(/rolled back/);
+    expect(agent.calls).toEqual(["a"]);
+  });
+
+  it("a complete record with a bad signature and no line end is refused, not trimmed as torn", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    await firstRun(cwd, chain(), agent, [], killAt("node:start", "c"));
+    const n = lines(cwd).length;
+    const body = { v: 3, seq: n + 1, type: "node:start", at: "2026-10-01T00:00:00.000Z", node: "c", iteration: 1 };
+    appendFileSync(journalFile(cwd), JSON.stringify({ ...body, h: "0".repeat(64) }));
+    const before = readFileSync(journalFile(cwd));
+
+    const { prepared } = await resumeRun(cwd, chain(), agent);
+    expect(prepared.ok === false && prepared.error).toMatch(new RegExp(`line ${n + 1} fails authentication`));
+    expect(agent.calls).toEqual(["a", "b"]);
+    expect(readFileSync(journalFile(cwd)).equals(before)).toBe(true);
+  });
+
+  it("a genuine torn final write (half the record reached the journal) still resumes", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    let pending = "";
+    const faults: JournalFaults = {
+      afterHeadUpdate(rec) {
+        if (rec.type === "node:start" && rec.node === "c") {
+          pending = JSON.stringify(rec) + "\n";
+          throw new Kill("node:start c");
+        }
+      },
+    };
+    expect(await firstRun(cwd, chain(), agent, [], faults)).toBe(true);
+    appendFileSync(journalFile(cwd), pending.slice(0, Math.floor(pending.length / 2)));
+
+    const { prepared } = await resumeRun(cwd, chain(), agent);
+    expect(prepared.lines[0]).toMatch(/dropped a torn record/);
+    expect(agent.calls).toEqual(["a", "b", "c", "d"]);
+    expect(readJournal(journalFile(cwd)).records.at(-1)).toMatchObject({ type: "run:end", status: "success" });
+  });
+
+  it("crash between the head write and the journal append: the record is restored, b is replayed not re-run", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    const faults: JournalFaults = {
+      afterHeadUpdate(rec) {
+        if (rec.type === "node:end" && rec.node === "b") throw new Kill("journal append of node:end b");
+      },
+    };
+    expect(await firstRun(cwd, chain(), agent, [], faults)).toBe(true);
+    expect(JSON.parse(lines(cwd).at(-1)!)).toMatchObject({ type: "node:start", node: "b" });
+
+    const { prepared } = await resumeRun(cwd, chain(), agent);
+    expect(prepared.ok).toBe(true);
+    expect(agent.calls).toEqual(["a", "b", "c", "d"]);
+    expect(readJournal(journalFile(cwd)).records.at(-1)).toMatchObject({ type: "run:end", status: "success" });
+  });
+
+  it("a journal written by an older sweny in the workspace is refused with a clear message", async () => {
+    const cwd = tmp();
+    const legacy = join(cwd, ".sweny", "runs", RUN_ID);
+    mkdirSync(legacy, { recursive: true });
+    writeFileSync(join(legacy, JOURNAL_FILE), '{"v":2,"seq":1,"type":"run:start","h":"x"}\n');
+    const prepared = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => chain() });
+    expect(prepared.ok === false && prepared.error).toMatch(/written by an older sweny.*cannot be resumed safely/);
+  });
+});
+
+describe("a journal append that fails stops the run", () => {
+  /** An I/O failure writing a record of `type` (for `node`, when given). */
+  const failWrite = (type: string, node?: string): JournalFaults => ({
+    writeJournal(fd, line) {
+      const rec = JSON.parse(line) as JournalRecord;
+      if (rec.type === type && (node === undefined || rec.node === node)) throw new Error("ENOSPC: no space left");
+      writeSync(fd, line);
+    },
+  });
+
+  it("node:end cannot be written: the node fails with the reason and nothing after it runs", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    const journal = RunJournal.create({
+      runId: RUN_ID,
+      cwd,
+      workflowFile: "wf.yml",
+      faults: failWrite("node:end", "a"),
+    });
+    const { results } = await execute(chain(), {}, { ...execOpts(agent, [], cwd), journal });
+    expect(agent.calls).toEqual(["a"]);
+    const a = results.get("a")!;
+    expect(a.status).toBe("failed");
+    expect(a.data).toMatchObject({ journal_failed: true });
+    expect(String(a.data.error)).toMatch(/run journal: could not write .*ENOSPC/);
+    expect(results.has("b")).toBe(false);
+    expect(journal.active).toBe(false);
+    journal.end("failed");
+  });
+
+  it("a live usage record cannot be written: the agent is stopped and the node fails", async () => {
+    const cwd = tmp();
+    let aborted = false;
+    const agent = fakeAgent({ live: (node) => (node === "a" ? { inputTokens: 50, outputTokens: 0 } : undefined) });
+    const run = agent.claude.run.bind(agent.claude);
+    agent.claude.run = async (req) => {
+      const out = await run(req);
+      aborted = req.signal?.aborted === true;
+      return out;
+    };
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml", faults: failWrite("usage") });
+    const { results } = await execute(chain(), {}, { ...execOpts(agent, [], cwd), journal });
+    expect(aborted).toBe(true);
+    expect(results.get("a")!.status).toBe("failed");
+    expect(results.get("a")!.data).toMatchObject({ journal_failed: true });
+    expect(results.has("b")).toBe(false);
+    journal.end("failed");
+  });
+
+  it("a write intent cannot be journaled: the write is never sent", async () => {
+    const cwd = tmp();
+    const gh = fakeProvider();
+    const agent = fakeAgent({ emit: { report: [ISSUE] } });
+    const journal = RunJournal.create({
+      runId: RUN_ID,
+      cwd,
+      workflowFile: "wf.yml",
+      faults: failWrite("output:intent"),
+    });
+    const { results } = await execute(reporting(), {}, { ...execOpts(agent, [gh.skill], cwd), journal });
+    expect(gh.issues).toHaveLength(0);
+    expect(results.get("report")!.status).toBe("failed");
+    expect(results.get("report")!.data).toMatchObject({ journal_failed: true });
+    expect(results.has("notify")).toBe(false);
+    journal.end("failed");
+  });
+});
+
+describe("review 4 follow-ups", () => {
+  it("live usage is on disk the moment it is reported: 10 then 100, process killed at once, resume seeds 100", async () => {
+    const cwd = tmp();
+    const claude: Claude = {
+      async run(req) {
+        req.onUsage?.({ inputTokens: 10, outputTokens: 0 });
+        req.onUsage?.({ inputTokens: 100, outputTokens: 0 });
+        // SIGKILL right after the second report: no timer, no flush, no end() ever runs.
+        throw new Kill("process killed");
+      },
+      async evaluate() {
+        throw new Error("unused");
+      },
+      async ask() {
+        return "ALLOW";
+      },
+    };
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml" });
+    await expect(
+      execute(chain(), {}, { skills: createSkillMap([]), claude, config: {}, logger: silent, cwd, journal }),
+    ).rejects.toBeInstanceOf(Kill);
+    processDied(cwd);
+    const usage = readJournal(journalFile(cwd)).records.filter((r) => r.type === "usage");
+    expect(usage.map((r) => r.tokens)).toEqual([10, 100]);
+
+    const prepared = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => chain() });
+    expect(prepared.ok && "ctx" in prepared && prepared.ctx.plan.priorSpend.tokens).toBe(100);
+    if (prepared.ok && "ctx" in prepared) prepared.ctx.journal.end("crashed");
+  });
+
+  it("crash after an issue was filed, before its receipt: the listing finds its marker, it is not filed again", async () => {
+    const cwd = tmp();
+    const gh = fakeProvider({ listing: true });
+    const agent = fakeAgent({ emit: { report: [ISSUE] } });
+    expect(await firstRun(cwd, reporting(), agent, [gh.skill], killAt("output:applied"))).toBe(true);
+    expect(gh.issues).toHaveLength(1);
+
+    const { results } = await resumeRun(cwd, reporting(), agent, [gh.skill]);
+    expect(gh.lists()).toBe(1);
+    expect(gh.searches()).toBe(0);
+    expect(gh.issues).toHaveLength(1);
+    expect(results!.get("report")!.outputs).toEqual([expect.objectContaining({ status: "applied", ref: 1 })]);
+  });
+
+  it("the write died after its intent, before it landed: the listing proves it absent, it is filed once", async () => {
+    const cwd = tmp();
+    const gh = fakeProvider({ listing: true });
+    const create = gh.skill.tools.find((t) => t.name === "github_create_issue")!;
+    const real = create.handler;
+    let calls = 0;
+    create.handler = async (input, ctx) => {
+      calls++;
+      if (calls === 1) throw new Kill("died before the API call landed");
+      return real(input, ctx);
+    };
+    const agent = fakeAgent({ emit: { report: [ISSUE] } });
+    await firstRun(cwd, reporting(), agent, [gh.skill]);
+    expect(gh.issues).toHaveLength(0);
+    const records = readJournal(journalFile(cwd)).records;
+    expect(records.some((r) => r.type === "output:intent")).toBe(true);
+    expect(records.some((r) => r.type === "output:applied")).toBe(false);
+
+    await resumeRun(cwd, reporting(), agent, [gh.skill]);
+    expect(gh.lists()).toBe(1);
+    expect(gh.issues).toHaveLength(1);
+  });
+
+  it("an agent that ran without an enforced sandbox: resume warns and the receipt carries journal_unsandboxed", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent({ contained: (node) => node !== "a" });
+    await firstRun(cwd, chain(), agent, [], killAt("node:start", "c"));
+    expect(readJournal(journalFile(cwd)).records.some((r) => r.type === "agent:unsandboxed" && r.node === "a")).toBe(
+      true,
+    );
+
+    const { prepared, results } = await resumeRun(cwd, chain(), agent);
+    expect(prepared.ok).toBe(true);
+    expect(prepared.lines.join("\n")).toMatch(/ran a without an enforced sandbox.*journal_unsandboxed/);
+    for (const r of results!.values()) {
+      expect((r.degraded ?? []).some((d) => d.startsWith("journal_unsandboxed:"))).toBe(true);
+    }
+  });
+
+  it("a fully sandboxed run resumes with no such warning", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    await firstRun(cwd, chain(), agent, [], killAt("node:start", "c"));
+    const { prepared, results } = await resumeRun(cwd, chain(), agent);
+    expect(prepared.lines.join("\n")).not.toMatch(/without an enforced sandbox/);
+    for (const r of results!.values()) expect(r.degraded ?? []).not.toContainEqual(expect.stringMatching(/^journal_/));
+  });
+});
+
+describe("one resume at a time", () => {
+  it("a second resume while the first holds the run is refused; after it ends, the run resumes", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    await firstRun(cwd, chain(), agent, [], killAt("node:start", "c"));
+    const first = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => chain() });
+    expect(first.ok && "ctx" in first).toBe(true);
+    const second = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => chain() });
+    expect(second.ok === false && second.error).toMatch(/in use by process/);
+    if (first.ok && "ctx" in first) first.ctx.journal.end("crashed");
+    const third = prepareResume(RUN_ID, { plan: true }, { cwd, loadWorkflow: () => chain() });
+    expect(third.ok).toBe(true);
+  });
+
+  it("two resumes racing for a crashed run's stale lock: exactly one gets the run", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    await firstRun(cwd, chain(), agent, [], killAt("node:start", "c"));
+    // A crashed process leaves its lock behind: a pid that no longer runs.
+    const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+    writeFileSync(join(journalDir(cwd, RUN_ID), "lock"), JSON.stringify({ pid: dead, started: 0, nonce: "x" }));
+    let inner: ReturnType<typeof prepareResume> | undefined;
+    const outer = prepareResume(
+      RUN_ID,
+      {},
+      {
+        cwd,
+        loadWorkflow: () => chain(),
+        lockHooks: {
+          afterStaleRead() {
+            inner ??= prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => chain() });
+          },
+        },
+      },
+    );
+    expect(inner?.ok && "ctx" in inner).toBe(true);
+    expect(outer.ok === false && outer.error).toMatch(/in use by process/);
+    if (inner?.ok && "ctx" in inner) inner.ctx.journal.end("crashed");
   });
 });
 

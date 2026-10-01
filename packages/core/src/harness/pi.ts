@@ -903,6 +903,8 @@ export class PiHarness implements AgentHarness {
     const extraDegraded: string[] = [];
     const tag = (r: NodeResult): HarnessRunResult => ({
       ...r,
+      // Only the process wrapper keeps the agent out of the sweny state dir.
+      contained: wrapper !== undefined,
       harness: this.info(),
       degraded: [...degraded, ...extraDegraded],
     });

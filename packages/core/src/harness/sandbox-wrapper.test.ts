@@ -105,6 +105,26 @@ describe("buildSrtSettings", () => {
     expect(s.filesystem.allowRead).toEqual([]);
   });
 
+  it("denies reading and writing the run journals' state dir, in read-only runs too", () => {
+    const saved = process.env.SWENY_STATE_DIR;
+    process.env.SWENY_STATE_DIR = "/nonexistent-sweny-state";
+    try {
+      const root = "/nonexistent-sweny-state/runs";
+      const present = (p: string) => exists(p) || p === root;
+      for (const readOnly of [false, true]) {
+        const s = buildSrtSettings(
+          { cwd: "/work", egress: [], readOnly },
+          { home: "/scratch/home", credentialHome: "/home/op", exists: present },
+        );
+        expect(s.filesystem.denyRead).toContain(root);
+        expect(s.filesystem.denyWrite).toContain(root);
+      }
+    } finally {
+      if (saved === undefined) delete process.env.SWENY_STATE_DIR;
+      else process.env.SWENY_STATE_DIR = saved;
+    }
+  });
+
   it("#473: denies reading and writing a persisted git credential, existing files only", () => {
     const present = (p: string) => exists(p) || p === "/work/.git/config" || p === "/runner/temp/creds.config";
     const s = buildSrtSettings(

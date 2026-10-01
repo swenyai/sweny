@@ -230,7 +230,10 @@ export function outputRelPath(runId: string): string {
 export function writeFinalOutput(runId: string, markdown: string, cwd: string = process.cwd()): string | null {
   try {
     const rel = outputRelPath(runId);
-    writeFileNoFollow(path.join(cwd, rel), markdown, { root: cwd, mode: 0o600 });
+    const file = path.join(cwd, rel);
+    // Node output: keep the run dir out of commits (an agent's `git add -A` included).
+    writeFileNoFollow(path.join(path.dirname(file), ".gitignore"), "*\n", { root: cwd, mode: 0o644 });
+    writeFileNoFollow(file, markdown, { root: cwd, mode: 0o600 });
     return rel;
   } catch {
     return null;

@@ -300,6 +300,7 @@ describe("ClaudeClient readOnly (#380)", () => {
   let mockQuery: ReturnType<typeof vi.fn>;
   let ClaudeClient: any;
   let READ_ONLY_DISALLOWED_TOOLS: readonly string[];
+  let claudeStateDirDenyRules: () => string[];
 
   function doneStream() {
     return (async function* () {
@@ -318,6 +319,7 @@ describe("ClaudeClient readOnly (#380)", () => {
     const mod = await import("../claude.js");
     ClaudeClient = mod.ClaudeClient;
     READ_ONLY_DISALLOWED_TOOLS = mod.READ_ONLY_DISALLOWED_TOOLS;
+    claudeStateDirDenyRules = () => mod.claudeStateDirDenyRules();
   });
 
   afterEach(() => {
@@ -371,12 +373,14 @@ describe("ClaudeClient readOnly (#380)", () => {
     expect(mockQuery.mock.calls[0][0].options.mcpServers).toBeUndefined();
   });
 
-  it("without readOnly, external MCP servers and built-ins are unchanged", async () => {
+  it("without readOnly, the configured MCP servers and built-ins stay (nothing ambient loads)", async () => {
     const client = new ClaudeClient({ mcpServers: { github: { type: "http", url: "https://example.com/mcp" } } });
     await client.run({ instruction: "x", context: {}, tools: [readTool] });
     const opts = mockQuery.mock.calls[0][0].options;
     expect(Object.keys(opts.mcpServers).sort()).toEqual(["github", "sweny-core"]);
-    expect(opts.disallowedTools).toBeUndefined();
-    expect(opts.strictMcpConfig).toBeUndefined();
+    // Only the run journals' state dir is denied to the built-in file tools.
+    expect(opts.disallowedTools).toEqual(claudeStateDirDenyRules());
+    expect(opts.strictMcpConfig).toBe(true);
+    expect(opts.settingSources).toEqual([]);
   });
 });

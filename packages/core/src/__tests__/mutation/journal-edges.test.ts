@@ -10,7 +10,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  JOURNAL_DIR,
   JOURNAL_FILE,
   JOURNAL_SCHEMA_VERSION,
   JournalIntegrityError,
@@ -19,6 +18,7 @@ import {
   JournalVersionError,
   REDACTED,
   RunJournal,
+  acquireRunLock,
   buildResumePlan,
   canonicalHash,
   collectSecretValues,
@@ -29,12 +29,15 @@ import {
   listJournalRuns,
   markerToken,
   mayRepeatWrites,
+  processStartTime,
   pruneJournals,
   readJournal,
   redact,
   runKeyFile,
   toolsHash,
   workflowHashOf,
+  workspaceScope,
+  runStateRoot,
   type JournalRecord,
   type ResumeJournalOptions,
   type ResumePlan,
@@ -57,11 +60,18 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const RUN = "20260930-120000-0a0b0c";
 /** Records are authenticated with a per-run key; hand-built files use this one. */
 const KEY = Buffer.alloc(32, 7);
-let KEYDIR = "";
+// Each spec gets its own state dir: journals, keys and locks live there, never in the workspace.
+const savedStateDir = process.env.SWENY_STATE_DIR;
 beforeEach(() => {
-  KEYDIR = tmp();
+  process.env.SWENY_STATE_DIR = tmp();
 });
-const readHand = (file: string, opts: { repair?: boolean } = {}) => readJournal(file, { key: KEY, ...opts });
+afterEach(() => {
+  if (savedStateDir === undefined) delete process.env.SWENY_STATE_DIR;
+  else process.env.SWENY_STATE_DIR = savedStateDir;
+});
+/** Hand-built files: authenticated with KEY and chained to RUN; their length is not checked against a head. */
+const readHand = (file: string, opts: { repair?: boolean } = {}) =>
+  readJournal(file, { key: KEY, runId: RUN, head: false, ...opts });
 
 describe("hashing", () => {
   it("canonicalHash is sha256 of key-sorted JSON with undefined dropped", () => {
@@ -308,6 +318,9 @@ describe("redact", () => {
 
 const mac = (body: string) => createHmac("sha256", KEY).update(body).digest("hex");
 
+/** MAC of the last line built: the next one chains to it (seq 1 starts a new chain). */
+let prevMac = "";
+
 function line(
   seq: number,
   type: string,
@@ -315,7 +328,9 @@ function line(
   over: Record<string, unknown> = {},
 ): string {
   const body = { v: JOURNAL_SCHEMA_VERSION, seq, type, at: "2026-01-01T00:00:00.000Z", ...fields };
-  return JSON.stringify({ ...body, h: mac(JSON.stringify(body)), ...over });
+  const h = mac(`sweny-journal\n${RUN}\n${seq}\n${seq === 1 ? "" : prevMac}\n${JSON.stringify(body)}`);
+  prevMac = h;
+  return JSON.stringify({ ...body, h, ...over });
 }
 
 function journalFile(text: string): string {
@@ -349,12 +364,13 @@ describe("readJournal", () => {
     expect(readHand(file, { repair: true }).truncatedBytes).toBe(0);
   });
 
-  it("treats a whole record with no trailing newline as torn", () => {
+  it("keeps a whole record with no trailing newline: complete JSON is never torn, it must authenticate", () => {
     const first = line(1, "run:start") + "\n";
     const second = line(2, "route");
     const r = readHand(journalFile(first + second));
-    expect(r.records).toHaveLength(1);
-    expect(r.truncatedBytes).toBe(Buffer.byteLength(second));
+    expect(r.records).toHaveLength(2);
+    expect(r.truncatedBytes).toBe(0);
+    expect(r.missingNewline).toBe(true);
   });
 
   it("a bad line with garbage after it is a torn tail: repairable", () => {
@@ -425,10 +441,10 @@ describe("readJournal", () => {
   });
 
   it("refuses a newer format with the version in the message", () => {
-    const file = journalFile(line(1, "run:start") + "\n" + line(2, "route", {}, { v: 3 }) + "\n");
+    const file = journalFile(line(1, "run:start") + "\n" + line(2, "route", {}, { v: 4 }) + "\n");
     expect(() => readHand(file)).toThrow(JournalVersionError);
     expect(() => readHand(file)).toThrow(
-      "run journal format v3 is newer than this sweny understands (v2); upgrade sweny to resume it",
+      "run journal format v4 is newer than this sweny understands (v3); upgrade sweny to resume it",
     );
     try {
       readHand(file);
@@ -440,7 +456,7 @@ describe("readJournal", () => {
   it("refuses an older, unauthenticated format from its first record", () => {
     const old = JSON.stringify({ v: 1, seq: 1, type: "run:start", at: "t", h: "abc" });
     expect(() => readHand(journalFile(old + "\n"))).toThrow(
-      "run journal format v1 predates authenticated records (v2); it cannot be resumed safely. Start a new run.",
+      "run journal format v1 predates chained records (v3); it cannot be resumed safely. Start a new run.",
     );
     // A later record with an old version is damage, not a format change.
     const later =
@@ -481,31 +497,40 @@ describe("journal errors", () => {
 
 // ─── Journals on disk ─────────────────────────────────────────────
 
+/** Real runs in the state dir, created in order (retention orders by their authenticated creation time). */
 function seedRuns(cwd: string, ids: string[], withFile = true): void {
   for (const id of ids) {
-    const d = join(cwd, JOURNAL_DIR, id);
-    mkdirSync(d, { recursive: true });
-    if (withFile) writeFileSync(join(d, JOURNAL_FILE), line(1, "run:start") + "\n");
+    if (!withFile) {
+      mkdirSync(journalDir(cwd, id), { recursive: true });
+      continue;
+    }
+    const j = RunJournal.create({ runId: id, cwd });
+    j.begin(beginInfo());
+    j.end("crashed");
   }
 }
 
 describe("journal directory", () => {
-  it("lists only well-formed run ids that have a journal, oldest first", () => {
+  it("lists only well-formed run ids with authenticated metadata, oldest first", () => {
     const cwd = tmp();
-    seedRuns(cwd, ["20260102-000000-000002", "20260101-000000-000001"]);
+    seedRuns(cwd, ["20260101-000000-000001", "20260102-000000-000002"]);
     seedRuns(cwd, ["20260103-000000-000003"], false);
-    seedRuns(cwd, [
-      "20260101-000000-00000G",
-      "20260101-000000-ABCDEF",
-      "20260101-000000-0000001",
-      "20260101-000000-00001",
-      "x20260101-000000-000001",
-      "20260101-000000-000001x",
-      "notarun",
-    ]);
+    seedRuns(
+      cwd,
+      [
+        "20260101-000000-00000G",
+        "20260101-000000-ABCDEF",
+        "20260101-000000-0000001",
+        "20260101-000000-00001",
+        "x20260101-000000-000001",
+        "20260101-000000-000001x",
+        "notarun",
+      ],
+      false,
+    );
     expect(listJournalRuns(cwd)).toStrictEqual(["20260101-000000-000001", "20260102-000000-000002"]);
     expect(listJournalRuns(join(cwd, "missing"))).toStrictEqual([]);
-    expect(journalDir(cwd, "r")).toBe(join(cwd, JOURNAL_DIR, "r"));
+    expect(journalDir(cwd, "r")).toBe(join(runStateRoot(), workspaceScope(cwd), "r"));
   });
 
   it("finds a run by exact id or a unique prefix", () => {
@@ -528,22 +553,18 @@ describe("journal directory", () => {
       "20260105-000000-000005",
     ];
     seedRuns(cwd, ids);
-    for (const id of ids) {
-      mkdirSync(KEYDIR, { recursive: true });
-      writeFileSync(runKeyFile(cwd, id, KEYDIR), "k");
-    }
-    writeFileSync(join(cwd, JOURNAL_DIR, ids[0], "extra.txt"), "x");
-    expect(pruneJournals(cwd, 3, undefined, KEYDIR)).toBe(2);
-    expect(existsSync(runKeyFile(cwd, ids[0], KEYDIR))).toBe(false);
-    expect(existsSync(runKeyFile(cwd, ids[1], KEYDIR))).toBe(false);
-    expect(existsSync(runKeyFile(cwd, ids[2], KEYDIR))).toBe(true);
+    writeFileSync(join(journalDir(cwd, ids[0]), "extra.txt"), "x");
+    expect(pruneJournals(cwd, 3)).toBe(2);
+    expect(existsSync(runKeyFile(cwd, ids[0]))).toBe(false);
+    expect(existsSync(runKeyFile(cwd, ids[1]))).toBe(false);
+    expect(existsSync(runKeyFile(cwd, ids[2]))).toBe(true);
     expect(listJournalRuns(cwd)).toStrictEqual(ids.slice(2));
     expect(existsSync(journalDir(cwd, ids[0]))).toBe(false);
-    expect(pruneJournals(cwd, 3, undefined, KEYDIR)).toBe(0);
+    expect(pruneJournals(cwd, 3)).toBe(0);
     // The current run counts toward the cap and is never removed, even when it is the oldest.
-    expect(pruneJournals(cwd, 2, ids[2], KEYDIR)).toBe(1);
+    expect(pruneJournals(cwd, 2, ids[2])).toBe(1);
     expect(listJournalRuns(cwd)).toStrictEqual([ids[2], ids[4]]);
-    expect(pruneJournals(cwd, 0, ids[4], KEYDIR)).toBe(1);
+    expect(pruneJournals(cwd, 0, ids[4])).toBe(1);
     expect(listJournalRuns(cwd)).toStrictEqual([ids[4]]);
   });
 });
@@ -836,7 +857,7 @@ function beginInfo(over: Partial<Parameters<RunJournal["begin"]>[0]> = {}) {
 }
 
 function records(j: RunJournal): JournalRecord[] {
-  return readJournal(j.file, { keyDir: KEYDIR }).records;
+  return readJournal(j.file).records;
 }
 
 /** Records appended by a resumed journal: their seq continues the old file, so they are read unverified. */
@@ -851,7 +872,6 @@ describe("RunJournal: a new run", () => {
   it("records the start with hashes and a redacted input, and keeps the journal out of commits", () => {
     const cwd = tmp();
     const j = RunJournal.create({
-      keyDir: KEYDIR,
       runId: RUN,
       cwd,
       workflowFile: "wf.yml",
@@ -885,16 +905,16 @@ describe("RunJournal: a new run", () => {
       input: { token: REDACTED, n: 1, note: `has ${REDACTED} inside` },
       input_redacted: true,
     });
-    expect(readFileSync(join(j.dir, ".gitignore"), "utf-8")).toBe("*\n");
-    // The signing key lives outside the workspace, private to the user; the journal itself is private too.
-    const keyFile = runKeyFile(cwd, RUN, KEYDIR);
+    // The journal, its signing key and its lock live outside the workspace, private to the user.
+    expect(j.dir.startsWith(cwd)).toBe(false);
+    const keyFile = runKeyFile(cwd, RUN);
     expect(keyFile.startsWith(cwd)).toBe(false);
     expect(readFileSync(keyFile, "utf-8")).toMatch(/^[0-9a-f]{64}\n$/);
     expect(statSync(keyFile).mode & 0o777).toBe(0o600);
     expect(statSync(j.file).mode & 0o777).toBe(0o600);
-    expect(readFileSync(join(j.dir, "journal.lock"), "utf-8")).toBe(String(process.pid));
+    expect(JSON.parse(readFileSync(join(j.dir, "lock"), "utf-8")).pid).toBe(process.pid);
     j.end("success");
-    expect(existsSync(join(j.dir, "journal.lock"))).toBe(false);
+    expect(existsSync(join(j.dir, "lock"))).toBe(false);
     expect(records(j).map((r) => [r.type, r.seq])).toStrictEqual([
       ["run:start", 1],
       ["run:end", 2],
@@ -903,7 +923,7 @@ describe("RunJournal: a new run", () => {
   });
 
   it("omits the optional start fields when they are not set, and starts only once", () => {
-    const j = RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: tmp() });
+    const j = RunJournal.create({ runId: RUN, cwd: tmp() });
     j.begin(beginInfo());
     j.begin(beginInfo());
     const [start, ...rest] = records(j);
@@ -915,16 +935,16 @@ describe("RunJournal: a new run", () => {
   it("prunes older journals beyond keep when a run begins", () => {
     const cwd = tmp();
     seedRuns(cwd, ["20260101-000000-000001", "20260102-000000-000002", "20260103-000000-000003"]);
-    RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd, keep: 2 }).begin(beginInfo());
+    RunJournal.create({ runId: RUN, cwd, keep: 2 }).begin(beginInfo());
     expect(listJournalRuns(cwd)).toStrictEqual(["20260103-000000-000003", RUN]);
     const cwd2 = tmp();
     seedRuns(cwd2, ["20260101-000000-000001"]);
-    RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: cwd2 }).begin(beginInfo());
+    RunJournal.create({ runId: RUN, cwd: cwd2 }).begin(beginInfo());
     expect(listJournalRuns(cwd2)).toHaveLength(2);
   });
 
   it("journals node records with secrets scrubbed and tool inputs dropped", () => {
-    const j = RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: tmp(), env: { API_TOKEN: "env-secret-value" } });
+    const j = RunJournal.create({ runId: RUN, cwd: tmp(), env: { API_TOKEN: "env-secret-value" } });
     j.begin(beginInfo());
     j.nodeStart("a", 0);
     const result = {
@@ -989,7 +1009,7 @@ describe("RunJournal: a new run", () => {
   });
 
   it("a minimal result carries only status, data and tool calls", () => {
-    const j = RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: tmp() });
+    const j = RunJournal.create({ runId: RUN, cwd: tmp() });
     j.begin(beginInfo());
     j.nodeEnd("a", 0, { status: "success", toolCalls: [{ tool: "t", input: 1 }] } as never, createWriteStageState());
     expect(records(j)[1].result).toStrictEqual({
@@ -1001,30 +1021,33 @@ describe("RunJournal: a new run", () => {
     expect((records(j)[2].result as NodeResult).toolCalls).toStrictEqual([]);
   });
 
-  it("a write failure disables the journal with a warning that names the file", () => {
+  it("a write failure is fatal: it names the file, and every later record fails the same way", () => {
     const cwd = tmp();
-    writeFileSync(join(cwd, ".sweny"), "a file where the directory should be");
-    const warn = vi.fn();
+    const error = vi.fn();
     const j = RunJournal.create({
-      keyDir: KEYDIR,
       runId: RUN,
       cwd,
-      logger: { info() {}, warn, error() {}, debug() {} },
+      logger: { info() {}, warn() {}, error, debug() {} },
+      faults: {
+        writeJournal(_fd, l) {
+          if (JSON.parse(l).type === "node:start") throw new Error("EIO: disk gone");
+          writeFileSync(j.file, l, { flag: "a" });
+        },
+      },
     });
     j.begin(beginInfo());
+    expect(() => j.nodeStart("a", 0)).toThrow(
+      `run journal: could not write ${j.file} (EIO: disk gone); the run stopped so a resume cannot lose spend or repeat a write`,
+    );
     expect(j.active).toBe(false);
-    expect(warn).toHaveBeenCalledTimes(1);
-    const msg = warn.mock.calls[0][0] as string;
-    expect(msg.startsWith(`  run journal: could not write ${j.file} (`)).toBe(true);
-    expect(msg.endsWith("); this run cannot be resumed past this point")).toBe(true);
-    j.nodeStart("a", 0);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(() => j.route("a", null)).toThrow(/could not write .*EIO: disk gone/);
+    expect(error).toHaveBeenCalledTimes(1);
   });
 
   it("a fault at an append stops everything after it and releases the lock", () => {
     class Kill extends Error {}
     const j = RunJournal.create({
-      keyDir: KEYDIR,
       runId: RUN,
       cwd: tmp(),
       faults: {
@@ -1036,7 +1059,7 @@ describe("RunJournal: a new run", () => {
     j.begin(beginInfo());
     expect(() => j.nodeStart("a", 0)).toThrow(Kill);
     expect(j.active).toBe(false);
-    expect(existsSync(join(j.dir, "journal.lock"))).toBe(false);
+    expect(existsSync(join(j.dir, "lock"))).toBe(false);
     j.nodeEnd("a", 0, { status: "success", data: {}, toolCalls: [] }, createWriteStageState());
     j.end("crashed");
     expect(records(j).map((r) => r.type)).toStrictEqual(["run:start"]);
@@ -1047,14 +1070,15 @@ function resumeFrom(recs: JournalRecord[], over: Partial<ResumeJournalOptions> =
   const plan = buildResumePlan(recs);
   const warn = vi.fn();
   const info = vi.fn();
-  mkdirSync(KEYDIR, { recursive: true });
-  writeFileSync(runKeyFile(cwd, RUN, KEYDIR), KEY.toString("hex") + "\n");
+  const dir = journalDir(cwd, RUN);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(runKeyFile(cwd, RUN), KEY.toString("hex") + "\n");
   const j = RunJournal.openForResume({
     runId: RUN,
     cwd,
-    keyDir: KEYDIR,
-    read: { file: join(journalDir(cwd, RUN), JOURNAL_FILE), records: recs, truncatedBytes: 0 },
+    read: { file: join(dir, JOURNAL_FILE), records: recs, truncatedBytes: 0 },
     plan,
+    lock: acquireRunLock(dir),
     logger: { info, warn, error() {}, debug() {} },
     ...over,
   });
@@ -1097,7 +1121,7 @@ describe("RunJournal: resume", () => {
     ]);
     expect(j.active).toBe(false);
     expect(existsSync(j.file)).toBe(false);
-    expect(existsSync(join(j.dir, "journal.lock"))).toBe(false);
+    expect(existsSync(join(j.dir, "lock"))).toBe(false);
   });
 
   it("each change is detected on its own", () => {
@@ -1194,7 +1218,7 @@ describe("RunJournal: resume", () => {
       agentRunFailed: true,
       attempt: 3,
     });
-    expect(RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: tmp() }).replay("a", 1)).toBeUndefined();
+    expect(RunJournal.create({ runId: RUN, cwd: tmp() }).replay("a", 1)).toBeUndefined();
   });
 
   it("replay carries next only when the route was journaled, null included", () => {
@@ -1222,21 +1246,36 @@ describe("RunJournal: resume", () => {
     ]);
   });
 
-  it("refuses while another live process holds the journal, but not a stale, own or garbled lock", () => {
+  it("refuses while another live process (or this one) holds the run, but not a stale or garbled lock", () => {
     const cwd = tmp();
+    const dir = journalDir(cwd, RUN);
     const lockAt = (text: string) => {
-      mkdirSync(journalDir(cwd, RUN), { recursive: true });
-      writeFileSync(join(journalDir(cwd, RUN), "journal.lock"), text);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "lock"), text);
     };
+    const started = (pid: number) => processStartTime(pid) ?? Math.round(Date.now() - process.uptime() * 1000);
+    const holder = (pid: number) => JSON.stringify({ pid, started: started(pid), nonce: "n" });
     const open = () => resumeFrom([matchingStart()], {}, cwd);
-    lockAt(String(process.ppid));
+    lockAt(holder(process.ppid));
     expect(() => open()).toThrow(
       `run journal is in use by process ${process.ppid}; wait for it to finish (or stop it) before resuming`,
     );
-    for (const text of [String(process.pid), "999999999", "garbage", "0", "-5", "1.5", ""]) {
+    // The lock is exclusive: this process holding it is no exception.
+    lockAt(holder(process.pid));
+    expect(() => open()).toThrow(`run journal is in use by process ${process.pid}`);
+    for (const text of [
+      JSON.stringify({ pid: 999999999, started: 0, nonce: "n" }),
+      "999999999",
+      "garbage",
+      "0",
+      "-5",
+      "1.5",
+      "",
+    ]) {
       lockAt(text);
-      expect(() => open(), text).not.toThrow();
-      expect(readFileSync(join(journalDir(cwd, RUN), "journal.lock"), "utf-8")).toBe(String(process.pid));
+      const { j } = open();
+      expect(JSON.parse(readFileSync(join(dir, "lock"), "utf-8")).pid, text).toBe(process.pid);
+      j.end("crashed");
     }
   });
 });
@@ -1458,17 +1497,94 @@ describe("wrapWrites", () => {
     expect(recovered).toMatchObject({ key, tool: "github_create_issue", recovered: true, output: out });
   });
 
-  it("sends a pending github issue when the search finds no marker", async () => {
+  it("a search miss is not proof: a pending github issue is not re-sent unless repeats are allowed", async () => {
     const args = { repo: "o/r", title: "T" };
     const key = keyOf("github_create_issue", args);
-    const fake = fakeProvider(
-      "github",
-      { github_create_issue: { number: 1 } },
-      { github_search_issues: { items: [{ number: 1, body: "unrelated" }] } },
+    const mk = () =>
+      fakeProvider(
+        "github",
+        { github_create_issue: { number: 1 } },
+        { github_search_issues: { items: [{ number: 1, body: "unrelated" }] } },
+      );
+    const refused = mk();
+    await expect(call(pendingJournal({ pending: [key] }).j, refused, "github_create_issue", args)).rejects.toThrow(
+      "(not in GitHub search, which can lag a just-made write)",
     );
-    const { j } = pendingJournal({ pending: [key] });
-    await call(j, fake, "github_create_issue", args);
-    expect(fake.writes).toHaveLength(1);
+    expect(refused.writes).toHaveLength(0);
+    const allowed = mk();
+    await call(pendingJournal({ pending: [key], allowRepeatWrites: true }).j, allowed, "github_create_issue", args);
+    expect(allowed.writes).toHaveLength(1);
+  });
+
+  it("the issue listing (consistent) finds a pending issue's marker, or proves it absent", async () => {
+    const args = { repo: "o/r", title: "T" };
+    const key = keyOf("github_create_issue", args);
+    const hit = { number: 5, body: `x ${markerToken(key)}`, created_at: "2026-01-01T00:00:00Z" };
+    const pr = { number: 6, body: `x ${markerToken(key)}`, pull_request: {} };
+    const found = fakeProvider(
+      "github",
+      { github_create_issue: {} },
+      { github_list_issues: [pr, hit], github_search_issues: { items: [] } },
+    );
+    expect(await call(pendingJournal({ pending: [key] }).j, found, "github_create_issue", args)).toStrictEqual({
+      number: 5,
+    });
+    expect(found.writes).toStrictEqual([]);
+    expect(found.reads).toStrictEqual([{ tool: "github_list_issues", args: { repo: "o/r", per_page: 100, page: 1 } }]);
+    const absent = fakeProvider("github", { github_create_issue: { number: 1 } }, { github_list_issues: [] });
+    await call(pendingJournal({ pending: [key] }).j, absent, "github_create_issue", args);
+    expect(absent.writes).toHaveLength(1);
+    // Full pages that never end or reach back to the write cannot prove it absent.
+    const page = Array.from({ length: 100 }, (_, i) => ({ number: i + 10, body: "other", created_at: "2999-01-01" }));
+    const crowded = fakeProvider("github", { github_create_issue: {} }, { github_list_issues: page });
+    await expect(call(pendingJournal({ pending: [key] }).j, crowded, "github_create_issue", args)).rejects.toThrow(
+      "(too many issues to search (more than 3000))",
+    );
+    expect(crowded.writes).toHaveLength(0);
+  });
+
+  it("the listings page on: an issue on page 2 is found, a comment at 101 is found, a failed page cannot confirm", async () => {
+    const issueArgs = { repo: "o/r", title: "T" };
+    const issueKey = keyOf("github_create_issue", issueArgs);
+    const issues = Array.from({ length: 150 }, (_, i) => ({
+      number: 200 - i,
+      body: i === 120 ? `x ${markerToken(issueKey)}` : "other",
+      created_at: "2999-01-01",
+    }));
+    const byPage = (all: unknown[]) => (a: Record<string, unknown>) =>
+      all.slice((Number(a.page) - 1) * 100, Number(a.page) * 100);
+    const issueFake = fakeProvider("github", { github_create_issue: {} }, { github_list_issues: byPage(issues) });
+    expect(
+      await call(pendingJournal({ pending: [issueKey] }).j, issueFake, "github_create_issue", issueArgs),
+    ).toStrictEqual({ number: 80 });
+    expect(issueFake.writes).toStrictEqual([]);
+    expect(issueFake.reads.map((r) => r.args.page)).toStrictEqual([1, 2]);
+
+    const args = { repo: "o/r", issue_number: 7, body: "hi" };
+    const key = keyOf("github_add_comment", args);
+    const comments = Array.from({ length: 101 }, (_, i) => ({
+      id: i + 1,
+      body: i === 100 ? `hi ${markerToken(key)}` : "other",
+    }));
+    const fake = fakeProvider("github", { github_add_comment: {} }, { github_list_issue_comments: byPage(comments) });
+    expect(await call(pendingJournal({ pending: [key] }).j, fake, "github_add_comment", args)).toStrictEqual({});
+    expect(fake.writes).toStrictEqual([]);
+    expect(fake.reads.map((r) => r.args.page)).toStrictEqual([1, 2]);
+
+    const failing = fakeProvider(
+      "github",
+      { github_add_comment: {} },
+      {
+        github_list_issue_comments: (a: Record<string, unknown>) => {
+          if (a.page === 2) throw new Error("HTTP 502");
+          return comments.slice(0, 100);
+        },
+      },
+    );
+    await expect(call(pendingJournal({ pending: [key] }).j, failing, "github_add_comment", args)).rejects.toThrow(
+      "(HTTP 502)",
+    );
+    expect(failing.writes).toStrictEqual([]);
   });
 
   it("finds a pending github comment by issue number, matching strings and numbers alike", async () => {
@@ -1489,8 +1605,29 @@ describe("wrapWrites", () => {
       { github_search_issues: { items: [{ number: 8 }] } },
     );
     const again = pendingJournal({ pending: [key] });
-    await call(again.j, miss, "github_add_comment", args);
-    expect(miss.writes).toHaveLength(1);
+    await expect(call(again.j, miss, "github_add_comment", args)).rejects.toThrow("can lag a just-made write");
+    expect(miss.writes).toHaveLength(0);
+  });
+
+  it("the comment listing (consistent) finds a pending comment's marker, or proves it absent", async () => {
+    const args = { repo: "o/r", issue_number: 7, body: "hi" };
+    const key = keyOf("github_add_comment", args);
+    const found = fakeProvider(
+      "github",
+      { github_add_comment: {} },
+      {
+        github_list_issue_comments: [
+          { id: 1, body: "other" },
+          { id: 2, body: `hi ${markerToken(key)}` },
+        ],
+      },
+    );
+    expect(await call(pendingJournal({ pending: [key] }).j, found, "github_add_comment", args)).toStrictEqual({});
+    expect(found.writes).toStrictEqual([]);
+    expect(found.reads.map((r) => [r.tool, r.args.issue_number])).toStrictEqual([["github_list_issue_comments", 7]]);
+    const absent = fakeProvider("github", { github_add_comment: {} }, { github_list_issue_comments: [] });
+    await call(pendingJournal({ pending: [key] }).j, absent, "github_add_comment", args);
+    expect(absent.writes).toHaveLength(1);
   });
 
   it("re-applies idempotent writes without searching", async () => {
@@ -1653,14 +1790,14 @@ describe("wrapWrites", () => {
 
 describe("journal: second-pass edges", () => {
   it("a record whose version is a string is damage, not a newer format", () => {
-    const file = journalFile(line(1, "run:start", {}, { v: "2" }) + "\n");
+    const file = journalFile(line(1, "run:start", {}, { v: "3" }) + "\n");
     const r = readHand(file);
     expect(r.records).toHaveLength(0);
     expect(r.truncatedBytes).toBeGreaterThan(0);
   });
 
   it("a journal that never began writes nothing on end", () => {
-    const j = RunJournal.create({ keyDir: KEYDIR, runId: RUN, cwd: tmp() });
+    const j = RunJournal.create({ runId: RUN, cwd: tmp() });
     j.end("success");
     expect(existsSync(j.file)).toBe(false);
   });
@@ -1669,7 +1806,10 @@ describe("journal: second-pass edges", () => {
     // pid 1 exists on every host; a non-root user gets EPERM from kill(1, 0).
     const cwd = tmp();
     mkdirSync(journalDir(cwd, RUN), { recursive: true });
-    writeFileSync(join(journalDir(cwd, RUN), "journal.lock"), "1");
+    writeFileSync(
+      join(journalDir(cwd, RUN), "lock"),
+      JSON.stringify({ pid: 1, started: processStartTime(1) ?? 0, nonce: "n" }),
+    );
     expect(() => resumeFrom([matchingStart()], {}, cwd)).toThrow(JournalLockedError);
   });
 

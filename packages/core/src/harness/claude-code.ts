@@ -11,6 +11,7 @@
 
 import { query, createSdkMcpServer, tool as sdkTool, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { createRequire } from "node:module";
+import { realpathSync } from "node:fs";
 import type {
   Claude,
   Tool,
@@ -55,6 +56,7 @@ import { jsonSchemaToZodShape, toolErrorToMcpResult, toolOutputToMcpResult } fro
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
 import { makeAbort } from "./abort.js";
+import { runStateRoot } from "../journal.js";
 import { claudeCodeAuth, type AuthProbe } from "./auth.js";
 
 export { buildEvaluatePrompt, CLAUDE_CODE_CAPABILITIES };
@@ -136,6 +138,39 @@ export const CLAUDE_TOOLS_BY_CLASS: Readonly<Record<ToolClass, readonly string[]
  */
 export function claudeReadDenyRule(absPath: string): string {
   return `Read(/${absPath.startsWith("/") ? absPath : `/${absPath}`})`;
+}
+
+/**
+ * Deny rules keeping every built-in file tool out of the run journals' state
+ * dir ({@link runStateRoot}): an agent that could read a run key could forge
+ * journal records, and one that could write there could cut a journal or
+ * plant a run.
+ *
+ * Mechanism: scoped deny rules on `disallowedTools`. Per the Agent SDK's
+ * permission evaluation order (code.claude.com/docs/en/agent-sdk/permissions,
+ * "Deny rules"), a matching deny rule from `disallowed_tools` blocks the tool
+ * "even in `bypassPermissions` mode", which every node runs under (#365);
+ * `canUseTool` and allow rules are never reached in that mode. `Read(path)`
+ * rules govern the built-in file readers (Read, and Grep/Glob), and
+ * `Edit(path)` rules "govern all built-in tools that write files, including
+ * `Write` and `NotebookEdit`" (a `Write(path)` rule is never matched, so none
+ * is emitted). `//` anchors an absolute filesystem path. Both the path as
+ * configured and its real path are denied (macOS `/var` is `/private/var`).
+ */
+export function claudeStateDirDenyRules(root: string = runStateRoot()): string[] {
+  let real = root;
+  try {
+    real = realpathSync(root);
+  } catch {
+    // not created yet: the configured path is the one tools would use
+  }
+  const abs = (p: string) => (p.startsWith("/") ? p : `/${p}`);
+  return [...new Set([root, real])].flatMap((dir) => [
+    `Read(/${abs(dir)})`,
+    `Read(/${abs(dir)}/**)`,
+    `Edit(/${abs(dir)})`,
+    `Edit(/${abs(dir)}/**)`,
+  ]);
 }
 
 /** Native `disallowedTools` for a policy: legacy names, compiled classes, and the read-only set. */
@@ -472,6 +507,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       harness: this.info(),
       degraded,
       ...(this.lastPolicyFacts ? { policy: this.lastPolicyFacts } : {}),
+      // The state dir deny rules hold for the file tools either way; Bash is held only by the sandbox.
+      contained: this.lastPolicyFacts?.sandboxStarted === true,
     };
   }
 
@@ -529,6 +566,9 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     let disallowedTools = readOnly
       ? [...new Set([...(opts.disallowedTools ?? []), ...READ_ONLY_DISALLOWED_TOOLS])]
       : opts.disallowedTools;
+    // Run journals, their keys and locks live in the sweny state dir: no built-in
+    // file tool may read or write there (Bash is held by the sandbox's filesystem deny).
+    disallowedTools = [...new Set([...(disallowedTools ?? []), ...claudeStateDirDenyRules()])];
     const effectiveModel = model ?? this.model;
 
     // #360: run agent commands in the SDK sandbox. `auto` (default in CI) falls
@@ -701,12 +741,17 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           ...(abort ? { abortController: abort.controller } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(Object.keys(allMcpServers).length > 0 ? { mcpServers: allMcpServers } : {}),
-          // Dry run (#380): settingSources is omitted, so the SDK loads user,
-          // project and local settings, including their MCP servers (and
-          // project .mcp.json, plugins). strictMcpConfig limits MCP to the
-          // servers passed above, which under readOnly is only sweny-core.
-          // A strict policy (#365) makes it exclusive for write nodes too.
-          ...(mcpWithheld(!!readOnly, agentAccess) || opts.strictMcp ? { strictMcpConfig: true } : {}),
+          // Only what sweny passes runs: an ambient MCP server or plugin (user
+          // settings, a repo's .mcp.json or .claude/settings.json, which are
+          // repo content) could read the run journals' state dir around the
+          // sandbox and the deny rules. SDK Options (sdk.d.ts):
+          // `strictMcpConfig` "Only use MCP servers passed via the `mcpServers`
+          // option ... ignoring ... project `.mcp.json`, user settings,
+          // plugins"; `settingSources` "Pass `[]` to disable filesystem
+          // settings (SDK isolation mode)", so no user/project/local
+          // settings, hooks or settings-enabled plugins load either.
+          strictMcpConfig: true,
+          settingSources: [],
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
           // CC-08: ask the SDK to produce validated structured output when the
           // node declares an output schema. The SDK then returns the parsed

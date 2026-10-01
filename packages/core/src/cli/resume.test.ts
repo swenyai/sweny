@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { JOURNAL_FILE, RunJournal, journalDir } from "../journal.js";
@@ -51,6 +51,14 @@ describe("prepareResume", () => {
     const r = prepareResume("20260930-1300", {}, { cwd, loadWorkflow: () => wf });
     expect(r.ok && "ctx" in r && r.ctx.input).toEqual({ repo: "acme/api" });
     if (r.ok && "ctx" in r) r.ctx.journal.end("crashed");
+  });
+
+  it("a state dir that resolves inside the workspace is refused before anything is read", () => {
+    const cwd = crashedRun({});
+    const inside = join(cwd, ".state");
+    mkdirSync(inside, { recursive: true });
+    const r = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => wf, stateRoot: inside });
+    expect(!r.ok && r.error).toMatch(/resolves inside the workspace/);
   });
 
   it("an unknown run id says why runs may have no journal", () => {

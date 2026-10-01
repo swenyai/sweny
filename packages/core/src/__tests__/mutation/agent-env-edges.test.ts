@@ -55,7 +55,7 @@ import {
   withPushBlocked,
   withholdCredentials,
 } from "../../agent-env.js";
-import { runKeyDir } from "../../journal.js";
+import { runStateRoot } from "../../journal.js";
 import type { Skill } from "../../types.js";
 
 const names = (list: readonly string[]) => Object.fromEntries(list.map((n) => [n, `v-${n}`]));
@@ -1143,10 +1143,11 @@ describe("agent access and sandbox", () => {
           ],
           files: [
             { path: path.join("/h", ".claude", ".credentials.json"), mode: "deny" },
-            // Run journal keys: an agent that could read them could forge journal records.
-            { path: runKeyDir(), mode: "deny" },
+            // Run journals and their keys: an agent that could read a key could forge records.
+            { path: runStateRoot(), mode: "deny" },
           ],
         },
+        filesystem: { denyRead: [runStateRoot()], denyWrite: [runStateRoot()] },
       });
     });
 
@@ -1156,7 +1157,7 @@ describe("agent access and sandbox", () => {
       expect(buildSandboxSettings([], { failIfUnavailable: true }).failIfUnavailable).toBe(true);
       expect(buildSandboxSettings([]).credentials?.files).toStrictEqual([
         { path: path.join(homedir(), ".claude", ".credentials.json"), mode: "deny" },
-        { path: runKeyDir(), mode: "deny" },
+        { path: runStateRoot(), mode: "deny" },
       ]);
     });
   });
@@ -1209,14 +1210,14 @@ describe("agent access and sandbox", () => {
       ]);
     });
 
-    it("an explicit extra list beats the environment, and auto does not fail when unavailable at start", () => {
+    it("an explicit extra list beats the environment, and auto past its preflight fails rather than degrades", () => {
       const r = resolveAgentSandbox({
         env: { SWENY_SANDBOX_ALLOWED_DOMAINS: "env.test" },
         mode: "auto",
         allowedDomains: ["own.test"],
         probe: () => undefined,
       });
-      expect(r.settings?.failIfUnavailable).toBe(false);
+      expect(r.settings?.failIfUnavailable).toBe(true);
       expect(r.settings?.network?.allowedDomains).toStrictEqual([...DEFAULT_SANDBOX_DOMAINS, "own.test"]);
       const none = resolveAgentSandbox({ env: {}, mode: "auto", probe: () => undefined });
       expect(none.settings?.network?.allowedDomains).toStrictEqual([...DEFAULT_SANDBOX_DOMAINS]);

@@ -12,7 +12,13 @@
 
 import { expect, vi } from "vitest";
 import type { Logger } from "../../types.js";
-import type { SandboxWrapper, SandboxWrapRequest, WrappedSpawn } from "../sandbox-wrapper.js";
+import {
+  buildSrtSettings,
+  type SandboxWrapper,
+  type SandboxWrapRequest,
+  type WrappedSpawn,
+} from "../sandbox-wrapper.js";
+import { runStateRoot } from "../../journal.js";
 import type { AgentHarness, HarnessRunRequest, NodePolicy } from "../types.js";
 import type { HarnessFakes } from "./fakes.js";
 import type { FakeScript } from "./scenarios.js";
@@ -108,6 +114,23 @@ export async function sandboxWrapperCase(make: MakeWithWrapper, fakes: HarnessFa
   fakes.script(DONE);
   await h.run(req({ readOnly: true, policy: policy("strict", true) }));
   expect(rec.requests.at(-1)?.readOnly, "read-only reaches the wrapper").toBe(true);
+
+  // 2b. Every spawn the adapter asks for, rendered by the real srt settings,
+  // keeps the run journals' state dir (keys, journals, locks) unreadable and
+  // unwritable: the agent's file tools run in that process, so this is their deny.
+  const saved = process.env.SWENY_STATE_DIR;
+  process.env.SWENY_STATE_DIR = "/nonexistent-sweny-contract-state";
+  try {
+    const runs = runStateRoot();
+    for (const q of rec.requests) {
+      const s = buildSrtSettings(q, { home: "/scratch/home", credentialHome: "/home/op", exists: (p) => p === runs });
+      expect(s.filesystem.denyRead, `state dir unreadable (readOnly: ${q.readOnly === true})`).toContain(runs);
+      expect(s.filesystem.denyWrite, `state dir unwritable (readOnly: ${q.readOnly === true})`).toContain(runs);
+    }
+  } finally {
+    if (saved === undefined) delete process.env.SWENY_STATE_DIR;
+    else process.env.SWENY_STATE_DIR = saved;
+  }
 
   // 3. No wrapper, strict: refused before the agent starts.
   await fakes.reset();
