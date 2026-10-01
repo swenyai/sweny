@@ -41,13 +41,14 @@ async function route(id: string, data: Record<string, Record<string, unknown>>) 
     n.skills = [];
     delete n.eval;
     delete n.tools;
+    delete n.outputs;
   }
+  const firstLine = (n: { instruction?: unknown }) =>
+    typeof n.instruction === "string" ? n.instruction.trim().split("\n")[0] : "";
   const ran: string[] = [];
   const claude: Claude = {
     async run(opts): Promise<NodeResult> {
-      const node =
-        Object.entries(wf.nodes).find(([, n]) => opts.instruction.includes(n.instruction.trim().split("\n")[0]))?.[0] ??
-        "?";
+      const node = Object.entries(wf.nodes).find(([, n]) => opts.instruction.includes(firstLine(n)))?.[0] ?? "?";
       ran.push(node);
       const base = fill(wf.nodes[node]?.output) as Record<string, unknown>;
       return { status: "success", data: { ...base, ...(data[node] ?? {}) }, toolCalls: [] };

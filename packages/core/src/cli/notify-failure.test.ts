@@ -41,7 +41,7 @@ function run(env: Record<string, string>, opts: { list?: unknown; ghFails?: bool
   fs.writeFileSync(
     path.join(bin, "gh"),
     `#!/bin/sh
-printf "gh %s " "$@" | tr "\\n" "~" >> "${log}"; echo >> "${log}"
+{ printf "gh "; printf "%s " "$@"; } | tr "\\n" "~" >> "${log}"; echo >> "${log}"
 ${opts.ghFails ? 'echo "HTTP 403: Resource not accessible" >&2; exit 1' : ""}
 case "$*" in
   *"-X POST"*) exit 0 ;;
@@ -53,7 +53,7 @@ esac
   fs.writeFileSync(
     path.join(bin, "curl"),
     `#!/bin/sh
-printf "curl %s " "$@" | tr "\\n" "~" >> "${log}"; echo >> "${log}"
+{ printf "curl "; printf "%s " "$@"; } | tr "\\n" "~" >> "${log}"; echo >> "${log}"
 ${opts.curlFails ? "echo 'curl: (22) The requested URL returned error: 404' >&2; exit 22" : "exit 0"}
 `,
     { mode: 0o755 },
