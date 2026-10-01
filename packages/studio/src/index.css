@@ -19,7 +19,11 @@
 /* Brand chrome: tokens come from theme.ts (injected in main.tsx). */
 body {
   background: var(--sw-canvas, #0f1a2c);
-  font-family: system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Helvetica Neue",
+    sans-serif;
 }
 
 .react-flow__node {

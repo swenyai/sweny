@@ -58,7 +58,7 @@ try {
       if (workflow !== "triage") {
         await page.getByRole("button", { name: workflow, exact: true }).click();
       }
-      await page.waitForSelector(".react-flow__edge", { timeout: 30000 });
+      await page.waitForSelector(".react-flow__edge", { state: "attached", timeout: 30000 });
       await page.waitForTimeout(1500);
       const file = join(outDir, `${label}-${workflow}-${scheme}.png`);
       await page.screenshot({ path: file });
