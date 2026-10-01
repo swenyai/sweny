@@ -56,6 +56,8 @@ export function shouldSkip(env: NodeJS.ProcessEnv, isTty: boolean, commandName: 
   if (env.SWENY_OFFLINE) return true;
   if (!isTty) return true;
   if (commandName === "upgrade" || commandName === "update") return true;
+  // `sweny try` makes no network calls, the version check included.
+  if (commandName === "try") return true;
   return false;
 }
 

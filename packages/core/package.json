@@ -50,7 +50,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/workflows/*.yml dist/workflows/ && node scripts/build-workflow-browser.mjs && node scripts/write-public-schema.mjs",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/workflows/*.yml dist/workflows/ && cp src/cli/try-fixture.json dist/cli/ && node scripts/build-workflow-browser.mjs && node scripts/write-public-schema.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude 'src/__tests__/integration/**' --exclude 'dist/**'",
     "test:integration": "vitest run --config vitest.integration.config.ts",
