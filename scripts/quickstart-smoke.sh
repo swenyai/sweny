@@ -55,6 +55,7 @@ pass "sweny --help"
 
 # 2b. sweny try: recorded demo, no credentials, no network. Banner, answer, receipt, exit 0, nothing written.
 run "sweny try" 0 sweny try
+cat "$OUT"
 contains "sweny try" "$OUT" "Recorded demo"
 contains "sweny try" "$OUT" "What it is:"
 contains "sweny try" "$OUT" "✓ 2/2 nodes"
