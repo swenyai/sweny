@@ -7,6 +7,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -16,8 +17,10 @@ import { createHash, createHmac } from "node:crypto";
 import {
   JOURNAL_FILE,
   JOURNAL_SCHEMA_VERSION,
+  JournalLocationError,
   JournalLockedError,
   JournalRollbackError,
+  assertStateOutsideWorkspace,
   JournalVersionError,
   LEGACY_JOURNAL_DIR,
   REDACTED,
@@ -443,6 +446,33 @@ describe("record integrity", () => {
     begin(j);
     j.end("crashed");
     expect(statSync(join(journalDir(cwd, RUN_ID), JOURNAL_FILE)).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("a state dir inside the workspace is refused", () => {
+  it("SWENY_STATE_DIR (here: stateRoot) inside the workspace: the run refuses to journal", () => {
+    const cwd = tmp();
+    const j = RunJournal.create({ runId: RUN_ID, cwd, stateRoot: join(cwd, ".state", "runs") });
+    expect(() => begin(j)).toThrow(/resolves inside the workspace/);
+    expect(j.active).toBe(false);
+  });
+
+  it("a state dir reached through a symlink into the workspace is refused too", () => {
+    const cwd = tmp();
+    mkdirSync(join(cwd, "sub"));
+    const outside = tmp();
+    symlinkSync(join(cwd, "sub"), join(outside, "link"));
+    const j = RunJournal.create({ runId: RUN_ID, cwd, stateRoot: join(outside, "link", "runs") });
+    expect(() => begin(j)).toThrow(/resolves inside the workspace/);
+  });
+
+  it("assertStateOutsideWorkspace compares real paths", () => {
+    const cwd = tmp();
+    const outside = tmp();
+    expect(() => assertStateOutsideWorkspace(outside, cwd)).not.toThrow();
+    expect(() => assertStateOutsideWorkspace(cwd, cwd)).toThrow(JournalLocationError);
+    symlinkSync(cwd, join(outside, "ws"));
+    expect(() => assertStateOutsideWorkspace(join(outside, "ws"), cwd)).toThrow(JournalLocationError);
   });
 });
 

@@ -84,6 +84,8 @@ function fakeAgent(
     usage?: (node: string, nth: number) => NodeUsage | undefined;
     /** Usage reported live through `onUsage`, before anything else (and before a kill). */
     live?: (node: string, nth: number) => NodeUsage | undefined;
+    /** Whether the agent ran inside an enforced sandbox (default: yes). */
+    contained?: (node: string) => boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -99,7 +101,8 @@ function fakeAgent(
       const nth = calls.filter((c) => c === node).length;
       const data = opts.data?.(node, nth) ?? { value: `${node}-out` };
       const usage = opts.usage?.(node, nth);
-      return { status: "success", data, toolCalls: [], ...(usage ? { usage } : {}) } as NodeResult;
+      const contained = opts.contained?.(node) ?? true;
+      return { status: "success", data, toolCalls: [], contained, ...(usage ? { usage } : {}) } as NodeResult;
     },
     async evaluate() {
       throw new Error("no conditional routing in these specs");
@@ -111,10 +114,24 @@ function fakeAgent(
   return { claude, calls, count: (node: string) => calls.filter((c) => c === node).length };
 }
 
-/** A GitHub-shaped provider: issues live in memory, search finds a token in the body. */
-function fakeProvider(opts: { searchFails?: boolean } = {}) {
-  const issues: { number: number; title: string; body: string; html_url: string }[] = [];
+/**
+ * A GitHub-shaped provider: issues live in memory, search finds a token in the
+ * body. With `listing`, it also has `github_list_issues` (newest first).
+ */
+function fakeProvider(opts: { searchFails?: boolean; listing?: boolean } = {}) {
+  const issues: { number: number; title: string; body: string; html_url: string; created_at: string }[] = [];
   let searches = 0;
+  let lists = 0;
+  const listTool = {
+    name: "github_list_issues",
+    description: "",
+    input_schema: { type: "object" },
+    access: "read" as const,
+    handler: async () => {
+      lists++;
+      return [...issues].reverse();
+    },
+  };
   const skill: Skill = {
     id: "github",
     name: "GitHub",
@@ -146,14 +163,16 @@ function fakeProvider(opts: { searchFails?: boolean } = {}) {
             title: input.title,
             body: input.body ?? "",
             html_url: `https://github.test/acme/api/issues/${n}`,
+            created_at: new Date().toISOString(),
           };
           issues.push(issue);
           return issue;
         },
       },
+      ...(opts.listing ? [listTool] : []),
     ],
   };
-  return { skill, issues, searches: () => searches };
+  return { skill, issues, searches: () => searches, lists: () => lists };
 }
 
 /** a -> b -> c -> d, every node read-only. */
@@ -753,6 +772,99 @@ describe("a journal append that fails stops the run", () => {
     expect(results.get("report")!.data).toMatchObject({ journal_failed: true });
     expect(results.has("notify")).toBe(false);
     journal.end("failed");
+  });
+});
+
+describe("review 4 follow-ups", () => {
+  it("throttled live usage is written when the window ends: 10 then 100 within it, crash after it, resume seeds 100", async () => {
+    const cwd = tmp();
+    const claude: Claude = {
+      async run(req) {
+        req.onUsage?.({ inputTokens: 10, outputTokens: 0 });
+        req.onUsage?.({ inputTokens: 100, outputTokens: 0 });
+        await new Promise((r) => setTimeout(r, 300));
+        throw new Kill("process died after the throttle window");
+      },
+      async evaluate() {
+        throw new Error("unused");
+      },
+      async ask() {
+        return "ALLOW";
+      },
+    };
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml", usageIntervalMs: 50 });
+    await expect(
+      execute(chain(), {}, { skills: createSkillMap([]), claude, config: {}, logger: silent, cwd, journal }),
+    ).rejects.toBeInstanceOf(Kill);
+    processDied(cwd);
+    const usage = readJournal(journalFile(cwd)).records.filter((r) => r.type === "usage");
+    expect(usage.map((r) => r.tokens)).toEqual([10, 100]);
+
+    const prepared = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => chain() });
+    expect(prepared.ok && "ctx" in prepared && prepared.ctx.plan.priorSpend.tokens).toBe(100);
+    if (prepared.ok && "ctx" in prepared) prepared.ctx.journal.end("crashed");
+  });
+
+  it("crash after an issue was filed, before its receipt: the listing finds its marker, it is not filed again", async () => {
+    const cwd = tmp();
+    const gh = fakeProvider({ listing: true });
+    const agent = fakeAgent({ emit: { report: [ISSUE] } });
+    expect(await firstRun(cwd, reporting(), agent, [gh.skill], killAt("output:applied"))).toBe(true);
+    expect(gh.issues).toHaveLength(1);
+
+    const { results } = await resumeRun(cwd, reporting(), agent, [gh.skill]);
+    expect(gh.lists()).toBe(1);
+    expect(gh.searches()).toBe(0);
+    expect(gh.issues).toHaveLength(1);
+    expect(results!.get("report")!.outputs).toEqual([expect.objectContaining({ status: "applied", ref: 1 })]);
+  });
+
+  it("the write died after its intent, before it landed: the listing proves it absent, it is filed once", async () => {
+    const cwd = tmp();
+    const gh = fakeProvider({ listing: true });
+    const create = gh.skill.tools.find((t) => t.name === "github_create_issue")!;
+    const real = create.handler;
+    let calls = 0;
+    create.handler = async (input, ctx) => {
+      calls++;
+      if (calls === 1) throw new Kill("died before the API call landed");
+      return real(input, ctx);
+    };
+    const agent = fakeAgent({ emit: { report: [ISSUE] } });
+    await firstRun(cwd, reporting(), agent, [gh.skill]);
+    expect(gh.issues).toHaveLength(0);
+    const records = readJournal(journalFile(cwd)).records;
+    expect(records.some((r) => r.type === "output:intent")).toBe(true);
+    expect(records.some((r) => r.type === "output:applied")).toBe(false);
+
+    await resumeRun(cwd, reporting(), agent, [gh.skill]);
+    expect(gh.lists()).toBe(1);
+    expect(gh.issues).toHaveLength(1);
+  });
+
+  it("an agent that ran without an enforced sandbox: resume warns and the receipt carries journal_unsandboxed", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent({ contained: (node) => node !== "a" });
+    await firstRun(cwd, chain(), agent, [], killAt("node:start", "c"));
+    expect(readJournal(journalFile(cwd)).records.some((r) => r.type === "agent:unsandboxed" && r.node === "a")).toBe(
+      true,
+    );
+
+    const { prepared, results } = await resumeRun(cwd, chain(), agent);
+    expect(prepared.ok).toBe(true);
+    expect(prepared.lines.join("\n")).toMatch(/ran a without an enforced sandbox.*journal_unsandboxed/);
+    for (const r of results!.values()) {
+      expect((r.degraded ?? []).some((d) => d.startsWith("journal_unsandboxed:"))).toBe(true);
+    }
+  });
+
+  it("a fully sandboxed run resumes with no such warning", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    await firstRun(cwd, chain(), agent, [], killAt("node:start", "c"));
+    const { prepared, results } = await resumeRun(cwd, chain(), agent);
+    expect(prepared.lines.join("\n")).not.toMatch(/without an enforced sandbox/);
+    for (const r of results!.values()) expect(r.degraded ?? []).not.toContainEqual(expect.stringMatching(/^journal_/));
   });
 });
 
