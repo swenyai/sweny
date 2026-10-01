@@ -19,6 +19,7 @@ export { WORKFLOW_INPUT_TYPES } from "./inputs.js";
 
 import type { Source as _Source, ResolvedSource as _ResolvedSource } from "./sources.js";
 import type { ToolClass } from "./harness/types.js";
+import type { Budget, BudgetOverrun } from "./budget.js";
 
 export type JSONSchema = Record<string, unknown>;
 
@@ -326,6 +327,12 @@ export interface Node {
   output?: JSONSchema;
   /** Max AI model turns for this node. When absent, the executor's default applies. */
   max_turns?: number;
+  /**
+   * Spend ceiling for one visit to this node (all retry attempts included),
+   * in input + output tokens and/or reported USD. Never above the workflow's
+   * `budget`. A crossing stops the agent and fails the node (see `budget.ts`).
+   */
+  budget?: Budget;
   /** Per-node directives. Additive by default; set `{ only: true, sources: [...] }` to block cascade. */
   rules?: NodeSources;
   /** Per-node background knowledge. Additive by default; set `{ only: true, sources: [...] }` to block cascade. */
@@ -592,6 +599,11 @@ export interface Workflow {
   /** Soft cap on expected judge calls per workflow run. Warning at load time when exceeded. */
   judge_budget?: number;
   /**
+   * Spend ceiling for the whole run and for every node (#449). A node's own
+   * `budget` may only narrow it. The CLI's `--max-tokens` / `--max-cost` tighten it.
+   */
+  budget?: Budget;
+  /**
    * Declared per-run input contract. When present, the CLI validates the
    * caller-provided `--input` JSON against this declaration, applies defaults
    * for omitted optional fields, and rejects malformed input before the
@@ -675,6 +687,12 @@ export interface NodeResult {
   degraded?: string[];
   /** Safe outputs (#365): what the write stage did with each intent. Absent when the node declares none. */
   outputs?: SafeOutputReceipt[];
+  /**
+   * Set when this node's spend crossed a token or cost budget (#449), or when
+   * the run's budget was already spent before it could start. The node is
+   * `failed`, `fail_soft` and `on_fail: continue` do not apply, and the run halts.
+   */
+  budget?: BudgetOverrun;
 }
 
 export interface ToolCall {
@@ -823,6 +841,13 @@ export interface Claude {
      * carry the same read-only and native-deny intent.
      */
     policy?: import("./harness/types.js").NodePolicy;
+    /**
+     * Live spend (#449): a harness that declares `capabilities.usage.live`
+     * calls this with the run's cumulative usage as it grows. The executor
+     * aborts `signal` when a budget is crossed. Harnesses that report usage
+     * only at the end never call it.
+     */
+    onUsage?: (usage: NodeUsage) => void;
   }): Promise<NodeResult>;
 
   /**

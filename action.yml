@@ -74,6 +74,16 @@ inputs:
     required: false
     default: ""
 
+  max-tokens:
+    description: "Run-wide token budget (input plus output tokens), forwarded to `sweny workflow run --max-tokens` only when set. The lowest of this and the workflow's `budget.tokens` wins. A crossing stops the agent, fails the node, and halts the run. Fails the step on a CLI too old to enforce it, so a cap is never silently dropped."
+    required: false
+    default: ""
+
+  max-cost:
+    description: "Run-wide cost budget in US dollars, forwarded to `sweny workflow run --max-cost` only when set. Uses harness-reported cost (never estimated). The lowest of this and the workflow's `budget.cost_usd` wins. Fails the step on a CLI too old to enforce it."
+    required: false
+    default: ""
+
   verbose:
     description: "When 'true', print each tool call's input and output inline. Truncated for readability; use the CLI's --stream flag locally for full untruncated NDJSON. Helpful for debugging a node that halts or fails."
     required: false
@@ -211,6 +221,8 @@ runs:
         VERBOSE: ${{ inputs.verbose }}
         INPUT_TIMEOUT: ${{ inputs.timeout }}
         INPUT_MAX_STEPS: ${{ inputs.max-steps }}
+        INPUT_MAX_TOKENS: ${{ inputs.max-tokens }}
+        INPUT_MAX_COST: ${{ inputs.max-cost }}
         WORKFLOW_INPUT: ${{ inputs.input }}
         INPUT_CLOUD_TOKEN: ${{ inputs.cloud-token }}
         PR_COMMENT: ${{ inputs.pr-comment }}
@@ -255,6 +267,26 @@ runs:
         fi
         if [ -n "$INPUT_MAX_STEPS" ]; then
           FLAGS+=("--max-steps" "$INPUT_MAX_STEPS")
+        fi
+        # Spend caps (#449): forwarded only when set. An older CLI would reject
+        # the flag, and running without the cap the caller asked for is worse,
+        # so a CLI that lacks it fails the step.
+        if [ -n "$INPUT_MAX_TOKENS" ] || [ -n "$INPUT_MAX_COST" ]; then
+          RUN_HELP_SPEND=$(sweny workflow run --help 2>/dev/null || true)
+          if [ -n "$INPUT_MAX_TOKENS" ]; then
+            if ! grep -q -- '--max-tokens' <<< "$RUN_HELP_SPEND"; then
+              echo "::error::the installed sweny CLI does not support max-tokens; set cli-version to a release that does"
+              exit 1
+            fi
+            FLAGS+=("--max-tokens" "$INPUT_MAX_TOKENS")
+          fi
+          if [ -n "$INPUT_MAX_COST" ]; then
+            if ! grep -q -- '--max-cost' <<< "$RUN_HELP_SPEND"; then
+              echo "::error::the installed sweny CLI does not support max-cost; set cli-version to a release that does"
+              exit 1
+            fi
+            FLAGS+=("--max-cost" "$INPUT_MAX_COST")
+          fi
         fi
         # Forward per-run inputs verbatim. Pass through env to avoid shell
         # quoting issues with nested JSON; the CLI parses and validates the

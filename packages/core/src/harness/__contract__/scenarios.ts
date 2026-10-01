@@ -24,6 +24,11 @@ export type FakeStep =
   | { kind: "stderr"; text: string }
   /** Terminal event. `ok: false` is an agent-reported failure (aborted, errored). */
   | { kind: "final"; text: string; ok?: boolean; structured?: unknown; usage?: FakeUsage }
+  /**
+   * Live usage mid-run (#449): the run's cumulative usage so far. Only adapters
+   * that declare `capabilities.usage.live` see it on the wire; others skip it.
+   */
+  | { kind: "usage"; usage: FakeUsage }
   /** The agent never produces another event (until it is aborted). */
   | { kind: "hang" }
   /** The agent process dies mid-stream. */

@@ -5,7 +5,12 @@
 
 import type { HarnessCapabilities } from "./types.js";
 
-/** Claude Code enforces every sweny opinion natively, so `policyGate` never degrades or refuses it. */
+/**
+ * Claude Code enforces every sweny opinion natively, so `policyGate` never degrades or refuses it.
+ * usage: tokens live (per assistant message, a lower bound until the terminal
+ * `result` message gives the authoritative total); cost only at the end of the
+ * node (the SDK prices the run in `total_cost_usd` on `result`).
+ */
 export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
   structuredOutput: "native",
   toolTrace: "full",
@@ -14,7 +19,7 @@ export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
   sandbox: { fs: true, network: true },
   readOnly: "native",
   turnLimit: "native",
-  usage: { tokens: true, costUsd: true, live: false },
+  usage: { tokens: true, costUsd: true, live: true, liveUnits: ["tokens"] },
   cancel: "signal",
   resume: false,
 };
@@ -121,9 +126,10 @@ export const PI_CAPABILITIES: HarnessCapabilities = {
  * - readOnly none: modes are agent-defined. `policyGate` counts read-only as
  *   enforced only with the wrapper's read-only mount.
  * - turnLimit watchdog: no turn limit in the protocol; sweny counts tool calls.
- * - usage costUsd only: `usage_update {used, size, cost?}` is the stable
- *   usage. `used` and `size` are context window occupancy, not billed tokens,
- *   so they are not mapped; `cost` (cumulative, ISO 4217 currency) is, when it
+ * - usage costUsd only, live: `usage_update {used, size, cost?}` is the stable
+ *   usage and arrives while the turn runs, so a cost budget stops the agent
+ *   mid-node. `used` and `size` are context window occupancy, not billed
+ *   tokens, so they are not mapped; `cost` (cumulative, ISO 4217 currency) is, when it
  *   is USD. Per-turn token usage is behind an unstable flag.
  * - cancel rpc: `session/cancel`, then kill.
  * - resume false: sweny starts a fresh session per node.
@@ -136,7 +142,7 @@ export const ACP_CAPABILITIES: HarnessCapabilities = {
   sandbox: { fs: false, network: false },
   readOnly: "none",
   turnLimit: "watchdog",
-  usage: { tokens: false, costUsd: true, live: false },
+  usage: { tokens: false, costUsd: true, live: true, liveUnits: ["costUsd"] },
   cancel: "rpc",
   resume: false,
 };

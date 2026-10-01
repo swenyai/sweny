@@ -313,6 +313,20 @@ export const nodePermissionsZ = z.union([
     }),
 ]);
 
+/**
+ * Spend ceiling (#449): input + output tokens and/or reported USD. The object
+ * must declare at least one of the two.
+ */
+export const budgetZ = z
+  .object({
+    tokens: z.number().int().min(1).optional(),
+    cost_usd: z.number().positive().optional(),
+  })
+  .strict()
+  .refine((b) => b.tokens !== undefined || b.cost_usd !== undefined, {
+    message: "budget must declare at least one of tokens, cost_usd",
+  });
+
 /** One typed write intent a node may emit (#365). */
 export const safeOutputDeclarationZ = z
   .object({
@@ -349,6 +363,7 @@ export const nodeZ = z
     skills: z.array(z.string()).default([]),
     output: jsonSchemaZ.optional(),
     max_turns: z.number().int().min(1).optional(),
+    budget: budgetZ.optional(),
     disallowed_tools: z.array(z.string().min(1)).optional(),
     tools: nodeToolsZ.optional(),
     fail_soft: z.boolean().optional(),
@@ -413,6 +428,7 @@ export const workflowZ = z.object({
   judge_model: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   judge_budget: z.number().int().min(0).optional(),
+  budget: budgetZ.optional(),
   inputs: workflowInputsZ.optional(),
   permissions: nodePermissionsZ.optional(),
   safe_outputs: safeOutputsPolicyZ.optional(),
@@ -473,6 +489,7 @@ export interface WorkflowError {
     | "EDGE_ITERATIONS_EXCEEDED"
     | "RETRY_MAX_EXCEEDED"
     | "PERMISSION_CEILING"
+    | "BUDGET_CEILING"
     | "OUTPUT_NOT_ALLOWED"
     | "DUPLICATE_OUTPUT"
     | "UNSUPPORTED_OUTPUT";
@@ -708,6 +725,29 @@ export function validateWorkflow(
         message: `Node "${nodeId}" asks for permissions write, above the workflow's permissions read`,
         nodeId,
       });
+    }
+    // Budgets (#449): the workflow's `budget` is the ceiling for every node.
+    const wfBudget = workflow.budget;
+    const nodeBudget = node.budget;
+    if (wfBudget && nodeBudget) {
+      if (wfBudget.tokens !== undefined && nodeBudget.tokens !== undefined && nodeBudget.tokens > wfBudget.tokens) {
+        errors.push({
+          code: "BUDGET_CEILING",
+          message: `Node "${nodeId}" declares budget.tokens ${nodeBudget.tokens}, above the workflow's budget.tokens ${wfBudget.tokens}`,
+          nodeId,
+        });
+      }
+      if (
+        wfBudget.cost_usd !== undefined &&
+        nodeBudget.cost_usd !== undefined &&
+        nodeBudget.cost_usd > wfBudget.cost_usd
+      ) {
+        errors.push({
+          code: "BUDGET_CEILING",
+          message: `Node "${nodeId}" declares budget.cost_usd ${nodeBudget.cost_usd}, above the workflow's budget.cost_usd ${wfBudget.cost_usd}`,
+          nodeId,
+        });
+      }
     }
     const seenTypes = new Set<string>();
     for (const out of node.outputs ?? []) {
@@ -950,6 +990,17 @@ export const workflowJsonSchema = {
         },
       ],
     },
+    Budget: {
+      type: "object",
+      additionalProperties: false,
+      minProperties: 1,
+      description:
+        "A spend ceiling. 'tokens' counts input plus output tokens as the harness reports them; 'cost_usd' is the harness-reported cost (never estimated). A crossing stops the agent and fails the node; the run halts.",
+      properties: {
+        tokens: { type: "integer", minimum: 1, description: "Max input plus output tokens." },
+        cost_usd: { type: "number", exclusiveMinimum: 0, description: "Max reported cost in USD." },
+      },
+    },
     SafeOutput: {
       type: "object",
       required: ["type"],
@@ -1095,6 +1146,11 @@ export const workflowJsonSchema = {
       description:
         "Soft cap on expected judge calls per workflow run. Executor warns at load time if exceeded; not a hard runtime cap in v1.",
     },
+    budget: {
+      $ref: "#/$defs/Budget",
+      description:
+        "Spend ceiling for the whole run and for every node. A node's own budget may only narrow it. The CLI's --max-tokens and --max-cost tighten it further.",
+    },
     inputs: {
       type: "object",
       description:
@@ -1206,6 +1262,11 @@ export const workflowJsonSchema = {
             type: "integer",
             minimum: 1,
             description: "Max AI model turns for this node. When absent, the executor's default applies.",
+          },
+          budget: {
+            $ref: "#/$defs/Budget",
+            description:
+              "Spend ceiling for one visit to this node, retry attempts included. Never above the workflow's budget. Crossing it stops the agent and fails the node (fail_soft and on_fail: continue do not apply) and the run halts.",
           },
           disallowed_tools: {
             type: "array",

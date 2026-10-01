@@ -332,6 +332,8 @@ interface ConverseOptions {
   signal?: AbortSignal;
   maxToolCalls?: number;
   onProgress?: (message: string) => void;
+  /** Live cost (#449): called with the cumulative USD cost of each `usage_update`. */
+  onUsage?: (usage: NodeUsage) => void;
 }
 
 // ─── Adapter ─────────────────────────────────────────────────────
@@ -580,8 +582,10 @@ export class AcpHarness implements AgentHarness {
           // `used` and `size` are context window occupancy, not billed tokens: not mapped.
           const cost = u.cost;
           if (isObj(cost) && typeof cost.amount === "number" && Number.isFinite(cost.amount)) {
-            if (typeof cost.currency === "string" && cost.currency.toUpperCase() === "USD") out.costUsd = cost.amount;
-            else if (!costWarned) {
+            if (typeof cost.currency === "string" && cost.currency.toUpperCase() === "USD") {
+              out.costUsd = cost.amount;
+              o.onUsage?.({ costUsd: cost.amount });
+            } else if (!costWarned) {
               costWarned = true;
               this.logger.debug(`[acp] usage_update cost is in ${String(cost.currency)}, not USD: not recorded`);
             }
@@ -957,6 +961,7 @@ export class AcpHarness implements AgentHarness {
           signal: req.signal,
           maxToolCalls: maxTurns,
           onProgress: req.onProgress,
+          onUsage: req.onUsage,
         });
       } finally {
         await prep.cleanup();

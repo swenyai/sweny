@@ -48,8 +48,11 @@ import { validateWorkflow } from "./schema.js";
 import { resolveAgentAccess } from "./agent-env.js";
 import { fenceUntrusted } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
-import { isToolClass, policyGate } from "./harness/policy.js";
+import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
+import type { HarnessPolicyMode } from "./harness/policy.js";
 import type { AgentHarness } from "./harness/types.js";
+import { BudgetGuard, describeOverrun, minLimits, toLimits } from "./budget.js";
+import type { Budget, BudgetOverrun } from "./budget.js";
 import { buildNodePolicy, resolveNodePermissions } from "./node-policy.js";
 import {
   applySafeOutputs,
@@ -133,6 +136,16 @@ export interface ExecuteOptions {
    * association in the `GITHUB_EVENT_PATH` payload.
    */
   actor?: ActorInfo;
+  /**
+   * Run-wide spend ceiling (#449), tightening `workflow.budget` (the lowest of
+   * the two wins per unit). CLI: `--max-tokens`, `--max-cost`. Default: none.
+   */
+  budget?: Budget;
+  /**
+   * `strict` refuses a node whose spend budget the harness cannot enforce at
+   * all (cost on Codex). Default: {@link resolveHarnessPolicy} from the run env.
+   */
+  harnessPolicy?: HarnessPolicyMode;
 }
 
 /**
@@ -205,6 +218,10 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   const actor: ActorInfo = usesOutputs ? resolveActor(runEnv, options.actor) : {};
   // The run input, for `number: { input }` issue pins on outputs.
   const runInput = input && typeof input === "object" ? (input as Record<string, unknown>) : undefined;
+  // Spend budgets (#449): the run ceiling is the lower of the workflow's
+  // `budget` and the caller's (`--max-tokens`, `--max-cost`).
+  const budgetGuard = new BudgetGuard(minLimits(toLimits(workflow.budget), toLimits(options.budget)));
+  const harnessPolicy = options.harnessPolicy ?? resolveHarnessPolicy(runEnv);
 
   // Build an eval-time alias table from the loaded skills. Each skill owns
   // its own mapping between skill-tool names and equivalent MCP names. Core
@@ -496,39 +513,104 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         ? policyGate(options.harness.capabilities, { ...nodePolicy, egress: [] })
         : undefined;
 
+    // Spend budgets (#449): this node's own limits plus what is left of the
+    // run's. The gate says whether the harness can keep them; a strict policy
+    // refuses the node when it cannot report the budgeted unit at all.
+    const nodeBudget = budgetGuard.node(toLimits(node.budget));
+    const budgetOn = budgetGuard.active(nodeBudget.limits);
+    const budgetCheck =
+      budgetOn && options.harness
+        ? budgetGate(
+            options.harness.capabilities,
+            minLimits(nodeBudget.limits, budgetGuard.runLimits),
+            permissions.strict || harnessPolicy === "strict",
+          )
+        : undefined;
+    // A budget stop: fail_soft and on_fail: continue never apply, the run halts.
+    let budgetStop: BudgetOverrun | undefined;
+    let previous: NodeResult | undefined;
+
     while (true) {
-      if (gate?.refuse) {
+      const refusal = gate?.refuse ?? budgetCheck?.refuse;
+      if (refusal) {
         // Not an agent failure: fail_soft never softens a policy refusal.
-        logger.warn(`  harness refused the node: ${gate.refuse}`, { node: currentId });
+        logger.warn(`  harness refused the node: ${refusal}`, { node: currentId });
         result = {
           status: "failed",
-          data: { error: gate.refuse, refused: true },
+          data: { error: refusal, refused: true },
           toolCalls: [],
-          degraded: gate.degraded,
+          degraded: [...(gate?.degraded ?? []), ...(budgetCheck?.degraded ?? [])],
         };
+        break;
+      }
+      // No attempt may start once a ceiling is reached (the run's budget spent
+      // by earlier nodes, or this node's by an earlier attempt).
+      const spent = budgetOn ? nodeBudget.exhausted() : undefined;
+      if (spent) {
+        const error = describeOverrun(spent, currentId);
+        logger.warn(`  ${error}; not starting the node`, { node: currentId });
+        result = {
+          ...(previous ?? { toolCalls: [] }),
+          status: "failed",
+          data: { ...(previous?.data ?? {}), error, budget_exceeded: true },
+          budget: spent,
+        };
+        agentRunFailed = true;
+        budgetStop = spent;
         break;
       }
       // Only the final attempt's intents may be applied.
       intents.length = 0;
-      result = await claude.run({
-        instruction: currentInstruction,
-        context,
-        tools: trackedTools,
-        outputSchema: node.output,
-        maxTurns: node.max_turns,
-        disallowedTools: node.disallowed_tools,
-        ...(denyClasses.length > 0 ? { deny: denyClasses } : {}),
-        model: nodeModel,
-        signal,
-        timeoutMs,
-        agentAccess,
-        ...(nodePolicy ? { policy: nodePolicy } : {}),
-        ...(readOnlyNode ? {} : { mcpServers: skillMcpServers }),
-        ...(readOnlyNode ? { readOnly: true } : {}),
-        onProgress: (message) => {
-          safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
-        },
-      });
+      const attemptBudget = budgetOn ? nodeBudget.attempt(signal) : undefined;
+      try {
+        result = await claude.run({
+          instruction: currentInstruction,
+          context,
+          tools: trackedTools,
+          outputSchema: node.output,
+          maxTurns: node.max_turns,
+          disallowedTools: node.disallowed_tools,
+          ...(denyClasses.length > 0 ? { deny: denyClasses } : {}),
+          model: nodeModel,
+          signal: attemptBudget?.signal ?? signal,
+          timeoutMs,
+          agentAccess,
+          ...(nodePolicy ? { policy: nodePolicy } : {}),
+          ...(readOnlyNode ? {} : { mcpServers: skillMcpServers }),
+          ...(readOnlyNode ? { readOnly: true } : {}),
+          ...(attemptBudget ? { onUsage: attemptBudget.onUsage } : {}),
+          onProgress: (message) => {
+            safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
+          },
+        });
+      } finally {
+        attemptBudget?.dispose();
+      }
+      previous = result;
+
+      if (budgetCheck && budgetCheck.degraded.length > 0) {
+        result = { ...result, degraded: [...new Set([...(result.degraded ?? []), ...budgetCheck.degraded])] };
+      }
+      if (attemptBudget) {
+        // Commit this attempt's spend; a live stop, or a crossing visible only
+        // in the final usage, fails the node whatever else it did.
+        const breach = attemptBudget.finish(result.usage);
+        if (breach) {
+          const error = describeOverrun(breach, currentId);
+          logger.warn(`  ${error}`, { node: currentId });
+          const usage = result.usage ?? attemptBudget.lastUsage;
+          result = {
+            ...result,
+            status: "failed",
+            data: { ...result.data, error, budget_exceeded: true },
+            ...(usage ? { usage } : {}),
+            budget: breach,
+          };
+          agentRunFailed = true;
+          budgetStop = breach;
+          break;
+        }
+      }
 
       // Opinions the harness could not honor natively: said once per node, never silently dropped.
       if (!degradedLogged && result.degraded && result.degraded.length > 0) {
@@ -647,7 +729,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // observers. Eval failures never take this path (agentRunFailed guards it).
     // A strict-policy refusal (#331) is not an agent failure: fail_soft never softens it.
     const refused = (result.data as Record<string, unknown> | undefined)?.refused === true;
-    if (agentRunFailed && result.status === "failed" && node.fail_soft === true && !refused) {
+    if (agentRunFailed && result.status === "failed" && node.fail_soft === true && !refused && !budgetStop) {
       const failError = (result.data as Record<string, unknown> | undefined)?.error;
       logger.warn(
         `  fail_soft: node failed (${String(failError ?? "unknown error")}); continuing with partial output`,
@@ -720,13 +802,10 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // the back of a failure. The failed result stays in `results`, so the run
     // surfaces as failed to callers (CLI exit code, cloud status). Authors who
     // want the legacy fall-through opt in per-node with `on_fail: "continue"`.
-    if (result.status === "failed" && (node.on_fail ?? "halt") === "halt") {
-      logger.warn(`  node failed; halting workflow (on_fail: halt)`, { node: currentId });
-      safeObserve(
-        observer,
-        { type: "route", from: currentId, to: "(end)", reason: "node failed (on_fail: halt)" },
-        logger,
-      );
+    if (result.status === "failed" && ((node.on_fail ?? "halt") === "halt" || budgetStop)) {
+      const why = budgetStop ? "budget exceeded" : "on_fail: halt";
+      logger.warn(`  node failed; halting workflow (${why})`, { node: currentId });
+      safeObserve(observer, { type: "route", from: currentId, to: "(end)", reason: `node failed (${why})` }, logger);
       break;
     }
 

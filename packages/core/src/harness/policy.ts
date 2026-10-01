@@ -13,6 +13,7 @@
  *   watchdog in place of a native turn limit). Reported, never refused.
  */
 
+import type { SpendLimits } from "../budget.js";
 import type { HarnessCapabilities, NodePolicy, PolicyGateResult, PolicyWrappers, ToolClass } from "./types.js";
 
 /** `strict` refuses a node whose opinions the harness cannot honor; `warn` runs it and reports `degraded`. */
@@ -131,5 +132,44 @@ export function policyGate(
         `or set SWENY_SANDBOX=auto to run with a warning.`,
     };
   }
+  return { degraded };
+}
+
+/**
+ * budgetGate (#449): can this harness keep a spend budget? Pure; the executor
+ * calls it once per node that has a token or cost limit (node or run).
+ *
+ * Per budgeted unit:
+ * - the harness cannot report the unit at all (Codex has no cost): nothing can
+ *   be enforced. Reported as `budget_<unit>`; `strict` refuses the node.
+ * - the harness reports it only when the node ends: enforced between nodes, so
+ *   one node can overrun before it is stopped. Reported as `budget_live`,
+ *   never refused.
+ */
+export function budgetGate(caps: HarnessCapabilities, limits: SpendLimits, strict: boolean): PolicyGateResult {
+  const unenforced: string[] = [];
+  const wrapped: string[] = [];
+  const units = [
+    { unit: "tokens", key: "tokens", limit: limits.tokens, reports: caps.usage.tokens },
+    { unit: "cost_usd", key: "costUsd", limit: limits.costUsd, reports: caps.usage.costUsd },
+  ] as const;
+  const notLive: string[] = [];
+  for (const u of units) {
+    if (u.limit === undefined) continue;
+    if (!u.reports) {
+      unenforced.push(
+        `budget_${u.unit}: harness cannot report ${u.unit === "tokens" ? "token" : "cost"} usage, so this budget is not enforced`,
+      );
+    } else if (!caps.usage.live || (caps.usage.liveUnits !== undefined && !caps.usage.liveUnits.includes(u.key))) {
+      notLive.push(u.unit);
+    }
+  }
+  if (notLive.length > 0) {
+    wrapped.push(
+      `budget_live: harness reports ${notLive.join(" and ")} only when a node ends; the budget is enforced between nodes, so a node can overrun before it is stopped`,
+    );
+  }
+  const degraded = [...unenforced, ...wrapped];
+  if (unenforced.length > 0 && strict) return { degraded, refuse: `strict policy: ${unenforced.join("; ")}` };
   return { degraded };
 }

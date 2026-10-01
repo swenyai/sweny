@@ -14,6 +14,7 @@ A Node represents a single step in a [Workflow](/workflow). Each node contains a
 | `skills`           | string[]                         | OPTIONAL | `[]`                            | Skill IDs this node has access to.                                                                                  |
 | `output`           | JSON Schema object               | OPTIONAL | —                               | Structured output schema for this node's result.                                                                    |
 | `max_turns`        | integer &ge; 1                   | OPTIONAL | implementation&#8209;defined    | Maximum AI model turns for this node's execution.                                                                   |
+| `budget`           | [Budget](#spend-budgets)         | OPTIONAL | none                            | Token and cost ceiling for one visit to this node. See [Spend Budgets](#spend-budgets).                             |
 | `model`            | string                           | OPTIONAL | inherited / impl&#8209;defined  | Execution model for this node's AI invocation. Free-text passthrough. See [Model Selection](#model-selection).      |
 | `disallowed_tools` | string[]                         | OPTIONAL | `[]`                            | Built-in agent tools removed from the model context at this node. See [Disallowed Tools](#disallowed-tools).        |
 | `tools`            | [ToolFilter](#tool-filter)       | OPTIONAL | all skill tools                 | Allowlist/denylist over skill-provided tools at this node. See [Tool Filter](#tool-filter).                         |
@@ -39,6 +40,32 @@ A conforming executor:
 - When the limit is reached, the executor **SHOULD** capture whatever partial result is available and produce a `NodeResult` with `status: "failed"` and a descriptive error in `data`. The executor **MUST NOT** silently discard the node's work.
 
 Different nodes have vastly different compute needs. A context-gathering node that queries multiple APIs may need many turns, while a summarization node with no tools may need one. Per-node limits give workflow authors fine-grained control over the compute budget.
+
+## Spend Budgets
+
+`budget` caps what a node's agent may spend. It has two optional keys, at least one of which MUST be present:
+
+| Key        | Type           | Meaning                                                                              |
+| ---------- | -------------- | ------------------------------------------------------------------------------------ |
+| `tokens`   | integer &ge; 1 | Input plus output tokens, as the harness reports them. Cache tokens are not counted. |
+| `cost_usd` | number &gt; 0  | The cost in USD the harness reports. Never estimated.                                |
+
+```yaml
+budget:
+  tokens: 200000
+  cost_usd: 1.50
+```
+
+On a node, `budget` caps one visit to that node, retry attempts included. On the [workflow](/workflow#fields), it caps the whole run and is the ceiling for every node: a node MUST NOT declare a larger value for a unit the workflow also caps (validation error `BUDGET_CEILING`). A caller may tighten the run ceiling further (`sweny workflow run --max-tokens`, `--max-cost`); the lowest value wins.
+
+A conforming executor:
+
+- **MUST**, when spend crosses a node or run budget, stop the agent, mark the node `failed` with a budget reason, and end the run without starting any further node. `fail_soft` and `on_fail: continue` do not apply to a budget stop. The failed result records which budget was crossed (`budget: { scope, unit, limit, spent }`) so the run receipt can show the overrun.
+- **MUST NOT** start a node, or a retry attempt, once a ceiling is already reached.
+- **MUST** enforce a budget while the node runs when the harness reports that unit live, and otherwise between nodes. Between-node enforcement lets one node overrun before it is stopped; the executor reports `budget_live` in the node's `degraded` list.
+- **MUST** report `budget_tokens` or `budget_cost_usd` in `degraded` when the harness cannot report that unit at all (for example cost on Codex), and no budget on that unit is enforced. Under a strict harness policy the node is refused instead.
+
+Only agent node runs are metered. Judge evaluators, route decisions and retry reflections report no usage and are not counted.
 
 ## Model Selection
 

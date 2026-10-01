@@ -261,6 +261,24 @@
         }
       ]
     },
+    "Budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "A spend ceiling. 'tokens' counts input plus output tokens as the harness reports them; 'cost_usd' is the harness-reported cost (never estimated). A crossing stops the agent and fails the node; the run halts.",
+      "properties": {
+        "tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Max input plus output tokens."
+        },
+        "cost_usd": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Max reported cost in USD."
+        }
+      }
+    },
     "SafeOutput": {
       "type": "object",
       "required": ["type"],
@@ -441,6 +459,10 @@
       "minimum": 0,
       "description": "Soft cap on expected judge calls per workflow run. Executor warns at load time if exceeded; not a hard runtime cap in v1."
     },
+    "budget": {
+      "$ref": "#/$defs/Budget",
+      "description": "Spend ceiling for the whole run and for every node. A node's own budget may only narrow it. The CLI's --max-tokens and --max-cost tighten it further."
+    },
     "inputs": {
       "type": "object",
       "description": "Declared per-run input contract. Each entry names a parameter the caller may supply via --input. The CLI validates against this declaration, applies defaults for omitted optional fields, and rejects unknown types before the executor runs. Optional; workflows without an inputs block accept any JSON object (back-compat).",
@@ -605,6 +627,10 @@
             "type": "integer",
             "minimum": 1,
             "description": "Max AI model turns for this node. When absent, the executor's default applies."
+          },
+          "budget": {
+            "$ref": "#/$defs/Budget",
+            "description": "Spend ceiling for one visit to this node, retry attempts included. Never above the workflow's budget. Crossing it stops the agent and fails the node (fail_soft and on_fail: continue do not apply) and the run halts."
           },
           "disallowed_tools": {
             "type": "array",
