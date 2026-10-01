@@ -34,7 +34,7 @@ export function createRecordingWrapper(): RecordingWrapper {
   const id = `rec-${process.pid}-${++seq}`;
   const w: RecordingWrapper = {
     backend: "srt",
-    provides: { sandbox: true, egress: true, readOnlyMount: true },
+    provides: { sandbox: true, egress: true, readOnlyMount: true, readDeny: true },
     id,
     requests: [],
     cleanups: 0,

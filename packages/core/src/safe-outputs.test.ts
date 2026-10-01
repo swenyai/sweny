@@ -705,6 +705,31 @@ describe("write stage: issue_state", () => {
     expect(other.gh.calls).toEqual([]);
   });
 
+  it("a close never takes its repository from the request", async () => {
+    const pinned = { declarations: decl({ state: "close", number: 8 }) };
+    // No declared target and no GITHUB_REPOSITORY: refused, even though the request names a repo.
+    const bare = opts({ ...pinned, env: {}, intents: [reopen({ state: "close", target: "evil/repo" })] });
+    expect((await applySafeOutputs(bare.o)).receipts[0]).toMatchObject({
+      status: "refused",
+      reason: "close needs a pinned repository",
+    });
+    expect(bare.gh.calls).toEqual([]);
+    // A different repo than the resolved one is refused.
+    const other = opts({ ...pinned, intents: [reopen({ state: "close", target: "evil/repo" })] });
+    expect((await applySafeOutputs(other.o)).receipts[0]).toMatchObject({
+      status: "refused",
+      reason: "target outside the declared target",
+    });
+    expect(other.gh.calls).toEqual([]);
+    // The declaration target wins over GITHUB_REPOSITORY.
+    const decl2 = opts({
+      declarations: decl({ state: "close", number: 8, target: "acme/other" }),
+      intents: [reopen({ state: "close" })],
+    });
+    await applySafeOutputs(decl2.o);
+    expect(decl2.gh.calls[0].input.repo).toBe("acme/other");
+  });
+
   it("a reopen-only output still takes its issue from the request", async () => {
     const { o, gh } = opts({ declarations: decl({ state: "reopen" }), intents: [reopen({ number: "5" })] });
     expect((await applySafeOutputs(o)).receipts[0].status).toBe("applied");

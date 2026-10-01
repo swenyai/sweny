@@ -46,7 +46,8 @@ import type {
   NodePolicy,
   ToolClass,
 } from "./types.js";
-import { policyGate, type HarnessPolicyMode } from "./policy.js";
+import { gitCredentialGap, policyGate, type HarnessPolicyMode } from "./policy.js";
+import { gitCredentialPolicy } from "../git-credentials.js";
 import { CLAUDE_CODE_CAPABILITIES } from "./capabilities.js";
 import { ask as coreAsk, evaluate as coreEvaluate, buildEvaluatePrompt, buildNodePrompt } from "./prompts.js";
 import { jsonSchemaToZodShape, toolErrorToMcpResult, toolOutputToMcpResult } from "./tool-bridge/protocol.js";
@@ -125,6 +126,16 @@ export const CLAUDE_TOOLS_BY_CLASS: Readonly<Record<ToolClass, readonly string[]
   net: ["WebFetch", "WebSearch"],
   subagent: ["Task", "Agent"],
 };
+
+/**
+ * A Claude Code permission rule that denies reading one absolute path (#473).
+ * `//` marks an absolute path in permission rules. Read rules cover Read and,
+ * best effort, Grep and Glob; with the SDK sandbox on, its filesystem
+ * `denyRead` (merged with these rules) covers Bash.
+ */
+export function claudeReadDenyRule(absPath: string): string {
+  return `Read(/${absPath.startsWith("/") ? absPath : `/${absPath}`})`;
+}
 
 /** Native `disallowedTools` for a policy: legacy names, compiled classes, and the read-only set. */
 export function compileClaudeCodeDeny(policy: NodePolicy, legacy: readonly string[] = []): string[] {
@@ -450,6 +461,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       },
       stagedWrite: !!req.agentAccess?.noPush && !readOnly,
       strict: policy.strict || this.policyMode === "strict",
+      // #473: files holding a credential the checkout persisted, for a read-only or staged node.
+      gitCredentials: gitCredentialPolicy(this.cwd, { readOnly, noPush: req.agentAccess?.noPush }).gitCredentials,
       degraded,
     });
     return {
@@ -489,6 +502,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     stagedWrite?: boolean;
     /** Refuse instead of degrade (node `permissions.strict`, or the harness policy). */
     strict?: boolean;
+    /** Files holding a persisted git credential the agent must not read (#473). */
+    gitCredentials?: string[];
     /** Collects what this run cannot honor, for `HarnessRunResult.degraded`. */
     degraded?: string[];
   }): Promise<NodeResult> {
@@ -509,7 +524,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     // Dry run (#380): external MCP servers cannot be classified per tool, so
     // they are unknown, and unknown means write. Drop them, and disallow the
     // built-ins that can change the workspace or shell out.
-    const disallowedTools = readOnly
+    let disallowedTools = readOnly
       ? [...new Set([...(opts.disallowedTools ?? []), ...READ_ONLY_DISALLOWED_TOOLS])]
       : opts.disallowedTools;
     const effectiveModel = model ?? this.model;
@@ -551,6 +566,34 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
         return { status: "failed", data: { error, refused: true }, toolCalls: [] };
       }
       opts.degraded?.push(gap);
+    }
+    // #473: a credential the checkout persisted (actions/checkout's default).
+    // Read deny rules keep it from Read, Grep and Glob; the SDK sandbox's
+    // filesystem deny keeps it from Bash (and stops a rename around the deny).
+    // A node with Bash and no sandbox cannot be held to it.
+    let sandboxSettings = sandbox.settings;
+    const credentialFiles = opts.gitCredentials ?? [];
+    if (credentialFiles.length > 0) {
+      disallowedTools = [...new Set([...(disallowedTools ?? []), ...credentialFiles.map(claudeReadDenyRule)])];
+      if (sandboxSettings) {
+        const fsDeny = sandboxSettings.filesystem ?? {};
+        sandboxSettings = {
+          ...sandboxSettings,
+          filesystem: {
+            ...fsDeny,
+            denyRead: [...new Set([...(fsDeny.denyRead ?? []), ...credentialFiles])],
+            denyWrite: [...new Set([...(fsDeny.denyWrite ?? []), ...credentialFiles])],
+          },
+        };
+      } else if (!disallowedTools.includes("Bash")) {
+        const gap = gitCredentialGap(credentialFiles);
+        if (opts.strict) {
+          const error = `strict policy: ${gap}`;
+          this.logger.error(error);
+          return { status: "failed", data: { error, refused: true }, toolCalls: [] };
+        }
+        opts.degraded?.push(gap);
+      }
     }
 
     // Tool-call accounting (Fix #1).
@@ -650,7 +693,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           env,
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
-          ...(sandbox.settings ? { sandbox: sandbox.settings } : {}),
+          ...(sandboxSettings ? { sandbox: sandboxSettings } : {}),
           stderr: (data: string) => this.logger.debug(`[claude-code] ${data}`),
           ...(abort ? { abortController: abort.controller } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),

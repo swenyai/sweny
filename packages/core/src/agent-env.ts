@@ -731,7 +731,8 @@ export function noPushGitConfig(dir: string): Array<[string, string]> {
  * them. A deliberate agent on an unsandboxed run that finds a credential on
  * disk (an ssh key without a passphrase, a keychain entry, a token persisted
  * in `.git/config` by a checkout) can still push. Run sandboxed (the sandbox
- * hides credential files such as `~/.ssh`) and without push credentials in CI
+ * hides credential files such as `~/.ssh`, and a checkout's persisted token,
+ * see git-credentials.ts) and without push credentials in CI
  * for a guarantee; under a strict harness policy an unsandboxed staged write
  * node is refused (`stagedWrite` in policy.ts). `enabled` false returns `env`
  * unchanged. Pure apart from creating {@link noPushDir} once.
@@ -753,9 +754,15 @@ export function withPushBlocked(env: Record<string, string>, enabled: boolean | 
     n++;
   }
   out.GIT_CONFIG_COUNT = String(n);
-  const ownSsh = env.GIT_SSH_COMMAND ?? (env.GIT_SSH ? shQuote(env.GIT_SSH) : undefined);
+  const wrapper = shQuote(path.join(dir, "ssh"));
+  // Applied twice, GIT_SSH_COMMAND is already our wrapper: keep the operator's command it recorded,
+  // or the wrapper would exec itself forever on a fetch.
+  const ownSsh =
+    env.GIT_SSH_COMMAND === wrapper
+      ? env.SWENY_NO_PUSH_SSH
+      : (env.GIT_SSH_COMMAND ?? (env.GIT_SSH ? shQuote(env.GIT_SSH) : undefined));
   if (ownSsh) out.SWENY_NO_PUSH_SSH = ownSsh;
-  out.GIT_SSH_COMMAND = shQuote(path.join(dir, "ssh"));
+  out.GIT_SSH_COMMAND = wrapper;
   out.GIT_SSH_VARIANT = "ssh";
   out.GIT_ASKPASS = path.join(dir, "askpass");
   out.GIT_TERMINAL_PROMPT = "0";

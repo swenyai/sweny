@@ -9,6 +9,7 @@ import { exportWorkflowYaml } from "../lib/export-yaml.js";
 import { exportAsTypescript } from "../lib/export-typescript.js";
 import { exportAsGitHubActions } from "../lib/export-github-actions.js";
 import { buildPermalinkUrl } from "../lib/permalink.js";
+import { BrandLockup } from "./BrandMark.js";
 
 interface ToolbarProps {
   onWorkflowChange(id: string): void;
@@ -106,9 +107,10 @@ export function Toolbar({
   }
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm border-b border-gray-700 flex-shrink-0">
+    <div className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm border-b border-slate-700 flex-shrink-0">
       {/* Brand */}
-      <span className="font-bold text-white mr-1">sweny studio</span>
+      <BrandLockup />
+      <span className="text-xs font-semibold tracking-wide text-slate-400 mr-1">studio</span>
 
       {/* Divider */}
       <div className="w-px h-5 bg-gray-600 mx-1" />
@@ -139,7 +141,7 @@ export function Toolbar({
           <button
             onClick={onNew}
             title="Create a blank workflow (Cmd+N)"
-            className="px-2.5 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs text-green-400"
+            className="px-2.5 py-1 rounded bg-gray-700 hover:bg-gray-600 text-xs text-blue-400"
           >
             + new
           </button>

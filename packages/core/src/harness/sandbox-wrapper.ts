@@ -19,7 +19,8 @@
  *   host network except through that proxy.
  * - filesystem: the workspace (cwd) and a scratch HOME are writable; the rest
  *   of the filesystem is read-only; the operator's credential files are
- *   unreadable. Sibling homes under the same configured scratch root are
+ *   unreadable, and so is a git credential the checkout persisted when the
+ *   node is read-only or staged (#473, `denyRead`). Sibling homes under the same configured scratch root are
  *   hidden; only this run's HOME is exposed. Dry runs (`readOnly`) leave the
  *   workspace read-only too. All concurrent credential-bearing adapters must
  *   use the same scratch root; different roots are not mutually isolated.
@@ -68,6 +69,12 @@ export interface SandboxWrapRequest extends AgentSpawn {
   egress: readonly string[];
   /** Dry run: the workspace is read-only too (only the scratch HOME is writable). */
   readOnly?: boolean;
+  /**
+   * Files the process must not read, nor move or rewrite (#473: a git
+   * credential `actions/checkout` persisted). On Linux srt masks each with
+   * /dev/null, so git sees an empty file; on macOS reads fail.
+   */
+  denyRead?: readonly string[];
 }
 
 /** The spawn to run instead, plus the scratch it owns. */
@@ -168,7 +175,7 @@ function real(p: string): string {
  * `credentialHome` is the operator's real HOME (not the scratch HOME).
  */
 export function buildSrtSettings(
-  req: Pick<SandboxWrapRequest, "cwd" | "egress" | "readOnly">,
+  req: Pick<SandboxWrapRequest, "cwd" | "egress" | "readOnly" | "denyRead">,
   opts: {
     home: string;
     credentialHome: string;
@@ -186,12 +193,16 @@ export function buildSrtSettings(
   // Deny the parent, not a snapshot of sibling homes: later-created runs
   // must stay hidden too. srt allowRead carves out only our own HOME.
   if (opts.isolationRoot) denyRead.push(opts.isolationRoot);
+  // #473: persisted git credentials. Also unwritable, so a writable workspace
+  // cannot rename one out from under its read deny.
+  const masked = [...new Set((req.denyRead ?? []).map(real))].filter((p) => exists(p));
+  denyRead.push(...masked.filter((p) => !denyRead.includes(p)));
   // Run journal keys (outside the workspace) are never readable by the agent,
   // and the journals themselves are not writable.
   const keyDir = runKeyDir();
-  if (exists(keyDir)) denyRead.push(keyDir);
+  if (exists(keyDir) && !denyRead.includes(keyDir)) denyRead.push(keyDir);
   const journals = path.join(real(req.cwd), JOURNAL_DIR);
-  const denyWrite = !req.readOnly && exists(journals) ? [journals] : [];
+  const denyWrite = !req.readOnly && exists(journals) ? [...masked, journals] : masked;
   const allowWrite = req.readOnly ? [opts.home] : [real(req.cwd), opts.home];
   return {
     network: { allowedDomains, deniedDomains: [], strictAllowlist: true, allowLocalBinding: false },
@@ -237,7 +248,7 @@ export interface SrtWrapperOptions {
 
 export class SrtSandboxWrapper implements SandboxWrapper {
   readonly backend = "srt" as const;
-  readonly provides: Required<PolicyWrappers> = { sandbox: true, egress: true, readOnlyMount: true };
+  readonly provides: Required<PolicyWrappers> = { sandbox: true, egress: true, readOnlyMount: true, readDeny: true };
 
   constructor(private readonly opts: SrtWrapperOptions) {}
 
@@ -484,7 +495,12 @@ export async function prepareAgentSpawn(opts: PrepareAgentSpawnOptions): Promise
     ...parseList(env.SWENY_SANDBOX_ALLOWED_DOMAINS),
     ...(opts.harnessEgress ?? []),
   ];
-  const wrapped = await wrapper.wrap({ ...opts.spawn, egress, readOnly: policy.readOnly });
+  const wrapped = await wrapper.wrap({
+    ...opts.spawn,
+    egress,
+    readOnly: policy.readOnly,
+    ...(policy.gitCredentials && policy.gitCredentials.length > 0 ? { denyRead: policy.gitCredentials } : {}),
+  });
   const { home, cleanup, ...spawn } = wrapped;
   return { degraded: gate.degraded, spawn, wrappedBy: wrapper.backend, home, cleanup };
 }

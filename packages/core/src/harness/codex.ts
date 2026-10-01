@@ -58,6 +58,7 @@ import type {
 } from "./types.js";
 import { CODEX_CAPABILITIES } from "./capabilities.js";
 import { policyGate, resolveHarnessPolicy, type HarnessPolicyMode } from "./policy.js";
+import { gitCredentialPolicy } from "../git-credentials.js";
 import { buildNodePrompt } from "./prompts.js";
 import { makeAbort } from "./abort.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
@@ -856,6 +857,8 @@ export class CodexHarness implements AgentHarness {
       sandbox: mode,
       ...(held.length > 0 ? { agentCredentials: held } : {}),
       ...(req.agentAccess?.noPush && !compiled.readOnly ? { stagedWrite: true } : {}),
+      // #473: a credential the checkout persisted stays unreadable to read-only and staged nodes.
+      ...gitCredentialPolicy(this.cwd, { readOnly: compiled.readOnly, noPush: req.agentAccess?.noPush }),
     };
     // Codex's network is one switch, not a host list, so any sandbox mode but
     // off needs the process wrapper for full containment.

@@ -72,6 +72,12 @@ export interface FakeCapture {
   cancelWired: boolean;
   /** The agent process was stopped or interrupted by the time the call returned. */
   stopped: boolean;
+  /**
+   * The harness itself keeps this absolute path from every tool the agent
+   * has (#473): a read deny on the file tools, and either no shell or a
+   * sandboxed shell that denies it too. Absent: the harness has no such deny.
+   */
+  unreadable?(absPath: string): boolean;
 }
 
 export interface HarnessFakes {
@@ -216,6 +222,13 @@ export function createClaudeSdkFake(): ClaudeSdkFake {
       builtinToolsDisabled,
       allows: (c: ToolClass) =>
         !builtinToolsDisabled && CLAUDE_TOOLS_BY_CLASS[c].some((name) => !disallowed.includes(name)),
+      // Read, Grep and Glob honor a `Read(//abs)` deny rule; Bash only inside the
+      // SDK sandbox, whose filesystem denyRead must name the file too.
+      unreadable: (p: string) =>
+        disallowed.includes(`Read(/${p})`) &&
+        (builtinToolsDisabled ||
+          disallowed.includes("Bash") ||
+          (Array.isArray(o.sandbox?.filesystem?.denyRead) && o.sandbox.filesystem.denyRead.includes(p))),
       maxTurns: o.maxTurns,
       model: o.model,
       structuredSchema: o.outputFormat?.schema,

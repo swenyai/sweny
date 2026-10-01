@@ -7,6 +7,25 @@
 
 import type { Skill, ToolContext, SkillCategory } from "../types.js";
 
+/**
+ * Pushes a PR's head branch from the sweny process (#473). The Node entry
+ * registers it (skills/git-push.ts, imported by the executor); this module
+ * stays browser-safe, and without a pusher `github_create_pr` only calls the API.
+ */
+export type BranchPusher = (opts: {
+  repo: string;
+  head: string;
+  base: string;
+  token?: string;
+}) => Promise<{ pushed: boolean; attempted: boolean; reason?: string }>;
+
+let branchPusher: BranchPusher | undefined;
+
+/** Register (or clear, with `undefined`) the sweny-side branch pusher. */
+export function setBranchPusher(fn: BranchPusher | undefined): void {
+  branchPusher = fn;
+}
+
 class GitHubApiError extends Error {
   status: number;
   body: string;
@@ -190,6 +209,21 @@ export const github: Skill = {
       ) => {
         let pr: { number?: number; html_url?: string } & Record<string, unknown>;
         let reused = false;
+        // #473: push the head branch from sweny with this skill's token, so the
+        // recommended `persist-credentials: false` checkout still ships the
+        // branch and the agent never holds a write token. Skipped unless the
+        // branch exists locally and origin is this repo; never forced.
+        if (branchPusher) {
+          const push = await branchPusher({
+            repo: input.repo,
+            head: input.head,
+            base: input.base ?? "main",
+            token: ctx.config.GITHUB_TOKEN,
+          });
+          if (push.pushed) ctx.logger?.info?.(`  github_create_pr: pushed ${input.head} to origin`);
+          else if (push.attempted) ctx.logger?.warn?.(`  github_create_pr: ${push.reason}; requesting the PR anyway`);
+          else ctx.logger?.debug?.(`  github_create_pr: no sweny-side push (${push.reason})`);
+        }
         try {
           pr = (await gh(`/repos/${input.repo}/pulls`, ctx, {
             method: "POST",
