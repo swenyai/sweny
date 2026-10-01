@@ -5,6 +5,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: [
+      "src/__tests__/mutation/*.test.ts",
       "src/__tests__/when.test.ts",
       "src/__tests__/when-routing.test.ts",
       "src/safe-outputs.test.ts",
