@@ -25,6 +25,7 @@ import type {
   Claude,
   Observer,
   NodeResult,
+  NodeUsage,
   Logger,
   ToolContext,
   ConfigField,
@@ -56,7 +57,7 @@ import { asClaude } from "./harness/compat.js";
 import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
 import type { HarnessPolicyMode } from "./harness/policy.js";
 import type { AgentHarness } from "./harness/types.js";
-import { BudgetGuard, describeOverrun, minLimits, toLimits } from "./budget.js";
+import { BudgetGuard, describeOverrun, minLimits, spendOf, toLimits } from "./budget.js";
 import { createShadowDecider, finishShadowDecision, startShadowDecision } from "./decider.js";
 import type { DeciderMode, ShadowDecider } from "./decider.js";
 import type { Budget, BudgetOverrun } from "./budget.js";
@@ -318,6 +319,10 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     writeState,
     harnessId: options.harness?.id,
   });
+  // Resume (#363): the run budget is the logical run's, so it starts from what
+  // earlier attempts already spent, not from zero.
+  const priorSpend = journal?.priorSpend?.();
+  if (priorSpend) budgetGuard.seed(priorSpend);
   safeObserve(observer, { type: "workflow:start", workflow: workflow.id }, logger);
   safeObserve(observer, { type: "sources:resolved", sources: resolvedSources }, logger);
 
@@ -369,9 +374,16 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       } else {
         if (replay.next !== null) {
           const key = `${from}→${replay.next}`;
-          edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
-          const reason =
-            whenLabel(workflow.edges.find((e) => e.from === from && e.to === replay.next)?.when) ?? "only path";
+          const edge = workflow.edges.find((e) => e.from === from && e.to === replay.next);
+          const taken = (edgeCounts.get(key) ?? 0) + 1;
+          // A replayed route must be a real edge its max_iterations still allows.
+          if (!edge || (edge.max_iterations !== undefined && taken > edge.max_iterations)) {
+            throw new Error(
+              `run journal routes ${from} -> ${replay.next}, which ${edge ? "exceeds the edge's max_iterations" : "is not an edge of this workflow"}; refusing to replay it`,
+            );
+          }
+          edgeCounts.set(key, taken);
+          const reason = whenLabel(edge.when) ?? "only path";
           trace.edges.push({ from, to: replay.next, reason });
         }
         safeObserve(observer, { type: "route", from, to: replay.next ?? "(end)", reason: "replayed" }, logger);
@@ -656,6 +668,24 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       // Only the final attempt's intents may be applied.
       intents.length = 0;
       const attemptBudget = budgetOn ? nodeBudget.attempt(signal) : undefined;
+      // Resume (#363): spend is journaled as it is reported, so a crash mid-node
+      // does not hand the resumed run a fresh budget.
+      const usageNode: string = currentId;
+      const usageAttempt = attempt;
+      let liveUsage: NodeUsage | undefined;
+      const journalUsage = journal?.usage
+        ? (u: NodeUsage) => {
+            liveUsage = { ...liveUsage, ...u };
+            journal!.usage!(usageNode, iteration, usageAttempt, liveUsage, false);
+          }
+        : undefined;
+      const onUsage =
+        attemptBudget || journalUsage
+          ? (u: NodeUsage) => {
+              attemptBudget?.onUsage(u);
+              journalUsage?.(u);
+            }
+          : undefined;
       try {
         result = await claude.run({
           nodeId: currentId,
@@ -673,7 +703,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
           ...(nodePolicy ? { policy: nodePolicy } : {}),
           ...(readOnlyNode ? {} : { mcpServers: skillMcpServers }),
           ...(readOnlyNode ? { readOnly: true } : {}),
-          ...(attemptBudget ? { onUsage: attemptBudget.onUsage } : {}),
+          ...(onUsage ? { onUsage } : {}),
           onProgress: (message) => {
             safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
           },
@@ -682,6 +712,16 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         attemptBudget?.dispose();
       }
       previous = result;
+      // The attempt's final spend: the larger of the result's usage and the last live report, per unit.
+      if (journal?.usage) {
+        const finalSpend = spendOf(result.usage);
+        const seen = spendOf(liveUsage);
+        const tokens = Math.max(finalSpend.tokens ?? 0, seen.tokens ?? 0);
+        const costUsd = Math.max(finalSpend.costUsd ?? 0, seen.costUsd ?? 0);
+        if (finalSpend.tokens !== undefined || finalSpend.costUsd !== undefined || liveUsage) {
+          journal.usage(usageNode, iteration, usageAttempt, { inputTokens: tokens, outputTokens: 0, costUsd }, true);
+        }
+      }
 
       if (budgetCheck && budgetCheck.degraded.length > 0) {
         result = { ...result, degraded: [...new Set([...(result.degraded ?? []), ...budgetCheck.degraded])] };

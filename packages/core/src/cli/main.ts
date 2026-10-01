@@ -41,11 +41,18 @@ import * as readline from "node:readline";
 import { loadDotenv, loadConfigFile, applyAgentFileConfig } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { nonInteractiveUsage, runNew } from "./new.js";
-import { formatFinalMarkdown, formatFinalOutput, resolveFinalOutput, writeFinalOutput } from "./final-output.js";
+import {
+  formatFinalMarkdown,
+  formatFinalOutput,
+  formatSavedOutputLine,
+  resolveFinalOutput,
+  shouldPrintFinalOutput,
+  writeFinalOutput,
+} from "./final-output.js";
 import { buildRunRecord, createNodeTimer, historyDisabled, newRunId, recordRun } from "./run-history.js";
 import { registerRunsCommand } from "./runs.js";
 import { registerTryCommand } from "./try.js";
-import { JournalLockedError, JournalMismatchError, RunJournal } from "../journal.js";
+import { JournalLockedError, JournalMismatchError, RunJournal, runSecretValues } from "../journal.js";
 import {
   journalDisabled,
   prepareResume,
@@ -1291,12 +1298,18 @@ export async function workflowRunAction(
 
     // The answer, above the receipt: the terminal node's result, or the failed node's error.
     // Also saved to .sweny/runs/<id>/output.md (local only; --no-history skips the file).
-    const finalOutput = resolveFinalOutput(workflow, results);
+    // Redacted with the journal's redactor; in CI printed only with --show-output.
+    const finalOutput = resolveFinalOutput(workflow, results, {
+      trace,
+      secrets: runSecretValues([...skills.values(), ...builtinSkills], process.env),
+    });
     if (finalOutput) {
       const savedTo = historyDisabled(options.history, fileConfig["history"])
         ? null
         : writeFinalOutput(runId, formatFinalMarkdown(workflow, finalOutput));
-      const block = formatFinalOutput(finalOutput, { outputPath: savedTo });
+      const block = shouldPrintFinalOutput(options.showOutput === true, process.env)
+        ? formatFinalOutput(finalOutput, { outputPath: savedTo })
+        : formatSavedOutputLine(savedTo);
       if (wfHasFailed) console.error(`${block}\n`);
       else console.log(`${block}\n`);
     }
@@ -1438,6 +1451,10 @@ workflowRunCmd.option(
   "Do not record this run or save its output.md in .sweny/runs/ (or set `history: off` in .sweny.yml)",
 );
 workflowRunCmd.option(
+  "--show-output",
+  "Print the final answer in CI too (off by default in CI: only the path to output.md is printed)",
+);
+workflowRunCmd.option(
   "--no-journal",
   "Do not write a run journal to .sweny/runs/<run-id>/ (or set `journal: off` in .sweny.yml); the run cannot be resumed",
 );
@@ -1482,6 +1499,7 @@ for (const [flags, description] of WORKFLOW_RUN_OPTIONS) {
   if (RESUME_SHARED_RUN_FLAGS.includes(flags)) workflowResumeCmd.option(flags, description);
 }
 workflowResumeCmd.option("--no-history", "Do not update this run's record in .sweny/runs/");
+workflowResumeCmd.option("--show-output", "Print the final answer in CI too (off by default in CI)");
 registerRunsCommand(program);
 
 workflowCmd

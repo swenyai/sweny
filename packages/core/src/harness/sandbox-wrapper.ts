@@ -49,6 +49,7 @@ import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import { DEFAULT_SANDBOX_DOMAINS, parseList, resolveSandboxMode, type SandboxMode } from "../agent-env.js";
+import { JOURNAL_DIR, runKeyDir } from "../journal.js";
 import { policyGate } from "./policy.js";
 import type { HarnessCapabilities, NodePolicy, PolicyWrappers } from "./types.js";
 
@@ -196,10 +197,16 @@ export function buildSrtSettings(
   // cannot rename one out from under its read deny.
   const masked = [...new Set((req.denyRead ?? []).map(real))].filter((p) => exists(p));
   denyRead.push(...masked.filter((p) => !denyRead.includes(p)));
+  // Run journal keys (outside the workspace) are never readable by the agent,
+  // and the journals themselves are not writable.
+  const keyDir = runKeyDir();
+  if (exists(keyDir) && !denyRead.includes(keyDir)) denyRead.push(keyDir);
+  const journals = path.join(real(req.cwd), JOURNAL_DIR);
+  const denyWrite = !req.readOnly && exists(journals) ? [...masked, journals] : masked;
   const allowWrite = req.readOnly ? [opts.home] : [real(req.cwd), opts.home];
   return {
     network: { allowedDomains, deniedDomains: [], strictAllowlist: true, allowLocalBinding: false },
-    filesystem: { denyRead, allowRead: opts.isolationRoot ? [opts.home] : [], allowWrite, denyWrite: masked },
+    filesystem: { denyRead, allowRead: opts.isolationRoot ? [opts.home] : [], allowWrite, denyWrite },
   };
 }
 

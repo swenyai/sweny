@@ -7,9 +7,11 @@ import {
   FINAL_OUTPUT_MAX_LINES,
   formatFinalMarkdown,
   formatFinalOutput,
+  formatSavedOutputLine,
   outputRelPath,
   renderSchemaOutput,
   resolveFinalOutput,
+  shouldPrintFinalOutput,
   writeFinalOutput,
 } from "./final-output.js";
 import { pruneRuns } from "./run-history.js";
@@ -161,9 +163,88 @@ describe("resolveFinalOutput", () => {
     expect(resolveFinalOutput(looped, results)!.node).toBe("explain");
   });
 
+  it("in a bounded loop A -> B -> A, picks A, the last successful visit in the trace, not Map order", () => {
+    const loop = {
+      ...wf,
+      edges: [
+        { from: "survey", to: "explain", max_iterations: 1 },
+        { from: "explain", to: "survey" },
+      ],
+    } as unknown as Workflow;
+    // Map insertion order stays [survey, explain] when survey is updated on its second visit.
+    const results = new Map<string, NodeResult>();
+    results.set("survey", ok({ summary: "first survey" }));
+    results.set("explain", ok({ summary: "explained", purpose: "P" }));
+    results.set("survey", ok({ summary: "second survey" }));
+    const trace = {
+      steps: [
+        { node: "survey", status: "success" as const, iteration: 1 },
+        { node: "explain", status: "success" as const, iteration: 1 },
+        { node: "survey", status: "success" as const, iteration: 2 },
+      ],
+      edges: [],
+      sources: {},
+    };
+    const out = resolveFinalOutput(loop, results, { trace })!;
+    expect(out.node).toBe("survey");
+    expect(out.lines).toEqual(["second survey"]);
+  });
+
+  it("redacts secret values, secret-named fields and token shapes before anything renders", () => {
+    const schema = {
+      type: "object",
+      properties: { summary: { type: "string" }, api_token: { type: "string" }, note: { type: "string" } },
+    };
+    const secretWf = {
+      ...wf,
+      nodes: { ...wf.nodes, explain: { name: "Explain It", instruction: "x", skills: [], output: schema } },
+    } as unknown as Workflow;
+    const results = new Map<string, NodeResult>([
+      [
+        "explain",
+        ok({
+          summary: "deployed with deploy-secret-value-123",
+          api_token: "plain-looking-value",
+          note: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        }),
+      ],
+    ]);
+    const out = resolveFinalOutput(secretWf, results, { secrets: ["deploy-secret-value-123"] })!;
+    const text = out.lines.join("\n");
+    expect(text).not.toContain("deploy-secret-value-123");
+    expect(text).not.toContain("plain-looking-value");
+    expect(text).not.toContain("ghp_abcdefghij");
+    expect(text).toContain("[redacted]");
+
+    const failedRun = new Map<string, NodeResult>([
+      ["explain", { status: "failed", data: { error: "auth failed for deploy-secret-value-123" }, toolCalls: [] }],
+    ]);
+    expect(resolveFinalOutput(secretWf, failedRun, { secrets: ["deploy-secret-value-123"] })!.lines).toEqual([
+      "auth failed for [redacted]",
+    ]);
+  });
+
   it("is null when nothing is worth showing", () => {
     expect(resolveFinalOutput(wf, new Map([["survey", ok({})]]))).toBeNull();
     expect(resolveFinalOutput(wf, new Map())).toBeNull();
+  });
+});
+
+describe("printing the answer in CI", () => {
+  it("is off in CI unless --show-output, and on everywhere else", () => {
+    expect(shouldPrintFinalOutput(false, { GITHUB_ACTIONS: "true" })).toBe(false);
+    expect(shouldPrintFinalOutput(false, { CI: "true" })).toBe(false);
+    expect(shouldPrintFinalOutput(false, { CI: "1" })).toBe(false);
+    expect(shouldPrintFinalOutput(true, { GITHUB_ACTIONS: "true" })).toBe(true);
+    expect(shouldPrintFinalOutput(false, {})).toBe(true);
+    expect(shouldPrintFinalOutput(false, { CI: "false" })).toBe(true);
+  });
+
+  it("says where the answer went in one line instead", () => {
+    expect(formatSavedOutputLine(".sweny/runs/20260930-101500-abc123/output.md")).toBe(
+      "  answer saved to .sweny/runs/20260930-101500-abc123/output.md (pass --show-output to print it in CI)",
+    );
+    expect(formatSavedOutputLine(null)).toBe("  answer not printed in CI (pass --show-output to print it)");
   });
 });
 
@@ -206,6 +287,14 @@ describe("output.md", () => {
     const body = fs.readFileSync(path.join(d, rel!), "utf-8");
     expect(body.startsWith("# Explain This Repo\n\n")).toBe(true);
     expect(body).toContain("l79");
+  });
+
+  it("is private to the user (0600)", () => {
+    if (process.platform === "win32") return;
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "final-output-"));
+    dirs.push(d);
+    const rel = writeFinalOutput("20260930-101500-abc123", "x", d)!;
+    expect(fs.statSync(path.join(d, rel)).mode & 0o777).toBe(0o600);
   });
 
   it("titles a failure with the node that failed", () => {

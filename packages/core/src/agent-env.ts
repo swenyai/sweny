@@ -32,6 +32,7 @@ import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import type { SandboxSettings } from "@anthropic-ai/claude-agent-sdk";
 import type { Logger, Skill } from "./types.js";
+import { runKeyDir } from "./journal.js";
 
 // ─── Scoped env ──────────────────────────────────────────────────
 
@@ -1118,7 +1119,11 @@ export function buildSandboxSettings(
     },
     credentials: {
       envVars: AGENT_AUTH_VARS.map((name) => ({ name, mode: "deny" as const })),
-      files: [{ path: path.join(opts.home ?? homedir(), ".claude", ".credentials.json"), mode: "deny" as const }],
+      files: [
+        { path: path.join(opts.home ?? homedir(), ".claude", ".credentials.json"), mode: "deny" as const },
+        // Run journal keys: an agent that could read them could forge journal records.
+        { path: runKeyDir(), mode: "deny" as const },
+      ],
     },
   };
 }

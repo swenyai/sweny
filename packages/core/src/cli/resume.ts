@@ -12,11 +12,13 @@ import { validateRuntimeInput } from "../inputs.js";
 import {
   JOURNAL_DIR,
   JOURNAL_FILE,
+  JournalKeyError,
   JournalLockedError,
   JournalVersionError,
   RunJournal,
   buildResumePlan,
   canonicalHash,
+  checkJournalAgainstWorkflow,
   findJournalRun,
   journalDir,
   mayRepeatWrites,
@@ -135,8 +137,14 @@ export function prepareResume(ref: string, opts: ResumeOptions, deps: PrepareRes
     // --plan stays read-only: a torn tail is reported, not cut.
     read = readJournal(file, { repair: !opts.plan });
   } catch (err) {
-    if (err instanceof JournalVersionError) return fail(err.message);
+    if (err instanceof JournalVersionError || err instanceof JournalKeyError) return fail(err.message);
     return fail(`cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (read.forgedAtLine !== undefined) {
+    return fail(
+      `run journal ${file} line ${read.forgedAtLine} fails authentication: it was edited or written by something ` +
+        `other than this run. Refusing to resume. Start a new run.`,
+    );
   }
   if (read.corruptAtLine !== undefined) {
     return fail(
@@ -177,6 +185,9 @@ export function prepareResume(ref: string, opts: ResumeOptions, deps: PrepareRes
     }
     lines.push(`warning: --force: workflow ${workflowFile} changed since the run started`);
   }
+  // Replayed control flow must exist in the workflow (not overridable by --force).
+  const flaw = checkJournalAgainstWorkflow(read.records, workflow);
+  if (flaw) return fail(`cannot resume run ${runId}: ${flaw}. Start a new run.`);
 
   let input: Record<string, unknown>;
   if (opts.input !== undefined) {

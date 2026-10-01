@@ -53,23 +53,29 @@ Nodes that write outside safe outputs (an agent with write tools, shell or `git 
 |---------|-----|-----------|
 | workflow changed | The workflow file (including its `spec_version`) differs from the one the run started with. Mixing results from two workflows is not a resume. | Start a new run, or `--force` (warns). |
 | instructions, rules or context files changed | A `file:` or `url:` Source resolved to different text. | Same. |
-| configured skills, agent or sweny version changed | Different tools could have produced different results. | Same. |
+| configured skills, agent or sweny version changed | Different tools could have produced different results. The fingerprint covers each skill's id, name, description, category, instruction, config field names and their env var names, every tool's name, description, input schema, access class and a digest of its handler source, the MCP server's type, command, args, URL, env var names and header names, the agent, and the sweny version. Secret values are never part of it (MCP env and header values are left out, args are redacted first), so rotating a token is not a change. | Same. |
 | input differs, or the journal redacted it | The input held secrets, so the journal kept a redacted copy. | Pass the same `--input` JSON again. |
 | may repeat writes | A node that writes outside safe outputs had started. | Check what it did, then `--allow-repeat-writes`. |
 | already finished successfully | Nothing to resume. | Nothing. |
-| damaged journal | A record in the middle of the file fails its checksum. | Start a new run. |
+| damaged journal | A record in the middle of the file is unreadable. | Start a new run. |
+| fails authentication | A whole record does not match the run's key: it was edited or written by something other than the run. | Start a new run. |
+| impossible record sequence, or a route that is not an edge | The journal describes control flow the executor never writes (a record after `run:end`, a node that no route pointed to, a second route for one visit), or a route the workflow does not have or whose `max_iterations` is used up. Not overridable by `--force`. | Start a new run. |
+| key missing | The run's key is not in this user's state dir. | Resume as the user that started the run, or point `SWENY_STATE_DIR` at its state dir. |
 | in use by process N | Another resume of the same run is still running. | Wait for it, or stop it. |
 
 ## The journal
 
-Location: `.sweny/runs/<run-id>/journal.ndjson`, next to the run's history record. One JSON record per line, each with a format version, a sequence number and a checksum. Every record is fsync'd before the run moves on.
+Location: `.sweny/runs/<run-id>/journal.ndjson` (mode `0600`, in a `0700` run directory), next to the run's history record. One JSON record per line, each with a format version, a sequence number and an HMAC-SHA256 under a per-run key. Every record is fsync'd before the run moves on.
+
+- **The key**: 32 random bytes made when the run starts, kept outside the workspace in `$SWENY_STATE_DIR/run-keys/` (default `$XDG_STATE_HOME/sweny/run-keys/`, else `~/.local/state/sweny/run-keys/`; directory `0700`, file `0600`). Anything that can write the workspace but not your state dir cannot forge a record a resume accepts. Sandboxed agents cannot read the key directory (the agent sandbox and the process sandbox both deny it), and the process sandbox also denies writes to `.sweny/runs/`. An agent running unsandboxed as your user can read the key, so resume also checks the record sequence and every replayed route against the workflow's edges. Journals written before keys existed (format v1) cannot be resumed.
+- **Spend**: each agent attempt's token and cost usage is journaled as it is reported (live reports at most every 2 seconds, plus the final figure). A resume starts the run budget from that total, so `budget:` and `--max-tokens` / `--max-cost` cap the whole logical run, not each attempt.
 
 - **Torn last record** (power loss mid-write): dropped on resume, with a note. The run resumes from the last whole record.
 - **Damage in the middle**: refused, never "repaired" by cutting valid records.
 - **What it holds**: workflow, instruction, input and tool hashes, the run input, each node's result data and eval verdicts, safe-output intents and receipts, and routing decisions. Not tool call inputs or outputs.
 - **What it never holds**: environment values. Secret-looking keys (`token`, `secret`, `password`, `api_key`, ...), known token shapes, and the values of secret environment variables and skill credentials are replaced with `[redacted]`.
 - **Git**: each run directory has a `.gitignore` of `*`, so an agent's `git add -A` never commits a journal.
-- **Retention**: the 20 most recent journals are kept.
+- **Retention**: the 20 most recent journals are kept; pruning a journal deletes its run directory and its key.
 
 Turn it off with `--no-journal`, or `journal: off` in `.sweny.yml`. A run without a journal cannot be resumed.
 
@@ -87,4 +93,4 @@ A fresh runner starts without `.sweny/runs/`, so the Action cannot resume yet. P
 | `--workflow <file>` | Load the workflow from here, when the file moved. Its content must still match. |
 | `--input <json>` | The original input, when the journal redacted it. Must match the original. |
 
-`--timeout`, `--max-steps`, `--json`, `--stream`, `--verbose`, `--mermaid`, `--comment-file`, `--agent`, `--harness-policy` and `--no-history` work as on [`sweny workflow run`](/cli/commands/#sweny-workflow-run).
+`--timeout`, `--max-steps`, `--json`, `--stream`, `--verbose`, `--mermaid`, `--comment-file`, `--agent`, `--harness-policy`, `--show-output` and `--no-history` work as on [`sweny workflow run`](/cli/commands/#sweny-workflow-run).

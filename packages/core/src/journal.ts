@@ -2,10 +2,23 @@
  * Run journal (#363): an append-only log of one workflow run, enough to resume
  * a killed or failed run without re-running the nodes that already finished.
  *
- * File: `.sweny/runs/<run-id>/journal.ndjson`, one JSON record per line. Every
- * record carries the format version (`v`), a sequence number (`seq`) and a
- * checksum (`h`, sha256 of the record without `h`). Each append is written and
- * fsync'd before the executor moves on, so a record on disk is a fact.
+ * File: `.sweny/runs/<run-id>/journal.ndjson` (mode 0600), one JSON record per
+ * line. Every record carries the format version (`v`), a sequence number (`seq`)
+ * and an authentication code (`h`, HMAC-SHA256 of the record without `h`, under
+ * a per-run key). Each append is written and fsync'd before the executor moves
+ * on, so a record on disk is a fact.
+ *
+ * Integrity: the key is 32 random bytes made when the run starts and kept
+ * OUTSIDE the workspace, in the user's sweny state dir
+ * (`$SWENY_STATE_DIR`, else `$XDG_STATE_HOME/sweny`, else
+ * `~/.local/state/sweny`), under `run-keys/` (dir 0700, file 0600). Anything
+ * that can write the workspace but not that dir (an agent confined to the
+ * workspace, a checked-out branch, an artifact) cannot mint a record resume
+ * accepts. Both sandboxes deny reading the key dir; an unsandboxed agent
+ * running as the same OS user can still read it, which is why resume also
+ * checks the record sequence (see {@link buildResumePlan}) and every replayed
+ * route against the workflow's real edges. A resume on another machine needs
+ * the same state dir.
  *
  * Records, in run order:
  *   run:start        workflow / instruction / input / tool hashes, harness id, input (redacted)
@@ -17,7 +30,11 @@
  *   output:applied   the write returned (key + the ids it produced)
  *   node:end         final result of the visit and the write-stage counters
  *   route            the edge taken after the visit (null = the run ended)
+ *   usage            spend of one agent attempt (cumulative; live while it runs, final when it returns)
  *   run:end          success | failed | crashed
+ *
+ * Spend: a resume seeds the run budget with every attempt's journaled usage,
+ * so a crash never resets the whole-run ceiling.
  *
  * Recovery: a torn or corrupt tail (power loss mid-append) is truncated back to
  * the last valid record. Corruption in the middle of the file is refused.
@@ -38,13 +55,16 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import type { Logger, NodeResult, Skill, Tool, ToolContext, Workflow } from "./types.js";
+import type { Logger, NodeResult, NodeUsage, Skill, Tool, ToolContext, Workflow } from "./types.js";
 import type { SafeOutputIntent, WriteStageState } from "./safe-outputs.js";
 import { resolveNodePermissions } from "./node-policy.js";
 import { CURRENT_SPEC_VERSION } from "./migrations.js";
+import { spendOf, type Spend } from "./budget.js";
 
-export const JOURNAL_SCHEMA_VERSION = 1;
+/** v2: records are authenticated with a per-run HMAC key (v1 used a public checksum and is refused). */
+export const JOURNAL_SCHEMA_VERSION = 2;
 export const JOURNAL_DIR = path.join(".sweny", "runs");
 export const JOURNAL_FILE = "journal.ndjson";
 const LOCK_FILE = "journal.lock";
@@ -91,20 +111,122 @@ export function instructionHash(sources: Record<string, { content: string }>): s
   return canonicalHash(Object.fromEntries(Object.entries(sources).map(([k, v]) => [k, v?.content ?? ""])));
 }
 
-/** Hash of the tools the run could call: skill ids, tool names and access, MCP presence, sweny version. */
-export function toolsHash(skills: Map<string, Skill>, swenyVersion?: string, harnessId?: string): string {
+const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
+
+/**
+ * Fingerprint of everything that decides what the run's tools do: per skill its
+ * id, name, description, category, instruction, config field names and env var
+ * NAMES, every tool's name, description, input schema, access class and a
+ * digest of its handler source, the MCP server's type, command, args, url,
+ * env var NAMES and header NAMES, and its tool aliases; plus the sweny version
+ * (which pins built-in skill code) and the harness. Secret values never enter
+ * it: MCP env and header values are dropped, and args are redacted first, so
+ * rotating a token neither changes the fingerprint nor leaves a hash of it.
+ */
+export function toolsHash(
+  skills: Map<string, Skill>,
+  swenyVersion?: string,
+  harnessId?: string,
+  secrets: string[] = [],
+): string {
+  const names = (m: Record<string, unknown> | undefined) => (m ? Object.keys(m).sort() : null);
   const shape = [...skills.values()]
     .map((s) => ({
       id: s.id,
-      tools: s.tools.map((t) => `${t.name}:${t.access ?? "unclassified"}`).sort(),
-      mcp: s.mcp ? (s.mcp.url ?? s.mcp.command ?? "mcp") : null,
+      name: s.name ?? null,
+      description: s.description ?? null,
+      category: s.category ?? null,
+      instruction: s.instruction ?? null,
+      config: Object.entries(s.config ?? {})
+        .map(([k, f]) => ({ key: k, env: f?.env ?? null, required: f?.required === true }))
+        .sort((a, b) => a.key.localeCompare(b.key)),
+      tools: (s.tools ?? [])
+        .map((t) => ({
+          name: t.name,
+          description: t.description ?? null,
+          schema: t.input_schema ?? null,
+          access: t.access ?? "unclassified",
+          impl: typeof t.handler === "function" ? sha256(t.handler.toString()) : null,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      mcp: s.mcp
+        ? {
+            type: s.mcp.type ?? null,
+            command: s.mcp.command ?? null,
+            args: s.mcp.args ? redact(s.mcp.args, secrets).value : null,
+            url: s.mcp.url ? redact(s.mcp.url, secrets).value : null,
+            env: names(s.mcp.env),
+            headers: names(s.mcp.headers),
+          }
+        : null,
+      aliases: s.mcpAliases ?? null,
     }))
     .sort((a, b) => a.id.localeCompare(b.id));
   return canonicalHash({ skills: shape, sweny: swenyVersion ?? null, harness: harnessId ?? null });
 }
 
-function recordHash(body: string): string {
-  return crypto.createHash("sha256").update(body).digest("hex").slice(0, 16);
+function recordMac(key: Buffer, body: string): string {
+  return crypto.createHmac("sha256", key).update(body).digest("hex");
+}
+
+// ─── Run keys ─────────────────────────────────────────────────────
+
+/** sweny's per-user state dir: `$SWENY_STATE_DIR`, else `$XDG_STATE_HOME/sweny`, else `~/.local/state/sweny`. */
+export function swenyStateDir(env: Record<string, string | undefined> = process.env): string {
+  if (env.SWENY_STATE_DIR && env.SWENY_STATE_DIR.trim() !== "") return path.resolve(env.SWENY_STATE_DIR);
+  const xdg = env.XDG_STATE_HOME;
+  const base = xdg && path.isAbsolute(xdg) ? xdg : path.join(os.homedir(), ".local", "state");
+  return path.join(base, "sweny");
+}
+
+/** Where run keys live. Never inside the workspace. */
+export function runKeyDir(env: Record<string, string | undefined> = process.env): string {
+  return path.join(swenyStateDir(env), "run-keys");
+}
+
+function realOr(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/** The key file for one run in one workspace (the workspace path is hashed, not stored). */
+export function runKeyFile(cwd: string, runId: string, keyDir: string = runKeyDir()): string {
+  const scope = sha256(realOr(cwd)).slice(0, 16);
+  return path.join(keyDir, `${scope}-${runId}.key`);
+}
+
+/** Thrown when a journal's key is missing or unreadable: its records cannot be checked. */
+export class JournalKeyError extends Error {
+  constructor(file: string, why: string) {
+    super(
+      `cannot verify the run journal: its key ${file} is ${why}. A journal can only be resumed by the user ` +
+        `(and state dir) that started the run; set SWENY_STATE_DIR to that dir, or start a new run.`,
+    );
+    this.name = "JournalKeyError";
+  }
+}
+
+function createRunKey(file: string): Buffer {
+  const key = crypto.randomBytes(32);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, key.toString("hex") + "\n", { mode: 0o600 });
+  fs.chmodSync(file, 0o600);
+  return key;
+}
+
+/** Read a run key. Throws {@link JournalKeyError}. */
+export function loadRunKey(file: string): Buffer {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf-8").trim();
+  } catch {
+    throw new JournalKeyError(file, "missing");
+  }
+  if (!/^[0-9a-f]{64}$/.test(text)) throw new JournalKeyError(file, "not a valid key");
+  return Buffer.from(text, "hex");
 }
 
 // ─── Redaction ────────────────────────────────────────────────────
@@ -147,6 +269,22 @@ export function collectSecretValues(...maps: Array<Record<string, string | undef
     }
   }
   return [...out].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * The secret values a run can see: secret-named env vars, plus skill config
+ * fields (resolved from their env vars) whose config key looks secret. The
+ * same set the journal redacts, for anything else that prints node output.
+ */
+export function runSecretValues(
+  skills: Iterable<Skill> | undefined,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const config: Record<string, string | undefined> = {};
+  for (const s of skills ?? []) {
+    for (const [k, f] of Object.entries(s.config ?? {})) if (f?.env) config[k] = env[f.env];
+  }
+  return collectSecretValues(env, config);
 }
 
 /**
@@ -252,13 +390,24 @@ interface OutputRecord extends JournalRecord {
   recovered?: boolean;
 }
 
-/** Thrown when the journal was written by a newer sweny. */
+/** Thrown when the journal was written by a newer sweny, or by an older one without record authentication. */
 export class JournalVersionError extends Error {
   constructor(version: unknown) {
     super(
-      `run journal format v${String(version)} is newer than this sweny understands (v${JOURNAL_SCHEMA_VERSION}); upgrade sweny to resume it`,
+      typeof version === "number" && version < JOURNAL_SCHEMA_VERSION
+        ? `run journal format v${version} predates authenticated records (v${JOURNAL_SCHEMA_VERSION}); it cannot be ` +
+            `resumed safely. Start a new run.`
+        : `run journal format v${String(version)} is newer than this sweny understands (v${JOURNAL_SCHEMA_VERSION}); upgrade sweny to resume it`,
     );
     this.name = "JournalVersionError";
+  }
+}
+
+/** Thrown when the journal's records describe something the executor never writes: edited, spliced or forged. */
+export class JournalIntegrityError extends Error {
+  constructor(message: string) {
+    super(`${message}. The journal was edited or does not come from this run; start a new run.`);
+    this.name = "JournalIntegrityError";
   }
 }
 
@@ -288,11 +437,18 @@ export interface JournalRead {
   records: JournalRecord[];
   /** Bytes dropped from a torn / corrupt tail (0 when the file was clean). */
   truncatedBytes: number;
-  /** Set when an invalid record sits before valid ones: not a torn tail, so not repairable. */
+  /**
+   * Set when an invalid record sits before valid ones (not a torn tail), or when
+   * a whole record fails authentication (tampering, never a torn write). Not repairable.
+   */
   corruptAtLine?: number;
+  /** The line whose record failed authentication, when that is why the journal is refused. */
+  forgedAtLine?: number;
 }
 
-function verifyLine(line: string, expectedSeq: number): JournalRecord | "version" | undefined {
+type LineCheck = JournalRecord | "version" | "forged" | undefined;
+
+function verifyLine(line: string, expectedSeq: number, key: () => Buffer): LineCheck {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -301,11 +457,22 @@ function verifyLine(line: string, expectedSeq: number): JournalRecord | "version
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
   const rec = parsed as Record<string, unknown>;
+  if (typeof rec.v === "number" && rec.v !== JOURNAL_SCHEMA_VERSION && expectedSeq === 1) return "version";
   if (typeof rec.v === "number" && rec.v > JOURNAL_SCHEMA_VERSION) return "version";
-  if (rec.v !== JOURNAL_SCHEMA_VERSION || rec.seq !== expectedSeq || typeof rec.type !== "string") return undefined;
+  if (rec.v !== JOURNAL_SCHEMA_VERSION || typeof rec.type !== "string" || typeof rec.h !== "string") return undefined;
   const { h, ...body } = rec;
-  if (typeof h !== "string" || h !== recordHash(JSON.stringify(body))) return undefined;
+  const expected = Buffer.from(recordMac(key(), JSON.stringify(body)), "hex");
+  const given = /^[0-9a-f]{64}$/.test(h as string) ? Buffer.from(h as string, "hex") : Buffer.alloc(0);
+  // A whole, well-formed line that fails its MAC is tampering, not a torn append.
+  if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return "forged";
+  if (rec.seq !== expectedSeq) return "forged";
   return rec as JournalRecord;
+}
+
+/** `<cwd>/.sweny/runs/<run-id>/journal.ndjson` -> cwd and run id. */
+function journalLocation(file: string): { cwd: string; runId: string } {
+  const runDir = path.dirname(path.resolve(file));
+  return { runId: path.basename(runDir), cwd: path.dirname(path.dirname(path.dirname(runDir))) };
 }
 
 function looksLikeRecord(text: string): boolean {
@@ -318,18 +485,29 @@ function looksLikeRecord(text: string): boolean {
 }
 
 /**
- * Read a journal. With `repair`, a torn or corrupt tail is truncated on disk
- * back to the last valid record. Throws {@link JournalVersionError} for a
- * newer format.
+ * Read a journal. With `repair`, a torn tail is truncated on disk back to the
+ * last valid record. Records are authenticated with the run's key (`key`, else
+ * loaded from the state dir for the run the path names). Throws
+ * {@link JournalVersionError} for another format and {@link JournalKeyError}
+ * when the key is missing.
  */
-export function readJournal(file: string, opts: { repair?: boolean } = {}): JournalRead {
+export function readJournal(file: string, opts: { repair?: boolean; key?: Buffer; keyDir?: string } = {}): JournalRead {
   const buf = fs.readFileSync(file);
+  let key = opts.key;
+  const getKey = (): Buffer => {
+    if (!key) {
+      const { cwd, runId } = journalLocation(file);
+      key = loadRunKey(runKeyFile(cwd, runId, opts.keyDir ?? runKeyDir()));
+    }
+    return key as Buffer;
+  };
   const records: JournalRecord[] = [];
   let offset = 0;
   let validBytes = 0;
   let line = 0;
   let firstBad: number | undefined;
   let corruptAtLine: number | undefined;
+  let forgedAtLine: number | undefined;
   while (offset < buf.length) {
     const nl = buf.indexOf(0x0a, offset);
     line++;
@@ -341,9 +519,13 @@ export function readJournal(file: string, opts: { repair?: boolean } = {}): Jour
     const text = buf.subarray(offset, nl).toString("utf-8");
     offset = nl + 1;
     if (firstBad === undefined) {
-      const rec = verifyLine(text, records.length + 1);
+      const rec = verifyLine(text, records.length + 1, getKey);
       if (rec === "version") throw new JournalVersionError((JSON.parse(text) as { v?: unknown }).v);
-      if (rec) {
+      if (rec === "forged") {
+        firstBad = line;
+        corruptAtLine = line;
+        forgedAtLine = line;
+      } else if (rec) {
         records.push(rec);
         validBytes = offset;
       } else {
@@ -358,7 +540,13 @@ export function readJournal(file: string, opts: { repair?: boolean } = {}): Jour
   if (opts.repair && truncatedBytes > 0 && corruptAtLine === undefined) {
     fs.truncateSync(file, validBytes);
   }
-  return { file, records, truncatedBytes, ...(corruptAtLine !== undefined ? { corruptAtLine } : {}) };
+  return {
+    file,
+    records,
+    truncatedBytes,
+    ...(corruptAtLine !== undefined ? { corruptAtLine } : {}),
+    ...(forgedAtLine !== undefined ? { forgedAtLine } : {}),
+  };
 }
 
 // ─── Resume plan ──────────────────────────────────────────────────
@@ -397,14 +585,206 @@ export interface ResumePlan {
   ends: Map<string, EndRecord>;
   intents: Map<string, OutputRecord>;
   receipts: Map<string, OutputRecord>;
+  /** Spend every earlier attempt journaled: the run budget starts here on resume. */
+  priorSpend: Spend;
 }
 
 const visitKey = (node: string, iteration: number) => `${node}#${iteration}`;
 
-/** Work out what a resume replays and where it picks up. */
+const RECORD_TYPES = new Set([
+  "run:start",
+  "run:resume",
+  "node:start",
+  "node:checkpoint",
+  "output:intent",
+  "output:applied",
+  "node:end",
+  "route",
+  "usage",
+  "run:end",
+]);
+
+const isPosInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0;
+const isName = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+const isAmount = (v: unknown): boolean => typeof v === "number" && Number.isFinite(v) && v >= 0;
+
+/**
+ * Check that the records are a sequence the executor can write: one run:start
+ * first; nothing but run:resume after run:end; a visit starts only where the
+ * last route pointed (or the entry), or re-starts an unfinished or failed
+ * visit after a resume; checkpoints, writes, usage and node:end only inside
+ * the open visit; one route per finished visit, from that visit's node.
+ * Throws {@link JournalIntegrityError}.
+ */
+export function checkRecordSequence(records: JournalRecord[]): void {
+  const bad = (r: JournalRecord, why: string): never => {
+    throw new JournalIntegrityError(`run journal record ${r.seq} (${r.type}) ${why}`);
+  };
+  interface Open {
+    node: string;
+    iteration: number;
+    ended: boolean;
+    failed: boolean;
+    routed: boolean;
+  }
+  let cur: Open | undefined;
+  let next: string | null | undefined;
+  let closed = false;
+  let resumedSinceStart = false;
+  const visits = new Map<string, number>();
+  const checkpointed = new Set<string>();
+  const intentKeys = new Set<string>();
+  const inVisit = (r: JournalRecord) => {
+    if (!cur || cur.ended) bad(r, "is outside any open node visit");
+    if (r.node !== cur!.node || r.iteration !== cur!.iteration) {
+      bad(r, `names ${String(r.node)}#${String(r.iteration)}, but the open visit is ${cur!.node}#${cur!.iteration}`);
+    }
+  };
+
+  records.forEach((r, i) => {
+    if (!RECORD_TYPES.has(r.type)) bad(r, "has an unknown type");
+    if (i === 0) {
+      if (r.type !== "run:start") bad(r, "is not run:start");
+      if (!isName(r.run_id) || !isName(r.workflow_entry)) bad(r, "is missing the run id or entry node");
+      next = r.workflow_entry as string;
+      return;
+    }
+    if (r.type === "run:start") bad(r, "is a second run:start");
+    if (closed && r.type !== "run:resume") bad(r, "comes after run:end");
+    switch (r.type) {
+      case "run:resume":
+        closed = false;
+        resumedSinceStart = true;
+        break;
+      case "node:start": {
+        if (!isName(r.node) || !isPosInt(r.iteration)) bad(r, "has no valid node or iteration");
+        const node = r.node as string;
+        const restart =
+          resumedSinceStart &&
+          !!cur &&
+          cur.node === node &&
+          cur.iteration === r.iteration &&
+          (!cur.ended || (cur.failed && !cur.routed));
+        if (!restart) {
+          if (cur && !cur.ended) bad(r, `starts ${node} while ${cur.node} is still running`);
+          if (cur && !cur.routed) bad(r, `starts ${node} before ${cur.node} was routed`);
+          if (typeof next !== "string" || node !== next) {
+            bad(r, `starts ${node}, but the run was routed to ${next === null ? "the end" : String(next)}`);
+          }
+          if (r.iteration !== (visits.get(node) ?? 0) + 1) bad(r, `starts ${node} at the wrong iteration`);
+          visits.set(node, r.iteration as number);
+        }
+        cur = { node, iteration: r.iteration as number, ended: false, failed: false, routed: false };
+        resumedSinceStart = false;
+        break;
+      }
+      case "node:checkpoint": {
+        inVisit(r);
+        const k = visitKey(r.node as string, r.iteration as number);
+        if (checkpointed.has(k)) bad(r, "checkpoints a visit twice");
+        checkpointed.add(k);
+        break;
+      }
+      case "output:intent":
+      case "output:applied":
+        inVisit(r);
+        if (!checkpointed.has(visitKey(r.node as string, r.iteration as number))) {
+          bad(r, "records a write before the visit's checkpoint");
+        }
+        if (!isName(r.key)) bad(r, "has no idempotency key");
+        if (r.type === "output:intent") intentKeys.add(r.key as string);
+        else if (!intentKeys.has(r.key as string) && r.recovered !== true) bad(r, "has no matching intent");
+        break;
+      case "usage":
+        inVisit(r);
+        if (!isAmount(r.tokens) || !isAmount(r.cost_usd) || !isPosInt((r.attempt as number) + 1)) {
+          bad(r, "has invalid amounts");
+        }
+        break;
+      case "node:end": {
+        inVisit(r);
+        const result = r.result as NodeResult | undefined;
+        if (!result || typeof result !== "object" || typeof result.status !== "string") bad(r, "has no result");
+        cur!.ended = true;
+        cur!.failed = result!.status === "failed";
+        break;
+      }
+      case "route":
+        if (!cur || !cur.ended) bad(r, "routes before any visit ended");
+        if (cur!.routed) bad(r, `routes ${cur!.node} a second time`);
+        if (r.from !== cur!.node) bad(r, `routes from ${String(r.from)}, but the visit that ended is ${cur!.node}`);
+        if (r.to !== null && !isName(r.to)) bad(r, "has no valid target");
+        cur!.routed = true;
+        next = r.to as string | null;
+        break;
+      case "run:end":
+        if (!["success", "failed", "crashed"].includes(r.status as string)) bad(r, "has an unknown status");
+        closed = true;
+        break;
+    }
+  });
+}
+
+/**
+ * Check a journal against the workflow it is resumed with: every visited node
+ * exists, and every journaled route is a real edge that its `max_iterations`
+ * still allowed. Returns the first problem, or undefined.
+ */
+export function checkJournalAgainstWorkflow(records: JournalRecord[], workflow: Workflow): string | undefined {
+  const start = records[0];
+  if (start?.type === "run:start" && start.workflow_entry !== workflow.entry) {
+    return `the run started at node ${String(start.workflow_entry)}, but the workflow's entry is ${workflow.entry}`;
+  }
+  const taken = new Map<string, number>();
+  for (const r of records) {
+    if (r.type === "node:start" && !workflow.nodes[r.node as string]) {
+      return `the journal visits node ${String(r.node)}, which this workflow does not have`;
+    }
+    if (r.type !== "route" || r.to === null) continue;
+    const from = r.from as string;
+    const to = r.to as string;
+    const edge = workflow.edges.find((e) => e.from === from && e.to === to);
+    if (!edge) return `the journal routes ${from} -> ${to}, which is not an edge of this workflow`;
+    const k = `${from}->${to}`;
+    const n = (taken.get(k) ?? 0) + 1;
+    taken.set(k, n);
+    if (edge.max_iterations !== undefined && n > edge.max_iterations) {
+      return `the journal routes ${from} -> ${to} ${n} times; the edge allows ${edge.max_iterations}`;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Spend the journal shows: per agent attempt (of each run segment), the
+ * largest cumulative usage it reported, live or final, summed.
+ */
+function journaledSpend(records: JournalRecord[]): Spend {
+  const perAttempt = new Map<string, Spend>();
+  let segment = 1;
+  for (const r of records) {
+    if (r.type === "run:resume") segment++;
+    if (r.type !== "usage") continue;
+    const k = `${segment}|${visitKey(r.node as string, r.iteration as number)}|${String(r.attempt)}`;
+    const prev = perAttempt.get(k) ?? { tokens: 0, costUsd: 0 };
+    perAttempt.set(k, {
+      tokens: Math.max(prev.tokens, r.tokens as number),
+      costUsd: Math.max(prev.costUsd, r.cost_usd as number),
+    });
+  }
+  const total: Spend = { tokens: 0, costUsd: 0 };
+  for (const s of perAttempt.values()) {
+    total.tokens += s.tokens;
+    total.costUsd += s.costUsd;
+  }
+  return total;
+}
+
+/** Work out what a resume replays and where it picks up. Throws {@link JournalIntegrityError} for an impossible sequence. */
 export function buildResumePlan(records: JournalRecord[]): ResumePlan {
   const start = records.find((r) => r.type === "run:start") as RunStartRecord | undefined;
   if (!start) throw new Error("run journal has no run:start record; nothing to resume");
+  checkRecordSequence(records);
 
   interface Visit {
     node: string;
@@ -530,6 +910,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
     ends,
     intents,
     receipts,
+    priorSpend: journaledSpend(records),
   };
 }
 
@@ -703,7 +1084,17 @@ export interface ExecutionJournal {
   wrapWrites(node: string, iteration: number, skills: Map<string, Skill>): Map<string, Skill>;
   nodeEnd(node: string, iteration: number, result: NodeResult, writeState: WriteStageState): void;
   route(from: string, to: string | null): void;
+  /**
+   * Spend of one agent attempt, cumulative for the attempt: `final` when the
+   * attempt returned, otherwise a live report (the journal may throttle those).
+   */
+  usage?(node: string, iteration: number, attempt: number, usage: NodeUsage, final: boolean): void;
+  /** Spend earlier attempts of this run already journaled (resume); the run budget starts from it. */
+  priorSpend?(): Spend | undefined;
 }
+
+/** Minimum gap between two live usage records of one attempt. Final reports are always written. */
+export const USAGE_JOURNAL_INTERVAL_MS = 2000;
 
 /** Test seam: called before each append; a throw simulates the process dying there. */
 export interface JournalFaults {
@@ -723,6 +1114,8 @@ export interface RunJournalOptions {
   faults?: JournalFaults;
   /** Journals kept on disk (default {@link JOURNAL_KEEP}). */
   keep?: number;
+  /** Where run keys live (default {@link runKeyDir}). Never inside the workspace. */
+  keyDir?: string;
 }
 
 export interface ResumeJournalOptions extends RunJournalOptions {
@@ -758,14 +1151,20 @@ export function findJournalRun(ref: string, cwd: string = process.cwd()): string
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-/** Delete the oldest journals beyond `keep`, never `except`. Never throws. */
-export function pruneJournals(cwd: string, keep: number = JOURNAL_KEEP, except?: string): number {
+/** Delete the oldest journals (and their keys) beyond `keep`, never `except`. Never throws. */
+export function pruneJournals(
+  cwd: string,
+  keep: number = JOURNAL_KEEP,
+  except?: string,
+  keyDir: string = runKeyDir(),
+): number {
   const runs = listJournalRuns(cwd).filter((r) => r !== except);
   const extra = runs.slice(0, Math.max(0, runs.length - Math.max(0, keep - (except ? 1 : 0))));
   let removed = 0;
   for (const r of extra) {
     try {
       fs.rmSync(journalDir(cwd, r), { recursive: true, force: true });
+      fs.rmSync(runKeyFile(cwd, r, keyDir), { force: true });
       removed++;
     } catch {
       // leave it
@@ -797,8 +1196,14 @@ export class RunJournal implements ExecutionJournal {
   private seq = 0;
   private dead = false;
   private began = false;
+  private closed = false;
   private secrets: string[] = [];
   private consumed = new Set<string>();
+  /** Per-run HMAC key; lives only here and in the key file outside the workspace. */
+  private key: Buffer | undefined;
+  private readonly keyFile: string;
+  /** Last live usage record per attempt: time and spend, for throttling. */
+  private lastUsage = new Map<string, { at: number; tokens: number; costUsd: number }>();
 
   private constructor(opts: RunJournalOptions, resume?: ResumeJournalOptions) {
     this.opts = opts;
@@ -807,6 +1212,7 @@ export class RunJournal implements ExecutionJournal {
     this.dir = journalDir(this.cwd, opts.runId);
     this.file = path.join(this.dir, JOURNAL_FILE);
     this.logger = opts.logger ?? quietLogger;
+    this.keyFile = runKeyFile(this.cwd, opts.runId, opts.keyDir ?? runKeyDir());
     if (resume) {
       this.resume = {
         plan: resume.plan,
@@ -814,6 +1220,7 @@ export class RunJournal implements ExecutionJournal {
         allowRepeatWrites: resume.allowRepeatWrites === true,
       };
       this.seq = resume.read.records.length;
+      this.key = loadRunKey(this.keyFile);
     }
   }
 
@@ -842,8 +1249,14 @@ export class RunJournal implements ExecutionJournal {
     } catch (err) {
       if (err instanceof JournalLockedError) throw err;
     }
-    fs.mkdirSync(this.dir, { recursive: true });
-    fs.writeFileSync(lock, String(process.pid));
+    this.makeDir();
+    fs.writeFileSync(lock, String(process.pid), { mode: 0o600 });
+  }
+
+  /** The run dir is private (0700); its parents are created as usual. */
+  private makeDir(): void {
+    fs.mkdirSync(path.dirname(this.dir), { recursive: true });
+    fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
   }
 
   private releaseLock(): void {
@@ -856,6 +1269,12 @@ export class RunJournal implements ExecutionJournal {
 
   private append(type: string, fields: Record<string, unknown>): void {
     if (this.dead) return;
+    if (!this.key) {
+      // No key, no record resume could trust: stop journaling rather than write unauthenticated records.
+      this.dead = true;
+      this.logger.warn(`  run journal: no signing key for this run; this run cannot be resumed`);
+      return;
+    }
     const body: Record<string, unknown> = {
       v: JOURNAL_SCHEMA_VERSION,
       seq: this.seq + 1,
@@ -863,7 +1282,7 @@ export class RunJournal implements ExecutionJournal {
       at: new Date().toISOString(),
       ...fields,
     };
-    const record = { ...body, h: recordHash(JSON.stringify(body)) } as unknown as JournalRecord;
+    const record = { ...body, h: recordMac(this.key, JSON.stringify(body)) } as unknown as JournalRecord;
     if (this.opts.faults?.beforeAppend) {
       try {
         this.opts.faults.beforeAppend(record);
@@ -877,8 +1296,9 @@ export class RunJournal implements ExecutionJournal {
     }
     try {
       if (this.fd === undefined) {
-        fs.mkdirSync(this.dir, { recursive: true });
-        this.fd = fs.openSync(this.file, "a");
+        this.makeDir();
+        this.fd = fs.openSync(this.file, "a", 0o600);
+        fs.fchmodSync(this.fd, 0o600);
       }
       fs.writeSync(this.fd, JSON.stringify(record) + "\n");
       fs.fsyncSync(this.fd);
@@ -913,7 +1333,7 @@ export class RunJournal implements ExecutionJournal {
     this.secrets = collectSecretValues(this.opts.env, info.config);
     const workflowHash = workflowHashOf(info.workflow);
     const instrHash = instructionHash(info.sources);
-    const toolHash = toolsHash(info.skills, this.opts.swenyVersion, info.harnessId);
+    const toolHash = toolsHash(info.skills, this.opts.swenyVersion, info.harnessId, this.secrets);
 
     if (this.resume) {
       const start = this.resume.plan.start;
@@ -948,14 +1368,22 @@ export class RunJournal implements ExecutionJournal {
     }
 
     try {
-      fs.mkdirSync(this.dir, { recursive: true });
+      this.makeDir();
       // Journals hold node output: keep them out of commits (an agent's `git add -A` included).
       fs.writeFileSync(path.join(this.dir, ".gitignore"), "*\n");
       this.takeLock();
     } catch {
       // append() reports the failure
     }
-    pruneJournals(this.cwd, this.opts.keep ?? JOURNAL_KEEP, this.runId);
+    try {
+      this.key = createRunKey(this.keyFile);
+    } catch (err) {
+      this.logger.warn(
+        `  run journal: could not write the run key under ${path.dirname(this.keyFile)} ` +
+          `(${err instanceof Error ? err.message : String(err)}); set SWENY_STATE_DIR to a writable dir`,
+      );
+    }
+    pruneJournals(this.cwd, this.opts.keep ?? JOURNAL_KEEP, this.runId, this.opts.keyDir ?? runKeyDir());
     const input = redact(info.input, this.secrets);
     this.append("run:start", {
       run_id: this.runId,
@@ -1031,9 +1459,35 @@ export class RunJournal implements ExecutionJournal {
     this.append("route", { from, to });
   }
 
-  /** Close the run: `run:end`, then release the lock. Safe to call twice. */
+  usage(node: string, iteration: number, attempt: number, usage: NodeUsage, final: boolean): void {
+    const s = spendOf(usage);
+    if (s.tokens === undefined && s.costUsd === undefined) return;
+    const tokens = s.tokens ?? 0;
+    const costUsd = s.costUsd ?? 0;
+    const k = `${visitKey(node, iteration)}|${attempt}`;
+    const last = this.lastUsage.get(k);
+    const now = Date.now();
+    if (!final && last) {
+      if (tokens <= last.tokens && costUsd <= last.costUsd) return;
+      if (now - last.at < USAGE_JOURNAL_INTERVAL_MS) return;
+    }
+    if (final && last && tokens <= last.tokens && costUsd <= last.costUsd) return;
+    this.lastUsage.set(k, {
+      at: now,
+      tokens: Math.max(tokens, last?.tokens ?? 0),
+      costUsd: Math.max(costUsd, last?.costUsd ?? 0),
+    });
+    this.append("usage", { node, iteration, attempt, tokens, cost_usd: costUsd, final });
+  }
+
+  priorSpend(): Spend | undefined {
+    return this.resume ? { ...this.resume.plan.priorSpend } : undefined;
+  }
+
+  /** Close the run: `run:end`, then release the lock. Safe to call twice (one run:end). */
   end(status: "success" | "failed" | "crashed"): void {
-    if (this.began) this.append("run:end", { status });
+    if (this.began && !this.closed) this.append("run:end", { status });
+    this.closed = true;
     this.closeFd();
     this.releaseLock();
   }
