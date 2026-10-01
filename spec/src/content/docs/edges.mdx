@@ -110,7 +110,8 @@ There are no function calls, no arithmetic, no assignment, and no list indexing.
 ### Semantics
 
 - **Strict types, no coercion.** `==` and `!=` compare strings, numbers, booleans, and null by value and type (`3 == '3'` is false). `<`, `<=`, `>`, `>=` need two numbers or two strings. `!`, `&&`, `||`, and the expression as a whole need booleans; there is no truthiness.
-- **Missing never routes.** A path whose value is absent (the field was not emitted, the node did not run or did not succeed, or the value breaks its declared `type` or `enum`) makes the expression unevaluable, and the executor MUST log a warning. A type mismatch at runtime is treated the same way. Neither a negation nor a default edge can turn a missing field into a route: see Routing outcome.
+- **Missing never routes.** A path whose value is absent (the field was not emitted, or the node did not run or did not succeed) makes the expression unevaluable, and the executor MUST log a warning. A type mismatch at runtime is treated the same way. Neither a negation nor a default edge can turn a missing field into a route: see Routing outcome.
+- **Invalid is unknown, not absent.** A field whose value breaks its declared `type` or `enum` makes ANY expression that references it unevaluable, `exists` included. Only a field that is genuinely absent (and not required) reads as not existing.
 - **`exists` is the explicit presence test** and never warns. `&&` and `||` short-circuit, so `exists a.url && a.url != ''` is safe.
 
 ### Routing outcome
@@ -119,7 +120,7 @@ Before routing, a node whose output breaks its declared contract (a `required` f
 
 When every conditional out-edge of a node is an expression, the executor evaluates them all and:
 
-- **any is unevaluable** (see Missing never routes): none is trusted; the route **falls through** to the next rung (the [decider](#decision-models) for a `route_by: decider` node, else the AI model), which reads each edge's `description`, or its expression when it has none. A dry run stops here;
+- **any is unevaluable** (see Missing never routes) and at most one is true: the route **falls through** to the next rung (the [decider](#decision-models) for a `route_by: decider` node, else the AI model), which reads each edge's `description`, or its expression when it has none. It is offered only the edges that could still be the answer: every unevaluable edge, plus the true edge when there is one, or else the default edge. A definitely false edge MUST NOT be offered, and an answer naming one MUST be rejected (the default edge, when offered, is the fallback; otherwise the branch ends). A dry run stops here;
 - **exactly one is true:** follow it;
 - **none is true:** follow the node's unconditional (default) edge if it has one;
 - **otherwise** (none true and no default, or two or more true): fail closed. The run stops with a route evaluation error, the same as a failed model route evaluation. The executor MUST NOT guess an edge.

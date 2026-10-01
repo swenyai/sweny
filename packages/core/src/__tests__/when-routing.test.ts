@@ -7,6 +7,7 @@ import { execute, RouteEvaluationError } from "../executor.js";
 import { parseWorkflow, validateWorkflow, workflowZ } from "../schema.js";
 import { createSkillMap } from "../skills/index.js";
 import { implementWorkflow, triageWorkflow } from "../workflows/index.js";
+import { evaluateExpression, parseExpression } from "../when.js";
 import type { Claude, Edge, ExecutionEvent, Logger, Node, NodeResult, Workflow } from "../types.js";
 
 const silent: Logger = { info() {}, warn() {}, error() {}, debug() {} };
@@ -330,6 +331,98 @@ describe("executor: expression routing (#461)", () => {
     expect(ran).toEqual(["a"]);
     expect(results.size).toBe(1);
     expect(evaluateCalls()).toBe(0);
+  });
+
+  describe("fall-through never offers or accepts a definitely false edge (#357)", () => {
+    const guardOut = {
+      type: "object",
+      properties: { allow: { type: "boolean" }, kind: { type: "string", enum: ["safe", "risky"] } },
+      required: ["allow", "kind"],
+    };
+    const nodes = (extra: Record<string, Node> = {}): Record<string, Node> => ({
+      a: { name: "A", instruction: "NODE_A", skills: [], output: guardOut },
+      b: { name: "B", instruction: "NODE_B", skills: [] },
+      c: { name: "C", instruction: "NODE_C", skills: [] },
+      d: { name: "D", instruction: "NODE_D", skills: [] },
+      ...extra,
+    });
+
+    it("the review's falsifier: {allow:false} twice with kind missing; the agent says danger; danger never runs", async () => {
+      // b = danger (allow == true, definitely false), c = safe (kind unknown), d = default.
+      const w = wf(
+        [
+          { from: "a", to: "b", when: { expr: "a.allow == true" }, description: "allowed" },
+          { from: "a", to: "c", when: { expr: "a.kind == 'safe'" }, description: "the change is safe" },
+          { from: "a", to: "d" },
+        ],
+        nodes(),
+      );
+      const offered: string[][] = [];
+      const { claude, ran, evaluateCalls } = scripted({ a: { allow: false } }, async (opts) => {
+        offered.push(opts.choices.map((c) => c.id));
+        return "b";
+      });
+      const { trace } = await run(w, claude);
+      expect(ran).toEqual(["a", "a", "d"]); // one repair, then the default, never b
+      expect(evaluateCalls()).toBe(1);
+      expect(offered).toEqual([["c", "d"]]);
+      expect(trace.edges[0]).toMatchObject({ from: "a", to: "d", rung: "agent" });
+    });
+
+    it("one edge true and one unknown: only those two are offered (the default cannot be right)", async () => {
+      const w = wf(
+        [
+          { from: "a", to: "b", when: { expr: "a.kind == 'safe'" }, description: "safe" },
+          { from: "a", to: "c", when: { expr: "a.allow == true" }, description: "allowed" },
+          { from: "a", to: "d" },
+        ],
+        nodes(),
+      );
+      const offered: string[][] = [];
+      const { claude, ran } = scripted({ a: { allow: true } }, async (opts) => {
+        offered.push(opts.choices.map((c) => c.id));
+        return "c";
+      });
+      await run(w, claude);
+      expect(offered).toEqual([["b", "c"]]);
+      expect(ran[ran.length - 1]).toBe("c");
+    });
+
+    it("a model answer naming a ruled-out edge, with no default to fall back on, ends the branch", async () => {
+      const w = wf(
+        [
+          { from: "a", to: "b", when: { expr: "a.kind == 'safe'" } },
+          { from: "a", to: "c", when: { expr: "a.allow == true" } },
+        ],
+        nodes(),
+      );
+      const { claude, ran } = scripted({ a: { allow: false } }, async () => "c");
+      await run(w, claude);
+      expect(ran).toEqual(["a", "a"]);
+    });
+
+    it("two true edges still fail closed, unknowns or not", async () => {
+      const w = wf(
+        [
+          { from: "a", to: "b", when: { expr: "a.allow == true" } },
+          { from: "a", to: "c", when: { expr: "a.allow != false" } },
+          { from: "a", to: "d", when: { expr: "a.kind == 'safe'" } },
+        ],
+        nodes(),
+      );
+      const { claude } = scripted({ a: { allow: true } }, async () => "b");
+      await expect(run(w, claude)).rejects.toBeInstanceOf(RouteEvaluationError);
+    });
+  });
+
+  it("an invalid field is unknown, never absent: even `exists` on it is a problem", () => {
+    const ast = parseExpression("exists a.url");
+    expect(evaluateExpression(ast, { a: { url: { x: 1 } } })).toEqual({ value: true });
+    expect(evaluateExpression(ast, { a: { url: { x: 1 } } }, { invalid: new Set(["a.url"]) })).toMatchObject({
+      value: false,
+      problem: expect.stringMatching(/a\.url' does not match its declared type/),
+    });
+    expect(evaluateExpression(parseExpression("!(exists a.url)"), { a: {} })).toEqual({ value: true });
   });
 
   it("does not read a failed node's data: its expressions fall through to the agent", async () => {
@@ -682,6 +775,32 @@ describe("built-in implement routes analyze without a model call (#357)", () => 
     await run(stripped, claude);
     expect(ran.slice(0, 3)).toEqual(["analyze", "analyze", "implement"]);
     expect(evaluated).toBe(0);
+  });
+
+  it("existing_pr_url as an object twice is unknown, not absent: the agent rung, never a deterministic implement", async () => {
+    const { claude, ran, evaluated } = harness({ ...analyze(false, "low", true), existing_pr_url: { url: "x" } });
+    await run(stripped, claude);
+    expect(ran.slice(0, 3)).toEqual(["analyze", "analyze", "skip"]);
+    expect(ran).not.toContain("implement");
+    expect(evaluated()).toBe(1);
+  });
+
+  it("the repair does not use a max_steps slot: analyze -> skip -> notify completes under max_steps 3", async () => {
+    const { claude, ran, evaluated } = harness(analyze(false, "low", undefined));
+    const { results } = await execute(
+      stripped,
+      {},
+      {
+        skills: createSkillMap([]),
+        claude,
+        config: {},
+        logger: silent,
+        max_steps: 3,
+      },
+    );
+    expect(ran).toEqual(["analyze", "analyze", "skip", "notify"]);
+    expect(evaluated()).toBe(1);
+    expect(results.has("notify")).toBe(true);
   });
 
   it("missing twice: the run continues, the agent routes on the descriptions (default edge on its failure)", async () => {

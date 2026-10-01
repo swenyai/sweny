@@ -859,14 +859,9 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       // first, for every harness: the agent is told exactly what is wrong.
       const contract = outputContractProblems(result.data, node.output);
       if (contract.length > 0 && !repaired) {
+        // Part of this node visit, like a retry of the same call: no extra
+        // max_steps slot. Its spend still counts (budget, journal usage).
         repaired = true;
-        stepCount++;
-        if (stepCount > maxSteps) {
-          throw new Error(
-            `step budget exceeded: workflow '${workflow.id}' ran ${stepCount} steps (max_steps: ${maxSteps}) ` +
-              `while repairing node '${currentId}' output. Raise 'max_steps' if the workflow legitimately needs more steps.`,
-          );
-        }
         const listed = contract.map((p) => `- ${p.field}: ${p.problem}`).join("\n");
         logger.warn(`  output contract: ${contract.map((p) => p.field).join(", ")}; asking the agent once to fix it`, {
           node: currentId,
@@ -2100,6 +2095,8 @@ async function resolveNext(
   // Deterministic routing (#461): every conditional out-edge is an expression,
   // so sweny decides without a model call. validateWorkflow rejects a node
   // that mixes expression and natural-language edges.
+  // On a fall-through: the edges that could still be the answer (#357).
+  let candidates: Set<string> | undefined;
   if (conditionalEdges.every((e) => isWhenExpression(e.when))) {
     const next = resolveByExpressions(
       workflow,
@@ -2113,8 +2110,10 @@ async function resolveNext(
     );
     if (typeof next === "string") return { next, rung: "expr" };
     // A field the expressions need is missing or invalid (#357): fall through
-    // to the next rung with each edge's natural-language description. A dry
-    // run stops here, as it does at any route a model would pick.
+    // to the next rung with the edges not ruled out, each by its natural-
+    // language description. A dry run stops here, as it does at any route a
+    // model would pick.
+    candidates = next.candidates;
     if (isDryRunInput(input)) {
       safeObserve(observer, { type: "route", from: current, to: "(end)", reason: "dry run" }, logger);
       return { next: null };
@@ -2167,13 +2166,19 @@ async function resolveNext(
 
   // An expression edge reached here only by falling through: the model reads
   // its natural-language `description`, else the expression itself.
-  const choices = conditionalEdges.map((e) => ({
-    id: e.to,
-    description: (isWhenExpression(e.when) ? e.description : undefined) ?? whenLabel(e.when)!,
-  }));
+  // A definitely false expression edge is never offered (#357).
+  const choices = conditionalEdges
+    .filter((e) => !candidates || candidates.has(e.to))
+    .map((e) => ({
+      id: e.to,
+      description: (isWhenExpression(e.when) ? e.description : undefined) ?? whenLabel(e.when)!,
+    }));
 
-  if (defaultEdge) {
-    choices.push({ id: defaultEdge.to, description: defaultEdge.description ?? "None of the above / default path" });
+  // The default edge, when it is still a possible answer: the fallback for a
+  // failed or invalid model answer below.
+  const fallback = defaultEdge && (!candidates || candidates.has(defaultEdge.to)) ? defaultEdge : undefined;
+  if (fallback) {
+    choices.push({ id: fallback.to, description: fallback.description ?? "None of the above / default path" });
   }
 
   const question = "Based on the results so far, which condition is true?";
@@ -2207,7 +2212,7 @@ async function resolveNext(
         signal: abort.signal,
       });
     }
-    if (picked !== null && outEdges.some((e) => e.to === picked)) {
+    if (picked !== null && choices.some((c) => c.id === picked)) {
       if (edgeCounts) {
         const key = `${current}→${picked}`;
         edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
@@ -2242,21 +2247,21 @@ async function resolveNext(
   // issues/PRs instead of routing to `skip`). Take the author's explicit
   // default/else edge if one exists; otherwise terminate the run loudly.
   if (chosen === null) {
-    if (defaultEdge) {
+    if (fallback) {
       logger?.warn(
-        `  route eval: evaluation failed for node '${current}'; taking default (unconditional) edge '${defaultEdge.to}'.`,
+        `  route eval: evaluation failed for node '${current}'; taking default (unconditional) edge '${fallback.to}'.`,
         { node: current },
       );
       safeObserve(
         observer,
-        { type: "route", from: current, to: defaultEdge.to, reason: "route evaluation failed; default edge" },
+        { type: "route", from: current, to: fallback.to, reason: "route evaluation failed; default edge" },
         logger,
       );
       if (edgeCounts) {
-        const key = `${current}→${defaultEdge.to}`;
+        const key = `${current}→${fallback.to}`;
         edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
       }
-      return { next: defaultEdge.to, rung: "agent" };
+      return { next: fallback.to, rung: "agent" };
     }
     logger?.error(
       `  route eval: evaluation failed for node '${current}' and there is no default (unconditional) edge; ` +
@@ -2275,8 +2280,9 @@ async function resolveNext(
     );
   }
 
-  // Validate that Claude returned a valid target.
-  const validTargets = new Set(outEdges.map((e) => e.to));
+  // Validate that Claude returned a valid target: one of the offered choices
+  // (every live out-edge, minus any ruled out on a fall-through).
+  const validTargets = new Set(choices.map((c) => c.id));
   if (!validTargets.has(chosen)) {
     // The evaluator returned a target that is not a live out-edge. If there's
     // an explicit default (unconditional) edge, take it as the documented
@@ -2284,7 +2290,7 @@ async function resolveNext(
     // `outEdges[0]` (often the loop-back edge) launders garbage model output
     // into a plausible-looking route and, combined with an unbounded cycle,
     // produces an infinite loop. Stop loudly instead.
-    if (!defaultEdge) {
+    if (!fallback) {
       logger?.warn(
         `  route eval: evaluator returned invalid target '${chosen}' for node '${current}' and there is no ` +
           `default (unconditional) edge; terminating this branch. Valid targets: ${[...validTargets].join(", ")}`,
@@ -2304,7 +2310,7 @@ async function resolveNext(
     }
   }
 
-  const resolved = validTargets.has(chosen) ? chosen : defaultEdge!.to;
+  const resolved = validTargets.has(chosen) ? chosen : fallback!.to;
 
   // Track edge usage for max_iterations
   if (edgeCounts) {
@@ -2336,11 +2342,18 @@ async function resolveNext(
  * two or more true) it fails closed with a RouteEvaluationError, the same
  * contract as a failed model route evaluation: sweny never guesses an edge.
  *
- * An expression reads only successful nodes' outputs, and a field that breaks
- * its declared type or enum reads as missing. When any expression on the node
- * hits a missing field (or a node that did not run or succeed, or a type
- * mismatch), none of them is trusted: the route falls through to the next
- * rung (#357), which reads each edge's `description` (else its expression).
+ * An expression reads only successful nodes' outputs. A field that breaks its
+ * declared type or enum is unknown (any reference to it, `exists` included,
+ * is a problem); a missing one is a problem too. Each edge is then true,
+ * false, or unknown. With any unknown edge the route falls through to the
+ * next rung (#357), offering only edges that could still be the answer:
+ *
+ *  - two or more true: fail closed, as without unknowns;
+ *  - one true: that edge and the unknown ones (the default cannot be right,
+ *    since an edge is true);
+ *  - none true: the unknown edges and the default edge.
+ *
+ * A definitely false edge is never offered, and never accepted if picked.
  */
 function resolveByExpressions(
   workflow: Workflow,
@@ -2351,23 +2364,25 @@ function resolveByExpressions(
   observer: Observer | undefined,
   edgeCounts: Map<string, number> | undefined,
   logger: Logger | undefined,
-): string | { fallThrough: string[] } {
+): string | { fallThrough: string[]; candidates: Set<string> } {
   const scope: ExpressionScope = {};
+  const invalid = new Set<string>();
   for (const [id, r] of results.entries()) {
     if (r.status !== "success") continue;
-    const ctx = buildPriorNodeContext(r);
     const node = hasOwn(workflow.nodes, id) ? workflow.nodes[id] : undefined;
-    for (const p of outputContractProblems(r.data, node?.output)) if (p.kind === "invalid") delete ctx[p.field];
-    scope[id] = ctx;
+    for (const p of outputContractProblems(r.data, node?.output))
+      if (p.kind === "invalid") invalid.add(`${id}.${p.field}`);
+    scope[id] = buildPriorNodeContext(r);
   }
 
   const problems: string[] = [];
+  const unknown: string[] = [];
   const matched: Array<{ to: string; expr: string }> = [];
   for (const edge of conditionalEdges) {
     const expr = whenLabel(edge.when)!;
     let outcome: ExpressionResult;
     try {
-      outcome = evaluateExpression(parseExpression(expr), scope);
+      outcome = evaluateExpression(parseExpression(expr), scope, { invalid });
     } catch (err) {
       // validateWorkflow parses every expression before a run, so this only
       // fires for a workflow that skipped validation. Fail closed.
@@ -2377,6 +2392,7 @@ function resolveByExpressions(
     }
     if (outcome.problem) {
       problems.push(outcome.problem);
+      unknown.push(edge.to);
       logger?.warn(
         `  route expr: '${current}' -> '${edge.to}' cannot be evaluated: ${outcome.problem} (${expr}); falling through`,
         { node: current, to: edge.to },
@@ -2394,7 +2410,11 @@ function resolveByExpressions(
     }
     if (outcome.value) matched.push({ to: edge.to, expr });
   }
-  if (problems.length > 0) return { fallThrough: problems };
+  if (problems.length > 0 && matched.length <= 1) {
+    const candidates = new Set([...unknown, ...matched.map((m) => m.to)]);
+    if (matched.length === 0 && defaultEdge) candidates.add(defaultEdge.to);
+    return { fallThrough: problems, candidates };
+  }
 
   const take = (to: string, reason: string): string => {
     if (edgeCounts) {
