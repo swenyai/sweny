@@ -69,6 +69,7 @@ import {
   type ActorInfo,
   type SafeOutputIntent,
 } from "./safe-outputs.js";
+import type { ExecutionJournal, JournalReplay } from "./journal.js";
 
 export interface ExecuteOptions {
   /** Registered skills (id → Skill) */
@@ -141,6 +142,12 @@ export interface ExecuteOptions {
    */
   actor?: ActorInfo;
   /**
+   * Run journal (#363): an append-only record of the run for `sweny workflow
+   * resume`. In resume mode it also replays the visits an earlier attempt
+   * finished, so their agents are not called again. Default: none.
+   */
+  journal?: ExecutionJournal;
+  /**
    * Run-wide spend ceiling (#449), tightening `workflow.budget` (the lowest of
    * the two wins per unit). CLI: `--max-tokens`, `--max-cost`. Default: none.
    */
@@ -193,7 +200,7 @@ function throwIfAborted(signal?: AbortSignal): void {
  * - `trace`: full ordered execution trace including loops and routing decisions
  */
 export async function execute(workflow: Workflow, input: unknown, options: ExecuteOptions): Promise<ExecutionResult> {
-  const { observer, signal, timeoutMs } = options;
+  const { observer, signal, timeoutMs, journal } = options;
   // `harness` is the seam; a legacy `claude` object is used as-is (what `asClaude(claudeCompat(claude))` yields).
   const claude: Claude = options.harness ? asClaude(options.harness) : (options.claude as Claude);
   if (!claude) {
@@ -290,6 +297,15 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     logger,
   });
   trace.sources = resolvedSources;
+  journal?.begin({
+    workflow,
+    input,
+    sources: resolvedSources,
+    skills,
+    config,
+    writeState,
+    harnessId: options.harness?.id,
+  });
   safeObserve(observer, { type: "workflow:start", workflow: workflow.id }, logger);
   safeObserve(observer, { type: "sources:resolved", sources: resolvedSources }, logger);
 
@@ -317,12 +333,41 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       );
     }
 
-    const iteration = (nodeRunCounts.get(currentId) ?? 0) + 1;
+    const iteration: number = (nodeRunCounts.get(currentId) ?? 0) + 1;
     nodeRunCounts.set(currentId, iteration);
 
     const resolvedInstruction = resolvedSources[`nodes.${currentId}.instruction`].content;
     safeObserve(observer, { type: "node:enter", node: currentId, instruction: resolvedInstruction }, logger);
     logger.info(`→ ${node.name}`, { node: currentId });
+
+    // Resume (#363): a visit an earlier attempt finished is replayed from the journal, not re-run.
+    const replay: JournalReplay | undefined = journal?.replay(currentId, iteration);
+    if (replay?.kind === "complete") {
+      results.set(currentId, replay.result);
+      trace.steps.push({ node: currentId, status: replay.result.status, iteration });
+      safeObserve(observer, { type: "node:exit", node: currentId, result: replay.result }, logger);
+      logger.info(`  replayed from the run journal: ${replay.result.status}`, { node: currentId });
+      const from: string = currentId;
+      if (replay.next === undefined) {
+        currentId = await advanceFromNode(workflow, from, results, input, claude, observer, edgeCounts, logger, trace, {
+          signal,
+          timeoutMs,
+        });
+        journal?.route(from, currentId);
+      } else {
+        if (replay.next !== null) {
+          const key = `${from}→${replay.next}`;
+          edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+          const reason =
+            whenLabel(workflow.edges.find((e) => e.from === from && e.to === replay.next)?.when) ?? "only path";
+          trace.edges.push({ from, to: replay.next, reason });
+        }
+        safeObserve(observer, { type: "route", from, to: replay.next ?? "(end)", reason: "replayed" }, logger);
+        currentId = replay.next;
+      }
+      continue;
+    }
+    journal?.nodeStart(currentId, iteration);
 
     // Gather tools from the node's skills, then apply the node's optional
     // skill-tool filter (`tools.allow` / `tools.deny`). Filtered tools are
@@ -418,6 +463,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
               toolCalls: [],
             };
       results.set(currentId, result);
+      journal?.nodeEnd(currentId, iteration, result, writeState);
       trace.steps.push({ node: currentId, status: result.status, iteration });
       safeObserve(observer, { type: "node:exit", node: currentId, result }, logger);
       logger.warn(`  requires ${onFail === "skip" ? "skipped" : "failed"}: ${requiresError}`, { node: currentId });
@@ -448,6 +494,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         trace,
         { signal, timeoutMs, shadow },
       );
+      journal?.route(currentId, next);
       currentId = next;
       continue;
     }
@@ -555,6 +602,13 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     let previous: NodeResult | undefined;
 
     while (true) {
+      if (replay?.kind === "checkpoint") {
+        // Resume (#363): the agent finished this visit before the crash. Reuse its result and
+        // write intents; the write stage below skips what the journal shows was already applied.
+        ({ result, agentRunFailed, attempt } = replay);
+        intents.push(...replay.intents);
+        break;
+      }
       const refusal = gate?.refuse ?? budgetCheck?.refuse;
       if (refusal) {
         // Not an agent failure: fail_soft never softens a policy refusal.
@@ -773,13 +827,14 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // may veto, and only then does sweny call the skill's own write handler.
     if (outputDecls.length > 0) {
       if (result.status === "success" && !agentRunFailed) {
+        journal?.checkpoint(currentId, iteration, { result, intents, agentRunFailed, attempt });
         const stage = await applySafeOutputs({
           nodeId: currentId,
           declarations: outputDecls,
           intents,
           policy: workflow.safe_outputs,
           nodeSkills: node.skills,
-          skills,
+          skills: journal ? journal.wrapWrites(currentId, iteration, skills) : skills,
           config,
           env: runEnv,
           actor,
@@ -811,6 +866,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
 
     if (skippedWrites.length > 0) result = { ...result, skippedWrites };
     results.set(currentId, result);
+    journal?.nodeEnd(currentId, iteration, result, writeState);
     trace.steps.push(
       attempt > 0
         ? { node: currentId, status: result.status, iteration, retryAttempt: attempt }
@@ -834,6 +890,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     }
 
     // Dry run gate + routing — shared with requires path via advanceFromNode helper.
+    const routedFrom: string = currentId;
     currentId = await advanceFromNode(
       workflow,
       currentId,
@@ -850,6 +907,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         shadow,
       },
     );
+    journal?.route(routedFrom, currentId);
   }
 
   safeObserve(

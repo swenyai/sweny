@@ -44,6 +44,14 @@ import { nonInteractiveUsage, runNew } from "./new.js";
 import { formatFinalMarkdown, formatFinalOutput, resolveFinalOutput, writeFinalOutput } from "./final-output.js";
 import { buildRunRecord, createNodeTimer, historyDisabled, newRunId, recordRun } from "./run-history.js";
 import { registerRunsCommand } from "./runs.js";
+import { JournalLockedError, JournalMismatchError, RunJournal } from "../journal.js";
+import {
+  journalDisabled,
+  prepareResume,
+  RESUME_SHARED_RUN_FLAGS,
+  WORKFLOW_RESUME_OPTIONS,
+  type ResumeContext,
+} from "./resume.js";
 import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "./e2e.js";
 import { createVerboseToolObserver } from "./verbose-observer.js";
 import {
@@ -863,6 +871,8 @@ export async function workflowRunAction(
     yes?: boolean;
     decider?: string;
   },
+  /** Set by `sweny workflow resume` (#363): the journal, run id and original input. */
+  resume?: ResumeContext,
 ): Promise<void> {
   if (options.decider !== undefined && options.decider !== "off" && options.decider !== "shadow") {
     console.error(chalk.red(`\n  --decider must be off or shadow, got "${options.decider}"\n`));
@@ -1031,7 +1041,9 @@ export async function workflowRunAction(
   // Build workflow input — prefer --input JSON if provided, else fall back to config-derived input
   let workflowInput: Record<string, unknown>;
 
-  if (options.input && typeof options.input === "string") {
+  if (resume) {
+    workflowInput = resume.input;
+  } else if (options.input && typeof options.input === "string") {
     const parsedInput = parseInputFlag(options.input);
     if (!parsedInput.ok) {
       for (const line of parsedInput.lines) console.error(chalk.red(`  ${line}`));
@@ -1119,7 +1131,19 @@ export async function workflowRunAction(
 
   // Run history (#388): metadata-only record under .sweny/runs/, written once at run end.
   const nodeTimer = createNodeTimer();
-  const runId = newRunId(runStart);
+  const runId = resume?.runId ?? newRunId(runStart);
+  // Run journal (#363): what `sweny workflow resume <run-id>` continues from.
+  const journal =
+    resume?.journal ??
+    (journalDisabled(options.journal, fileConfig["journal"])
+      ? undefined
+      : RunJournal.create({
+          runId,
+          workflowFile: path.resolve(file),
+          swenyVersion: version,
+          env: process.env,
+          logger: runLogger,
+        }));
   let historyRecorded = false;
   const recordHistory = (results: Map<string, NodeResult>, trace: ExecutionTrace | undefined, crashed: boolean) => {
     if (historyRecorded || historyDisabled(options.history, fileConfig["history"])) return;
@@ -1179,6 +1203,7 @@ export async function workflowRunAction(
           max_steps: wfMaxSteps,
           ...(options.decider ? { decider: options.decider as "off" | "shadow" } : {}),
           stageOutputs: options.stage === true,
+          journal,
           ...(spendBudget ? { budget: spendBudget } : {}),
           harnessPolicy: resolveHarnessPolicy(
             process.env,
@@ -1192,6 +1217,7 @@ export async function workflowRunAction(
 
     const wfDurationMs = Date.now() - runStart;
     const wfHasFailed = [...results.values()].some((r) => r.status === "failed");
+    journal?.end(wfHasFailed ? "failed" : "success");
     recordHistory(results, trace, false);
 
     // Close the cloud lifecycle session BEFORE the JSON early-exit so
@@ -1253,14 +1279,23 @@ export async function workflowRunAction(
 
     if (wfHasFailed) {
       console.error(`  ${renderReceiptLine(receipt, isTTY)}\n`);
+      if (journal?.active) console.error(c.subtle(`  resume with: sweny workflow resume ${runId}\n`));
       process.exit(1);
       return;
     }
     console.log(`  ${renderReceiptLine(receipt, isTTY)}\n`);
     process.exit(0);
   } catch (err) {
+    // A refused resume ran nothing: leave the run's journal and history as they were.
+    if (err instanceof JournalMismatchError || err instanceof JournalLockedError) {
+      console.error(chalk.red(`\n  ${err.message}\n`));
+      process.exit(1);
+      return;
+    }
     console.error(formatCrashError(err));
     runLogger.flush();
+    journal?.end("crashed");
+    if (journal) console.error(c.subtle(`  resume with: sweny workflow resume ${runId}`));
     recordHistory(nodeTimer.lastResults, undefined, true);
     console.error(`  ${renderReceiptLine(summarizeRun(new Map(), Date.now() - runStart, true), isTTY)}\n`);
     // A crash must not leave a stale success comment behind.
@@ -1377,6 +1412,51 @@ workflowRunCmd.option(
   "--no-history",
   "Do not record this run or save its output.md in .sweny/runs/ (or set `history: off` in .sweny.yml)",
 );
+workflowRunCmd.option(
+  "--no-journal",
+  "Do not write a run journal to .sweny/runs/<run-id>/ (or set `journal: off` in .sweny.yml); the run cannot be resumed",
+);
+
+const workflowResumeCmd = workflowCmd
+  .command("resume <run-id>")
+  .description(
+    "Resume a killed or failed `workflow run` from its journal: finished nodes are replayed without calling the agent, " +
+      "the first unfinished node runs again, and writes already applied are not re-sent",
+  )
+  .action(async (runRef: string, options: Record<string, unknown>) => {
+    const discovered = configuredSkillsWithDiagnostics(process.env, process.cwd());
+    const known = new Set([...discovered.skills.map((s) => s.id), ...builtinSkills.map((s) => s.id)]);
+    const prepared = prepareResume(
+      runRef,
+      {
+        force: options.force === true,
+        allowRepeatWrites: options.allowRepeatWrites === true,
+        plan: options.plan === true,
+        workflow: typeof options.workflow === "string" ? options.workflow : undefined,
+        input: typeof options.input === "string" ? options.input : undefined,
+      },
+      { loadWorkflow: (f) => loadWorkflowFile(f, known), swenyVersion: version, env: process.env },
+    );
+    const out = options.json ? process.stderr : process.stdout;
+    for (const line of prepared.lines) out.write(`  ${line}\n`);
+    if (!prepared.ok) {
+      console.error(chalk.red(`\n  ${prepared.error}\n`));
+      process.exit(1);
+      return;
+    }
+    if ("planOnly" in prepared) {
+      process.exit(0);
+      return;
+    }
+    // The run's own input goes to the executor (--input was only checked against it).
+    const runOptions = { ...options, input: undefined } as Parameters<typeof workflowRunAction>[1];
+    await workflowRunAction(prepared.ctx.file, runOptions, prepared.ctx);
+  });
+for (const [flags, description] of WORKFLOW_RESUME_OPTIONS) workflowResumeCmd.option(flags, description);
+for (const [flags, description] of WORKFLOW_RUN_OPTIONS) {
+  if (RESUME_SHARED_RUN_FLAGS.includes(flags)) workflowResumeCmd.option(flags, description);
+}
+workflowResumeCmd.option("--no-history", "Do not update this run's record in .sweny/runs/");
 registerRunsCommand(program);
 
 workflowCmd

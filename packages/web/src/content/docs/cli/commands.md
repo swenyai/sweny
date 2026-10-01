@@ -269,8 +269,28 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 | `-y, --yes` | Skip the batch confirmation prompt (use in CI) | `false` |
 | `--agent <id>` | Coding agent that runs the nodes: `claude`, `codex` or `pi` (experimental) | `claude` |
 | `--harness-policy <mode>` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and reports it as degraded. Env: `SWENY_HARNESS_POLICY` | `strict` under GitHub Actions, else `warn` |
+| `--no-journal` | Do not write the run journal (`.sweny/runs/<run-id>/journal.ndjson`). The run cannot be resumed. Or set `journal: off` in `.sweny.yml` | journal on |
 
 With a file, loads the definition, validates its schema, then executes it with the same DAG renderer and skill infrastructure as the built-in `triage` and `implement` commands. With no file, it lists every `.sweny/e2e/*.yml` workflow, asks you to confirm (skip with `--yes`), runs them sequentially with template variables (`{base_url}`, `{run_id}`, ...) resolved, and exits `0` if all pass, `1` if any fail. Provider settings from `.sweny.yml` and `.env` apply.
+
+### sweny workflow resume
+
+Resume a killed or failed `workflow run` from its journal. Finished nodes are replayed without calling the agent, the first unfinished node runs again, and writes already applied are not sent twice. See [Resume a run](/cli/resume/).
+
+```bash
+sweny workflow resume <run-id> [options]
+sweny workflow resume <run-id> --plan    # show what would replay and re-run, run nothing
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--plan` | Print the resume plan and exit | `false` |
+| `--force` | Resume although the workflow, its instruction files, the input, or the configured skills/agent changed (warns) | `false` |
+| `--allow-repeat-writes` | Re-run nodes that may repeat a write outside safe outputs, and re-send writes whose outcome cannot be confirmed on the provider | `false` |
+| `--workflow <file>` | Workflow file to load when it moved (its content must still match) | the path the run used |
+| `--input <json>` | The run's original input, required when the journal redacted secrets from it | the journaled input |
+
+`--timeout`, `--max-steps`, `--json`, `--stream`, `--verbose`, `--mermaid`, `--comment-file`, `--agent`, `--harness-policy` and `--no-history` work as on `workflow run`. A run id prefix is enough when it is unique.
 
 ### sweny workflow diagram
 
