@@ -232,6 +232,21 @@ export type { Templates } from "./templates.js";
 export { toMermaid, toMermaidBlock } from "./mermaid.js";
 export type { MermaidOptions, NodeStatus } from "./mermaid.js";
 
+// Visual tokens (#479): palette, color roles, glyphs, diagram classDefs. Browser-safe.
+export {
+  SWENY_TAGLINE,
+  PALETTE,
+  ROLE_COLORS,
+  SURFACE_COLORS,
+  GLYPHS,
+  SPINNER_FRAMES,
+  SPINNER_INTERVAL_MS,
+  TICKET_BOX,
+  MERMAID_CLASS_DEFS,
+  MERMAID_EDGE_STYLES,
+} from "./theme.js";
+export type { ColorRole, GlyphKey, GlyphSet, TicketBox, DiagramNodeStatus } from "./theme.js";
+
 // Config file
 export { loadConfigFile } from "./cli/config-file.js";
 export type { FileConfig } from "./cli/config-file.js";

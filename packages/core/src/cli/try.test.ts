@@ -4,10 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SWENY_TAGLINE } from "../theme.js";
 import {
   TRY_BANNER_TITLE,
   TRY_HELP_NOTE,
-  TRY_NEXT_COMMANDS,
+  TRY_NEXT_COMMAND,
   createReplayHarness,
   loadTryFixture,
   loadTryWorkflow,
@@ -23,7 +24,7 @@ afterEach(() => {
 
 async function capture(opts: Parameters<typeof runTry>[0] = {}) {
   let out = "";
-  const code = await runTry({ fast: true, tty: false, write: (s) => (out += s), ...opts });
+  const code = await runTry({ fast: true, tty: false, unicode: true, write: (s) => (out += s), ...opts });
   return { code, out };
 }
 
@@ -87,11 +88,14 @@ describe("replay harness", () => {
 });
 
 describe("runTry", () => {
-  it("prints banner, progress, answer, receipt with policy, PR comment and next steps; exits 0", async () => {
+  it("prints tagline, progress, answer, comment preview, receipt with policy and one next command; exits 0", async () => {
     const { code, out } = await capture();
     expect(code).toBe(0);
-    expect(out).toContain(TRY_BANNER_TITLE);
-    expect(out).toContain("illustrative");
+    // leads with the tagline; the demo notice is the second line
+    const lines = out.split("\n");
+    expect(lines[1]).toContain(SWENY_TAGLINE);
+    expect(lines[2]).toContain(TRY_BANNER_TITLE);
+    expect(lines[2]).toContain("illustrative");
     expect(out).toContain("✓ survey");
     expect(out).toContain("✓ explain");
     // the answer block, from the real renderer (field titles from the template schema)
@@ -101,15 +105,40 @@ describe("runTry", () => {
     expect(out).toContain("Watch out for:");
     // the receipt line, from the real formatter, with the policy segment
     expect(out).toContain("✓ 2/2 nodes · 12 tool calls · 28s · 30k tokens · $0.13 · policy: env scoped, sandbox on");
-    // the PR comment, from the real formatter
-    expect(out).toContain("<!-- sweny-run-comment:explain-repo -->");
-    expect(out).toContain("| Survey the Repo | ✅ success | 18s |");
-    // closing block with the exact next commands
-    expect(out).toContain("Run it for real");
-    for (const cmd of TRY_NEXT_COMMANDS) expect(out).toContain(cmd);
+    // a compact comment preview: heading and the DAG, not raw markdown
+    expect(out).toContain("CI posts");
+    expect(out).toContain("✓ Explain This Repo");
+    expect(out).toContain("┌");
+    expect(out).not.toContain("<!-- sweny-run-comment");
+    expect(out).not.toContain("| --- |");
+    expect(out).not.toContain("```");
+    // ends on the receipt plus one next command
+    const tail = out.trimEnd().split("\n");
+    expect(tail[tail.length - 1]).toContain(TRY_NEXT_COMMAND);
+    expect(tail[tail.length - 3]).toContain("2/2 nodes");
     // the answer comes above the receipt
     expect(out.indexOf("What it is:")).toBeLessThan(out.indexOf("2/2 nodes"));
     expect(out).not.toContain("\u2014");
+  });
+
+  it("on a TTY: spinner per node, then ends on the ticket with the stamp and one next command", async () => {
+    const prev = { NO_COLOR: process.env.NO_COLOR, CI: process.env.CI };
+    process.env.NO_COLOR = "1";
+    delete process.env.CI;
+    try {
+      const { code, out } = await capture({ tty: true, fast: false, paceMs: 200, columns: 80 });
+      expect(code).toBe(0);
+      expect(out).toMatch(/\r\x1B\[2K {2}[\u2800-\u28FF] survey/);
+      expect(out).toContain("[ ENV SCOPED · SANDBOXED ]");
+      expect(out).toContain("╭");
+      expect(out).not.toContain("✓ 2/2 nodes ·");
+      expect(out.trimEnd().split("\n").pop()).toContain(TRY_NEXT_COMMAND);
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 
   it("makes no network call, reads no credentials, writes no files", async () => {

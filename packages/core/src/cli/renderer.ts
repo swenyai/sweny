@@ -1,5 +1,7 @@
 import chalk from "chalk";
 import type { Workflow, ExecutionEvent } from "../types.js";
+import { GLYPHS, ROLE_COLORS } from "../theme.js";
+import { supportsUnicode, toAsciiDrawing } from "./terminal.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -72,18 +74,20 @@ function topologicalOrder(workflow: Workflow): string[] {
   return order;
 }
 
-// ── Status icons + colors ────────────────────────────────────────
+// ── Status icons + colors (the theme glyph set, one role color each) ─
+
+const G = GLYPHS.unicode;
 
 function statusIcon(state: NodeState): string {
   switch (state) {
     case "completed":
-      return chalk.green("●");
+      return chalk.hex(ROLE_COLORS.success)(G.success);
     case "running":
-      return chalk.yellow("◉");
+      return chalk.hex(ROLE_COLORS.brand)(G.running);
     case "pending":
-      return chalk.gray("○");
+      return chalk.hex(ROLE_COLORS.muted)(G.pending);
     case "failed":
-      return chalk.red("✕");
+      return chalk.hex(ROLE_COLORS.error)(G.failure);
   }
 }
 
@@ -178,7 +182,7 @@ function renderNodeBox(
     bottom = `${pad}└${"─".repeat(innerWidth)}┘`;
   }
 
-  // Content lines — icon on first line, wrapped name
+  // Content lines: icon on first line, wrapped name
   // Available space for text: innerWidth - 4 (1 space + icon + 1 space + text + padding + 1 space)
   // "│ ○ Name...padding │"  → icon(1) + spaces(2) + name + pad
   const iconVis = stripAnsi(icon); // 1 char
@@ -224,10 +228,10 @@ function renderNodeBox(
 
 function renderLegend(): string {
   const items = [
-    `${chalk.green("●")} completed`,
-    `${chalk.yellow("◉")} running`,
-    `${chalk.gray("○")} pending`,
-    `${chalk.red("✕")} failed`,
+    `${statusIcon("completed")} completed`,
+    `${statusIcon("running")} running`,
+    `${statusIcon("pending")} pending`,
+    `${statusIcon("failed")} failed`,
   ];
   return `\n  ${chalk.dim(items.join("   "))}`;
 }
@@ -239,6 +243,10 @@ export interface DagRendererOptions {
   animate?: boolean;
   /** Stream to write to when animate=true or render() is called. Default: process.stderr. */
   stream?: NodeJS.WriteStream;
+  /** Show the status legend under the graph. Default: true. */
+  legend?: boolean;
+  /** Draw with Unicode box characters, else ASCII. Default: what the terminal supports. */
+  unicode?: boolean;
 }
 
 export class DagRenderer {
@@ -254,6 +262,8 @@ export class DagRenderer {
     this.workflow = workflow;
     this.options = {
       animate: options.animate ?? false,
+      legend: options.legend ?? true,
+      unicode: options.unicode ?? supportsUnicode(),
       stream:
         options.stream ??
         (typeof process !== "undefined" ? process.stderr : (undefined as unknown as NodeJS.WriteStream)),
@@ -377,7 +387,7 @@ export class DagRenderer {
         const leftState = this.nodeStates.get(leftId) ?? { state: "pending" as NodeState, toolCallCount: 0 };
         const rightState = this.nodeStates.get(rightId) ?? { state: "pending" as NodeState, toolCallCount: 0 };
 
-        // Determine child box widths — each child gets its own width based on its name
+        // Determine child box widths: each child gets its own width based on its name
         const leftKids = children.get(leftId) ?? [];
         const rightKids = children.get(rightId) ?? [];
 
@@ -511,8 +521,9 @@ export class DagRenderer {
       }
     }
 
-    lines.push(renderLegend());
-    return lines.join("\n");
+    if (this.options.legend) lines.push(renderLegend());
+    const out = lines.join("\n");
+    return this.options.unicode ? out : toAsciiDrawing(out);
   }
 
   /**

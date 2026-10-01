@@ -118,3 +118,19 @@ export type { ExprNode, ExpressionScope, ExpressionResult } from "./when.js";
 // Studio adapter
 export { workflowToFlow, flowToWorkflow, applyExecutionEvent, exportAsTypescript, getSkillCatalog } from "./studio.js";
 export type { FlowNode, SkillNodeData, FlowEdge } from "./studio.js";
+
+// Visual tokens (#479): palette, color roles, glyphs, diagram classDefs. No
+// imports, no chalk: Studio and the docs site share them with the CLI.
+export {
+  SWENY_TAGLINE,
+  PALETTE,
+  ROLE_COLORS,
+  SURFACE_COLORS,
+  GLYPHS,
+  SPINNER_FRAMES,
+  SPINNER_INTERVAL_MS,
+  TICKET_BOX,
+  MERMAID_CLASS_DEFS,
+  MERMAID_EDGE_STYLES,
+} from "./theme.js";
+export type { ColorRole, GlyphKey, GlyphSet, TicketBox, DiagramNodeStatus } from "./theme.js";

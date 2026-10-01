@@ -64,13 +64,16 @@ import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "
 import { createVerboseToolObserver } from "./verbose-observer.js";
 import {
   createRunLogger,
-  renderReceiptLine,
   summarizeRun,
   writeStepSummary,
   WORKFLOW_RUN_DESCRIPTION,
   WORKFLOW_RUN_OPTIONS,
 } from "./run-output.js";
 import { writeRunComment } from "./comment-output.js";
+import { writeReceipt } from "./ticket.js";
+import { createNodeProgress, toolCallsText } from "./progress.js";
+import { applyNoColor, createPaint } from "./style.js";
+import { colorEnabled, glyphsFor, richOutput, spinnerFramesFor, supportsUnicode } from "./terminal.js";
 import {
   registerTriageCommand,
   registerImplementCommand,
@@ -140,6 +143,9 @@ if (process.argv[2] !== "try") {
   // Agent sandbox / env-passthrough keys from .sweny.yml -> SWENY_* env (#360).
   applyAgentFileConfig(loadConfigFile());
 }
+
+// NO_COLOR (https://no-color.org) turns off every color, including direct chalk calls.
+applyNoColor();
 
 const program = new Command()
   .name("sweny")
@@ -359,7 +365,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   });
 
   // ── Progress display state ─────────────────────────────────
-  const FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
+  const FRAMES = spinnerFramesFor(supportsUnicode());
   const isTTY = !config.json && (process.stderr.isTTY ?? false);
   const MAX_ACTIVITY = 3;
   let spinnerInterval: ReturnType<typeof setInterval> | undefined;
@@ -382,7 +388,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   /** Render the multi-line progress block (spinner + activity lines). */
   function renderProgressBlock() {
     const cols = process.stderr.columns || 80;
-    const frame = chalk.cyan(FRAMES[frameIdx++ % FRAMES.length]);
+    const frame = c.brand(FRAMES[frameIdx++ % FRAMES.length]);
     const counter = c.subtle(`[${stepIndex}/${totalNodes}]`);
     const elapsed = c.subtle(formatElapsed(Date.now() - stepStart));
     const headerLine = `  ${frame} ${counter} ${stepLabel}  ${elapsed}`;
@@ -712,7 +718,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   const implProgressObserver: Observer = (event: ExecutionEvent) => {
     switch (event.type) {
       case "workflow:start":
-        process.stderr.write(`\n  \u25B2 ${chalk.bold(event.workflow)}\n\n`);
+        process.stderr.write(`\n  ${c.brand("\u25B2")} ${chalk.bold(event.workflow)}\n\n`);
         break;
       case "node:enter":
         process.stderr.write(`  ${c.subtle("\u25CB")} ${chalk.dim(event.node)}\u2026\n`);
@@ -1018,32 +1024,41 @@ export async function workflowRunAction(
   // Track per-node entry time to compute elapsed on exit
   const nodeEnterTimes = new Map<string, number>();
 
+  // Node progress (#479): a spinner on the running node when stderr is live,
+  // then one settled line per node. Verbose and stream output interleave with
+  // it, so those runs get plain lines.
+  const unicode = supportsUnicode();
+  const g = glyphsFor(unicode);
+  const progressPaint = createPaint(!isJson && colorEnabled(process.stderr));
+  const progress = createNodeProgress({
+    write: (s) => void process.stderr.write(s),
+    live: !isJson && richOutput(process.stderr) && !options.verbose && !options.stream,
+    unicode,
+    paint: progressPaint,
+    announce: true,
+  });
+
   const wfProgressObserver: Observer | undefined = isJson
     ? undefined
     : (event: ExecutionEvent) => {
         switch (event.type) {
           case "workflow:start":
-            process.stderr.write(`\n  \u25B2 ${chalk.bold(event.workflow)}\n\n`);
+            process.stderr.write(`\n  ${progressPaint.brand(g.brand)} ${progressPaint.strong(event.workflow)}\n\n`);
             break;
           case "node:enter":
             nodeEnterTimes.set(event.node, Date.now());
-            process.stderr.write(`  ${c.subtle("\u25CB")} ${chalk.dim(event.node)}\u2026\n`);
+            progress.enter(event.node);
+            break;
+          case "node:progress":
+            progress.tick(event.node);
             break;
           case "node:exit": {
-            const icon =
-              event.result.status === "success"
-                ? c.ok("\u2713")
-                : event.result.status === "skipped"
-                  ? c.subtle("\u2212")
-                  : c.fail("\u2717");
             const enterTime = nodeEnterTimes.get(event.node) ?? Date.now();
             const elapsedMs = Date.now() - enterTime;
-            const elapsed = chalk.dim(elapsedMs < 1000 ? `${elapsedMs}ms` : `${Math.round(elapsedMs / 100) / 10}s`);
-            if (isTTY) {
-              process.stderr.write(`\x1B[1A\x1B[2K  ${icon} ${event.node}  ${elapsed}\n`);
-            } else {
-              process.stderr.write(`  ${icon} ${event.node}  ${elapsed}\n`);
-            }
+            const elapsed = elapsedMs < 1000 ? `${elapsedMs}ms` : `${Math.round(elapsedMs / 100) / 10}s`;
+            const calls = event.result.toolCalls.length;
+            const detail = [elapsed, ...(calls > 0 ? [toolCallsText(calls)] : [])].join(` ${g.sep} `);
+            progress.exit(event.node, event.result.status, detail);
             runLogger.flush();
             break;
           }
@@ -1250,6 +1265,7 @@ export async function workflowRunAction(
       writeRunComment(options.commentFile, workflow, results, summarizeRun(results, wfDurationMs, false, trace), {
         trace,
         durationsMs: Object.fromEntries(nodeTimer.durations),
+        runId,
       });
     }
 
@@ -1298,13 +1314,14 @@ export async function workflowRunAction(
       else console.log(`${block}\n`);
     }
 
+    // The receipt: a ticket on a TTY, one plain line in CI and pipes.
     if (wfHasFailed) {
-      console.error(`  ${renderReceiptLine(receipt, isTTY)}\n`);
+      await writeReceipt(receipt, { workflow: workflow.id, runId, stream: process.stderr });
       if (journal?.active) console.error(c.subtle(`  resume with: sweny workflow resume ${runId}\n`));
       process.exit(1);
       return;
     }
-    console.log(`  ${renderReceiptLine(receipt, isTTY)}\n`);
+    await writeReceipt(receipt, { workflow: workflow.id, runId, stream: process.stdout });
     process.exit(0);
   } catch (err) {
     // A refused resume ran nothing: leave the run's journal and history as they were.
@@ -1313,17 +1330,17 @@ export async function workflowRunAction(
       process.exit(1);
       return;
     }
+    progress.stop();
     console.error(formatCrashError(err));
     runLogger.flush();
     journal?.end("crashed");
     if (journal) console.error(c.subtle(`  resume with: sweny workflow resume ${runId}`));
     recordHistory(nodeTimer.lastResults, undefined, true);
-    console.error(`  ${renderReceiptLine(summarizeRun(new Map(), Date.now() - runStart, true), isTTY)}\n`);
+    const crashSummary = summarizeRun(new Map(), Date.now() - runStart, true);
+    await writeReceipt(crashSummary, { workflow: workflow.id, runId, crashed: true, stream: process.stderr });
     // A crash must not leave a stale success comment behind.
     if (options.commentFile) {
-      writeRunComment(options.commentFile, workflow, new Map(), summarizeRun(new Map(), Date.now() - runStart, true), {
-        crashed: true,
-      });
+      writeRunComment(options.commentFile, workflow, new Map(), crashSummary, { crashed: true, runId });
     }
     // Finalize the cloud run as failed (covers thrown errors, incl.
     // RouteEvaluationError). Without this a crashed workflow run stays
@@ -1489,7 +1506,7 @@ workflowCmd
   .command("diagram <file>")
   .description("Render a workflow as a Mermaid diagram (raw .mmd by default; .md output auto-fences)")
   .option("--direction <dir>", "Graph direction: TB (top-bottom) or LR (left-right)", "TB")
-  .option("--title <title>", "Inject a title header (off by default — raw Mermaid has no title)")
+  .option("--title <title>", "Inject a title header (off by default: raw Mermaid has no title)")
   .option("--block", "Wrap in ```mermaid fenced code block (forces fencing in any output)")
   .option("--no-block", "Force raw Mermaid even when writing to a .md file")
   .option("-o, --output <path>", "Write to a file instead of stdout (.mmd/.mermaid raw; .md fenced)")
@@ -1706,7 +1723,7 @@ program
           shell: process.platform === "win32",
         });
         if (res.error) {
-          process.stderr.write(chalk.red(`  Error: couldn't run ${cmd} — ${res.error.message}`) + "\n");
+          process.stderr.write(chalk.red(`  Error: couldn't run ${cmd}: ${res.error.message}`) + "\n");
           return 127;
         }
         return typeof res.status === "number" ? res.status : 1;
