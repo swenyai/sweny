@@ -25,6 +25,19 @@ This context is available to the node's instruction execution and to [edge condi
 
 Context is **append-only**: each completed node adds its result to the context. If a node executes multiple times (via a [bounded cycle](/edges#bounded-cycles)), the context contains the **most recent** result for that node ID.
 
+### What a node receives
+
+The context above is what [`requires`](/nodes#requires) gates read, always in full. What the AI model sees at a node is a view of it, chosen by the workflow's `context_mode`:
+
+| `context_mode`      | Prior nodes included                                                                                                                                           | Each prior node's value                                                                                                                                                                                                        |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bounded` (default) | Nodes this node can depend on: its graph ancestors via edges (itself too, on a cycle), nodes its `requires` paths name, and node IDs its instruction mentions. | For a node that succeeded and declares `output.properties`: only the declared fields, plus the executor's `error` / `fail_soft` markers. Free-text fields such as an adapter's `summary` are dropped. Otherwise the full data. |
+| `full`              | Every previously completed node.                                                                                                                               | The full result data.                                                                                                                                                                                                          |
+
+Every value keeps the runtime `evals` (and `safe_outputs` receipts) namespace. Prior results reach the model inside an untrusted-data fence in both modes.
+
+Why bounded is the default: in `full` mode node N re-sends the complete output of nodes 1 to N-1, prose included, so prompt size per run grows quadratically and one verbose node inflates every later prompt. Declaring an `output` schema is how a node says which of its fields matter downstream. Set `context_mode: full` on a workflow whose later nodes read prose a schema'd node does not declare.
+
 ## Node Execution Sequence
 
 For each node, a conforming executor MUST perform the following steps in order:
@@ -33,7 +46,7 @@ For each node, a conforming executor MUST perform the following steps in order:
 1. **Resolve skills** from the node's `skills` list (see [Skills](/skills)).
 2. **Collect tools** from resolved skills that have `tools`.
 3. **Collect MCP servers** from resolved skills that have `mcp`. Wire them for this node's execution session only (node-scoped, not global).
-4. **Build context** — the accumulated context object (input + all prior node results).
+4. **Build context**: the accumulated context object, viewed per [`context_mode`](#what-a-node-receives) for the model.
 5. **Build instruction** — the node's base instruction, augmented with input `rules` and `context` fields (see [Nodes — Input Augmentation](/nodes#input-augmentation)), then **skill instructions** from resolved skills that have `instruction`.
 6. **Invoke the AI model** with: instruction, context, tools (from step 2 + MCP tools from step 3), and output schema (if present). The model is resolved per [Model Selection](/nodes#model-selection) (`node.model` → `workflow.model` → executor default); when none is specified the executor uses its implementation-defined default.
 7. **Capture the result** as a `NodeResult`.

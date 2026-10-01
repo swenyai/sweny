@@ -11,6 +11,7 @@ import { z } from "zod";
 import type { Workflow, WorkflowType } from "./types.js";
 import {
   AUTHOR_ASSOCIATIONS,
+  CONTEXT_MODES,
   EVALUATOR_KINDS,
   EVAL_POLICIES,
   MCP_TRANSPORTS,
@@ -429,6 +430,7 @@ export const workflowZ = z.object({
   model: z.string().min(1).optional(),
   judge_budget: z.number().int().min(0).optional(),
   budget: budgetZ.optional(),
+  context_mode: z.enum(CONTEXT_MODES).optional(),
   inputs: workflowInputsZ.optional(),
   permissions: nodePermissionsZ.optional(),
   safe_outputs: safeOutputsPolicyZ.optional(),
@@ -1150,6 +1152,12 @@ export const workflowJsonSchema = {
       $ref: "#/$defs/Budget",
       description:
         "Spend ceiling for the whole run and for every node. A node's own budget may only narrow it. The CLI's --max-tokens and --max-cost tighten it further.",
+    },
+    context_mode: {
+      type: "string",
+      enum: [...CONTEXT_MODES],
+      description:
+        "What prior results a node's prompt receives. bounded (default): only nodes it can depend on, and a schema'd node's declared fields instead of its free-text summary. full: every prior node's complete data.",
     },
     inputs: {
       type: "object",

@@ -370,15 +370,24 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // (a Record<name, EvalResult> for downstream lookup like
     // `priorNode.evals.tests_run_clean.pass`). This namespace is reserved
     // for runtime verdicts; an agent-provided `data.evals` never overrides it.
-    const context: Record<string, unknown> = {
+    // `requires` always reads this full map: it is a deterministic gate, not
+    // a prompt, so it costs no tokens and keeps every declared path working.
+    const requiresContext: Record<string, unknown> = {
       input,
       ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, buildPriorNodeContext(v)])),
     };
+    // What the model sees (#337): only nodes this one can depend on, and a
+    // schema'd node's declared fields instead of its prose. `context_mode:
+    // full` keeps the old everything-prior map.
+    const context: Record<string, unknown> =
+      workflow.context_mode === "full"
+        ? requiresContext
+        : buildBoundedContext(workflow, currentId, results, input, resolvedInstruction);
 
     // Pre-condition gate: evaluate `requires` against the cross-node context
     // BEFORE invoking the LLM. Failure either marks the node failed (on_fail
     // default) or skipped (on_fail: "skip") and skips execution entirely.
-    const requiresError = evaluateRequires(node.requires, context);
+    const requiresError = evaluateRequires(node.requires, requiresContext);
     if (requiresError) {
       const onFail = node.requires?.on_fail ?? "fail";
       const result: NodeResult =
@@ -986,9 +995,9 @@ function buildPriorNodeContext(result: NodeResult): Record<string, unknown> {
  * evaluator. When no schema is declared we fall back to the full data
  * (back-compat for workflows without structured outputs).
  *
- * The downstream node prompt is untouched: nodes still see the full prior
- * `data` including any prose `summary`, so workflows that consume the
- * narrative in subsequent steps keep working.
+ * Downstream node prompts get a similar projection (see
+ * `buildBoundedNodeEntry`), minus the null-fill, unless the workflow sets
+ * `context_mode: full`.
  */
 function buildRouteEvalEntry(
   result: NodeResult,
@@ -1048,6 +1057,89 @@ function getDeclaredOutputProperties(output: JSONSchema | undefined): Set<string
   const keys = Object.keys(props as Record<string, unknown>);
   if (keys.length === 0) return null;
   return new Set(keys);
+}
+
+// ─── Bounded node context (#337) ─────────────────────────────────
+//
+// Full mode hands every node the whole results map: node N re-sends nodes
+// 1..N-1 including each one's prose `summary`, so prompt bytes per run grow
+// quadratically and one verbose node inflates every later prompt. Bounded
+// mode (the default) keeps the same keys a node can depend on, and sends a
+// schema'd node's declared fields only.
+
+/** Keys the executor itself writes into data; kept when a view is projected. */
+const RUNTIME_DATA_KEYS = ["error", "fail_soft", "skipped_reason"];
+
+/**
+ * The prompt-context entry for one prior node in bounded mode. A successful
+ * node with a declared `output.properties` block contributes those fields
+ * (plus executor-written error/fail_soft keys); everything else, including
+ * the free-text `summary`, is dropped. Nodes without a schema, and nodes
+ * that did not succeed, keep the full `buildPriorNodeContext` entry. The
+ * trusted `evals` and `safe_outputs` namespaces always come from the runtime.
+ */
+function buildBoundedNodeEntry(result: NodeResult, sourceNode: Node | undefined): Record<string, unknown> {
+  const full = buildPriorNodeContext(result);
+  const declared = getDeclaredOutputProperties(sourceNode?.output);
+  if (!declared || result.status !== "success") return full;
+  const keep = new Set([...declared, ...RUNTIME_DATA_KEYS, "evals", "safe_outputs"]);
+  return Object.fromEntries(Object.entries(full).filter(([k]) => keep.has(k)));
+}
+
+/** First segment of a requires path (`any:triage.findings[*].x` -> `triage`). */
+function pathRoot(path: string): string | undefined {
+  return /^(?:all:|any:)?([^.[\]]+)/.exec(path)?.[1];
+}
+
+function mentionsNode(text: string, nodeId: string): boolean {
+  const escaped = nodeId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`).test(text);
+}
+
+/**
+ * Node ids whose results `nodeId` may read: its graph ancestors (every node
+ * with an edge path into it, itself included when it sits on a cycle), any
+ * node a `requires` path names, and any node id its instruction mentions.
+ */
+function contextDependencies(workflow: Workflow, nodeId: string, instruction = ""): Set<string> {
+  const deps = new Set<string>();
+  const stack = [nodeId];
+  for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
+    for (const e of workflow.edges) {
+      if (e.to === id && !deps.has(e.from)) {
+        deps.add(e.from);
+        stack.push(e.from);
+      }
+    }
+  }
+  const requires = workflow.nodes[nodeId]?.requires;
+  for (const p of [...(requires?.output_required ?? []), ...(requires?.output_matches ?? []).map((m) => m.path)]) {
+    const root = pathRoot(p);
+    if (root && root !== "input") deps.add(root);
+  }
+  for (const id of Object.keys(workflow.nodes)) {
+    if (id !== nodeId && mentionsNode(instruction, id)) deps.add(id);
+  }
+  return deps;
+}
+
+/** The bounded prompt context for one node: `input` plus its dependencies' entries. */
+function buildBoundedContext(
+  workflow: Workflow,
+  nodeId: string,
+  results: Map<string, NodeResult>,
+  input: unknown,
+  instruction: string,
+): Record<string, unknown> {
+  const deps = contextDependencies(workflow, nodeId, instruction);
+  return {
+    input,
+    ...Object.fromEntries(
+      [...results.entries()]
+        .filter(([k]) => deps.has(k))
+        .map(([k, v]) => [k, buildBoundedNodeEntry(v, workflow.nodes[k])]),
+    ),
+  };
 }
 
 /**

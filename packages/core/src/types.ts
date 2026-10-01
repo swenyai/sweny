@@ -168,6 +168,10 @@ export type EvaluatorKind = (typeof EVALUATOR_KINDS)[number];
 export const EVAL_POLICIES = ["all_pass", "any_pass", "weighted"] as const;
 export type EvalPolicy = (typeof EVAL_POLICIES)[number];
 
+/** What prior results a node's prompt receives (#337). See {@link Workflow.context_mode}. */
+export const CONTEXT_MODES = ["bounded", "full"] as const;
+export type ContextMode = (typeof CONTEXT_MODES)[number];
+
 /** Action when a `requires` precondition fails. */
 export const REQUIRES_ON_FAIL = ["fail", "skip"] as const;
 export type RequiresOnFail = (typeof REQUIRES_ON_FAIL)[number];
@@ -603,6 +607,13 @@ export interface Workflow {
    * `budget` may only narrow it. The CLI's `--max-tokens` / `--max-cost` tighten it.
    */
   budget?: Budget;
+  /**
+   * What prior results a node's prompt receives (#337). `bounded` (default):
+   * only nodes it can depend on (graph ancestors, nodes named by `requires`
+   * or its instruction), and a schema'd node's declared fields instead of its
+   * free-text `summary`. `full`: every prior node's complete data.
+   */
+  context_mode?: ContextMode;
   /**
    * Declared per-run input contract. When present, the CLI validates the
    * caller-provided `--input` JSON against this declaration, applies defaults
