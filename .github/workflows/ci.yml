@@ -404,6 +404,10 @@ jobs:
       # spec is deliberately outside the root workspaces and has its own lock.
       - run: npm run build --prefix spec
 
+      # Assert neither built site loads a script from a third-party origin.
+      - run: npx vitest run src/__tests__/no-third-party-scripts.test.ts
+        working-directory: packages/web
+
   # Studio build plus before/after screenshots of the static app (PR #480).
   # Playwright runs here in CI only; the artifact holds the PNGs.
   studio-screenshots:
