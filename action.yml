@@ -65,7 +65,7 @@ inputs:
     default: "false"
 
   dry-run:
-    description: "When 'true', run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first natural-language conditional edge."
+    description: "When 'true', run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent (the PR comment and failure notification are skipped too). Stops at the first natural-language conditional edge."
     required: false
     default: "false"
 
@@ -401,8 +401,10 @@ runs:
 
         sweny workflow run "$WORKFLOW_PATH" "${FLAGS[@]}"
 
+    # A dry run writes nothing outside the job: no PR comment, no failure
+    # notice. Same truthy set as the run step's normalize() (case-insensitive).
     - name: Post PR comment
-      if: ${{ !cancelled() && inputs.setup-only != 'true' && inputs.pr-comment != 'false' && github.event.pull_request.number != '' }}
+      if: ${{ !cancelled() && inputs.setup-only != 'true' && !contains(fromJSON('["true","1","yes"]'), inputs.dry-run) && inputs.pr-comment != 'false' && github.event.pull_request.number != '' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -412,7 +414,7 @@ runs:
       run: bash "${{ github.action_path }}/scripts/post-run-comment.sh"
 
     - name: Notify on failure
-      if: ${{ failure() && inputs.setup-only != 'true' && inputs.notify-on-failure != '' }}
+      if: ${{ failure() && inputs.setup-only != 'true' && !contains(fromJSON('["true","1","yes"]'), inputs.dry-run) && inputs.notify-on-failure != '' }}
       shell: bash
       # The requested workflow directory may be the reason the run failed.
       working-directory: ${{ github.workspace }}
