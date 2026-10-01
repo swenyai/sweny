@@ -239,6 +239,20 @@ describe("prune", () => {
     expect(left).toEqual(["20260930-100004-000000.json", "20260930-100005-000000.json", "20260930-100006-000000.json"]);
   });
 
+  it("removes a pruned run's output.md folder with it", () => {
+    const d = tmp();
+    const old = newRunId(Date.parse("2026-09-30T10:00:00Z"), () => "000000");
+    const kept = newRunId(Date.parse("2026-09-30T10:00:01Z"), () => "000000");
+    for (const id of [old, kept]) {
+      writeRunRecord(record({ runId: id }), d);
+      fs.mkdirSync(path.join(d, RUN_HISTORY_DIR, id), { recursive: true });
+      fs.writeFileSync(path.join(d, RUN_HISTORY_DIR, id, "output.md"), "x");
+    }
+    expect(pruneRuns(d, 1)).toBe(1);
+    expect(fs.existsSync(path.join(d, RUN_HISTORY_DIR, old))).toBe(false);
+    expect(fs.existsSync(path.join(d, RUN_HISTORY_DIR, kept, "output.md"))).toBe(true);
+  });
+
   it("recordRun prunes to 200 by default", () => {
     const d = tmp();
     const dir = path.join(d, RUN_HISTORY_DIR);
