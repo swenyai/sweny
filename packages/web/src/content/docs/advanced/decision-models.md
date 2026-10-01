@@ -71,9 +71,9 @@ The endpoint, model and key never come from a workflow file. A workflow that set
 | Where the URL comes from | What it may reach | Key sent |
 | --- | --- | --- |
 | `SWENY_DECIDER_URL` in the CI or shell environment | any public address; loopback and private only with `SWENY_DECIDER_ALLOW_PRIVATE=true` (environment) | `SWENY_DECIDER_API_KEY`, the only name read |
-| `decider: { url }` in `.sweny.yml` | loopback only (local Ollama) | never |
+| `decider: { url }` in `.sweny.yml`, or `SWENY_DECIDER_URL` set by the workspace `.env` | loopback only (local Ollama) | never |
 
-The model comes from `SWENY_DECIDER_MODEL`, else `decider.model` in `.sweny.yml`. Never put the URL or key for a remote server in `.sweny.yml` or a committed `.env`.
+The model comes from `SWENY_DECIDER_MODEL`, else `decider.model` in `.sweny.yml`. Never put the URL or key for a remote server in `.sweny.yml` or a committed `.env`: a `SWENY_DECIDER_API_KEY` or `SWENY_DECIDER_ALLOW_PRIVATE` that only the workspace `.env` sets is ignored.
 
 The URL must be http or https with no credentials in it. SWEny resolves the host name itself, checks every address it resolves to, and connects to the address it checked, so a name cannot be rebound to another address between the check and the connection. Loopback and private addresses (127.0.0.0/8, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, fc00::/7) need the environment's allowance above. Link-local and cloud metadata addresses (169.254.0.0/16, fe80::/10, `metadata.google.internal`) are always refused. Redirects are not followed. There is no default URL and no fallback from a local server to a hosted one.
 

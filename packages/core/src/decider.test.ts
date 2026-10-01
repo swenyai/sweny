@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import http from "node:http";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AddressInfo } from "node:net";
@@ -13,7 +13,8 @@ import { parseWorkflow, validateWorkflow, workflowZ } from "./schema.js";
 import { validateParsed } from "./loader.js";
 import { formatReceipt, summarizeRun, WORKFLOW_RUN_OPTIONS } from "./cli/run-output.js";
 import { RESUME_SHARED_RUN_FLAGS, prepareResume } from "./cli/resume.js";
-import { operatorDeciderConfig } from "./cli/config-file.js";
+import { loadDotenv, operatorDeciderConfig } from "./cli/config-file.js";
+import { trustedEnvValue, unmarkWorkspaceEnv } from "./startup-env.js";
 import {
   JOURNAL_FILE,
   JournalIntegrityError,
@@ -906,18 +907,58 @@ describe("CLI operator config", () => {
     expect(operatorDeciderConfig({}, {}, false)).toBeUndefined();
   });
 
-  it("values come through the trusted reader, so a value it does not vouch for is ignored", () => {
+  it("a URL the trusted reader does not vouch for is repo content: loopback only, no key", () => {
     const env = { SWENY_DECIDER_URL: "https://evil.example.com", SWENY_DECIDER_MODEL: "m", SWENY_DECIDER_API_KEY: "k" };
     // A reader that vouches only for the key (the URL came from a committed .env, say).
     const trusted = (k: string) => (k === "SWENY_DECIDER_API_KEY" ? env[k] : undefined);
-    expect(operatorDeciderConfig({ "decider.model": "m" }, env, false, trusted)).toBeUndefined();
-    expect(
-      operatorDeciderConfig({ "decider.url": "https://evil.example.com", "decider.model": "m" }, env, false, trusted),
-    ).toEqual({
+    expect(operatorDeciderConfig({}, env, false, trusted)).toEqual({
       url: "https://evil.example.com",
       model: "m",
       loopbackOnly: true,
     });
+    expect(operatorDeciderConfig({}, {}, false, trusted)).toBeUndefined();
+  });
+
+  it("a committed .env URL is repo content: loopback only, and the real env key is never sent to it", async () => {
+    const cwd = tmp();
+    writeFileSync(join(cwd, ".env"), "SWENY_DECIDER_URL=https://evil.example.com\nSWENY_DECIDER_MODEL=m\n");
+    const keys = ["SWENY_DECIDER_URL", "SWENY_DECIDER_MODEL"];
+    try {
+      loadDotenv(cwd);
+      expect(process.env.SWENY_DECIDER_URL).toBe("https://evil.example.com");
+      // The run env as a caller would build it after .env loaded, with a real operator key.
+      const env = { ...process.env, SWENY_DECIDER_API_KEY: "sk-real" };
+      const cfg = operatorDeciderConfig({}, env, false, (k) => trustedEnvValue(env, k));
+      expect(cfg).toEqual({ url: "https://evil.example.com", model: "m", loopbackOnly: true });
+      const { trace } = await runWith(wf(), "handle_high", { decider: cfg as DeciderOperatorConfig });
+      expect(trace.decisions).toBeUndefined();
+      expect(trace.deciderOff).toMatch(/must be loopback/);
+    } finally {
+      for (const k of keys) {
+        delete process.env[k];
+        unmarkWorkspaceEnv(k);
+      }
+    }
+  });
+
+  it("a committed .env loopback URL works, still with no key", async () => {
+    const srv = await fakeServer({ json: confident("handle_low") });
+    const cwd = tmp();
+    writeFileSync(join(cwd, ".env"), `SWENY_DECIDER_URL=${srv.baseUrl}\nSWENY_DECIDER_MODEL=m\n`);
+    const keys = ["SWENY_DECIDER_URL", "SWENY_DECIDER_MODEL"];
+    try {
+      loadDotenv(cwd);
+      const env = { ...process.env, SWENY_DECIDER_API_KEY: "sk-real" };
+      const cfg = operatorDeciderConfig({}, env, false, (k) => trustedEnvValue(env, k)) as DeciderOperatorConfig;
+      const { results } = await runWith(wf(), "handle_high", { decider: { ...cfg, timeoutMs: 300 } });
+      expect(results.has("handle_low")).toBe(true);
+      expect(srv.seen[0].headers.authorization).toBeUndefined();
+    } finally {
+      for (const k of keys) {
+        delete process.env[k];
+        unmarkWorkspaceEnv(k);
+      }
+    }
   });
 
   it("end to end: a .sweny.yml URL pointing off the machine sends nothing, key or not", async () => {

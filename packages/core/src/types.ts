@@ -30,7 +30,40 @@ export interface ToolContext {
   config: Record<string, string>;
   /** Structured logger */
   logger: Logger;
+  /** The run's working directory (`ExecuteOptions.cwd`, else `process.cwd()`). */
+  cwd?: string;
+  /**
+   * A staged or dry run: no side effects. The executor refuses every
+   * non-`read` tool before its handler runs.
+   */
+  staged?: boolean;
+  /**
+   * Pushes a PR's head branch from the sweny process (#473), bound to this
+   * run's checkout. Set by the Node executor; absent in the browser build,
+   * where `github_create_pr` only calls the API.
+   */
+  pushBranch?: BranchPusher;
+  /**
+   * The operator's GITHUB_API_URL (GHES), read through the startup env
+   * snapshot by the Node executor. Absent means https://api.github.com.
+   */
+  githubApiUrl?: string;
 }
+
+/** The sweny-side head-branch push behind `github_create_pr` (#473). Never throws. */
+export type BranchPusher = (opts: {
+  repo: string;
+  head: string;
+  base: string;
+  /** The repo's default branch from the GitHub API; without it nothing is pushed. */
+  defaultBranch?: string;
+  /**
+   * The head branch's sha on the remote when it was checked through the API,
+   * or "" when it did not exist. The push leases on it. Without it nothing is pushed.
+   */
+  remoteSha?: string;
+  token?: string;
+}) => Promise<{ pushed: boolean; attempted: boolean; reason?: string }>;
 
 /**
  * Side-effect class of a tool. `"read"` only reads. `"write"` can change

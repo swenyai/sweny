@@ -39,6 +39,17 @@ npm test --workspace=packages/studio
 npx vitest run packages/core/src/skills/linear.test.ts
 ```
 
+### Mutation testing
+
+Stryker mutates the security- and correctness-critical core modules (`when`, `safe-outputs`, `budget`, `journal`, `agent-env`, `node-policy`, `harness/policy`; see `packages/core/stryker.config.json`) and reports which mutants the specs fail to kill. It is slow, so it never runs on PRs. It runs weekly in `.github/workflows/mutation.yml`, or on demand:
+
+```bash
+gh workflow run mutation.yml --ref <branch>
+gh run watch
+```
+
+The per-file scores and surviving mutants land in the run summary; the HTML and JSON reports are in the `mutation-report` artifact. A manual run reuses the cached report (incremental) unless you tick `force`; the weekly run is always full, because mutants on module-level constants are not re-tested when only the tests change. The job fails when the total score drops below the `break` threshold in `stryker.config.json` (first full run with these specs: 95.24, break 93). Specs written to kill survivors live in `packages/core/src/__tests__/mutation/`. Don't run it locally on a shared machine.
+
 ## Running the CLI locally
 
 The CLI auto-loads `.env` and `.sweny.yml` from your working directory:

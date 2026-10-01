@@ -66,7 +66,7 @@ steps:
       GITHUB_TOKEN: ${{ github.token }}   # the github skill's token; sweny pushes and opens the PR with it
 ```
 
-With that, no agent holds a push credential: the built-in `create_pr` node's own `git push` fails and SWEny pushes the head branch (`origin` only, the PR's own repo, never forced, never the base or default branch). A custom node whose shell must push itself declares `agent_env: [GITHUB_TOKEN]` and runs `gh auth setup-git` (or uses a credential helper that reads the token) before `git push`.
+With that, no agent holds a push credential: the built-in `create_pr` node's own `git push` fails and SWEny pushes the head branch: only when every `origin` URL (fetch and push) is the PR's own repo, to that repo's URL on the GitHub server with an explicit refspec, never forced, never the base or default branch. The push runs from a private copy of the branch with no system, global or repository git config and no hooks, so nothing the agent wrote in the checkout runs while the token is in use. It needs `GITHUB_TOKEN`; an ssh `origin` is pushed over https with it. A custom node whose shell must push itself declares `agent_env: [GITHUB_TOKEN]` and runs `gh auth setup-git` (or uses a credential helper that reads the token) before `git push`.
 
 When a run does start with a persisted credential (an `http.*.extraheader`, a credential helper holding a token, a `store` helper's file, or a URL with a password or token in it, in the repo, worktree or global git config or any file they include), SWEny warns once with the file and key (never the value), then keeps it from every read-only and staged node's agent:
 
@@ -111,7 +111,7 @@ Three modes:
 
 Env scoping is controlled separately by `env-scope`. Untrusted-input fencing always applies.
 
-On Ubuntu 23.10 and later, AppArmor can block the unprivileged user namespaces bubblewrap needs, and GitHub-hosted `ubuntu-24.04` runners do: there `auto` currently warns and runs unsandboxed. SWEny reports this in the warning. The fix is `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, which changes a host kernel setting, so the Action only applies it when you set `SWENY_SANDBOX: strict` in the step's `env`.
+On Ubuntu 23.10 and later, AppArmor can block the unprivileged user namespaces bubblewrap needs, and GitHub-hosted `ubuntu-24.04` runners do. On GitHub-hosted runners (ephemeral VMs) the Action runs `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` by default, so agents are sandboxed there with no setup. On self-hosted runners that setting belongs to a persistent host, so the Action only changes it when you set `SWENY_SANDBOX: strict` in the step's `env`; otherwise `auto` warns and runs unsandboxed. `off` never touches it.
 
 :::note[Scope]
 The sandbox covers the agent's shell commands. SWEny's own skill tools run in the SWEny process, and MCP servers run outside the sandbox; both only receive the credentials wired for them.

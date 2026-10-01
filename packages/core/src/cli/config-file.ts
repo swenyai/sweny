@@ -1,10 +1,31 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
+// Imported for its side effect too: the startup env snapshot is taken before loadDotenv runs.
+import { markWorkspaceEnv } from "../startup-env.js";
+
+/**
+ * Keys a workspace `.env` may never set. The workspace is agent-writable, and
+ * these name runtime or platform state sweny trusts as the operator's: CI and
+ * runner identity and the files the runner hands sweny to write
+ * (GITHUB_STEP_SUMMARY, GITHUB_OUTPUT, ...), where binaries are found (PATH),
+ * how Node and git behave (NODE_*, GIT_*), where traffic goes and which CAs it
+ * trusts (proxies, SSL/CA vars), and the home and temp dirs. A `.env` value
+ * for one of them is skipped with a warning. GITHUB_TOKEN is a credential the
+ * `.env` template documents, not platform state, so it stays allowed.
+ */
+export const DOTENV_DENIED_KEYS =
+  /^(GITHUB_(?!TOKEN$)[A-Za-z0-9_]*|RUNNER_[A-Za-z0-9_]*|ACTIONS_[A-Za-z0-9_]*|CI|PATH|Path|NODE_[A-Za-z0-9_]*|GIT_[A-Za-z0-9_]*|(HTTPS?|ALL|NO|FTP)_PROXY|(https?|all|no|ftp)_proxy|SSL_CERT_FILE|SSL_CERT_DIR|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE|TMPDIR|TEMP|TMP|HOME|USERPROFILE)$/;
+
+/** True when a workspace `.env` may not set `key` (see {@link DOTENV_DENIED_KEYS}). */
+export function isDotenvDenied(key: string): boolean {
+  return DOTENV_DENIED_KEYS.test(key);
+}
 
 /**
  * Auto-load a `.env` file from the given directory.
- * Sets `process.env[KEY]` only if not already defined (real env vars win).
+ * Sets `process.env[KEY]` only if not already defined (real env vars win),
+ * and never a runtime or platform key ({@link DOTENV_DENIED_KEYS}).
  */
 export function loadDotenv(cwd: string = process.cwd()): void {
   const envPath = path.join(cwd, ".env");
@@ -30,9 +51,13 @@ export function loadDotenv(cwd: string = process.cwd()): void {
       value = value.slice(1, -1);
     }
 
-    if (process.env[key] === undefined) {
-      process.env[key] = value;
+    if (process.env[key] !== undefined) continue;
+    if (isDotenvDenied(key)) {
+      process.stderr.write(`  warning: .env sets ${key}, a runtime/platform variable; ignored\n`);
+      continue;
     }
+    process.env[key] = value;
+    markWorkspaceEnv(key);
   }
 }
 
@@ -95,7 +120,7 @@ export function operatorDeciderConfig(
 ): { url: string; model: string; apiKey?: string; allowPrivate?: boolean; loopbackOnly?: boolean } | false | undefined {
   if (noDecider) return false;
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
-  const model = str(trusted("SWENY_DECIDER_MODEL")) ?? str(fileConfig["decider.model"]);
+  const model = str(trusted("SWENY_DECIDER_MODEL")) ?? str(env.SWENY_DECIDER_MODEL) ?? str(fileConfig["decider.model"]);
   const envUrl = str(trusted("SWENY_DECIDER_URL"));
   if (envUrl) {
     if (!model) return undefined;
@@ -103,9 +128,11 @@ export function operatorDeciderConfig(
     const allowPrivate = ["1", "true"].includes((str(trusted("SWENY_DECIDER_ALLOW_PRIVATE")) ?? "").toLowerCase());
     return { url: envUrl, model, ...(apiKey ? { apiKey } : {}), ...(allowPrivate ? { allowPrivate } : {}) };
   }
-  const fileUrl = str(fileConfig["decider.url"]);
-  if (!fileUrl || !model) return undefined;
-  return { url: fileUrl, model, loopbackOnly: true };
+  // Repo content: a URL a committed `.env` put in the environment (untrusted),
+  // else the `.sweny.yml` one. Loopback only, never a key.
+  const repoUrl = str(env.SWENY_DECIDER_URL) ?? str(fileConfig["decider.url"]);
+  if (!repoUrl || !model) return undefined;
+  return { url: repoUrl, model, loopbackOnly: true };
 }
 
 /** Parsed config file — flat strings for scalar fields, arrays for list fields, objects for nested blocks. */

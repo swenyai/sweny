@@ -65,7 +65,7 @@ inputs:
     default: "false"
 
   dry-run:
-    description: "When 'true', run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first natural-language conditional edge."
+    description: "When 'true', run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent (the PR comment and failure notification are skipped too). Stops at the first natural-language conditional edge."
     required: false
     default: "false"
 
@@ -212,9 +212,13 @@ runs:
     # Agent sandbox deps (#360). SWENY_SANDBOX=auto (default) sandboxes agent
     # shell commands when bubblewrap + socat work and otherwise warns and runs
     # unsandboxed, so this step is best-effort and never fails the job.
+    # GitHub-hosted runners are ephemeral VMs, so the AppArmor relaxation below is
+    # applied there by default; self-hosted runners only get it with strict.
     - name: Install agent sandbox dependencies
       if: runner.os == 'Linux'
       shell: bash
+      env:
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       run: |
         SUDO=""
         if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo -n"; fi
@@ -228,11 +232,17 @@ runs:
           fi
         fi
         # Ubuntu 23.10+ restricts unprivileged user namespaces via AppArmor,
-        # which bubblewrap needs. Only relax the host kernel setting when the
-        # caller explicitly asked for SWENY_SANDBOX=strict.
-        if command -v bwrap >/dev/null 2>&1 && ! bwrap --ro-bind / / --dev /dev --proc /proc true >/dev/null 2>&1; then
-          if [ "${SWENY_SANDBOX:-}" = "strict" ]; then
+        # which bubblewrap needs. Relax the kernel setting on GitHub-hosted runners
+        # (ephemeral VM) or when the caller asked for SWENY_SANDBOX=strict. Never
+        # under off, and never by default on self-hosted (persistent host).
+        if [ "${SWENY_SANDBOX:-}" != "off" ] && command -v bwrap >/dev/null 2>&1 && ! bwrap --ro-bind / / --dev /dev --proc /proc true >/dev/null 2>&1; then
+          if [ "${SWENY_SANDBOX:-}" = "strict" ] || [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
             $SUDO sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+            if bwrap --ro-bind / / --dev /dev --proc /proc true >/dev/null 2>&1; then
+              echo "::notice title=SWEny agent sandbox::Relaxed kernel.apparmor_restrict_unprivileged_userns; agent commands will be sandboxed."
+            else
+              echo "::warning title=SWEny agent sandbox::bubblewrap still cannot create a sandbox after relaxing kernel.apparmor_restrict_unprivileged_userns; agent commands will run unsandboxed unless SWENY_SANDBOX=strict."
+            fi
           fi
         fi
         exit 0
@@ -249,6 +259,7 @@ runs:
       env:
         SRT_VERSION: "0.0.78"
         AGENT: ${{ inputs.agent }}
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       run: |
         if [ "${SWENY_SANDBOX:-}" = "off" ]; then
           echo "::notice title=SWEny sandbox wrapper::SWENY_SANDBOX=off; skipping srt install"
@@ -274,10 +285,18 @@ runs:
         probe() { srt --settings "$SETTINGS" -- true >/dev/null 2>&1; }
         if ! probe && [ "$RUNNER_OS" = "Linux" ]; then
           # Ubuntu 23.10+ restricts unprivileged user namespaces, which bubblewrap needs.
-          $SUDO sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+          # Same rule as the dependencies step: GitHub-hosted (ephemeral VM) or strict only.
+          if [ "${SWENY_SANDBOX:-}" = "strict" ] || [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
+            $SUDO sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+            if probe; then
+              echo "::notice title=SWEny agent sandbox::Relaxed kernel.apparmor_restrict_unprivileged_userns; agent commands will be sandboxed."
+            else
+              echo "::warning title=SWEny agent sandbox::srt still cannot wrap a command after relaxing kernel.apparmor_restrict_unprivileged_userns."
+            fi
+          fi
         fi
         if ! probe; then
-          echo "::error title=SWEny sandbox wrapper::srt ${SRT_VERSION} is installed but cannot wrap a command on this runner (needs bubblewrap, socat, ripgrep and unprivileged user namespaces). Fix the runner, or set SWENY_SANDBOX=off and harness-policy: warn to run agent commands unsandboxed."
+          echo "::error title=SWEny sandbox wrapper::srt ${SRT_VERSION} is installed but cannot wrap a command on this runner (needs bubblewrap, socat, ripgrep and unprivileged user namespaces). On a self-hosted Ubuntu 23.10+ runner, set SWENY_SANDBOX=strict to let sweny relax kernel.apparmor_restrict_unprivileged_userns, fix the runner yourself, or set SWENY_SANDBOX=off and harness-policy: warn to run agent commands unsandboxed."
           srt --settings "$SETTINGS" -- true 2>&1 | head -5 || true
           exit 1
         fi
@@ -401,8 +420,10 @@ runs:
 
         sweny workflow run "$WORKFLOW_PATH" "${FLAGS[@]}"
 
+    # A dry run writes nothing outside the job: no PR comment, no failure
+    # notice. Same truthy set as the run step's normalize() (case-insensitive).
     - name: Post PR comment
-      if: ${{ !cancelled() && inputs.setup-only != 'true' && inputs.pr-comment != 'false' && github.event.pull_request.number != '' }}
+      if: ${{ !cancelled() && inputs.setup-only != 'true' && !contains(fromJSON('["true","1","yes"]'), inputs.dry-run) && inputs.pr-comment != 'false' && github.event.pull_request.number != '' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -412,7 +433,7 @@ runs:
       run: bash "${{ github.action_path }}/scripts/post-run-comment.sh"
 
     - name: Notify on failure
-      if: ${{ failure() && inputs.setup-only != 'true' && inputs.notify-on-failure != '' }}
+      if: ${{ failure() && inputs.setup-only != 'true' && !contains(fromJSON('["true","1","yes"]'), inputs.dry-run) && inputs.notify-on-failure != '' }}
       shell: bash
       # The requested workflow directory may be the reason the run failed.
       working-directory: ${{ github.workspace }}

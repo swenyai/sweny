@@ -80,8 +80,31 @@ describe("agent sandbox wrapper step", () => {
     expect(step.run).toContain("::error title=SWEny sandbox wrapper::");
   });
 
+  it("relaxes AppArmor only on GitHub-hosted runners or strict, with the same env", () => {
+    expect(step.env.RUNNER_ENVIRONMENT).toBe("${{ runner.environment }}");
+    expect(step.run).toContain(
+      '[ "${SWENY_SANDBOX:-}" = "strict" ] || [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]',
+    );
+    expect(step.run).toContain("::notice title=SWEny agent sandbox::");
+    expect(step.run).toContain("::warning title=SWEny agent sandbox::srt still cannot");
+  });
+
   it("setup-only skips the run and the PR comment", () => {
     expect(steps.find((s) => s.name === "Run workflow")!.if).toBe("inputs.setup-only != 'true'");
     expect(steps.find((s) => s.name === "Post PR comment")!.if).toContain("inputs.setup-only != 'true'");
+  });
+});
+
+describe("agent sandbox dependencies step", () => {
+  const step = steps.find((s) => s.name === "Install agent sandbox dependencies")!;
+
+  it("relaxes AppArmor on GitHub-hosted runners or strict, never under off", () => {
+    expect(step.env.RUNNER_ENVIRONMENT).toBe("${{ runner.environment }}");
+    expect(step.run).toContain('[ "${SWENY_SANDBOX:-}" != "off" ]');
+    expect(step.run).toContain('[ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]');
+    expect(step.run).toContain('[ "${SWENY_SANDBOX:-}" = "strict" ]');
+    expect(step.run).toContain("kernel.apparmor_restrict_unprivileged_userns=0");
+    expect(step.run).toContain("::notice title=SWEny agent sandbox::");
+    expect(step.run).toContain("::warning title=SWEny agent sandbox::bubblewrap still cannot");
   });
 });

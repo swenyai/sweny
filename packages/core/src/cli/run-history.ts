@@ -16,6 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExecutionEvent, ExecutionTrace, NodeResult, RouteRung, Workflow } from "../types.js";
 import { summarizeRun } from "./run-output.js";
+import { openNoFollow } from "../safe-file.js";
 
 export const RUN_HISTORY_SCHEMA_VERSION = 1;
 export const RUN_HISTORY_DIR = path.join(".sweny", "runs");
@@ -200,8 +201,9 @@ export function writeRunRecord(record: RunRecord, cwd: string = process.cwd()): 
   const final = path.join(dir, `${record.run_id}.json`);
   const tmp = path.join(dir, `.${record.run_id}.json.${process.pid}.tmp`);
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    const fd = fs.openSync(tmp, "w");
+    // The workspace is agent-writable: no link on the path is followed (safe-file.ts).
+    // rename() replaces a link at `final` itself, never its target.
+    const fd = openNoFollow(tmp, { root: cwd, mode: 0o644 });
     try {
       fs.writeSync(fd, JSON.stringify(record, null, 2) + "\n");
       fs.fsyncSync(fd);

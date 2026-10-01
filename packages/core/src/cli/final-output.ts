@@ -13,7 +13,7 @@
  * repo's secrets are.
  */
 
-import fs from "node:fs";
+import { writeFileNoFollow } from "../safe-file.js";
 import path from "node:path";
 import type { ExecutionTrace, JSONSchema, NodeResult, Workflow } from "../types.js";
 import { collectSecretValues, redact } from "../journal.js";
@@ -223,16 +223,14 @@ export function outputRelPath(runId: string): string {
   return path.posix.join(...RUN_HISTORY_DIR.split(path.sep), runId, "output.md");
 }
 
-/** Write output.md (mode 0600). Local only. Returns the relative path, or null on failure. Never throws. */
+/**
+ * Write output.md (mode 0600). Local only. Returns the relative path, or null on failure. Never throws.
+ * The run dir is agent-writable: no link on the path is followed (see safe-file.ts).
+ */
 export function writeFinalOutput(runId: string, markdown: string, cwd: string = process.cwd()): string | null {
   try {
     const rel = outputRelPath(runId);
-    const file = path.join(cwd, rel);
-    fs.mkdirSync(path.dirname(path.dirname(file)), { recursive: true });
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(file, markdown, { mode: 0o600 });
-    // mode only applies on create: a resumed run overwrites an existing file.
-    fs.chmodSync(file, 0o600);
+    writeFileNoFollow(path.join(cwd, rel), markdown, { root: cwd, mode: 0o600 });
     return rel;
   } catch {
     return null;
