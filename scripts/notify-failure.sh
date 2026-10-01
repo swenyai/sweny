@@ -5,7 +5,7 @@
 #                     or an https:// Slack webhook URL itself
 #      WORKFLOW_PATH  the workflow file the Action ran
 #      RUNS_DIR       directory holding .sweny/runs records (default .sweny/runs)
-#      MARKER_FILE    touched just before the run; only newer run records count
+#      MARKER_FILE    unique marker created before Action setup; only newer records count
 #      RUN_URL, GITHUB_REPOSITORY, GH_TOKEN
 #
 # METADATA ONLY: workflow id, failed node ids, a reason class, the run link.
@@ -29,11 +29,13 @@ FAILED=""
 
 RUNS="${RUNS_DIR:-.sweny/runs}"
 RECORD=""
-if [ -d "$RUNS" ] && command -v jq >/dev/null 2>&1; then
-  for f in $(ls -1 "$RUNS"/*.json 2>/dev/null | sort -r); do
-    if [ -n "${MARKER_FILE:-}" ] && [ -e "$MARKER_FILE" ] && [ ! "$f" -nt "$MARKER_FILE" ]; then continue; fi
-    RECORD="$f"
-    break
+# An absent/invalid marker cannot authorize history from another invocation.
+# In that case keep did_not_start, even when an older record says success.
+if [ -f "${MARKER_FILE:-}" ] && [ -d "$RUNS" ] && command -v jq >/dev/null 2>&1; then
+  for f in "$RUNS"/*.json; do
+    [ -f "$f" ] && [ "$f" -nt "$MARKER_FILE" ] || continue
+    # Run filenames sort chronologically. Avoid splitting paths on whitespace.
+    if [ -z "$RECORD" ] || [[ "$f" > "$RECORD" ]]; then RECORD="$f"; fi
   done
 fi
 if [ -n "$RECORD" ]; then

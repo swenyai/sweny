@@ -146,6 +146,16 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Scope history before auth validation or dependency setup can fail. Step
+    # outputs belong to this invocation, including when this Action runs twice.
+    - name: Mark run start
+      id: run_start
+      if: ${{ inputs.setup-only != 'true' && inputs.notify-on-failure != '' }}
+      shell: bash
+      run: |
+        MARKER=$(mktemp "${RUNNER_TEMP}/sweny-run-start.XXXXXX")
+        printf 'marker=%s\n' "$MARKER" >> "$GITHUB_OUTPUT"
+
     - name: Validate auth inputs
       shell: bash
       env:
@@ -267,11 +277,6 @@ runs:
           exit 1
         fi
         echo "srt ${SRT_VERSION} wraps commands on this runner"
-
-    - name: Mark run start
-      if: ${{ inputs.setup-only != 'true' && inputs.notify-on-failure != '' }}
-      shell: bash
-      run: touch "${{ runner.temp }}/sweny-run-start"
 
     - name: Run workflow
       if: inputs.setup-only != 'true'
@@ -395,12 +400,14 @@ runs:
     - name: Notify on failure
       if: ${{ failure() && inputs.setup-only != 'true' && inputs.notify-on-failure != '' }}
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
+      # The requested workflow directory may be the reason the run failed.
+      working-directory: ${{ github.workspace }}
       env:
         GH_TOKEN: ${{ github.token }}
         NOTIFY: ${{ inputs.notify-on-failure }}
         WORKFLOW_PATH: ${{ inputs.workflow }}
-        MARKER_FILE: ${{ runner.temp }}/sweny-run-start
+        MARKER_FILE: ${{ steps.run_start.outputs.marker }}
+        RUNS_DIR: ${{ inputs.working-directory }}/.sweny/runs
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         GITHUB_REPOSITORY: ${{ github.repository }}
       run: bash "${{ github.action_path }}/scripts/notify-failure.sh"
