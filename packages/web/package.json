@@ -22,6 +22,7 @@
     "@vercel/speed-insights": "^2.0.0",
     "astro": "7.2.10",
     "cookie": "^2.0.1",
+    "mermaid": "11.17.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "sharp": "^0.35.4",
