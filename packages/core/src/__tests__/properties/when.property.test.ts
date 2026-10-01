@@ -154,21 +154,18 @@ const evalLeafArb: fc.Arbitrary<ExprNode> = fc.oneof(
 
 /** Build a recursive expression arbitrary over a leaf arbitrary. */
 function exprArb(leaf: fc.Arbitrary<ExprNode>, depth: number): fc.Arbitrary<ExprNode> {
-  const memo = fc.memo<ExprNode>((n) => {
-    if (n <= 1) return leaf;
-    const sub = memo(n - 1);
-    return fc.oneof(
-      leaf,
-      sub.map((operand): ExprNode => ({ kind: "not", operand })),
-      fc
-        .tuple(fc.constantFrom<"and" | "or">("and", "or"), sub, sub)
-        .map(([kind, left, right]): ExprNode => ({ kind, left, right })),
-      fc
-        .tuple(fc.constantFrom(...CMP_OPS), sub, sub)
-        .map(([op, left, right]): ExprNode => ({ kind: "cmp", op, left, right })),
-    );
-  });
-  return memo(depth);
+  if (depth <= 1) return leaf;
+  const sub: fc.Arbitrary<ExprNode> = exprArb(leaf, depth - 1);
+  return fc.oneof(
+    leaf,
+    sub.map((operand): ExprNode => ({ kind: "not", operand })),
+    fc
+      .tuple(fc.constantFrom<"and" | "or">("and", "or"), sub, sub)
+      .map(([kind, left, right]): ExprNode => ({ kind, left, right })),
+    fc
+      .tuple(fc.constantFrom(...CMP_OPS), sub, sub)
+      .map(([op, left, right]): ExprNode => ({ kind: "cmp", op, left, right })),
+  );
 }
 
 // ─── Reference semantics (independent of when.ts) ────────────────
@@ -456,9 +453,9 @@ describe("when: a missing field never makes an expression true", () => {
   );
 
   it("any and/or/! combination of missing-field tests is false, with a reported problem", () => {
-    const combos = fc.memo<ExprNode>((n) => {
+    const combos = (n: number): fc.Arbitrary<ExprNode> => {
       if (n <= 1) return missingLeaf;
-      const sub = combos(n - 1);
+      const sub: fc.Arbitrary<ExprNode> = combos(n - 1);
       return fc.oneof(
         missingLeaf,
         sub.map((operand): ExprNode => ({ kind: "not", operand })),
@@ -466,7 +463,7 @@ describe("when: a missing field never makes an expression true", () => {
           .tuple(fc.constantFrom<"and" | "or">("and", "or"), sub, sub)
           .map(([kind, left, right]): ExprNode => ({ kind, left, right })),
       );
-    });
+    };
     fc.assert(
       fc.property(combos(4), evalScopeArb, (ast, scope) => {
         const res = evaluateExpression(ast, scope);

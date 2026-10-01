@@ -752,9 +752,15 @@ export function withPushBlocked(env: Record<string, string>, enabled: boolean | 
     n++;
   }
   out.GIT_CONFIG_COUNT = String(n);
-  const ownSsh = env.GIT_SSH_COMMAND ?? (env.GIT_SSH ? shQuote(env.GIT_SSH) : undefined);
+  const wrapper = shQuote(path.join(dir, "ssh"));
+  // Applied twice, GIT_SSH_COMMAND is already our wrapper: keep the operator's command it recorded,
+  // or the wrapper would exec itself forever on a fetch.
+  const ownSsh =
+    env.GIT_SSH_COMMAND === wrapper
+      ? env.SWENY_NO_PUSH_SSH
+      : (env.GIT_SSH_COMMAND ?? (env.GIT_SSH ? shQuote(env.GIT_SSH) : undefined));
   if (ownSsh) out.SWENY_NO_PUSH_SSH = ownSsh;
-  out.GIT_SSH_COMMAND = shQuote(path.join(dir, "ssh"));
+  out.GIT_SSH_COMMAND = wrapper;
   out.GIT_SSH_VARIANT = "ssh";
   out.GIT_ASKPASS = path.join(dir, "askpass");
   out.GIT_TERMINAL_PROMPT = "0";

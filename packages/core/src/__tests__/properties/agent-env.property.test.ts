@@ -232,7 +232,13 @@ function expectPushBlocked(env: Record<string, string>, out: Record<string, stri
   }
 
   // The operator's own ssh command is kept for fetches, and everything unrelated is preserved.
-  if (env.GIT_SSH_COMMAND !== undefined) expect(out.SWENY_NO_PUSH_SSH).toBe(env.GIT_SSH_COMMAND);
+  if (env.GIT_SSH_COMMAND === out.GIT_SSH_COMMAND) {
+    // Already wrapped: the operator's command recorded the first time must survive, never the wrapper itself.
+    expect(out.SWENY_NO_PUSH_SSH).toBe(env.SWENY_NO_PUSH_SSH);
+    expect(out.SWENY_NO_PUSH_SSH).not.toBe(out.GIT_SSH_COMMAND);
+  } else if (env.GIT_SSH_COMMAND !== undefined) {
+    expect(out.SWENY_NO_PUSH_SSH).toBe(env.GIT_SSH_COMMAND);
+  }
   for (const [k, v] of Object.entries(env)) {
     if (
       REPLACED.has(k) ||
