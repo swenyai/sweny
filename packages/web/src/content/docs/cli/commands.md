@@ -104,7 +104,7 @@ sweny triage [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--dry-run` | Analyze only. Every node runs with read-only tools: write tools, external MCP servers, and shell/file-edit tools are withheld by the executor (on Codex, a shell confined to its OS read-only sandbox: no writes, no network), so no issues are created, no PRs opened, no notifications sent. Stops at the first conditional edge. See [Dry run](/workflows/#dry-run). | `false` |
+| `--dry-run` | Analyze only. Every node runs with read-only tools: write tools, external MCP servers, and shell/file-edit tools are withheld by the executor (on Codex, a shell confined to its OS read-only sandbox: no writes, no network), so no issues are created, no PRs opened, no notifications sent. Stops at the first natural-language conditional edge. See [Dry run](/workflows/#dry-run). | `false` |
 | `--stage` | Run normally, but preview every issue, comment and PR instead of filing it; the run stops before any code is pushed. The push is blocked by sweny, not left to the agent: see [No push under --stage](#no-push-under---stage-and---dry-run). See [Permissions and safe outputs](/workflows/yaml-reference/#permissions-and-safe-outputs). | `false` |
 | `--no-novelty-mode` | Allow +1 on existing issues instead of skipping duplicates | -- |
 | `--issue-override <issue>` | Work on a specific existing issue instead of scanning for new ones | -- |
@@ -242,7 +242,7 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--dry-run` | Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld (on Codex, a shell confined to its OS read-only sandbox: no writes, no network), so nothing is created, posted, or sent. Stops at the first conditional edge. See [Dry run](/workflows/#dry-run). | `false` |
+| `--dry-run` | Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld (on Codex, a shell confined to its OS read-only sandbox: no writes, no network), so nothing is created, posted, or sent. Stops at the first natural-language conditional edge. See [Dry run](/workflows/#dry-run). | `false` |
 | `--list-nodes` | Validate the workflow and print its node list without running | `false` |
 | `--json` | Output result as JSON to stdout; suppress progress rendering | `false` |
 | `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |

@@ -3,7 +3,7 @@ title: Edges & Routing
 description: The Edge object and routing semantics for workflow execution flow.
 ---
 
-Edges define the execution flow between [Nodes](/nodes) in a [Workflow](/workflow). Each edge connects a source node to a target node, with an optional natural language condition that determines whether the edge is followed.
+Edges define the execution flow between [Nodes](/nodes) in a [Workflow](/workflow). Each edge connects a source node to a target node, with an optional condition that determines whether the edge is followed. A condition is either natural language, which the AI model evaluates, or an [expression](#expressions), which the executor evaluates itself with no model call.
 
 ## Fields
 
@@ -11,7 +11,7 @@ Edges define the execution flow between [Nodes](/nodes) in a [Workflow](/workflo
 | ---------------- | ------------------ | -------- | --------- | ----------------------------------------------------------------------- |
 | `from`           | string             | REQUIRED | —         | Source node ID. MUST reference a key in `nodes`.                        |
 | `to`             | string             | REQUIRED | —         | Target node ID. MUST reference a key in `nodes`.                        |
-| `when`           | string             | OPTIONAL | —         | Natural language routing condition.                                     |
+| `when`           | string \| object   | OPTIONAL | none      | Routing condition: natural language, or `{ expr }` (see Expressions).   |
 | `max_iterations` | integer (1 to 100) | OPTIONAL | unlimited | Maximum times this edge can be followed. Values above 100 are rejected. |
 
 ## Routing Algorithm
@@ -22,7 +22,8 @@ After a node completes, a conforming executor MUST resolve the next node using t
 2. **Exclude** edges that have exhausted their `max_iterations` count (i.e., the edge has been followed `max_iterations` times already).
 3. **If zero edges remain:** execution is complete. The current node is a **terminal node**.
 4. **If exactly one edge remains and it has no `when` clause:** follow it unconditionally. The executor MUST NOT invoke the AI model.
-5. **Otherwise:** present all remaining edge conditions to the AI model. The model evaluates each `when` clause against the accumulated context (workflow input + all prior node results) and selects one edge. The executor follows the selected edge.
+5. **If every remaining conditional edge is an [expression](#expressions):** evaluate them in the executor. The executor MUST NOT invoke the AI model.
+6. **Otherwise:** present all remaining edge conditions to the AI model. The model evaluates each `when` clause against the accumulated context (workflow input + all prior node results) and selects one edge. The executor follows the selected edge.
 
 ## Unconditional Edges
 
@@ -38,7 +39,7 @@ edges:
 
 ## Conditional Edges
 
-An edge with a `when` clause is **conditional**. The `when` field contains a natural language condition.
+An edge with a `when` clause is **conditional**. The `when` field contains a natural language condition, or an [expression](#expressions).
 
 ```yaml
 edges:
@@ -52,8 +53,8 @@ edges:
 
 A conforming executor:
 
-- **MUST** evaluate conditions by providing the AI model with the accumulated context (workflow input + all prior node results) and the list of conditions as choices.
-- **MUST NOT** evaluate conditions programmatically. The AI model is the evaluator.
+- **MUST** evaluate natural-language conditions by providing the AI model with the accumulated context (workflow input + all prior node results) and the list of conditions as choices.
+- **MUST NOT** evaluate natural-language conditions programmatically. The AI model is the evaluator.
 - **MUST** follow the edge selected by the AI model.
 
 When a node has a mix of conditional and unconditional outgoing edges, the unconditional edge serves as a **default path**. The executor presents the conditional edges as choices, with the unconditional edge as a "none of the above" fallback.
@@ -73,6 +74,66 @@ Rationale: a natural-language route evaluator can be swayed by any prose it sees
 ### Nested properties
 
 The schema-strict filter is top-level. If a declared property is itself an object (`type: "object"` with nested `properties`), the entire nested value passes through unchanged. The filter does not recurse. Authors who need to hide internal fields of a nested object MUST omit them from the parent object's output, not rely on this filter.
+
+## Expressions
+
+A `when` written as `{ expr: "..." }` is a deterministic condition: a small boolean expression over prior nodes' declared output fields. The executor evaluates it itself. No model call, the same inputs always route the same way, and nothing in the routed data can steer the decision, because data values are only ever compared, never parsed or run.
+
+```yaml
+edges:
+  - from: investigate
+    to: create_issue
+    when:
+      expr: "investigate.novel_count > 0 && investigate.highest_severity in ['medium', 'high', 'critical']"
+  - from: investigate
+    to: skip
+    when:
+      expr: "investigate.novel_count == 0 || investigate.highest_severity == 'low'"
+```
+
+### Syntax
+
+| Form       | Example                                         | Meaning                                                                                  |
+| ---------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Path       | `investigate.novel_count`                       | A node id, then a declared output field, then any declared nested field.                 |
+| Literal    | `'high'`, `"high"`, `3`, `-1.5`, `true`, `null` | String (single or double quotes), number, boolean, null.                                 |
+| List       | `['pass', 'no-framework']`                      | Literals only. Used on the right of `in`.                                                |
+| Comparison | `==` `!=` `<` `<=` `>` `>=`                     | At most one per operand pair; no chaining.                                               |
+| Membership | `a.status in ['pass', 'skipped']`               | True when the value equals one of the list items.                                        |
+| Presence   | `exists a.url`                                  | True when the field is present and not null.                                             |
+| Logic      | `!`, `&&`, `\|\|`, `( )`                        | Comparisons bind tightest, then `!`, then `&&`, then `\|\|`: `!a.n > 0` is `!(a.n > 0)`. |
+
+There are no function calls, no arithmetic, no assignment, and no list indexing. An expression is at most 2000 characters.
+
+### Semantics
+
+- **Strict types, no coercion.** `==` and `!=` compare strings, numbers, booleans, and null by value and type (`3 == '3'` is false). `<`, `<=`, `>`, `>=` need two numbers or two strings. `!`, `&&`, `||`, and the expression as a whole need booleans; there is no truthiness.
+- **Missing means false.** A path whose value is absent (the field was not emitted, or the node did not run or did not succeed) makes the **whole** expression false, and the executor MUST log a warning. A type mismatch is treated the same way. A negation can therefore never turn a missing field into a true.
+- **`exists` is the explicit presence test** and never warns. `&&` and `||` short-circuit, so `exists a.url && a.url != ''` is safe.
+
+### Routing outcome
+
+When every conditional out-edge of a node is an expression, the executor evaluates them all and:
+
+- **exactly one is true:** follow it;
+- **none is true:** follow the node's unconditional (default) edge if it has one;
+- **otherwise** (none true and no default, or two or more true): fail closed. The run stops with a route evaluation error, the same as a failed model route evaluation. The executor MUST NOT guess an edge.
+
+### Load-time validation
+
+A conforming validator MUST reject a workflow (`INVALID_WHEN_EXPRESSION`) when an expression:
+
+- does not parse;
+- names a node that is not the edge's source or one of its ancestors (a node that can run before it);
+- names a node without a non-empty `output.properties` block, or a field (or nested field) that block does not declare;
+- compares a declared field with a literal of another declared type, or with a string outside the field's declared `enum`;
+- uses a field where a boolean is needed when the field is not declared boolean.
+
+A node's conditional out-edges MUST be all expressions or all natural language (`MIXED_EDGE_CONDITIONS`). An unconditional default edge may accompany either.
+
+### Dry runs
+
+Under a dry run every node already runs read-only. Because an expression needs no model call, a dry run follows expression edges and stops only at the first node whose routing would need the AI model. Routing on a dry run stays reproducible from the node outputs alone.
 
 ## Terminal Nodes
 
@@ -154,7 +215,7 @@ edges:
     to: notify
 ```
 
-After `investigate` completes, the AI model evaluates both conditions against the investigation results and selects the matching branch. Both branches converge at `notify`.
+After `investigate` completes, the AI model evaluates both conditions against the investigation results and selects the matching branch. Both branches converge at `notify`. The built-in triage workflow writes these two conditions as [expressions](#expressions), so the same branch is chosen with no model call.
 
 ### Bounded Retry Loop
 

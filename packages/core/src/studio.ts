@@ -74,7 +74,7 @@ export interface FlowEdge {
   /** Array index of this edge in workflow.edges — used for stable lookups. */
   edgeIndex: number;
   data: {
-    when?: string;
+    when?: Edge["when"];
     max_iterations?: number;
     isConditional: boolean;
   };

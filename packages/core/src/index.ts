@@ -34,6 +34,8 @@ export type {
   Workflow,
   Node,
   Edge,
+  EdgeWhen,
+  WhenExpression,
   NodeResult,
   ToolCall,
   ExecutionEvent,
@@ -186,6 +188,17 @@ export {
   skillJsonSchema,
 } from "./schema.js";
 export type { WorkflowError } from "./schema.js";
+
+// Deterministic `when` expressions (#461). Pure, browser-safe.
+export {
+  isWhenExpression,
+  whenLabel,
+  parseExpression,
+  evaluateExpression,
+  checkExpression,
+  ExpressionSyntaxError,
+} from "./when.js";
+export type { ExprNode, ExpressionScope, ExpressionResult } from "./when.js";
 
 // Loader — canonical read → parse → structural-validate pipeline (the path
 // the CLI uses for `workflow run`, `workflow validate`, and `publish`).

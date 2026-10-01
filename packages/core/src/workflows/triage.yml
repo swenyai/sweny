@@ -792,12 +792,17 @@ nodes:
 edges:
   - from: gather
     to: investigate
+  # Deterministic routing (#461): sweny evaluates these expressions over the
+  # declared, required outputs of investigate, with no model call. The two
+  # are complements over the declared enum, so exactly one is true.
   - from: investigate
     to: create_issue
-    when: novel_count is greater than 0 AND highest_severity is medium or higher
+    when:
+      expr: "investigate.novel_count > 0 && investigate.highest_severity in ['medium', 'high', 'critical']"
   - from: investigate
     to: skip
-    when: novel_count is 0, OR highest_severity is low
+    when:
+      expr: "investigate.novel_count == 0 || investigate.highest_severity == 'low'"
   - from: create_issue
     to: implement
     when: at least one novel finding has fix_complexity simple or moderate AND fix_approach is provided
@@ -806,11 +811,17 @@ edges:
     when: all novel findings have fix_complexity complex, OR no clear fix_approach
   - from: skip
     to: notify
+  # test_status is required and the node's eval only lets pass, no-framework
+  # and skipped through (fail and not-run fail the node, which halts), so
+  # exactly one of these is true. skipped: Step 0b found an open PR for the
+  # issue, or Step 0 found a staged preview.
   - from: implement
     to: notify
-    when: implement.test_status is "skipped" (Step 0b found an open PR already exists for the issue identifier, or Step 0 found a staged preview)
+    when:
+      expr: "implement.test_status == 'skipped'"
   - from: implement
     to: create_pr
-    when: implement.test_status is "pass" or "no-framework" (no existing PR; fix was implemented or there is no test framework)
+    when:
+      expr: "implement.test_status in ['pass', 'no-framework']"
   - from: create_pr
     to: notify

@@ -1,7 +1,9 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps } from "@xyflow/react";
+import type { EdgeWhen } from "@sweny-ai/core";
+import { whenLabel } from "@sweny-ai/core/schema";
 
 export type TransitionEdgeData = {
-  when?: string;
+  when?: EdgeWhen;
   max_iterations?: number;
   edgeIndex: number;
   isConditional: boolean;
@@ -21,7 +23,7 @@ export function TransitionEdge({
   data,
   markerEnd,
 }: EdgeProps<TransitionEdgeType>) {
-  const when = data?.when;
+  const when = whenLabel(data?.when);
   const isConditional = data?.isConditional ?? false;
   const isError = data?.isError ?? false;
 

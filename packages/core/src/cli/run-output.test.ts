@@ -323,7 +323,7 @@ describe("workflow run help text", () => {
         "--max-tokens <n>  Run-wide token budget (input plus output) for a single workflow file. The lowest of this and the workflow's budget.tokens wins. A crossing stops the agent, fails the node and halts the run",
         "--max-cost <usd>  Run-wide cost budget in US dollars for a single workflow file, from harness-reported cost (never estimated). The lowest of this and the workflow's budget.cost_usd wins",
         "-y, --yes  Skip the batch confirmation prompt (for CI)",
-        "--dry-run  Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge. To inspect nodes without running, use --list-nodes.",
+        "--dry-run  Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first natural-language conditional edge. To inspect nodes without running, use --list-nodes.",
         "--stage  Run normally, but preview every safe output (nodes with outputs:) instead of writing it: print what would be written and write nothing",
         "--list-nodes  Validate, print nodes and skills, and exit without running",
         "--json  Output result as JSON on stdout; suppress progress output",
