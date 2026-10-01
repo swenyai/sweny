@@ -241,7 +241,7 @@ Triage runs on sweny's own opinions ([permissions and safe outputs](/workflows/y
 
 | Node | Access | What it may write |
 |------|--------|-------------------|
-| `gather`, `investigate` | `read` | Nothing. Read skill tools only: no write tool, no shell, no file edits, on any agent. |
+| `gather`, `investigate` | `read` | Nothing. Read skill tools only: no write tool, no file edits, and no shell (on Codex, a shell confined to its OS read-only sandbox: no writes, no network). |
 | `create_issue` | `read` + outputs | Issues (at most 10), +1 comments (at most 10) and reopening closed duplicates (at most 10), as safe outputs. |
 | `skip` | `read` + outputs | +1 comments and reopening closed duplicates (at most 10 each), as safe outputs. |
 | `implement` | `write`, no web | The code change: file edits, tests, a local commit. No GitHub write tool. |
