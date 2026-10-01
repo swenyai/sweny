@@ -8,6 +8,8 @@
 //   { kind: "http", url, via: "proxy" | "direct" }  -> { ok, status?, body?, error? }
 //   { kind: "write", path }                          -> { ok, error? }
 //   { kind: "read", path }                           -> { ok, error? }
+//   { kind: "contains", path, needle }               -> { ok, found, error? } (read the file, search it)
+//   { kind: "vcs", args, needle }                    -> { ok, found } (run git with args, search its output)
 //   { kind: "env", names }                           -> { values: { name: value | null } }
 //   { kind: "procScan", needle }                     -> { found, scanned }
 //   { kind: "dumpEnv", path }                        -> appends {env, cwd} as one JSON line to path
@@ -17,6 +19,7 @@
 //     process, lists its tools, then makes one tools/call.
 // Paths starting with "$HOME" resolve against the HOME this process sees.
 
+import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import http from "node:http";
 
@@ -61,6 +64,22 @@ function tryFs(fn) {
   } catch (err) {
     return { ok: false, error: err.code ?? String(err) };
   }
+}
+
+/** Read a file and say whether `needle` is in it (a masked file reads empty or fails). */
+function containsProbe(p, needle) {
+  try {
+    return { ok: true, found: readFileSync(p, "utf8").includes(needle) };
+  } catch (err) {
+    return { ok: false, found: false, error: err.code ?? String(err) };
+  }
+}
+
+/** Run git (as an agent's shell would) and say whether `needle` shows up in its output. */
+function vcsProbe(args, needle) {
+  const r = spawnSync("git", args, { encoding: "utf8", timeout: TIMEOUT_MS });
+  const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+  return { ok: r.status === 0, found: out.includes(needle) };
 }
 
 function procScan(needle) {
@@ -124,6 +143,8 @@ for (const p of plan) {
   if (p.kind === "http") results.push(await httpProbe(p.url, p.via));
   else if (p.kind === "write") results.push(tryFs(() => writeFileSync(resolvePath(p.path), "sweny-fake-agent\n")));
   else if (p.kind === "read") results.push(tryFs(() => readFileSync(resolvePath(p.path))));
+  else if (p.kind === "contains") results.push(containsProbe(resolvePath(p.path), p.needle));
+  else if (p.kind === "vcs") results.push(vcsProbe(p.args, p.needle));
   else if (p.kind === "dumpEnv")
     results.push(tryFs(() => appendFileSync(p.path, JSON.stringify({ env: process.env, cwd: process.cwd() }) + "\n")));
   else if (p.kind === "env")

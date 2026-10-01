@@ -104,6 +104,23 @@ describe("buildSrtSettings", () => {
     expect(s.filesystem.denyRead).toEqual(["/home/op/.ssh", "/home/op/.npmrc"]);
     expect(s.filesystem.allowRead).toEqual([]);
   });
+
+  it("#473: denies reading and writing a persisted git credential, existing files only", () => {
+    const present = (p: string) => exists(p) || p === "/work/.git/config" || p === "/runner/temp/creds.config";
+    const s = buildSrtSettings(
+      { cwd: "/work", egress: [], denyRead: ["/work/.git/config", "/runner/temp/creds.config", "/gone/config"] },
+      { home: "/scratch/home", credentialHome: "/home/op", exists: present },
+    );
+    expect(s.filesystem.denyRead).toEqual([
+      "/home/op/.ssh",
+      "/home/op/.npmrc",
+      "/work/.git/config",
+      "/runner/temp/creds.config",
+    ]);
+    // A writable workspace cannot rename the file out from under its read deny.
+    expect(s.filesystem.denyWrite).toEqual(["/work/.git/config", "/runner/temp/creds.config"]);
+    expect(s.filesystem.allowWrite).toEqual(["/work", "/scratch/home"]);
+  });
 });
 
 describe("scratchEnv", () => {
@@ -165,7 +182,7 @@ describe("SrtSandboxWrapper", () => {
 
   it("wraps the argv after --, writes the settings, and cleans up its scratch", async () => {
     const w = new SrtSandboxWrapper({ srtPath: "/opt/srt", credentialHome: "/nonexistent-home" });
-    expect(w.provides).toEqual({ sandbox: true, egress: true, readOnlyMount: true });
+    expect(w.provides).toEqual({ sandbox: true, egress: true, readOnlyMount: true, readDeny: true });
     const wrapped = await w.wrap({ ...SPAWN, cwd: process.cwd(), egress: ["api.linear.app"] });
     try {
       expect(wrapped.command).toBe("/opt/srt");

@@ -75,6 +75,7 @@ import type {
 } from "./types.js";
 import { ACP_CAPABILITIES } from "./capabilities.js";
 import { policyGate, resolveHarnessPolicy, TOOL_CLASSES, type HarnessPolicyMode } from "./policy.js";
+import { gitCredentialPolicy } from "../git-credentials.js";
 import { buildNodePrompt } from "./prompts.js";
 import { makeAbort } from "./abort.js";
 import { parseToolResultContent, schemaMismatches, summarizeToolError, tryParseJSON } from "./parse.js";
@@ -868,6 +869,8 @@ export class AcpHarness implements AgentHarness {
       sandbox: mode,
       ...(held.length > 0 ? { agentCredentials: held } : {}),
       ...(req.agentAccess?.noPush && !compiled.readOnly ? { stagedWrite: true } : {}),
+      // #473: a credential the checkout persisted stays unreadable to read-only and staged nodes.
+      ...gitCredentialPolicy(this.cwd, { readOnly: compiled.readOnly, noPush: req.agentAccess?.noPush }),
     };
     // ACP has no sandbox of its own: any mode but off needs the process wrapper.
     const wrapper =

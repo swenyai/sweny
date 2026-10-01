@@ -437,6 +437,9 @@ export function buildActionWorkflow(credentials: Credential[], cronExpression: s
   lines.push("    runs-on: ubuntu-latest");
   lines.push("    steps:");
   lines.push("      - uses: actions/checkout@v4");
+  // #473: no token on disk for the agents to read; sweny pushes the PR branch itself.
+  lines.push("        with:");
+  lines.push("          persist-credentials: false");
   lines.push("      - uses: swenyai/sweny@v5");
   lines.push("        with:");
   lines.push("          workflow: triage");
