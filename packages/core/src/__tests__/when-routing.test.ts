@@ -242,7 +242,7 @@ describe("executor: expression routing (#461)", () => {
     const { trace } = await run(w, claude);
     expect(ran).toEqual(["a", "c"]);
     expect(evaluateCalls()).toBe(0);
-    expect(trace.edges).toEqual([{ from: "a", to: "c", reason: "only path" }]);
+    expect(trace.edges).toEqual([{ from: "a", to: "c", reason: "only path", rung: "expr" }]);
   });
 
   it("fails closed when no expression is true and there is no default", async () => {
