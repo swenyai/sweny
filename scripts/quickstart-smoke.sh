@@ -53,6 +53,17 @@ contains "sweny --help" "$OUT" "new"
 contains "sweny --help" "$OUT" "check"
 pass "sweny --help"
 
+# 2b. sweny try: recorded demo, no credentials, no network. Banner, answer, receipt, exit 0, nothing written.
+run "sweny try" 0 sweny try
+cat "$OUT"
+contains "sweny try" "$OUT" "Recorded demo"
+contains "sweny try" "$OUT" "What it is:"
+contains "sweny try" "$OUT" "✓ 2/2 nodes"
+contains "sweny try" "$OUT" "policy: env scoped, sandbox on"
+contains "sweny try" "$OUT" "sweny workflow run .sweny/workflows/explain-repo.yml"
+[ ! -e .sweny ] || fail "sweny try: wrote .sweny/ (it must write nothing)" "$(ls -R .sweny)"
+pass "sweny try (recorded demo, exit 0, nothing written)"
+
 # 3. sweny new --template explain-repo --yes (no TTY, no prompts)
 run "sweny new" 0 sweny new --template explain-repo --yes </dev/null
 [ -f .sweny.yml ] || fail "sweny new: .sweny.yml missing" "$(cat "$OUT")"

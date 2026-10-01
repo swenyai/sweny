@@ -329,7 +329,8 @@ jobs:
         run: npm run build --workspace=packages/core
 
       # Packs core, installs the tarball into an empty prefix with a scrubbed
-      # env (no credentials, no LLM calls) and runs the README quickstart.
+      # env (no credentials, no LLM calls) and runs the README quickstart,
+      # including `sweny try` (asserts banner, answer block, receipt line, exit 0).
       - name: Run README quickstart
         run: sh scripts/quickstart-smoke.sh
 
@@ -359,3 +360,60 @@ jobs:
 
       # spec is deliberately outside the root workspaces and has its own lock.
       - run: npm run build --prefix spec
+
+  # Studio build plus before/after screenshots of the static app (PR #480).
+  # Playwright runs here in CI only; the artifact holds the PNGs.
+  studio-screenshots:
+    name: Studio build and screenshots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build --workspace=packages/core
+
+      - name: Build Studio (this commit)
+        run: |
+          npm run build --workspace=packages/studio
+          cp -r packages/studio/dist "$RUNNER_TEMP/studio-after"
+
+      - name: Build Studio (base branch, for the before shots)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch origin "$BASE_REF"
+          git checkout "origin/$BASE_REF" -- packages/studio/src packages/studio/index.html
+          git clean -fdq packages/studio/src
+          npx --workspace=packages/studio vite build
+          cp -r packages/studio/dist "$RUNNER_TEMP/studio-before"
+
+      - name: Install Playwright
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw"
+          npm init -y >/dev/null
+          npm install playwright
+          npx playwright install --with-deps chromium
+
+      - name: Capture screenshots
+        env:
+          PW_DIR: ${{ runner.temp }}/pw
+        run: |
+          node scripts/studio-screenshots.mjs "$RUNNER_TEMP/studio-after" studio-screenshots after
+          if [ -d "$RUNNER_TEMP/studio-before" ]; then
+            node scripts/studio-screenshots.mjs "$RUNNER_TEMP/studio-before" studio-screenshots before
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: studio-screenshots
+          path: studio-screenshots/*.png
+          if-no-files-found: error

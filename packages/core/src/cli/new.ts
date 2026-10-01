@@ -492,6 +492,27 @@ export function appendMissingEnvKeys(cwd: string, credentials: Credential[]): nu
 }
 
 /** Write workflow YAML into .sweny/workflows/<id>.yml. Returns info about what happened. */
+/** Where a pack's GitHub Actions trigger is written: `.github/workflows/sweny-<pack>.yml`. */
+export function packTriggerPath(id: string): string {
+  return path.join(".github", "workflows", `sweny-${id}.yml`);
+}
+
+/**
+ * Write a pack's Actions trigger (#474). Never overwrites: an existing file is
+ * left exactly as it is. Returns `skipped` for a template that is not a pack.
+ */
+export function writePackTrigger(
+  cwd: string,
+  template: WorkflowTemplate,
+): { written: boolean; exists?: boolean; skipped?: boolean; path: string } {
+  const target = path.join(cwd, packTriggerPath(template.id));
+  if (!template.pack) return { written: false, skipped: true, path: target };
+  if (fs.existsSync(target)) return { written: false, exists: true, path: target };
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, template.pack.trigger, "utf-8");
+  return { written: true, path: target };
+}
+
 export function writeWorkflowFile(
   cwd: string,
   id: string,
@@ -598,6 +619,8 @@ export async function runNew(options?: {
   template?: string;
   /** Skip every confirmation prompt (never overwrites existing files). */
   yes?: boolean;
+  /** `false` (`--no-ci`) skips writing a pack's GitHub Actions trigger file. */
+  ci?: boolean;
   /** Internal: the id came from the marketplace picker, skip the built-in shortcut. */
   forceMarketplace?: boolean;
 }): Promise<void> {
@@ -607,7 +630,12 @@ export async function runNew(options?: {
   // so it works with no network. Only other ids go to the marketplace.
   if (options?.marketplaceId && options.marketplaceId !== "e2e" && !options.forceMarketplace) {
     if (WORKFLOW_TEMPLATES.some((t) => t.id === options.marketplaceId)) {
-      return runNew({ template: options.marketplaceId, skipIntro: options.skipIntro, yes: options.yes });
+      return runNew({
+        template: options.marketplaceId,
+        skipIntro: options.skipIntro,
+        yes: options.yes,
+        ci: options.ci,
+      });
     }
   }
 
@@ -799,6 +827,8 @@ export async function runNew(options?: {
   const files: string[] = [];
   if (!hasExistingConfig) files.push(".sweny.yml", ".env");
   if (template) files.push(`.sweny/workflows/${template.id}.yml`);
+  const writeTrigger = !!template?.pack && options?.ci !== false;
+  if (template && writeTrigger) files.push(packTriggerPath(template.id));
 
   const inferred: string[] = [
     `  Source control:  ${sourceControl}${gitInfo ? " (detected)" : ""}`,
@@ -866,11 +896,20 @@ export async function runNew(options?: {
     p.log.info(".env already contains all required keys — skipped");
   }
 
+  // The pack's Actions trigger (#474): never overwritten, skipped with --no-ci.
+  const installTrigger = () => {
+    if (!template || !writeTrigger) return;
+    const r = writePackTrigger(cwd, template);
+    if (r.written) p.log.success(`Created ${packTriggerPath(template.id)}`);
+    else if (r.exists) p.log.info(`${packTriggerPath(template.id)} already exists, not overwritten`);
+  };
+
   // 3. Workflow template
   if (template) {
     const firstAttempt = writeWorkflowFile(cwd, template.id, template.yaml, { overwrite: false });
     if (firstAttempt.exists && options?.yes) {
       p.log.info(`.sweny/workflows/${template.id}.yml already exists, not overwritten`);
+      installTrigger();
       p.outro("Done.");
       return;
     }
@@ -888,6 +927,7 @@ export async function runNew(options?: {
       writeWorkflowFile(cwd, template.id, template.yaml, { overwrite: true });
     }
     p.log.success(`Created .sweny/workflows/${template.id}.yml`);
+    installTrigger();
   }
 
   // 4. Keep .env out of version control
@@ -916,7 +956,14 @@ export async function runNew(options?: {
 
   if (template) {
     steps.push(`${stepNum++}. Run your workflow:`, `   ${cli} workflow run .sweny/workflows/${template.id}.yml`);
-    if (template.pack) {
+    if (template.pack && writeTrigger) {
+      steps.push(
+        "",
+        `${stepNum++}. Run it automatically: add the CLAUDE_CODE_OAUTH_TOKEN repo secret, then commit`,
+        `   .sweny/workflows/${template.id}.yml and ${packTriggerPath(template.id)}`,
+        `   https://docs.sweny.ai/workflows/packs/#${template.id}`,
+      );
+    } else if (template.pack) {
       steps.push(
         "",
         `${stepNum++}. Run it automatically (GitHub Actions trigger and permissions):`,

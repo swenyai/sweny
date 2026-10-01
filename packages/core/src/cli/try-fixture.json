@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "illustrative": true,
+  "notice": "ILLUSTRATIVE SAMPLE DATA. This is not output from a real run and not about your code. The repo (acme-notes-api) is fictional; timings, tool-call counts, token usage and cost are plausible numbers for a small repo, written by hand. Replace this file with a recorded real run (metadata plus the sample answer only) and set illustrative to false.",
+  "workflow": "explain-repo",
+  "sample_repo": "acme-notes-api",
+  "harness": { "id": "claude-code", "version": "sample" },
+  "policy": { "envScope": true, "sandbox": "auto", "sandboxStarted": true },
+  "nodes": {
+    "survey": {
+      "duration_ms": 18400,
+      "tool_calls": { "Glob": 3, "Read": 7, "Grep": 2 },
+      "usage": { "inputTokens": 21300, "outputTokens": 1150, "costUsd": 0.09, "numTurns": 8 }
+    },
+    "explain": {
+      "duration_ms": 9100,
+      "tool_calls": {},
+      "usage": { "inputTokens": 6800, "outputTokens": 640, "costUsd": 0.04, "numTurns": 1 },
+      "output": {
+        "purpose": "A small REST API for storing and searching notes, built with Express and TypeScript on top of SQLite. Meant as the backend for a notes app.",
+        "how_to_run": ["npm install", "npm run build", "npm test", "npm start (serves on http://localhost:3000)"],
+        "key_files": [
+          "src/server.ts: the entry point, wires routes and the database",
+          "src/routes/notes.ts: the CRUD and search endpoints",
+          "src/db/schema.sql: the tables, applied on first start",
+          "test/notes.test.ts: the API tests, a good map of expected behavior"
+        ],
+        "risks": [
+          "No auth on any route: fine locally, not safe to expose as is.",
+          "The README does not mention the PORT or DB_PATH environment variables that src/server.ts reads."
+        ]
+      }
+    }
+  }
+}

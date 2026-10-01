@@ -11,6 +11,8 @@ sweny new --template weekly-digest --yes        # or by id
 sweny workflow validate .sweny/workflows/weekly-digest.yml   # no credentials needed
 ```
 
+`sweny new` also writes the pack's trigger to `.github/workflows/sweny-<pack>.yml` (the snippets below, verbatim). It never overwrites a file that exists, and `--no-ci` skips it. Add the `CLAUDE_CODE_OAUTH_TOKEN` repo secret, commit both files, and the pack runs on its own.
+
 ## Shared guarantees
 
 - **Output schema on every node.** Each node declares the JSON shape it returns.
@@ -29,7 +31,8 @@ Every Monday: what changed this week, risky files touched, sent to an issue or S
 - **Runs:** Mondays 14:00 UTC (cron), or on demand
 - **Reads:** Commits, merged pull requests, issues, and changed files through the `github` skill (`github_list_recent_commits`, `github_search_issues`, `github_list_pr_files` for churn).
 - **Writes:** One issue per week (a safe output: at most one, title prefix `Weekly digest `, label `sweny-digest`) or one Slack message (`slack_send_message`, the only write tool `publish` holds), chosen by the `deliver` input. Nothing else.
-- **Permissions:** `contents: read`. Add `issues: write` only when `deliver` is `issue`.
+- **Permissions:** `contents: read`, and `issues: write` for `deliver: issue` and the failure alert.
+- **Quiet weeks:** with no commits, merged PRs, or issues opened or closed, nothing is delivered.
 - **Expected tokens:** 15k to 40k per run (estimate)
 
 ### Trigger
@@ -45,20 +48,21 @@ on:
 
 permissions:
   contents: read
-  issues: write # only needed for deliver: issue
+  issues: write # deliver: issue, and the failure alert
 
 jobs:
   digest:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
           fetch-depth: 0
+          persist-credentials: false
       - uses: swenyai/sweny@v5
         with:
           workflow: .sweny/workflows/weekly-digest.yml
+          notify-on-failure: issue # one sticky issue, only when a run fails
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           input: '{"repo": "${{ github.repository }}"}'
           # input: '{"repo": "${{ github.repository }}", "days": 7, "deliver": "slack"}'
@@ -72,6 +76,8 @@ jobs:
 - `collect`: function gates (it queried the repo, it called no write tool) and value gates (dated window, commit shas match a sha pattern).
 - `analyze`: value gates on the headline, counts, and risky-file categories. It calls no tool.
 - `publish`: value gate on the destination, function gate that it never writes to GitHub directly (the issue is a safe output).
+
+A week with no activity routes to `quiet` and delivers nothing. SWEny decides that from the four counts with a deterministic [`when` expression](https://spec.sweny.ai/edges/#expressions) and no model call, so the digest does not train anyone to ignore it.
 
 The run receipt and step summary show the DAG, duration, and tokens. The digest itself goes to the issue or Slack, because the step summary carries run metadata only.
 
@@ -128,12 +134,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: swenyai/sweny@v5
         with:
           workflow: .sweny/workflows/dependency-drift.yml
+          notify-on-failure: issue # one sticky issue, only when a run fails
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           input: '{"repo": "${{ github.repository }}"}'
         env:
@@ -150,7 +157,7 @@ jobs:
 - `assess`: value gates on the action and severities. It calls no tool.
 - `file-issue`: function gate that it searched for an existing issue before requesting a write and never wrote to GitHub directly, value gate on the result.
 
-Dedupe is by the open issue labelled `sweny-drift`: same advisories and paths means nothing is written.
+Dedupe is by the open issue labelled `sweny-drift`: same advisories and paths means nothing is written. When `assess` finds nothing actionable (`action` is `none`), SWEny routes straight to `quiet` on a deterministic `when` expression and skips the issue step.
 
 ### Sample output
 
@@ -205,7 +212,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: swenyai/sweny@v5
@@ -241,6 +248,20 @@ Where to look
 
 Read-only scope review. No code was changed.
 ```
+
+## Failure alerts
+
+The two scheduled packs set `notify-on-failure: issue`. When a run fails or is refused, the Action opens one issue titled `SWEny run failed: <workflow>` labelled `sweny-failure`, and comments on it for later failures instead of opening more. Nothing is sent on success. It needs `issues: write`, which both triggers already request.
+
+For Slack, pass an incoming-webhook URL from a secret, or the name of an env var on the step that holds it:
+
+```yaml
+      - uses: swenyai/sweny@v5
+        with:
+          notify-on-failure: ${{ secrets.SLACK_FAILURE_WEBHOOK }}
+```
+
+The message carries metadata only: the workflow id, the failed node ids, a reason class (`node_failed`, `crashed`, or `did_not_start` for a run that was refused or never began), and the run link. No error text, node output, or model prose.
 
 ## Making them your own
 
