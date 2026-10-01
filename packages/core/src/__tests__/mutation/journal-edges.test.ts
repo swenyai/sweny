@@ -1530,17 +1530,61 @@ describe("wrapWrites", () => {
       number: 5,
     });
     expect(found.writes).toStrictEqual([]);
-    expect(found.reads).toStrictEqual([{ tool: "github_list_issues", args: { repo: "o/r", per_page: 100 } }]);
+    expect(found.reads).toStrictEqual([{ tool: "github_list_issues", args: { repo: "o/r", per_page: 100, page: 1 } }]);
     const absent = fakeProvider("github", { github_create_issue: { number: 1 } }, { github_list_issues: [] });
     await call(pendingJournal({ pending: [key] }).j, absent, "github_create_issue", args);
     expect(absent.writes).toHaveLength(1);
-    // A full page that does not reach back to the write cannot prove it absent.
+    // Full pages that never end or reach back to the write cannot prove it absent.
     const page = Array.from({ length: 100 }, (_, i) => ({ number: i + 10, body: "other", created_at: "2999-01-01" }));
     const crowded = fakeProvider("github", { github_create_issue: {} }, { github_list_issues: page });
     await expect(call(pendingJournal({ pending: [key] }).j, crowded, "github_create_issue", args)).rejects.toThrow(
-      "(too many issues created since the write)",
+      "(too many issues to search (more than 3000))",
     );
     expect(crowded.writes).toHaveLength(0);
+  });
+
+  it("the listings page on: an issue on page 2 is found, a comment at 101 is found, a failed page cannot confirm", async () => {
+    const issueArgs = { repo: "o/r", title: "T" };
+    const issueKey = keyOf("github_create_issue", issueArgs);
+    const issues = Array.from({ length: 150 }, (_, i) => ({
+      number: 200 - i,
+      body: i === 120 ? `x ${markerToken(issueKey)}` : "other",
+      created_at: "2999-01-01",
+    }));
+    const byPage = (all: unknown[]) => (a: Record<string, unknown>) =>
+      all.slice((Number(a.page) - 1) * 100, Number(a.page) * 100);
+    const issueFake = fakeProvider("github", { github_create_issue: {} }, { github_list_issues: byPage(issues) });
+    expect(
+      await call(pendingJournal({ pending: [issueKey] }).j, issueFake, "github_create_issue", issueArgs),
+    ).toStrictEqual({ number: 80 });
+    expect(issueFake.writes).toStrictEqual([]);
+    expect(issueFake.reads.map((r) => r.args.page)).toStrictEqual([1, 2]);
+
+    const args = { repo: "o/r", issue_number: 7, body: "hi" };
+    const key = keyOf("github_add_comment", args);
+    const comments = Array.from({ length: 101 }, (_, i) => ({
+      id: i + 1,
+      body: i === 100 ? `hi ${markerToken(key)}` : "other",
+    }));
+    const fake = fakeProvider("github", { github_add_comment: {} }, { github_list_issue_comments: byPage(comments) });
+    expect(await call(pendingJournal({ pending: [key] }).j, fake, "github_add_comment", args)).toStrictEqual({});
+    expect(fake.writes).toStrictEqual([]);
+    expect(fake.reads.map((r) => r.args.page)).toStrictEqual([1, 2]);
+
+    const failing = fakeProvider(
+      "github",
+      { github_add_comment: {} },
+      {
+        github_list_issue_comments: (a: Record<string, unknown>) => {
+          if (a.page === 2) throw new Error("HTTP 502");
+          return comments.slice(0, 100);
+        },
+      },
+    );
+    await expect(call(pendingJournal({ pending: [key] }).j, failing, "github_add_comment", args)).rejects.toThrow(
+      "(HTTP 502)",
+    );
+    expect(failing.writes).toStrictEqual([]);
   });
 
   it("finds a pending github comment by issue number, matching strings and numbers alike", async () => {

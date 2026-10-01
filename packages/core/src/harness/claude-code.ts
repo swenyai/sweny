@@ -741,12 +741,17 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           ...(abort ? { abortController: abort.controller } : {}),
           ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(Object.keys(allMcpServers).length > 0 ? { mcpServers: allMcpServers } : {}),
-          // Dry run (#380): settingSources is omitted, so the SDK loads user,
-          // project and local settings, including their MCP servers (and
-          // project .mcp.json, plugins). strictMcpConfig limits MCP to the
-          // servers passed above, which under readOnly is only sweny-core.
-          // A strict policy (#365) makes it exclusive for write nodes too.
-          ...(mcpWithheld(!!readOnly, agentAccess) || opts.strictMcp ? { strictMcpConfig: true } : {}),
+          // Only what sweny passes runs: an ambient MCP server or plugin (user
+          // settings, a repo's .mcp.json or .claude/settings.json, which are
+          // repo content) could read the run journals' state dir around the
+          // sandbox and the deny rules. SDK Options (sdk.d.ts):
+          // `strictMcpConfig` "Only use MCP servers passed via the `mcpServers`
+          // option ... ignoring ... project `.mcp.json`, user settings,
+          // plugins"; `settingSources` "Pass `[]` to disable filesystem
+          // settings (SDK isolation mode)", so no user/project/local
+          // settings, hooks or settings-enabled plugins load either.
+          strictMcpConfig: true,
+          settingSources: [],
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
           // CC-08: ask the SDK to produce validated structured output when the
           // node declares an output schema. The SDK then returns the parsed

@@ -801,9 +801,8 @@ async function executeRun(
       } catch (err) {
         if (journalFault) throw journalFault;
         // The attempt ended abnormally (abort, timeout, harness error): whether its agent was
-        // contained is unknown, so the journal says it was not, and spend the throttle held goes in now.
+        // contained is unknown, so the journal says it was not.
         journal?.uncontained?.(usageNode, iteration);
-        journal?.flushUsage?.();
         throw err;
       } finally {
         parentSignal?.removeEventListener("abort", onParentAbort);

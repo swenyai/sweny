@@ -25,7 +25,6 @@ import {
   JournalIntegrityError,
   JournalKeyError,
   RunJournal,
-  USAGE_JOURNAL_INTERVAL_MS,
   buildResumePlan,
   checkJournalAgainstWorkflow,
   checkRecordSequence,
@@ -548,16 +547,11 @@ describe("usage records", () => {
     ]);
   });
 
-  it("live reports are throttled: one per interval, and only when spend grew", () => {
+  it("every live report that raises the spend is written at once, and only those", () => {
     const j = begun();
     j.usage("a", 1, 0, { inputTokens: 10 }, false);
-    now += USAGE_JOURNAL_INTERVAL_MS - 1;
-    j.usage("a", 1, 0, { inputTokens: 20 }, false);
-    expect(usages(j)).toHaveLength(1);
-    now += 1;
     j.usage("a", 1, 0, { inputTokens: 20 }, false);
     expect(usages(j).map((r) => r.tokens)).toStrictEqual([10, 20]);
-    now += USAGE_JOURNAL_INTERVAL_MS;
     j.usage("a", 1, 0, { inputTokens: 20 }, false);
     j.usage("a", 1, 0, { inputTokens: 5 }, false);
     expect(usages(j)).toHaveLength(2);
@@ -569,10 +563,9 @@ describe("usage records", () => {
     ]);
   });
 
-  it("a lower non-growing report is dropped even after the interval, but growth in either unit counts", () => {
+  it("a lower non-growing report is dropped, but growth in either unit counts", () => {
     const j = begun();
     j.usage("a", 1, 0, { inputTokens: 10, costUsd: 1 }, false);
-    now += USAGE_JOURNAL_INTERVAL_MS * 2;
     j.usage("a", 1, 0, { inputTokens: 10, costUsd: 1 }, false);
     j.usage("a", 1, 0, { inputTokens: 9, costUsd: 1 }, false);
     j.usage("a", 1, 0, { inputTokens: 10, costUsd: 0.5 }, false);
@@ -581,7 +574,7 @@ describe("usage records", () => {
     expect(usages(j)).toHaveLength(2);
   });
 
-  it("the final report ignores the throttle but still only records growth", () => {
+  it("the final report too only records growth", () => {
     const j = begun();
     j.usage("a", 1, 0, { inputTokens: 10, costUsd: 1 }, false);
     j.usage("a", 1, 0, { inputTokens: 10, costUsd: 1 }, true);
@@ -606,7 +599,6 @@ describe("usage records", () => {
   it("remembers the largest spend seen per unit, not the last report's", () => {
     const j = begun();
     j.usage("a", 1, 0, { inputTokens: 100, costUsd: 1 }, false);
-    now += USAGE_JOURNAL_INTERVAL_MS;
     j.usage("a", 1, 0, { inputTokens: 50, costUsd: 2 }, false);
     j.usage("a", 1, 0, { inputTokens: 80, costUsd: 2 }, true);
     j.usage("a", 1, 0, { inputTokens: 100, costUsd: 3 }, true);

@@ -776,14 +776,14 @@ describe("a journal append that fails stops the run", () => {
 });
 
 describe("review 4 follow-ups", () => {
-  it("throttled live usage is written when the window ends: 10 then 100 within it, crash after it, resume seeds 100", async () => {
+  it("live usage is on disk the moment it is reported: 10 then 100, process killed at once, resume seeds 100", async () => {
     const cwd = tmp();
     const claude: Claude = {
       async run(req) {
         req.onUsage?.({ inputTokens: 10, outputTokens: 0 });
         req.onUsage?.({ inputTokens: 100, outputTokens: 0 });
-        await new Promise((r) => setTimeout(r, 300));
-        throw new Kill("process died after the throttle window");
+        // SIGKILL right after the second report: no timer, no flush, no end() ever runs.
+        throw new Kill("process killed");
       },
       async evaluate() {
         throw new Error("unused");
@@ -792,7 +792,7 @@ describe("review 4 follow-ups", () => {
         return "ALLOW";
       },
     };
-    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml", usageIntervalMs: 50 });
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml" });
     await expect(
       execute(chain(), {}, { skills: createSkillMap([]), claude, config: {}, logger: silent, cwd, journal }),
     ).rejects.toBeInstanceOf(Kill);

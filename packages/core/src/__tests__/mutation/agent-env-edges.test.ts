@@ -1210,14 +1210,14 @@ describe("agent access and sandbox", () => {
       ]);
     });
 
-    it("an explicit extra list beats the environment, and auto does not fail when unavailable at start", () => {
+    it("an explicit extra list beats the environment, and auto past its preflight fails rather than degrades", () => {
       const r = resolveAgentSandbox({
         env: { SWENY_SANDBOX_ALLOWED_DOMAINS: "env.test" },
         mode: "auto",
         allowedDomains: ["own.test"],
         probe: () => undefined,
       });
-      expect(r.settings?.failIfUnavailable).toBe(false);
+      expect(r.settings?.failIfUnavailable).toBe(true);
       expect(r.settings?.network?.allowedDomains).toStrictEqual([...DEFAULT_SANDBOX_DOMAINS, "own.test"]);
       const none = resolveAgentSandbox({ env: {}, mode: "auto", probe: () => undefined });
       expect(none.settings?.network?.allowedDomains).toStrictEqual([...DEFAULT_SANDBOX_DOMAINS]);

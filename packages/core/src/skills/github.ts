@@ -205,13 +205,15 @@ export const github: Skill = {
         type: "object",
         properties: {
           repo: { type: "string", description: "owner/repo" },
-          per_page: { type: "number", description: "How many (max 100, default 30)" },
+          per_page: { type: "number", description: "How many per page (max 100, default 30)" },
+          page: { type: "number", description: "Page number, from 1 (default 1)" },
         },
         required: ["repo"],
       },
-      handler: async (input: { repo: string; per_page?: number }, ctx) => {
+      handler: async (input: { repo: string; per_page?: number; page?: number }, ctx) => {
         const n = Math.min(100, Math.max(1, Math.floor(input.per_page ?? 30)));
-        return gh(`/repos/${input.repo}/issues?state=all&sort=created&direction=desc&per_page=${n}`, ctx);
+        const page = Math.max(1, Math.floor(input.page ?? 1));
+        return gh(`/repos/${input.repo}/issues?state=all&sort=created&direction=desc&per_page=${n}&page=${page}`, ctx);
       },
     },
     {
@@ -224,12 +226,17 @@ export const github: Skill = {
           repo: { type: "string", description: "owner/repo" },
           issue_number: { type: "number", description: "Issue or PR number" },
           since: { type: "string", description: "ISO 8601 time: only comments updated at or after it" },
+          page: { type: "number", description: "Page of 100 comments, oldest first, from 1 (default 1)" },
         },
         required: ["repo", "issue_number"],
       },
-      handler: async (input: { repo: string; issue_number: number; since?: string }, ctx) => {
+      handler: async (input: { repo: string; issue_number: number; since?: string; page?: number }, ctx) => {
         const since = input.since ? `&since=${encodeURIComponent(input.since)}` : "";
-        return gh(`/repos/${input.repo}/issues/${Number(input.issue_number)}/comments?per_page=100${since}`, ctx);
+        const page = Math.max(1, Math.floor(input.page ?? 1));
+        return gh(
+          `/repos/${input.repo}/issues/${Number(input.issue_number)}/comments?per_page=100&page=${page}${since}`,
+          ctx,
+        );
       },
     },
     {

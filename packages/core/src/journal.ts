@@ -49,8 +49,8 @@
  *   output:applied   the write returned (key + the ids it produced)
  *   node:end         final result of the visit and the write-stage counters
  *   route            the edge taken after the visit (null = the run ended)
- *   usage            spend of one agent attempt (cumulative; live while it runs, final when it returns;
- *                    a throttled live report is held and written when its window ends)
+ *   usage            spend of one agent attempt (cumulative; one per model turn that raised it, written
+ *                    synchronously, and the final figure when the attempt returns)
  *   agent:unsandboxed the visit's agent ran without an enforced sandbox
  *   run:end          success | failed | crashed
  *
@@ -1405,10 +1405,16 @@ async function callRead(skill: Skill | undefined, name: string, args: unknown, c
 const hasRead = (skill: Skill | undefined, name: string) =>
   !!skill?.tools.some((t) => t.name === name && t.access === "read");
 
+/** Pages of 100 a marker lookup reads before it gives up (cannot confirm). */
+const LIST_PAGE_SIZE = 100;
+const LIST_MAX_PAGES = 30;
+
 /**
  * Look for a GitHub issue or comment by its marker through the listing
- * endpoints (consistent, unlike search). Undefined when the skill has no
- * listing tool, so the caller falls back to search.
+ * endpoints (consistent, unlike search), page by page until the marker is
+ * found, the listing ends, or it reaches back past the write. Undefined when
+ * the skill has no listing tool, so the caller falls back to search. A page
+ * that cannot be read is "cannot confirm" (the caller's catch).
  */
 async function listGitHubForMarker(
   toolName: string,
@@ -1419,28 +1425,29 @@ async function listGitHubForMarker(
   ctx: ToolContext,
 ): Promise<ProbeResult | undefined> {
   const hasBody = (i: Record<string, unknown>) => typeof i.body === "string" && (i.body as string).includes(token);
-  if (toolName === "github_add_comment") {
-    if (!hasRead(skill, "github_list_issue_comments")) return undefined;
-    const out = await callRead(
-      skill,
-      "github_list_issue_comments",
-      { repo: args.repo, issue_number: args.issue_number, ...(since ? { since } : {}) },
-      ctx,
-    );
-    if (!Array.isArray(out)) return { state: "unknown", reason: "comment list unavailable" };
-    const hit = (out as Array<Record<string, unknown>>).find(hasBody);
-    return hit ? { state: "applied", output: {} } : { state: "absent" };
+  const comments = toolName === "github_add_comment";
+  const tool = comments ? "github_list_issue_comments" : "github_list_issues";
+  if (!hasRead(skill, tool)) return undefined;
+  for (let page = 1; page <= LIST_MAX_PAGES; page++) {
+    const query = comments
+      ? { repo: args.repo, issue_number: args.issue_number, ...(since ? { since } : {}), page }
+      : { repo: args.repo, per_page: LIST_PAGE_SIZE, page };
+    const out = await callRead(skill, tool, query, ctx);
+    if (!Array.isArray(out)) return { state: "unknown", reason: `${comments ? "comment" : "issue"} list unavailable` };
+    const items = out as Array<Record<string, unknown>>;
+    // Issues listing includes pull requests; a marker only ever lands in an issue.
+    const hit = items.find((i) => hasBody(i) && (comments || !i.pull_request));
+    if (hit) return { state: "applied", output: comments ? {} : hit };
+    // The listing ended: everything since the write was seen.
+    if (items.length < LIST_PAGE_SIZE) return { state: "absent" };
+    // Issues come newest first: a page that reaches back past the write ends the search.
+    const oldest = items.at(-1)?.created_at;
+    if (!comments && since !== undefined && typeof oldest === "string" && oldest < since) return { state: "absent" };
   }
-  if (!hasRead(skill, "github_list_issues")) return undefined;
-  const out = await callRead(skill, "github_list_issues", { repo: args.repo, per_page: 100 }, ctx);
-  if (!Array.isArray(out)) return { state: "unknown", reason: "issue list unavailable" };
-  const items = (out as Array<Record<string, unknown>>).filter((i) => !i.pull_request);
-  const hit = items.find(hasBody);
-  if (hit) return { state: "applied", output: hit };
-  // A miss counts only if the newest-first list reaches back to before the intent.
-  const oldest = items.at(-1)?.created_at;
-  const reachesBack = out.length < 100 || (since !== undefined && typeof oldest === "string" && oldest < since);
-  return reachesBack ? { state: "absent" } : { state: "unknown", reason: "too many issues created since the write" };
+  return {
+    state: "unknown",
+    reason: `too many ${comments ? "comments" : "issues"} to search (more than ${LIST_MAX_PAGES * LIST_PAGE_SIZE})`,
+  };
 }
 
 /**
@@ -1572,11 +1579,9 @@ export interface ExecutionJournal {
   route(from: string, to: string | null): void;
   /**
    * Spend of one agent attempt, cumulative for the attempt: `final` when the
-   * attempt returned, otherwise a live report (the journal may throttle those).
+   * attempt returned, otherwise a live report (written at once when it raises the spend).
    */
   usage?(node: string, iteration: number, attempt: number, usage: NodeUsage, final: boolean): void;
-  /** Write any live usage the throttle is holding back (before an abort is handled). */
-  flushUsage?(): void;
   /** The visit's agent ran without an enforced sandbox: recorded so a resume can say so. */
   uncontained?(node: string, iteration: number): void;
   /** Spend earlier attempts of this run already journaled (resume); the run budget starts from it. */
@@ -1584,9 +1589,6 @@ export interface ExecutionJournal {
   /** Receipt `degraded` entries this journal adds to the run (e.g. `journal_unsandboxed`). */
   degraded?(): string[];
 }
-
-/** Minimum gap between two live usage records of one attempt. Final reports are always written. */
-export const USAGE_JOURNAL_INTERVAL_MS = 2000;
 
 /** Test seams: a throw simulates the process dying at that point of an append. */
 export interface JournalFaults {
@@ -1613,8 +1615,6 @@ export interface RunJournalOptions {
   keep?: number;
   /** Where run journals live (default {@link runStateRoot}). Never inside the workspace. */
   stateRoot?: string;
-  /** Throttle window for live usage records (default {@link USAGE_JOURNAL_INTERVAL_MS}). */
-  usageIntervalMs?: number;
 }
 
 export interface ResumeJournalOptions extends RunJournalOptions {
@@ -1716,15 +1716,6 @@ export function lockRun(cwd: string, runId: string, root: string = runStateRoot(
 
 const quietLogger: Logger = { info() {}, warn() {}, error() {}, debug() {} };
 
-interface PendingUsage {
-  node: string;
-  iteration: number;
-  attempt: number;
-  tokens: number;
-  costUsd: number;
-  timer?: ReturnType<typeof setTimeout>;
-}
-
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export class RunJournal implements ExecutionJournal {
@@ -1752,9 +1743,7 @@ export class RunJournal implements ExecutionJournal {
   private key: Buffer | undefined;
   private lock: RunLock | undefined;
   /** Last live usage record per attempt: time and spend, for throttling. */
-  private lastUsage = new Map<string, { at: number; tokens: number; costUsd: number }>();
-  /** Live usage the throttle held back, per attempt: written when its window ends or before the next record. */
-  private pendingUsage = new Map<string, PendingUsage>();
+  private lastUsage = new Map<string, { tokens: number; costUsd: number }>();
   /** Visits already recorded as run without an enforced sandbox. */
   private uncontainedVisits = new Set<string>();
 
@@ -1824,8 +1813,6 @@ export class RunJournal implements ExecutionJournal {
     if (this.failure) throw this.failure;
     if (this.killed) return;
     if (!this.key) return this.fail("no signing key for this run");
-    // Spend the throttle held back goes in before anything that follows it.
-    if (type !== "usage" && this.pendingUsage.size > 0) this.flushUsage();
     const body: Record<string, unknown> = {
       v: JOURNAL_SCHEMA_VERSION,
       seq: this.seq + 1,
@@ -1872,7 +1859,6 @@ export class RunJournal implements ExecutionJournal {
   }
 
   private closeFd(): void {
-    this.clearAllPendingUsage();
     if (this.fd === undefined) return;
     try {
       fs.closeSync(this.fd);
@@ -2027,6 +2013,14 @@ export class RunJournal implements ExecutionJournal {
     this.append("route", { from, to });
   }
 
+  /**
+   * Journal one usage report, synchronously, whenever it raises the attempt's
+   * spend (reports are cumulative; the largest figure seen per unit counts).
+   * Nothing is held back: harnesses report once per model turn (Claude Code
+   * per assistant message, ACP per usage update), so every turn's spend is on
+   * disk before the next turn runs, and a process killed at any point has lost
+   * at most the turn it was in.
+   */
   usage(node: string, iteration: number, attempt: number, usage: NodeUsage, final: boolean): void {
     const s = spendOf(usage);
     if (s.tokens === undefined && s.costUsd === undefined) return;
@@ -2034,80 +2028,12 @@ export class RunJournal implements ExecutionJournal {
     const costUsd = s.costUsd ?? 0;
     const k = `${visitKey(node, iteration)}|${attempt}`;
     const last = this.lastUsage.get(k);
-    const pending = this.pendingUsage.get(k);
-    // Reports are cumulative for the attempt: the largest figure seen is the spend.
-    const t = Math.max(tokens, pending?.tokens ?? 0);
-    const c = Math.max(costUsd, pending?.costUsd ?? 0);
-    if (last && t <= last.tokens && c <= last.costUsd) {
-      this.clearPendingUsage(k);
-      return;
-    }
-    const interval = this.opts.usageIntervalMs ?? USAGE_JOURNAL_INTERVAL_MS;
-    const now = Date.now();
-    if (!final && last && now - last.at < interval) {
-      // Throttled, not dropped: hold the latest figure and write it when the
-      // window ends, or before the next record (node end, write intent), or
-      // when the attempt aborts, whichever comes first.
-      const entry: PendingUsage = pending ?? { node, iteration, attempt, tokens: t, costUsd: c };
-      entry.tokens = t;
-      entry.costUsd = c;
-      if (!entry.timer) {
-        entry.timer = setTimeout(() => this.flushPendingSafely(k), interval - (now - last.at));
-        entry.timer.unref?.();
-      }
-      this.pendingUsage.set(k, entry);
-      return;
-    }
-    this.clearPendingUsage(k);
-    this.writeUsage(k, node, iteration, attempt, t, c, final);
-  }
-
-  private writeUsage(
-    k: string,
-    node: string,
-    iteration: number,
-    attempt: number,
-    tokens: number,
-    costUsd: number,
-    final: boolean,
-  ): void {
-    const last = this.lastUsage.get(k);
+    if (last && tokens <= last.tokens && costUsd <= last.costUsd) return;
     this.lastUsage.set(k, {
-      at: Date.now(),
       tokens: Math.max(tokens, last?.tokens ?? 0),
       costUsd: Math.max(costUsd, last?.costUsd ?? 0),
     });
     this.append("usage", { node, iteration, attempt, tokens, cost_usd: costUsd, final });
-  }
-
-  private clearPendingUsage(k: string): void {
-    const p = this.pendingUsage.get(k);
-    if (p?.timer) clearTimeout(p.timer);
-    this.pendingUsage.delete(k);
-  }
-
-  private clearAllPendingUsage(): void {
-    for (const k of [...this.pendingUsage.keys()]) this.clearPendingUsage(k);
-  }
-
-  /** Write every live usage figure the throttle is holding. Throws {@link JournalWriteError} like any append. */
-  flushUsage(): void {
-    for (const [k, p] of [...this.pendingUsage]) {
-      this.clearPendingUsage(k);
-      this.writeUsage(k, p.node, p.iteration, p.attempt, p.tokens, p.costUsd, false);
-    }
-  }
-
-  private flushPendingSafely(k: string): void {
-    const p = this.pendingUsage.get(k);
-    if (!p) return;
-    this.clearPendingUsage(k);
-    try {
-      this.writeUsage(k, p.node, p.iteration, p.attempt, p.tokens, p.costUsd, false);
-    } catch {
-      // A failed write is recorded (this.failure): the next append, or the
-      // executor after the attempt, stops the run.
-    }
   }
 
   uncontained(node: string, iteration: number): void {

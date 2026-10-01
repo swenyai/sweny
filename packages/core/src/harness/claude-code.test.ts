@@ -283,7 +283,7 @@ describe("ClaudeCodeHarness", () => {
       });
       const opts = mockQuery.mock.calls[0][0].options;
       expect(opts.disallowedTools).toEqual(["Glob", "Bash", "WebFetch", "WebSearch", ...mod.claudeStateDirDenyRules()]);
-      expect(opts.strictMcpConfig).toBeUndefined();
+      expect(opts.strictMcpConfig).toBe(true);
     });
 
     it("every class compiles to at least one native name", () => {
@@ -325,7 +325,41 @@ describe("ClaudeCodeHarness", () => {
       await h.run({ instruction: "x", context: {}, tools: [], disallowedTools: ["Bash"] });
       const opts = mockQuery.mock.calls[0][0].options;
       expect(opts.disallowedTools).toEqual(["Bash", ...mod.claudeStateDirDenyRules()]);
-      expect(opts.strictMcpConfig).toBeUndefined();
+      expect(opts.strictMcpConfig).toBe(true);
+    });
+
+    it("auto past its preflight enforces the sandbox (fail, not degrade) and reports the agent contained", async () => {
+      vi.stubEnv("SWENY_SANDBOX", "auto");
+      mockQuery.mockReturnValueOnce(resultStream("done"));
+      const h = new mod.ClaudeCodeHarness({ logger: noopLogger(), sandboxProbe: () => undefined });
+      const r = await h.run({ instruction: "x", context: {}, tools: [] });
+      expect(mockQuery.mock.calls.at(-1)![0].options.sandbox).toMatchObject({ enabled: true, failIfUnavailable: true });
+      expect(r.contained).toBe(true);
+    });
+
+    it("auto whose preflight fails runs unsandboxed and reports the agent not contained", async () => {
+      vi.stubEnv("SWENY_SANDBOX", "auto");
+      mockQuery.mockReturnValueOnce(resultStream("done"));
+      const h = new mod.ClaudeCodeHarness({ logger: noopLogger(), sandboxProbe: () => "no bubblewrap" });
+      const r = await h.run({ instruction: "x", context: {}, tools: [] });
+      expect(mockQuery.mock.calls.at(-1)![0].options.sandbox).toBeUndefined();
+      expect(r.contained).toBe(false);
+    });
+
+    it("every run loads only the MCP servers sweny passes, and no filesystem settings or plugins", async () => {
+      for (const p of [policy({}), policy({ readOnly: true }), undefined]) {
+        mockQuery.mockReturnValueOnce(resultStream("done"));
+        const h = new mod.ClaudeCodeHarness({
+          logger: noopLogger(),
+          mcpServers: { github: { type: "http", url: "https://example.test/mcp" } },
+        });
+        await h.run({ instruction: "x", context: {}, tools: [], ...(p ? { policy: p } : {}) });
+        const opts = mockQuery.mock.calls.at(-1)![0].options;
+        // No user/project .mcp.json, settings or plugin servers: a filesystem MCP could read the state dir.
+        expect(opts.strictMcpConfig).toBe(true);
+        expect(opts.settingSources).toEqual([]);
+        expect(opts.plugins).toBeUndefined();
+      }
     });
 
     it("every run denies the built-in file tools the run journals' state dir, read and write", async () => {

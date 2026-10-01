@@ -178,7 +178,7 @@ describe("resolveAgentSandbox", () => {
     expect(resolveAgentSandbox({ env: { SWENY_SANDBOX: "off" }, probe: () => undefined })).toEqual({ mode: "off" });
   });
 
-  it("auto on a supported host: settings with default + node + configured hosts, degrade not fail", () => {
+  it("auto on a supported host: settings with default + node + configured hosts, enforced (fail, not degrade)", () => {
     const { settings, error, warning } = resolveAgentSandbox({
       env: { CI: "true", SWENY_SANDBOX_ALLOWED_DOMAINS: "internal.example.com, *.corp.example" },
       nodeDomains: ["api.linear.app"],
@@ -188,7 +188,7 @@ describe("resolveAgentSandbox", () => {
     expect(warning).toBeUndefined();
     expect(settings).toMatchObject({
       enabled: true,
-      failIfUnavailable: false,
+      failIfUnavailable: true,
       allowUnsandboxedCommands: false,
       network: { strictAllowlist: true },
     });
@@ -355,7 +355,7 @@ describe("ClaudeClient scoped env + sandbox wiring", () => {
       tools: [],
       agentAccess: { envVars: [], domains: ["api.linear.app"] },
     });
-    expect(opts().sandbox).toMatchObject({ enabled: true, failIfUnavailable: false, allowUnsandboxedCommands: false });
+    expect(opts().sandbox).toMatchObject({ enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false });
     expect(opts().sandbox.network.allowedDomains).toContain("api.linear.app");
 
     mockQuery.mockClear();
