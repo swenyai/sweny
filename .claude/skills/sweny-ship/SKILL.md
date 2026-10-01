@@ -48,11 +48,18 @@ scripts/land-pr.sh <pr>          # update branch, wait for clean, squash-merge; 
 
 On exit 2 send the lane back to `git merge origin/main`, keep both sides, rerun gates. Order: correctness first, then the PRs that others rebase onto.
 
+Lessons from running many lanes at once:
+- Chain landings on PR state (`until [ "$(gh pr view N --json state -q .state)" != OPEN ]`), never by grepping another job's log: a copied log line once fired the next merge early.
+- Lanes that touch the same files (the harness seam, `executor.ts`, the contract suite) land one at a time; the next one rebases. Resume the same lane for the rebase so it keeps its context.
+- `git pull` the main checkout before running `scripts/*`: a stale checkout runs a stale script.
+- Lanes commit from worktrees with the main checkout's `node_modules` symlinked in (the pre-commit hook runs eslint, which needs the full tree, not just `.bin`).
+- A lane brief says "wait until PR #N is merged before branching" when it depends on unmerged work.
+
 ## 4. Prove it shipped
 
 ```bash
 scripts/verify-release.sh                                   # release run for main head + npm versions
-scripts/verify-release.sh "" --expect '--comment-file' --help-args 'workflow run'
+scripts/verify-release.sh "" --expect '--comment-file' --help-args 'workflow run'   
 ```
 
 Failure hints: E404 = NPM_TOKEN expired, E422 = a publishable package.json lacks `repository`, EOTP = token is not an Automation token.
