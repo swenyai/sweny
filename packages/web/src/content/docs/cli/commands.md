@@ -250,6 +250,8 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 | `--comment-file <path>` | Write a PR-comment markdown (run receipt, status-colored DAG, per-node table; metadata only) to `<path>` so any CI can post it | -- |
 | `--timeout <ms>` | Whole-run wall-clock budget for `workflow run` (one file, or per workflow in batch runs). `0` disables the budget. Non-numeric values are rejected | `3600000` (60 min) |
 | `--max-steps <n>` | Hard cap on total node executions for a single workflow file, including eval-failure retries | `200` |
+| `--max-tokens <n>` | Run-wide token budget (input plus output) for a single workflow file. The lowest of this and the workflow's `budget.tokens` wins. A crossing stops the agent, fails the node and halts the run. See [Spend budgets](/workflows/yaml-reference/#spend-budgets) | none |
+| `--max-cost <usd>` | Run-wide cost budget in US dollars, from harness-reported cost (never estimated). The lowest of this and the workflow's `budget.cost_usd` wins | none |
 | `-y, --yes` | Skip the batch confirmation prompt (use in CI) | `false` |
 | `--agent <id>` | Coding agent that runs the nodes: `claude`, `codex` or `pi` (experimental) | `claude` |
 | `--harness-policy <mode>` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and reports it as degraded. Env: `SWENY_HARNESS_POLICY` | `strict` under GitHub Actions, else `warn` |

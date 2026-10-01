@@ -9,9 +9,10 @@
  *
  * Each case passes, or is skipped only where the adapter's declared
  * `capabilities` say the opinion is not native (the skip must match the
- * declaration). Nineteen cases, one `it` each, so a report reads "19 passed".
+ * declaration). Twenty cases, one `it` each, so a report reads "20 passed".
  * Cases 16 to 18 (#365) prove the node policy reaches the agent, which safe
- * outputs depend on. Case 19 (#442) proves a staged run cannot push.
+ * outputs depend on. Case 19 (#442) proves a staged run cannot push. Case 20
+ * (#449) proves live usage reaches `onUsage` and that stopping on it stops the agent.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -19,7 +20,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import type { Logger, Tool } from "../../types.js";
+import type { Logger, NodeUsage, Tool } from "../../types.js";
 import { AGENT_ENV_ALLOWLIST, AGENT_ENV_PREFIXES } from "../../agent-env.js";
 import { UNTRUSTED_DATA_NOTICE } from "../../untrusted.js";
 import { ask as coreAsk, evaluate as coreEvaluate } from "../prompts.js";
@@ -117,6 +118,7 @@ export const CONTRACT_CASE_NAMES = [
   "17 strict policy: MCP is exclusive for a write-capable node too, or strict refuses",
   "18 policy read-only: policy.readOnly alone is enforced and the skill tool channel survives",
   "19 stage no push: under noPush a git push from the agent's env fails and write tokens are withheld; normal mode pushes",
+  "20 live usage: onUsage gets cumulative usage while the node runs, and aborting on it stops the agent",
 ] as const;
 
 export interface ContractSuiteOptions {
@@ -705,6 +707,48 @@ export function runContractSuite(
         } finally {
           rmSync(root, { recursive: true, force: true });
         }
+      },
+
+      // 20
+      async (skip) => {
+        const { h } = await fresh();
+        const caps = h.capabilities.usage;
+        if (!caps.live) return skip("live usage is not declared");
+        const unit = caps.liveUnits?.[0] ?? (caps.tokens ? "tokens" : "costUsd");
+        const report = (n: number): FakeUsage =>
+          unit === "tokens" ? { inputTokens: n, outputTokens: 1 } : { costUsd: n };
+        const total = (u: NodeUsage): number =>
+          unit === "tokens" ? (u.inputTokens ?? 0) + (u.outputTokens ?? 0) : (u.costUsd ?? 0);
+
+        // Reports arrive before the run ends, cumulative, never going backwards.
+        fakes.script([
+          { kind: "usage", usage: report(10) },
+          { kind: "usage", usage: report(30) },
+          { kind: "final", text: "done", usage: report(30) },
+        ]);
+        const seen: number[] = [];
+        const ok = await h.run(req({ onUsage: (u) => seen.push(total(u)) }));
+        expect(ok.status).toBe("success");
+        expect(seen.length).toBeGreaterThan(0);
+        expect(seen).toEqual([...seen].sort((a, b) => a - b));
+        expect(Math.max(...seen)).toBeGreaterThanOrEqual(30);
+
+        // A caller that aborts on a report (what a spend budget does) stops the agent.
+        fakes.script([{ kind: "usage", usage: report(500) }, { kind: "hang" }]);
+        const ac = new AbortController();
+        const t0 = Date.now();
+        const r = await h.run(
+          req({
+            signal: ac.signal,
+            onUsage: (u) => {
+              if (total(u) >= 100) ac.abort();
+            },
+          }),
+        );
+        expect(Date.now() - t0).toBeLessThan(2000);
+        expect(r.status).toBe("failed");
+        expect(fakes.captured().stopped).toBe(true);
+        expect(fakes.leftovers()).toEqual([]);
       },
     ];
 

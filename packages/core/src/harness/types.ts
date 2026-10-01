@@ -34,7 +34,13 @@ export interface HarnessCapabilities {
   sandbox: { fs: boolean; network: boolean };
   readOnly: "native" | "tool-allowlist" | "none";
   turnLimit: "native" | "watchdog" | "none";
-  usage: { tokens: boolean; costUsd: boolean; live: boolean };
+  /**
+   * What the harness reports. `live`: usage arrives while the node runs (through
+   * `HarnessRunRequest.onUsage`), so a spend budget stops the agent mid-node.
+   * `liveUnits` narrows which of the reported units arrive live; absent means
+   * every reported unit. Without `live`, budgets are enforced between nodes.
+   */
+  usage: { tokens: boolean; costUsd: boolean; live: boolean; liveUnits?: Array<"tokens" | "costUsd"> };
   cancel: "signal" | "rpc" | "kill";
   resume: boolean;
 }

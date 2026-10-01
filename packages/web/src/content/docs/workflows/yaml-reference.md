@@ -15,6 +15,7 @@ This is the complete schema reference for SWEny workflow YAML files. Every field
 | `entry` | string | Yes | ID of the entry node. Execution starts here. |
 | `nodes` | object | Yes | Map of node ID to node definition. Keys are the node IDs. |
 | `edges` | array | Yes | Array of edge objects defining the graph structure. |
+| `budget` | object | No | `{ tokens, cost_usd }`: spend ceiling for the whole run and for every node. See [Spend budgets](#spend-budgets). |
 | `permissions` | string \| object | No | Default and ceiling for every node's permissions. See [Permissions and safe outputs](#permissions-and-safe-outputs). |
 | `safe_outputs` | object | No | Run-wide limits on safe outputs: allowed types, total cap, staged preview, trusted actors, optional screen. |
 
@@ -34,8 +35,35 @@ Each key in the `nodes` object is a node ID (an arbitrary string you choose). Th
 | `rules` | array \| object | No | inherited | Per-node directives, cascading from workflow level. See [Rules & Context](https://spec.sweny.ai/nodes/#rules--context). |
 | `context` | array \| object | No | inherited | Per-node background knowledge, cascading from workflow level. See [Rules & Context](https://spec.sweny.ai/nodes/#rules--context). |
 | `max_turns` | integer | No | implementation-defined | Cap on AI model turns for this node. See [Max Turns Semantics](https://spec.sweny.ai/nodes/#max-turns-semantics). |
+| `budget` | object | No | -- | `{ tokens, cost_usd }`: spend ceiling for one visit to this node, retries included. Never above the workflow's. See [Spend budgets](#spend-budgets). |
 | `permissions` | string \| object | No | see below | `read` or `write`, or `{ access, deny, strict }`. See [Permissions and safe outputs](#permissions-and-safe-outputs). |
 | `outputs` | array | No | -- | Typed writes (`comment`, `issue`, `pr`, `label`, `issue_state`) the node may request. sweny applies them after the node. |
+
+### Spend budgets
+
+```yaml
+budget:            # workflow: the whole run, and the ceiling for every node
+  tokens: 500000
+  cost_usd: 5
+nodes:
+  investigate:
+    budget: { tokens: 200000 }   # one visit to this node
+```
+
+Tokens are input plus output as the agent reports them (cache tokens are not counted); cost is the agent's own reported USD, never estimated. `sweny workflow run --max-tokens` and `--max-cost` (Action inputs `max-tokens`, `max-cost`) tighten the run ceiling; the lowest value wins.
+
+When a node's spend crosses its budget, or the run's, sweny stops the agent, fails the node with a budget reason (`fail_soft` and `on_fail: continue` do not apply), and ends the run without starting another node. The receipt shows the overrun. A node is not started once the run's budget is already spent.
+
+How tightly it is kept depends on what the agent reports while it works:
+
+| Agent | Tokens | Cost |
+|-------|--------|------|
+| Claude Code | Stopped mid-node, from each message's usage (a lower bound; the final total is checked when the node ends) | Checked when the node ends |
+| Codex | Checked when the node ends | Not reported: cannot be enforced |
+| pi | Checked when the node ends | Checked when the node ends |
+| ACP (`acp:<command>`) | Not reported: cannot be enforced | Stopped mid-node, from `usage_update` |
+
+"Checked when the node ends" means one node can overrun before it is stopped; the node reports `budget_live` as degraded. "Cannot be enforced" reports `budget_tokens` or `budget_cost_usd` as degraded and enforces nothing for that unit; under `--harness-policy strict` (the default under GitHub Actions) the node is refused before it starts. Only agent node runs are metered: judge evaluators, route decisions and retry reflections are not counted.
 
 ### Permissions and safe outputs
 
@@ -247,6 +275,7 @@ SWEny validates workflows before execution. The `sweny workflow validate` comman
 | Retry ceiling | `RETRY_MAX_EXCEEDED` | `retry.max` may not exceed 10. |
 | Known skills | `UNKNOWN_SKILL` | If a skill catalog is provided, all referenced skill IDs must exist in it. |
 | Valid inline skills | `INVALID_INLINE_SKILL` | Inline `skills` entries in a workflow must declare `instruction`, `mcp`, or both. |
+| Budget ceiling | `BUDGET_CEILING` | A node's `budget.tokens` or `budget.cost_usd` may not exceed the workflow's. |
 | Permission ceiling | `PERMISSION_CEILING` | A node may not declare `permissions: write` when the workflow declares `read`. |
 | Allowed outputs | `OUTPUT_NOT_ALLOWED` | A node's output type must be in `safe_outputs.allow` when that is set. |
 | One entry per output type | `DUPLICATE_OUTPUT` | A node may declare each output type once. |

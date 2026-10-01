@@ -26,6 +26,8 @@ SWEny ships three GitHub Actions, each with its own input surface. This page doc
 | `openai-api-key` | OpenAI API key for `agent: codex` (passed to Codex as `CODEX_API_KEY`) | -- |
 | `codex-version` | Version of `@openai/codex` to install for `agent: codex` (0.159.0 or newer) | `latest` |
 | `harness-policy` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and lists it as degraded in the receipt. Empty uses the CLI default (`strict` under GitHub Actions) | -- |
+| `max-tokens` | Run-wide token budget (input plus output). Forwarded as `--max-tokens` only when set; the lowest of this and the workflow's `budget.tokens` wins. The step fails on a CLI too old to enforce it, so a cap is never silently dropped | -- |
+| `max-cost` | Run-wide cost budget in US dollars (harness-reported cost, never estimated). Forwarded as `--max-cost` only when set. See [Spend budgets](/workflows/yaml-reference/#spend-budgets) | -- |
 | `cli-version` | Version of `@sweny-ai/core` to install | `latest` |
 | `node-version` | Node.js version to install | `24` |
 | `working-directory` | Working directory to run from | `.` |
