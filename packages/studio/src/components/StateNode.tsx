@@ -1,6 +1,7 @@
 import { Handle, Position, type Node as RFNode, type NodeProps } from "@xyflow/react";
 import type { Node } from "@sweny-ai/core";
 import { SkillIcon } from "./SkillIcon.js";
+import { tok } from "../theme.js";
 
 export type NodeExecStatus = "current" | "success" | "failed" | "skipped" | "pending";
 
@@ -22,10 +23,11 @@ const execStyle: Record<NodeExecStatus, { shadow: string; bg: string; borderColo
     bg: "rgba(59,130,246,0.1)",
     borderColor: "#3b82f6",
   },
-  success: { shadow: "0 0 0 1.5px #22c55e", bg: "rgba(34,197,94,0.07)", borderColor: "#22c55e" },
+  // Brand success is blue (matches PR and CLI output); the live node keeps the stronger glow.
+  success: { shadow: `0 0 0 1.5px ${tok("success")}`, bg: "rgba(96,165,250,0.08)", borderColor: tok("success") },
   failed: { shadow: "0 0 0 1.5px #ef4444", bg: "rgba(239,68,68,0.09)", borderColor: "#ef4444" },
   skipped: { shadow: "none", bg: "rgba(107,114,128,0.04)", borderColor: "rgba(100,116,139,0.3)" },
-  pending: { shadow: "0 2px 12px rgba(0,0,0,0.5)", bg: "rgba(8,14,26,0.92)", borderColor: "" },
+  pending: { shadow: "0 2px 12px rgba(15,23,42,0.28)", bg: tok("nodeBg"), borderColor: "" },
 };
 
 const skillColors: Record<string, string> = {
@@ -105,7 +107,7 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
                 fontSize: 12,
                 fontWeight: 700,
                 lineHeight: 1.3,
-                color: "#dde5f0",
+                color: tok("text"),
                 flex: 1,
                 opacity: textOpacity,
               }}
@@ -140,7 +142,7 @@ export function StateNode({ data }: NodeProps<StateNodeType>) {
             style={{
               fontFamily: "ui-monospace, 'Cascadia Code', monospace",
               fontSize: 9,
-              color: "#64748b",
+              color: tok("textMuted"),
               opacity: textOpacity,
             }}
           >
