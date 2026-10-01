@@ -14,9 +14,10 @@ const fakes = createCodexProcessFake();
 afterAll(() => fakes.destroy());
 
 runContractSuite(
-  ({ logger, sandbox, sandboxWrapper }) =>
+  ({ logger, sandbox, sandboxWrapper, cwd }) =>
     new CodexHarness({
       logger,
+      ...(cwd ? { cwd } : {}),
       envScope: true,
       policy: "warn",
       codexCommand: fakes.command,
