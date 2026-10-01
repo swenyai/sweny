@@ -328,6 +328,28 @@ export const budgetZ = z
     message: "budget must declare at least one of tokens, cost_usd",
   });
 
+/**
+ * Decision model for route choices (#357). `shadow` needs a provider; the
+ * state only ever goes to that `base_url`, there is no fallback. The key is
+ * named by env var, never inlined.
+ */
+export const deciderZ = z
+  .object({
+    mode: z.enum(["off", "shadow"]),
+    provider: z
+      .object({
+        base_url: z.string().url(),
+        model: z.string().min(1),
+        api_key_env: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .refine((d) => d.mode === "off" || d.provider !== undefined, {
+    message: "decider.provider is required when mode is shadow",
+  });
+
 /** One typed write intent a node may emit (#365). */
 export const safeOutputDeclarationZ = z
   .object({
@@ -430,6 +452,7 @@ export const workflowZ = z.object({
   model: z.string().min(1).optional(),
   judge_budget: z.number().int().min(0).optional(),
   budget: budgetZ.optional(),
+  decider: deciderZ.optional(),
   context_mode: z.enum(CONTEXT_MODES).optional(),
   inputs: workflowInputsZ.optional(),
   permissions: nodePermissionsZ.optional(),
@@ -1003,6 +1026,32 @@ export const workflowJsonSchema = {
         cost_usd: { type: "number", exclusiveMinimum: 0, description: "Max reported cost in USD." },
       },
     },
+    Decider: {
+      type: "object",
+      required: ["mode"],
+      additionalProperties: false,
+      description:
+        "Decision model for route choices. 'shadow' asks it alongside the agent and logs whether they agree; the route is always the agent's. The workflow state goes only to provider.base_url, with no fallback.",
+      properties: {
+        mode: { type: "string", enum: ["off", "shadow"] },
+        provider: {
+          type: "object",
+          required: ["base_url", "model"],
+          additionalProperties: false,
+          properties: {
+            base_url: {
+              type: "string",
+              format: "uri",
+              description: "Server root serving POST /v1/systemone (Ollama or TypeSafe Jev).",
+            },
+            model: { type: "string", minLength: 1 },
+            api_key_env: { type: "string", minLength: 1, description: "Env var holding the bearer key." },
+          },
+        },
+      },
+      if: { properties: { mode: { const: "shadow" } } },
+      then: { required: ["provider"] },
+    },
     SafeOutput: {
       type: "object",
       required: ["type"],
@@ -1152,6 +1201,10 @@ export const workflowJsonSchema = {
       $ref: "#/$defs/Budget",
       description:
         "Spend ceiling for the whole run and for every node. A node's own budget may only narrow it. The CLI's --max-tokens and --max-cost tighten it further.",
+    },
+    decider: {
+      $ref: "#/$defs/Decider",
+      description: "Decision model for route choices (shadow mode only). Default: off.",
     },
     context_mode: {
       type: "string",
