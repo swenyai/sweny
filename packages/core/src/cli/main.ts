@@ -130,7 +130,7 @@ const program = new Command()
 program
   .command("new [id]")
   .description(
-    "Create a new workflow. With no id, opens the interactive picker. With an id, uses that built-in template, or installs it from the marketplace (swenyai/workflows).",
+    "Create a new workflow. With no id, opens the interactive picker. With an id, uses that built-in template.",
   )
   .option("--template <id>", "Use a built-in template without the picker")
   .option("-y, --yes", "Skip every prompt (never overwrites existing files)")

@@ -15,7 +15,6 @@
   <a href="https://www.npmjs.com/package/@sweny-ai/core"><img alt="npm" src="https://img.shields.io/npm/v/@sweny-ai/core?style=flat-square&color=orange" /></a>
   <a href="https://github.com/swenyai/sweny/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/swenyai/sweny?style=flat-square" /></a>
   <a href="https://docs.sweny.ai"><img alt="Docs" src="https://img.shields.io/badge/docs-docs.sweny.ai-blue?style=flat-square" /></a>
-  <a href="https://marketplace.sweny.ai"><img alt="Marketplace" src="https://img.shields.io/badge/Workflows-marketplace.sweny.ai-blue?style=flat-square" /></a>
 </p>
 
 ---
@@ -29,11 +28,11 @@ the work. SWEny decides what it can touch, checks what it hands back, and record
 - **Quality.** A node's declared output schema is a contract: a missing required field fails the node
   (or retries it), and a step that returns no result fails instead of passing.
 - **Proof.** Every run ends with a receipt: nodes, tool calls, duration, tokens, cost. The GitHub Action
-  posts it to the PR with the run's DAG, and `sweny runs diff` compares a run with the one before it.
+  posts it to the PR with the run's DAG, and `sweny runs diff` compares a run with the one before it in local `.sweny/runs/` history (CI runs are ephemeral unless you cache that directory).
 
 ```bash
 npm install -g @sweny-ai/core
-sweny new --template explain-repo --yes            # two-node starter, no tokens needed
+sweny new --template explain-repo --yes            # two-node starter, no skill credentials needed
 sweny workflow run .sweny/workflows/explain-repo.yml
 # ...node progress, then one receipt line:
 # ✓ 2/2 nodes · <tool calls> · <duration> · <tokens> · <cost>
@@ -44,11 +43,11 @@ sweny workflow run .sweny/workflows/explain-repo.yml
 | Agent | Status |
 |-------|--------|
 | Claude Code | Supported. Passes the 15-case harness contract suite on every CI run, with skill tools in process and over the tool bridge. |
-| Codex | Supported (`--agent codex`, Codex CLI 0.159+). Passes the same suite against a scripted Codex. Reports as degraded: `max_turns` (kept by a sweny watchdog), `tools.deny: [write]` / `[edit]`, and per-host egress unless it runs inside the sandbox wrapper. See [Agent harnesses](#agent-harnesses). |
+| Codex | Shipped, contract suite green; not yet run against a live Codex (`--agent codex`, Codex CLI 0.159+). Passes the same suite against a scripted Codex. Reports as degraded: `max_turns` (kept by a sweny watchdog), `tools.deny: [write]` / `[edit]`, and per-host egress unless it runs inside the sandbox wrapper. See [Agent harnesses](#agent-harnesses). |
 | ACP agents (OpenCode, Hermes, goose, Gemini CLI, ...) | **Experimental** (`--agent "acp:<command>"`, for example `acp:opencode acp`). Runs any [Agent Client Protocol](https://agentclientprotocol.com) agent. ACP has no structured output, tool deny or sandbox, so most policies are degraded or refused in strict mode; see [ACP agents](#acp-agents-experimental). Not listed as supported. |
 | pi | Experimental, contract suite green (`--agent pi`, pi 0.99.2+, any model pi can call). Not run against a live pi yet. Reports as degraded: the process sandbox (pi has none; it runs only inside the sandbox wrapper, and strict refuses without it), `max_turns` (sweny watchdog), `tools.deny: [net]`, and `disallowed_tools` names pi has no tool for. See [pi (experimental)](#pi-experimental). |
 
-An agent is listed as supported once it passes the same contract suite: scoped env, exclusive MCP config,
+An agent is listed as supported once it passes the same contract suite and has run live: scoped env, exclusive MCP config,
 read-only dry run, output checks, timeouts, untrusted-input fencing, cleanup.
 
 ## Quickstart
@@ -57,7 +56,7 @@ Requires Node 20+ and a Claude login (`claude` signed in) or an `ANTHROPIC_API_K
 
 ```bash
 npm install -g @sweny-ai/core
-sweny new --template explain-repo --yes   # zero-credential starter: reads this checkout, no tokens
+sweny new --template explain-repo --yes   # zero-credential starter: reads this checkout, no skill credentials (the run itself uses your agent login)
 sweny workflow validate .sweny/workflows/explain-repo.yml
 sweny workflow diagram .sweny/workflows/explain-repo.yml   # Mermaid graph of the DAG
 sweny workflow run .sweny/workflows/explain-repo.yml
@@ -98,8 +97,6 @@ Keep the CLI current:
 sweny upgrade          # pulls the latest @sweny-ai/core via your package manager
 sweny upgrade --check  # dry-run: just report the available version
 ```
-
-Browse **[marketplace.sweny.ai](https://marketplace.sweny.ai)** for ready-to-run workflows.
 
 ## What it does
 
@@ -171,9 +168,8 @@ sweny cannot run an interactive login: pass the agent's API key env var through 
 |---------|-------------|
 | **[CLI](https://docs.sweny.ai/cli/)** | Build, run, and publish workflows from your terminal |
 | **[GitHub Action](https://docs.sweny.ai/action/)** | Run any workflow on CI, plus dedicated [triage](https://github.com/swenyai/triage) and [e2e](https://github.com/swenyai/e2e) actions |
-| **[Studio](https://docs.sweny.ai/studio/)** | Visual DAG editor and live execution monitor |
+| **[Studio](https://docs.sweny.ai/studio/)** | Visual DAG editor. Run it from a repo checkout with `npm run dev -w @sweny-ai/studio`; Live mode connects to a WebSocket or SSE event URL you give it |
 | **[Claude Code Plugin](https://docs.sweny.ai/advanced/mcp-plugin/)** | Slash commands, MCP tools, and an isolated workflow agent |
-| **[Marketplace](https://marketplace.sweny.ai)** | Browse, fork, and share community workflows |
 
 ## Workflows
 
@@ -290,7 +286,7 @@ nodes:
     skills: [code-standards, github]
 ```
 
-Skills are cross-tool compatible: the same `SKILL.md` works in Claude Code, Codex, and Gemini CLI. Write once, use everywhere. [Learn more](https://docs.sweny.ai/skills/custom/).
+Skills are cross-tool compatible: skills are `SKILL.md` files that SWEny discovers from `.sweny/skills/`, `.claude/skills/`, `.agents/skills/` and `.gemini/skills/`. [Learn more](https://docs.sweny.ai/skills/custom/).
 
 ## Built-in skills
 
@@ -312,7 +308,7 @@ Set the credential, the skill is ready. No configuration.
 # Run any workflow on CI
 - uses: swenyai/sweny@v5
   with:
-    workflow: .sweny/workflows/security-audit.yml
+    workflow: .sweny/workflows/security-scan.yml
     claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
   env:
     LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
@@ -334,27 +330,18 @@ The CLI contains an opt-in run reporting path, gated entirely on a `SWENY_CLOUD_
 
 The hosted service behind it is in active development and **not open for sign-ups**, so there is no token to obtain today. See [PRIVACY.md](./PRIVACY.md) for the exact payload if you point it at your own endpoint.
 
-## Publish to the marketplace
-
-Share your workflows and skills with the community:
-
-```bash
-sweny publish   # interactive CLI: publish a workflow or skill
-```
-
 ## Packages
 
 | Package | Description |
 |---------|-------------|
 | [`@sweny-ai/core`](packages/core) | Skills, DAG executor, CLI, workflows |
-| [`@sweny-ai/studio`](packages/studio) | Visual DAG editor and execution monitor |
+| [`@sweny-ai/studio`](packages/studio) | Visual DAG editor |
 | [`@sweny-ai/mcp`](packages/mcp) | MCP server for Claude Code / Desktop |
 
 ## Links
 
 - [Documentation](https://docs.sweny.ai): full docs, guides, and reference
 - [Workflow Spec](https://spec.sweny.ai): formal YAML specification
-- [Marketplace](https://marketplace.sweny.ai): browse and share workflows
 
 ## Development
 

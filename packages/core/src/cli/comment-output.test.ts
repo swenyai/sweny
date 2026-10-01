@@ -75,7 +75,7 @@ describe("formatRunComment", () => {
     const md = formatRunComment(workflow, results, summarizeRun(results, 1000));
     expect(md.split("\n")[0]).toBe("<!-- sweny-run-comment:pr-review -->");
     expect(md).toContain(RUN_COMMENT_FOOTER);
-    expect(RUN_COMMENT_FOOTER).toBe("Run with [SWEny](https://sweny.ai): `npx @sweny-ai/core new`");
+    expect(RUN_COMMENT_FOOTER).toBe("Run with [SWEny](https://github.com/swenyai/sweny): `npx @sweny-ai/core new`");
     expect(md).not.toContain("SECRET");
     expect(md).not.toContain("indigo");
     expect(md).not.toContain("\u2014");
