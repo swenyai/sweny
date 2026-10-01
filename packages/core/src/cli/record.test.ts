@@ -4,8 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { SWENY_TAGLINE } from "../theme.js";
 import { SPINNER_FRAMES } from "../theme.js";
-import { RECORD_WRAP, parseAnsiLine, recordTrySvg, recordTrySvgToFile, wrapCells } from "./record.js";
+import { CELL_W, TEXT_X, RECORD_WRAP, parseAnsiLine, recordTrySvg, recordTrySvgToFile, wrapCells } from "./record.js";
 
+const NBSP = String.fromCharCode(0xa0);
 const tmp: string[] = [];
 afterEach(() => {
   for (const d of tmp.splice(0)) fs.rmSync(d, { recursive: true, force: true });
@@ -59,7 +60,7 @@ describe("recordTrySvg", () => {
   });
 
   it("shows the real demo: tagline, both nodes, the answer, the ticket and the stamp, in brand colors", async () => {
-    const svg = await recordTrySvg();
+    const svg = (await recordTrySvg()).replace(new RegExp(NBSP, "g"), " ");
     expect(svg).toContain(SWENY_TAGLINE);
     expect(svg).toContain("survey");
     expect(svg).toContain("explain");
@@ -73,7 +74,7 @@ describe("recordTrySvg", () => {
   it("has no em dashes and nothing wider than the window wraps to", async () => {
     const svg = await recordTrySvg();
     expect(svg).not.toContain(String.fromCharCode(0x2014));
-    for (const m of svg.matchAll(/<text class="r [^"]*" x="\d+" y="\d+">(.*?)<\/text>/g)) {
+    for (const m of svg.matchAll(/<text class="r [^"]*"[^>]*>(.*?)<\/text>/g)) {
       const visible = m[1].replace(/<[^>]+>/g, "").replace(/&amp;|&lt;|&gt;/g, "x");
       expect([...visible].length).toBeLessThanOrEqual(RECORD_WRAP);
     }
@@ -94,7 +95,7 @@ describe("recordTrySvg", () => {
     const spinnerChars = new Set<string>(SPINNER_FRAMES.unicode);
     let persistent = 0;
     let transient = 0;
-    for (const m of svg.matchAll(/<text class="(r [^"]*)" x="\d+" y="\d+">(.*?)<\/text>/g)) {
+    for (const m of svg.matchAll(/<text class="(r [^"]*)"[^>]*>(.*?)<\/text>/g)) {
       const classes = m[1].split(" ");
       const visible = m[2].replace(/<[^>]+>/g, "");
       const isSpinner = [...visible].some((ch) => spinnerChars.has(ch));
@@ -116,6 +117,45 @@ describe("recordTrySvg", () => {
     expect(svg).toContain("passed");
     const h = Number(/viewBox="0 0 \d+ (\d+)"/.exec(svg)![1]);
     expect(h).toBeLessThan(900);
+  });
+
+  it("lays out by explicit columns: no reliance on whitespace handling", async () => {
+    const svg = await recordTrySvg();
+    expect(svg).toMatch(/^<svg [^>]*xml:space="preserve"/);
+    type Seg = { x: number; text: string };
+    const rows: { preserve: boolean; segs: Seg[] }[] = [];
+    for (const m of svg.matchAll(/<text class="r [^"]*"([^>]*)>(.*?)<\/text>/g)) {
+      const segs = [...m[2].matchAll(/<tspan x="([\d.]+)"[^>]*>(.*?)<\/tspan>/g)].map((t) => ({
+        x: Number(t[1]),
+        text: t[2],
+      }));
+      // Every character sits in a positioned tspan; no bare text nodes.
+      expect(m[2].replace(/<tspan[^>]*>.*?<\/tspan>/g, "")).toBe("");
+      rows.push({ preserve: m[1].includes('xml:space="preserve"'), segs });
+    }
+    expect(rows.length).toBeGreaterThan(20);
+    for (const r of rows) {
+      expect(r.preserve).toBe(true);
+      for (const seg of r.segs) {
+        // No run of ASCII spaces, and no edge spaces: inner spaces are non-breaking.
+        expect(seg.text).not.toMatch(/ {2}/);
+        expect(seg.text).not.toMatch(/^ | $/);
+        // Column-aligned: x is TEXT_X plus a whole number of cells.
+        const col = (seg.x - TEXT_X) / CELL_W;
+        expect(Math.abs(col - Math.round(col))).toBeLessThan(0.01);
+      }
+    }
+    // Ticket rows: the frame's right edge sits at one x on every row.
+    const ticket = rows.filter((r) => /^[\u256D\u2506\u251C\u2570]/.test(r.segs[0]?.text ?? ""));
+    expect(ticket.length).toBeGreaterThan(8);
+    const rightEdges = ticket.map((r) => {
+      const last = r.segs[r.segs.length - 1];
+      return Number((last.x + ([...last.text].length - 1) * CELL_W).toFixed(2));
+    });
+    expect(new Set(rightEdges).size).toBe(1);
+    // Fields keep their columns: label and value are separate segments at fixed columns.
+    const nodes = rows.find((r) => r.segs.some((s) => s.text === "nodes"));
+    expect(nodes?.segs.some((s) => s.text.startsWith("2/2"))).toBe(true);
   });
 
   it("writes the file and reports its size", async () => {

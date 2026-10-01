@@ -26,9 +26,13 @@ export const RECORD_COLUMNS = 80;
 export const RECORD_WRAP = 96;
 
 const FONT_SIZE = 13;
-const CELL_W = 7.85;
+/** Width of one terminal column in the window, in px. Every segment is placed at column * CELL_W. */
+export const CELL_W = 7.85;
+/** Left edge of column 0. */
+export const TEXT_X = 24;
+const NBSP = "\u00A0";
 const LINE_H = 19;
-const PAD_X = 24;
+const PAD_X = TEXT_X;
 const BAR_H = 38;
 const PAD_TOP = 18;
 const PAD_BOTTOM = 22;
@@ -257,18 +261,25 @@ export function renderRecordingSvg(lines: string[], fixture: TryFixture): string
     while (i < row.cells.length) {
       let j = i + 1;
       while (j < row.cells.length && sameStyle(row.cells[i].style, row.cells[j].style)) j++;
-      const text = esc(
-        row.cells
-          .slice(i, j)
-          .map((c) => c.ch)
-          .join(""),
-      );
-      const cls = classFor(row.cells[i].style);
-      spans.push(cls ? `<tspan class="${cls}">${text}</tspan>` : text);
+      const raw = row.cells
+        .slice(i, j)
+        .map((c) => c.ch)
+        .join("");
+      // Layout must not depend on whitespace handling (rsvg, proxies and some viewers collapse
+      // spaces): each segment sits at an explicit x for its column, edge spaces become offset
+      // or nothing, and inner spaces are non-breaking.
+      const lead = raw.length - raw.trimStart().length;
+      const body_ = raw.trim();
+      if (body_ !== "") {
+        const x = (TEXT_X + (i + lead) * CELL_W).toFixed(2);
+        const text = esc(body_).replace(/ /g, NBSP);
+        const cls = classFor(row.cells[i].style);
+        spans.push(`<tspan x="${x}"${cls ? ` class="${cls}"` : ""}>${text}</tspan>`);
+      }
       i = j;
     }
     const cls = `r ${frameFor(row.from, row.to)}${row.spinner ? " sp" : ""}`;
-    body.push(`<text class="${cls}" x="${PAD_X}" y="${y}">${spans.join("")}</text>`);
+    body.push(`<text class="${cls}" x="${TEXT_X}" y="${y}" xml:space="preserve">${spans.join("")}</text>`);
   }
 
   const css: string[] = [
@@ -296,7 +307,7 @@ export function renderRecordingSvg(lines: string[], fixture: TryFixture): string
 
   const label = "Recorded demo of sweny try: two nodes run, then the answer and the receipt ticket.";
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WINDOW_W} ${height}" width="${WINDOW_W}" height="${height}" role="img" aria-label="${esc(label)}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WINDOW_W} ${height}" width="${WINDOW_W}" height="${height}" xml:space="preserve" role="img" aria-label="${esc(label)}">`,
     `<title>sweny try</title>`,
     `<style>${css.join("")}</style>`,
     `<rect x="0.5" y="0.5" width="${WINDOW_W - 1}" height="${height - 1}" rx="10" fill="${dark.background}" stroke="${dark.border}"/>`,
