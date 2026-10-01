@@ -41,6 +41,7 @@ import * as readline from "node:readline";
 import { loadDotenv, loadConfigFile, applyAgentFileConfig } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { nonInteractiveUsage, runNew } from "./new.js";
+import { formatFinalMarkdown, formatFinalOutput, resolveFinalOutput, writeFinalOutput } from "./final-output.js";
 import { buildRunRecord, createNodeTimer, historyDisabled, newRunId, recordRun } from "./run-history.js";
 import { registerRunsCommand } from "./runs.js";
 import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "./e2e.js";
@@ -130,7 +131,7 @@ const program = new Command()
 program
   .command("new [id]")
   .description(
-    "Create a new workflow. With no id, opens the interactive picker. With an id, uses that built-in template, or installs it from the marketplace (swenyai/workflows).",
+    "Create a new workflow. With no id, opens the interactive picker. With an id, uses that built-in template.",
   )
   .option("--template <id>", "Use a built-in template without the picker")
   .option("-y, --yes", "Skip every prompt (never overwrites existing files)")
@@ -1231,6 +1232,19 @@ export async function workflowRunAction(
     runLogger.flush();
     const receipt = summarizeRun(results, wfDurationMs);
     writeStepSummary(workflow, results, receipt, trace);
+
+    // The answer, above the receipt: the terminal node's result, or the failed node's error.
+    // Also saved to .sweny/runs/<id>/output.md (local only; --no-history skips the file).
+    const finalOutput = resolveFinalOutput(workflow, results);
+    if (finalOutput) {
+      const savedTo = historyDisabled(options.history, fileConfig["history"])
+        ? null
+        : writeFinalOutput(runId, formatFinalMarkdown(workflow, finalOutput));
+      const block = formatFinalOutput(finalOutput, { outputPath: savedTo });
+      if (wfHasFailed) console.error(`${block}\n`);
+      else console.log(`${block}\n`);
+    }
+
     if (wfHasFailed) {
       console.error(`  ${renderReceiptLine(receipt, isTTY)}\n`);
       process.exit(1);
@@ -1353,7 +1367,10 @@ const workflowRunCmd = workflowCmd
 for (const [flags, description] of WORKFLOW_RUN_OPTIONS) {
   workflowRunCmd.option(flags, description);
 }
-workflowRunCmd.option("--no-history", "Do not record this run in .sweny/runs/ (or set `history: off` in .sweny.yml)");
+workflowRunCmd.option(
+  "--no-history",
+  "Do not record this run or save its output.md in .sweny/runs/ (or set `history: off` in .sweny.yml)",
+);
 registerRunsCommand(program);
 
 workflowCmd

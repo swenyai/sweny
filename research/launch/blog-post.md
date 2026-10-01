@@ -27,10 +27,10 @@ and run again in CI on every pull request. It takes about five minutes.
 The tool is [SWEny](https://github.com/swenyai/sweny?utm_source=nateross.dev&utm_medium=blog&utm_campaign=sweny-launch),
 an open-source (MIT) workflow runner for coding agents. Each step of a workflow is a coding-agent run. SWEny
 decides what that run can touch, checks what it hands back, and prints a receipt when it is done. It runs on
-Claude Code today; a Codex adapter is in progress.
+Claude Code (supported). Codex is shipped but not yet run against a live Codex; pi and ACP agents are experimental.
 
 **What you'll learn**
-- Scaffold and run a workflow with no tokens beyond your Claude login
+- Scaffold and run a workflow with no skill credentials, just your agent login
 - Read the YAML: nodes, edges, instructions
 - Add an output contract so a step fails loudly instead of guessing
 - Run it read-only, then in GitHub Actions with a PR comment
@@ -116,7 +116,7 @@ Every run is also recorded locally (metadata only, no prompts or outputs) under 
 
 ```bash
 sweny runs          # recent runs: status, duration, tokens, cost
-sweny runs diff     # the last two runs of the same workflow, side by side
+sweny runs diff     # the last two runs of the same workflow, side by side (local history in .sweny/runs/)
 ```
 
 ```
@@ -169,9 +169,10 @@ sweny workflow run .sweny/workflows/explain-repo.yml --dry-run
 - **Timeouts.** A whole run has a wall-clock budget (60 minutes by default, `--timeout` to change it) and a
   step cap (`--max-steps`).
 
-These rules live behind one adapter interface with a 14-case contract suite (env, MCP isolation, read-only,
-output checks, timeouts, abort, fencing, cleanup). Claude Code passes it on every CI run. Any other agent has
-to pass the same suite before SWEny lists it as supported.
+These rules live behind one adapter interface with a 15-case contract suite (env, MCP isolation, read-only,
+output checks, timeouts, abort, fencing, cleanup). Claude Code passes it on every CI run. Codex passes it
+against a scripted Codex but has not been run live; pi and ACP agents are experimental. An agent is listed as
+supported once it passes the suite and has run live.
 
 ## Step 6: run it on every PR
 

@@ -301,3 +301,30 @@ jobs:
       # env (no credentials, no LLM calls) and runs the README quickstart.
       - name: Run README quickstart
         run: sh scripts/quickstart-smoke.sh
+
+  docs-sites:
+    name: Docs and specification builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            spec/package-lock.json
+
+      - run: npm ci
+      - run: npm ci --prefix spec
+
+      # Match the docs Vercel build, including the Studio library consumed by it.
+      - run: npm run build --workspace=packages/core
+      - run: npm run build:lib --workspace=packages/studio
+      - run: npm run build --workspace=packages/web
+
+      # spec is deliberately outside the root workspaces and has its own lock.
+      - run: npm run build --prefix spec
