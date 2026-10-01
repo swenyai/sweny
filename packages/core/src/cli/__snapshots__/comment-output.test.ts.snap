@@ -1,10 +1,19 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`formatCrashComment > crash: receipt only, no DAG, no error text 1`] = `
+exports[`formatCrashComment > crash: ticket only, no DAG, no error text 1`] = `
 "<!-- sweny-run-comment:pr-review -->
 ## ❌ PR Review
 
-\`✗ 0/0 nodes · 0 tool calls · 2s · crashed\`
+\`\`\`text
+╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮
+┆ ✗ crashed                                    ┆
+┆ pr-review                                    ┆
+┆                                              ┆
+┆ nodes       0/0                              ┆
+┆ tool calls  0                                ┆
+┆ duration    2s                               ┆
+╰┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╯
+\`\`\`
 
 The run stopped before finishing. See the job log for details.
 
@@ -16,7 +25,18 @@ exports[`formatRunComment > failure 1`] = `
 "<!-- sweny-run-comment:pr-review -->
 ## ❌ PR Review
 
-\`✗ 1/2 nodes · 6 tool calls · 12s · 1.5k tokens · $0.05\`
+\`\`\`text
+╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮
+┆ ✗ failed                                     ┆
+┆ pr-review                                    ┆
+┆                                              ┆
+┆ nodes       1/2, 1 failed                    ┆
+┆ tool calls  6                                ┆
+┆ duration    12s                              ┆
+┆ tokens      1.5k                             ┆
+┆ cost        $0.05                            ┆
+╰┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╯
+\`\`\`
 
 \`\`\`mermaid
 graph TB
@@ -27,12 +47,14 @@ graph TB
     gather --> analyze
     analyze --> report
 
-    classDef current fill:#3b82f6,stroke:#2563eb,color:#fff,stroke-width:2px
+    classDef current fill:#3b82f6,stroke:#1d4ed8,color:#fff,stroke-width:4px
     classDef success fill:#2563eb,stroke:#1d4ed8,color:#fff,stroke-width:2px
-    classDef failed fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px
-    classDef skipped fill:#6b7280,stroke:#4b5563,color:#fff,stroke-dasharray:5 5
+    classDef failed fill:#dc2626,stroke:#991b1b,color:#fff,stroke-width:2px
+    classDef skipped fill:#64748b,stroke:#475569,color:#fff,stroke-dasharray:5 5
+    classDef pending fill:none,stroke:#64748b,color:#64748b,stroke-width:1px
     class gather success
     class analyze failed
+    class report pending
 \`\`\`
 
 <details>
@@ -53,7 +75,18 @@ exports[`formatRunComment > skipped 1`] = `
 "<!-- sweny-run-comment:pr-review -->
 ## ✅ PR Review
 
-\`✓ 1/3 nodes · 2 skipped · 1 tool call · 3s · 1.5k tokens · $0.05\`
+\`\`\`text
+╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮
+┆ ✓ passed                                     ┆
+┆ pr-review                                    ┆
+┆                                              ┆
+┆ nodes       1/3, 2 skipped                   ┆
+┆ tool calls  1                                ┆
+┆ duration    3s                               ┆
+┆ tokens      1.5k                             ┆
+┆ cost        $0.05                            ┆
+╰┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╯
+\`\`\`
 
 \`\`\`mermaid
 graph TB
@@ -64,10 +97,11 @@ graph TB
     gather --> analyze
     analyze --> report
 
-    classDef current fill:#3b82f6,stroke:#2563eb,color:#fff,stroke-width:2px
+    classDef current fill:#3b82f6,stroke:#1d4ed8,color:#fff,stroke-width:4px
     classDef success fill:#2563eb,stroke:#1d4ed8,color:#fff,stroke-width:2px
-    classDef failed fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px
-    classDef skipped fill:#6b7280,stroke:#4b5563,color:#fff,stroke-dasharray:5 5
+    classDef failed fill:#dc2626,stroke:#991b1b,color:#fff,stroke-width:2px
+    classDef skipped fill:#64748b,stroke:#475569,color:#fff,stroke-dasharray:5 5
+    classDef pending fill:none,stroke:#64748b,color:#64748b,stroke-width:1px
     class gather success
     class analyze,report skipped
 \`\`\`
@@ -91,7 +125,18 @@ exports[`formatRunComment > success 1`] = `
 "<!-- sweny-run-comment:pr-review -->
 ## ✅ PR Review
 
-\`✓ 3/3 nodes · 16 tool calls · 1m10s · 4.5k tokens · $0.15\`
+\`\`\`text
+╭┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮
+┆ ✓ passed                                     ┆
+┆ pr-review                                    ┆
+┆                                              ┆
+┆ nodes       3/3                              ┆
+┆ tool calls  16                               ┆
+┆ duration    1m10s                            ┆
+┆ tokens      4.5k                             ┆
+┆ cost        $0.15                            ┆
+╰┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╯
+\`\`\`
 
 \`\`\`mermaid
 graph TB
@@ -102,10 +147,11 @@ graph TB
     gather --> analyze
     analyze --> report
 
-    classDef current fill:#3b82f6,stroke:#2563eb,color:#fff,stroke-width:2px
+    classDef current fill:#3b82f6,stroke:#1d4ed8,color:#fff,stroke-width:4px
     classDef success fill:#2563eb,stroke:#1d4ed8,color:#fff,stroke-width:2px
-    classDef failed fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:2px
-    classDef skipped fill:#6b7280,stroke:#4b5563,color:#fff,stroke-dasharray:5 5
+    classDef failed fill:#dc2626,stroke:#991b1b,color:#fff,stroke-width:2px
+    classDef skipped fill:#64748b,stroke:#475569,color:#fff,stroke-dasharray:5 5
+    classDef pending fill:none,stroke:#64748b,color:#64748b,stroke-width:1px
     class gather,analyze,report success
 \`\`\`
 
