@@ -164,6 +164,22 @@ describe("triage workflow specifics", () => {
     });
   });
 
+  it("routes create_issue with an expression over investigate.fixable_count (#357)", () => {
+    const fromCreate = triageWorkflow.edges.filter((e) => e.from === "create_issue");
+    expect(fromCreate.find((e) => e.to === "implement")?.when).toEqual({ expr: "investigate.fixable_count > 0" });
+    expect(fromCreate.find((e) => e.to === "notify")?.when).toBeUndefined();
+    const props = triageWorkflow.nodes.investigate.output!.properties as Record<string, any>;
+    expect(props.fixable_count.type).toBe("integer");
+    expect(triageWorkflow.nodes.investigate.output!.required).toContain("fixable_count");
+  });
+
+  it("every bundled route is free: no natural-language edge is left (#357)", () => {
+    for (const wf of [triageWorkflow, implementWorkflow, seedContentWorkflow]) {
+      const nl = wf.edges.filter((e) => typeof e.when === "string");
+      expect(nl, `${wf.id}: ${nl.map((e) => `${e.from}->${e.to}`).join(", ")}`).toEqual([]);
+    }
+  });
+
   it("notify is reachable from all branches", () => {
     const toNotify = triageWorkflow.edges.filter((e) => e.to === "notify");
     expect(toNotify.length).toBeGreaterThanOrEqual(3);
@@ -476,20 +492,37 @@ describe("implement workflow specifics", () => {
     expect(implementWorkflow.entry).toBe("analyze");
   });
 
-  it("has three conditional edges from analyze (existing PR, fix, skip)", () => {
-    // analyze now branches three ways:
-    //   1. existing_pr_url is set → notify (no work to do)
-    //   2. risk low/medium with a clear plan → implement
-    //   3. too complex/risky/unclear → skip
+  it("routes analyze three ways with expressions and a default (existing PR, fix, skip)", () => {
+    // analyze branches three ways with no model call (#357):
+    //   1. has_open_pr → notify (no work to do)
+    //   2. no open PR, risk low/medium, clear plan → implement
+    //   3. anything else → skip (the default edge)
     const analyzeEdges = implementWorkflow.edges.filter((e) => e.from === "analyze");
     expect(analyzeEdges.length).toBe(3);
-    expect(analyzeEdges.every((e) => e.when)).toBe(true);
+    const when = (to: string) => analyzeEdges.find((e) => e.to === to)?.when;
+    expect(when("notify")).toEqual({ expr: "analyze.has_open_pr == true || exists analyze.existing_pr_url" });
+    expect(when("implement")).toEqual({
+      expr: "analyze.has_open_pr == false && !(exists analyze.existing_pr_url) && analyze.risk_level in ['low', 'medium'] && analyze.plan_is_clear == true",
+    });
+    expect(when("skip")).toBeUndefined();
+    // Every converted edge keeps its natural-language condition for the fall-through.
+    for (const e of analyzeEdges) expect(e.description).toBeTruthy();
+    expect(analyzeEdges.find((e) => e.to === "notify")!.description).toMatch(/existing_pr_url/);
   });
 
-  it("analyze → notify edge mentions existing_pr_url", () => {
-    const analyzeToNotify = implementWorkflow.edges.find((e) => e.from === "analyze" && e.to === "notify");
-    expect(analyzeToNotify).toBeDefined();
-    expect(analyzeToNotify!.when!).toMatch(/existing_pr_url/);
+  it("every bundled expression edge carries a natural-language description (#357)", () => {
+    for (const wf of [triageWorkflow, implementWorkflow, seedContentWorkflow]) {
+      const bare = wf.edges.filter((e) => e.when && typeof e.when === "object" && !e.description);
+      expect(bare, `${wf.id}: ${bare.map((e) => `${e.from}->${e.to}`).join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("analyze declares the routing fields as required booleans and an enum", () => {
+    const out = implementWorkflow.nodes.analyze.output as { properties: Record<string, any>; required: string[] };
+    expect(out.properties.has_open_pr.type).toBe("boolean");
+    expect(out.properties.plan_is_clear.type).toBe("boolean");
+    expect(out.properties.risk_level.enum).toEqual(["low", "medium", "high"]);
+    expect(out.required).toEqual(expect.arrayContaining(["has_open_pr", "risk_level", "plan_is_clear"]));
   });
 
   it("analyze node instruction mentions the PR-existence check", () => {

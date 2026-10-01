@@ -47,7 +47,7 @@ import { runWorkflowDiagram } from "./diagram.js";
 import { DagRenderer } from "./renderer.js";
 import * as readline from "node:readline";
 
-import { loadDotenv, loadConfigFile, applyAgentFileConfig } from "./config-file.js";
+import { loadDotenv, loadConfigFile, applyAgentFileConfig, operatorDeciderConfig } from "./config-file.js";
 import { buildCredentialMap } from "./credentials.js";
 import { nonInteractiveUsage, runNew } from "./new.js";
 import {
@@ -902,15 +902,12 @@ export async function workflowRunAction(
     maxTokens?: string;
     maxCost?: string;
     yes?: boolean;
-    decider?: string;
+    /** False with `--no-decider`. */
+    decider?: boolean;
   },
   /** Set by `sweny workflow resume` (#363): the journal, run id and original input. */
   resume?: ResumeContext,
 ): Promise<void> {
-  if (options.decider !== undefined && options.decider !== "off" && options.decider !== "shadow") {
-    console.error(chalk.red(`\n  --decider must be off or shadow, got "${options.decider}"\n`));
-    process.exit(1);
-  }
   // Reject junk --timeout/--max-steps up front (both paths) instead of
   // silently falling back to a default.
   let budget: ReturnType<typeof parseRunBudgetFlags>;
@@ -1243,7 +1240,11 @@ export async function workflowRunAction(
           fileRoot: config.fileRoot || undefined,
           signal,
           max_steps: wfMaxSteps,
-          ...(options.decider ? { decider: options.decider as "off" | "shadow" } : {}),
+          // One trust domain per credential (#357): a URL, key or allowance a
+          // committed .env introduced is repo content, read as untrusted.
+          decider: operatorDeciderConfig(fileConfig, process.env, options.decider === false, (k) =>
+            trustedEnvValue(process.env, k),
+          ),
           stageOutputs: options.stage === true,
           journal,
           ...(spendBudget ? { budget: spendBudget } : {}),

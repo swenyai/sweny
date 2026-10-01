@@ -11,7 +11,7 @@ import type { RunSummary } from "./run-output.js";
 import {
   formatBudgetAmount,
   formatCost,
-  formatDeciderCounts,
+  formatRouteCounts,
   formatReceiptDuration,
   formatTokenCount,
   policyParts,
@@ -111,7 +111,8 @@ function ticketFields(s: RunSummary): Array<[label: string, value: string]> {
     ...(s.costUsd !== undefined ? [["cost", formatCost(s.costUsd)] as [string, string]] : []),
     ...(s.harness !== undefined && s.harness !== "claude-code" ? [["harness", s.harness] as [string, string]] : []),
     ...(s.degraded && s.degraded.length > 0 ? [["degraded", s.degraded.join(", ")] as [string, string]] : []),
-    ...(s.decider ? [["decider", formatDeciderCounts(s.decider)] as [string, string]] : []),
+    ...(s.routes && s.routes.total > 0 ? [["routes", formatRouteCounts(s.routes)] as [string, string]] : []),
+    ...(s.deciderOff ? [["decider off", s.deciderOff] as [string, string]] : []),
     ...(s.budget
       ? [
           ["budget", `${formatBudgetAmount(s.budget)} (${s.budget.scope})`] as [string, string],

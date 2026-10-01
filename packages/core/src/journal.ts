@@ -29,7 +29,7 @@
  *   output:intent    a write is about to be applied (idempotency key + tool)
  *   output:applied   the write returned (key + the ids it produced)
  *   node:end         final result of the visit and the write-stage counters
- *   route            the edge taken after the visit (null = the run ended)
+ *   route            the edge taken after the visit (null = the run ended), and the rung that chose it
  *   usage            spend of one agent attempt (cumulative; live while it runs, final when it returns)
  *   run:end          success | failed | crashed
  *
@@ -57,11 +57,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Logger, NodeResult, NodeUsage, Skill, Tool, ToolContext, Workflow } from "./types.js";
+import type { Logger, NodeResult, NodeUsage, RouteRung, Skill, Tool, ToolContext, Workflow } from "./types.js";
 import type { SafeOutputIntent, WriteStageState } from "./safe-outputs.js";
 import { resolveNodePermissions } from "./node-policy.js";
 import { CURRENT_SPEC_VERSION } from "./migrations.js";
 import { spendOf, type Spend } from "./budget.js";
+import type { DeciderCounters } from "./decider.js";
 import { ensureDirNoFollow, openNoFollow, writeFileNoFollow } from "./safe-file.js";
 
 /** v2: records are authenticated with a per-run HMAC key (v1 used a public checksum and is refused). */
@@ -319,12 +320,15 @@ export function redact(value: unknown, secrets: string[] = []): { value: unknown
     if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));
     if (v && typeof v === "object") {
       const out: Record<string, unknown> = {};
+      // defineProperty, not assignment: a key named `__proto__` stays a plain key.
+      const put = (k: string, x: unknown) =>
+        Object.defineProperty(out, k, { value: x, enumerable: true, writable: true, configurable: true });
       for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
         if (typeof x === "string" && isSecretKey(k) && x.length > 0) {
-          out[k] = REDACTED;
+          put(k, REDACTED);
           redacted = true;
         } else if (x !== undefined && typeof x !== "function") {
-          out[k] = walk(x, depth + 1);
+          put(k, walk(x, depth + 1));
         }
       }
       return out;
@@ -358,6 +362,7 @@ export interface RunStartRecord extends JournalRecord {
   sweny_version?: string;
   input: unknown;
   input_redacted: boolean;
+  decider?: { mode: "on" | "off"; reason?: string };
 }
 
 export interface WriteStateSnapshot {
@@ -562,6 +567,8 @@ export interface PlannedVisit {
   status?: NodeResult["status"];
   /** Route taken after the visit: a node id, null for run end, undefined when not journaled. */
   next?: string | null;
+  /** Who chose that route, when it was a decision (#357). */
+  rung?: RouteRung;
   /** Writes the checkpointed write stage already applied (receipts in the journal). */
   applied: number;
   /** Writes with an intent but no receipt: checked on the provider before anything is re-sent. */
@@ -588,6 +595,8 @@ export interface ResumePlan {
   receipts: Map<string, OutputRecord>;
   /** Spend every earlier attempt journaled: the run budget starts here on resume. */
   priorSpend: Spend;
+  /** The decider's mode at run start and its counters after the last journaled route (#357). */
+  decider?: JournalDeciderState;
 }
 
 const visitKey = (node: string, iteration: number) => `${node}#${iteration}`;
@@ -608,6 +617,14 @@ const RECORD_TYPES = new Set([
 const isPosInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0;
 const isName = (v: unknown): v is string => typeof v === "string" && v.length > 0;
 const isAmount = (v: unknown): boolean => typeof v === "number" && Number.isFinite(v) && v >= 0;
+const isRung = (v: unknown): v is RouteRung => v === "expr" || v === "decider" || v === "agent";
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+const isCounters = (v: unknown): v is DeciderCounters =>
+  typeof v === "object" &&
+  v !== null &&
+  isCount((v as DeciderCounters).calls) &&
+  isCount((v as DeciderCounters).failures) &&
+  typeof (v as DeciderCounters).open === "boolean";
 
 /**
  * Check that the records are a sequence the executor can write: one run:start
@@ -715,6 +732,8 @@ export function checkRecordSequence(records: JournalRecord[]): void {
         if (cur!.routed) bad(r, `routes ${cur!.node} a second time`);
         if (r.from !== cur!.node) bad(r, `routes from ${String(r.from)}, but the visit that ended is ${cur!.node}`);
         if (r.to !== null && !isName(r.to)) bad(r, "has no valid target");
+        if (r.rung !== undefined && !isRung(r.rung)) bad(r, "has an unknown rung");
+        if (r.decider !== undefined && !isCounters(r.decider)) bad(r, "has invalid decider counters");
         cur!.routed = true;
         next = r.to as string | null;
         break;
@@ -793,6 +812,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
     checkpoint?: CheckpointRecord;
     end?: EndRecord;
     next?: string | null;
+    rung?: RouteRung;
   }
   const order: Visit[] = [];
   const byKey = new Map<string, Visit>();
@@ -800,6 +820,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
   const receipts = new Map<string, OutputRecord>();
   let attempts = 1;
   let lastStatus: string | undefined;
+  let deciderCounters: DeciderCounters | undefined;
 
   for (const r of records) {
     switch (r.type) {
@@ -818,6 +839,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
           // Re-run of a visit an earlier attempt did not finish (or finished failed).
           delete v.end;
           delete v.next;
+          delete v.rung;
         }
         break;
       }
@@ -834,7 +856,12 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
       case "route": {
         const from = r.from as string;
         const v = [...order].reverse().find((x) => x.node === from);
-        if (v) v.next = (r.to as string | null) ?? null;
+        if (v) {
+          v.next = (r.to as string | null) ?? null;
+          if (isRung(r.rung)) v.rung = r.rung;
+        }
+        // Calls already made count even if the visit later re-runs.
+        if (isCounters(r.decider)) deciderCounters = r.decider;
         break;
       }
       case "output:intent":
@@ -869,6 +896,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
         action: "replay",
         status: v.end!.result.status,
         next: v.next,
+        ...(v.rung ? { rung: v.rung } : {}),
         applied,
         unconfirmed,
       });
@@ -912,6 +940,9 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
     intents,
     receipts,
     priorSpend: journaledSpend(records),
+    ...(start.decider
+      ? { decider: { ...start.decider, ...(deciderCounters ? { counters: { ...deciderCounters } } : {}) } }
+      : {}),
   };
 }
 
@@ -1059,6 +1090,19 @@ export interface JournalBeginInfo {
   config: Record<string, string>;
   writeState: WriteStageState;
   harnessId?: string;
+  /** Whether the run's decider ran (#357), journaled so a resume keeps the same mode. */
+  decider?: { mode: "on" | "off"; reason?: string };
+}
+
+/**
+ * The decider as an earlier attempt left it (#357): its mode at run start and
+ * the breaker / cap counters after the last journaled route. Cap and breaker
+ * are per logical run, so a resume continues them.
+ */
+export interface JournalDeciderState {
+  mode: "on" | "off";
+  reason?: string;
+  counters?: DeciderCounters;
 }
 
 export interface JournalCheckpoint {
@@ -1069,7 +1113,8 @@ export interface JournalCheckpoint {
 }
 
 export type JournalReplay =
-  { kind: "complete"; result: NodeResult; next?: string | null } | ({ kind: "checkpoint" } & JournalCheckpoint);
+  | { kind: "complete"; result: NodeResult; next?: string | null; rung?: RouteRung }
+  | ({ kind: "checkpoint" } & JournalCheckpoint);
 
 /**
  * The executor's view of a journal (`ExecuteOptions.journal`). Every hook is
@@ -1084,7 +1129,8 @@ export interface ExecutionJournal {
   /** The skill map the write stage applies through: write tools journaled and made idempotent. */
   wrapWrites(node: string, iteration: number, skills: Map<string, Skill>): Map<string, Skill>;
   nodeEnd(node: string, iteration: number, result: NodeResult, writeState: WriteStageState): void;
-  route(from: string, to: string | null): void;
+  /** The edge taken after a visit, and for a decision the rung that chose it (#357), so resume replays it. */
+  route(from: string, to: string | null, rung?: RouteRung, decider?: DeciderCounters): void;
   /**
    * Spend of one agent attempt, cumulative for the attempt: `final` when the
    * attempt returned, otherwise a live report (the journal may throttle those).
@@ -1092,6 +1138,8 @@ export interface ExecutionJournal {
   usage?(node: string, iteration: number, attempt: number, usage: NodeUsage, final: boolean): void;
   /** Spend earlier attempts of this run already journaled (resume); the run budget starts from it. */
   priorSpend?(): Spend | undefined;
+  /** The decider state earlier attempts of this run journaled (resume); undefined otherwise. */
+  deciderResume?(): JournalDeciderState | undefined;
 }
 
 /** Minimum gap between two live usage records of one attempt. Final reports are always written. */
@@ -1397,7 +1445,12 @@ export class RunJournal implements ExecutionJournal {
       ...(this.opts.swenyVersion ? { sweny_version: this.opts.swenyVersion } : {}),
       input: input.value,
       input_redacted: input.redacted,
+      ...(info.decider ? { decider: info.decider } : {}),
     });
+  }
+
+  deciderResume(): JournalDeciderState | undefined {
+    return this.resume?.plan.decider;
   }
 
   replay(node: string, iteration: number): JournalReplay | undefined {
@@ -1414,6 +1467,7 @@ export class RunJournal implements ExecutionJournal {
         kind: "complete",
         result: structuredClone(end.result),
         ...(visit.next !== undefined ? { next: visit.next } : {}),
+        ...(visit.rung ? { rung: visit.rung } : {}),
       };
     }
     if (visit.action === "write-stage") {
@@ -1454,8 +1508,8 @@ export class RunJournal implements ExecutionJournal {
     });
   }
 
-  route(from: string, to: string | null): void {
-    this.append("route", { from, to });
+  route(from: string, to: string | null, rung?: RouteRung, decider?: DeciderCounters): void {
+    this.append("route", { from, to, ...(rung ? { rung } : {}), ...(decider ? { decider } : {}) });
   }
 
   usage(node: string, iteration: number, attempt: number, usage: NodeUsage, final: boolean): void {
