@@ -1,0 +1,70 @@
+name: Mutation
+
+# Mutation testing for the security- and correctness-critical core modules.
+# Expensive, so never on PRs: weekly plus manual (`gh workflow run mutation.yml`).
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    name: Stryker (critical core modules)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Stryker 10 needs Node 22+. This job only; CI's own matrix is unchanged.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build core
+        run: npm run build --workspace=packages/core
+
+      # Incremental mode: only mutants whose code or tests changed are re-run.
+      - name: Restore incremental report
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/core/reports/mutation/stryker-incremental.json
+          key: mutation-incremental-${{ github.run_id }}
+          restore-keys: mutation-incremental-
+
+      - name: Run Stryker
+        working-directory: packages/core
+        run: npx stryker run
+
+      - name: Summary
+        if: always()
+        working-directory: packages/core
+        run: |
+          if [ -f reports/mutation/mutation.json ]; then
+            node scripts/mutation-summary.mjs | tee reports/mutation/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Save incremental report
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/core/reports/mutation/stryker-incremental.json
+          key: mutation-incremental-${{ github.run_id }}
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: mutation-report
+          path: packages/core/reports/mutation/
+          if-no-files-found: warn
