@@ -16,6 +16,7 @@ import {
   JOURNAL_FILE,
   JOURNAL_SCHEMA_VERSION,
   JournalLockedError,
+  JournalRollbackError,
   JournalVersionError,
   REDACTED,
   RunJournal,
@@ -24,10 +25,12 @@ import {
   collectSecretValues,
   journalDir,
   listJournalRuns,
+  loadJournalHead,
   loadRunKey,
   pruneJournals,
   readJournal,
   redact,
+  runHeadFile,
   runKeyFile,
 } from "./journal.js";
 import { createWriteStageState } from "./safe-outputs.js";
@@ -339,6 +342,76 @@ describe("record integrity", () => {
     begin(j);
     j.end("crashed");
     expect(statSync(join(journalDir(cwd, RUN_ID), JOURNAL_FILE)).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("head pointer (rollback detection)", () => {
+  function crashed(cwd: string): string {
+    const j = RunJournal.create({ runId: RUN_ID, cwd });
+    begin(j);
+    j.nodeStart("a", 1);
+    j.nodeEnd("a", 1, ok({}), createWriteStageState());
+    j.route("a", "b");
+    j.end("crashed");
+    return join(journalDir(cwd, RUN_ID), JOURNAL_FILE);
+  }
+
+  it("lives next to the key, outside the workspace (0600), and names the last record appended", () => {
+    const cwd = tmp();
+    const file = crashed(cwd);
+    const headFile = runHeadFile(cwd, RUN_ID);
+    expect(headFile.startsWith(cwd)).toBe(false);
+    if (process.platform !== "win32") expect(statSync(headFile).mode & 0o777).toBe(0o600);
+    const lines = readFileSync(file, "utf-8").trim().split("\n");
+    const last = JSON.parse(lines[lines.length - 1]);
+    expect(loadJournalHead(headFile, loadRunKey(runKeyFile(cwd, RUN_ID)), RUN_ID)).toEqual({
+      seq: lines.length,
+      mac: last.h,
+    });
+  });
+
+  it("a journal cut back at a record boundary is refused as rolled back, and left as found", () => {
+    const cwd = tmp();
+    const file = crashed(cwd);
+    const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
+    // Every kept record still authenticates; only the head pointer shows the cut.
+    const cut = lines.slice(0, 3).join("\n") + "\n";
+    writeFileSync(file, cut);
+    expect(() => readJournal(file, { repair: true })).toThrow(JournalRollbackError);
+    expect(() => readJournal(file)).toThrow(/rolled back/);
+    expect(readFileSync(file, "utf-8")).toBe(cut);
+  });
+
+  it("an edited or swapped head pointer is refused", () => {
+    const cwd = tmp();
+    const file = crashed(cwd);
+    const headFile = runHeadFile(cwd, RUN_ID);
+    const original = readFileSync(headFile, "utf-8");
+    writeFileSync(headFile, original.replace(/"seq":\d+/, '"seq":3'));
+    expect(() => readJournal(file)).toThrow(/head pointer .* is not valid/);
+    rmSync(headFile);
+    expect(() => readJournal(file)).toThrow(/head pointer .* is missing/);
+  });
+
+  it("a whole, authenticated last record that lost its line end is kept, and repair restores the line end", () => {
+    const cwd = tmp();
+    const file = crashed(cwd);
+    const text = readFileSync(file, "utf-8");
+    writeFileSync(file, text.slice(0, -1));
+    const read = readJournal(file, { repair: true });
+    expect(read.missingNewline).toBe(true);
+    expect(read.truncatedBytes).toBe(0);
+    expect(read.records.at(-1)).toMatchObject({ type: "run:end" });
+    expect(readFileSync(file, "utf-8")).toBe(text);
+  });
+
+  it("pruning a journal deletes its head pointer with its key", () => {
+    const cwd = tmp();
+    crashed(cwd);
+    expect(existsSync(runHeadFile(cwd, RUN_ID))).toBe(true);
+    expect(pruneJournals(cwd, 0)).toBe(1);
+    expect(existsSync(runHeadFile(cwd, RUN_ID))).toBe(false);
+    expect(existsSync(runKeyFile(cwd, RUN_ID))).toBe(false);
   });
 });
 
