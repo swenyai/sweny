@@ -122,7 +122,7 @@ describe("spend budgets (#449)", () => {
     expect(a.status).toBe("failed");
     expect(a.budget).toEqual({ scope: "node", unit: "tokens", limit: 100, spent: 110 });
     expect(a.data).toMatchObject({ budget_exceeded: true });
-    expect(String(a.data.error)).toContain("node budget exceeded for 'a': tokens 110 of 100");
+    expect(String(a.data.error)).toContain("node budget for 'a' exceeded: tokens 110 of 100");
     // The cancelled agent reported no usage: the last live report stands in.
     expect(a.usage).toMatchObject({ inputTokens: 90, outputTokens: 20 });
     // The agent was told to stop through its signal, and node b never ran.
@@ -366,7 +366,7 @@ describe("BudgetGuard", () => {
       "run budget exceeded: cost_usd $1.25 of $1.00",
     );
     expect(describeOverrun({ scope: "node", unit: "tokens", limit: 100, spent: 110.4 }, "a")).toBe(
-      "node budget exceeded for 'a': tokens 110 of 100",
+      "node budget for 'a' exceeded: tokens 110 of 100",
     );
   });
 
