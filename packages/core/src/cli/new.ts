@@ -717,10 +717,8 @@ export async function runNew(options?: {
       const { fetchMarketplaceIndex } = await import("./marketplace.js");
       const entries = await fetchMarketplaceIndex({ timeoutMs: 3000 });
       if (Array.isArray(entries) && entries.length > 0) marketplaceEntries = entries;
-      else p.log.info("Marketplace has no workflows yet. Showing built-in templates.");
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      p.log.info(`Marketplace unavailable (${reason}). Showing built-in templates.`);
+    } catch {
+      // No reachable index: built-in templates only, and nothing about a marketplace is shown.
     }
 
     templateChoice = await p.select({

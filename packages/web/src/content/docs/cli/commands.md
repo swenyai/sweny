@@ -12,7 +12,7 @@ Create a new SWEny workflow. Interactive picker offering templates, AI-generated
 ```bash
 sweny new          # interactive picker
 sweny new e2e      # jump straight into the end-to-end browser-testing wizard
-sweny new <id>     # install a published workflow from the marketplace (swenyai/workflows)
+sweny new <id>     # use a built-in template by id
 ```
 
 In a fresh repo, walks you through provider inference, credential collection, and writes `.sweny.yml` + `.env` + `.sweny/workflows/<id>.yml`. In a repo that already has `.sweny.yml`, adds the new workflow non-destructively — existing config is preserved and `.env` is append-only.
@@ -231,6 +231,20 @@ sweny workflow validate broken.yml
 #     Node "fetch" references unknown skill "nonexistent"
 ```
 
+### sweny workflow upgrade
+
+Rewrite a workflow file at the current spec version.
+
+```bash
+sweny workflow upgrade <file> [--dry-run]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--dry-run` | Report what would change without writing the file | `false` |
+
+Workflows carry an optional `spec_version` (absent means `"1"`). Older files still load: the CLI migrates them in memory and prints one warning pointing here. `upgrade` applies the same migrations and writes the file back. YAML comments, blank lines and key order are kept for everything a migration does not touch; comments on values a migration replaces or removes are not. A file newer than your CLI is refused with a prompt to run `sweny upgrade`.
+
 ### sweny workflow run
 
 Execute a workflow file. With no file argument, batch-runs every workflow in `.sweny/e2e/` (this is where end-to-end tests run, having replaced the old `sweny e2e run`).
@@ -428,7 +442,7 @@ sweny skill list --json
 
 ## sweny publish
 
-Publish a workflow or skill to the SWEny marketplace. Interactive CLI that validates your content and opens a pull request against the marketplace repository.
+Publish a workflow or skill. Interactive CLI that validates your content and opens a pull request against the swenyai/marketplace repository.
 
 ```bash
 sweny publish
@@ -440,7 +454,7 @@ Walks you through:
 2. **Select path** — pick the file (workflow) or directory (skill) to publish
 3. **Validate** — checks schema, frontmatter, and structure
 4. **Metadata** — add tags, category, and description
-5. **Submit** — forks the marketplace repo via `gh`, creates a branch, and opens a PR
+5. **Submit**: forks swenyai/marketplace via `gh`, creates a branch, and opens a PR
 
 Requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated. If `gh` is not available, the command saves validated files locally to `./sweny-publish/` for manual submission.
 

@@ -425,6 +425,10 @@ export const workflowZ = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().default(""),
+  spec_version: z
+    .string()
+    .regex(/^[1-9]\d*$/, "spec_version must be a positive integer string")
+    .optional(),
   workflow_type: workflowTypeZ.optional(),
   nodes: z.record(nodeZ),
   edges: z.array(edgeZ),
@@ -1135,6 +1139,12 @@ export const workflowJsonSchema = {
     id: { type: "string", minLength: 1 },
     name: { type: "string", minLength: 1 },
     description: { type: "string" },
+    spec_version: {
+      type: "string",
+      pattern: "^[1-9][0-9]*$",
+      description:
+        "Workflow spec version as a positive integer string. Absent means 1. Older versions are migrated in memory on load; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
+    },
     entry: { type: "string", minLength: 1, description: "ID of the entry node" },
     rules: {
       type: "array",

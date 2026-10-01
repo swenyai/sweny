@@ -603,6 +603,8 @@ export interface Workflow {
   id: string;
   name: string;
   description: string;
+  /** Spec version, a positive integer string (e.g. "1"). Absent means "1". See `migrations.ts`. */
+  spec_version?: string;
   /** Optional. Defaults to "generic" when absent. Required on marketplace templates. */
   workflow_type?: WorkflowType;
   nodes: Record<string, Node>;
@@ -713,6 +715,11 @@ export interface NodeResult {
   harness?: { id: string; version: string };
   /** Opinions this run could not honor natively. Always empty for Claude Code. */
   degraded?: string[];
+  /**
+   * Agent floor this node actually ran under, for the run receipt. Set by the
+   * Claude Code harness only; absent for harnesses that do not report it.
+   */
+  policy?: NodePolicyFacts;
   /** Safe outputs (#365): what the write stage did with each intent. Absent when the node declares none. */
   outputs?: SafeOutputReceipt[];
   /**
@@ -721,6 +728,16 @@ export interface NodeResult {
    * `failed`, `fail_soft` and `on_fail: continue` do not apply, and the run halts.
    */
   budget?: BudgetOverrun;
+}
+
+/** Facts about the agent floor (scoped env, process sandbox) a node ran under. Booleans and a mode only. */
+export interface NodePolicyFacts {
+  /** The agent subprocess env was narrowed to the allowlist. */
+  envScope: boolean;
+  /** Requested sandbox mode. */
+  sandbox: "off" | "auto" | "strict";
+  /** The sandbox was enabled for this node (false under `off`, or `auto` on a host that cannot sandbox). */
+  sandboxStarted: boolean;
 }
 
 export interface ToolCall {
