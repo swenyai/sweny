@@ -61,9 +61,11 @@ The reference implementation is [`@sweny-ai/core`](https://github.com/swenyai/sw
 
 ## Versioning
 
-This specification follows semantic versioning:
+Every workflow file declares the spec version it was written against with a top-level [`spec_version`](/workflow#spec-version) field, a positive integer string such as `"1"`. A file without the field is version 1. This document describes version 1.
 
-- **Non-breaking additions** (new optional fields, new event types) are additive to the current version.
-- **Breaking changes** (field removals, semantic changes) require a new major version.
+- **Non-breaking additions** (new optional fields, new event types) are additive to the current version and do not change `spec_version`.
+- **Breaking changes** (field removals, semantic changes) bump `spec_version` and ship with a migration from the previous version.
 
-The current version lives at the root (`spec.sweny.ai/`). When v2 ships, v1 will move to `spec.sweny.ai/v1/`.
+A conforming implementation migrates older versions in memory when it loads a file, and MUST refuse a file whose `spec_version` is newer than it supports. In the reference implementation, `sweny workflow upgrade <file>` rewrites a file at the current version.
+
+This site always documents the current version.
