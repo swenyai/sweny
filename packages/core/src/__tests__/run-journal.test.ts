@@ -12,9 +12,19 @@
  * applied twice.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { execute } from "../executor.js";
 import { createSkillMap } from "../skills/index.js";
 import {
@@ -527,30 +537,69 @@ describe("resume keeps the run's spend", () => {
   });
 });
 
-describe("rollback and tail authentication (security review 3, finding 3)", () => {
+describe("journal integrity (security review 3, finding 3)", () => {
   const lines = (cwd: string) => readFileSync(journalFile(cwd), "utf-8").split("\n").filter(Boolean);
+  /** Every file under `dir`, recursively. */
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],
+    );
+  /** Crash on the final usage append of node a: the head holds the record, the journal never got it. */
+  const crashOnUsage = (): JournalFaults => ({
+    afterHeadUpdate(rec) {
+      if (rec.type === "usage") throw new Kill("usage append");
+    },
+  });
 
-  it("a journal cut back at a prior newline (before a usage record) is refused, so spend is never forgotten", async () => {
+  it("crash on a usage append: nothing in the workspace can cut it, and the spend is restored", async () => {
+    const cwd = tmp();
+    const wf = chain({ budget: { tokens: 100 } });
+    const agent = fakeAgent({ usage: (node) => ({ inputTokens: node === "a" ? 90 : 20, outputTokens: 0 }) });
+    expect(await firstRun(cwd, wf, agent, [], crashOnUsage())).toBe(true);
+    // The reviewer's attack needs a journal line to delete. The workspace has none.
+    expect(walk(cwd).filter((f) => f.endsWith(JOURNAL_FILE))).toEqual([]);
+    expect(journalFile(cwd).startsWith(cwd)).toBe(false);
+    // Whatever an agent does to the workspace's .sweny dir changes nothing.
+    rmSync(join(cwd, ".sweny"), { recursive: true, force: true });
+
+    const { prepared, results } = await resumeRun(cwd, wf, agent);
+    expect(prepared.ok).toBe(true);
+    expect(prepared.lines.join("\n")).toMatch(/restored the journal's last record from the head/);
+    // 90 journaled (restored from the head) + 90 for re-running a: the 100-token budget fails instead of resetting.
+    const a = results!.get("a")!;
+    expect(a.status).toBe("failed");
+    expect(a.budget).toEqual(expect.objectContaining({ scope: "run", limit: 100 }));
+    expect(results!.has("b")).toBe(false);
+  });
+
+  it("the same attack on the state file itself (delete the final line, then one more) is refused", async () => {
+    const cwd = tmp();
+    const wf = chain({ budget: { tokens: 100 } });
+    const agent = fakeAgent({ usage: (node) => ({ inputTokens: node === "a" ? 90 : 20, outputTokens: 0 }) });
+    await firstRun(cwd, wf, agent, [], crashOnUsage());
+    const all = lines(cwd);
+    const cut = all.slice(0, -1).join("\n") + "\n";
+    writeFileSync(journalFile(cwd), cut);
+
+    const { prepared } = await resumeRun(cwd, wf, agent);
+    expect(prepared.ok === false && prepared.error).toMatch(/rolled back/);
+    expect(agent.calls).toEqual(["a"]);
+    expect(readFileSync(journalFile(cwd), "utf-8")).toBe(cut);
+    // --force does not bypass it.
+    const forced = await resumeRun(cwd, wf, agent, [], { force: true });
+    expect(forced.prepared.ok === false && forced.prepared.error).toMatch(/rolled back/);
+  });
+
+  it("a journal cut back at a prior newline after a clean stop is refused", async () => {
     const cwd = tmp();
     const wf = chain({ budget: { tokens: 100 } });
     const agent = fakeAgent({ usage: (node) => ({ inputTokens: node === "a" ? 90 : 20, outputTokens: 0 }) });
     expect(await firstRun(cwd, wf, agent, [], killAt("node:start", "b"))).toBe(true);
     const all = lines(cwd);
     const usageAt = all.findIndex((l) => JSON.parse(l).type === "usage");
-    expect(usageAt).toBeGreaterThan(0);
-    // Every remaining record authenticates and nothing is torn: only the head pointer shows the cut.
-    const cut = all.slice(0, usageAt).join("\n") + "\n";
-    writeFileSync(journalFile(cwd), cut);
-
+    writeFileSync(journalFile(cwd), all.slice(0, usageAt).join("\n") + "\n");
     const { prepared } = await resumeRun(cwd, wf, agent);
-    expect(prepared.ok).toBe(false);
     expect(prepared.ok === false && prepared.error).toMatch(/rolled back/);
-    expect(agent.calls).toEqual(["a"]);
-    expect(readFileSync(journalFile(cwd), "utf-8")).toBe(cut);
-
-    // --force does not bypass it.
-    const forced = await resumeRun(cwd, wf, agent, [], { force: true });
-    expect(forced.prepared.ok === false && forced.prepared.error).toMatch(/rolled back/);
     expect(agent.calls).toEqual(["a"]);
   });
 
@@ -559,7 +608,7 @@ describe("rollback and tail authentication (security review 3, finding 3)", () =
     const agent = fakeAgent();
     await firstRun(cwd, chain(), agent, [], killAt("node:start", "c"));
     const n = lines(cwd).length;
-    const body = { v: 2, seq: n + 1, type: "node:start", at: "2026-10-01T00:00:00.000Z", node: "c", iteration: 1 };
+    const body = { v: 3, seq: n + 1, type: "node:start", at: "2026-10-01T00:00:00.000Z", node: "c", iteration: 1 };
     appendFileSync(journalFile(cwd), JSON.stringify({ ...body, h: "0".repeat(64) }));
     const before = readFileSync(journalFile(cwd));
 
@@ -569,12 +618,12 @@ describe("rollback and tail authentication (security review 3, finding 3)", () =
     expect(readFileSync(journalFile(cwd)).equals(before)).toBe(true);
   });
 
-  it("a genuine torn final write (a prefix of the record being appended) still resumes", async () => {
+  it("a genuine torn final write (half the record reached the journal) still resumes", async () => {
     const cwd = tmp();
     const agent = fakeAgent();
     let pending = "";
     const faults: JournalFaults = {
-      beforeAppend(rec) {
+      afterHeadUpdate(rec) {
         if (rec.type === "node:start" && rec.node === "c") {
           pending = JSON.stringify(rec) + "\n";
           throw new Kill("node:start c");
@@ -582,7 +631,6 @@ describe("rollback and tail authentication (security review 3, finding 3)", () =
       },
     };
     expect(await firstRun(cwd, chain(), agent, [], faults)).toBe(true);
-    // Power loss mid-append: half the record reached the disk.
     appendFileSync(journalFile(cwd), pending.slice(0, Math.floor(pending.length / 2)));
 
     const { prepared } = await resumeRun(cwd, chain(), agent);
@@ -591,52 +639,139 @@ describe("rollback and tail authentication (security review 3, finding 3)", () =
     expect(readJournal(journalFile(cwd)).records.at(-1)).toMatchObject({ type: "run:end", status: "success" });
   });
 
-  describe("crash between the journal append and the head update", () => {
-    /** Killed after b's node:end reached the journal, before the head pointer moved to it. */
-    async function windowRun(cwd: string, agent: ReturnType<typeof fakeAgent>) {
-      const faults: JournalFaults = {
-        beforeHeadUpdate(rec) {
-          if (rec.type === "node:end" && rec.node === "b") throw new Kill("head update after node:end b");
+  it("crash between the head write and the journal append: the record is restored, b is replayed not re-run", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    const faults: JournalFaults = {
+      afterHeadUpdate(rec) {
+        if (rec.type === "node:end" && rec.node === "b") throw new Kill("journal append of node:end b");
+      },
+    };
+    expect(await firstRun(cwd, chain(), agent, [], faults)).toBe(true);
+    expect(JSON.parse(lines(cwd).at(-1)!)).toMatchObject({ type: "node:start", node: "b" });
+
+    const { prepared } = await resumeRun(cwd, chain(), agent);
+    expect(prepared.ok).toBe(true);
+    expect(agent.calls).toEqual(["a", "b", "c", "d"]);
+    expect(readJournal(journalFile(cwd)).records.at(-1)).toMatchObject({ type: "run:end", status: "success" });
+  });
+
+  it("a journal written by an older sweny in the workspace is refused with a clear message", async () => {
+    const cwd = tmp();
+    const legacy = join(cwd, ".sweny", "runs", RUN_ID);
+    mkdirSync(legacy, { recursive: true });
+    writeFileSync(join(legacy, JOURNAL_FILE), '{"v":2,"seq":1,"type":"run:start","h":"x"}\n');
+    const prepared = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => chain() });
+    expect(prepared.ok === false && prepared.error).toMatch(/written by an older sweny.*cannot be resumed safely/);
+  });
+});
+
+describe("a journal append that fails stops the run", () => {
+  /** An I/O failure writing a record of `type` (for `node`, when given). */
+  const failWrite = (type: string, node?: string): JournalFaults => ({
+    writeJournal(fd, line) {
+      const rec = JSON.parse(line) as JournalRecord;
+      if (rec.type === type && (node === undefined || rec.node === node)) throw new Error("ENOSPC: no space left");
+      writeSync(fd, line);
+    },
+  });
+
+  it("node:end cannot be written: the node fails with the reason and nothing after it runs", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    const journal = RunJournal.create({
+      runId: RUN_ID,
+      cwd,
+      workflowFile: "wf.yml",
+      faults: failWrite("node:end", "a"),
+    });
+    const { results } = await execute(chain(), {}, { ...execOpts(agent, [], cwd), journal });
+    expect(agent.calls).toEqual(["a"]);
+    const a = results.get("a")!;
+    expect(a.status).toBe("failed");
+    expect(a.data).toMatchObject({ journal_failed: true });
+    expect(String(a.data.error)).toMatch(/run journal: could not write .*ENOSPC/);
+    expect(results.has("b")).toBe(false);
+    expect(journal.active).toBe(false);
+    journal.end("failed");
+  });
+
+  it("a live usage record cannot be written: the agent is stopped and the node fails", async () => {
+    const cwd = tmp();
+    let aborted = false;
+    const agent = fakeAgent({ live: (node) => (node === "a" ? { inputTokens: 50, outputTokens: 0 } : undefined) });
+    const run = agent.claude.run.bind(agent.claude);
+    agent.claude.run = async (req) => {
+      const out = await run(req);
+      aborted = req.signal?.aborted === true;
+      return out;
+    };
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml", faults: failWrite("usage") });
+    const { results } = await execute(chain(), {}, { ...execOpts(agent, [], cwd), journal });
+    expect(aborted).toBe(true);
+    expect(results.get("a")!.status).toBe("failed");
+    expect(results.get("a")!.data).toMatchObject({ journal_failed: true });
+    expect(results.has("b")).toBe(false);
+    journal.end("failed");
+  });
+
+  it("a write intent cannot be journaled: the write is never sent", async () => {
+    const cwd = tmp();
+    const gh = fakeProvider();
+    const agent = fakeAgent({ emit: { report: [ISSUE] } });
+    const journal = RunJournal.create({
+      runId: RUN_ID,
+      cwd,
+      workflowFile: "wf.yml",
+      faults: failWrite("output:intent"),
+    });
+    const { results } = await execute(reporting(), {}, { ...execOpts(agent, [gh.skill], cwd), journal });
+    expect(gh.issues).toHaveLength(0);
+    expect(results.get("report")!.status).toBe("failed");
+    expect(results.get("report")!.data).toMatchObject({ journal_failed: true });
+    expect(results.has("notify")).toBe(false);
+    journal.end("failed");
+  });
+});
+
+describe("one resume at a time", () => {
+  it("a second resume while the first holds the run is refused; after it ends, the run resumes", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    await firstRun(cwd, chain(), agent, [], killAt("node:start", "c"));
+    const first = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => chain() });
+    expect(first.ok && "ctx" in first).toBe(true);
+    const second = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => chain() });
+    expect(second.ok === false && second.error).toMatch(/in use by process/);
+    if (first.ok && "ctx" in first) first.ctx.journal.end("crashed");
+    const third = prepareResume(RUN_ID, { plan: true }, { cwd, loadWorkflow: () => chain() });
+    expect(third.ok).toBe(true);
+  });
+
+  it("two resumes racing for a crashed run's stale lock: exactly one gets the run", async () => {
+    const cwd = tmp();
+    const agent = fakeAgent();
+    await firstRun(cwd, chain(), agent, [], killAt("node:start", "c"));
+    // A crashed process leaves its lock behind: a pid that no longer runs.
+    const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+    writeFileSync(join(journalDir(cwd, RUN_ID), "lock"), JSON.stringify({ pid: dead, started: 0, nonce: "x" }));
+    let inner: ReturnType<typeof prepareResume> | undefined;
+    const outer = prepareResume(
+      RUN_ID,
+      {},
+      {
+        cwd,
+        loadWorkflow: () => chain(),
+        lockHooks: {
+          afterStaleRead() {
+            inner ??= prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => chain() });
+          },
         },
-      };
-      expect(await firstRun(cwd, chain(), agent, [], faults)).toBe(true);
-    }
-
-    it("the one whole record past the head is kept: b is replayed, not run again", async () => {
-      const cwd = tmp();
-      const agent = fakeAgent();
-      await windowRun(cwd, agent);
-      expect(JSON.parse(lines(cwd).at(-1)!)).toMatchObject({ type: "node:end", node: "b" });
-
-      const { prepared } = await resumeRun(cwd, chain(), agent);
-      expect(prepared.ok).toBe(true);
-      expect(agent.calls).toEqual(["a", "b", "c", "d"]);
-      // The resume's appends moved the head on: the journal reads clean.
-      expect(readJournal(journalFile(cwd)).records.at(-1)).toMatchObject({ type: "run:end", status: "success" });
-    });
-
-    it("cutting below the head is still refused", async () => {
-      const cwd = tmp();
-      const agent = fakeAgent();
-      await windowRun(cwd, agent);
-      const all = lines(cwd);
-      writeFileSync(journalFile(cwd), all.slice(0, all.length - 2).join("\n") + "\n");
-      const { prepared } = await resumeRun(cwd, chain(), agent);
-      expect(prepared.ok === false && prepared.error).toMatch(/rolled back/);
-      expect(agent.calls).toEqual(["a", "b"]);
-    });
-
-    it("a torn tail after the unacknowledged record is refused (the next append never starts first)", async () => {
-      const cwd = tmp();
-      const agent = fakeAgent();
-      await windowRun(cwd, agent);
-      appendFileSync(journalFile(cwd), '{"v":2,"seq"');
-      const { prepared } = await resumeRun(cwd, chain(), agent);
-      expect(prepared.ok === false && prepared.error).toMatch(
-        /torn record after record \d+, which the run never acknowledged/,
-      );
-      expect(agent.calls).toEqual(["a", "b"]);
-    });
+      },
+    );
+    expect(inner?.ok && "ctx" in inner).toBe(true);
+    expect(outer.ok === false && outer.error).toMatch(/in use by process/);
+    if (inner?.ok && "ctx" in inner) inner.ctx.journal.end("crashed");
   });
 });
 
