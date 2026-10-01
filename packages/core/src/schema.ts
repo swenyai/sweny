@@ -928,7 +928,7 @@ export const workflowJsonSchema = {
     },
     Permissions: {
       description:
-        "What a node's agent may do. 'read' runs it read-only: only access: read skill tools, no external skill MCP servers, no shell, file-write, edit, fetch or subagent built-ins. On the workflow it is the default and the ceiling for every node.",
+        "What a node's agent may do. 'read' runs it read-only: only access: read skill tools, no external skill MCP servers, no file-write, edit, fetch or subagent built-ins, and no shell (on Codex, a shell confined to its OS read-only sandbox). On the workflow it is the default and the ceiling for every node.",
       oneOf: [
         { type: "string", enum: [...NODE_ACCESS] },
         {
