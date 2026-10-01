@@ -16,7 +16,7 @@ The **triage** and **e2e** actions are preset wrappers that auto-wire credential
 ## Prerequisites
 
 - A GitHub repository
-- SWEny uses [Claude](https://claude.ai/) as its AI engine — you'll need an [Anthropic API key](https://console.anthropic.com/) or a Claude OAuth token
+- SWEny runs nodes on Claude Code by default (see [Agents and policies](/getting-started/agents-and-policies/)). For Claude Code you'll need an [Anthropic API key](https://console.anthropic.com/) or a Claude OAuth token
 - For triage: an observability platform (Datadog, Sentry, CloudWatch, or [17 others](/action/inputs/#observability))
 
 ## Triage setup

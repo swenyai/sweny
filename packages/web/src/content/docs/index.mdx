@@ -10,10 +10,6 @@ hero:
       link: /getting-started/quick-start/
       icon: right-arrow
       variant: primary
-    - text: Browse Marketplace
-      link: https://marketplace.sweny.ai
-      icon: external
-      variant: secondary
     - text: View on GitHub
       link: https://github.com/swenyai/sweny
       icon: external
@@ -26,7 +22,7 @@ import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
 npm install -g @sweny-ai/core
 ```
 
-SWEny uses [Claude](https://claude.ai/) as its AI engine. You'll need an Anthropic API key, OAuth token, or authenticated Claude Code instance.
+SWEny runs nodes on Claude Code by default; Codex is shipped and pi and ACP agents are experimental (see [Agents and policies](/getting-started/agents-and-policies/)). For Claude Code you need an Anthropic API key, OAuth token, or an authenticated Claude Code instance.
 
 ```bash
 sweny workflow create "scan our repo for security issues, check dependencies \
@@ -59,16 +55,7 @@ Save to security_audit.yml? [Y/n/refine]
 sweny workflow run .sweny/workflows/github_security_audit.yml
 ```
 
-```
-✓ [1/4] Scan Commits for Exposed Secrets   12s
-  ↳ Searched 847 commits, 0 secrets found
-✓ [2/4] Scan Dependencies for Vulns        28s
-  ↳ 2 critical CVEs in transitive deps
-⠹ [3/4] Compile Security Report            6s
-  ↳ Analyzing findings…
-```
-
-That's it. One sentence in, a full workflow out. No YAML to write, no boilerplate, no config.
+One sentence in, a workflow YAML out. You review it before it runs.
 
 Don't like the result? Edit it the same way you created it:
 
@@ -81,7 +68,7 @@ sweny workflow edit security_audit.yml "add a quality gate that rejects \
 
 ## Built-in workflows
 
-SWEny ships two production-ready workflows you can run immediately:
+SWEny ships two built-in workflows you can run immediately:
 
 <CardGrid>
   <Card title="Triage" icon="warning">
@@ -114,7 +101,7 @@ The wizard supports 7 flow types: registration, login, purchase, onboarding, upg
 
 ## Beyond DevOps
 
-SWEny workflows aren't limited to triage and fixes. Teams use them to replace brittle data pipelines, automate research, and build quality-gated extraction systems.
+SWEny workflows aren't limited to triage and fixes. They can also drive data extraction, research, and quality-gated pipelines.
 
 <CardGrid>
   <Card title="Data Pipelines" icon="document">
@@ -155,7 +142,7 @@ Install the [Claude Code plugin](/advanced/mcp-plugin/) and get slash commands, 
 /plugin install sweny@sweny-official
 ```
 
-Then type `/sweny:triage`, `/sweny:implement ENG-123`, `/sweny:e2e-run`, or any of the 11 available commands. Claude can also autonomously delegate tasks to SWEny's DAG executor via MCP tools.
+Then type `/sweny:triage`, `/sweny:implement ENG-123`, `/sweny:e2e-run`, or any of the 9 available commands. Claude can also autonomously delegate tasks to SWEny's DAG executor via MCP tools.
 
 ## Connect to your stack
 
@@ -163,8 +150,4 @@ SWEny connects to the tools you already use (GitHub, Linear, Sentry, Datadog, Be
 
 ## Studio
 
-[Studio](/studio/) is a visual DAG editor and live execution monitor. Design workflows by dragging nodes, or watch running workflows execute node-by-node in real time. Pass `--stream` to any CLI run to pipe events into Studio.
-
-## Workflow Marketplace
-
-**[marketplace.sweny.ai](https://marketplace.sweny.ai)**: a community catalog of ready-to-run SWEny workflows. Browse by category, copy a workflow into `.sweny/workflows/`, customize the steps, and run it. The CLI and Action are free and always will be.
+[Studio](/studio/) is a visual DAG editor. Run it from a repo checkout with `npm run dev -w @sweny-ai/studio`. Live mode connects to a WebSocket or SSE event URL you provide and overlays node state as events arrive.

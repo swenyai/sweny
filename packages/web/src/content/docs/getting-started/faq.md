@@ -10,11 +10,9 @@ The **GitHub Action and CLI are free and open source**. You pay for Claude usage
 - **Claude Max/Pro subscription** (`claude-oauth-token`) — triage runs are included in your existing subscription. No per-run charge.
 - **Anthropic API key** (`anthropic-api-key`) — pay-per-use. A typical triage run costs roughly $0.10-$0.50 depending on log volume and investigation depth.
 
-The **[Workflow Marketplace](https://marketplace.sweny.ai)** is free to browse — copy any workflow into your repo and run it on your own infrastructure.
-
 ## What AI model does SWEny use?
 
-Claude, via headless [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) — not the raw Anthropic API. Claude Code provides tool use, context management, and structured output built into the runtime. SWEny's executor sends each node's instruction and tools to Claude Code, which handles the rest.
+Claude Code by default, via the headless [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) runtime, not the raw Anthropic API. Codex is shipped (`--agent codex`); pi and ACP agents are experimental. Which agent enforces which policy is on [Agents and policies](/getting-started/agents-and-policies/).
 
 ## Which GitHub Action should I use?
 
@@ -135,5 +133,4 @@ Yes. Set `source-control-provider: gitlab` and add `gitlab-token` and `gitlab-pr
 - [Troubleshooting](/advanced/troubleshooting/) — common issues and solutions
 - [GitHub Issues](https://github.com/swenyai/sweny/issues) — report bugs and request features
 - [GitHub Discussions](https://github.com/swenyai/sweny/discussions) — ask questions and share workflows
-- [Marketplace](https://marketplace.sweny.ai) — browse community workflows
 - [Contact us](mailto:hello@sweny.ai) — enterprise inquiries and partnership questions
