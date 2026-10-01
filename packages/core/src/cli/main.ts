@@ -26,7 +26,7 @@ import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
 import { loadAndValidateWorkflow } from "../loader.js";
 import { validateRuntimeInput } from "../inputs.js";
-import { mergeDryRunIntoInput, parseInputFlag, parseRunBudgetFlags } from "./workflow-input.js";
+import { mergeDryRunIntoInput, parseInputFlag, parseRunBudgetFlags, parseSpendFlags } from "./workflow-input.js";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -863,6 +863,8 @@ export async function workflowRunAction(
     verbose?: boolean;
     timeout?: string;
     maxSteps?: string;
+    maxTokens?: string;
+    maxCost?: string;
     yes?: boolean;
   },
   /** Set by `sweny workflow resume` (#363): the journal, run id and original input. */
@@ -871,8 +873,10 @@ export async function workflowRunAction(
   // Reject junk --timeout/--max-steps up front (both paths) instead of
   // silently falling back to a default.
   let budget: ReturnType<typeof parseRunBudgetFlags>;
+  let spendBudget: ReturnType<typeof parseSpendFlags>;
   try {
     budget = parseRunBudgetFlags(options.timeout, options.maxSteps, DEFAULT_WORKFLOW_TIMEOUT_MS);
+    spendBudget = parseSpendFlags(options.maxTokens, options.maxCost);
   } catch (err) {
     console.error(chalk.red(`\n  ${err instanceof Error ? err.message : String(err)}\n`));
     process.exit(1);
@@ -1191,6 +1195,12 @@ export async function workflowRunAction(
           max_steps: wfMaxSteps,
           stageOutputs: options.stage === true,
           journal,
+          ...(spendBudget ? { budget: spendBudget } : {}),
+          harnessPolicy: resolveHarnessPolicy(
+            process.env,
+            typeof options.harnessPolicy === "string" ? options.harnessPolicy : undefined,
+            runLogger,
+          ),
         }),
       wfTimeoutMs,
       `Workflow ${workflow.name}`,

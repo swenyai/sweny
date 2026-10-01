@@ -31,6 +31,8 @@ export interface RunSummary {
    * (`max_turns`, `egress allowlist`, `deny [write]`). Absent when none.
    */
   degraded?: string[];
+  /** The spend budget a node crossed (#449). Absent when none was. */
+  budget?: { node: string; scope: "node" | "run"; unit: "tokens" | "cost_usd"; limit: number; spent: number };
 }
 
 /** The short key of a `degraded` entry: the text before its first colon. */
@@ -49,9 +51,11 @@ export function summarizeRun(results: Map<string, NodeResult>, durationMs: numbe
   let costUsd: number | undefined;
   let harness: string | undefined;
   const degraded = new Set<string>();
+  let budget: RunSummary["budget"];
   const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
-  for (const r of results.values()) {
+  for (const [nodeId, r] of results) {
+    if (r.budget && !budget) budget = { node: nodeId, ...r.budget };
     harness ??= r.harness?.id;
     for (const d of r.degraded ?? []) degraded.add(degradedKey(d));
     if (r.status === "success") nodesOk++;
@@ -79,6 +83,7 @@ export function summarizeRun(results: Map<string, NodeResult>, durationMs: numbe
     ...(costUsd !== undefined ? { costUsd } : {}),
     ...(harness !== undefined ? { harness } : {}),
     ...(degraded.size > 0 ? { degraded: [...degraded] } : {}),
+    ...(budget ? { budget } : {}),
   };
 }
 
@@ -101,6 +106,14 @@ export function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
+/** `budget exceeded: tokens 52k of 50k (run, at node gather)`. */
+export function formatBudgetOverrun(b: NonNullable<RunSummary["budget"]>): string {
+  const amount = (n: number) =>
+    b.unit === "cost_usd" ? (n < 0.01 ? `$${n.toFixed(4)}` : formatCost(n)) : formatTokenCount(n);
+  const unit = b.unit === "cost_usd" ? "cost" : "tokens";
+  return `budget exceeded: ${unit} ${amount(b.spent)} of ${amount(b.limit)} (${b.scope}, at node ${b.node})`;
+}
+
 /**
  * One plain line: `✓ 3/3 nodes · 41 tool calls · 2m10s · 12k tokens · $0.18`.
  * Token and cost segments are omitted when the SDK reported none. A harness
@@ -118,6 +131,7 @@ export function formatReceipt(s: RunSummary): string {
     ...(s.costUsd !== undefined ? [formatCost(s.costUsd)] : []),
     ...(s.harness !== undefined && s.harness !== "claude-code" ? [s.harness] : []),
     ...(s.degraded && s.degraded.length > 0 ? [`degraded: ${s.degraded.join(", ")}`] : []),
+    ...(s.budget ? [formatBudgetOverrun(s.budget)] : []),
   ];
   return parts.join(" · ");
 }
@@ -235,6 +249,14 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
   [
     "--max-steps <n>",
     "Hard cap on total node executions for a single workflow file, including eval-failure retries (default: 200)",
+  ],
+  [
+    "--max-tokens <n>",
+    "Run-wide token budget (input plus output) for a single workflow file. The lowest of this and the workflow's budget.tokens wins. A crossing stops the agent, fails the node and halts the run",
+  ],
+  [
+    "--max-cost <usd>",
+    "Run-wide cost budget in US dollars for a single workflow file, from harness-reported cost (never estimated). The lowest of this and the workflow's budget.cost_usd wins",
   ],
   ["-y, --yes", "Skip the batch confirmation prompt (for CI)"],
   [

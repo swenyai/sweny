@@ -452,6 +452,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     strictMcp?: boolean;
     /** Per-request containment requirement; falls back to the client default. */
     sandboxMode?: SandboxMode;
+    /** Live token usage (#449), reported as assistant messages arrive. */
+    onUsage?: (usage: NodeUsage) => void;
   }): Promise<NodeResult> {
     const {
       instruction,
@@ -465,6 +467,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       signal,
       readOnly,
       agentAccess,
+      onUsage,
     } = opts;
     // Dry run (#380): external MCP servers cannot be classified per tool, so
     // they are unknown, and unknown means write. Drop them, and disallow the
@@ -513,6 +516,11 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     // why FIFO-by-name is wrong.
     const toolCalls: ToolCall[] = [];
     const pendingByUseId = new Map<string, ToolCall>();
+    // Live token tally (#449). Each assistant message carries its API
+    // message's usage; the SDK repeats one API message across its content
+    // blocks, so keep the latest per message id and sum. A lower bound until
+    // the terminal `result` message, whose total is authoritative.
+    const liveByMessage = new Map<string, { input: number; output: number }>();
 
     // Convert core tools to SDK MCP tools. The wrapper invokes the user's
     // handler and returns `content` via the MCP transport. We do not push
@@ -626,6 +634,25 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           // Tool_use blocks start a ToolCall record. Status + output are
           // filled in when the matching user tool_result arrives.
           const am = message as any;
+          if (onUsage) {
+            const u = am.message?.usage;
+            if (u && typeof u === "object") {
+              const key = typeof am.message?.id === "string" ? am.message.id : `#${liveByMessage.size}`;
+              const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+              const prev = liveByMessage.get(key);
+              liveByMessage.set(key, {
+                input: Math.max(prev?.input ?? 0, num(u.input_tokens)),
+                output: Math.max(prev?.output ?? 0, num(u.output_tokens)),
+              });
+              let inputTokens = 0;
+              let outputTokens = 0;
+              for (const v of liveByMessage.values()) {
+                inputTokens += v.input;
+                outputTokens += v.output;
+              }
+              onUsage({ inputTokens, outputTokens });
+            }
+          }
           if (am.message?.content && Array.isArray(am.message.content)) {
             for (const block of am.message.content) {
               if (block.type === "tool_use") {

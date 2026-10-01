@@ -244,6 +244,17 @@ async function playTurn(id, steps) {
         save();
         break;
       }
+      case "usage":
+        // Live cost (#449): `usage_update` carries the cumulative cost so far.
+        if (step.usage.costUsd !== undefined) {
+          await update({
+            sessionUpdate: "usage_update",
+            used: 1234,
+            size: 200000,
+            cost: { amount: step.usage.costUsd, currency: "USD" },
+          });
+        }
+        break;
       case "stderr":
         process.stderr.write(step.text + "\n");
         break;

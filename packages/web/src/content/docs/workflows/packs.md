@@ -15,7 +15,7 @@ sweny workflow validate .sweny/workflows/weekly-digest.yml   # no credentials ne
 
 - **Output schema on every node.** Each node declares the JSON shape it returns.
 - **Gates before judges.** Every node has value or function gates (shape, enums, patterns, which tools were or were not called). A judge gate is used only where a rule cannot decide, and only once in the whole set.
-- **Read-only by default.** Each pack declares a workflow `permissions` ceiling, and every analysis node runs `permissions: read`: no write tool, no shell, no file edits, on any agent.
+- **Read-only by default.** Each pack declares a workflow `permissions` ceiling, and every analysis node runs `permissions: read`: no write tool, no file edits, and no shell (on Codex, a shell confined to its OS read-only sandbox: no writes, no network).
 - **GitHub writes are safe outputs.** No node holds a GitHub write tool. The issue or comment a pack files is a declared output with a cap (and a pin, title prefix, and label where one applies); the agent requests it, and SWEny applies it after the step. `--stage` previews it without writing. See [Permissions and safe outputs](/workflows/yaml-reference/#permissions-and-safe-outputs).
 - **Harness-agnostic.** Instructions use SWEny skill tools, no agent-specific tool names.
 - **Bounded spend.** Every node sets `max_turns`.

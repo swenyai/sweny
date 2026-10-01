@@ -48,8 +48,11 @@ import { validateWorkflow } from "./schema.js";
 import { resolveAgentAccess } from "./agent-env.js";
 import { fenceUntrusted } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
-import { isToolClass, policyGate } from "./harness/policy.js";
+import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
+import type { HarnessPolicyMode } from "./harness/policy.js";
 import type { AgentHarness } from "./harness/types.js";
+import { BudgetGuard, describeOverrun, minLimits, toLimits } from "./budget.js";
+import type { Budget, BudgetOverrun } from "./budget.js";
 import { buildNodePolicy, resolveNodePermissions } from "./node-policy.js";
 import {
   applySafeOutputs,
@@ -140,6 +143,16 @@ export interface ExecuteOptions {
    * finished, so their agents are not called again. Default: none.
    */
   journal?: ExecutionJournal;
+  /**
+   * Run-wide spend ceiling (#449), tightening `workflow.budget` (the lowest of
+   * the two wins per unit). CLI: `--max-tokens`, `--max-cost`. Default: none.
+   */
+  budget?: Budget;
+  /**
+   * `strict` refuses a node whose spend budget the harness cannot enforce at
+   * all (cost on Codex). Default: {@link resolveHarnessPolicy} from the run env.
+   */
+  harnessPolicy?: HarnessPolicyMode;
 }
 
 /**
@@ -212,6 +225,10 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   const actor: ActorInfo = usesOutputs ? resolveActor(runEnv, options.actor) : {};
   // The run input, for `number: { input }` issue pins on outputs.
   const runInput = input && typeof input === "object" ? (input as Record<string, unknown>) : undefined;
+  // Spend budgets (#449): the run ceiling is the lower of the workflow's
+  // `budget` and the caller's (`--max-tokens`, `--max-cost`).
+  const budgetGuard = new BudgetGuard(minLimits(toLimits(workflow.budget), toLimits(options.budget)));
+  const harnessPolicy = options.harnessPolicy ?? resolveHarnessPolicy(runEnv);
 
   // Build an eval-time alias table from the loaded skills. Each skill owns
   // its own mapping between skill-tool names and equivalent MCP names. Core
@@ -397,15 +414,24 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // (a Record<name, EvalResult> for downstream lookup like
     // `priorNode.evals.tests_run_clean.pass`). This namespace is reserved
     // for runtime verdicts; an agent-provided `data.evals` never overrides it.
-    const context: Record<string, unknown> = {
+    // `requires` always reads this full map: it is a deterministic gate, not
+    // a prompt, so it costs no tokens and keeps every declared path working.
+    const requiresContext: Record<string, unknown> = {
       input,
       ...Object.fromEntries([...results.entries()].map(([k, v]) => [k, buildPriorNodeContext(v)])),
     };
+    // What the model sees (#337): only nodes this one can depend on, and a
+    // schema'd node's declared fields instead of its prose. `context_mode:
+    // full` keeps the old everything-prior map.
+    const context: Record<string, unknown> =
+      workflow.context_mode === "full"
+        ? requiresContext
+        : buildBoundedContext(workflow, currentId, results, input, resolvedInstruction);
 
     // Pre-condition gate: evaluate `requires` against the cross-node context
     // BEFORE invoking the LLM. Failure either marks the node failed (on_fail
     // default) or skipped (on_fail: "skip") and skips execution entirely.
-    const requiresError = evaluateRequires(node.requires, context);
+    const requiresError = evaluateRequires(node.requires, requiresContext);
     if (requiresError) {
       const onFail = node.requires?.on_fail ?? "fail";
       const result: NodeResult =
@@ -542,6 +568,23 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         ? policyGate(options.harness.capabilities, { ...nodePolicy, egress: [] })
         : undefined;
 
+    // Spend budgets (#449): this node's own limits plus what is left of the
+    // run's. The gate says whether the harness can keep them; a strict policy
+    // refuses the node when it cannot report the budgeted unit at all.
+    const nodeBudget = budgetGuard.node(toLimits(node.budget));
+    const budgetOn = budgetGuard.active(nodeBudget.limits);
+    const budgetCheck =
+      budgetOn && options.harness
+        ? budgetGate(
+            options.harness.capabilities,
+            minLimits(nodeBudget.limits, budgetGuard.runLimits),
+            permissions.strict || harnessPolicy === "strict",
+          )
+        : undefined;
+    // A budget stop: fail_soft and on_fail: continue never apply, the run halts.
+    let budgetStop: BudgetOverrun | undefined;
+    let previous: NodeResult | undefined;
+
     while (true) {
       if (replay?.kind === "checkpoint") {
         // Resume (#363): the agent finished this visit before the crash. Reuse its result and
@@ -550,38 +593,86 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
         intents.push(...replay.intents);
         break;
       }
-      if (gate?.refuse) {
+      const refusal = gate?.refuse ?? budgetCheck?.refuse;
+      if (refusal) {
         // Not an agent failure: fail_soft never softens a policy refusal.
-        logger.warn(`  harness refused the node: ${gate.refuse}`, { node: currentId });
+        logger.warn(`  harness refused the node: ${refusal}`, { node: currentId });
         result = {
           status: "failed",
-          data: { error: gate.refuse, refused: true },
+          data: { error: refusal, refused: true },
           toolCalls: [],
-          degraded: gate.degraded,
+          degraded: [...(gate?.degraded ?? []), ...(budgetCheck?.degraded ?? [])],
         };
+        break;
+      }
+      // No attempt may start once a ceiling is reached (the run's budget spent
+      // by earlier nodes, or this node's by an earlier attempt).
+      const spent = budgetOn ? nodeBudget.exhausted() : undefined;
+      if (spent) {
+        const error = describeOverrun(spent, currentId);
+        logger.warn(`  ${error}; not starting the node`, { node: currentId });
+        result = {
+          ...(previous ?? { toolCalls: [] }),
+          status: "failed",
+          data: { ...(previous?.data ?? {}), error, budget_exceeded: true },
+          budget: spent,
+        };
+        agentRunFailed = true;
+        budgetStop = spent;
         break;
       }
       // Only the final attempt's intents may be applied.
       intents.length = 0;
-      result = await claude.run({
-        instruction: currentInstruction,
-        context,
-        tools: trackedTools,
-        outputSchema: node.output,
-        maxTurns: node.max_turns,
-        disallowedTools: node.disallowed_tools,
-        ...(denyClasses.length > 0 ? { deny: denyClasses } : {}),
-        model: nodeModel,
-        signal,
-        timeoutMs,
-        agentAccess,
-        ...(nodePolicy ? { policy: nodePolicy } : {}),
-        ...(readOnlyNode ? {} : { mcpServers: skillMcpServers }),
-        ...(readOnlyNode ? { readOnly: true } : {}),
-        onProgress: (message) => {
-          safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
-        },
-      });
+      const attemptBudget = budgetOn ? nodeBudget.attempt(signal) : undefined;
+      try {
+        result = await claude.run({
+          instruction: currentInstruction,
+          context,
+          tools: trackedTools,
+          outputSchema: node.output,
+          maxTurns: node.max_turns,
+          disallowedTools: node.disallowed_tools,
+          ...(denyClasses.length > 0 ? { deny: denyClasses } : {}),
+          model: nodeModel,
+          signal: attemptBudget?.signal ?? signal,
+          timeoutMs,
+          agentAccess,
+          ...(nodePolicy ? { policy: nodePolicy } : {}),
+          ...(readOnlyNode ? {} : { mcpServers: skillMcpServers }),
+          ...(readOnlyNode ? { readOnly: true } : {}),
+          ...(attemptBudget ? { onUsage: attemptBudget.onUsage } : {}),
+          onProgress: (message) => {
+            safeObserve(observer, { type: "node:progress", node: currentId!, message }, logger);
+          },
+        });
+      } finally {
+        attemptBudget?.dispose();
+      }
+      previous = result;
+
+      if (budgetCheck && budgetCheck.degraded.length > 0) {
+        result = { ...result, degraded: [...new Set([...(result.degraded ?? []), ...budgetCheck.degraded])] };
+      }
+      if (attemptBudget) {
+        // Commit this attempt's spend; a live stop, or a crossing visible only
+        // in the final usage, fails the node whatever else it did.
+        const breach = attemptBudget.finish(result.usage);
+        if (breach) {
+          const error = describeOverrun(breach, currentId);
+          logger.warn(`  ${error}`, { node: currentId });
+          const usage = result.usage ?? attemptBudget.lastUsage;
+          result = {
+            ...result,
+            status: "failed",
+            data: { ...result.data, error, budget_exceeded: true },
+            ...(usage ? { usage } : {}),
+            budget: breach,
+          };
+          agentRunFailed = true;
+          budgetStop = breach;
+          break;
+        }
+      }
 
       // Opinions the harness could not honor natively: said once per node, never silently dropped.
       if (!degradedLogged && result.degraded && result.degraded.length > 0) {
@@ -700,7 +791,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // observers. Eval failures never take this path (agentRunFailed guards it).
     // A strict-policy refusal (#331) is not an agent failure: fail_soft never softens it.
     const refused = (result.data as Record<string, unknown> | undefined)?.refused === true;
-    if (agentRunFailed && result.status === "failed" && node.fail_soft === true && !refused) {
+    if (agentRunFailed && result.status === "failed" && node.fail_soft === true && !refused && !budgetStop) {
       const failError = (result.data as Record<string, unknown> | undefined)?.error;
       logger.warn(
         `  fail_soft: node failed (${String(failError ?? "unknown error")}); continuing with partial output`,
@@ -775,13 +866,10 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     // the back of a failure. The failed result stays in `results`, so the run
     // surfaces as failed to callers (CLI exit code, cloud status). Authors who
     // want the legacy fall-through opt in per-node with `on_fail: "continue"`.
-    if (result.status === "failed" && (node.on_fail ?? "halt") === "halt") {
-      logger.warn(`  node failed; halting workflow (on_fail: halt)`, { node: currentId });
-      safeObserve(
-        observer,
-        { type: "route", from: currentId, to: "(end)", reason: "node failed (on_fail: halt)" },
-        logger,
-      );
+    if (result.status === "failed" && ((node.on_fail ?? "halt") === "halt" || budgetStop)) {
+      const why = budgetStop ? "budget exceeded" : "on_fail: halt";
+      logger.warn(`  node failed; halting workflow (${why})`, { node: currentId });
+      safeObserve(observer, { type: "route", from: currentId, to: "(end)", reason: `node failed (${why})` }, logger);
       break;
     }
 
@@ -964,9 +1052,9 @@ function buildPriorNodeContext(result: NodeResult): Record<string, unknown> {
  * evaluator. When no schema is declared we fall back to the full data
  * (back-compat for workflows without structured outputs).
  *
- * The downstream node prompt is untouched: nodes still see the full prior
- * `data` including any prose `summary`, so workflows that consume the
- * narrative in subsequent steps keep working.
+ * Downstream node prompts get a similar projection (see
+ * `buildBoundedNodeEntry`), minus the null-fill, unless the workflow sets
+ * `context_mode: full`.
  */
 function buildRouteEvalEntry(
   result: NodeResult,
@@ -1026,6 +1114,89 @@ function getDeclaredOutputProperties(output: JSONSchema | undefined): Set<string
   const keys = Object.keys(props as Record<string, unknown>);
   if (keys.length === 0) return null;
   return new Set(keys);
+}
+
+// ─── Bounded node context (#337) ─────────────────────────────────
+//
+// Full mode hands every node the whole results map: node N re-sends nodes
+// 1..N-1 including each one's prose `summary`, so prompt bytes per run grow
+// quadratically and one verbose node inflates every later prompt. Bounded
+// mode (the default) keeps the same keys a node can depend on, and sends a
+// schema'd node's declared fields only.
+
+/** Keys the executor itself writes into data; kept when a view is projected. */
+const RUNTIME_DATA_KEYS = ["error", "fail_soft", "skipped_reason"];
+
+/**
+ * The prompt-context entry for one prior node in bounded mode. A successful
+ * node with a declared `output.properties` block contributes those fields
+ * (plus executor-written error/fail_soft keys); everything else, including
+ * the free-text `summary`, is dropped. Nodes without a schema, and nodes
+ * that did not succeed, keep the full `buildPriorNodeContext` entry. The
+ * trusted `evals` and `safe_outputs` namespaces always come from the runtime.
+ */
+function buildBoundedNodeEntry(result: NodeResult, sourceNode: Node | undefined): Record<string, unknown> {
+  const full = buildPriorNodeContext(result);
+  const declared = getDeclaredOutputProperties(sourceNode?.output);
+  if (!declared || result.status !== "success") return full;
+  const keep = new Set([...declared, ...RUNTIME_DATA_KEYS, "evals", "safe_outputs"]);
+  return Object.fromEntries(Object.entries(full).filter(([k]) => keep.has(k)));
+}
+
+/** First segment of a requires path (`any:triage.findings[*].x` -> `triage`). */
+function pathRoot(path: string): string | undefined {
+  return /^(?:all:|any:)?([^.[\]]+)/.exec(path)?.[1];
+}
+
+function mentionsNode(text: string, nodeId: string): boolean {
+  const escaped = nodeId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`).test(text);
+}
+
+/**
+ * Node ids whose results `nodeId` may read: its graph ancestors (every node
+ * with an edge path into it, itself included when it sits on a cycle), any
+ * node a `requires` path names, and any node id its instruction mentions.
+ */
+function contextDependencies(workflow: Workflow, nodeId: string, instruction = ""): Set<string> {
+  const deps = new Set<string>();
+  const stack = [nodeId];
+  for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
+    for (const e of workflow.edges) {
+      if (e.to === id && !deps.has(e.from)) {
+        deps.add(e.from);
+        stack.push(e.from);
+      }
+    }
+  }
+  const requires = workflow.nodes[nodeId]?.requires;
+  for (const p of [...(requires?.output_required ?? []), ...(requires?.output_matches ?? []).map((m) => m.path)]) {
+    const root = pathRoot(p);
+    if (root && root !== "input") deps.add(root);
+  }
+  for (const id of Object.keys(workflow.nodes)) {
+    if (id !== nodeId && mentionsNode(instruction, id)) deps.add(id);
+  }
+  return deps;
+}
+
+/** The bounded prompt context for one node: `input` plus its dependencies' entries. */
+function buildBoundedContext(
+  workflow: Workflow,
+  nodeId: string,
+  results: Map<string, NodeResult>,
+  input: unknown,
+  instruction: string,
+): Record<string, unknown> {
+  const deps = contextDependencies(workflow, nodeId, instruction);
+  return {
+    input,
+    ...Object.fromEntries(
+      [...results.entries()]
+        .filter(([k]) => deps.has(k))
+        .map(([k, v]) => [k, buildBoundedNodeEntry(v, workflow.nodes[k])]),
+    ),
+  };
 }
 
 /**

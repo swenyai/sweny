@@ -23,7 +23,14 @@ export type {
   PolicyWrappers,
   ToolClass,
 } from "./types.js";
-export { policyGate, nativeDenyClasses, resolveHarnessPolicy, isToolClass, TOOL_CLASSES } from "./policy.js";
+export {
+  policyGate,
+  budgetGate,
+  nativeDenyClasses,
+  resolveHarnessPolicy,
+  isToolClass,
+  TOOL_CLASSES,
+} from "./policy.js";
 export type { HarnessPolicyMode } from "./policy.js";
 export { ask, evaluate, buildAskPrompt, buildEvaluatePrompt } from "./prompts.js";
 export { ClaudeCodeHarness, CLAUDE_CODE_CAPABILITIES } from "./claude-code.js";
