@@ -1248,3 +1248,35 @@ describe("safe outputs: second-pass edges", () => {
     expect(gh.calls[0].input).toStrictEqual({ repo: "acme/api", issue_number: 5, body: "hi" });
   });
 });
+
+describe("safe outputs: closing needs a pinned repository", () => {
+  const close = (over: Partial<SafeOutputIntent> = {}) =>
+    intent({ type: "issue_state", number: "5", state: "close", target: "acme/api", ...over });
+  const decl = [{ type: "issue_state" as const, number: 5 }];
+
+  it("the agent cannot name the repository it closes in", async () => {
+    expect(await receiptsOf({ declarations: decl, intents: [close()], env: {} })).toStrictEqual([
+      refused("issue_state", "close needs a pinned repository", at),
+    ]);
+  });
+
+  it("a declared target or the run's repository pins it", async () => {
+    const declared = await receiptsOf({
+      declarations: [{ ...decl[0], target: "acme/api" }],
+      intents: [close()],
+      env: {},
+    });
+    expect(declared.map((r) => r.status)).toStrictEqual(["applied"]);
+    const fromRun = await receiptsOf({
+      declarations: decl,
+      intents: [close()],
+      env: { GITHUB_REPOSITORY: "acme/api" },
+    });
+    expect(fromRun.map((r) => r.status)).toStrictEqual(["applied"]);
+  });
+
+  it("reopening needs no repository pin", async () => {
+    const r = await receiptsOf({ declarations: decl, intents: [close({ state: "reopen" })], env: {} });
+    expect(r.map((x) => x.status)).toStrictEqual(["applied"]);
+  });
+});

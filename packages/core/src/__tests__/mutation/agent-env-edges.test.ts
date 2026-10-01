@@ -1299,3 +1299,15 @@ describe("agent env: second-pass edges", () => {
     );
   });
 });
+
+describe("agent env: push block applied twice", () => {
+  it("keeps the operator's own ssh command instead of wrapping the wrapper", () => {
+    const once = withPushBlocked({ GIT_SSH_COMMAND: "ssh -i key", PATH: "/bin" }, true);
+    const twice = withPushBlocked(once, true);
+    expect(twice.SWENY_NO_PUSH_SSH).toBe("ssh -i key");
+    expect(twice.GIT_SSH_COMMAND).toBe(once.GIT_SSH_COMMAND);
+    expect(twice.GIT_CONFIG_COUNT).toBe("22");
+    const none = withPushBlocked(withPushBlocked({ PATH: "/bin" }, true), true);
+    expect(none).not.toHaveProperty("SWENY_NO_PUSH_SSH");
+  });
+});

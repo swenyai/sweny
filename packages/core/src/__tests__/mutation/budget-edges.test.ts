@@ -203,3 +203,31 @@ describe("BudgetAttempt outer signal wiring", () => {
     expect(attempt.signal.aborted).toBe(false);
   });
 });
+
+describe("budget: resume and non-finite usage", () => {
+  it("spendOf counts only finite fields, so one bad number never poisons the sum", () => {
+    expect(spendOf({ inputTokens: NaN, outputTokens: 5 })).toStrictEqual({ tokens: 5 });
+    expect(spendOf({ inputTokens: 3, outputTokens: Infinity })).toStrictEqual({ tokens: 3 });
+    expect(spendOf({ inputTokens: NaN, outputTokens: NaN })).toStrictEqual({});
+  });
+
+  it("seed adds a resumed run's earlier spend, ignoring anything not a positive finite number", () => {
+    const g = new BudgetGuard({ tokens: 100, costUsd: 1 });
+    g.seed({ tokens: 40, costUsd: 0.5 });
+    expect(g.totals).toStrictEqual({ tokens: 40, costUsd: 0.5 });
+    for (const bad of [
+      { tokens: NaN, costUsd: -1 },
+      { tokens: Infinity, costUsd: -Infinity },
+      { tokens: 0, costUsd: 0 },
+      { tokens: -5, costUsd: NaN },
+    ]) {
+      g.seed(bad);
+    }
+    expect(g.totals).toStrictEqual({ tokens: 40, costUsd: 0.5 });
+    g.seed({ tokens: NaN, costUsd: 0.25 });
+    expect(g.totals).toStrictEqual({ tokens: 40, costUsd: 0.75 });
+    expect(g.runExhausted()).toBeUndefined();
+    g.seed({ tokens: 60, costUsd: 0 });
+    expect(g.runExhausted()).toStrictEqual({ scope: "run", unit: "tokens", limit: 100, spent: 100 });
+  });
+});

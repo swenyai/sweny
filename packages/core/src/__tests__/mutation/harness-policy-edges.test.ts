@@ -4,7 +4,13 @@
  * on these strings, so they are part of the contract.
  */
 import { describe, expect, it, vi } from "vitest";
-import { budgetGate, nativeDenyClasses, policyGate, resolveHarnessPolicy } from "../../harness/policy.js";
+import {
+  budgetGate,
+  gitCredentialGap,
+  nativeDenyClasses,
+  policyGate,
+  resolveHarnessPolicy,
+} from "../../harness/policy.js";
 import type { HarnessCapabilities, NodePolicy } from "../../harness/types.js";
 
 const base: NodePolicy = { readOnly: false, deny: [], egress: [], strict: false };
@@ -331,5 +337,30 @@ describe("budgetGate: strict refusal lists every unenforced budget", () => {
     const tokens = "budget_tokens: harness cannot report token usage, so this budget is not enforced";
     const cost = "budget_cost_usd: harness cannot report cost usage, so this budget is not enforced";
     expect(budgetGate(weak, { tokens: 10, costUsd: 1 }, true).refuse).toBe(`strict policy: ${tokens}; ${cost}`);
+  });
+});
+
+describe("persisted git credentials (#473)", () => {
+  const files = [".git/config", "/home/runner/.git-credentials"];
+  const msg =
+    "git credential: .git/config, /home/runner/.git-credentials holds a persisted git credential " +
+    "(actions/checkout persist-credentials) and nothing keeps this node's agent from reading it; " +
+    "set persist-credentials: false, or run under the sandbox";
+
+  it("names every file the credential sits in", () => {
+    expect(gitCredentialGap(files)).toBe(msg);
+    expect(gitCredentialGap([".git/config"])).toContain("git credential: .git/config holds");
+  });
+
+  it("is unenforced unless a read deny is active, and refused under strict", () => {
+    expect(policyGate(weak, { ...base, gitCredentials: files }).degraded).toStrictEqual([msg]);
+    expect(policyGate(weak, { ...base, gitCredentials: files }, { readDeny: true })).toStrictEqual({ degraded: [] });
+    expect(policyGate(weak, { ...base, gitCredentials: files }, { readDeny: false }).degraded).toStrictEqual([msg]);
+    expect(policyGate(weak, { ...base, gitCredentials: [] })).toStrictEqual({ degraded: [] });
+    expect(policyGate(weak, base)).toStrictEqual({ degraded: [] });
+    expect(policyGate(weak, { ...base, strict: true, gitCredentials: files })).toStrictEqual({
+      degraded: [msg],
+      refuse: `strict policy: ${msg}`,
+    });
   });
 });
