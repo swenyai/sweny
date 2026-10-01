@@ -47,7 +47,7 @@ inputs:
   cli-version:
     description: "Version of @sweny-ai/core to install (the package that ships the `sweny` CLI). Defaults to latest on the floating v5 tag; an immutable v5.<version> tag defaults to that exact version."
     required: false
-    default: "latest"
+    default: "0.1.178"
 
   node-version:
     description: "Node.js version to install."
