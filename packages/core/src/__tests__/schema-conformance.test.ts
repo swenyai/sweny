@@ -76,6 +76,50 @@ const fixtures: Fixture[] = [
     expected: true,
   },
   {
+    name: "edge with an expression when (#461)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [{ from: "a", to: "a", max_iterations: 3, when: { expr: "a.n > 0" } }],
+    },
+    expected: true,
+  },
+  {
+    name: "edge when expression with an extra key (rejected)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [{ from: "a", to: "a", max_iterations: 3, when: { expr: "a.n > 0", text: "n is positive" } }],
+    },
+    expected: false,
+  },
+  {
+    name: "edge when expression empty (rejected)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [{ from: "a", to: "a", max_iterations: 3, when: { expr: "" } }],
+    },
+    expected: false,
+  },
+  {
+    name: "edge when of a non-string, non-object type (rejected)",
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [{ from: "a", to: "a", max_iterations: 3, when: 7 }],
+    },
+    expected: false,
+  },
+  {
     name: "node with valid eval (function any_tool_called)",
     input: {
       id: "d",

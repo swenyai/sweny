@@ -25,6 +25,7 @@ import { buildAutoMcpServers, buildSkillMcpServers, buildProviderContext } from 
 import { loadAdditionalContext } from "../templates.js";
 import type { McpAutoConfig } from "../types.js";
 import { loadAndValidateWorkflow } from "../loader.js";
+import { upgradeWorkflowFile } from "./workflow-upgrade.js";
 import { validateRuntimeInput } from "../inputs.js";
 import { mergeDryRunIntoInput, parseInputFlag, parseRunBudgetFlags, parseSpendFlags } from "./workflow-input.js";
 
@@ -843,6 +844,7 @@ export function loadWorkflowFile(filePath: string, knownSkills?: Set<string>): W
   if (!result.ok) {
     throw new Error(`Invalid workflow file:\n${result.errors.map((e) => `  ${e.message}`).join("\n")}`);
   }
+  for (const w of result.warnings ?? []) console.error(chalk.yellow(`  \u26A0 ${w}`));
   return result.workflow;
 }
 
@@ -1305,7 +1307,14 @@ export function workflowValidateAction(file: string, options: { json?: boolean }
   const result = loadAndValidateWorkflow(file);
   // Missing skill env is a warning here, not a failure: `run` is where it blocks.
   const warnings = result.ok
-    ? skillEnvWarnings(result.workflow, process.env, builtinSkills.concat(configuredSkills(process.env, process.cwd())))
+    ? [
+        ...(result.warnings ?? []),
+        ...skillEnvWarnings(
+          result.workflow,
+          process.env,
+          builtinSkills.concat(configuredSkills(process.env, process.cwd())),
+        ),
+      ]
     : [];
 
   if (options.json) {
@@ -1333,6 +1342,29 @@ workflowCmd
   .description("Validate a workflow YAML or JSON file")
   .option("--json", "Output result as JSON")
   .action(workflowValidateAction);
+
+export function workflowUpgradeAction(file: string, options: { dryRun?: boolean }): void {
+  const result = upgradeWorkflowFile(file, { dryRun: options.dryRun });
+  if (result.status === "error") {
+    console.error(chalk.red(`  \u2717 ${result.message}`));
+    process.exit(1);
+    return;
+  }
+  if (result.status === "current") {
+    console.log(chalk.green(`  \u2713 ${file} is already at spec_version "${result.version}"`));
+    return;
+  }
+  const verb = result.status === "dry-run" ? "Would upgrade" : "Upgraded";
+  console.log(chalk.green(`  \u2713 ${verb} ${file}: spec_version "${result.from}" -> "${result.to}"`));
+  for (const step of result.steps) console.log(chalk.dim(`    - ${step}`));
+  if (result.status === "dry-run") console.log(chalk.dim("    (dry run, file not changed)"));
+}
+
+workflowCmd
+  .command("upgrade <file>")
+  .description("Rewrite a workflow file at the current spec version (comments are kept where possible)")
+  .option("--dry-run", "Show what would change without writing the file")
+  .action(workflowUpgradeAction);
 
 const workflowRunCmd = workflowCmd
   .command("run [file]")

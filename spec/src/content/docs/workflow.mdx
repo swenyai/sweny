@@ -19,6 +19,7 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 | `rules`         | [Source](/sources)[]                                             | OPTIONAL | `[]`               | Directives prepended to every node's instruction. Organization-wide policies, coding standards.                                             |
 | `context`       | [Source](/sources)[]                                             | OPTIONAL | `[]`               | Background knowledge prepended to every node's instruction. Architecture docs, playbooks.                                                   |
 | `context_mode`  | string (enum)                                                    | OPTIONAL | `bounded`          | What prior results each node's prompt receives: `bounded` or `full`. See [What a node receives](/execution#what-a-node-receives).           |
+| `spec_version`  | string                                                           | OPTIONAL | `"1"`              | Spec version this file was written against: a positive integer string. See [Spec version](#spec-version).                                   |
 | `workflow_type` | string (enum)                                                    | OPTIONAL | `generic`          | Workflow type discriminator. Routes runs to a type-specific renderer. See [Workflow type](#workflow-type).                                  |
 | `model`         | string                                                           | OPTIONAL | impl&#8209;defined | Default execution model for every node. Overridable per-node. Free-text passthrough. See [Nodes — Model Selection](/nodes#model-selection). |
 | `budget`        | [Budget](/nodes#spend-budgets)                                   | OPTIONAL | none               | Token and cost ceiling for the whole run and for every node. See [Spend Budgets](/nodes#spend-budgets).                                     |
@@ -26,6 +27,16 @@ A Workflow is the top-level document. It defines a directed graph of [Nodes](/no
 | `inputs`        | Record&lt;string, [InputField](#inputs)&gt;                      | OPTIONAL | —                  | Declared per-run input contract. The CLI validates `--input` against this and applies defaults. See [Inputs](#inputs).                      |
 | `permissions`   | [Permissions](/nodes#permissions)                                | OPTIONAL | `write`            | Default and ceiling for every node's `permissions`.                                                                                         |
 | `safe_outputs`  | [SafeOutputsPolicy](#safe-outputs-policy)                        | OPTIONAL | none               | Run-wide limits for [safe outputs](/nodes#safe-outputs). See [Safe Outputs Policy](#safe-outputs-policy).                                   |
+
+## Spec version
+
+`spec_version` is a positive integer string (`"1"`, `"2"`, ...). A file that omits it is version 1.
+
+- **Older than the implementation supports:** the implementation MUST migrate the file to the current version in memory before validating it, and SHOULD warn once, naming the file's version and how to upgrade it. Migrations are applied one version at a time (v1 to v2, then v2 to v3).
+- **Newer than the implementation supports:** the implementation MUST refuse the file with an error telling the user to upgrade the implementation. It MUST NOT guess.
+- **Invalid** (not a positive integer string): the file is rejected.
+
+In the reference implementation, `sweny workflow upgrade <file>` applies the migrations and rewrites the file with `spec_version` set. `--dry-run` reports the change without writing. YAML comments, blank lines and key order are kept for everything a migration does not touch; comments attached to values a migration replaces or removes are not.
 
 ## Workflow type
 
@@ -227,23 +238,25 @@ A conforming validator MUST enforce the following rules:
 
 ## Error Codes
 
-| Code                       | Description                                                                                                                    |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `MISSING_ENTRY`            | `entry` does not reference an existing node.                                                                                   |
-| `UNKNOWN_EDGE_SOURCE`      | An edge `from` references a non-existent node.                                                                                 |
-| `UNKNOWN_EDGE_TARGET`      | An edge `to` references a non-existent node.                                                                                   |
-| `UNREACHABLE_NODE`         | A node is not reachable from `entry`.                                                                                          |
-| `SELF_LOOP`                | A self-loop edge lacks `max_iterations`.                                                                                       |
-| `UNBOUNDED_CYCLE`          | A cycle exists with no `max_iterations` guard.                                                                                 |
-| `EDGE_ITERATIONS_EXCEEDED` | An edge's `max_iterations` is above 100.                                                                                       |
-| `RETRY_MAX_EXCEEDED`       | A node's `retry.max` is above 10.                                                                                              |
-| `UNKNOWN_SKILL`            | A node references a skill not in the registry.                                                                                 |
-| `INVALID_INLINE_SKILL`     | An inline skill provides neither `instruction` nor `mcp`.                                                                      |
-| `PERMISSION_CEILING`       | A node declares `permissions: write` under a workflow `read`.                                                                  |
-| `BUDGET_CEILING`           | A node's `budget` is above the workflow's `budget` for the same unit.                                                          |
-| `OUTPUT_NOT_ALLOWED`       | A node declares an output type outside `safe_outputs.allow`.                                                                   |
-| `DUPLICATE_OUTPUT`         | A node declares the same output type twice.                                                                                    |
-| `UNSUPPORTED_OUTPUT`       | An output's `via` names a skill that cannot apply its type, or a `number` pin is on an output other than `comment` or `label`. |
+| Code                       | Description                                                                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MISSING_ENTRY`            | `entry` does not reference an existing node.                                                                                                     |
+| `UNKNOWN_EDGE_SOURCE`      | An edge `from` references a non-existent node.                                                                                                   |
+| `UNKNOWN_EDGE_TARGET`      | An edge `to` references a non-existent node.                                                                                                     |
+| `UNREACHABLE_NODE`         | A node is not reachable from `entry`.                                                                                                            |
+| `SELF_LOOP`                | A self-loop edge lacks `max_iterations`.                                                                                                         |
+| `UNBOUNDED_CYCLE`          | A cycle exists with no `max_iterations` guard.                                                                                                   |
+| `EDGE_ITERATIONS_EXCEEDED` | An edge's `max_iterations` is above 100.                                                                                                         |
+| `RETRY_MAX_EXCEEDED`       | A node's `retry.max` is above 10.                                                                                                                |
+| `UNKNOWN_SKILL`            | A node references a skill not in the registry.                                                                                                   |
+| `INVALID_INLINE_SKILL`     | An inline skill provides neither `instruction` nor `mcp`.                                                                                        |
+| `PERMISSION_CEILING`       | A node declares `permissions: write` under a workflow `read`.                                                                                    |
+| `BUDGET_CEILING`           | A node's `budget` is above the workflow's `budget` for the same unit.                                                                            |
+| `OUTPUT_NOT_ALLOWED`       | A node declares an output type outside `safe_outputs.allow`.                                                                                     |
+| `DUPLICATE_OUTPUT`         | A node declares the same output type twice.                                                                                                      |
+| `UNSUPPORTED_OUTPUT`       | An output's `via` names a skill that cannot apply its type, or a `number` pin is on an output other than `comment` or `label`.                   |
+| `INVALID_WHEN_EXPRESSION`  | An edge's `when` expression does not parse or names an undeclared field or a node that cannot run first (see [Expressions](/edges#expressions)). |
+| `MIXED_EDGE_CONDITIONS`    | A node's conditional out-edges mix expressions and natural language.                                                                             |
 
 ## Safe Outputs Policy
 

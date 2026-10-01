@@ -7,7 +7,8 @@
  *  - Withheld write tools are recorded on the node result (`skippedWrites`).
  *  - The Claude client is told the node is read-only (`readOnly: true`), which
  *    drops external MCP servers and write-capable built-ins (Bash, Write, ...).
- *  - The run still stops at the first conditional edge (deterministic path).
+ *  - The run still stops at the first natural-language conditional edge.
+ *    Expression edges (#461) need no model call, so the run follows them.
  *
  * Non-dry-run behavior is unchanged.
  */

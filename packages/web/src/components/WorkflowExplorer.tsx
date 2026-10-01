@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { WorkflowViewer } from "@sweny-ai/studio/viewer";
 import { triageWorkflow, implementWorkflow } from "@sweny-ai/core/workflows";
-import { builtinSkills } from "@sweny-ai/core/browser";
+import { builtinSkills, whenLabel } from "@sweny-ai/core/browser";
 import "@sweny-ai/studio/style.css";
 import type { Workflow, Node, Skill } from "@sweny-ai/core/browser";
 import {
@@ -249,10 +249,10 @@ function NodeDetail({
           <div style={sectionLabel}>Edges</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             {inEdges.map((edge) => (
-              <EdgeChip key={`in-${edge.from}`} direction="in" otherNode={edge.from} when={edge.when} />
+              <EdgeChip key={`in-${edge.from}`} direction="in" otherNode={edge.from} when={whenLabel(edge.when)} />
             ))}
             {outEdges.map((edge) => (
-              <EdgeChip key={`out-${edge.to}`} direction="out" otherNode={edge.to} when={edge.when} />
+              <EdgeChip key={`out-${edge.to}`} direction="out" otherNode={edge.to} when={whenLabel(edge.when)} />
             ))}
           </div>
         </div>

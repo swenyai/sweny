@@ -154,6 +154,16 @@ describe("triage workflow specifics", () => {
     expect(investigateEdges.every((e) => e.when)).toBe(true);
   });
 
+  it("routes investigate with deterministic expressions (#461)", () => {
+    const expr = (to: string) => triageWorkflow.edges.find((e) => e.from === "investigate" && e.to === to)?.when;
+    expect(expr("create_issue")).toEqual({
+      expr: "investigate.novel_count > 0 && investigate.highest_severity in ['medium', 'high', 'critical']",
+    });
+    expect(expr("skip")).toEqual({
+      expr: "investigate.novel_count == 0 || investigate.highest_severity == 'low'",
+    });
+  });
+
   it("notify is reachable from all branches", () => {
     const toNotify = triageWorkflow.edges.filter((e) => e.to === "notify");
     expect(toNotify.length).toBeGreaterThanOrEqual(3);
@@ -418,8 +428,7 @@ describe("triage implement node — Step 0b open-PR precondition", () => {
   it("has an edge from implement to notify gated on test_status skipped", () => {
     const implementToNotify = triageWorkflow.edges.find((e) => e.from === "implement" && e.to === "notify");
     expect(implementToNotify).toBeDefined();
-    expect(implementToNotify!.when).toBeDefined();
-    expect(implementToNotify!.when!).toMatch(/skipped/);
+    expect(implementToNotify!.when).toEqual({ expr: "implement.test_status == 'skipped'" });
   });
 
   it("the implement→create_pr edge is now conditional, not unconditional", () => {
@@ -429,8 +438,7 @@ describe("triage implement node — Step 0b open-PR precondition", () => {
     // notify based on the implement node's output.
     const implementToCreatePr = triageWorkflow.edges.find((e) => e.from === "implement" && e.to === "create_pr");
     expect(implementToCreatePr).toBeDefined();
-    expect(implementToCreatePr!.when).toBeDefined();
-    expect(implementToCreatePr!.when!).toMatch(/pass|no-framework/);
+    expect(implementToCreatePr!.when).toEqual({ expr: "implement.test_status in ['pass', 'no-framework']" });
   });
 
   it("the judge rubric still covers the skipped case", () => {

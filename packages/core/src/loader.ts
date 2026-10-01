@@ -17,19 +17,37 @@ import { ZodError } from "zod";
 
 import type { Workflow } from "./types.js";
 import { workflowZ, validateWorkflow, preflightLegacyVerify, type WorkflowError } from "./schema.js";
+import {
+  DEFAULT_MIGRATION_CONFIG,
+  migrateWorkflow,
+  migrationWarning,
+  type MigrationConfig,
+  type RawWorkflow,
+} from "./migrations.js";
 
 /** Structural/schema error. `code` is present only for structural errors. */
 export interface LoaderError {
   message: string;
-  code?: WorkflowError["code"] | "IO" | "PARSE" | "SCHEMA";
+  code?: WorkflowError["code"] | "IO" | "PARSE" | "SCHEMA" | "SPEC_VERSION";
   nodeId?: string;
 }
 
-export type LoaderResult = { ok: true; workflow: Workflow } | { ok: false; errors: LoaderError[] };
+export type LoaderResult =
+  | {
+      ok: true;
+      workflow: Workflow;
+      /** Non-fatal notes, e.g. the one-line "migrated in memory" warning. */
+      warnings?: string[];
+    }
+  | { ok: false; errors: LoaderError[] };
 
 export interface LoaderOptions {
   /** Optional set of known skill IDs for UNKNOWN_SKILL validation. */
   knownSkills?: Set<string>;
+  /** Spec version + migration registry. Defaults to the built-in one; tests inject their own. */
+  migration?: MigrationConfig;
+  /** Path shown in the migration warning. Set by loadAndValidateWorkflow. */
+  filePath?: string;
 }
 
 /**
@@ -54,7 +72,7 @@ export function loadAndValidateWorkflow(filePath: string, options: LoaderOptions
     return { ok: false, errors: [{ message: `Could not parse "${filePath}": ${msg}`, code: "PARSE" }] };
   }
 
-  return validateParsed(raw, options);
+  return validateParsed(raw, { ...options, filePath: options.filePath ?? filePath });
 }
 
 /**
@@ -66,6 +84,16 @@ export function validateParsed(raw: unknown, options: LoaderOptions = {}): Loade
     const kind = raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw;
     return { ok: false, errors: [{ message: `Expected a workflow object, got ${kind}`, code: "SCHEMA" }] };
   }
+
+  // Apply spec_version migrations in memory (older versions), or refuse a
+  // version newer than this build supports. Runs first so a migration can
+  // reshape a file before the checks below see it.
+  const migrated = migrateWorkflow(raw as RawWorkflow, options.migration ?? DEFAULT_MIGRATION_CONFIG);
+  if (!migrated.ok) {
+    return { ok: false, errors: [{ message: migrated.message, code: "SPEC_VERSION" }] };
+  }
+  raw = migrated.workflow;
+  const warnings = migrated.applied.length > 0 ? [migrationWarning(migrated.from, migrated.to, options.filePath)] : [];
 
   // Detect legacy `verify:` blocks (renamed to `eval:` in v0.2.0) before the
   // Zod parse. workflowZ is intentionally non-strict at the top level, so a
@@ -104,5 +132,5 @@ export function validateParsed(raw: unknown, options: LoaderOptions = {}): Loade
     };
   }
 
-  return { ok: true, workflow: parsed };
+  return warnings.length > 0 ? { ok: true, workflow: parsed, warnings } : { ok: true, workflow: parsed };
 }
