@@ -446,6 +446,8 @@ export interface ApplySafeOutputsOptions {
   cwd?: string;
   /** The PR head push, bound to `cwd` (#473). */
   pushBranch?: BranchPusher;
+  /** The operator's GITHUB_API_URL for the github skill (GHES). */
+  githubApiUrl?: string;
   state: WriteStageState;
   logger: Logger;
   /** The run input, for `number: { input }` pins. */
@@ -701,6 +703,7 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
         logger: o.logger,
         ...(o.cwd ? { cwd: o.cwd } : {}),
         ...(o.pushBranch ? { pushBranch: o.pushBranch } : {}),
+        ...(o.githubApiUrl ? { githubApiUrl: o.githubApiUrl } : {}),
       });
       const ref = refOf(output);
       const url = urlOf(output);

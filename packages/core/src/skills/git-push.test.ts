@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -15,18 +16,20 @@ import * as path from "node:path";
 import {
   branchName,
   hardenedGitEnv,
+  isPlainRepoConfig,
   isSafeBranch,
   isSafeRepo,
   pushAuthConfig,
+  pushTransportConfig,
   pushHeadBranch,
   repoFromRemote,
   resolveTrustedGit,
   trustedPathDirs,
   type GitRunner,
 } from "./git-push.js";
-import { github } from "./github.js";
+import { github, githubApiBase } from "./github.js";
 import { loadDotenv } from "../cli/config-file.js";
-import { startupEnv, startupTmpdir, unmarkWorkspaceEnv } from "../startup-env.js";
+import { markWorkspaceEnv, startupEnv, startupTmpdir, unmarkWorkspaceEnv } from "../startup-env.js";
 
 // #473: with `persist-credentials: false` the checkout holds no token, so
 // sweny pushes the PR head itself, from its own process, with the github
@@ -202,6 +205,8 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     expect(push.env.GIT_CONFIG_NOSYSTEM).toBe("1");
     expect(push.env.GIT_CONFIG_GLOBAL).toMatch(/null|nul/i);
     expect(gitConfig(push.env)).toEqual({
+      [`http.${PUSH}.proxy`]: [""],
+      [`http.${PUSH}.sslVerify`]: ["true"],
       "http.https://github.com/.extraheader": ["", `AUTHORIZATION: basic ${BASIC}`],
     });
     // Only the push carries the token (as the header); reads in the checkout never do.
@@ -294,7 +299,11 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     expect((await pushHeadBranch({ ...opts(f), env, git: g.git })).pushed).toBe(true);
     const [push] = g.pushes();
     expect(push.args).toContain(dest);
-    expect(Object.keys(gitConfig(push.env))).toEqual(["http.https://ghe.example.com/.extraheader"]);
+    expect(Object.keys(gitConfig(push.env))).toEqual([
+      `http.${dest}.proxy`,
+      `http.${dest}.sslVerify`,
+      "http.https://ghe.example.com/.extraheader",
+    ]);
   });
 
   it.each([
@@ -386,17 +395,49 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     expect(r.reason).not.toContain(TOKEN);
   }, 60_000);
 
-  it("a TMPDIR the workspace .env introduced does not place the private push repo", async () => {
+  /**
+   * Put `vars` in process.env as if a workspace file had set them (past the
+   * .env denylist, the second layer under test). Only keys unset at startup.
+   */
+  function introduce(vars: Record<string, string>): { fresh: string[]; undo: () => void } {
+    const fresh = Object.keys(vars).filter((k) => startupEnv()[k] === undefined && process.env[k] === undefined);
+    for (const k of fresh) {
+      process.env[k] = vars[k];
+      markWorkspaceEnv(k);
+    }
+    return {
+      fresh,
+      undo: () => {
+        for (const k of fresh) {
+          delete process.env[k];
+          unmarkWorkspaceEnv(k);
+        }
+      },
+    };
+  }
+
+  it("a workspace .env cannot set TMPDIR, proxies, CA vars or GITHUB_SERVER_URL", () => {
+    const f = make();
+    const keys = ["TMPDIR", "HTTPS_PROXY", "https_proxy", "GIT_SSL_CAINFO", "SSL_CERT_FILE", "GITHUB_SERVER_URL"];
+    const fresh = keys.filter((k) => process.env[k] === undefined);
+    const dotenvDir = path.join(f.root, "dotenv");
+    mkdirSync(dotenvDir);
+    writeFileSync(path.join(dotenvDir, ".env"), keys.map((k) => `${k}=/evil`).join("\n"));
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      loadDotenv(dotenvDir);
+    } finally {
+      err.mockRestore();
+    }
+    for (const k of fresh) expect(process.env[k], k).toBeUndefined();
+  });
+
+  it("a workspace-introduced TMPDIR does not place the private push repo", async () => {
     const f = make();
     const evilTmp = path.join(f.work, "evil-tmp");
     mkdirSync(evilTmp);
-    const dotenvDir = path.join(f.root, "dotenv-tmp");
-    mkdirSync(dotenvDir);
-    writeFileSync(path.join(dotenvDir, ".env"), `TMPDIR=${evilTmp}\n`);
-    const fresh = process.env.TMPDIR === undefined;
-    loadDotenv(dotenvDir);
+    const w = introduce({ TMPDIR: evilTmp });
     try {
-      if (fresh) expect(process.env.TMPDIR).toBe(evilTmp);
       const g = realGit({ [PUSH]: `file://${f.remote}` });
       expect(await pushHeadBranch({ ...opts(f), git: g.git })).toEqual({ pushed: true, attempted: true });
       const [push] = g.pushes();
@@ -404,51 +445,65 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
       expect(path.dirname(push.cwd)).toBe(startupTmpdir());
       expect(readdirSync(evilTmp)).toEqual([]);
     } finally {
-      if (fresh) {
-        delete process.env.TMPDIR;
-        unmarkWorkspaceEnv("TMPDIR");
-      }
+      w.undo();
     }
   });
 
-  it("transport settings and the server URL a workspace .env introduced are not used", async () => {
+  it("workspace-introduced transport settings and server URL are not used", async () => {
     const f = make();
-    const introduced = ["HTTPS_PROXY", "https_proxy", "GIT_SSL_CAINFO", "SSL_CERT_FILE", "GITHUB_SERVER_URL"];
-    const fresh = introduced.filter((k) => startupEnv()[k] === undefined && process.env[k] === undefined);
-    const dotenvDir = path.join(f.root, "dotenv");
-    mkdirSync(dotenvDir);
-    writeFileSync(
-      path.join(dotenvDir, ".env"),
-      [
-        "HTTPS_PROXY=http://evil-proxy.invalid:3128",
-        "https_proxy=http://evil-proxy.invalid:3128",
-        "GIT_SSL_CAINFO=/workspace/evil-ca.pem",
-        "SSL_CERT_FILE=/workspace/evil-ca.pem",
-        "GITHUB_SERVER_URL=https://evil.invalid",
-      ].join("\n"),
-    );
-    loadDotenv(dotenvDir);
+    const w = introduce({
+      HTTPS_PROXY: "http://evil-proxy.invalid:3128",
+      https_proxy: "http://evil-proxy.invalid:3128",
+      GIT_SSL_CAINFO: "/workspace/evil-ca.pem",
+      SSL_CERT_FILE: "/workspace/evil-ca.pem",
+      GITHUB_SERVER_URL: "https://evil.invalid",
+    });
     try {
-      for (const k of fresh) expect(process.env[k], k).toBeDefined();
       for (const env of [process.env, { ...process.env }]) {
         const g = realGit({ [PUSH]: `file://${f.remote}` });
         const r = await pushHeadBranch({ ...opts(f), env, git: g.git });
         // GITHUB_SERVER_URL=evil.invalid was ignored: origin github.com still matches.
-        if (fresh.includes("GITHUB_SERVER_URL")) expect(r).toEqual({ pushed: true, attempted: true });
+        if (w.fresh.includes("GITHUB_SERVER_URL")) expect(r).toEqual({ pushed: true, attempted: true });
         expect(g.calls.length).toBeGreaterThan(0);
         for (const c of g.calls) {
-          for (const k of fresh) expect(c.env[k], k).toBe(startupEnv()[k]);
+          for (const k of w.fresh) expect(c.env[k], k).toBe(startupEnv()[k]);
           expect(JSON.stringify(c.env)).not.toContain("evil");
         }
-        if (fresh.includes("GITHUB_SERVER_URL")) expect(g.pushes()[0].args).toContain(PUSH);
+        if (w.fresh.includes("GITHUB_SERVER_URL")) expect(g.pushes()[0].args).toContain(PUSH);
         run(["update-ref", "-d", "refs/heads/off-1-fix"], f.remote, f.env);
       }
     } finally {
-      for (const k of fresh) {
-        delete process.env[k];
-        unmarkWorkspaceEnv(k);
-      }
+      w.undo();
     }
+  });
+
+  it("a private push repo edited between setup and push (insteadOf to a decoy) is refused before the token is used", async () => {
+    const f = make();
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
+    // A background process the agent left running edits push.git/config after update-ref.
+    const tamper: GitRunner = async (args, o) => {
+      const r = await g.git(args, o);
+      const gitDir = args.find((a) => a.startsWith("--git-dir="))?.slice("--git-dir=".length);
+      if (gitDir && args.includes("update-ref")) {
+        appendFileSync(path.join(gitDir, "config"), `[url "file://${f.decoy}"]\n\tinsteadOf = ${PUSH}\n`);
+      }
+      return r;
+    };
+    const r = await pushHeadBranch({ ...opts(f), git: tamper });
+    expect(r).toEqual({ pushed: false, attempted: false, reason: "the private push repo changed before the push" });
+    expect(g.pushes()).toEqual([]);
+    expect(f.refs(f.remote)).toBe("");
+    expect(f.refs(f.decoy)).toBe("");
+  });
+
+  it("the push carries transport config for its exact URL: no proxy, TLS verified", async () => {
+    const f = make();
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
+    expect(await pushHeadBranch({ ...opts(f), git: g.git })).toEqual({ pushed: true, attempted: true });
+    const cfg = gitConfig(g.pushes()[0].env);
+    expect(cfg[`http.${PUSH}.proxy`]).toEqual([""]);
+    expect(cfg[`http.${PUSH}.sslVerify`]).toEqual(["true"]);
+    expect(cfg).not.toHaveProperty(`http.${PUSH}.sslCAInfo`);
   });
 
   it("skips when there is no origin", async () => {
@@ -495,6 +550,39 @@ describe("helpers", () => {
     for (const bad of ["-x", "a..b", "a b", "a;b", "/a", "a/", "a//b", "x.lock", "$(id)"]) {
       expect(isSafeBranch(bad), bad).toBe(false);
     }
+  });
+
+  it("isPlainRepoConfig accepts init's config and nothing that steers a push", () => {
+    expect(isPlainRepoConfig("[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = true\n")).toBe(true);
+    expect(
+      isPlainRepoConfig("[core]\n\tbare = true\n\tignorecase = true\n[extensions]\n\tobjectformat = sha256\n"),
+    ).toBe(true);
+    for (const bad of [
+      '[url "file:///decoy"]\n\tinsteadOf = https://github.com/\n',
+      "[http]\n\tproxy = http://evil:1\n",
+      "[http]\n\tsslVerify = false\n",
+      "[include]\n\tpath = /tmp/x\n",
+      "[core]\n\tsshCommand = evil\n",
+      "[core]\n\tbare = true ; [http] x\n",
+    ]) {
+      expect(isPlainRepoConfig(bad), bad).toBe(false);
+    }
+  });
+
+  it("pushTransportConfig takes proxy and CA only from the env it is given", () => {
+    const dest = "https://github.com/o/r.git";
+    expect(pushTransportConfig(dest, {})).toEqual([
+      [`http.${dest}.proxy`, ""],
+      [`http.${dest}.sslVerify`, "true"],
+    ]);
+    expect(
+      pushTransportConfig(dest, { HTTPS_PROXY: "http://proxy:3128", GIT_SSL_CAINFO: "/ca.pem", GIT_SSL_CAPATH: "/ca" }),
+    ).toEqual([
+      [`http.${dest}.proxy`, "http://proxy:3128"],
+      [`http.${dest}.sslVerify`, "true"],
+      [`http.${dest}.sslCAInfo`, "/ca.pem"],
+      [`http.${dest}.sslCAPath`, "/ca"],
+    ]);
   });
 
   it("isSafeRepo", () => {
@@ -628,6 +716,53 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
     });
     expect(order.slice(0, 2)).toEqual(["repo", "push"]);
     expect(order).toContain("api");
+  });
+
+  it("GHES: the default-branch lookup and the PR request go to ctx.githubApiUrl", async () => {
+    const urls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      urls.push(String(url));
+      return !init?.method
+        ? new Response(JSON.stringify({ default_branch: "trunk" }), { status: 200 })
+        : new Response(JSON.stringify({ number: 7 }), { status: 201 });
+    });
+    const pusher = vi.fn(async (_o: { defaultBranch?: string }) => ({ pushed: true, attempted: true }));
+    const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await createPr.handler(
+      { repo: "o/r", title: "t", head: "x-1-fix" },
+      {
+        config: { GITHUB_TOKEN: TOKEN },
+        logger,
+        pushBranch: pusher,
+        githubApiUrl: "https://ghe.example.com/api/v3/",
+      },
+    );
+    expect(urls).toEqual([
+      "https://ghe.example.com/api/v3/repos/o/r",
+      "https://ghe.example.com/api/v3/repos/o/r/pulls",
+    ]);
+    expect(pusher.mock.calls[0][0].defaultBranch).toBe("trunk");
+  });
+
+  it("without githubApiUrl the API is api.github.com", async () => {
+    const urls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify({ number: 7 }), { status: 201 });
+    });
+    const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await createPr.handler({ repo: "o/r", title: "t", head: "x-1-fix" }, { config: { GITHUB_TOKEN: TOKEN }, logger });
+    expect(urls[0]).toBe("https://api.github.com/repos/o/r/pulls");
+  });
+
+  it("githubApiBase accepts only a plain https URL", () => {
+    expect(githubApiBase(undefined)).toBe("https://api.github.com");
+    expect(githubApiBase("https://ghe.example.com/api/v3")).toBe("https://ghe.example.com/api/v3");
+    for (const bad of ["http://ghe.example.com/api/v3", "https://u:p@ghe.example.com", "https://x/?a=1", "nope"]) {
+      expect(() => githubApiBase(bad), bad).toThrow(/GITHUB_API_URL/);
+    }
   });
 
   it("a failed default-branch lookup hands the pusher no default branch (it then refuses)", async () => {

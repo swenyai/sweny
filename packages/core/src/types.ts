@@ -43,6 +43,11 @@ export interface ToolContext {
    * where `github_create_pr` only calls the API.
    */
   pushBranch?: BranchPusher;
+  /**
+   * The operator's GITHUB_API_URL (GHES), read through the startup env
+   * snapshot by the Node executor. Absent means https://api.github.com.
+   */
+  githubApiUrl?: string;
 }
 
 /** The sweny-side head-branch push behind `github_create_pr` (#473). Never throws. */

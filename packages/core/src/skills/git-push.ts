@@ -28,6 +28,20 @@
  * path that lies outside the workspace, the temp dir and any directory this
  * user can write (see {@link resolveTrustedGit}).
  *
+ * The private repo lives in the temp dir, which this user (and so the agent)
+ * can write. A process the agent left running could edit its config between
+ * `init` and `push` (an `insteadOf`, a proxy, `sslVerify=false`). Two layers:
+ * the push carries command-scope config for its exact URL (proxy from the
+ * trusted env or none, `sslVerify=true`, CA only from the trusted env), which
+ * beats repo-local config of the same URL; and the repo's config, alternates,
+ * top-level entries and hooks dir are fingerprinted after setup and compared
+ * right before the push, which is refused on any change. git has no switch to
+ * skip `$GIT_DIR/config`, so a byte check is the idiomatic guard. Residual
+ * risk: a change landing in the milliseconds between that check and git's own
+ * config read. The harnesses stop the agent's process (Codex its whole process
+ * group) when a node ends, but a deliberately detached process (`setsid`)
+ * escapes any group kill; only the sandbox's own process boundary ends it.
+ *
  * Guard rails: only a local branch that exists, only when origin is the PR's
  * own repo, never force, never the base branch or the repo's default branch
  * (from the GitHub API, not the checkout's `origin/HEAD`).
@@ -42,6 +56,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -237,20 +252,46 @@ export function isSafeRepo(repo: string): boolean {
   );
 }
 
-/** The command-scope git config that authenticates one push to `server` with `token`. */
-export function pushAuthConfig(server: string, token: string, env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+/** `env` plus command-scope config entries (GIT_CONFIG_COUNT/KEY/VALUE), appended after any already there. */
+function withCommandConfig(env: NodeJS.ProcessEnv, entries: Array<[string, string]>): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env };
   const base = Number.parseInt(out.GIT_CONFIG_COUNT ?? "0", 10);
   let n = Number.isFinite(base) && base > 0 ? base : 0;
-  const key = `http.${server.replace(/\/+$/, "")}/.extraheader`;
-  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
-  // An empty value resets the list, so no other header is sent with it.
-  for (const value of ["", `AUTHORIZATION: basic ${basic}`]) {
+  for (const [key, value] of entries) {
     out[`GIT_CONFIG_KEY_${n}`] = key;
     out[`GIT_CONFIG_VALUE_${n}`] = value;
     n++;
   }
   out.GIT_CONFIG_COUNT = String(n);
+  return out;
+}
+
+/** The command-scope git config that authenticates one push to `server` with `token`. */
+export function pushAuthConfig(server: string, token: string, env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const key = `http.${server.replace(/\/+$/, "")}/.extraheader`;
+  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
+  // An empty value resets the list, so no other header is sent with it.
+  return withCommandConfig(env, [
+    [key, ""],
+    [key, `AUTHORIZATION: basic ${basic}`],
+  ]);
+}
+
+/**
+ * Command-scope transport config for the push to `destination`, keyed to that
+ * exact URL so it beats repo-local `http.*` and `http.<url>.*` entries: the
+ * proxy from the trusted env or none (an empty `http.proxy` disables proxying,
+ * env included), TLS verification on, and a CA bundle only from the trusted env.
+ */
+export function pushTransportConfig(destination: string, trusted: NodeJS.ProcessEnv): Array<[string, string]> {
+  const k = (name: string) => `http.${destination}.${name}`;
+  const proxy = trusted.HTTPS_PROXY ?? trusted.https_proxy ?? trusted.ALL_PROXY ?? trusted.all_proxy ?? "";
+  const out: Array<[string, string]> = [
+    [k("proxy"), proxy],
+    [k("sslVerify"), "true"],
+  ];
+  if (trusted.GIT_SSL_CAINFO) out.push([k("sslCAInfo"), trusted.GIT_SSL_CAINFO]);
+  if (trusted.GIT_SSL_CAPATH) out.push([k("sslCAPath"), trusted.GIT_SSL_CAPATH]);
   return out;
 }
 
@@ -280,6 +321,41 @@ export function hardenedGitEnv(env: NodeJS.ProcessEnv, trustedPath?: string): No
   out.GIT_TERMINAL_PROMPT = "0";
   return out;
 }
+
+/**
+ * True when a fresh `git init --bare` config holds only repo-format keys
+ * (`[core]` format/fs flags, `[extensions]` object format and ref storage).
+ */
+export function isPlainRepoConfig(text: string): boolean {
+  let section = "";
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#") || line.startsWith(";")) continue;
+    const head = /^\[([A-Za-z0-9.-]+)\]$/.exec(line);
+    if (head) {
+      section = head[1].toLowerCase();
+      if (section !== "core" && section !== "extensions") return false;
+      continue;
+    }
+    const kv = /^([A-Za-z][A-Za-z0-9-]*)\s*=\s*[A-Za-z0-9._-]*$/.exec(line);
+    if (!kv) return false;
+    const key = `${section}.${kv[1].toLowerCase()}`;
+    if (!PLAIN_REPO_KEYS.has(key)) return false;
+  }
+  return true;
+}
+
+const PLAIN_REPO_KEYS = new Set([
+  "core.repositoryformatversion",
+  "core.filemode",
+  "core.bare",
+  "core.ignorecase",
+  "core.precomposeunicode",
+  "core.symlinks",
+  "core.logallrefupdates",
+  "extensions.objectformat",
+  "extensions.refstorage",
+]);
 
 /** Command-line config (highest precedence) for every sweny-side git call. */
 function hardenedArgs(hooksDir: string): string[] {
@@ -392,6 +468,10 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
       git([...hard, `--git-dir=${repoDir}`, ...args], { cwd: tmp!, env: { ...env, ...extraEnv } });
     const init = await git([...hard, "init", "--quiet", "--bare", repoDir], { cwd: tmp, env });
     if (init.code !== 0) return { pushed: false, attempted: false, reason: "cannot create the push repo" };
+    // The config `init` wrote may only hold plain repo-format keys: no url, http, include or remote.
+    if (!isPlainRepoConfig(readFileSync(path.join(repoDir, "config"), "utf8"))) {
+      return { pushed: false, attempted: false, reason: "the private push repo changed before the push" };
+    }
     writeFileSync(path.join(repoDir, "objects", "info", "alternates"), `${objects}\n`);
     // A shallow checkout (actions/checkout's default): copy its boundary list. Only a
     // plain, bounded file; a link or FIFO the agent planted is not read.
@@ -399,12 +479,25 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
     if (shallowStat?.isFile() && shallowStat.size <= 1 << 20) {
       writeFileSync(path.join(repoDir, "shallow"), readFileSync(shallow));
     }
+    // What the push reads from the private repo, fixed here and re-checked right before the token is used.
+    const fingerprint = () =>
+      JSON.stringify([
+        readdirSync(repoDir).sort(),
+        readFileSync(path.join(repoDir, "config"), "utf8"),
+        readFileSync(path.join(repoDir, "objects", "info", "alternates"), "utf8"),
+        readdirSync(hooks).sort(),
+      ]);
+    const staged = fingerprint();
     const ref = await own(["update-ref", `refs/heads/${head}`, sha]);
     if (ref.code !== 0) return { pushed: false, attempted: false, reason: `cannot stage ${head} for the push` };
 
+    const pushEnv = pushAuthConfig(serverBase, token, withCommandConfig({}, pushTransportConfig(destination, env)));
+    if (fingerprint() !== staged) {
+      return { pushed: false, attempted: false, reason: "the private push repo changed before the push" };
+    }
     const r = await own(
       ["push", "--no-verify", "--porcelain", destination, `refs/heads/${head}:refs/heads/${head}`],
-      pushAuthConfig(serverBase, token, {}),
+      pushEnv,
     );
     if (r.code !== 0) {
       const why = (r.stderr || r.stdout).trim().split("\n").at(-1) ?? "";

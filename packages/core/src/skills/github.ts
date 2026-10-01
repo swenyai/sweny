@@ -23,8 +23,27 @@ class GitHubApiError extends Error {
   }
 }
 
+/**
+ * The REST base: `ctx.githubApiUrl` (the operator's GITHUB_API_URL, for GHES)
+ * or https://api.github.com. Only a plain https URL: no credentials, query or
+ * fragment, since the token goes to it.
+ */
+export function githubApiBase(apiUrl: string | undefined): string {
+  if (!apiUrl) return "https://api.github.com";
+  let u: URL;
+  try {
+    u = new URL(apiUrl);
+  } catch {
+    throw new Error(`[GitHub] GITHUB_API_URL is not a URL`);
+  }
+  if (u.protocol !== "https:" || u.username || u.password || u.search || u.hash) {
+    throw new Error(`[GitHub] GITHUB_API_URL is not a plain https URL`);
+  }
+  return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
+}
+
 async function gh(path: string, ctx: ToolContext, init?: RequestInit): Promise<unknown> {
-  const res = await fetch(`https://api.github.com${path}`, {
+  const res = await fetch(`${githubApiBase(ctx.githubApiUrl)}${path}`, {
     ...init,
     headers: {
       Authorization: `token ${ctx.config.GITHUB_TOKEN}`,

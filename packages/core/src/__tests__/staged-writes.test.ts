@@ -142,6 +142,19 @@ describe("tool handlers run against the run's checkout (#473)", () => {
       expect(ctx?.cwd).toBe(dir);
       expect(ctx?.staged).toBe(false);
       expect(typeof ctx?.pushBranch).toBe("function");
+
+      // GHES: the operator's GITHUB_API_URL reaches the github skill's API calls.
+      await execute(
+        wf(["probe"]),
+        {},
+        {
+          skills: createSkillMap([probe]),
+          claude: agentCalling("probe_write", {}).claude,
+          cwd: dir,
+          env: { PATH: process.env.PATH, GITHUB_API_URL: "https://ghe.example.com/api/v3" },
+        },
+      );
+      expect(ctx?.githubApiUrl).toBe("https://ghe.example.com/api/v3");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

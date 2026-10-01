@@ -52,6 +52,7 @@ import { grantedAgentEnv, resolveAgentAccess } from "./agent-env.js";
 import { gitCredentialWarning, scanGitCredentials } from "./git-credentials.js";
 // #473: the sweny-side branch push in `github_create_pr` (Node only; skills/ stays browser-safe).
 import { bindBranchPusher } from "./skills/git-push.js";
+import { trustedEnvValue } from "./startup-env.js";
 import { fenceUntrusted } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
 import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
@@ -303,6 +304,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   // #473: the PR head push runs in this run's checkout, never process.cwd() of
   // an embedding process. Tools get it through ToolContext.
   const pushBranch = bindBranchPusher(resolveCwd, runEnv);
+  // GHES: the REST base for the github skill, never a value the workspace .env introduced.
+  const githubApiUrl = trustedEnvValue(runEnv, "GITHUB_API_URL") || undefined;
   const resolvedSources = await resolveSources(sourceMap, {
     cwd: resolveCwd,
     env: options.env ?? process.env,
@@ -540,7 +543,14 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       handler: async (toolInput: any) => {
         safeObserve(observer, { type: "tool:call", node: currentId!, tool: t.name, input: toolInput }, logger);
         guardStagedWrite(t, stageOutputs);
-        const toolCtx: ToolContext = { config, logger, cwd: resolveCwd, staged: stageOutputs, pushBranch };
+        const toolCtx: ToolContext = {
+          config,
+          logger,
+          cwd: resolveCwd,
+          staged: stageOutputs,
+          pushBranch,
+          ...(githubApiUrl ? { githubApiUrl } : {}),
+        };
         const output = await t.handler(toolInput, toolCtx);
         safeObserve(observer, { type: "tool:result", node: currentId!, tool: t.name, output }, logger);
         return output;
@@ -915,6 +925,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
           staged: stageOutputs,
           cwd: resolveCwd,
           pushBranch,
+          ...(githubApiUrl ? { githubApiUrl } : {}),
           state: writeState,
           logger,
           input: runInput,
