@@ -57,6 +57,54 @@ async function gh(path: string, ctx: ToolContext, init?: RequestInit): Promise<u
   return res.json();
 }
 
+/**
+ * Whether sweny may push the PR's head branch, from the API (#498). The agent
+ * names head and base, so head could be an existing integration branch
+ * ("release") that is neither base nor default. A head that does not exist
+ * remotely is pushed with an empty lease (it must still not exist). One that
+ * exists is pushed only when it is unprotected and already has an open PR from
+ * this repo into `base`, leased on the sha the API returned. Any API failure
+ * means no push.
+ */
+export async function headPushLease(
+  repo: string,
+  head: string,
+  base: string,
+  ctx: ToolContext,
+): Promise<{ remoteSha: string } | { skip: string }> {
+  const branch = head.replace(/^refs\/heads\//, "");
+  const target = base.replace(/^refs\/heads\//, "");
+  const seg = branch.split("/").map(encodeURIComponent).join("/");
+  let info: { protected?: unknown; commit?: { sha?: unknown } };
+  try {
+    info = (await gh(`/repos/${repo}/branches/${seg}`, ctx)) as typeof info;
+  } catch (err) {
+    if (err instanceof GitHubApiError && err.status === 404) return { remoteSha: "" };
+    return { skip: `cannot check head ${branch} on ${repo}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const sha = info?.commit?.sha;
+  if (typeof sha !== "string" || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(sha)) {
+    return { skip: `cannot check head ${branch} on ${repo}: no branch sha in the API answer` };
+  }
+  if (info.protected !== false) return { skip: `head ${branch} exists on ${repo} and is protected` };
+  const owner = repo.split("/")[0];
+  let open: unknown;
+  try {
+    open = await gh(
+      `/repos/${repo}/pulls?head=${encodeURIComponent(`${owner}:${branch}`)}&base=${encodeURIComponent(target)}&state=open&per_page=1`,
+      ctx,
+    );
+  } catch (err) {
+    return {
+      skip: `cannot check open PRs for ${branch} on ${repo}: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!Array.isArray(open) || open.length === 0) {
+    return { skip: `head ${branch} already exists on ${repo} with no open PR into ${target}` };
+  }
+  return { remoteSha: sha };
+}
+
 function isAlreadyExistsError(err: unknown): err is GitHubApiError {
   if (!(err instanceof GitHubApiError) || err.status !== 422) return false;
   return /pull request already exists/i.test(err.body);
@@ -228,14 +276,20 @@ export const github: Skill = {
           } catch {
             // The pusher refuses without it; the PR request below reports the API error.
           }
-          const push = await ctx.pushBranch({
-            repo: input.repo,
-            head: input.head,
-            base: input.base ?? "main",
-            ...(defaultBranch ? { defaultBranch } : {}),
-            token: ctx.config.GITHUB_TOKEN,
-          });
-          if (push.pushed) ctx.logger?.info?.(`  github_create_pr: pushed ${input.head} to ${input.repo}`);
+          const lease = await headPushLease(input.repo, input.head, input.base ?? "main", ctx);
+          const push =
+            "skip" in lease
+              ? { pushed: false, attempted: false, reason: lease.skip }
+              : await ctx.pushBranch({
+                  repo: input.repo,
+                  head: input.head,
+                  base: input.base ?? "main",
+                  ...(defaultBranch ? { defaultBranch } : {}),
+                  remoteSha: lease.remoteSha,
+                  token: ctx.config.GITHUB_TOKEN,
+                });
+          if ("skip" in lease) ctx.logger?.warn?.(`  github_create_pr: not pushing: ${lease.skip}`);
+          else if (push.pushed) ctx.logger?.info?.(`  github_create_pr: pushed ${input.head} to ${input.repo}`);
           else if (push.attempted) ctx.logger?.warn?.(`  github_create_pr: ${push.reason}; requesting the PR anyway`);
           else ctx.logger?.debug?.(`  github_create_pr: no sweny-side push (${push.reason})`);
         }

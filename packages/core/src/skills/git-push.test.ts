@@ -117,6 +117,7 @@ const opts = (f: ReturnType<typeof fixture>) => ({
   head: "off-1-fix",
   base: "main",
   defaultBranch: "main",
+  remoteSha: "",
   token: TOKEN,
   cwd: f.work,
   env: f.env,
@@ -197,6 +198,8 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     expect(push.args).toContain(PUSH);
     expect(push.args).toContain("--no-verify");
     expect(push.args.at(-1)).toBe("refs/heads/off-1-fix:refs/heads/off-1-fix");
+    // A new branch: the lease says it must still not exist.
+    expect(push.args).toContain("--force-with-lease=refs/heads/off-1-fix:");
     expect(push.args.join(" ")).not.toContain(TOKEN);
     expect(push.args.join(" ")).not.toContain(BASIC);
     expect(push.args.some((a) => a === "--force" || a.startsWith("+") || a === "-f")).toBe(false);
@@ -506,6 +509,145 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     expect(cfg).not.toHaveProperty(`http.${PUSH}.sslCAInfo`);
   });
 
+  it("no remote state from the API: nothing is pushed", async () => {
+    const f = make();
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
+    const r = await pushHeadBranch({ ...opts(f), remoteSha: undefined, git: g.git });
+    expect(r).toMatchObject({ pushed: false, attempted: false, reason: "the remote state of off-1-fix is unknown" });
+    expect(g.calls).toEqual([]);
+  });
+
+  it("the lease: a head created on the remote after the check is not overwritten", async () => {
+    const f = make();
+    const main = f.git(["rev-parse", "main"]).stdout.trim();
+    expect(f.git(["push", "-q", `file://${f.remote}`, "main:refs/heads/off-1-fix"]).code).toBe(0);
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
+    const r = await pushHeadBranch({ ...opts(f), remoteSha: "", git: g.git });
+    expect(r).toMatchObject({ pushed: false, attempted: true });
+    expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${main}`);
+  });
+
+  it("an existing PR head is fast-forwarded under a lease on the API's sha", async () => {
+    const f = make();
+    const main = f.git(["rev-parse", "main"]).stdout.trim();
+    expect(f.git(["push", "-q", `file://${f.remote}`, "main:refs/heads/off-1-fix"]).code).toBe(0);
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
+    const r = await pushHeadBranch({ ...opts(f), remoteSha: main, git: g.git });
+    expect(r).toEqual({ pushed: true, attempted: true });
+    expect(g.pushes()[0].args).toContain(`--force-with-lease=refs/heads/off-1-fix:${main}`);
+    expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${f.sha}`);
+  });
+
+  it("an existing remote head the local branch does not descend from is not replaced", async () => {
+    const f = make();
+    const id = ["-c", "user.name=t", "-c", "user.email=t@t"];
+    expect(f.git(["checkout", "-q", "-b", "other", "main"]).code).toBe(0);
+    expect(f.git([...id, "commit", "-q", "--allow-empty", "-m", "diverged"]).code).toBe(0);
+    const other = f.git(["rev-parse", "HEAD"]).stdout.trim();
+    expect(f.git(["push", "-q", `file://${f.remote}`, "other:refs/heads/off-1-fix"]).code).toBe(0);
+    const g = realGit({ [PUSH]: `file://${f.remote}` });
+    const r = await pushHeadBranch({ ...opts(f), remoteSha: other, git: g.git });
+    expect(r).toMatchObject({ pushed: false, attempted: false });
+    expect(r.reason).toContain("not a fast-forward");
+    expect(g.pushes()).toEqual([]);
+    expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${other}`);
+  });
+
+  describe("github_create_pr decides from the API whether the head may be pushed (real git)", () => {
+    type Api = { branch?: number | { protected: boolean; sha: string }; openPrs?: unknown[] };
+    /** Mock the GitHub API for Owner/Repo; returns the URLs it was asked for. */
+    function api(o: Api): string[] {
+      const urls: string[] = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+        const u = String(url);
+        urls.push(u);
+        const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+        if (init?.method) return json({ number: 7 }, 201);
+        if (u.endsWith("/repos/Owner/Repo")) return json({ default_branch: "main" });
+        if (u.includes("/repos/Owner/Repo/branches/")) {
+          if (typeof o.branch === "number") return new Response("err", { status: o.branch });
+          if (!o.branch) return new Response("Branch not found", { status: 404 });
+          return json({ protected: o.branch.protected, commit: { sha: o.branch.sha } });
+        }
+        if (u.includes("/repos/Owner/Repo/pulls?")) return json(o.openPrs ?? []);
+        return json({});
+      });
+      return urls;
+    }
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    async function createPrWith(f: ReturnType<typeof fixture>, head: string, g: ReturnType<typeof realGit>) {
+      const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
+      const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+      await createPr.handler(
+        { repo: "Owner/Repo", title: "t", head, base: "main" },
+        {
+          config: { GITHUB_TOKEN: TOKEN },
+          logger,
+          pushBranch: (o) => pushHeadBranch({ ...o, cwd: f.work, env: f.env, git: g.git }),
+        },
+      );
+      return logger;
+    }
+
+    it("falsifier: head names an existing integration branch (release), base main: not pushed", async () => {
+      const f = make();
+      const main = f.git(["rev-parse", "main"]).stdout.trim();
+      expect(f.git(["push", "-q", `file://${f.remote}`, "main:refs/heads/release"]).code).toBe(0);
+      expect(f.git(["branch", "release", "off-1-fix"]).code).toBe(0);
+      api({ branch: { protected: false, sha: main }, openPrs: [] });
+      const g = realGit({ [PUSH]: `file://${f.remote}` });
+      const logger = await createPrWith(f, "release", g);
+      expect(g.pushes()).toEqual([]);
+      expect(f.refs(f.remote)).toBe(`refs/heads/release ${main}`);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("no open PR into main"));
+    });
+
+    it("a head that does not exist remotely is pushed", async () => {
+      const f = make();
+      api({});
+      const g = realGit({ [PUSH]: `file://${f.remote}` });
+      await createPrWith(f, "off-1-fix", g);
+      expect(g.pushes()).toHaveLength(1);
+      expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${f.sha}`);
+    });
+
+    it("an unprotected head with an open PR into the base is pushed", async () => {
+      const f = make();
+      const main = f.git(["rev-parse", "main"]).stdout.trim();
+      expect(f.git(["push", "-q", `file://${f.remote}`, "main:refs/heads/off-1-fix"]).code).toBe(0);
+      const urls = api({ branch: { protected: false, sha: main }, openPrs: [{ number: 3 }] });
+      const g = realGit({ [PUSH]: `file://${f.remote}` });
+      await createPrWith(f, "off-1-fix", g);
+      expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${f.sha}`);
+      expect(urls.some((u) => u.includes("pulls?head=Owner%3Aoff-1-fix&base=main&state=open"))).toBe(true);
+    });
+
+    it("a protected existing head is not pushed", async () => {
+      const f = make();
+      const main = f.git(["rev-parse", "main"]).stdout.trim();
+      expect(f.git(["push", "-q", `file://${f.remote}`, "main:refs/heads/off-1-fix"]).code).toBe(0);
+      api({ branch: { protected: true, sha: main }, openPrs: [{ number: 3 }] });
+      const g = realGit({ [PUSH]: `file://${f.remote}` });
+      const logger = await createPrWith(f, "off-1-fix", g);
+      expect(g.pushes()).toEqual([]);
+      expect(f.refs(f.remote)).toBe(`refs/heads/off-1-fix ${main}`);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("is protected"));
+    });
+
+    it("an API error on the branch check means no push", async () => {
+      const f = make();
+      api({ branch: 500 });
+      const g = realGit({ [PUSH]: `file://${f.remote}` });
+      const logger = await createPrWith(f, "off-1-fix", g);
+      expect(g.pushes()).toEqual([]);
+      expect(f.refs(f.remote)).toBe("");
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("cannot check head off-1-fix"));
+    });
+  });
+
   it("skips when there is no origin", async () => {
     const f = make();
     expect(f.git(["remote", "remove", "origin"]).code).toBe(0);
@@ -698,6 +840,10 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
         order.push("repo");
         return new Response(JSON.stringify({ default_branch: "trunk" }), { status: 200 });
       }
+      if (String(url) === "https://api.github.com/repos/o/r/branches/x-1-fix") {
+        order.push("branch");
+        return new Response("Branch not found", { status: 404 });
+      }
       order.push("api");
       return new Response(JSON.stringify({ number: 7, html_url: "https://github.com/o/r/pull/7" }), { status: 201 });
     });
@@ -712,9 +858,10 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
       head: "x-1-fix",
       base: "main",
       defaultBranch: "trunk",
+      remoteSha: "",
       token: TOKEN,
     });
-    expect(order.slice(0, 2)).toEqual(["repo", "push"]);
+    expect(order.slice(0, 3)).toEqual(["repo", "branch", "push"]);
     expect(order).toContain("api");
   });
 
@@ -722,6 +869,7 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
     const urls: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       urls.push(String(url));
+      if (String(url).includes("/branches/")) return new Response("Branch not found", { status: 404 });
       return !init?.method
         ? new Response(JSON.stringify({ default_branch: "trunk" }), { status: 200 })
         : new Response(JSON.stringify({ number: 7 }), { status: 201 });
@@ -738,8 +886,9 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
         githubApiUrl: "https://ghe.example.com/api/v3/",
       },
     );
-    expect(urls.slice(0, 2)).toEqual([
+    expect(urls.slice(0, 3)).toEqual([
       "https://ghe.example.com/api/v3/repos/o/r",
+      "https://ghe.example.com/api/v3/repos/o/r/branches/x-1-fix",
       "https://ghe.example.com/api/v3/repos/o/r/pulls",
     ]);
     // Every call, including the follow-up label request, goes to the GHES API.
@@ -775,7 +924,9 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) =>
       String(url) === "https://api.github.com/repos/o/r" && !init?.method
         ? new Response("boom", { status: 500 })
-        : new Response(JSON.stringify({ number: 7 }), { status: 201 }),
+        : String(url).includes("/branches/")
+          ? new Response("Branch not found", { status: 404 })
+          : new Response(JSON.stringify({ number: 7 }), { status: 201 }),
     );
     const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -790,7 +941,11 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
   it("a failed push warns and still requests the PR", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => new Response(JSON.stringify({ number: 8 }), { status: 201 }));
+      .mockImplementation(async (url) =>
+        String(url).includes("/branches/")
+          ? new Response("Branch not found", { status: 404 })
+          : new Response(JSON.stringify({ number: 8 }), { status: 201 }),
+      );
     const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     await createPr.handler(

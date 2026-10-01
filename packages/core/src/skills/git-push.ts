@@ -43,8 +43,11 @@
  * escapes any group kill; only the sandbox's own process boundary ends it.
  *
  * Guard rails: only a local branch that exists, only when origin is the PR's
- * own repo, never force, never the base branch or the repo's default branch
- * (from the GitHub API, not the checkout's `origin/HEAD`).
+ * own repo, never the base branch or the repo's default branch (from the
+ * GitHub API, not the checkout's `origin/HEAD`). The head must be new on the
+ * remote, or an unprotected branch with an open PR into the base (checked by
+ * the caller through the API); the push leases on the sha that check saw and
+ * only fast-forwards.
  * A push that fails is logged and the PR is still requested: the agent may
  * already have pushed (persisted credentials, an `agent_env` grant).
  */
@@ -195,6 +198,13 @@ export interface PushHeadOptions {
    * pushed: the checkout's `origin/HEAD` is agent-written and not consulted.
    */
   defaultBranch?: string;
+  /**
+   * The head branch's sha on the remote, as the API reported it, or "" when it
+   * did not exist (`headPushLease` in github.ts). The push leases on it, so a
+   * branch created or moved since the check is not overwritten. Without it
+   * nothing is pushed.
+   */
+  remoteSha?: string;
   /** The github skill's token. Without it nothing is pushed. */
   token?: string;
   /** The checkout (the run's `cwd`). */
@@ -397,6 +407,10 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
   if (head === defaultBranch || head === "main" || head === "master") {
     return { pushed: false, attempted: false, reason: `head ${head} is the default branch` };
   }
+  const remoteSha = opts.remoteSha;
+  if (remoteSha === undefined || !/^([0-9a-f]{40}([0-9a-f]{24})?)?$/.test(remoteSha)) {
+    return { pushed: false, attempted: false, reason: `the remote state of ${head} is unknown` };
+  }
   if (!token) return { pushed: false, attempted: false, reason: "no GITHUB_TOKEN" };
 
   const opEnv = opts.env ?? process.env;
@@ -491,12 +505,29 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
     const ref = await own(["update-ref", `refs/heads/${head}`, sha]);
     if (ref.code !== 0) return { pushed: false, attempted: false, reason: `cannot stage ${head} for the push` };
 
+    // An existing remote head (an open PR's branch) is only fast-forwarded:
+    // the lease below would otherwise let a diverged commit replace it.
+    if (remoteSha) {
+      const ff = await own(["merge-base", "--is-ancestor", remoteSha, sha]);
+      if (ff.code !== 0) {
+        return { pushed: false, attempted: false, reason: `${head} is not a fast-forward of the remote ${head}` };
+      }
+    }
+
     const pushEnv = pushAuthConfig(serverBase, token, withCommandConfig({}, pushTransportConfig(destination, env)));
     if (fingerprint() !== staged) {
       return { pushed: false, attempted: false, reason: "the private push repo changed before the push" };
     }
     const r = await own(
-      ["push", "--no-verify", "--porcelain", destination, `refs/heads/${head}:refs/heads/${head}`],
+      [
+        "push",
+        "--no-verify",
+        "--porcelain",
+        // The remote head must still be what the API reported ("" = must not exist).
+        `--force-with-lease=refs/heads/${head}:${remoteSha}`,
+        destination,
+        `refs/heads/${head}:refs/heads/${head}`,
+      ],
       pushEnv,
     );
     if (r.code !== 0) {

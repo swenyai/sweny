@@ -57,6 +57,11 @@ export type BranchPusher = (opts: {
   base: string;
   /** The repo's default branch from the GitHub API; without it nothing is pushed. */
   defaultBranch?: string;
+  /**
+   * The head branch's sha on the remote when it was checked through the API,
+   * or "" when it did not exist. The push leases on it. Without it nothing is pushed.
+   */
+  remoteSha?: string;
   token?: string;
 }) => Promise<{ pushed: boolean; attempted: boolean; reason?: string }>;
 
