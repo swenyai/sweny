@@ -82,6 +82,24 @@ describe("formatRunComment", () => {
     expect(md).toContain("#2563eb");
   });
 
+  it("leads with the receipt ticket card, before the DAG", () => {
+    const results = new Map<string, NodeResult>([
+      ["gather", { ...ok(5), policy: { envScope: true, sandbox: "auto", sandboxStarted: true } }],
+    ]);
+    const md = formatRunComment(workflow, results, summarizeRun(results, 4_000), {
+      runId: "20260930-110000-3f9a2c",
+    });
+    const lines = md.split("\n");
+    expect(lines[1]).toBe("## \u2705 PR Review");
+    expect(lines[3]).toBe("```text");
+    expect(lines[4]).toMatch(/^\u256D\u2504+\u256E$/);
+    expect(lines[5]).toMatch(/^\u2506 \u2713 passed +run 3f9a2c \u2506$/);
+    expect(md).toContain("[ ENV SCOPED \u00B7 SANDBOXED ]");
+    expect(md.indexOf("```text")).toBeLessThan(md.indexOf("```mermaid"));
+    // The card is plain text: no ANSI in a PR comment.
+    expect(md).not.toMatch(/\x1b\[/);
+  });
+
   it("marker id is comment-safe", () => {
     expect(runCommentMarker("a--b>c d")).toBe("<!-- sweny-run-comment:a-b_c_d -->");
   });
@@ -122,10 +140,11 @@ describe("CLI flag", () => {
 });
 
 describe("formatCrashComment", () => {
-  it("crash: receipt only, no DAG, no error text", () => {
+  it("crash: ticket only, no DAG, no error text", () => {
     const md = formatCrashComment(workflow, summarizeRun(new Map(), 2_000, true));
     expect(md).toMatchSnapshot();
     expect(md).not.toContain("mermaid");
+    expect(md).toContain("\u2717 crashed");
     expect(md.split("\n")[0]).toBe("<!-- sweny-run-comment:pr-review -->");
   });
 });

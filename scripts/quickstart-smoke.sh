@@ -60,7 +60,7 @@ contains "sweny try" "$OUT" "Recorded demo"
 contains "sweny try" "$OUT" "What it is:"
 contains "sweny try" "$OUT" "✓ 2/2 nodes"
 contains "sweny try" "$OUT" "policy: env scoped, sandbox on"
-contains "sweny try" "$OUT" "sweny workflow run .sweny/workflows/explain-repo.yml"
+contains "sweny try" "$OUT" "npx @sweny-ai/core new --template explain-repo"
 [ ! -e .sweny ] || fail "sweny try: wrote .sweny/ (it must write nothing)" "$(ls -R .sweny)"
 pass "sweny try (recorded demo, exit 0, nothing written)"
 

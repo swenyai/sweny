@@ -118,9 +118,9 @@ describe("DagRenderer", () => {
 
   it("shows running status icon for active node", () => {
     renderer.update({ type: "node:enter", node: "gather", instruction: "Gather" });
-    const output = renderer.renderToString();
-    // ◉ is the running icon
-    expect(output).toContain("◉");
+    const output = stripAnsi(renderer.renderToString());
+    // ● is the running icon (theme glyph set)
+    expect(output).toContain("● Gather Context");
   });
 
   it("shows completed status icon for finished node", () => {
@@ -130,9 +130,9 @@ describe("DagRenderer", () => {
       node: "gather",
       result: { status: "success", data: {}, toolCalls: [] },
     });
-    const output = renderer.renderToString();
-    // ● is the completed icon
-    expect(output).toContain("●");
+    const output = stripAnsi(renderer.renderToString());
+    // ✓ is the completed icon, the same glyph as the receipt
+    expect(output).toContain("✓ Gather Context");
   });
 
   it("shows failed status icon for failed node", () => {
@@ -142,9 +142,9 @@ describe("DagRenderer", () => {
       node: "gather",
       result: { status: "failed", data: {}, toolCalls: [] },
     });
-    const output = renderer.renderToString();
-    // ✕ is the failed icon
-    expect(output).toContain("✕");
+    const output = stripAnsi(renderer.renderToString());
+    // ✗ is the failed icon, the same glyph as the receipt
+    expect(output).toContain("✗ Gather Context");
   });
 
   it("returns pending state for unknown node id", () => {
@@ -156,10 +156,23 @@ describe("DagRenderer", () => {
   });
 
   it("includes a legend in the output", () => {
-    const output = renderer.renderToString();
-    // Legend should mention at least pending and completed
-    expect(output).toContain("○");
-    expect(output).toContain("●");
+    const output = stripAnsi(renderer.renderToString());
+    expect(output).toContain("✓ completed");
+    expect(output).toContain("● running");
+    expect(output).toContain("○ pending");
+    expect(output).toContain("✗ failed");
+  });
+
+  it("legend: false drops the legend", () => {
+    expect(stripAnsi(new DagRenderer(testWorkflow, { legend: false }).renderToString())).not.toContain("pending");
+  });
+
+  it("draws in ASCII when the terminal lacks Unicode, keeping every row the same width", () => {
+    const uni = stripAnsi(new DagRenderer(testWorkflow, { unicode: true }).renderToString());
+    const ascii = stripAnsi(new DagRenderer(testWorkflow, { unicode: false }).renderToString());
+    expect(ascii).toMatch(/^[\x20-\x7e\n]*$/);
+    expect(ascii).toContain("o Gather Context");
+    expect(ascii.split("\n").map((l) => l.length)).toEqual(uni.split("\n").map((l) => l.length));
   });
 
   it("handles workflow:start event without crashing", () => {
