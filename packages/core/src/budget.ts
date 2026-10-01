@@ -75,8 +75,11 @@ export function hasLimits(l: SpendLimits): boolean {
 /** Tokens and cost a usage report carries. A field the harness did not report stays undefined. */
 export function spendOf(u: NodeUsage | undefined): { tokens?: number; costUsd?: number } {
   if (!u) return {};
-  const tokens =
-    isNum(u.inputTokens) || isNum(u.outputTokens) ? (u.inputTokens ?? 0) + (u.outputTokens ?? 0) : undefined;
+  // Count only finite fields: a NaN beside a real count must not turn the sum into NaN,
+  // which no limit compares as crossed (the run would pass its budget without stopping).
+  const inTokens = isNum(u.inputTokens) ? u.inputTokens : undefined;
+  const outTokens = isNum(u.outputTokens) ? u.outputTokens : undefined;
+  const tokens = inTokens !== undefined || outTokens !== undefined ? (inTokens ?? 0) + (outTokens ?? 0) : undefined;
   return { ...(tokens !== undefined ? { tokens } : {}), ...(isNum(u.costUsd) ? { costUsd: u.costUsd } : {}) };
 }
 
