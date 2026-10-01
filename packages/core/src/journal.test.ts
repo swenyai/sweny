@@ -11,7 +11,7 @@ import {
   REDACTED,
   RunJournal,
   buildResumePlan,
-  canonicalHash,
+  workflowHashOf,
   collectSecretValues,
   journalDir,
   listJournalRuns,
@@ -81,7 +81,7 @@ describe("journal records", () => {
       run_id: RUN_ID,
       workflow_id: "w",
       workflow_file: "w.yml",
-      workflow_hash: canonicalHash(wf),
+      workflow_hash: workflowHashOf(wf),
     });
     // The run dir keeps itself out of git.
     expect(readFileSync(join(journalDir(cwd, RUN_ID), ".gitignore"), "utf-8")).toBe("*\n");
@@ -111,6 +111,13 @@ describe("journal records", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, JOURNAL_FILE), JSON.stringify({ v: 2, seq: 1, type: "run:start", h: "x" }) + "\n");
     expect(() => readJournal(join(dir, JOURNAL_FILE))).toThrow(JournalVersionError);
+  });
+});
+
+describe("workflow hash", () => {
+  it("binds the effective spec_version (#469)", () => {
+    expect(workflowHashOf({ ...wf, spec_version: "1" })).toBe(workflowHashOf(wf));
+    expect(workflowHashOf({ ...wf, spec_version: "2" })).not.toBe(workflowHashOf(wf));
   });
 });
 

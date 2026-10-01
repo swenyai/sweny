@@ -60,7 +60,13 @@ function killAt(type: string, node?: string): JournalFaults {
 }
 
 /** A fake agent: records which node it ran, requests the scripted writes, returns `<node>-out`. */
-function fakeAgent(opts: { kill?: (node: string, nth: number) => boolean; emit?: Record<string, object[]> } = {}) {
+function fakeAgent(
+  opts: {
+    kill?: (node: string, nth: number) => boolean;
+    emit?: Record<string, object[]>;
+    data?: (node: string, nth: number) => Record<string, unknown> | undefined;
+  } = {},
+) {
   const calls: string[] = [];
   const claude: Claude = {
     async run(req) {
@@ -69,7 +75,9 @@ function fakeAgent(opts: { kill?: (node: string, nth: number) => boolean; emit?:
       if (opts.kill?.(node, calls.filter((c) => c === node).length)) throw new Kill(`agent ${node}`);
       const emitter = req.tools.find((t) => t.name === "emit_output");
       for (const e of opts.emit?.[node] ?? []) await emitter!.handler(e, { config: {}, logger: silent });
-      return { status: "success", data: { value: `${node}-out` }, toolCalls: [] } as NodeResult;
+      const nth = calls.filter((c) => c === node).length;
+      const data = opts.data?.(node, nth) ?? { value: `${node}-out` };
+      return { status: "success", data, toolCalls: [] } as NodeResult;
     },
     async evaluate() {
       throw new Error("no conditional routing in these specs");
@@ -422,6 +430,41 @@ describe("run journal crash boundaries (#363)", () => {
     const { prepared } = await resumeRun(cwd, chain(), agent);
     expect(prepared.ok === false && prepared.error).toMatch(/already finished successfully/);
     expect(agent.calls).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("expression routes (#470) are journaled and replayed, not re-decided", async () => {
+    const cwd = tmp();
+    const wf: Workflow = {
+      id: "routed",
+      name: "Routed",
+      description: "",
+      entry: "a",
+      permissions: "read",
+      nodes: {
+        a: {
+          name: "A",
+          instruction: "NODE:a",
+          skills: [],
+          output: { type: "object", properties: { go: { type: "string" } }, required: ["go"] },
+        },
+        b: { name: "B", instruction: "NODE:b", skills: [] },
+        c: { name: "C", instruction: "NODE:c", skills: [] },
+      },
+      edges: [
+        { from: "a", to: "b", when: { expr: "a.go == 'b'" } },
+        { from: "a", to: "c", when: { expr: "a.go == 'c'" } },
+      ],
+    };
+    // Attempt 1 routes to c; any later decision for a would route to b.
+    const agent = fakeAgent({ data: (node, nth) => (node === "a" ? { go: nth === 1 ? "c" : "b" } : undefined) });
+    expect(await firstRun(cwd, wf, agent, [], killAt("node:start", "c"))).toBe(true);
+    const routes = readJournal(journalFile(cwd)).records.filter((r) => r.type === "route");
+    expect(routes).toEqual([expect.objectContaining({ from: "a", to: "c" })]);
+
+    const { results } = await resumeRun(cwd, wf, agent);
+    expect(agent.calls).toEqual(["a", "c"]);
+    expect(results!.has("b")).toBe(false);
+    expect(results!.get("c")!.status).toBe("success");
   });
 
   it("a second crash, then a second resume: each finished node still ran once", async () => {

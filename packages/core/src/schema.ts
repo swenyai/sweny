@@ -32,6 +32,10 @@ import {
 } from "./types.js";
 import { sourceZ } from "./sources.js";
 import { workflowInputsZ, WORKFLOW_INPUT_TYPES } from "./inputs.js";
+import { checkExpression, isWhenExpression, WHEN_EXPR_MAX_LENGTH } from "./when.js";
+
+// Studio and other schema-only consumers label edges without importing the root entry.
+export { isWhenExpression, whenLabel } from "./when.js";
 export { sourceZ };
 export { workflowInputsZ };
 
@@ -386,7 +390,9 @@ export const edgeZ = z
   .object({
     from: z.string().min(1),
     to: z.string().min(1),
-    when: z.string().optional(),
+    // Natural language (the harness picks the edge) or `{ expr }`, a
+    // deterministic expression sweny evaluates itself (#461). One or the other.
+    when: z.union([z.string(), z.object({ expr: z.string().min(1).max(WHEN_EXPR_MAX_LENGTH) }).strict()]).optional(),
     max_iterations: z.number().int().min(1).max(EDGE_MAX_ITERATIONS_CEILING).optional(),
   })
   .strict();
@@ -419,6 +425,10 @@ export const workflowZ = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().default(""),
+  spec_version: z
+    .string()
+    .regex(/^[1-9]\d*$/, "spec_version must be a positive integer string")
+    .optional(),
   workflow_type: workflowTypeZ.optional(),
   nodes: z.record(nodeZ),
   edges: z.array(edgeZ),
@@ -494,7 +504,9 @@ export interface WorkflowError {
     | "BUDGET_CEILING"
     | "OUTPUT_NOT_ALLOWED"
     | "DUPLICATE_OUTPUT"
-    | "UNSUPPORTED_OUTPUT";
+    | "UNSUPPORTED_OUTPUT"
+    | "INVALID_WHEN_EXPRESSION"
+    | "MIXED_EDGE_CONDITIONS";
   message: string;
   nodeId?: string;
 }
@@ -593,6 +605,65 @@ export function validateWorkflow(
       errors.push({
         code: "AMBIGUOUS_EDGES",
         message: `Node "${from}" has ${targets.length} unconditional out-edges (to ${targets.join(", ")}); add a 'when' clause to all but one so routing is deterministic`,
+        nodeId: from,
+      });
+    }
+  }
+
+  // Deterministic `when` expressions (#461). Every path must name a declared
+  // output field of the edge's source node or one of its ancestors, so a typo
+  // is a load error rather than a branch that never fires. A node routes on
+  // expressions or on natural language, never both: a mixed node would hand
+  // the expression edges to the model and lose the determinism the author
+  // asked for.
+  const ancestorsCache = new Map<string, Set<string>>();
+  const inAll = new Map<string, string[]>();
+  for (const [from, tos] of outAll) for (const to of tos) push(inAll, to, from);
+  const ancestorsOf = (id: string): Set<string> => {
+    let seen = ancestorsCache.get(id);
+    if (seen) return seen;
+    seen = new Set<string>([id]);
+    const queue = [id];
+    for (let i = 0; i < queue.length; i++) {
+      for (const from of inAll.get(queue[i]) ?? []) {
+        if (!seen.has(from)) {
+          seen.add(from);
+          queue.push(from);
+        }
+      }
+    }
+    ancestorsCache.set(id, seen);
+    return seen;
+  };
+  const outputs = Object.fromEntries(Object.entries(workflow.nodes).map(([id, n]) => [id, n.output]));
+  const conditionKinds = new Map<string, { expr: number; nl: number }>();
+  for (const edge of workflow.edges) {
+    if (!nodeIds.has(edge.from) || !edge.when) continue;
+    const kinds = conditionKinds.get(edge.from) ?? { expr: 0, nl: 0 };
+    conditionKinds.set(edge.from, kinds);
+    if (!isWhenExpression(edge.when)) {
+      kinds.nl++;
+      continue;
+    }
+    kinds.expr++;
+    const problems = checkExpression(edge.when.expr, {
+      from: edge.from,
+      ancestors: ancestorsOf(edge.from),
+      outputs,
+    });
+    for (const problem of problems) {
+      errors.push({
+        code: "INVALID_WHEN_EXPRESSION",
+        message: `Edge "${edge.from}" -> "${edge.to}": ${problem}`,
+        nodeId: edge.from,
+      });
+    }
+  }
+  for (const [from, kinds] of conditionKinds) {
+    if (kinds.expr > 0 && kinds.nl > 0) {
+      errors.push({
+        code: "MIXED_EDGE_CONDITIONS",
+        message: `Node "${from}" mixes expression and natural-language 'when' conditions on its out-edges; use one kind per node (an unconditional default edge is fine with either)`,
         nodeId: from,
       });
     }
@@ -1068,6 +1139,12 @@ export const workflowJsonSchema = {
     id: { type: "string", minLength: 1 },
     name: { type: "string", minLength: 1 },
     description: { type: "string" },
+    spec_version: {
+      type: "string",
+      pattern: "^[1-9][0-9]*$",
+      description:
+        "Workflow spec version as a positive integer string. Absent means 1. Older versions are migrated in memory on load; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version.",
+    },
     entry: { type: "string", minLength: 1, description: "ID of the entry node" },
     rules: {
       type: "array",
@@ -1420,8 +1497,25 @@ export const workflowJsonSchema = {
           from: { type: "string", minLength: 1 },
           to: { type: "string", minLength: 1 },
           when: {
-            type: "string",
-            description: "Natural language condition, evaluated at runtime by the workflow's harness.",
+            description:
+              "Condition for taking this edge. A string is natural language, evaluated at runtime by the workflow's harness. An object { expr } is a deterministic expression over prior nodes' declared output fields, evaluated by sweny with no model call.",
+            oneOf: [
+              { type: "string" },
+              {
+                type: "object",
+                required: ["expr"],
+                additionalProperties: false,
+                properties: {
+                  expr: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: WHEN_EXPR_MAX_LENGTH,
+                    description:
+                      "Boolean expression: == != < <= > >= in, && || !, exists, string/number/boolean/null literals, and node.field paths to declared output fields.",
+                  },
+                },
+              },
+            ],
           },
           max_iterations: {
             type: "integer",

@@ -7,7 +7,7 @@ Studio is the visual workflow editor and real-time execution monitor for SWEny. 
 
 Studio is available in three forms:
 
-- **Standalone app** -- run `npm run dev:studio` to launch the full editor locally
+- **Standalone app** -- from a repo checkout, run `npm run dev -w @sweny-ai/studio` to launch the full editor locally
 - **Embeddable viewer** -- `@sweny-ai/studio/viewer` exports a read-only `WorkflowViewer` React component for dashboards and docs
 - **Embeddable editor** -- `@sweny-ai/studio/editor` exports the full editor store (`useEditorStore`) for building custom tooling
 

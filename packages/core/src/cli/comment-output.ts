@@ -19,7 +19,7 @@ import {
   type RunSummary,
 } from "./run-output.js";
 
-export const RUN_COMMENT_FOOTER = "Run with [SWEny](https://sweny.ai): `npx @sweny-ai/core new`";
+export const RUN_COMMENT_FOOTER = "Run with [SWEny](https://github.com/swenyai/sweny): `npx @sweny-ai/core new`";
 
 export interface RunCommentOptions {
   trace?: ExecutionTrace;

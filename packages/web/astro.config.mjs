@@ -48,6 +48,7 @@ export default defineConfig({
             { label: "Concepts", slug: "getting-started/concepts" },
             { label: "Quick Start", slug: "getting-started/quick-start" },
             { label: "Walkthrough", slug: "getting-started/walkthrough" },
+            { label: "Agents and policies", slug: "getting-started/agents-and-policies" },
             { label: "FAQ", slug: "getting-started/faq" },
           ],
         },

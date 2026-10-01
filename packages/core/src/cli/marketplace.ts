@@ -58,9 +58,7 @@ export async function fetchMarketplaceWorkflow(id: string): Promise<FetchedWorkf
   }
 
   if (res.status === 404) {
-    const err = new Error(
-      `Workflow "${id}" not found in ${MARKETPLACE_REPO}. See https://marketplace.sweny.ai for available workflows.`,
-    ) as FetchError;
+    const err = new Error(`Workflow "${id}" not found in ${MARKETPLACE_REPO}.`) as FetchError;
     err.kind = "not-found";
     throw err;
   }

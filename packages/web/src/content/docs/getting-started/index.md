@@ -59,9 +59,7 @@ The executor uses headless [Claude Code](https://docs.anthropic.com/en/docs/clau
 |--------|--------------|
 | **CLI** | Build and run workflows from your terminal. The primary way to create workflows and get things done. |
 | **GitHub Action** | Deploy workflows to CI for scheduled automation. Built-in triage monitors production errors. |
-| **Studio** | Visual DAG editor and live execution monitor. Watch workflows run node-by-node. |
-
-Looking for inspiration? Browse the **[Workflow Marketplace](https://marketplace.sweny.ai)** for ready-to-run workflows you can copy, customize, and run.
+| **Studio** | Visual DAG editor. Run it from a repo checkout; Live mode connects to an event URL you provide. |
 
 ## What people build with it
 

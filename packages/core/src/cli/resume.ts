@@ -21,6 +21,7 @@ import {
   journalDir,
   mayRepeatWrites,
   readJournal,
+  workflowHashOf,
   type JournalRead,
   type ResumePlan,
 } from "../journal.js";
@@ -167,7 +168,7 @@ export function prepareResume(ref: string, opts: ResumeOptions, deps: PrepareRes
   } catch (err) {
     return fail(`cannot load workflow ${workflowFile}: ${err instanceof Error ? err.message : String(err)}`);
   }
-  if (canonicalHash(workflow) !== plan.start.workflow_hash) {
+  if (workflowHashOf(workflow) !== plan.start.workflow_hash) {
     if (!opts.force) {
       return fail(
         `workflow ${workflowFile} changed since run ${runId} started. Resuming would mix results from two ` +

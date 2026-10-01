@@ -42,6 +42,7 @@ import path from "node:path";
 import type { Logger, NodeResult, Skill, Tool, ToolContext, Workflow } from "./types.js";
 import type { SafeOutputIntent, WriteStageState } from "./safe-outputs.js";
 import { resolveNodePermissions } from "./node-policy.js";
+import { CURRENT_SPEC_VERSION } from "./migrations.js";
 
 export const JOURNAL_SCHEMA_VERSION = 1;
 export const JOURNAL_DIR = path.join(".sweny", "runs");
@@ -74,6 +75,15 @@ export function canonicalHash(value: unknown): string {
     .createHash("sha256")
     .update(JSON.stringify(canonicalize(value ?? null)))
     .digest("hex");
+}
+
+/**
+ * Hash of the workflow a journal is bound to: the canonical workflow plus its
+ * effective `spec_version` (#469), so a file that only changes spec version
+ * (and therefore migrations) is a different workflow for resume.
+ */
+export function workflowHashOf(workflow: Workflow): string {
+  return canonicalHash({ ...workflow, spec_version: workflow.spec_version ?? String(CURRENT_SPEC_VERSION) });
 }
 
 /** Hash of what the nodes were told: every resolved instruction, rule and context Source. */
@@ -901,7 +911,7 @@ export class RunJournal implements ExecutionJournal {
     if (this.began) return;
     this.began = true;
     this.secrets = collectSecretValues(this.opts.env, info.config);
-    const workflowHash = canonicalHash(info.workflow);
+    const workflowHash = workflowHashOf(info.workflow);
     const instrHash = instructionHash(info.sources);
     const toolHash = toolsHash(info.skills, this.opts.swenyVersion, info.harnessId);
 

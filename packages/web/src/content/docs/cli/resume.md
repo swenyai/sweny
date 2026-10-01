@@ -27,7 +27,7 @@ Finished nodes are replayed from the journal without calling the agent. The firs
 | `↻` write stage only | The agent finished and its result passed every eval, but the run stopped while sweny was applying the node's [safe outputs](/workflows/yaml-reference/#permissions-and-safe-outputs). The agent is not called again. Each write is checked against the journal and, if needed, the provider (see below). |
 | `▶` run | The node never finished, so it runs from the start. |
 
-Routing is replayed too: the edge a finished node took is read from the journal, so an LLM route decision is not asked again.
+Routing is replayed too: the edge a finished node took is read from the journal, so neither a model route decision nor a `when: { expr }` expression is decided again.
 
 Preview the plan without running anything:
 
@@ -51,7 +51,7 @@ Nodes that write outside safe outputs (an agent with write tools, shell or `git 
 
 | Refusal | Why | What to do |
 |---------|-----|-----------|
-| workflow changed | The workflow file differs from the one the run started with. Mixing results from two workflows is not a resume. | Start a new run, or `--force` (warns). |
+| workflow changed | The workflow file (including its `spec_version`) differs from the one the run started with. Mixing results from two workflows is not a resume. | Start a new run, or `--force` (warns). |
 | instructions, rules or context files changed | A `file:` or `url:` Source resolved to different text. | Same. |
 | configured skills, agent or sweny version changed | Different tools could have produced different results. | Same. |
 | input differs, or the journal redacted it | The input held secrets, so the journal kept a redacted copy. | Pass the same `--input` JSON again. |

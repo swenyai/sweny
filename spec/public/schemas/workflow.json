@@ -368,6 +368,11 @@
     "description": {
       "type": "string"
     },
+    "spec_version": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$",
+      "description": "Workflow spec version as a positive integer string. Absent means 1. Older versions are migrated in memory on load; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version."
+    },
     "entry": {
       "type": "string",
       "minLength": 1,
@@ -824,8 +829,25 @@
             "minLength": 1
           },
           "when": {
-            "type": "string",
-            "description": "Natural language condition, evaluated at runtime by the workflow's harness."
+            "description": "Condition for taking this edge. A string is natural language, evaluated at runtime by the workflow's harness. An object { expr } is a deterministic expression over prior nodes' declared output fields, evaluated by sweny with no model call.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "required": ["expr"],
+                "additionalProperties": false,
+                "properties": {
+                  "expr": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "description": "Boolean expression: == != < <= > >= in, && || !, exists, string/number/boolean/null literals, and node.field paths to declared output fields."
+                  }
+                }
+              }
+            ]
           },
           "max_iterations": {
             "type": "integer",

@@ -96,6 +96,92 @@ describe("receipt", () => {
     expect(formatReceipt(summarizeRun(results, 1_000))).toBe("✓ 1/1 nodes · 1 tool call · 1s");
   });
 
+  describe("policy segment", () => {
+    const claude = (policy: NodeResult["policy"], extra: Partial<NodeResult> = {}): NodeResult => ({
+      ...ok(1),
+      harness: { id: "claude-code", version: "0.3.0" },
+      degraded: [],
+      policy,
+      ...extra,
+    });
+
+    it("Claude Code: env scope, a started sandbox, and staged outputs", () => {
+      const results = new Map<string, NodeResult>([
+        ["a", claude({ envScope: true, sandbox: "auto", sandboxStarted: true })],
+        [
+          "b",
+          claude(
+            { envScope: true, sandbox: "auto", sandboxStarted: true },
+            { outputs: [{ type: "add_comment", status: "staged" }] },
+          ),
+        ],
+      ]);
+      expect(formatReceipt(summarizeRun(results, 1_000))).toBe(
+        "✓ 2/2 nodes · 2 tool calls · 1s · policy: env scoped, sandbox on, 1 output staged",
+      );
+    });
+
+    it("Claude Code locally: unscoped env and sandbox off, said plainly", () => {
+      const results = new Map<string, NodeResult>([
+        ["a", claude({ envScope: false, sandbox: "off", sandboxStarted: false })],
+      ]);
+      expect(formatReceipt(summarizeRun(results, 1_000))).toBe(
+        "✓ 1/1 nodes · 1 tool call · 1s · policy: env unscoped, sandbox off",
+      );
+    });
+
+    it("an auto sandbox that could not start is not reported as on", () => {
+      const results = new Map<string, NodeResult>([
+        ["a", claude({ envScope: true, sandbox: "auto", sandboxStarted: false })],
+      ]);
+      expect(formatReceipt(summarizeRun(results, 1_000))).toContain("sandbox unavailable (ran unsandboxed)");
+    });
+
+    it("the weakest node wins when nodes differ", () => {
+      const results = new Map<string, NodeResult>([
+        ["a", claude({ envScope: true, sandbox: "auto", sandboxStarted: true })],
+        ["b", claude({ envScope: false, sandbox: "auto", sandboxStarted: false })],
+      ]);
+      const line = formatReceipt(summarizeRun(results, 1_000));
+      expect(line).toContain("env unscoped");
+      expect(line).toContain("sandbox unavailable");
+    });
+
+    it("non-Claude: only the facts the run knows (outputs), no invented env or sandbox", () => {
+      const results = new Map<string, NodeResult>([
+        [
+          "a",
+          {
+            ...ok(2),
+            harness: { id: "codex", version: "0.159.2" },
+            degraded: [],
+            outputs: [
+              { type: "add_comment", status: "applied" },
+              { type: "add_comment", status: "applied" },
+              { type: "create_issue", status: "staged" },
+              { type: "create_issue", status: "refused" },
+            ],
+          },
+        ],
+      ]);
+      const s = summarizeRun(results, 2_000);
+      expect(s.policy).toEqual({ outputs: { staged: 1, applied: 2 } });
+      expect(formatReceipt(s)).toBe(
+        "✓ 1/1 nodes · 2 tool calls · 2s · codex · policy: 1 output staged, 2 outputs applied",
+      );
+    });
+
+    it("is absent when nothing is known, and is plain text", () => {
+      const s = summarizeRun(new Map([["a", ok(1)]]), 1_000);
+      expect(s.policy).toBeUndefined();
+      const withPolicy = formatReceipt(
+        summarizeRun(new Map([["a", claude({ envScope: true, sandbox: "off", sandboxStarted: false })]]), 1_000),
+      );
+
+      expect(withPolicy).not.toMatch(/\x1b\[/);
+    });
+  });
+
   it("failure shows the cross and the partial count", () => {
     const results = new Map<string, NodeResult>([
       ["a", ok(3, { inputTokens: 900, outputTokens: 100, costUsd: 0.01 })],
@@ -323,7 +409,7 @@ describe("workflow run help text", () => {
         "--max-tokens <n>  Run-wide token budget (input plus output) for a single workflow file. The lowest of this and the workflow's budget.tokens wins. A crossing stops the agent, fails the node and halts the run",
         "--max-cost <usd>  Run-wide cost budget in US dollars for a single workflow file, from harness-reported cost (never estimated). The lowest of this and the workflow's budget.cost_usd wins",
         "-y, --yes  Skip the batch confirmation prompt (for CI)",
-        "--dry-run  Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge. To inspect nodes without running, use --list-nodes.",
+        "--dry-run  Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first natural-language conditional edge. To inspect nodes without running, use --list-nodes.",
         "--stage  Run normally, but preview every safe output (nodes with outputs:) instead of writing it: print what would be written and write nothing",
         "--list-nodes  Validate, print nodes and skills, and exit without running",
         "--json  Output result as JSON on stdout; suppress progress output",

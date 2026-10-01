@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import type { Node, NodeResult, Source } from "@sweny-ai/core";
-import { validateWorkflow } from "@sweny-ai/core/schema";
+import type { Edge, Node, NodeResult, Source } from "@sweny-ai/core";
+import { isWhenExpression, validateWorkflow, whenLabel } from "@sweny-ai/core/schema";
 import { getSkillCatalog } from "@sweny-ai/core/studio";
 import { useEditorStore } from "../store/editor-store.js";
 import { SkillIcon } from "./SkillIcon.js";
@@ -101,7 +101,7 @@ export function PropertiesPanel() {
         edgeIndex={edgeIndex}
         from={from}
         to={to}
-        when={edge?.when ?? ""}
+        when={edge?.when}
         maxIterations={edge?.max_iterations}
         nodeIds={nodeIds}
         readOnly={readOnly}
@@ -550,11 +550,11 @@ interface EdgePanelProps {
   edgeIndex: number;
   from: string;
   to: string;
-  when: string;
+  when: Edge["when"];
   maxIterations?: number;
   nodeIds: string[];
   readOnly: boolean;
-  updateEdge: (edgeIndex: number, patch: { when?: string; to?: string; max_iterations?: number }) => void;
+  updateEdge: (edgeIndex: number, patch: { when?: Edge["when"]; to?: string; max_iterations?: number }) => void;
   deleteEdge: (edgeIndex: number) => void;
 }
 
@@ -569,7 +569,9 @@ function EdgePanel({
   updateEdge,
   deleteEdge,
 }: EdgePanelProps) {
-  const [editWhen, setEditWhen] = useState(when);
+  const [editWhen, setEditWhen] = useState(whenLabel(when) ?? "");
+  const [isExpr, setIsExpr] = useState(isWhenExpression(when));
+  const saveWhen = (text: string, expr: boolean) => updateEdge(edgeIndex, { when: expr ? { expr: text } : text });
   const [editMaxIter, setEditMaxIter] = useState(maxIterations?.toString() ?? "");
 
   return (
@@ -604,11 +606,27 @@ function EdgePanel({
           rows={3}
           value={editWhen}
           onChange={(e) => setEditWhen(e.target.value)}
-          onBlur={() => updateEdge(edgeIndex, { when: editWhen })}
+          onBlur={() => saveWhen(editWhen, isExpr)}
           disabled={readOnly}
           placeholder="Leave empty for unconditional edge"
         />
-        <p className="text-xs text-gray-400 mt-1">Natural language condition — Claude evaluates at runtime</p>
+        <label className="flex items-center gap-1 text-xs text-gray-600 mt-1">
+          <input
+            type="checkbox"
+            checked={isExpr}
+            disabled={readOnly}
+            onChange={(e) => {
+              setIsExpr(e.target.checked);
+              saveWhen(editWhen, e.target.checked);
+            }}
+          />
+          Expression
+        </label>
+        <p className="text-xs text-gray-400 mt-1">
+          {isExpr
+            ? "Expression over prior nodes' declared outputs, evaluated by sweny with no model call"
+            : "Natural language condition, evaluated by the model at runtime"}
+        </p>
       </div>
 
       <div className="mb-3">

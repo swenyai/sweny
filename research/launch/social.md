@@ -37,7 +37,7 @@ What it adds around the agent:
 - output schemas that fail a step instead of guessing
 - a receipt per run, and a PR comment from the GitHub Action
 
-Zero-token starter: `sweny new --template explain-repo --yes`, then
+Starter with no skill credentials: `sweny new --template explain-repo --yes`, then
 `sweny workflow run .sweny/workflows/explain-repo.yml`.
 
 MIT, CLI is free: https://github.com/swenyai/sweny?utm_source=reddit&utm_medium=social&utm_campaign=sweny-launch

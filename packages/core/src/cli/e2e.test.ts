@@ -388,12 +388,20 @@ describe("buildFlowWorkflow", () => {
 
   it("includes failure edge from setup to report", () => {
     const wf = buildFlowWorkflow({ type: "registration", path: "/signup" }, "http://localhost:3000");
-    expect(wf.edges.some((e) => e.from === "setup" && e.to === "report" && e.when?.includes("fail"))).toBe(true);
+    expect(
+      wf.edges.some(
+        (e) => e.from === "setup" && e.to === "report" && typeof e.when === "string" && e.when.includes("fail"),
+      ),
+    ).toBe(true);
   });
 
   it("includes failure edges from login to report for auth flows", () => {
     const wf = buildFlowWorkflow({ type: "purchase", path: "/pricing" }, "http://localhost:3000");
-    expect(wf.edges.some((e) => e.from === "login" && e.to === "report" && e.when?.includes("fail"))).toBe(true);
+    expect(
+      wf.edges.some(
+        (e) => e.from === "login" && e.to === "report" && typeof e.when === "string" && e.when.includes("fail"),
+      ),
+    ).toBe(true);
   });
 });
 

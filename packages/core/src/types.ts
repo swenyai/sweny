@@ -146,8 +146,9 @@ export interface Skill {
 //
 // A Workflow is a directed graph of nodes connected by edges.
 // Each node has an instruction (what Claude should do) and a set of
-// available skills. Edges define flow; conditional edges have a
-// natural-language `when` clause that Claude evaluates at runtime.
+// available skills. Edges define flow; conditional edges have a `when`
+// clause: natural language the harness evaluates at runtime, or a `{ expr }`
+// expression sweny evaluates itself.
 // Edges with `max_iterations` enable controlled retry loops.
 
 /**
@@ -552,12 +553,28 @@ export interface NodeToolFilter {
   deny?: string[];
 }
 
+/**
+ * A deterministic edge condition (#461): a boolean expression over prior
+ * nodes' declared output fields, evaluated by sweny with no model call.
+ * Grammar and semantics: `when.ts`.
+ */
+export interface WhenExpression {
+  expr: string;
+}
+
+/** An edge condition: natural language (model-evaluated) or a `{ expr }` expression. */
+export type EdgeWhen = string | WhenExpression;
+
 /** An edge connecting two nodes */
 export interface Edge {
   from: string;
   to: string;
-  /** Natural language condition, evaluated at runtime by the workflow's harness. */
-  when?: string;
+  /**
+   * Condition for taking this edge. A string is natural language, evaluated at
+   * runtime by the workflow's harness. `{ expr }` is a deterministic expression
+   * evaluated by sweny with no model call.
+   */
+  when?: EdgeWhen;
   /** Max times this edge can be followed (enables retry loops). Default: unlimited. */
   max_iterations?: number;
 }
@@ -586,6 +603,8 @@ export interface Workflow {
   id: string;
   name: string;
   description: string;
+  /** Spec version, a positive integer string (e.g. "1"). Absent means "1". See `migrations.ts`. */
+  spec_version?: string;
   /** Optional. Defaults to "generic" when absent. Required on marketplace templates. */
   workflow_type?: WorkflowType;
   nodes: Record<string, Node>;
@@ -696,6 +715,11 @@ export interface NodeResult {
   harness?: { id: string; version: string };
   /** Opinions this run could not honor natively. Always empty for Claude Code. */
   degraded?: string[];
+  /**
+   * Agent floor this node actually ran under, for the run receipt. Set by the
+   * Claude Code harness only; absent for harnesses that do not report it.
+   */
+  policy?: NodePolicyFacts;
   /** Safe outputs (#365): what the write stage did with each intent. Absent when the node declares none. */
   outputs?: SafeOutputReceipt[];
   /**
@@ -704,6 +728,16 @@ export interface NodeResult {
    * `failed`, `fail_soft` and `on_fail: continue` do not apply, and the run halts.
    */
   budget?: BudgetOverrun;
+}
+
+/** Facts about the agent floor (scoped env, process sandbox) a node ran under. Booleans and a mode only. */
+export interface NodePolicyFacts {
+  /** The agent subprocess env was narrowed to the allowlist. */
+  envScope: boolean;
+  /** Requested sandbox mode. */
+  sandbox: "off" | "auto" | "strict";
+  /** The sandbox was enabled for this node (false under `off`, or `auto` on a host that cannot sandbox). */
+  sandboxStarted: boolean;
 }
 
 export interface ToolCall {

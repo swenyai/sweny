@@ -11,6 +11,7 @@
  */
 
 import type { Workflow, ExecutionTrace } from "./types.js";
+import { whenLabel } from "./when.js";
 
 export type NodeStatus = "current" | "success" | "failed" | "skipped";
 
@@ -132,7 +133,8 @@ export function toMermaid(workflow: Workflow, options: MermaidOptions = {}): str
 
     // Build label parts
     const labelParts: string[] = [];
-    if (edge.when) labelParts.push(edge.when);
+    const when = whenLabel(edge.when);
+    if (when) labelParts.push(when);
     if (edge.max_iterations) labelParts.push(`max ${edge.max_iterations}x`);
     // Show how many times this edge was actually followed
     if (takenCount > 1) labelParts.push(`taken ${takenCount}x`);

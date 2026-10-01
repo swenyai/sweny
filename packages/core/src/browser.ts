@@ -25,6 +25,8 @@ export type {
   Workflow,
   Node,
   Edge,
+  EdgeWhen,
+  WhenExpression,
   NodeResult,
   ToolCall,
   ExecutionEvent,
@@ -101,6 +103,17 @@ export {
   skillJsonSchema,
 } from "./schema.js";
 export type { WorkflowError } from "./schema.js";
+
+// Deterministic `when` expressions (#461). Pure, browser-safe.
+export {
+  isWhenExpression,
+  whenLabel,
+  parseExpression,
+  evaluateExpression,
+  checkExpression,
+  ExpressionSyntaxError,
+} from "./when.js";
+export type { ExprNode, ExpressionScope, ExpressionResult } from "./when.js";
 
 // Studio adapter
 export { workflowToFlow, flowToWorkflow, applyExecutionEvent, exportAsTypescript, getSkillCatalog } from "./studio.js";
