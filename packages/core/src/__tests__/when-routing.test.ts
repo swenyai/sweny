@@ -389,12 +389,14 @@ describe("executor: expression routing (#461)", () => {
     });
 
     it("a model answer naming a ruled-out edge, with no default to fall back on, ends the branch", async () => {
+      const ns = nodes();
+      delete ns.d; // no default edge here, so no d
       const w = wf(
         [
           { from: "a", to: "b", when: { expr: "a.kind == 'safe'" } },
           { from: "a", to: "c", when: { expr: "a.allow == true" } },
         ],
-        nodes(),
+        ns,
       );
       const { claude, ran } = scripted({ a: { allow: false } }, async () => "c");
       await run(w, claude);
