@@ -7,24 +7,10 @@
 
 import type { Skill, ToolContext, SkillCategory } from "../types.js";
 
-/**
- * Pushes a PR's head branch from the sweny process (#473). The Node entry
- * registers it (skills/git-push.ts, imported by the executor); this module
- * stays browser-safe, and without a pusher `github_create_pr` only calls the API.
- */
-export type BranchPusher = (opts: {
-  repo: string;
-  head: string;
-  base: string;
-  token?: string;
-}) => Promise<{ pushed: boolean; attempted: boolean; reason?: string }>;
-
-let branchPusher: BranchPusher | undefined;
-
-/** Register (or clear, with `undefined`) the sweny-side branch pusher. */
-export function setBranchPusher(fn: BranchPusher | undefined): void {
-  branchPusher = fn;
-}
+// #473: the sweny-side head-branch push arrives as `ctx.pushBranch`, bound to
+// the run's checkout by the Node executor (skills/git-push.ts). This module
+// stays browser-safe; without a pusher `github_create_pr` only calls the API.
+export type { BranchPusher } from "../types.js";
 
 class GitHubApiError extends Error {
   status: number;
@@ -213,14 +199,14 @@ export const github: Skill = {
         // recommended `persist-credentials: false` checkout still ships the
         // branch and the agent never holds a write token. Skipped unless the
         // branch exists locally and origin is this repo; never forced.
-        if (branchPusher) {
-          const push = await branchPusher({
+        if (ctx.pushBranch) {
+          const push = await ctx.pushBranch({
             repo: input.repo,
             head: input.head,
             base: input.base ?? "main",
             token: ctx.config.GITHUB_TOKEN,
           });
-          if (push.pushed) ctx.logger?.info?.(`  github_create_pr: pushed ${input.head} to origin`);
+          if (push.pushed) ctx.logger?.info?.(`  github_create_pr: pushed ${input.head} to ${input.repo}`);
           else if (push.attempted) ctx.logger?.warn?.(`  github_create_pr: ${push.reason}; requesting the PR anyway`);
           else ctx.logger?.debug?.(`  github_create_pr: no sweny-side push (${push.reason})`);
         }

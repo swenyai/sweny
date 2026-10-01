@@ -50,8 +50,8 @@ import { buildToolAliases } from "./skills/index.js";
 import { validateWorkflow } from "./schema.js";
 import { grantedAgentEnv, resolveAgentAccess } from "./agent-env.js";
 import { gitCredentialWarning, scanGitCredentials } from "./git-credentials.js";
-// #473: arms the sweny-side branch push in `github_create_pr` (Node only; skills/ stays browser-safe).
-import "./skills/git-push.js";
+// #473: the sweny-side branch push in `github_create_pr` (Node only; skills/ stays browser-safe).
+import { bindBranchPusher } from "./skills/git-push.js";
 import { fenceUntrusted } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
 import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
@@ -299,6 +299,9 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   }
 
   const resolveCwd = options.cwd ?? process.cwd();
+  // #473: the PR head push runs in this run's checkout, never process.cwd() of
+  // an embedding process. Tools get it through ToolContext.
+  const pushBranch = bindBranchPusher(resolveCwd, runEnv);
   const resolvedSources = await resolveSources(sourceMap, {
     cwd: resolveCwd,
     env: options.env ?? process.env,
@@ -407,10 +410,17 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     const declaresPolicy =
       node.permissions !== undefined || workflow.permissions !== undefined || (node.outputs?.length ?? 0) > 0;
     const readOnlyNode = dryRun || permissions.access === "read";
-    const readTools = readOnlyNode ? filteredTools.filter(isReadTool) : filteredTools;
-    const skippedWrites = dryRun ? filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name) : [];
+    // A staged run (--stage, safe_outputs.staged) writes nothing either: its
+    // write tools are withheld too, and the dispatcher below refuses any that
+    // still reach a handler.
+    const readTools = readOnlyNode || stageOutputs ? filteredTools.filter(isReadTool) : filteredTools;
+    // A staged write node records what it lost, like a dry run.
+    const stagedWriteNode = stageOutputs && !readOnlyNode;
+    const skippedWrites =
+      dryRun || stagedWriteNode ? filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name) : [];
     if (skippedWrites.length > 0) {
-      logger.info(`  dry run: withheld write tools: ${skippedWrites.join(", ")}`, { node: currentId });
+      const why = dryRun ? "dry run" : "staged";
+      logger.info(`  ${why}: withheld write tools: ${skippedWrites.join(", ")}`, { node: currentId });
     } else if (readOnlyNode && readTools.length < filteredTools.length) {
       const withheld = filteredTools.filter((t) => !isReadTool(t)).map((t) => t.name);
       logger.info(`  permissions: read: withheld write tools: ${withheld.join(", ")}`, { node: currentId });
@@ -528,7 +538,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       ...t,
       handler: async (toolInput: any) => {
         safeObserve(observer, { type: "tool:call", node: currentId!, tool: t.name, input: toolInput }, logger);
-        const toolCtx: ToolContext = { config, logger };
+        guardStagedWrite(t, stageOutputs);
+        const toolCtx: ToolContext = { config, logger, cwd: resolveCwd, staged: stageOutputs, pushBranch };
         const output = await t.handler(toolInput, toolCtx);
         safeObserve(observer, { type: "tool:result", node: currentId!, tool: t.name, output }, logger);
         return output;
@@ -563,7 +574,11 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       outputDecls.length > 0
         ? `${baseInstruction}\n\n${safeOutputsInstruction(outputDecls, runInput)}`
         : baseInstruction;
-    const instruction = dryRun ? `${dryRunNotice(skippedWrites)}\n\n---\n\n${nodeInstruction}` : nodeInstruction;
+    const instruction = dryRun
+      ? `${dryRunNotice(skippedWrites)}\n\n---\n\n${nodeInstruction}`
+      : skippedWrites.length > 0
+        ? `${stagedNotice(skippedWrites)}\n\n---\n\n${nodeInstruction}`
+        : nodeInstruction;
 
     // Run Claude on this node, with optional eval-failure retry loop.
     let attempt = 0;
@@ -896,6 +911,8 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
           env: runEnv,
           actor,
           staged: stageOutputs,
+          cwd: resolveCwd,
+          pushBranch,
           state: writeState,
           logger,
           input: runInput,
@@ -1416,6 +1433,17 @@ export function isReadTool(tool: Pick<Tool, "access">): boolean {
   return tool.access === "read";
 }
 
+/**
+ * The tool dispatcher's staged-run gate: in a staged or dry run no write (or
+ * unclassified) tool handler runs, whatever reached the agent. Throws before
+ * any side effect.
+ */
+export function guardStagedWrite(tool: Pick<Tool, "name" | "access">, staged: boolean): void {
+  if (staged && !isReadTool(tool)) {
+    throw new Error(`${tool.name} is a write tool and this run is staged: nothing was written`);
+  }
+}
+
 /** Instruction section prepended to every node under dry-run. */
 function dryRunNotice(skippedWrites: string[]): string {
   const withheld =
@@ -1424,6 +1452,15 @@ function dryRunNotice(skippedWrites: string[]): string {
     `## Dry run\n\nThis is a dry run. Only read-only tools are available. ${withheld}` +
     `Do not create, modify, post, or send anything. Do the analysis, and where this step would ` +
     `normally write, describe exactly what it would have written instead.`
+  );
+}
+
+/** Instruction section prepended to a staged write node whose write tools were withheld. */
+function stagedNotice(skippedWrites: string[]): string {
+  return (
+    `## Staged run\n\nThis run is staged: nothing is written outside the workspace. These write tools were ` +
+    `withheld from this step: ${skippedWrites.join(", ")}. Where this step would call one, describe ` +
+    `exactly what it would have written instead.`
   );
 }
 

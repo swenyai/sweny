@@ -7,17 +7,32 @@
  * the sweny process, with the github skill's token (`GITHUB_TOKEN`), right
  * before it opens the PR. The agent never holds the token.
  *
- * Guard rails: only a local branch that exists, only to `origin` when it is
- * the PR's own repo, never force, never the base branch or the remote's
- * default branch. The token goes to git through command-scope config in the
- * child env (`GIT_CONFIG_*`), never argv, as an `http.<server>/.extraheader`
- * that first resets any persisted one (so the job token is never sent twice).
+ * The checkout is agent-written, so nothing in it may run, or steer the push,
+ * while the token is in play. The push therefore never runs in the checkout:
+ *
+ * 1. Read-only git in the checkout, with no token in its env, resolves the
+ *    head commit, checks that every fetch and push URL of `origin` is the PR's
+ *    repo on the GitHub server, and finds the object store.
+ * 2. A private temporary bare repo borrows those objects (`alternates`, data
+ *    only) and gets one ref, the head commit.
+ * 3. git pushes from that repo, with no system or global config, an empty
+ *    hooks dir, `--no-verify` and no credential helper, to an explicit URL
+ *    built from the PR's repo (`<server>/<owner>/<repo>.git`) with an explicit
+ *    refspec. No agent-written config, hook, push URL or `insteadOf` is read.
+ *    The token goes to git as command-scope config in the child env, never
+ *    argv, and only on this one invocation.
+ *
+ * Guard rails: only a local branch that exists, only when origin is the PR's
+ * own repo, never force, never the base branch or the remote's default branch.
  * A push that fails is logged and the PR is still requested: the agent may
  * already have pushed (persisted credentials, an `agent_env` grant).
  */
 
 import { execFile } from "node:child_process";
-import { setBranchPusher } from "./github.js";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { devNull, tmpdir } from "node:os";
+import * as path from "node:path";
+import type { BranchPusher } from "../types.js";
 
 export interface GitRunResult {
   code: number;
@@ -46,10 +61,11 @@ export interface PushHeadOptions {
   head: string;
   /** The PR's base branch. */
   base: string;
-  /** The github skill's token. Without it, git uses whatever credential the checkout has. */
+  /** The github skill's token. Without it nothing is pushed. */
   token?: string;
-  /** The checkout. Default: `process.cwd()`. */
-  cwd?: string;
+  /** The checkout (the run's `cwd`). */
+  cwd: string;
+  /** The operator's env: `GITHUB_SERVER_URL`, proxy and CA settings. Default: `process.env`. */
   env?: NodeJS.ProcessEnv;
   /** Test seam. */
   git?: GitRunner;
@@ -88,6 +104,15 @@ export function isSafeBranch(name: string): boolean {
   );
 }
 
+/** `owner/repo` with plain name characters only. */
+export function isSafeRepo(repo: string): boolean {
+  const parts = repo.split("/");
+  return (
+    parts.length === 2 &&
+    parts.every((p) => /^[A-Za-z0-9._-]+$/.test(p) && p !== "." && p !== ".." && !p.startsWith("-"))
+  );
+}
+
 /** The command-scope git config that authenticates one push to `server` with `token`. */
 export function pushAuthConfig(server: string, token: string, env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env };
@@ -95,7 +120,7 @@ export function pushAuthConfig(server: string, token: string, env: NodeJS.Proces
   let n = Number.isFinite(base) && base > 0 ? base : 0;
   const key = `http.${server.replace(/\/+$/, "")}/.extraheader`;
   const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
-  // An empty value resets the list, so a header the checkout persisted is not sent too.
+  // An empty value resets the list, so no other header is sent with it.
   for (const value of ["", `AUTHORIZATION: basic ${basic}`]) {
     out[`GIT_CONFIG_KEY_${n}`] = key;
     out[`GIT_CONFIG_VALUE_${n}`] = value;
@@ -105,55 +130,154 @@ export function pushAuthConfig(server: string, token: string, env: NodeJS.Proces
   return out;
 }
 
+// What the operator's env may hand git: the path, locale, temp dirs, proxies
+// and CA bundles. Every other GIT_* setting (GIT_DIR, GIT_CONFIG_*, GIT_SSH*,
+// GIT_ASKPASS, GIT_TRACE*, ...) is dropped.
+const KEPT_ENV =
+  /^(PATH|Path|HOME|USERPROFILE|TMPDIR|TEMP|TMP|LANG|LANGUAGE|LC_[A-Z_]+|SYSTEMROOT|SystemRoot|COMSPEC|ComSpec|PATHEXT|(HTTPS?|ALL|NO)_PROXY|(https?|all|no)_proxy|SSL_CERT_FILE|SSL_CERT_DIR|GIT_SSL_CAINFO|GIT_SSL_CAPATH)$/;
+
+/** The env every sweny-side git call runs with: no system or global config, no prompts, no inherited git settings. */
+export function hardenedGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(env)) if (v !== undefined && KEPT_ENV.test(k)) out[k] = v;
+  out.GIT_CONFIG_NOSYSTEM = "1";
+  out.GIT_CONFIG_GLOBAL = devNull;
+  out.GIT_TERMINAL_PROMPT = "0";
+  return out;
+}
+
+/** Command-line config (highest precedence) for every sweny-side git call. */
+function hardenedArgs(hooksDir: string): string[] {
+  return [
+    "-c",
+    `core.hooksPath=${hooksDir}`,
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.sshCommand=",
+    "-c",
+    "credential.helper=",
+    "-c",
+    "core.askPass=",
+    "-c",
+    "protocol.ext.allow=never",
+  ];
+}
+
 /**
- * Push the PR's head branch to `origin` from the sweny process. Never throws.
+ * Push the PR's head branch from the sweny process. Never throws.
  */
 export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadResult> {
   const git = opts.git ?? defaultGit;
-  const cwd = opts.cwd ?? process.cwd();
-  const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env), GIT_TERMINAL_PROMPT: "0" };
-  const { head, base } = opts;
+  const { head, base, token } = opts;
+  if (!isSafeRepo(opts.repo))
+    return { pushed: false, attempted: false, reason: `repo "${opts.repo}" is not owner/repo` };
   if (!isSafeBranch(head))
     return { pushed: false, attempted: false, reason: `head "${head}" is not a plain branch name` };
   if (head === base) return { pushed: false, attempted: false, reason: "head is the base branch" };
+  if (!token) return { pushed: false, attempted: false, reason: "no GITHUB_TOKEN" };
+
+  const opEnv = opts.env ?? process.env;
+  let server: URL;
   try {
-    const local = await git(["rev-parse", "--verify", "--quiet", `refs/heads/${head}^{commit}`], { cwd, env });
-    if (local.code !== 0) return { pushed: false, attempted: false, reason: `no local branch ${head}` };
-    const remote = await git(["remote", "get-url", "origin"], { cwd, env });
-    if (remote.code !== 0) return { pushed: false, attempted: false, reason: "no origin remote" };
-    const parsed = repoFromRemote(remote.stdout);
-    if (!parsed || parsed.repo !== opts.repo.toLowerCase()) {
-      return { pushed: false, attempted: false, reason: `origin is not ${opts.repo}` };
+    server = new URL((opEnv.GITHUB_SERVER_URL || "https://github.com").replace(/\/+$/, ""));
+  } catch {
+    return { pushed: false, attempted: false, reason: "GITHUB_SERVER_URL is not a URL" };
+  }
+  if (server.protocol !== "https:" || server.username || server.password || server.search || server.hash) {
+    return { pushed: false, attempted: false, reason: "GITHUB_SERVER_URL is not a plain https URL" };
+  }
+  const serverBase = `${server.origin}${server.pathname.replace(/\/+$/, "")}`;
+  const serverHost = server.hostname.toLowerCase();
+  const destination = `${serverBase}/${opts.repo}.git`;
+
+  const cwd = path.resolve(opts.cwd);
+  const env = hardenedGitEnv(opEnv);
+  let tmp: string | undefined;
+  try {
+    tmp = mkdtempSync(path.join(tmpdir(), "sweny-push-"));
+    const hooks = path.join(tmp, "hooks");
+    mkdirSync(hooks, { mode: 0o700 });
+    const hard = hardenedArgs(hooks);
+    // Reads in the agent's checkout: no token in the env, nothing run from its config.
+    const read = (args: string[]) => git([...hard, "-c", "safe.directory=*", ...args], { cwd, env });
+
+    const local = await read(["rev-parse", "--verify", "--quiet", `refs/heads/${head}^{commit}`]);
+    const sha = local.stdout.trim();
+    if (local.code !== 0 || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(sha)) {
+      return { pushed: false, attempted: false, reason: `no local branch ${head}` };
     }
-    const originHead = await git(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], { cwd, env });
+    const fetchUrls = await read(["remote", "get-url", "--all", "origin"]);
+    const pushUrls = await read(["remote", "get-url", "--push", "--all", "origin"]);
+    if (fetchUrls.code !== 0 || pushUrls.code !== 0) {
+      return { pushed: false, attempted: false, reason: "no origin remote" };
+    }
+    const urls = `${fetchUrls.stdout}\n${pushUrls.stdout}`
+      .split("\n")
+      .map((u) => u.trim())
+      .filter(Boolean);
+    const wanted = opts.repo.toLowerCase();
+    const bad =
+      urls.length === 0 ||
+      urls.some((u) => {
+        const p = repoFromRemote(u);
+        return !p || p.repo !== wanted || p.host !== serverHost;
+      });
+    if (bad) return { pushed: false, attempted: false, reason: `origin is not ${opts.repo} on ${serverHost}` };
+
+    const originHead = await read(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]);
     const defaultBranch = originHead.code === 0 ? originHead.stdout.trim().replace(/^origin\//, "") : undefined;
     if (head === defaultBranch || head === "main" || head === "master") {
       return { pushed: false, attempted: false, reason: `head ${head} is the default branch` };
     }
-    const server = (env.GITHUB_SERVER_URL || "https://github.com").replace(/\/+$/, "");
-    let serverHost: string;
-    try {
-      serverHost = new URL(server).host.toLowerCase();
-    } catch {
-      serverHost = "github.com";
+
+    const objectsOut = await read(["rev-parse", "--git-path", "objects"]);
+    const shallowOut = await read(["rev-parse", "--git-path", "shallow"]);
+    if (objectsOut.code !== 0 || shallowOut.code !== 0) {
+      return { pushed: false, attempted: false, reason: "cannot locate the checkout's object store" };
     }
-    const pushEnv =
-      opts.token && parsed.https && parsed.host === serverHost ? pushAuthConfig(server, opts.token, env) : env;
-    const r = await git(["push", "--porcelain", "origin", `refs/heads/${head}:refs/heads/${head}`], {
-      cwd,
-      env: pushEnv,
-    });
+    const objects = path.resolve(cwd, objectsOut.stdout.trim());
+    const shallow = path.resolve(cwd, shallowOut.stdout.trim());
+
+    // A private bare repo that borrows the checkout's objects and holds one ref.
+    const repoDir = path.join(tmp, "push.git");
+    const own = (args: string[], extraEnv?: NodeJS.ProcessEnv) =>
+      git([...hard, `--git-dir=${repoDir}`, ...args], { cwd: tmp!, env: { ...env, ...extraEnv } });
+    const init = await git([...hard, "init", "--quiet", "--bare", repoDir], { cwd: tmp, env });
+    if (init.code !== 0) return { pushed: false, attempted: false, reason: "cannot create the push repo" };
+    writeFileSync(path.join(repoDir, "objects", "info", "alternates"), `${objects}\n`);
+    // A shallow checkout (actions/checkout's default): copy its boundary list. Only a
+    // plain, bounded file; a link or FIFO the agent planted is not read.
+    const shallowStat = lstatSync(shallow, { throwIfNoEntry: false });
+    if (shallowStat?.isFile() && shallowStat.size <= 1 << 20) {
+      writeFileSync(path.join(repoDir, "shallow"), readFileSync(shallow));
+    }
+    const ref = await own(["update-ref", `refs/heads/${head}`, sha]);
+    if (ref.code !== 0) return { pushed: false, attempted: false, reason: `cannot stage ${head} for the push` };
+
+    const r = await own(
+      ["push", "--no-verify", "--porcelain", destination, `refs/heads/${head}:refs/heads/${head}`],
+      pushAuthConfig(serverBase, token, {}),
+    );
     if (r.code !== 0) {
       const why = (r.stderr || r.stdout).trim().split("\n").at(-1) ?? "";
-      return { pushed: false, attempted: true, reason: `git push failed: ${redact(why, opts.token)}` };
+      return { pushed: false, attempted: true, reason: `git push failed: ${redact(why, token)}` };
     }
     return { pushed: true, attempted: true };
   } catch (err) {
     return {
       pushed: false,
       attempted: false,
-      reason: redact(err instanceof Error ? err.message : String(err), opts.token),
+      reason: redact(err instanceof Error ? err.message : String(err), token),
     };
+  } finally {
+    if (tmp) {
+      try {
+        rmSync(tmp, { recursive: true, force: true });
+      } catch {
+        // Best effort: a leftover temp dir holds no secret.
+      }
+    }
   }
 }
 
@@ -163,5 +287,7 @@ function redact(text: string, token: string | undefined): string {
   return text.split(token).join("***").split(basic).join("***");
 }
 
-// The Node entry imports this module (executor.ts), which arms the push in `github_create_pr`.
-setBranchPusher(pushHeadBranch);
+/** A pusher bound to one run's checkout and env (handed to tools as `ToolContext.pushBranch`). */
+export function bindBranchPusher(cwd: string, env?: NodeJS.ProcessEnv): BranchPusher {
+  return (o) => pushHeadBranch({ ...o, cwd, env });
+}
