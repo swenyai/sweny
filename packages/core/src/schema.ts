@@ -11,6 +11,7 @@ import { z } from "zod";
 import type { Workflow, WorkflowType } from "./types.js";
 import {
   AUTHOR_ASSOCIATIONS,
+  CONTEXT_MODES,
   EVALUATOR_KINDS,
   EVAL_POLICIES,
   MCP_TRANSPORTS,
@@ -20,6 +21,7 @@ import {
   SAFE_OUTPUT_APPLIERS,
   SAFE_OUTPUT_EXPIRES_PATTERN,
   SAFE_OUTPUT_MAX_CEILING,
+  SAFE_OUTPUT_STATES,
   SAFE_OUTPUT_TYPES,
   SKILL_CATEGORIES,
   SKILL_ID_MAX_LENGTH,
@@ -322,6 +324,10 @@ export const safeOutputDeclarationZ = z
     title_prefix: z.string().min(1).max(64).optional(),
     labels: z.array(z.string().min(1)).min(1).optional(),
     expires: z.string().regex(SAFE_OUTPUT_EXPIRES_PATTERN).optional(),
+    number: z
+      .union([z.string().min(1), z.number().int().min(1), z.object({ input: z.string().min(1) }).strict()])
+      .optional(),
+    state: z.enum(SAFE_OUTPUT_STATES).optional(),
   })
   .strict();
 
@@ -408,6 +414,7 @@ export const workflowZ = z.object({
   judge_model: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   judge_budget: z.number().int().min(0).optional(),
+  context_mode: z.enum(CONTEXT_MODES).optional(),
   inputs: workflowInputsZ.optional(),
   permissions: nodePermissionsZ.optional(),
   safe_outputs: safeOutputsPolicyZ.optional(),
@@ -731,6 +738,29 @@ export function validateWorkflow(
           nodeId,
         });
       }
+      if (out.number !== undefined && out.type !== "comment" && out.type !== "label" && out.type !== "issue_state") {
+        errors.push({
+          code: "UNSUPPORTED_OUTPUT",
+          message: `Node "${nodeId}" output "${out.type}" pins number, which only applies to comment, label and issue_state outputs`,
+          nodeId,
+        });
+      }
+      // Closing is destructive: an injected agent must not pick the issue. Only a
+      // reopen-only output may rely on the issue named in the request.
+      if (out.type === "issue_state" && out.state !== "reopen" && out.number === undefined) {
+        errors.push({
+          code: "UNSUPPORTED_OUTPUT",
+          message: `Node "${nodeId}" output "issue_state" can close issues, so it must pin number (a literal or { input: name }); only state: reopen may omit the pin`,
+          nodeId,
+        });
+      }
+      if (out.state !== undefined && out.type !== "issue_state") {
+        errors.push({
+          code: "UNSUPPORTED_OUTPUT",
+          message: `Node "${nodeId}" output "${out.type}" sets state, which only applies to issue_state outputs`,
+          nodeId,
+        });
+      }
     }
   }
 
@@ -898,7 +928,7 @@ export const workflowJsonSchema = {
     },
     Permissions: {
       description:
-        "What a node's agent may do. 'read' runs it read-only: only access: read skill tools, no external skill MCP servers, no shell, file-write, edit, fetch or subagent built-ins. On the workflow it is the default and the ceiling for every node.",
+        "What a node's agent may do. 'read' runs it read-only: only access: read skill tools, no external skill MCP servers, no file-write, edit, fetch or subagent built-ins, and no shell (on Codex, a shell confined to its OS read-only sandbox). On the workflow it is the default and the ceiling for every node.",
       oneOf: [
         { type: "string", enum: [...NODE_ACCESS] },
         {
@@ -960,6 +990,25 @@ export const workflowJsonSchema = {
           type: "string",
           pattern: SAFE_OUTPUT_EXPIRES_PATTERN.source,
           description: "Drop an intent older than this when the write stage runs (e.g. 30m, 2h, 7d).",
+        },
+        number: {
+          description:
+            "comment / label / issue_state: the only issue or PR this output may write to (GitHub number, Linear identifier), or { input: <name> } to pin it to a run input.",
+          oneOf: [
+            { type: "string", minLength: 1 },
+            { type: "integer", minimum: 1 },
+            {
+              type: "object",
+              required: ["input"],
+              additionalProperties: false,
+              properties: { input: { type: "string", minLength: 1 } },
+            },
+          ],
+        },
+        state: {
+          type: "string",
+          enum: [...SAFE_OUTPUT_STATES],
+          description: "issue_state: the one change this output may make (reopen or close). Default: either.",
         },
       },
     },
@@ -1047,6 +1096,12 @@ export const workflowJsonSchema = {
       // applies the soft-cap default at use-time. See judge_model above.
       description:
         "Soft cap on expected judge calls per workflow run. Executor warns at load time if exceeded; not a hard runtime cap in v1.",
+    },
+    context_mode: {
+      type: "string",
+      enum: [...CONTEXT_MODES],
+      description:
+        "What prior results a node's prompt receives. bounded (default): only nodes it can depend on, and a schema'd node's declared fields instead of its free-text summary. full: every prior node's complete data.",
     },
     inputs: {
       type: "object",

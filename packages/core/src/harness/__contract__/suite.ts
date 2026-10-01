@@ -9,12 +9,16 @@
  *
  * Each case passes, or is skipped only where the adapter's declared
  * `capabilities` say the opinion is not native (the skip must match the
- * declaration). Eighteen cases, one `it` each, so a report reads "18 passed".
+ * declaration). Nineteen cases, one `it` each, so a report reads "19 passed".
  * Cases 16 to 18 (#365) prove the node policy reaches the agent, which safe
- * outputs depend on.
+ * outputs depend on. Case 19 (#442) proves a staged run cannot push.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
 import type { Logger, Tool } from "../../types.js";
 import { AGENT_ENV_ALLOWLIST, AGENT_ENV_PREFIXES } from "../../agent-env.js";
 import { UNTRUSTED_DATA_NOTICE } from "../../untrusted.js";
@@ -22,7 +26,7 @@ import { ask as coreAsk, evaluate as coreEvaluate } from "../prompts.js";
 import { nativeDenyClasses, policyGate } from "../policy.js";
 import type { AgentHarness, HarnessRunRequest, NodePolicy, ToolClass } from "../types.js";
 import type { SandboxWrapper } from "../sandbox-wrapper.js";
-import { AMBIENT_MCP_CANARY, type HarnessFakes } from "./fakes.js";
+import { AMBIENT_MCP_CANARY, type FakeCapture, type HarnessFakes } from "./fakes.js";
 import { sandboxWrapperCase } from "./sandbox.js";
 import {
   EXIT_CASES,
@@ -80,12 +84,23 @@ function count(text: string, re: RegExp): number {
 }
 
 type Skip = (note?: string) => void;
+
+/**
+ * Read-only expectation for one tool class. Write, edit, net and subagent must
+ * be denied. A shell must be denied too, unless the harness keeps it confined
+ * to an OS read-only sandbox (Codex), where it can read but not write or reach
+ * the network.
+ */
+function expectDeniedInReadOnly(cap: FakeCapture, c: ToolClass, label: string): void {
+  if (c === "shell" && cap.shellConfinedReadOnly === true) return;
+  expect(cap.allows(c), label).toBe(false);
+}
 type CaseFn = (skip: Skip) => Promise<void>;
 
 export const CONTRACT_CASE_NAMES = [
   "01 env: only the allowlist, the node's vars and auth reach the agent",
   "02 mcp exclusive: only injected servers load, never the user's own config",
-  "03 read-only: no write, edit, shell or net tool is granted",
+  "03 read-only: no write, edit or net tool is granted; a shell only inside an OS read-only sandbox",
   "04 deny compile: every tool class maps natively or degrades/refuses",
   "05 structured output: valid, fenced, prose, invalid and missing-field results",
   "06 tool trace: parallel same-name calls pair by id, errors and orphans keep status",
@@ -99,8 +114,9 @@ export const CONTRACT_CASE_NAMES = [
   "14 cleanup: nothing is left running or on disk after success, failure and abort",
   "15 sandbox wrapper: no native sandbox means the agent runs only inside the wrapper, and strict refuses without one",
   "16 policy deny: every class in policy.deny reaches the agent natively, or degrades and strict refuses",
-  "17 strict policy: MCP is exclusive for a write-capable node too",
+  "17 strict policy: MCP is exclusive for a write-capable node too, or strict refuses",
   "18 policy read-only: policy.readOnly alone is enforced and the skill tool channel survives",
+  "19 stage no push: under noPush a git push from the agent's env fails and write tokens are withheld; normal mode pushes",
 ] as const;
 
 export interface ContractSuiteOptions {
@@ -194,7 +210,7 @@ export function runContractSuite(
         }
         const cap = fakes.captured();
         for (const c of TOOL_CLASSES) {
-          expect(cap.allows(c), `${c} must be denied in a read-only run`).toBe(false);
+          expectDeniedInReadOnly(cap, c, `${c} must be denied in a read-only run`);
         }
         // Read-only is honored natively, so nothing about it is degraded. A
         // harness with no native turn limit still reports that, and only that.
@@ -284,7 +300,7 @@ export function runContractSuite(
       // 7
       async (skip) => {
         const { h } = await fresh();
-        if (!h.capabilities.usage.tokens) return skip("usage is not captured");
+        if (!h.capabilities.usage.tokens && !h.capabilities.usage.costUsd) return skip("usage is not captured");
         // Only fields the wire format carries can arrive; the rest must stay absent (never a guessed 0).
         const carried = new Set<keyof FakeUsage>(fakes.usageFields ?? (Object.keys(FULL_USAGE) as (keyof FakeUsage)[]));
         const pick = (u: FakeUsage) =>
@@ -470,7 +486,7 @@ export function runContractSuite(
           fakes.script(DONE);
           await h.run(req({ readOnly: true, policy: readOnlyPolicy }));
           for (const c of ["shell", "write", "edit"] as ToolClass[]) {
-            expect(fakes.captured().allows(c), c).toBe(false);
+            expectDeniedInReadOnly(fakes.captured(), c, c);
           }
         }
 
@@ -589,18 +605,24 @@ export function runContractSuite(
         }
       },
 
-      // 17 (#365)
-      async (skip) => {
+      // 17 (#365): `permissions.strict` asks for exclusive MCP. A harness that
+      // cannot exclude the user's own servers refuses before the agent starts.
+      async () => {
         const { h } = await fresh();
-        if (h.capabilities.mcp.exclusive === "none") return skip("mcp exclusive is none");
         fakes.script(DONE);
+        const before = fakes.captured().invocations;
         const r = await h.run(
           req({
-            policy: { readOnly: false, deny: [], egress: [], strict: true },
+            policy: { readOnly: false, deny: [], egress: [], strict: true, exclusiveMcp: true },
             tools: [lookupTool],
             mcpServers: { injected: { type: "stdio", command: "injected-server" } },
           }),
         );
+        if (h.capabilities.mcp.exclusive === "none") {
+          expect(r.status).toBe("failed");
+          expect(fakes.captured().invocations, "agent not started").toBe(before);
+          return;
+        }
         expect(r.status).toBe("success");
         const loaded = fakes.captured().mcpServersLoaded;
         expect(loaded).toContain("injected");
@@ -619,11 +641,70 @@ export function runContractSuite(
         }
         const cap = fakes.captured();
         for (const c of TOOL_CLASSES) {
-          expect(cap.allows(c), `${c} must be denied under policy.readOnly`).toBe(false);
+          expectDeniedInReadOnly(cap, c, `${c} must be denied under policy.readOnly`);
         }
         expect(cap.mcpServersLoaded.some((n) => n.startsWith("sweny"))).toBe(true);
         if (h.capabilities.mcp.exclusive !== "none") expect(cap.mcpServersLoaded).not.toContain(AMBIENT_MCP_CANARY);
         expect(r.degraded.filter((d) => d.startsWith("read-only"))).toEqual([]);
+      },
+
+      // 19 (#442): --stage / --dry-run mark the node noPush. The agent's shell
+      // inherits the env the adapter hands it, so a real `git push` run with
+      // that exact env is what the agent's own push would do.
+      async (skip) => {
+        if (process.platform === "win32") return skip("posix git fixture");
+        vi.stubEnv("GITHUB_TOKEN", "stage-write-token");
+        vi.stubEnv("GH_TOKEN", "stage-gh-token");
+        const nodeVars = ["GITHUB_TOKEN"];
+        const root = mkdtempSync(path.join(tmpdir(), "sweny-contract-442-"));
+        try {
+          const remote = path.join(root, "remote.git");
+          const work = path.join(root, "work");
+          const hostEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: path.join(root, "gc") };
+          writeFileSync(hostEnv.GIT_CONFIG_GLOBAL, "");
+          const sh = (args: string[], cwd: string, env: NodeJS.ProcessEnv) =>
+            spawnSync("git", args, { cwd, env, encoding: "utf8", timeout: 30_000 });
+          expect(sh(["init", "-q", "--bare", remote], root, hostEnv).status).toBe(0);
+          expect(sh(["init", "-q", work], root, hostEnv).status).toBe(0);
+          const c = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"];
+          expect(sh(c, work, hostEnv).status).toBe(0);
+          expect(sh(["remote", "add", "origin", remote], work, hostEnv).status).toBe(0);
+          const refs = () => (sh(["for-each-ref", "--format=%(refname)"], remote, hostEnv).stdout ?? "").trim();
+          // The agent's env, isolated from the host's global git config.
+          const agentEnv = (env: Record<string, string>) => ({
+            ...env,
+            PATH: env.PATH ?? process.env.PATH ?? "",
+            GIT_CONFIG_NOSYSTEM: "1",
+            GIT_CONFIG_GLOBAL: hostEnv.GIT_CONFIG_GLOBAL,
+          });
+
+          const { h } = await fresh();
+          fakes.script(DONE);
+          await h.run(req({ agentAccess: { envVars: nodeVars, domains: [], noPush: true } }));
+          const staged = fakes.captured().env;
+          expect(staged, "write token withheld even when the node declares it").not.toHaveProperty("GITHUB_TOKEN");
+          expect(Object.values(staged)).not.toContain("stage-write-token");
+          expect(Object.values(staged)).not.toContain("stage-gh-token");
+          for (const args of [
+            ["push", "origin", "HEAD:refs/heads/a"],
+            ["push", "--no-verify", "--force", "origin", "HEAD:refs/heads/b"],
+            ["push"],
+          ]) {
+            const r = sh(args, work, agentEnv(staged));
+            expect(r.status, `staged git ${args.join(" ")}`).not.toBe(0);
+          }
+          expect(refs(), "nothing reached the remote").toBe("");
+
+          fakes.script(DONE);
+          await h.run(req({ agentAccess: { envVars: nodeVars, domains: [] } }));
+          const normal = fakes.captured().env;
+          expect(normal.GITHUB_TOKEN).toBe("stage-write-token");
+          const ok = sh(["push", "-q", "origin", "HEAD:refs/heads/ok"], work, agentEnv(normal));
+          expect(ok.status, `normal push: ${ok.stderr}`).toBe(0);
+          expect(refs()).toBe("refs/heads/ok");
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
       },
     ];
 

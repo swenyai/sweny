@@ -167,6 +167,10 @@ export type EvaluatorKind = (typeof EVALUATOR_KINDS)[number];
 export const EVAL_POLICIES = ["all_pass", "any_pass", "weighted"] as const;
 export type EvalPolicy = (typeof EVAL_POLICIES)[number];
 
+/** What prior results a node's prompt receives (#337). See {@link Workflow.context_mode}. */
+export const CONTEXT_MODES = ["bounded", "full"] as const;
+export type ContextMode = (typeof CONTEXT_MODES)[number];
+
 /** Action when a `requires` precondition fails. */
 export const REQUIRES_ON_FAIL = ["fail", "skip"] as const;
 export type RequiresOnFail = (typeof REQUIRES_ON_FAIL)[number];
@@ -435,16 +439,20 @@ export interface NodePermissionsSpec {
 export type NodePermissions = NodeAccess | NodePermissionsSpec;
 
 /** Write operations a node may request through `emit_output`. */
-export const SAFE_OUTPUT_TYPES = ["comment", "issue", "pr", "label"] as const;
+export const SAFE_OUTPUT_TYPES = ["comment", "issue", "pr", "label", "issue_state"] as const;
 export type SafeOutputType = (typeof SAFE_OUTPUT_TYPES)[number];
+
+/** What an `issue_state` output may do to an issue: reopen a closed one, or close an open one. */
+export const SAFE_OUTPUT_STATES = ["reopen", "close"] as const;
+export type SafeOutputState = (typeof SAFE_OUTPUT_STATES)[number];
 
 /**
  * Skills that can apply each output type. The write stage calls the skill's
  * own tool handler; a skill not listed here cannot apply safe outputs.
  */
 export const SAFE_OUTPUT_APPLIERS: Readonly<Record<string, readonly SafeOutputType[]>> = {
-  github: ["comment", "issue", "pr", "label"],
-  linear: ["comment", "issue"],
+  github: ["comment", "issue", "pr", "label", "issue_state"],
+  linear: ["comment", "issue", "issue_state"],
 };
 
 /** GitHub author associations accepted by `safe_outputs.trusted_associations`. */
@@ -480,7 +488,20 @@ export interface SafeOutputDeclaration {
   labels?: string[];
   /** Drop an intent older than this when the write stage runs (e.g. `30m`, `2h`, `7d`). */
   expires?: string;
+  /**
+   * comment / label / issue_state: the only issue or PR this output may write
+   * to (GitHub issue or PR number, Linear issue identifier), or `{ input: <name> }`
+   * to pin it to a run input. An intent naming another is refused; an intent
+   * naming none uses the pin. An empty pinned input refuses the write.
+   * `issue_state` always needs an issue: the pin, or a number on the intent.
+   */
+  number?: SafeOutputPin;
+  /** issue_state only: the one change this output may make. Default: either. */
+  state?: SafeOutputState;
 }
+
+/** A pinned issue / PR: a literal number or identifier, or the name of a run input that holds one. */
+export type SafeOutputPin = string | number | { input: string };
 
 /** Workflow-level safe-output policy: the ceiling and run-wide limits. */
 export interface SafeOutputsPolicy {
@@ -509,6 +530,8 @@ export interface SafeOutputReceipt {
   target?: string;
   /** Issue / PR / comment number or id the write produced. */
   ref?: string | number;
+  /** Web URL of what the write produced, as the API returned it. */
+  url?: string;
 }
 
 /**
@@ -572,6 +595,13 @@ export interface Workflow {
   model?: string;
   /** Soft cap on expected judge calls per workflow run. Warning at load time when exceeded. */
   judge_budget?: number;
+  /**
+   * What prior results a node's prompt receives (#337). `bounded` (default):
+   * only nodes it can depend on (graph ancestors, nodes named by `requires`
+   * or its instruction), and a schema'd node's declared fields instead of its
+   * free-text `summary`. `full`: every prior node's complete data.
+   */
+  context_mode?: ContextMode;
   /**
    * Declared per-run input contract. When present, the CLI validates the
    * caller-provided `--input` JSON against this declaration, applies defaults

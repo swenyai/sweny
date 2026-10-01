@@ -258,7 +258,7 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
     "Write a PR-comment markdown (run receipt, status-colored DAG, per-node table; metadata only) to <path> so any CI can post it",
   ],
   ["--input <json>", "JSON string of input data to pass to the workflow"],
-  ["--agent <id>", "Coding agent that runs the nodes: claude (default) or codex"],
+  ["--agent <id>", "Coding agent that runs the nodes: claude (default), codex, or pi (experimental)"],
   [
     "--harness-policy <mode>",
     "strict: refuse a node whose policy the agent cannot enforce; warn: run it and report what was not enforced (default: strict under GitHub Actions, warn elsewhere; env SWENY_HARNESS_POLICY)",

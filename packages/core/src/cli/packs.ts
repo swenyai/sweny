@@ -10,11 +10,15 @@
  *   - validates with no credentials
  *   - every node declares an `output` schema and at least one `eval` gate
  *   - value and function gates first; a judge only where a rule cannot decide
- *   - every node is read-only except the delivery node, and each node's write
- *     tools are named in `pack.writes`; the delivery node also restricts its
- *     tool list with `tools.allow`
- *   - harness-agnostic: instructions name SWEny skill tools and plain
- *     read-only shell commands, never a specific agent's built-in tools
+ *   - safe outputs (#365): every GitHub write (issue, comment) is a declared
+ *     output with a cap, and a pin or title prefix where one applies; sweny
+ *     applies it after the node. No node holds a GitHub write tool.
+ *   - least privilege: a workflow-level `permissions` ceiling, and every node
+ *     is `read` except a delivery node that needs a write no safe output
+ *     covers (Slack); its write tools are named in `pack.writes` and its tool
+ *     list is restricted with `tools.allow`
+ *   - harness-agnostic: instructions name SWEny skill tools, never a specific
+ *     agent's built-in tools
  */
 
 import type { WorkflowTemplate } from "./templates.js";
@@ -40,13 +44,20 @@ inputs:
     enum: [issue, slack, none]
     default: issue
 
+# Ceiling (#365): write only for the Slack post in publish. The digest issue is
+# a safe output, applied by sweny after publish, at most one per run.
+permissions: write
+safe_outputs:
+  allow: [issue]
+  max: 1
+
 nodes:
   collect:
     name: Collect the Week
     instruction: |
       Gather facts about the last N days, where N is context.input.days
-      (default 7). The repo is context.input.repo; if empty, use the
-      GITHUB_REPOSITORY environment variable, else the origin remote.
+      (default 7). The repo is context.input.repo; if empty, read the origin
+      remote URL from .git/config in the checkout.
       Compute the window as UTC dates: until is today, since is N days ago.
 
       1. Commits on the default branch in the window:
@@ -57,18 +68,19 @@ nodes:
       3. Issues opened and issues closed in the window:
          github_search_issues with "is:issue created:>=SINCE" and
          "is:issue closed:>=SINCE".
-      4. Files touched, with churn: run a read-only git command in the
-         checkout, for example "git log --since=SINCE --no-merges
-         --numstat --format=", and sum added plus deleted lines per path.
-         Keep the 15 paths with the most churn.
+      4. Files touched, with churn: github_list_pr_files for each merged PR
+         (at most 20, newest first), and sum additions plus deletions per
+         path. Keep the 15 paths with the most churn.
 
-      Only read. Never create, edit, comment, post, or push anything.
-      Report only what the tools returned. A quiet week is a valid result.
+      Only read. Report only what the tools returned. A quiet week is a
+      valid result.
     skills: [github]
+    permissions: read
     tools:
       allow:
         - github_list_recent_commits
         - github_search_issues
+        - github_list_pr_files
     max_turns: 30
     output:
       type: object
@@ -202,6 +214,7 @@ nodes:
       Copy the counts exactly from the collected facts; never estimate.
       watch_next is at most 3 short items a maintainer should look at next
       week (for example, a risky file that changed without a test).
+    permissions: read
     max_turns: 5
     output:
       type: object
@@ -274,19 +287,27 @@ nodes:
 
       - issue: first call github_search_issues for an open issue labelled
         sweny-digest whose title is "Weekly digest SINCE to UNTIL". If one
-        exists, do not create another. Otherwise call github_create_issue
-        with that title, the body, and the label sweny-digest.
+        exists, do not request another. Otherwise request it with
+        emit_output: type issue, that title, the body, and dedupe_key
+        "weekly-digest-SINCE". sweny files it after this step and adds the
+        sweny-digest label.
       - slack: call slack_send_message once with the body as mrkdwn.
-      - none: call no tool; just return the body.
+      - none: request nothing; just return the body.
 
-      This is the only step allowed to write, and only to the destination
-      above.
+      delivered means the issue was requested or the Slack message was sent.
     skills: [github, slack]
+    # Write only for slack_send_message (no safe output covers Slack). The
+    # issue is a declared output: capped at one, labelled, title-prefixed.
+    permissions: write
     tools:
       allow:
         - github_search_issues
-        - github_create_issue
         - slack_send_message
+    outputs:
+      - type: issue
+        max: 1
+        title_prefix: "Weekly digest "
+        labels: [sweny-digest]
     max_turns: 8
     output:
       type: object
@@ -310,12 +331,13 @@ nodes:
           output_matches:
             - path: destination
               in: [issue, slack, none]
-      - name: delivery_never_opens_a_pr
+      - name: delivery_never_writes_github_directly
         kind: function
         rule:
           no_tool_called:
             - github_create_pr
             - github_add_comment
+            - github_create_issue
 
 edges:
   - from: collect
@@ -346,7 +368,8 @@ jobs:
         with:
           workflow: .sweny/workflows/weekly-digest.yml
           claude-oauth-token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # input: '{"days": 7, "deliver": "slack"}'
+          input: '{"repo": "\${{ github.repository }}"}'
+          # input: '{"repo": "\${{ github.repository }}", "days": 7, "deliver": "slack"}'
         env:
           GITHUB_TOKEN: \${{ github.token }}
           # SLACK_WEBHOOK_URL: \${{ secrets.SLACK_WEBHOOK_URL }}
@@ -386,6 +409,13 @@ inputs:
     description: Lowest advisory severity worth an issue.
     enum: [low, medium, high, critical]
     default: medium
+
+# Ceiling (#365): every node is read-only. The one issue (or the one comment
+# on it) is a safe output, applied by sweny after file-issue.
+permissions: read
+safe_outputs:
+  allow: [issue, comment]
+  max: 1
 
 nodes:
   inventory:
@@ -452,7 +482,7 @@ nodes:
     name: Fetch Open Advisories
     instruction: |
       Call github_list_dependabot_alerts for the repo (context.input.repo;
-      if empty, GITHUB_REPOSITORY or the origin remote).
+      if empty, the origin remote URL in .git/config).
 
       If the tool returns unavailable: true, record available as false and
       return no alerts. Do NOT guess advisories from memory: an advisory you
@@ -595,24 +625,31 @@ nodes:
       Always start with github_search_issues for an open issue labelled
       sweny-drift (query: "is:issue is:open label:sweny-drift").
 
-      - If action is "none": create nothing. Return result "none".
+      - If action is "none": request nothing. Return result "none".
       - If an open sweny-drift issue exists and lists the same advisory ids
         and drift paths: change nothing. Return result "unchanged".
-      - If it exists but the set changed: call github_add_comment once on
-        that issue with only what is new. Return result "updated".
-      - If none exists: call github_create_issue once, titled
-        "Dependency drift: N actionable", label sweny-drift. The body has a
-        table (package, severity, advisory id, why it matters, fix), the
-        drift paths with reasons, and the deferred count. Return "created".
+      - If it exists but the set changed: request one comment on that issue
+        (emit_output type comment, number = the issue number) with only what
+        is new. Return result "updated".
+      - If none exists: request one issue (emit_output type issue) titled
+        "Dependency drift: N actionable". The body has a table (package,
+        severity, advisory id, why it matters, fix), the drift paths with
+        reasons, and the deferred count. Return "created". sweny files it
+        after this step and adds the sweny-drift label.
 
-      Never open a pull request. Never edit code or lockfiles. At most one
-      issue is created per run.
+      You cannot write to GitHub directly here: requests are applied after
+      this step, at most one per run.
     skills: [github]
     tools:
       allow:
         - github_search_issues
-        - github_create_issue
-        - github_add_comment
+    outputs:
+      - type: issue
+        max: 1
+        title_prefix: "Dependency drift: "
+        labels: [sweny-drift]
+      - type: comment
+        max: 1
     max_turns: 8
     output:
       type: object
@@ -633,11 +670,13 @@ nodes:
         rule:
           any_tool_called:
             - github_search_issues
-      - name: no_code_writes
+      - name: no_direct_github_writes
         kind: function
         rule:
           no_tool_called:
             - github_create_pr
+            - github_create_issue
+            - github_add_comment
       - name: result_is_valid
         kind: value
         rule:
@@ -676,6 +715,7 @@ jobs:
         with:
           workflow: .sweny/workflows/dependency-drift.yml
           claude-oauth-token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          input: '{"repo": "\${{ github.repository }}"}'
         env:
           # The built-in token cannot read Dependabot alerts. Use a fine-grained
           # token with Dependabot alerts: read, Issues: write, Contents: read.
@@ -711,6 +751,14 @@ inputs:
     type: number
     description: Pull request number. The Action snippet passes github.event.pull_request.number.
     default: 0
+
+# Ceiling (#365): every node is read-only. The review comment is a safe
+# output pinned to context.input.pr_number, applied by sweny after
+# post-comment.
+permissions: read
+safe_outputs:
+  allow: [comment]
+  max: 1
 
 nodes:
   scope:
@@ -885,9 +933,9 @@ nodes:
   post-comment:
     name: Post the Review Comment
     instruction: |
-      Post exactly one comment on the pull request with github_add_comment
-      (repo context.input.repo or GITHUB_REPOSITORY, issue_number
-      context.input.pr_number).
+      Request exactly one comment on the pull request with emit_output
+      (type comment). It can only land on context.input.pr_number; sweny
+      posts it after this step.
 
       Start the body with the line: <!-- sweny-pr-risk -->
       Then: "Risk: LEVEL" with the size, then the reasons as short bullets
@@ -895,34 +943,36 @@ nodes:
       "Read-only scope review. No code was changed."
       Keep it under 15 lines. No emoji walls, no praise.
 
-      This is the only step allowed to write, and it may only comment.
+      This is the only step that asks for a write, and it may only comment.
     skills: [github]
     tools:
       allow:
-        - github_add_comment
+        - github_get_issue
+    outputs:
+      - type: comment
+        max: 1
+        number: { input: pr_number }
     max_turns: 4
     output:
       type: object
       properties:
-        posted:
+        requested:
           type: boolean
-        comment_url:
-          type: string
         risk_level:
           type: string
           enum: [low, medium, high]
-      required: [posted, risk_level]
+      required: [requested, risk_level]
     eval:
-      - name: comment_was_posted
+      - name: comment_was_requested
         kind: function
         rule:
           all_tools_called:
-            - github_add_comment
+            - emit_output
       - name: comment_result
         kind: value
         rule:
           output_matches:
-            - path: posted
+            - path: requested
               equals: true
             - path: risk_level
               in: [low, medium, high]
@@ -986,7 +1036,7 @@ export const PACK_TEMPLATES: WorkflowTemplate[] = [
       trigger: DIGEST_TRIGGER,
       sample: DIGEST_SAMPLE,
       tokens: "15k to 40k per run (estimate)",
-      writes: { publish: ["github_create_issue", "slack_send_message"] },
+      writes: { publish: ["slack_send_message"] },
     },
   },
   {
@@ -998,7 +1048,7 @@ export const PACK_TEMPLATES: WorkflowTemplate[] = [
       trigger: DRIFT_TRIGGER,
       sample: DRIFT_SAMPLE,
       tokens: "20k to 60k per run (estimate)",
-      writes: { "file-issue": ["github_create_issue", "github_add_comment"] },
+      writes: {},
     },
   },
   {
@@ -1010,7 +1060,7 @@ export const PACK_TEMPLATES: WorkflowTemplate[] = [
       trigger: RISK_TRIGGER,
       sample: RISK_SAMPLE,
       tokens: "10k to 30k per run (estimate)",
-      writes: { "post-comment": ["github_add_comment"] },
+      writes: {},
     },
   },
 ];

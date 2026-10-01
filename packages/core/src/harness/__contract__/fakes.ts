@@ -53,6 +53,13 @@ export interface FakeCapture {
   nativeDisallowed: string[];
   /** Whether the agent would still have any built-in tool of this class. */
   allows(toolClass: ToolClass): boolean;
+  /**
+   * The shell tool exists but every command runs inside an OS-enforced
+   * read-only sandbox with the network off (Codex `--sandbox read-only`), so it
+   * can read the checkout and cannot write or reach the network. A read-only
+   * node may keep such a shell; any other shell must be denied.
+   */
+  shellConfinedReadOnly?: boolean;
   /** All built-in tools disabled (classification calls). */
   builtinToolsDisabled: boolean;
   maxTurns?: number;
@@ -360,6 +367,8 @@ export function createCodexProcessFake(): CodexProcessFake {
       mcpServersLoaded: c.mcpServersLoaded,
       nativeDisallowed: [],
       allows,
+      // The OS read-only sandbox blocks file writes and network for shell commands.
+      shellConfinedReadOnly: c.sandbox === "read-only",
       builtinToolsDisabled: disabled,
       maxTurns: undefined,
       model: c.model,
@@ -411,6 +420,190 @@ export function createCodexProcessFake(): CodexProcessFake {
         if (c.outputSchemaPath) paths.push(path.dirname(c.outputSchemaPath));
         const servers = (c.config.mcp_servers ?? {}) as Record<string, { args?: unknown }>;
         for (const s of bridgeSocketsIn(servers)) paths.push(path.dirname(s));
+      }
+      const live = raw()
+        .filter((c) => pidAlive(c.pid))
+        .map((c) => `pid ${c.pid} still running`);
+      return [...stillOnDisk(paths), ...live];
+    },
+    dispose() {
+      for (const c of raw()) {
+        if (pidAlive(c.pid)) {
+          try {
+            process.kill(c.pid, "SIGKILL");
+          } catch {
+            // gone
+          }
+        }
+      }
+    },
+    destroy() {
+      fs.rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+// ─── pi: a scripted `pi --mode rpc` process ──────────────────────
+
+/** What the pi fake process recorded (harness/fakes/pi-fake.mjs). */
+export interface PiFakeCapture {
+  pid: number;
+  args: string[];
+  env: Record<string, string>;
+  cwd: string;
+  /** The `message` of the `prompt` RPC command. */
+  prompt: string;
+  flags: string[];
+  model?: string;
+  systemPrompt?: string;
+  extensions: string[];
+  toolsAllow?: string[];
+  toolsExclude: string[];
+  /** Tools pi would declare to the model: `--tools` allowlist, else defaults minus exclusions. */
+  activeTools: string[];
+  agentDir: string;
+  /** Files in pi's agent dir when it started (the adapter's generated `mcp.json`, `models.json`). */
+  agentDirFiles: string[];
+  mcpServersLoaded: string[];
+  mcpConfig: Record<string, { args?: unknown }>;
+  /** With `callMcp`: pi-registered tool names each MCP server listed. */
+  mcpTools?: Record<string, string[]>;
+  mcpExtensionLoaded: boolean;
+  otherExtensionsLoaded: boolean;
+}
+
+export interface PiProcessFake extends HarnessFakes {
+  /** Command that runs the fake in place of `pi` (the adapter's `piCommand`). */
+  readonly command: { command: string; args: string[] };
+  /** The fake's HOME: `~/.pi/agent/mcp.json` declares {@link AMBIENT_MCP_CANARY}. */
+  readonly ambientHome: string;
+  /** A project directory whose `.pi/mcp.json` declares a server; use it as the adapter's `cwd`. */
+  readonly projectDir: string;
+  /** Every raw capture since the last reset, oldest first. */
+  raw(): PiFakeCapture[];
+  /** Script with options: `callMcp` calls the configured MCP servers for real; `ignoreAbort` never stops on `abort`. */
+  scriptWith(steps: FakeScript, opts: { callMcp?: boolean; ignoreAbort?: boolean; disposition?: string }): void;
+  /** Script only the n-th invocation since the last reset (1-based). */
+  scriptFor(invocation: number, steps: FakeScript): void;
+  /** Make `pi --version` report this version. */
+  setVersion(version: string): void;
+  /** Remove the fake's scratch directory (after all cases). */
+  destroy(): void;
+}
+
+/**
+ * A scripted `pi` CLI for the contract suite: a node script the adapter spawns
+ * through its `piCommand` seam. The fake reads its script and writes what it
+ * received to a scratch directory; this kit turns that into the neutral
+ * {@link FakeCapture}.
+ */
+export function createPiProcessFake(): PiProcessFake {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-pi-fake-"));
+  const ambientHome = path.join(dir, "ambient-home");
+  fs.mkdirSync(path.join(ambientHome, ".pi", "agent"), { recursive: true });
+  // The operator's own pi setup has an MCP server configured; it must never load.
+  fs.writeFileSync(
+    path.join(ambientHome, ".pi", "agent", "mcp.json"),
+    JSON.stringify({ mcpServers: { [AMBIENT_MCP_CANARY]: { command: "ambient-server" } } }),
+  );
+  const projectDir = path.join(dir, "project");
+  fs.mkdirSync(path.join(projectDir, ".pi"), { recursive: true });
+  // A project server only loads for a trusted project; the adapter passes --no-approve.
+  fs.writeFileSync(
+    path.join(projectDir, ".pi", "mcp.json"),
+    JSON.stringify({ mcpServers: { "project-mcp-canary": { command: "project-server" } } }),
+  );
+  const fakePath = fileURLToPath(new URL("../fakes/pi-fake.mjs", import.meta.url));
+  const command = { command: process.execPath, args: [fakePath, "--fake-dir", dir] };
+
+  const captureFiles = () =>
+    fs
+      .readdirSync(dir)
+      .filter((f) => /^capture-\d+\.json$/.test(f))
+      .sort((a, b) => parseInt(a.slice(8), 10) - parseInt(b.slice(8), 10));
+  const raw = (): PiFakeCapture[] =>
+    captureFiles().map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as PiFakeCapture);
+
+  const writeScript = (value: unknown) => fs.writeFileSync(path.join(dir, "script.json"), JSON.stringify(value));
+
+  const toCapture = (c: PiFakeCapture, invocations: number): FakeCapture => {
+    const shell = c.activeTools.some((t) => t === "bash" || t === "powershell");
+    const allows = (cls: ToolClass): boolean => {
+      switch (cls) {
+        case "shell":
+          return shell;
+        case "write":
+          return c.activeTools.includes("write");
+        case "edit":
+          return c.activeTools.includes("edit");
+        case "net":
+          // pi has no built-in net tool; the shell can still reach the network.
+          return shell;
+        default:
+          // subagent: pi has no built-in one; only an extension could add it.
+          return c.otherExtensionsLoaded;
+      }
+    };
+    const disabled = (["shell", "write", "edit", "net", "subagent"] as ToolClass[]).every((k) => !allows(k));
+    return {
+      invocations,
+      prompt: c.prompt,
+      env: c.env,
+      mcpServersLoaded: c.mcpServersLoaded,
+      nativeDisallowed: [],
+      allows,
+      builtinToolsDisabled: disabled,
+      maxTurns: undefined,
+      model: c.model,
+      structuredSchema: undefined,
+      sandboxed: false,
+      // The `abort` RPC command plus kill: cases 8, 9 and 14 prove the process is gone.
+      cancelWired: true,
+      stopped: !pidAlive(c.pid),
+    };
+  };
+
+  return {
+    command,
+    ambientHome,
+    projectDir,
+    // pi has no output-schema channel: the final message is the JSON.
+    structuredChannel: false,
+    usageFields: ["costUsd", "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens"],
+    reset() {
+      for (const f of fs.readdirSync(dir)) {
+        if (/^(capture|script)-\d+\.json$/.test(f)) fs.rmSync(path.join(dir, f), { force: true });
+      }
+      fs.rmSync(path.join(dir, "version"), { force: true });
+      writeScript([]);
+      vi.stubEnv("HOME", ambientHome);
+    },
+    script(steps) {
+      writeScript(steps);
+    },
+    scriptWith(steps, opts) {
+      writeScript({ steps, ...opts });
+    },
+    scriptFor(invocation, steps) {
+      fs.writeFileSync(path.join(dir, `script-${invocation}.json`), JSON.stringify(steps));
+    },
+    setVersion(version) {
+      fs.writeFileSync(path.join(dir, "version"), version);
+    },
+    captured() {
+      const all = raw();
+      const last = all.at(-1);
+      // No process ran (an abort landed before spawn): nothing is left running.
+      if (!last) return { ...emptyCapture(), stopped: true, cancelWired: true };
+      return toCapture(last, all.length);
+    },
+    raw,
+    leftovers() {
+      const paths: string[] = [];
+      for (const c of raw()) {
+        // pi's scratch agent dir is the adapter's; it must be gone after the run.
+        if (c.env.PI_CODING_AGENT_DIR) paths.push(c.env.PI_CODING_AGENT_DIR);
+        for (const s of bridgeSocketsIn(c.mcpConfig)) paths.push(path.dirname(s));
       }
       const live = raw()
         .filter((c) => pidAlive(c.pid))

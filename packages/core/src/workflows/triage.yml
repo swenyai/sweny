@@ -3,6 +3,14 @@ name: Alert Triage
 workflow_type: monitor
 description: Investigate a production alert, determine root cause, create an issue, implement a fix, and notify the team
 entry: gather
+# Ceiling (#365). `write` because implement and create_pr change code in the
+# checkout and push a branch; every other node narrows to `read`. External
+# writes (issues, comments, the PR) happen only as declared outputs, applied
+# by sweny after the node, within these types and this run-wide cap.
+permissions: write
+safe_outputs:
+  allow: [issue, comment, issue_state, pr]
+  max: 25
 nodes:
   gather:
     name: Gather Context
@@ -35,30 +43,14 @@ nodes:
       - datadog
       - betterstack
       - linear
-    # Structural enforcement of the read-only scope above: write tools from
-    # the github/linear skills are never registered for this node, so the
-    # model cannot call them no matter what the prompt fails to prevent.
-    # Driving incident: the 2026-06-08 letsoffload/permit-service scheduled
-    # run, where gather created Linear issues OFF-2332/OFF-2333 and PRs
-    # #101/#102 from inside this node and then died at the 50-turn cap.
-    tools:
-      deny:
-        - linear_create_issue
-        - linear_add_comment
-        - linear_update_issue
-        - github_create_issue
-        - github_add_comment
-        - github_create_pr
-    # Same incident: gather authored code changes mid-gather. Write/Edit are
-    # removed from the model context entirely. Bash stays available because
-    # read-side investigation legitimately uses it (git log, grep); blocking
-    # specific Bash invocations (git commit, gh pr create) needs the SDK's
-    # canUseTool callback and is tracked as follow-up work (see the implement
-    # node's note below).
-    disallowed_tools:
-      - Write
-      - Edit
-      - NotebookEdit
+    # Structural enforcement of the read-only scope above (#365): `read`
+    # registers only read skill tools, withholds external MCP servers, and
+    # removes every write-capable built-in (shell, file edits, subagents), on
+    # every harness. Driving incident: the 2026-06-08
+    # letsoffload/permit-service scheduled run, where gather created Linear
+    # issues OFF-2332/OFF-2333 and PRs #101/#102 from inside this node, and
+    # authored code changes, then died at the 50-turn cap.
+    permissions: read
     # When gather still dies early (turn cap, SDK error), proceed with the
     # partial context instead of failing the whole workflow: investigate has
     # its own tools and can re-derive what gather missed. The 2026-06-08 run
@@ -140,16 +132,9 @@ nodes:
     skills:
       - github
       - linear
-    # Structural enforcement of the scope boundaries above: the write tools
-    # this node is told not to call are not registered for it at all.
-    tools:
-      deny:
-        - linear_create_issue
-        - linear_add_comment
-        - linear_update_issue
-        - github_create_issue
-        - github_add_comment
-        - github_create_pr
+    # Structural enforcement of the scope boundaries above (#365): the node
+    # is read-only, so no write tool or write-capable built-in reaches it.
+    permissions: read
     eval:
       # The novelty check REQUIRES searching the issue tracker. If the node finishes
       # with 0 search tool calls, it means the agent skipped the novelty check entirely
@@ -225,6 +210,14 @@ nodes:
       Process ALL findings from the investigation. The findings array contains both novel and duplicate issues.
 
 
+      **How writes work here.** If you have the `emit_output` tool, you cannot write to the tracker directly:
+      request each new issue and each comment with `emit_output`, and sweny files them after this step, within
+      its limits. A requested issue has no identifier yet; sweny records it for the next steps. Without
+      `emit_output`, use the tracker's own tools (for example `linear_create_issue`, `github_create_issue`,
+      `linear_add_comment`, `github_add_comment`, or the configured tracker's MCP tools) and copy the
+      identifier they return.
+
+
       **For each NOVEL finding** (is_duplicate = false):
 
       1. **First, check if a prior triage run already created an issue for this exact bug.** Call
@@ -232,76 +225,93 @@ nodes:
       If a matching issue already exists with the same root cause:
          - Treat it as a duplicate: DO NOT create a new issue.
          - Populate `issueIdentifier`, `issueTitle`, and `issueUrl` from the existing issue.
-         - Add a "+1" comment if appropriate (using `linear_add_comment` or `github_add_comment`).
+         - Add a "+1" comment if appropriate.
          - Set the `action` to `updated` in the `issues` array.
          - This prevents duplicate tickets when the same alert fires multiple times.
 
-      2. If no matching issue exists, create a new one with a clear, actionable title by invoking
-      `linear_create_issue` or `github_create_issue`. You MUST actually call the tool — do NOT
-      synthesize an identifier from an alert ID, commit SHA, or your own imagination. If the
-      tool errors, stop and report the failure; do not invent a fallback identifier.
-      **Use the exact tool names above** — do NOT use generic alternatives like `create_issue`
-      or `create_pull_request` from ToolSearch. The eval check requires the specific tool
-      names listed here.
+      2. If no matching issue exists, file a new one with a clear, actionable title (type `issue`). Do NOT
+      synthesize an identifier from an alert ID, commit SHA, or your own imagination: a new issue's
+      identifier comes only from the tracker. Set `dedupe_key` to a short stable fingerprint of the root
+      cause, so two findings with the same cause are filed once. Set the `action` to `requested` (or
+      `created` when you filed it with a tracker tool and have its identifier).
 
       3. Include: root cause, severity, affected services, reproduction steps, and recommended fix.
 
       4. Apply the `sweny`, `agent`, and `triage` labels. For Linear: call `linear_list_labels` to find the
-      IDs for labels named `sweny`, `agent`, and `triage`, then pass those IDs in `labelIds` when calling
-      `linear_create_issue` (skip any that don't exist in the team — don't invent IDs). For GitHub: pass
-      `labels: ["sweny", "agent", "triage"]` to `github_create_issue`.
+      IDs for labels named `sweny`, `agent`, and `triage`, and pass those IDs as the labels (skip any that
+      don't exist in the team; don't invent IDs). For Linear, the target is the team ID (`linear_list_teams`).
+      For GitHub: labels `["sweny", "agent", "triage"]`.
 
       5. Link to relevant commits, PRs, or existing issues.
 
-      6. Copy the identifier returned by the tool verbatim into the `issueIdentifier` output
-      field. The identifier must match `^[A-Z][A-Z0-9]*-\d+$` (e.g. `OFF-1234`) — do not
-      prefix it with anything else.
+      6. When you know the identifier (an existing issue, or one a tracker tool returned), copy it verbatim
+      into `issueIdentifier`. It must match `^[A-Z][A-Z0-9]*-\d+$` (e.g. `OFF-1234`); do not prefix it with
+      anything else. Leave `issueIdentifier` unset for an issue you only requested.
 
 
       **For each DUPLICATE finding** (is_duplicate = true):
 
       1. Find the existing issue (check duplicate_of field).
 
-      2. Check the issue's comments — if the most recent comment is already from SWEny (contains "+1") within the last
-      24 hours, skip adding another comment.
+      2. Check the issue's comments. If the most recent comment is already from SWEny (contains "+1") within
+      the last 24 hours, skip adding another comment.
 
-      3. Otherwise add a SHORT comment: "+1 — seen again {UTC timestamp}. {one sentence of new context}." (Keep it under
-      2 lines. No markdown headers, no emoji, no formatting.)
+      3. Otherwise add a SHORT comment (type `comment`, `number` = the issue ID or number): "+1 seen again
+      {UTC timestamp}. {one sentence of new context}." (Keep it under 2 lines. No markdown headers, no emoji,
+      no formatting.)
 
-      4. If the existing issue is closed/done, reopen it.
+      4. If the existing issue is closed or done: reopen it (type `issue_state`, `state` = `reopen`, `number`
+      = the issue ID or number) when you have `emit_output`; with a tracker tool instead, use one that can
+      reopen. If you can do neither, say in the comment that it is closed and was seen again.
 
 
       If context.issueTemplate is provided, use it as the format for new issue bodies. Otherwise use a clear structure
       with: Summary, Root Cause, Impact, Steps to Reproduce, and Recommended Fix.
 
 
-      Use the issue tracker specified in context (e.g. Linear, Jira, or GitHub Issues) — do NOT fall back to a
-      different tracker. Output the created/updated issue identifiers.
+      Use the issue tracker specified in context (e.g. Linear, Jira, or GitHub Issues). Do NOT fall back to a
+      different tracker. Output the issues you requested, created, or updated.
 
 
-      **IMPORTANT — scope boundaries for this node:**
+      **IMPORTANT: scope boundaries for this node:**
 
       - DO NOT create branches, commits, or pull requests. The `implement` and `create_pr` nodes handle that.
-
-      - DO NOT call `create_pull_request`, `github_create_pr`, or any PR/branch tools.
 
       - Your job is issue creation and duplicate management ONLY.
     skills:
       - linear
       - github
-    # Structural enforcement: this node manages issues, never PRs.
+    # #365: this node reads and decides; it never holds a tracker write.
+    # Issues and +1 comments are declared outputs: sweny applies them after
+    # the node succeeds (and after its eval), via the configured tracker
+    # skill, capped per run and deduped. The node is read-only by default
+    # because it declares outputs. The next steps read the new issue's
+    # identifier from `context.create_issue.safe_outputs`.
+    outputs:
+      - type: issue
+        max: 10
+      - type: comment
+        max: 10
+      # Reopening a closed duplicate (what triage did before #365). Reopen
+      # only: this node never closes an issue. The issue must be named on the
+      # request; sweny checks it is in the tracker and only moves a closed one.
+      - type: issue_state
+        state: reopen
+        max: 10
+    # Legacy runs (a tracker with no safe-output skill, see
+    # cli/builtin-workflows.ts) still never open PRs from here.
     tools:
       deny:
         - github_create_pr
     eval:
-      # Require a real issue-tracker tool call. linear_create_issue / github_create_issue
-      # for novel findings; linear_search_issues / github_search_issues for duplicate-check
-      # when the issue already exists from a prior triage run. linear_add_comment covers
-      # the +1 path for duplicates.
+      # Require a real issue-tracker action: a search (the duplicate check) or
+      # a requested write. emit_output covers safe outputs; the tracker tool
+      # names cover a legacy run that writes directly.
       - name: issue_tracker_tool_was_called
         kind: function
         rule:
           any_tool_called:
+            - emit_output
             - linear_create_issue
             - github_create_issue
             - linear_search_issues
@@ -315,21 +325,21 @@ nodes:
           type: string
           pattern: '^[A-Z][A-Z0-9]*-\d+$'
           description: >-
-            Primary issue identifier (e.g. OFF-1234). MUST be the identifier returned by
-            `linear_create_issue` / `github_create_issue` — do NOT invent a value from a
-            Sentry short-ID or commit SHA. Used by downstream nodes for branch naming and
-            PR linking.
+            Primary issue identifier (e.g. OFF-1234) when known in this step: an existing issue the
+            duplicate check matched, or one a tracker tool returned. Unset for an issue only requested
+            through emit_output; sweny records its identifier in safe_outputs. Never invented from a
+            Sentry short-ID or commit SHA.
         issueTitle:
           type: string
-          description: Title of the primary issue created
+          description: Title of the primary issue
         issueUrl:
           type: string
           pattern: "^https?://"
-          description: URL of the primary issue created, as returned by the create-issue tool
+          description: URL of the primary issue, when known in this step
         issues:
           type: array
           minItems: 1
-          description: All issues created or updated during this step
+          description: All issues requested, created, or updated during this step
           items:
             type: object
             properties:
@@ -342,23 +352,21 @@ nodes:
               action:
                 type: string
                 enum:
+                  - requested
                   - created
                   - updated
                   - reopened
             required:
-              - identifier
               - action
       required:
-        - issueIdentifier
         - issueTitle
-        - issueUrl
         - issues
     retry:
       max: 1
       instruction:
         auto: true
   skip:
-    name: Skip — All Duplicates or Low Priority
+    name: Skip - All Duplicates or Low Priority
     instruction: >-
       Every finding from the investigation was either a duplicate or low-priority. No new issues need to be created.
 
@@ -367,32 +375,42 @@ nodes:
 
       1. Find the existing issue (check duplicate_of field).
 
-      2. Check the issue's comments — if the most recent comment is already from SWEny (contains "+1") within the last
-      24 hours, skip adding another comment.
+      2. Check the issue's comments. If the most recent comment is already from SWEny (contains "+1") within
+      the last 24 hours, skip adding another comment.
 
-      3. Otherwise add a SHORT comment: "+1 — seen again {UTC timestamp}. {one sentence of new context}." (Keep it under
-      2 lines. No markdown headers, no emoji, no formatting.)
+      3. Otherwise add a SHORT comment (with `emit_output` type `comment` when you have it, `number` = the
+      issue ID or number): "+1 seen again {UTC timestamp}. {one sentence of new context}." (Keep it under 2
+      lines. No markdown headers, no emoji, no formatting.)
 
-      4. If the issue is closed/done, reopen it.
+      4. If the issue is closed or done: reopen it (`emit_output` type `issue_state`, `state` = `reopen`,
+      `number` = the issue ID or number) when you have `emit_output`; with a tracker tool instead, use one
+      that can reopen. If you can do neither, say in the comment that it is closed and was seen again.
 
 
       For **low priority** findings, log a brief note about why they were skipped.
     skills:
       - linear
       - github
-    # Structural enforcement: this node comments on and reopens existing
-    # issues only. It never creates issues or PRs.
-    tools:
-      deny:
-        - linear_create_issue
-        - github_create_issue
-        - github_create_pr
+    # #365: comments on existing issues, and reopening closed ones, as declared
+    # outputs. Read-only otherwise: it never creates issues or PRs.
+    outputs:
+      - type: comment
+        max: 10
+      - type: issue_state
+        state: reopen
+        max: 10
   implement:
     name: Implement Fix
     instruction: |-
       Implement the fix identified during investigation, plus the tests that pin
-      it as a regression guard. The issue created in the previous step is in your
-      context — use its identifier for branch naming and commit messages.
+      it as a regression guard. The issue from the previous step is in your
+      context. Use its identifier for branch naming and commit messages.
+
+      **The issue identifier** (ISSUE_ID below): the `ref` of the `issue` entry
+      with status `applied` in `context.create_issue.safe_outputs` (the issue
+      sweny filed after the previous step), else
+      `context.create_issue.issueIdentifier` (an existing issue the previous
+      step matched, or one it filed directly).
 
       ## Quality bar (non-negotiable)
 
@@ -425,12 +443,18 @@ nodes:
 
       ## Steps
 
-      0a. **Precondition — verify context.create_issue.issueIdentifier is well-formed.**
+      0. **Precondition: staged preview.** If the `issue` entry in
+         `context.create_issue.safe_outputs` has status `staged`, this run is a
+         preview (`--stage`) and no issue exists. STOP before touching the
+         checkout. Output `test_status: "skipped"`, `skipped_reason: "staged"`,
+         empty file lists, `branch: ""`, `commit_sha: ""`.
+
+      0a. **Precondition: verify ISSUE_ID is well-formed.**
          The identifier MUST match `^[A-Z][A-Z0-9]*-\d+$` (e.g. `OFF-1234`). If it
          is missing, empty, or matches a Sentry short-ID / slug / any other shape,
-         STOP immediately — do NOT invent a branch name from the Sentry event,
+         STOP immediately. Do NOT invent a branch name from the Sentry event,
          commit SHA, or alert payload. Return a failed status with a clear message
-         instead; the workflow will route to notify and a human will pick it up.
+         instead; a human will pick it up.
 
       0b. **Precondition — check for an existing open PR for this issue.** Call
          `github_search_issues` (which hits GitHub's `/search/issues` endpoint
@@ -466,12 +490,12 @@ nodes:
 
       1. Create a feature branch from the base branch (check context for
          baseBranch, default `main`). **Branch name MUST include the issue
-         identifier** exactly as provided in `context.create_issue.issueIdentifier`.
+         identifier** exactly as ISSUE_ID above.
          Format: lowercase the identifier and use it as a prefix, e.g.
          `off-1234-fix-null-check`. If the repository uses a different branch
          convention (check context.branchPattern or the rules/CLAUDE.md for a
          regex), follow that — but the identifier piece MUST still come from
-         `context.create_issue.issueIdentifier`, never from a Sentry short-ID.
+         ISSUE_ID, never from a Sentry short-ID.
 
       2. Read the relevant source files to understand the current code AND read
          the nearest existing test file (e.g. `foo.service.spec.ts` next to
@@ -498,8 +522,8 @@ nodes:
       ## Scope boundary — do NOT open the PR here
 
       Stop after the commit. Do NOT push the branch, do NOT run `gh pr create`,
-      do NOT call any PR-creation tool. The dedicated `create_pr` node opens the
-      PR via `github_create_pr`. Opening it from this node bypasses the workflow's
+      do NOT call any PR-creation tool. The dedicated `create_pr` node pushes the
+      branch and requests the PR. Opening it from this node bypasses the workflow's
       eval gate and triggers a self-close-and-recreate workaround (PR opened via
       shell, then `github_create_pr` returns 422 "already exists" against the same
       branch, then the agent closes the first PR to satisfy the eval). The
@@ -539,24 +563,24 @@ nodes:
       explain why — do not force a bad fix.
     skills:
       - github
-    # Defense-in-depth: the implement node should read repo files, edit
-    # them, run tests, and commit — not browse the web. Disallowing the
-    # built-in web tools removes them from the model context so the agent
-    # cannot drift off-task into external research mid-implementation.
-    # Note: Bash is intentionally NOT in this list because the agent needs
-    # it for `git add`/`git commit` and to run test commands. Restricting
-    # *which* Bash invocations are allowed (e.g. blocking `gh pr create`
-    # / `git push`) belongs to a follow-up that wires the SDK's
-    # canUseTool callback to a per-node Bash deny pattern list.
-    disallowed_tools:
-      - WebFetch
-      - WebSearch
-    # Structural enforcement of the "do NOT open the PR here" boundary: the
-    # PR tool is not registered for this node. The dedicated create_pr node
-    # is the only place github_create_pr exists.
+    # A write node on purpose (#365): the code change itself. It edits files
+    # in the checkout, runs the tests, and commits, which needs file edits and
+    # a shell. It does not browse the web (`deny: [net]`, portable across
+    # harnesses). Restricting *which* shell commands run (e.g. blocking
+    # `gh pr create` / `git push`) needs a per-command policy and is follow-up
+    # work.
+    permissions:
+      access: write
+      deny: [net]
+    # Structural enforcement of the "do NOT open the PR here" boundary: no
+    # GitHub write tool is registered for this node. The PR is create_pr's
+    # declared output.
     tools:
       deny:
         - github_create_pr
+        - github_create_issue
+        - github_add_comment
+        - github_add_labels
     output:
       type: object
       properties:
@@ -601,18 +625,18 @@ nodes:
             - `not-run` — tests exist but the environment couldn't
               execute them. Explain in `test_notes`. Retry will fire.
             - `skipped` — the node short-circuited before running tests
-              because a precondition was not met. Today the only
-              accepted reason is `open-pr-exists` (Step 0b found an
-              open PR with the issue identifier in its title).
-              `skipped_reason` and `existing_pr_url` MUST be populated.
-              Downstream `create_pr` is bypassed and the workflow
-              routes to `notify`.
+              because a precondition was not met: `open-pr-exists` (Step
+              0b found an open PR with the issue identifier in its
+              title; `existing_pr_url` MUST be populated) or `staged`
+              (Step 0: a preview run filed no issue). `skipped_reason`
+              MUST be populated. Downstream `create_pr` is bypassed and
+              the workflow routes to `notify`.
         skipped_reason:
           type: string
           description: |
             Why the node short-circuited. Only set when `test_status` is
-            `skipped`. Today the only valid value is `open-pr-exists`.
-          enum: [open-pr-exists]
+            `skipped`: `open-pr-exists` (Step 0b) or `staged` (Step 0).
+          enum: [open-pr-exists, staged]
         existing_pr_url:
           type: string
           description: |
@@ -668,10 +692,11 @@ nodes:
           - If test_status is "no-framework": test_files_changed MAY be empty.
             Pass vacuously.
           - If test_status is "skipped": test_files_changed MAY be empty.
-            The node short-circuited before writing any code (Step 0b
-            found an open PR for the issue). `skipped_reason` and
-            `existing_pr_url` MUST be populated; if they are missing,
-            return no.
+            The node short-circuited before writing any code. When
+            skipped_reason is "open-pr-exists" (Step 0b found an open PR
+            for the issue), `existing_pr_url` MUST be populated; when it
+            is "staged" (a preview run), nothing else is required. If
+            skipped_reason is missing, return no.
           - If test_status is "fail" or "not-run": this evaluator should not
             run (the prior value evaluator catches that). Pass vacuously.
 
@@ -686,30 +711,29 @@ nodes:
     # A failed PR must not stop the run: the only edge is an unconditional one to notify.
     on_fail: continue
     instruction: >-
-      Open a pull request for the fix. The issue identifier and URL are in your context from the create_issue step.
+      Open a pull request for the fix. The issue is in your context from the create_issue step; its identifier
+      (ISSUE_ID) is the `ref` of the applied `issue` entry in `context.create_issue.safe_outputs`, else
+      `context.create_issue.issueIdentifier`. The branch is `context.implement.branch`.
 
 
       1. Push the branch to the remote.
 
-      2. Create the PR using the `github_create_pr` tool. **Use this exact tool name** — do NOT
-      use `create_pull_request` or any other variant from ToolSearch. The eval check requires
-      `github_create_pr` specifically.
-
-      **If `github_create_pr` returns a result with `reused: true`**, the implement
-      node (or a prior run) already opened a PR for this branch and the tool
-      recovered it instead of failing on 422. Treat this as success and return the
-      PR's URL and number — do NOT close it and call `github_create_pr` again.
+      2. Request the PR: with `emit_output` (type `pr`, `head` = the branch, `base` = the base branch,
+      default `main`) when you have it; sweny opens it after this step and reuses an open PR for the same
+      branch instead of failing. Without `emit_output`, call `github_create_pr` (use this exact tool name,
+      not `create_pull_request` or any other variant from ToolSearch); if it returns `reused: true`, treat
+      it as success and do NOT close it and call again.
 
       3. PR title MUST start with the issue identifier in brackets.
-      Format: `[{context.create_issue.issueIdentifier}] fix: {short description}`.
+      Format: `[ISSUE_ID] fix: {short description}`.
 
       4. In the PR body, include: summary of the bug, what the fix does, and a link to the issue
-      (context.create_issue.issueUrl). If the investigation found a Sentry issue, include "Fixes {sentryShortId}"
-      in the PR body so Sentry auto-resolves on merge. If the issue tracker is Linear, also include the line
-      "Fixes {context.create_issue.issueIdentifier}" (e.g. "Fixes OFF-1234") so Linear links the PR and moves
-      the issue to Done on merge.
+      (its `url` in `context.create_issue.safe_outputs`, else context.create_issue.issueUrl). If the
+      investigation found a Sentry issue, include "Fixes {sentryShortId}" in the PR body so Sentry
+      auto-resolves on merge. If the issue tracker is Linear, also include the line "Fixes ISSUE_ID"
+      (e.g. "Fixes OFF-1234") so Linear links the PR and moves the issue to Done on merge.
 
-      5. Pass `labels: ["sweny", "agent", "triage"]` to `github_create_pr`.
+      5. Labels: `["sweny", "agent", "triage"]`.
 
 
       If context.prTemplate is provided, use it as the format for the PR body. Otherwise use a clear structure with:
@@ -720,14 +744,29 @@ nodes:
       sweny:run_id:{context.cloudRunId} -->
 
 
-      Return the PR URL and number.
+      Return the branch and the PR title you requested (and the PR URL and number when a tool returned them).
     skills:
       - github
+    # A write node on purpose (#365): pushing the branch ships the code change
+    # and needs git in a shell. The PR itself is a declared output, so the
+    # agent never holds the PR write; no GitHub write tool is registered here.
+    permissions: write
+    outputs:
+      - type: pr
+        max: 1
+        labels: [sweny, agent, triage]
+    tools:
+      deny:
+        - github_create_pr
+        - github_create_issue
+        - github_add_comment
+        - github_add_labels
     eval:
       - name: pr_was_created
         kind: function
         rule:
           any_tool_called:
+            - emit_output
             - github_create_pr
     retry:
       max: 1
@@ -739,8 +778,12 @@ nodes:
       Send a notification summarizing the triage result:
 
       1. Include: alert summary, severity, root cause (1-2 sentences), and links to any created issues or PRs.
+         Issues and PRs sweny filed are in `safe_outputs` of the create_issue, skip and create_pr steps
+         (`ref` and `url` of each `applied` entry).
       2. For critical/high severity, make the notification urgent.
       3. For medium/low, a standard notification is fine.
+      4. If any `safe_outputs` entry has status `staged`, this run is a preview: send nothing, and put the
+         notification you would have sent in your summary.
 
       Use whichever notification channel is available to you.
     skills:
@@ -765,7 +808,7 @@ edges:
     to: notify
   - from: implement
     to: notify
-    when: implement.test_status is "skipped" (Step 0b found an open PR already exists for the issue identifier)
+    when: implement.test_status is "skipped" (Step 0b found an open PR already exists for the issue identifier, or Step 0 found a staged preview)
   - from: implement
     to: create_pr
     when: implement.test_status is "pass" or "no-framework" (no existing PR; fix was implemented or there is no test framework)

@@ -14,6 +14,7 @@ import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workf
 import type { ExecutionEvent, ExecutionTrace, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
 import { consoleLogger } from "../types.js";
 import { createHarness } from "../harness/index.js";
+import { bindBuiltinWorkflow } from "./builtin-workflows.js";
 import { isSupportedAgent, unsupportedAgentError } from "../harness/agents.js";
 import { resolveHarnessPolicy } from "../harness/policy.js";
 import type { AgentHarness, ClaudeCodeHarnessOptions, CodexHarnessOptions } from "../harness/index.js";
@@ -143,6 +144,9 @@ program
   });
 
 // ── sweny check ───────────────────────────────────────────────────────
+/** validateInputs' generic agent-auth lines, replaced by the harness preflight reason (#339). */
+const AGENT_AUTH_ERROR_PREFIXES = ["Missing: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN", "Missing: CODEX_API_KEY"];
+
 program
   .command("check")
   .description("Verify provider credentials and connectivity")
@@ -152,13 +156,21 @@ program
     const workflows = discoverWorkflowSkillIds(process.cwd());
     const scope = workflows.found ? workflows.skillIds : undefined;
     const claudeCodeLogin = detectClaudeCodeLogin();
-    const errors = validateCheckInputs(config, { scope, claudeCodeLogin });
+    let errors = validateCheckInputs(config, { scope, claudeCodeLogin });
+    // #339: the agent's own preflight (install and login), named by --agent.
+    // Its reason replaces the generic agent-auth line from validateInputs.
+    const agent = config.codingAgentProvider;
+    const pre = isSupportedAgent(agent) ? await createHarness(agent, { logger: consoleLogger }).preflight() : undefined;
+    if (pre && !pre.ok) {
+      errors = [pre.reason, ...errors.filter((e) => !AGENT_AUTH_ERROR_PREFIXES.some((p) => e.startsWith(p)))];
+    }
     if (errors.length > 0) {
       console.error(formatValidationErrors(errors));
       process.exit(1);
     }
     console.log(chalk.dim("\n  Checking provider connectivity…\n"));
     const results = await checkProviderConnectivity(config, { scope, claudeCodeLogin });
+    if (pre?.ok) results.unshift({ name: `Agent (${agent})`, status: "ok", detail: `ready (${pre.version})` });
     console.log(formatCheckResults(results));
     const hasFailure = results.some((r) => r.status === "fail");
     process.exit(hasFailure ? 1 : 0);
@@ -238,8 +250,9 @@ async function resolveRulesAndContext(config: CliConfig): Promise<{
 }
 
 /**
- * Build the harness for `--agent` (#331). A non-Claude agent is checked before
- * any node runs, so a missing or too-old CLI fails fast with the fix.
+ * Build the harness for `--agent` (#331) and preflight it before any node
+ * runs (#339): the adapter checks its own install and login, so a missing
+ * CLI or a missing login fails fast with the fix, naming the agent.
  */
 async function harnessFor(
   agent: string,
@@ -254,14 +267,29 @@ async function harnessFor(
     ...opts,
     policy: resolveHarnessPolicy(process.env, harnessPolicy, opts.logger),
   });
-  if (agent !== "claude") {
-    const pre = await harness.preflight();
-    if (!pre.ok) {
-      console.error(chalk.red(`\n  ${pre.reason}\n`));
-      process.exit(1);
-    }
+  const pre = await harness.preflight();
+  if (!pre.ok) {
+    console.error(chalk.red(`\n  ${pre.reason}\n`));
+    process.exit(1);
   }
   return harness;
+}
+
+/**
+ * Bind a built-in workflow to this run's providers (#365) and say which nodes
+ * fall back to their pre-safe-outputs shape, and why.
+ */
+function bindForCli(workflow: Workflow, config: CliConfig): Workflow {
+  const bound = bindBuiltinWorkflow(workflow, {
+    issueTracker: config.issueTrackerProvider,
+    sourceControl: config.sourceControlProvider,
+    observability: config.observabilityProviders,
+    repository: config.repository || undefined,
+    userMcpServers: Object.keys(config.mcpServers),
+    workspaceTools: config.workspaceTools,
+  });
+  if (!config.json) for (const note of bound.notes) console.error(c.subtle(`  ${workflow.id}: ${note}`));
+  return bound.workflow;
 }
 
 // ── sweny triage ──────────────────────────────────────────────────────
@@ -490,8 +518,12 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     createCloudStreamObserver(config, cloudHandle),
   );
 
+  // #365: pin safe outputs to the configured tracker and repo; nodes these
+  // providers cannot run read-only or through safe outputs keep their old shape.
+  const triageRun = bindForCli(triageWorkflow, config);
+
   try {
-    const { results, trace } = await execute(triageWorkflow, workflowInput, {
+    const { results, trace } = await execute(triageRun, workflowInput, {
       skills,
       harness: claude,
       observer,
@@ -501,6 +533,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
       fetchAuth: config.fetchAuth,
       offline: config.offline,
       fileRoot: config.fileRoot || undefined,
+      stageOutputs: options.stage === true,
     });
 
     const durationMs = Date.now() - runStart;
@@ -718,8 +751,10 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     createCloudStreamObserver(config, implCloudHandle),
   );
 
+  const implementRun = bindForCli(implementWorkflow, config);
+
   try {
-    const { results } = await execute(implementWorkflow, workflowInput, {
+    const { results } = await execute(implementRun, workflowInput, {
       skills,
       harness: claude,
       observer,
@@ -729,6 +764,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
       fetchAuth: config.fetchAuth,
       offline: config.offline,
       fileRoot: config.fileRoot || undefined,
+      stageOutputs: options.stage === true,
     });
 
     const hasFailed = [...results.values()].some((r) => r.status === "failed");
@@ -1457,11 +1493,12 @@ workflowCmd
 program
   .command("tool-bridge", { hidden: true })
   .description("Internal: stdio MCP shim for sweny skill tools")
-  .requiredOption("--socket <path>", "Per-run bridge socket")
+  .option("--socket <path>", "Per-run bridge socket")
+  .option("--connect <host:port>", "Per-run bridge TCP endpoint (inside the process sandbox, via its proxy)")
   .option("--token <token>", "Per-run token (default: SWENY_TOOL_BRIDGE_TOKEN)")
-  .action(async (options: { socket: string; token?: string }) => {
+  .action(async (options: { socket?: string; connect?: string; token?: string }) => {
     const { runToolBridgeShim } = await import("../harness/tool-bridge/shim.js");
-    await runToolBridgeShim({ socket: options.socket, token: options.token, version });
+    await runToolBridgeShim({ socket: options.socket, connect: options.connect, token: options.token, version });
   });
 
 // ── sweny upgrade / update ────────────────────────────────────────────

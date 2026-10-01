@@ -9,6 +9,7 @@
  * Browser-safe: types only, no runtime imports.
  */
 
+import type { AgentAccess } from "../agent-env.js";
 import type { Claude, Logger, NodeResult } from "../types.js";
 
 export type HarnessId = "claude-code" | "mock" | "codex" | "pi" | "hermes" | "gemini" | `acp:${string}`;
@@ -50,6 +51,12 @@ export interface NodePolicy {
   egress: string[];
   /** Refuse instead of degrade when an opinion cannot be enforced. */
   strict: boolean;
+  /**
+   * Only the MCP servers sweny passes may load, never the user's own config
+   * (`permissions.strict`, #365). A harness whose `mcp.exclusive` is `none`
+   * cannot honor it: reported in `degraded`, refused under `strict`.
+   */
+  exclusiveMcp?: boolean;
   /**
    * Turn budget for the run. Set by adapters whose `turnLimit` is not native,
    * so the gate reports how the budget is kept (watchdog) or that it is not.
@@ -94,6 +101,12 @@ export interface HarnessRunRequest extends ClaudeRunRequest {
    * `readOnly` / `disallowedTools` / `agentAccess` fields.
    */
   policy?: NodePolicy;
+  /**
+   * {@link ClaudeRunRequest.agentAccess} plus `noPush` (#442): the executor
+   * sets it for a staged or dry run, and every adapter applies
+   * `withPushBlocked` to the agent env.
+   */
+  agentAccess?: AgentAccess;
 }
 
 export interface HarnessRunResult extends NodeResult {

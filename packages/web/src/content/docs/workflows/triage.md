@@ -235,6 +235,30 @@ The triage workflow lists **all compatible skills per category** in each node. A
 | tasks | `linear`, `github` | Past issues, ticket creation |
 | notification | `slack`, `notification` | Team alerts |
 
+## Permissions and writes
+
+Triage runs on sweny's own opinions ([permissions and safe outputs](/workflows/yaml-reference/#permissions-and-safe-outputs)):
+
+| Node | Access | What it may write |
+|------|--------|-------------------|
+| `gather`, `investigate` | `read` | Nothing. Read skill tools only: no write tool, no file edits, and no shell (on Codex, a shell confined to its OS read-only sandbox: no writes, no network). |
+| `create_issue` | `read` + outputs | Issues (at most 10), +1 comments (at most 10) and reopening closed duplicates (at most 10), as safe outputs. |
+| `skip` | `read` + outputs | +1 comments and reopening closed duplicates (at most 10 each), as safe outputs. |
+| `implement` | `write`, no web | The code change: file edits, tests, a local commit. No GitHub write tool. |
+| `create_pr` | `write` + outputs | Pushes the branch (git needs a shell); the PR itself (at most 1) is a safe output. |
+| `notify` | `write` | The notification. |
+
+The workflow caps the run at 25 writes and allows only `issue`, `comment`, `issue_state` and `pr`. The agent requests each issue, comment and PR with `emit_output`; sweny checks it and files it after the step, through the `github` or `linear` skill. The next steps read the new issue's identifier and URL from `context.create_issue.safe_outputs`.
+
+`sweny triage` pins every write to the tracker and repository you configured. When a provider cannot work that way, only the affected nodes keep their older write-capable shape, and the run prints which and why:
+
+- A Jira or file tracker, or GitLab source control: the nodes that write there use the tracker's own tools.
+- An integration a read-only step cannot reach (Jira, GitLab, an observability provider without a built-in skill such as Loki or New Relic, your own MCP servers or workspace tools): `gather` and `investigate` keep the shell and MCP, with file edits and skill write tools denied.
+
+`sweny triage --stage` previews every issue, comment and PR instead of filing it, and stops before any code is pushed. `--dry-run` runs with no side effects at all. In both, sweny blocks the push itself rather than trusting the agent to skip it: `git push` fails in every node, and write tokens (`GITHUB_TOKEN`, `GH_TOKEN`) are withheld from the agent, so `gh pr create` fails too. See [No push under --stage](/cli/commands/#no-push-under---stage-and---dry-run).
+
+Behavior notes: a closed duplicate gets its +1 comment and is reopened (an `issue_state` output, reopen only). On Codex, read-only steps keep a shell confined to the OS read-only sandbox (no writes, no network), so `gather` and `investigate` can read the checkout.
+
 ## Running the triage workflow
 
 **From the CLI:**

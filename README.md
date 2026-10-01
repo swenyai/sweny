@@ -45,6 +45,8 @@ sweny workflow run .sweny/workflows/explain-repo.yml
 |-------|--------|
 | Claude Code | Supported. Passes the 15-case harness contract suite on every CI run, with skill tools in process and over the tool bridge. |
 | Codex | Supported (`--agent codex`, Codex CLI 0.159+). Passes the same suite against a scripted Codex. Reports as degraded: `max_turns` (kept by a sweny watchdog), `tools.deny: [write]` / `[edit]`, and per-host egress unless it runs inside the sandbox wrapper. See [Agent harnesses](#agent-harnesses). |
+| ACP agents (OpenCode, Hermes, goose, Gemini CLI, ...) | **Experimental** (`--agent "acp:<command>"`, for example `acp:opencode acp`). Runs any [Agent Client Protocol](https://agentclientprotocol.com) agent. ACP has no structured output, tool deny or sandbox, so most policies are degraded or refused in strict mode; see [ACP agents](#acp-agents-experimental). Not listed as supported. |
+| pi | Experimental, contract suite green (`--agent pi`, pi 0.99.2+, any model pi can call). Not run against a live pi yet. Reports as degraded: the process sandbox (pi has none; it runs only inside the sandbox wrapper, and strict refuses without it), `max_turns` (sweny watchdog), `tools.deny: [net]`, and `disallowed_tools` names pi has no tool for. See [pi (experimental)](#pi-experimental). |
 
 An agent is listed as supported once it passes the same contract suite: scoped env, exclusive MCP config,
 read-only dry run, output checks, timeouts, untrusted-input fencing, cleanup.
@@ -139,6 +141,29 @@ Nodes run on Claude Code by default. `--agent codex` (Action input `agent: codex
 | Timeout and cancel | enforced | enforced |
 
 What Codex cannot enforce itself is never dropped silently: it is listed as `degraded` in the log, the run receipt and `.sweny/runs/`, or, with `--harness-policy strict` (the default under GitHub Actions), the node is refused. On Codex that list is `max_turns` (kept by the watchdog, never refused), `tools.deny: [write]` / `[edit]` (apply_patch has no switch), `disallowed_tools` names Codex has no tool for, and the per-host egress allowlist (plus, with `SWENY_SANDBOX` on, the sandbox itself) unless Codex runs inside the sandbox wrapper.
+
+### ACP agents (experimental)
+
+`--agent "acp:<command>"` runs any [Agent Client Protocol](https://agentclientprotocol.com) agent over stdio: `acp:opencode acp`, `acp:hermes acp`, `acp:goose acp`, `acp:gemini --experimental-acp`. The contract suite runs against a scripted fake ACP agent on every CI run; no real agent is tested there. The protocol carries a prompt and a stream of updates, not sweny's policies, so this is the degraded list (always reported in `degraded`, or, in strict mode, the node is refused):
+
+- `tools.deny` and `disallowed_tools`: ACP has no deny list. sweny rejects the agent's `session/request_permission` for denied classes, but an agent that never asks is not stopped.
+- Read-only dry run: same. sweny rejects every non-read permission request and every `fs/write_text_file`, and enforces it fully only with the sandbox wrapper's read-only mount.
+- Sandbox and per-host egress: none in the protocol. The agent process runs inside the sandbox wrapper (srt) when `SWENY_SANDBOX` is `auto` or `strict`; strict refuses without it. Add the agent's model API host to `SWENY_SANDBOX_ALLOWED_DOMAINS`.
+- Only the MCP servers sweny injects: sweny passes its skill tools in `session/new`, but whether the agent also loads its own MCP config is up to the agent.
+- Structured output: sweny asks for the JSON in the prompt, parses and checks it, and asks once more on a mismatch.
+- `max_turns`: a sweny watchdog over tool calls. Usage: cost in USD when the agent reports it, no token counts. `model`: no portable selector, the agent uses its own.
+
+sweny cannot run an interactive login: pass the agent's API key env var through `SWENY_ENV_PASSTHROUGH`.
+
+### pi (experimental)
+
+`--agent pi` runs a node on [pi](https://github.com/badlogic/pi-mono) over `pi --mode rpc` (pi 0.99.2 or newer), so a workflow can bring any model pi supports (`--model provider/id` is passed through as free text; SWEny has no model opinion). It passes the harness contract suite against a scripted pi in CI. No live pi run is recorded yet, so it is not listed as supported.
+
+- pi has no sandbox of its own. With `SWENY_SANDBOX=auto` or `strict` the whole pi process runs inside the sandbox wrapper (srt); `strict`, and `--harness-policy strict` (the default under GitHub Actions), refuse the node without it, with a message naming "sandbox".
+- Kept by pi natively: read-only dry runs (`--tools read,grep,find,ls` plus SWEny's own tools), `tools.deny` for shell, write, edit and subagent, usage with cost.
+- Kept by SWEny: structured output (prompted, parsed and checked), the `max_turns` watchdog, env scoping, untrusted-input fencing, skill tools over the tool bridge.
+- Reported as degraded, or refused in strict: the sandbox without the wrapper, `max_turns`, `tools.deny: [net]` (pi has no network tool, but its shell can still reach the network), `disallowed_tools` names pi has no tool for.
+- pi runs with an empty config dir: your `~/.pi/agent`, project `.pi/`, context files, skills and extensions are not loaded. Provider keys come from the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, ...); point `SWENY_PI_MODELS_JSON` at a `models.json` for custom endpoints.
 
 ## Use it anywhere
 

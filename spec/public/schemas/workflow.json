@@ -229,7 +229,7 @@
       ]
     },
     "Permissions": {
-      "description": "What a node's agent may do. 'read' runs it read-only: only access: read skill tools, no external skill MCP servers, no shell, file-write, edit, fetch or subagent built-ins. On the workflow it is the default and the ceiling for every node.",
+      "description": "What a node's agent may do. 'read' runs it read-only: only access: read skill tools, no external skill MCP servers, no file-write, edit, fetch or subagent built-ins, and no shell (on Codex, a shell confined to its OS read-only sandbox). On the workflow it is the default and the ceiling for every node.",
       "oneOf": [
         {
           "type": "string",
@@ -268,7 +268,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["comment", "issue", "pr", "label"]
+          "enum": ["comment", "issue", "pr", "label", "issue_state"]
         },
         "via": {
           "type": "string",
@@ -305,6 +305,35 @@
           "type": "string",
           "pattern": "^[1-9][0-9]*(s|m|h|d)$",
           "description": "Drop an intent older than this when the write stage runs (e.g. 30m, 2h, 7d)."
+        },
+        "number": {
+          "description": "comment / label / issue_state: the only issue or PR this output may write to (GitHub number, Linear identifier), or { input: <name> } to pin it to a run input.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "object",
+              "required": ["input"],
+              "additionalProperties": false,
+              "properties": {
+                "input": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": ["reopen", "close"],
+          "description": "issue_state: the one change this output may make (reopen or close). Default: either."
         }
       }
     }
@@ -368,7 +397,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["comment", "issue", "pr", "label"]
+            "enum": ["comment", "issue", "pr", "label", "issue_state"]
           },
           "minItems": 1,
           "description": "Output types any node may declare. Absent: all types."
@@ -411,6 +440,11 @@
       "type": "integer",
       "minimum": 0,
       "description": "Soft cap on expected judge calls per workflow run. Executor warns at load time if exceeded; not a hard runtime cap in v1."
+    },
+    "context_mode": {
+      "type": "string",
+      "enum": ["bounded", "full"],
+      "description": "What prior results a node's prompt receives. bounded (default): only nodes it can depend on, and a schema'd node's declared fields instead of its free-text summary. full: every prior node's complete data."
     },
     "inputs": {
       "type": "object",

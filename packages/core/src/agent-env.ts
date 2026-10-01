@@ -23,8 +23,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import type { SandboxSettings } from "@anthropic-ai/claude-agent-sdk";
 import type { Logger, Skill } from "./types.js";
@@ -168,6 +168,69 @@ export function resolveCodexAuthEnv(env: Record<string, string>): Record<string,
   if (!out.CODEX_API_KEY && out.OPENAI_API_KEY) out.CODEX_API_KEY = out.OPENAI_API_KEY;
   return out;
 }
+
+/**
+ * pi's provider credentials (badlogic/pi-mono v0.99.2, docs/providers.md).
+ * sweny has no model opinion, so a pi run may need any provider's key; only
+ * these names (never the rest of the env) reach the pi process. A stored
+ * `auth.json` is not used: pi runs with a scratch `PI_CODING_AGENT_DIR`.
+ */
+export const PI_AUTH_VARS: readonly string[] = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_OAUTH_TOKEN",
+  "ANTHROPIC_AUTH_TOKEN",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "MISTRAL_API_KEY",
+  "GROQ_API_KEY",
+  "CEREBRAS_API_KEY",
+  "XAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "AI_GATEWAY_API_KEY",
+  "ZAI_API_KEY",
+  "ZAI_CODING_CN_API_KEY",
+  "OPENCODE_API_KEY",
+  "RADIUS_API_KEY",
+  "TYPESAFE_API_KEY",
+  "HF_TOKEN",
+  "FIREWORKS_API_KEY",
+  "TOGETHER_API_KEY",
+  "BASETEN_API_KEY",
+  "KIMI_API_KEY",
+  "META_API_KEY",
+  "MINIMAX_API_KEY",
+  "MINIMAX_CN_API_KEY",
+  "MOONSHOT_API_KEY",
+  "NVIDIA_API_KEY",
+  "ANT_LING_API_KEY",
+  "QWEN_TOKEN_PLAN_API_KEY",
+  "QWEN_TOKEN_PLAN_CN_API_KEY",
+  "XIAOMI_API_KEY",
+  "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+  "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+  "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+  "COPILOT_GITHUB_TOKEN",
+  "AZURE_OPENAI_API_KEY",
+  "AZURE_OPENAI_BASE_URL",
+  "AZURE_OPENAI_RESOURCE_NAME",
+  "CLOUDFLARE_API_KEY",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_GATEWAY_ID",
+  "GOOGLE_CLOUD_API_KEY",
+  "GOOGLE_CLOUD_PROJECT",
+  "GCLOUD_PROJECT",
+  "GOOGLE_CLOUD_LOCATION",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION",
+];
+
+/** Prefixes for a pi run: locale only. `ANTHROPIC_*` / `CLAUDE_*` beyond the names above never reach pi. */
+export const PI_ENV_PREFIXES: readonly string[] = ["LC_"];
 
 /** A stored Codex login (`codex login`): `auth.json` under `CODEX_HOME`, default `~/.codex`. */
 export function hasCodexLogin(
@@ -422,12 +485,150 @@ export function buildAgentEnv(
   return out;
 }
 
+// ─── No push under --stage / --dry-run (#442) ────────────────────
+
+/**
+ * Write tokens withheld from the agent when pushes are blocked. `gh`, the
+ * GitHub/GitLab REST APIs and git's HTTPS auth all read these; skill tools
+ * run in the sweny process, not the agent, so reads through skills still work.
+ * The harness's own model credentials are never in this list.
+ */
+export const PUSH_TOKEN_VARS: readonly string[] = [
+  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN",
+  "GITHUB_PAT",
+  "GITLAB_TOKEN",
+  "GL_TOKEN",
+  "CI_JOB_TOKEN",
+  "BITBUCKET_TOKEN",
+  // git transport credentials: the ssh agent socket and any askpass program
+  "SSH_AUTH_SOCK",
+  "SSH_ASKPASS",
+  "GIT_ASKPASS",
+];
+
+/** The remote name every push is pointed at under {@link withPushBlocked}. It never exists. */
+export const NO_PUSH_REMOTE = "sweny-no-push";
+
+/** URL prefixes rewritten to an unusable scheme for pushes only (fetches are untouched). */
+const PUSH_URL_PREFIXES = ["https://", "http://", "ssh://", "git://", "git@", "file://", "/"];
+
+const NO_PUSH_MESSAGE = "sweny: git push is blocked under --stage and --dry-run (#442)";
+
+let noPushDirCache: string | undefined;
+
+/** Single-quote for sh: git runs `GIT_SSH_COMMAND` through the shell. */
+function shQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * A sweny-owned directory holding a `pre-push` hook and a `GIT_ASKPASS`
+ * program that both refuse, an ssh wrapper that refuses pushes, and an empty
+ * `gh` config dir. Created once per process under the OS temp dir.
+ */
+export function noPushDir(): string {
+  if (noPushDirCache && existsSync(path.join(noPushDirCache, "hooks", "pre-push"))) return noPushDirCache;
+  const dir = mkdtempSync(path.join(tmpdir(), "sweny-no-push-"));
+  mkdirSync(path.join(dir, "hooks"));
+  mkdirSync(path.join(dir, "gh"));
+  const refuse = `#!/bin/sh\necho "${NO_PUSH_MESSAGE}" >&2\nexit 1\n`;
+  writeFileSync(path.join(dir, "hooks", "pre-push"), refuse, { mode: 0o755 });
+  writeFileSync(path.join(dir, "askpass"), refuse, { mode: 0o755 });
+  // git runs `<ssh> host "git-receive-pack '<path>'"` to push and
+  // git-upload-pack to fetch: refuse the first, hand everything else to the
+  // operator's own ssh command (or plain ssh).
+  const ssh =
+    `#!/bin/sh\n` +
+    `for a in "$@"; do case "$a" in *receive-pack*) echo "${NO_PUSH_MESSAGE}" >&2; exit 1;; esac; done\n` +
+    `if [ -n "$SWENY_NO_PUSH_SSH" ]; then exec sh -c "$SWENY_NO_PUSH_SSH \\"\\$@\\"" ssh "$@"; fi\n` +
+    `exec ssh "$@"\n`;
+  writeFileSync(path.join(dir, "ssh"), ssh, { mode: 0o755 });
+  noPushDirCache = dir;
+  return dir;
+}
+
+/**
+ * Git config entries (command scope, via `GIT_CONFIG_COUNT`) that make every
+ * push fail while leaving fetch, commit and diff alone:
+ *
+ * - `credential.helper` set to empty resets the helper list, so no stored
+ *   credential (keychain, `gh auth git-credential`, store) reaches git;
+ * - `remote.pushDefault` names a remote that does not exist and
+ *   `push.default=nothing` refuses a bare `git push`;
+ * - `url.<unusable>.pushInsteadOf` rewrites every https/ssh/git/file/absolute
+ *   path push URL to a scheme git has no helper for;
+ * - `core.hooksPath` points at a sweny `pre-push` hook that exits 1, which
+ *   also covers a remote with an explicit `pushurl` (git ignores
+ *   pushInsteadOf there). Repo hooks do not run in these nodes.
+ */
+export function noPushGitConfig(dir: string): Array<[string, string]> {
+  return [
+    ["credential.helper", ""],
+    ["remote.pushDefault", NO_PUSH_REMOTE],
+    ["push.default", "nothing"],
+    ["core.hooksPath", path.join(dir, "hooks")],
+    ...PUSH_URL_PREFIXES.map((p): [string, string] => [`url.${NO_PUSH_REMOTE}://blocked/.pushInsteadOf`, p]),
+  ];
+}
+
+/**
+ * The agent env with pushes blocked (#442). Applied to every node's agent
+ * env when a run is staged or a dry run, on every harness, whether or not env
+ * scoping is on. Withholds {@link PUSH_TOKEN_VARS}, appends
+ * {@link noPushGitConfig} after any `GIT_CONFIG_*` entries already present,
+ * sets `GIT_ASKPASS` to a refusing program, turns off git's terminal prompt,
+ * routes git's ssh through a wrapper that refuses `git-receive-pack` (so an
+ * ssh push fails even to a remote with an explicit `pushurl` under
+ * `--no-verify`; ssh fetches still run the operator's own ssh command), and
+ * gives `gh` an empty config dir so a stored `gh auth login` is not used.
+ *
+ * Not a sandbox: a process that rewrites its own env or git config and
+ * finds a credential on disk (an ssh key without a passphrase, a keychain
+ * entry) is outside what env can stop. The sandbox wrapper hides credential
+ * files such as `~/.ssh`. `enabled` false returns `env` unchanged. Pure apart from
+ * creating {@link noPushDir} once.
+ */
+export function withPushBlocked(env: Record<string, string>, enabled: boolean | undefined): Record<string, string> {
+  if (!enabled) return env;
+  const dir = noPushDir();
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (PUSH_TOKEN_VARS.includes(k)) continue;
+    out[k] = v;
+  }
+  const base = Number.parseInt(out.GIT_CONFIG_COUNT ?? "0", 10);
+  let n = Number.isFinite(base) && base > 0 ? base : 0;
+  for (const [key, value] of noPushGitConfig(dir)) {
+    out[`GIT_CONFIG_KEY_${n}`] = key;
+    out[`GIT_CONFIG_VALUE_${n}`] = value;
+    n++;
+  }
+  out.GIT_CONFIG_COUNT = String(n);
+  const ownSsh = env.GIT_SSH_COMMAND ?? (env.GIT_SSH ? shQuote(env.GIT_SSH) : undefined);
+  if (ownSsh) out.SWENY_NO_PUSH_SSH = ownSsh;
+  out.GIT_SSH_COMMAND = shQuote(path.join(dir, "ssh"));
+  out.GIT_SSH_VARIANT = "ssh";
+  out.GIT_ASKPASS = path.join(dir, "askpass");
+  out.GIT_TERMINAL_PROMPT = "0";
+  out.GH_CONFIG_DIR = path.join(dir, "gh");
+  out.GH_PROMPT_DISABLED = "1";
+  return out;
+}
+
 // ─── Per-node access (env vars + network) ────────────────────────
 
 /** What one node's agent call may see: env var names and network hosts. */
 export interface AgentAccess {
   envVars: string[];
   domains: string[];
+  /**
+   * The run is staged or a dry run (#442): the harness applies
+   * {@link withPushBlocked} to the agent env, so no push can leave the node.
+   */
+  noPush?: boolean;
 }
 
 /** Hosts reachable by sandboxed commands in every node: source hosting + package registries. */

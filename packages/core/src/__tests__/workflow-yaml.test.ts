@@ -12,6 +12,7 @@ import { parse as parseYaml } from "yaml";
 
 import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workflows/index.js";
 import { validateWorkflow, workflowZ } from "../schema.js";
+import { resolveNodePermissions } from "../node-policy.js";
 import type { Workflow } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -267,10 +268,10 @@ describe("triage implement node — fix-quality contract", () => {
     it("declares skipped_reason as an enum scoped to documented reasons", () => {
       const props = output!.properties as Record<string, any>;
       expect(props.skipped_reason).toBeDefined();
-      // Currently the only valid skip reason is open-pr-exists. Keeping
-      // this enum tight prevents drive-by additions; new reasons should
-      // come with a documented rationale and edge wiring.
-      expect(new Set(props.skipped_reason.enum)).toEqual(new Set(["open-pr-exists"]));
+      // open-pr-exists (Step 0b) and staged (Step 0, a --stage preview that
+      // filed no issue). Keeping this enum tight prevents drive-by additions;
+      // new reasons should come with a documented rationale and edge wiring.
+      expect(new Set(props.skipped_reason.enum)).toEqual(new Set(["open-pr-exists", "staged"]));
     });
 
     it("declares existing_pr_url as a URL string", () => {
@@ -569,26 +570,13 @@ describe("runtime Zod validation in loader", () => {
 describe("triage gather node: read-only scope enforcement", () => {
   const gather = triageWorkflow.nodes.gather;
 
-  it("denies every issue/PR/comment write tool from its skills", () => {
-    expect(gather.tools).toBeDefined();
-    expect(gather.tools!.deny).toEqual(
-      expect.arrayContaining([
-        "linear_create_issue",
-        "linear_add_comment",
-        "linear_update_issue",
-        "github_create_issue",
-        "github_add_comment",
-        "github_create_pr",
-      ]),
-    );
+  it("is read-only (#365): no write tool, no write built-in, on any harness", () => {
+    expect(gather.permissions).toBe("read");
+    expect(resolveNodePermissions(gather, triageWorkflow).access).toBe("read");
   });
 
-  it("does not declare an allow list (deny-only keeps new read tools available)", () => {
-    expect(gather.tools!.allow).toBeUndefined();
-  });
-
-  it("disallows the built-in file-editing tools (no code authoring mid-gather)", () => {
-    expect(gather.disallowed_tools).toEqual(expect.arrayContaining(["Write", "Edit", "NotebookEdit"]));
+  it("needs no agent-specific disallowed_tools (they made Codex refuse gather under strict)", () => {
+    expect(gather.disallowed_tools).toBeUndefined();
   });
 
   it("is fail-soft: a turn-cap death proceeds with partial context", () => {
@@ -606,41 +594,109 @@ describe("triage gather node: read-only scope enforcement", () => {
     expect(instr).not.toMatch(/Use every tool available/i);
   });
 
-  it("downstream write nodes keep their write tools", () => {
-    // create_issue must still be able to create issues and comment.
-    const createIssueDeny = triageWorkflow.nodes.create_issue.tools?.deny ?? [];
-    expect(createIssueDeny).not.toContain("linear_create_issue");
-    expect(createIssueDeny).not.toContain("linear_add_comment");
-    // but never PRs
-    expect(createIssueDeny).toContain("github_create_pr");
-
-    // create_pr must still be able to open PRs.
-    const createPrDeny = triageWorkflow.nodes.create_pr.tools?.deny ?? [];
-    expect(createPrDeny).not.toContain("github_create_pr");
-
-    // skip must still be able to +1 and reopen.
-    const skipDeny = triageWorkflow.nodes.skip.tools?.deny ?? [];
-    expect(skipDeny).not.toContain("linear_add_comment");
-    expect(skipDeny).not.toContain("linear_update_issue");
-    expect(skipDeny).toContain("github_create_pr");
-  });
-
-  it("investigate denies the same write tools its instruction forbids", () => {
-    const deny = triageWorkflow.nodes.investigate.tools?.deny ?? [];
-    for (const tool of [
-      "linear_create_issue",
-      "linear_add_comment",
-      "github_create_issue",
-      "github_add_comment",
-      "github_create_pr",
-    ]) {
-      expect(deny).toContain(tool);
-    }
+  it("investigate is read-only too", () => {
+    expect(resolveNodePermissions(triageWorkflow.nodes.investigate, triageWorkflow).access).toBe("read");
   });
 
   it("implement denies the PR tool (create_pr is the only PR-opening node)", () => {
     const deny = triageWorkflow.nodes.implement.tools?.deny ?? [];
     expect(deny).toContain("github_create_pr");
+  });
+});
+
+// ─── Built-in workflows on safe outputs (#365) ──────────────────
+
+describe("built-in workflows: least privilege and safe outputs (#365)", () => {
+  const builtins = [
+    ["triage", triageWorkflow],
+    ["implement", implementWorkflow],
+  ] as const;
+  const githubAndLinearWrites = [
+    "github_create_issue",
+    "github_add_comment",
+    "github_create_pr",
+    "github_add_labels",
+    "linear_create_issue",
+    "linear_add_comment",
+    "linear_update_issue",
+  ];
+
+  it.each(builtins)("%s declares a workflow permission ceiling and a safe_outputs policy", (_id, wf) => {
+    expect(wf.permissions).toBeDefined();
+    expect(wf.safe_outputs?.allow?.length).toBeGreaterThan(0);
+    expect(wf.safe_outputs?.max).toBeGreaterThan(0);
+    expect(validateWorkflow(wf)).toEqual([]);
+  });
+
+  it.each(builtins)("%s: only the code-changing nodes and notify are write nodes", (_id, wf) => {
+    const writers = Object.entries(wf.nodes)
+      .filter(([, n]) => resolveNodePermissions(n, wf).access === "write")
+      .map(([id]) => id)
+      .sort();
+    expect(writers).toEqual(["create_pr", "implement", "notify"]);
+  });
+
+  it.each(builtins)("%s: no node can call a GitHub or Linear write tool directly", (_id, wf) => {
+    for (const [id, node] of Object.entries(wf.nodes)) {
+      if (resolveNodePermissions(node, wf).access === "read") continue;
+      const deny = new Set(node.tools?.deny ?? []);
+      const skillWrites = githubAndLinearWrites.filter((t) => node.skills.some((s) => t.startsWith(`${s}_`)));
+      for (const t of skillWrites) expect(deny.has(t), `${id} can call ${t}`).toBe(true);
+    }
+  });
+
+  it("triage files issues and +1 comments only as capped outputs", () => {
+    const create = triageWorkflow.nodes.create_issue;
+    expect(create.outputs!.map((o) => o.type).sort()).toEqual(["comment", "issue", "issue_state"]);
+    for (const o of create.outputs!) expect(o.max).toBeGreaterThan(0);
+    expect(triageWorkflow.nodes.skip.outputs).toEqual([
+      { type: "comment", max: 10 },
+      { type: "issue_state", state: "reopen", max: 10 },
+    ]);
+  });
+
+  it("triage reopens closed duplicates (and never closes): capped issue_state, reopen only, inside the ceiling", () => {
+    expect(triageWorkflow.safe_outputs!.allow).toContain("issue_state");
+    for (const id of ["create_issue", "skip"]) {
+      const node = triageWorkflow.nodes[id];
+      expect(node.outputs).toContainEqual({ type: "issue_state", state: "reopen", max: 10 });
+      expect(node.instruction as string).toMatch(/issue_state/);
+    }
+  });
+
+  it("the PR is an output of create_pr, which stays a write node only to push the branch", () => {
+    for (const wf of [triageWorkflow, implementWorkflow]) {
+      const pr = wf.nodes.create_pr;
+      expect(pr.outputs).toEqual([expect.objectContaining({ type: "pr", max: 1 })]);
+      expect(pr.permissions).toBe("write");
+      expect(pr.tools!.deny).toContain("github_create_pr");
+      expect(pr.instruction as string).toMatch(/Push the branch/);
+    }
+  });
+
+  it("implement nodes deny the web portably instead of by Claude tool name", () => {
+    for (const wf of [triageWorkflow, implementWorkflow]) {
+      expect(wf.nodes.implement.permissions).toEqual({ access: "write", deny: ["net"] });
+      expect(wf.nodes.implement.disallowed_tools).toBeUndefined();
+    }
+  });
+
+  it("implement's skip comment is pinned to the run's issue", () => {
+    expect(implementWorkflow.nodes.skip.outputs).toEqual([
+      { type: "comment", max: 1, number: { input: "issueIdentifier" } },
+    ]);
+  });
+
+  it("the triage implement node reads the new issue's identifier from safe_outputs, and stops on a staged preview", () => {
+    const instr = triageWorkflow.nodes.implement.instruction as string;
+    expect(instr).toMatch(/context\.create_issue\.safe_outputs/);
+    expect(instr).toMatch(/skipped_reason: "staged"/);
+  });
+
+  it("no built-in declares Claude-only tool names", () => {
+    for (const wf of [triageWorkflow, implementWorkflow]) {
+      for (const [id, node] of Object.entries(wf.nodes)) expect(node.disallowed_tools, id).toBeUndefined();
+    }
   });
 });
 
@@ -654,7 +710,8 @@ describe("triage create_pr node: Linear magic words", () => {
   });
 
   it("adds the Linear Fixes line keyed to the created issue identifier", () => {
-    expect(instr).toMatch(/Fixes \{context\.create_issue\.issueIdentifier\}/);
+    expect(instr).toMatch(/Fixes ISSUE_ID/);
+    expect(instr).toMatch(/context\.create_issue\.safe_outputs/);
     expect(instr).toMatch(/Fixes OF{2}-1234/);
     expect(instr).toMatch(/Linear/);
   });
