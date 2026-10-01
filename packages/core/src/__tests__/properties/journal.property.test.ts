@@ -30,6 +30,9 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 const file = join(root, "journal.ndjson");
 // Records are authenticated with a per-run key; built journals use this one.
 const KEY = randomBytes(32);
+// The two exhaustive specs read the journal once per byte (a few thousand
+// authenticated reads, each a file write + read); 5s is too tight on slow runners.
+const EXHAUSTIVE_TIMEOUT_MS = 60_000;
 process.env.SWENY_STATE_DIR = join(root, "state");
 
 // ─── Building valid journals ─────────────────────────────────────
@@ -249,56 +252,60 @@ describe("journal: truncation recovers to the last complete record", () => {
     );
   });
 
-  it("a journal written by the real RunJournal recovers at every possible truncation point", () => {
-    const wf: Workflow = {
-      id: "w",
-      name: "W",
-      description: "",
-      entry: "a",
-      nodes: { a: { name: "A", instruction: "do a", skills: [] }, b: { name: "B", instruction: "do b", skills: [] } },
-      edges: [{ from: "a", to: "b" }],
-    };
-    const cwd = mkdtempSync(join(root, "real-"));
-    const runId = "20260930-120000-0a0b0c";
-    const j = RunJournal.create({ runId, cwd });
-    j.begin({
-      workflow: wf,
-      input: {},
-      sources: { "nodes.a.instruction": { content: "do a" } },
-      skills: new Map(),
-      config: {},
-      writeState: createWriteStageState(),
-    });
-    j.nodeStart("a", 1);
-    j.nodeEnd("a", 1, result("success"), createWriteStageState());
-    j.route("a", "b");
-    j.nodeStart("b", 1);
-    j.nodeEnd("b", 1, result("failed"), createWriteStageState());
-    j.end("failed");
+  it(
+    "a journal written by the real RunJournal recovers at every possible truncation point",
+    () => {
+      const wf: Workflow = {
+        id: "w",
+        name: "W",
+        description: "",
+        entry: "a",
+        nodes: { a: { name: "A", instruction: "do a", skills: [] }, b: { name: "B", instruction: "do b", skills: [] } },
+        edges: [{ from: "a", to: "b" }],
+      };
+      const cwd = mkdtempSync(join(root, "real-"));
+      const runId = "20260930-120000-0a0b0c";
+      const j = RunJournal.create({ runId, cwd });
+      j.begin({
+        workflow: wf,
+        input: {},
+        sources: { "nodes.a.instruction": { content: "do a" } },
+        skills: new Map(),
+        config: {},
+        writeState: createWriteStageState(),
+      });
+      j.nodeStart("a", 1);
+      j.nodeEnd("a", 1, result("success"), createWriteStageState());
+      j.route("a", "b");
+      j.nodeStart("b", 1);
+      j.nodeEnd("b", 1, result("failed"), createWriteStageState());
+      j.end("failed");
 
-    const full = readFileSync(join(journalDir(cwd, runId), JOURNAL_FILE));
-    const runKey = loadRunKey(runKeyFile(cwd, runId));
-    const whole = readBytes(full, undefined, runKey);
-    expect(whole.truncatedBytes).toBe(0);
-    expect(whole.records.map((r) => r.type)).toEqual([
-      "run:start",
-      "node:start",
-      "node:end",
-      "route",
-      "node:start",
-      "node:end",
-      "run:end",
-    ]);
+      const full = readFileSync(join(journalDir(cwd, runId), JOURNAL_FILE));
+      const runKey = loadRunKey(runKeyFile(cwd, runId));
+      const whole = readBytes(full, undefined, runKey);
+      expect(whole.truncatedBytes).toBe(0);
+      expect(whole.records.map((r) => r.type)).toEqual([
+        "run:start",
+        "node:start",
+        "node:end",
+        "route",
+        "node:start",
+        "node:end",
+        "run:end",
+      ]);
 
-    let complete = 0;
-    for (let cut = 0; cut <= full.length; cut++) {
-      if (cut > 0 && full[cut - 1] === 0x0a) complete++;
-      const read = readBytes(full.subarray(0, cut), undefined, runKey);
-      expect(read.records).toHaveLength(complete);
-      expect(read.records).toEqual(whole.records.slice(0, complete));
-      expect(read.corruptAtLine).toBeUndefined();
-    }
-  });
+      let complete = 0;
+      for (let cut = 0; cut <= full.length; cut++) {
+        if (cut > 0 && full[cut - 1] === 0x0a) complete++;
+        const read = readBytes(full.subarray(0, cut), undefined, runKey);
+        expect(read.records).toHaveLength(complete);
+        expect(read.records).toEqual(whole.records.slice(0, complete));
+        expect(read.corruptAtLine).toBeUndefined();
+      }
+    },
+    EXHAUSTIVE_TIMEOUT_MS,
+  );
 });
 
 describe("journal: byte corruption is detected, never silently skipped", () => {
@@ -355,28 +362,32 @@ describe("journal: byte corruption is detected, never silently skipped", () => {
     );
   });
 
-  it("flipping a single byte anywhere in a real two-visit journal is never accepted as a different history", () => {
-    const { lines, records } = buildJournal({
-      steps: [
-        { node: "a", status: "success", checkpoint: true, end: true, route: "next", restart: false, resume: false },
-        { node: "b", status: "failed", checkpoint: false, end: true, route: "end", restart: false, resume: false },
-      ],
-      runEnd: "failed",
-    });
-    const buf = Buffer.from(lines.join(""), "utf-8");
-    for (let k = 0; k < buf.length; k++) {
-      const mutated = Buffer.from(buf);
-      mutated[k] ^= 0x01;
-      let read: ReturnType<typeof readJournal>;
-      try {
-        read = readBytes(mutated);
-      } catch (err) {
-        expect(err).toBeInstanceOf(JournalVersionError);
-        continue;
+  it(
+    "flipping a single byte anywhere in a real two-visit journal is never accepted as a different history",
+    () => {
+      const { lines, records } = buildJournal({
+        steps: [
+          { node: "a", status: "success", checkpoint: true, end: true, route: "next", restart: false, resume: false },
+          { node: "b", status: "failed", checkpoint: false, end: true, route: "end", restart: false, resume: false },
+        ],
+        runEnd: "failed",
+      });
+      const buf = Buffer.from(lines.join(""), "utf-8");
+      for (let k = 0; k < buf.length; k++) {
+        const mutated = Buffer.from(buf);
+        mutated[k] ^= 0x01;
+        let read: ReturnType<typeof readJournal>;
+        try {
+          read = readBytes(mutated);
+        } catch (err) {
+          expect(err).toBeInstanceOf(JournalVersionError);
+          continue;
+        }
+        read.records.forEach((r, i) => expect(r).toEqual(records[i]));
       }
-      read.records.forEach((r, i) => expect(r).toEqual(records[i]));
-    }
-  });
+    },
+    EXHAUSTIVE_TIMEOUT_MS,
+  );
 });
 
 describe("journal: replay never marks a node succeeded that was not recorded as succeeded", () => {
