@@ -199,9 +199,18 @@ jobs:
           # when publish was skipped/failed and core's version is unchanged).
           if git rev-parse -q --verify "refs/tags/$VERSIONED_TAG" >/dev/null; then
             echo "$VERSIONED_TAG already exists, leaving it untouched"
-          elif ! npm view "@sweny-ai/core@${CORE_VERSION}" version >/dev/null 2>&1; then
-            # A tag that pins a version npm does not serve would break every consumer of it.
-            echo "::warning::@sweny-ai/core@${CORE_VERSION} is not on npm; not cutting $VERSIONED_TAG"
+          elif ! {
+            # npm takes minutes to serve a just-published version. Poll the registry for this
+            # exact version (15s, up to 15 min). A tag that pins a version npm does not serve
+            # would break every consumer of it, so only skip after the timeout.
+            for _ in $(seq 1 60); do
+              served=$(curl -fsS "https://registry.npmjs.org/@sweny-ai%2fcore" | jq -r --arg v "$CORE_VERSION" '.versions[$v].version // empty' 2>/dev/null || true)
+              [ "$served" = "$CORE_VERSION" ] && break
+              sleep 15
+            done
+            [ "$served" = "$CORE_VERSION" ]
+          }; then
+            echo "::warning::@sweny-ai/core@${CORE_VERSION} not served by npm after 15 min; not cutting $VERSIONED_TAG"
           else
             # The immutable tag points at a commit (on no branch) whose action.yml defaults
             # cli-version to this exact core version, so re-running the tag runs the same code.
