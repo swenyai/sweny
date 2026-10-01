@@ -21,6 +21,7 @@ import type {
   JSONSchema,
   Logger,
   McpServerConfig,
+  NodePolicyFacts,
 } from "../types.js";
 import { consoleLogger } from "../types.js";
 import {
@@ -336,6 +337,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
   private sandboxProbe: (() => string | undefined) | undefined;
   private sandboxWarned = false;
   private envScope: boolean | undefined;
+  /** Floor facts from the latest runQuery, read by run() for the receipt. */
+  private lastPolicyFacts: NodePolicyFacts | undefined;
   private toolBridge: boolean;
   private toolBridgeShim: { command: string; args: string[] } | undefined;
   private authProbe: AuthProbe;
@@ -449,7 +452,12 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       strict: policy.strict || this.policyMode === "strict",
       degraded,
     });
-    return { ...result, harness: this.info(), degraded };
+    return {
+      ...result,
+      harness: this.info(),
+      degraded,
+      ...(this.lastPolicyFacts ? { policy: this.lastPolicyFacts } : {}),
+    };
   }
 
   private async runQuery(opts: {
@@ -517,6 +525,11 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       probe: this.sandboxProbe,
       logger: this.logger,
     });
+    this.lastPolicyFacts = {
+      envScope: resolveEnvScope(process.env, this.envScope),
+      sandbox: sandbox.mode,
+      sandboxStarted: sandbox.settings !== undefined,
+    };
     if (sandbox.error) {
       this.logger.error(sandbox.error);
       return { status: "failed", data: { error: sandbox.error, refused: true }, toolCalls: [] };

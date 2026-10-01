@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import chalk from "chalk";
 import { consoleLogger, type ExecutionTrace, type Logger, type NodeResult, type Workflow } from "../types.js";
+import { summarizeDecisions } from "../decider.js";
 import { toMermaidBlock, type NodeStatus } from "../mermaid.js";
 
 // ── Receipt ─────────────────────────────────────────────────────
@@ -31,8 +32,29 @@ export interface RunSummary {
    * (`max_turns`, `egress allowlist`, `deny [write]`). Absent when none.
    */
   degraded?: string[];
+  /**
+   * What the run's opinions did, from facts the nodes reported: env scope and
+   * sandbox (Claude Code only) and safe-output counts. Absent when the run
+   * knows none of it.
+   */
+  policy?: RunPolicy;
   /** The spend budget a node crossed (#449). Absent when none was. */
   budget?: { node: string; scope: "node" | "run"; unit: "tokens" | "cost_usd"; limit: number; spent: number };
+  /**
+   * Shadow-mode decider agreement (#357), counts only. `compared` decisions
+   * passed every gate; `agreed` matched the agent; the rest fell through.
+   * Absent when the decider was off or never consulted.
+   */
+  decider?: { compared: number; agreed: number; fellThrough: number };
+}
+
+export interface RunPolicy {
+  /** Agent env narrowed to the allowlist. Absent when no node reported it. */
+  envScope?: boolean;
+  /** Sandbox facts. `started` is false when the mode asked for one but the host could not. */
+  sandbox?: { mode: "off" | "auto" | "strict"; started: boolean };
+  /** Safe outputs staged (previewed) and applied (written), summed over nodes. */
+  outputs?: { staged: number; applied: number };
 }
 
 /** The short key of a `degraded` entry: the text before its first colon. */
@@ -42,7 +64,12 @@ export function degradedKey(entry: string): string {
 }
 
 /** Sum the per-node results into one run summary. */
-export function summarizeRun(results: Map<string, NodeResult>, durationMs: number, crashed = false): RunSummary {
+export function summarizeRun(
+  results: Map<string, NodeResult>,
+  durationMs: number,
+  crashed = false,
+  trace?: ExecutionTrace,
+): RunSummary {
   let nodesOk = 0;
   let nodesSkipped = 0;
   let failed = crashed;
@@ -52,12 +79,26 @@ export function summarizeRun(results: Map<string, NodeResult>, durationMs: numbe
   let harness: string | undefined;
   const degraded = new Set<string>();
   let budget: RunSummary["budget"];
+  const policy: RunPolicy = {};
+  let staged = 0;
+  let applied = 0;
   const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
   for (const [nodeId, r] of results) {
     if (r.budget && !budget) budget = { node: nodeId, ...r.budget };
     harness ??= r.harness?.id;
     for (const d of r.degraded ?? []) degraded.add(degradedKey(d));
+    if (r.policy) {
+      // Any node that ran unscoped or unsandboxed counts: the receipt must not overstate.
+      policy.envScope = policy.envScope === undefined ? r.policy.envScope : policy.envScope && r.policy.envScope;
+      const sb = { mode: r.policy.sandbox, started: r.policy.sandboxStarted };
+      // Keep the weakest node: the first one that did not run sandboxed.
+      if (!policy.sandbox || (policy.sandbox.started && !sb.started)) policy.sandbox = sb;
+    }
+    for (const o of r.outputs ?? []) {
+      if (o.status === "staged") staged++;
+      else if (o.status === "applied") applied++;
+    }
     if (r.status === "success") nodesOk++;
     else if (r.status === "skipped") nodesSkipped++;
     else failed = true;
@@ -72,6 +113,8 @@ export function summarizeRun(results: Map<string, NodeResult>, durationMs: numbe
     }
   }
 
+  if (staged > 0 || applied > 0) policy.outputs = { staged, applied };
+
   return {
     ok: !failed,
     nodesOk,
@@ -83,8 +126,40 @@ export function summarizeRun(results: Map<string, NodeResult>, durationMs: numbe
     ...(costUsd !== undefined ? { costUsd } : {}),
     ...(harness !== undefined ? { harness } : {}),
     ...(degraded.size > 0 ? { degraded: [...degraded] } : {}),
+    ...(Object.keys(policy).length > 0 ? { policy } : {}),
     ...(budget ? { budget } : {}),
+    ...(trace?.decisions && trace.decisions.length > 0 ? { decider: decisionCounts(trace) } : {}),
   };
+}
+
+function decisionCounts(trace: ExecutionTrace): NonNullable<RunSummary["decider"]> {
+  const d = summarizeDecisions(trace.decisions ?? []);
+  return { compared: d.compared, agreed: d.agreed, fellThrough: d.fell_through };
+}
+
+/**
+ * `policy: env scoped, sandbox on, 1 output staged`. Only what the run knew:
+ * no segment for a fact no node reported. Undefined when there is nothing to say.
+ */
+export function formatPolicySegment(p: RunPolicy | undefined): string | undefined {
+  if (!p) return undefined;
+  const parts: string[] = [];
+  if (p.envScope !== undefined) parts.push(p.envScope ? "env scoped" : "env unscoped");
+  if (p.sandbox) {
+    parts.push(
+      p.sandbox.mode === "off"
+        ? "sandbox off"
+        : p.sandbox.started
+          ? "sandbox on"
+          : "sandbox unavailable (ran unsandboxed)",
+    );
+  }
+  if (p.outputs) {
+    const n = (count: number) => `${count} ${count === 1 ? "output" : "outputs"}`;
+    if (p.outputs.staged > 0) parts.push(`${n(p.outputs.staged)} staged`);
+    if (p.outputs.applied > 0) parts.push(`${n(p.outputs.applied)} applied`);
+  }
+  return parts.length > 0 ? `policy: ${parts.join(", ")}` : undefined;
 }
 
 export function formatReceiptDuration(ms: number): string {
@@ -131,7 +206,15 @@ export function formatReceipt(s: RunSummary): string {
     ...(s.costUsd !== undefined ? [formatCost(s.costUsd)] : []),
     ...(s.harness !== undefined && s.harness !== "claude-code" ? [s.harness] : []),
     ...(s.degraded && s.degraded.length > 0 ? [`degraded: ${s.degraded.join(", ")}`] : []),
+    ...(formatPolicySegment(s.policy) ? [formatPolicySegment(s.policy)!] : []),
     ...(s.budget ? [formatBudgetOverrun(s.budget)] : []),
+    ...(s.decider
+      ? [
+          s.decider.compared > 0
+            ? `decider agreed ${s.decider.agreed}/${s.decider.compared}`
+            : `decider fell through ${s.decider.fellThrough}/${s.decider.fellThrough}`,
+        ]
+      : []),
   ];
   return parts.join(" · ");
 }
@@ -261,7 +344,7 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
   ["-y, --yes", "Skip the batch confirmation prompt (for CI)"],
   [
     "--dry-run",
-    "Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge. To inspect nodes without running, use --list-nodes.",
+    "Run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first natural-language conditional edge. To inspect nodes without running, use --list-nodes.",
   ],
   [
     "--stage",
@@ -284,5 +367,9 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
   [
     "--harness-policy <mode>",
     "strict: refuse a node whose policy the agent cannot enforce; warn: run it and report what was not enforced (default: strict under GitHub Actions, warn elsewhere; env SWENY_HARNESS_POLICY)",
+  ],
+  [
+    "--decider <mode>",
+    "Decision model for route choices: off (default) or shadow. Shadow asks the workflow's decider.provider alongside the agent and reports agreement; the route is always the agent's. Needs decider.provider in the workflow (no default URL)",
   ],
 ];

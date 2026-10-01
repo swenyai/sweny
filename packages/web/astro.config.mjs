@@ -48,6 +48,7 @@ export default defineConfig({
             { label: "Concepts", slug: "getting-started/concepts" },
             { label: "Quick Start", slug: "getting-started/quick-start" },
             { label: "Walkthrough", slug: "getting-started/walkthrough" },
+            { label: "Agents and policies", slug: "getting-started/agents-and-policies" },
             { label: "FAQ", slug: "getting-started/faq" },
           ],
         },
@@ -56,6 +57,7 @@ export default defineConfig({
           items: [
             { label: "Quick Start", slug: "cli" },
             { label: "Commands", slug: "cli/commands" },
+            { label: "Resume a run", slug: "cli/resume" },
             { label: "E2E Testing", slug: "cli/e2e" },
             { label: "Examples", slug: "cli/examples" },
           ],
@@ -118,6 +120,7 @@ export default defineConfig({
             { label: "Architecture", slug: "advanced/architecture" },
             { label: "Model Gateway (LiteLLM)", slug: "advanced/model-gateway" },
             { label: "Agent Sandbox", slug: "advanced/agent-sandbox" },
+            { label: "Decision Models (Shadow)", slug: "advanced/decision-models" },
             { label: "MCP Servers", slug: "advanced/mcp-servers" },
             { label: "Claude Code Plugin", slug: "advanced/mcp-plugin" },
             { label: "Troubleshooting", slug: "advanced/troubleshooting" },

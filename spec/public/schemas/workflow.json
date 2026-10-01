@@ -279,6 +279,49 @@
         }
       }
     },
+    "Decider": {
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "description": "Decision model for route choices. 'shadow' asks it alongside the agent and logs whether they agree; the route is always the agent's. The workflow state goes only to provider.base_url, with no fallback.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["off", "shadow"]
+        },
+        "provider": {
+          "type": "object",
+          "required": ["base_url", "model"],
+          "additionalProperties": false,
+          "properties": {
+            "base_url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Server root serving POST /v1/systemone (Ollama or TypeSafe Jev)."
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1
+            },
+            "api_key_env": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Env var holding the bearer key."
+            }
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "shadow"
+          }
+        }
+      },
+      "then": {
+        "required": ["provider"]
+      }
+    },
     "SafeOutput": {
       "type": "object",
       "required": ["type"],
@@ -367,6 +410,11 @@
     },
     "description": {
       "type": "string"
+    },
+    "spec_version": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$",
+      "description": "Workflow spec version as a positive integer string. Absent means 1. Older versions are migrated in memory on load; newer than the CLI supports is refused. Run `sweny workflow upgrade <file>` to rewrite a file at the current version."
     },
     "entry": {
       "type": "string",
@@ -462,6 +510,10 @@
     "budget": {
       "$ref": "#/$defs/Budget",
       "description": "Spend ceiling for the whole run and for every node. A node's own budget may only narrow it. The CLI's --max-tokens and --max-cost tighten it further."
+    },
+    "decider": {
+      "$ref": "#/$defs/Decider",
+      "description": "Decision model for route choices (shadow mode only). Default: off."
     },
     "context_mode": {
       "type": "string",
@@ -833,8 +885,25 @@
             "minLength": 1
           },
           "when": {
-            "type": "string",
-            "description": "Natural language condition, evaluated at runtime by the workflow's harness."
+            "description": "Condition for taking this edge. A string is natural language, evaluated at runtime by the workflow's harness. An object { expr } is a deterministic expression over prior nodes' declared output fields, evaluated by sweny with no model call.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "required": ["expr"],
+                "additionalProperties": false,
+                "properties": {
+                  "expr": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "description": "Boolean expression: == != < <= > >= in, && || !, exists, string/number/boolean/null literals, and node.field paths to declared output fields."
+                  }
+                }
+              }
+            ]
           },
           "max_iterations": {
             "type": "integer",

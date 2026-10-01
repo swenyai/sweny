@@ -59,6 +59,8 @@ export interface RunRecord {
   harness?: { id: string; version: string };
   /** Opinions the harness could not honor natively on some node, deduped. Absent when none. */
   degraded?: string[];
+  /** Shadow-mode decider agreement counts (#357). Absent when the decider was off. */
+  decider?: { compared: number; agreed: number; fell_through: number };
 }
 
 // ── Hash + ids ──────────────────────────────────────────────────
@@ -142,7 +144,7 @@ export interface BuildRunRecordInput {
 }
 
 export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
-  const summary = summarizeRun(i.results, i.durationMs, i.crashed);
+  const summary = summarizeRun(i.results, i.durationMs, i.crashed, i.trace);
   const retries = new Map<string, number>();
   for (const s of i.trace?.steps ?? []) {
     if (s.retryAttempt !== undefined) retries.set(s.node, Math.max(retries.get(s.node) ?? 0, s.retryAttempt));
@@ -188,6 +190,15 @@ export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
     },
     ...(harness ? { harness: { id: harness.id, version: harness.version } } : {}),
     ...(degraded.length > 0 ? { degraded } : {}),
+    ...(summary.decider
+      ? {
+          decider: {
+            compared: summary.decider.compared,
+            agreed: summary.decider.agreed,
+            fell_through: summary.decider.fellThrough,
+          },
+        }
+      : {}),
   };
 }
 
@@ -228,7 +239,11 @@ export function pruneRuns(cwd: string = process.cwd(), keep: number = RUN_HISTOR
       .filter((f) => f.endsWith(".json") && RUN_ID_RE.test(f.slice(0, -5)))
       .sort();
     const extra = files.slice(0, Math.max(0, files.length - keep));
-    for (const f of extra) fs.rmSync(path.join(dir, f), { force: true });
+    for (const f of extra) {
+      fs.rmSync(path.join(dir, f), { force: true });
+      // output.md lives beside the record in <run-id>/ (final-output.ts)
+      fs.rmSync(path.join(dir, f.slice(0, -5)), { recursive: true, force: true });
+    }
     return extra.length;
   } catch {
     return 0;

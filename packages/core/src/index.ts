@@ -34,6 +34,8 @@ export type {
   Workflow,
   Node,
   Edge,
+  EdgeWhen,
+  WhenExpression,
   NodeResult,
   ToolCall,
   ExecutionEvent,
@@ -106,6 +108,10 @@ export { consoleLogger } from "./types.js";
 // Executor
 export { execute, RouteEvaluationError } from "./executor.js";
 export type { ExecuteOptions } from "./executor.js";
+
+// Decision models, shadow mode (#357)
+export { systemOneProvider, DecideError, gateVerdict, DECIDER_MIN_CONFIDENCE, DECIDER_MIN_MARGIN } from "./decider.js";
+export type { DecisionProvider, DeciderConfig, DeciderMode, DeciderRecord, SystemOneOptions } from "./decider.js";
 
 // Least-privilege nodes and safe outputs (#365)
 export { BudgetGuard, describeOverrun, minLimits, toLimits } from "./budget.js";
@@ -187,11 +193,24 @@ export {
 } from "./schema.js";
 export type { WorkflowError } from "./schema.js";
 
+// Deterministic `when` expressions (#461). Pure, browser-safe.
+export {
+  isWhenExpression,
+  whenLabel,
+  parseExpression,
+  evaluateExpression,
+  checkExpression,
+  ExpressionSyntaxError,
+} from "./when.js";
+export type { ExprNode, ExpressionScope, ExpressionResult } from "./when.js";
+
 // Loader — canonical read → parse → structural-validate pipeline (the path
 // the CLI uses for `workflow run`, `workflow validate`, and `publish`).
 // Node-only: loader.ts imports `node:fs`, so this is NOT mirrored in browser.ts.
 export { loadAndValidateWorkflow, validateParsed } from "./loader.js";
 export type { LoaderResult, LoaderError, LoaderOptions } from "./loader.js";
+export { CURRENT_SPEC_VERSION, MIGRATIONS, migrateWorkflow } from "./migrations.js";
+export type { Migration, MigrationConfig, MigrateResult } from "./migrations.js";
 
 // Workflow input validation
 export { validateRuntimeInput, summarizeInputShape } from "./inputs.js";

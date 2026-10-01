@@ -54,7 +54,33 @@ nodes:
       From the survey, write a short plain-English explanation:
       what this project does, how it is organized, how to build and
       run it, and where a new contributor should start.
-      Keep it under 300 words.
+      Keep every field short and concrete: a sentence or a few
+      bullets, in plain English, naming real files and commands.
+    output:
+      type: object
+      properties:
+        purpose:
+          type: string
+          title: What it is
+          description: One or two sentences on what this project does and who it is for.
+        how_to_run:
+          type: array
+          title: How to run it
+          description: The commands, in order, to install, build, test, and start it.
+          items:
+            type: string
+        key_files:
+          type: array
+          title: Key files
+          description: The files and directories a new contributor should open first, each with a few words on why.
+          items:
+            type: string
+        risks:
+          type: array
+          title: Watch out for
+          description: Sharp edges, missing docs, or things that look fragile. Empty if none.
+          items:
+            type: string
 
 edges:
   - from: survey

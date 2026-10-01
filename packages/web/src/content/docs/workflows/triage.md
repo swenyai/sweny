@@ -115,12 +115,12 @@ Include: severity, root cause, and links to created issues or PRs.`,
     {
       from: "investigate",
       to: "create_issue",
-      when: "novel_count is greater than 0 AND highest_severity is medium or higher",
+      when: { expr: "investigate.novel_count > 0 && investigate.highest_severity in ['medium', 'high', 'critical']" },
     },
     {
       from: "investigate",
       to: "skip",
-      when: "novel_count is 0, OR highest_severity is low",
+      when: { expr: "investigate.novel_count == 0 || investigate.highest_severity == 'low'" },
     },
     {
       from: "create_issue",
@@ -210,6 +210,8 @@ The workflow has three conditional branch points:
 |--------|-----------|
 | `create_issue` | `novel_count > 0` AND `highest_severity` is medium or higher |
 | `skip` | `novel_count == 0` OR `highest_severity` is low |
+
+Both are [expression conditions](https://spec.sweny.ai/edges/#expressions): SWEny evaluates them over the declared `investigate` output with no model call.
 
 ### After `create_issue`
 

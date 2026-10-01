@@ -36,16 +36,16 @@ inputs:
     description: "OpenAI API key for agent: codex. Passed to Codex as CODEX_API_KEY."
     required: false
   codex-version:
-    description: "Version of @openai/codex to install when agent is codex. sweny needs 0.159.0 or newer."
+    description: "Version of @openai/codex to install when agent is codex. Defaults to the version sweny's Codex capability claims were tested against (TESTED_CODEX_VERSION in harness/codex.ts). sweny needs 0.159.0 or newer; a newer Codex runs with a warning. Set 'latest' to opt in to untested versions."
     required: false
-    default: "latest"
+    default: "0.159.2"
   harness-policy:
     description: "strict refuses a node whose policy the agent cannot enforce (for example tools.deny: [write] on codex); warn runs it and reports it in the receipt. Empty uses the CLI default, which is strict under GitHub Actions."
     required: false
     default: ""
 
   cli-version:
-    description: "Version of @sweny-ai/core to install (the package that ships the `sweny` CLI). Defaults to latest."
+    description: "Version of @sweny-ai/core to install (the package that ships the `sweny` CLI). Defaults to latest on the floating v5 tag; an immutable v5.<version> tag defaults to that exact version."
     required: false
     default: "latest"
 
@@ -59,8 +59,13 @@ inputs:
     required: false
     default: "."
 
+  setup-only:
+    description: "When 'true', install and probe the agent and its sandbox, then stop without running the workflow or calling a model. For CI that proves a runner can host an agent."
+    required: false
+    default: "false"
+
   dry-run:
-    description: "When 'true', run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first conditional edge."
+    description: "When 'true', run with read-only tools only: write tools, external MCP servers, and shell/file-edit tools are withheld, so nothing is created, posted, or sent. Stops at the first natural-language conditional edge."
     required: false
     default: "false"
 
@@ -157,7 +162,7 @@ runs:
         esac
 
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ inputs.node-version }}
 
@@ -204,7 +209,54 @@ runs:
         fi
         exit 0
 
+    # Non-Claude agents run under the srt process wrapper (harness/sandbox-wrapper.ts),
+    # and GitHub Actions defaults the harness policy to strict, so a runner without a
+    # working srt refuses the first Codex node. Install the pinned srt (same pin as the
+    # ci.yml sandbox-wrapper job; a test keeps them equal), ripgrep and, if the probe
+    # needs it, the AppArmor relaxation, then prove srt can wrap a command. Claude-only
+    # runs skip this step.
+    - name: Install and probe the agent sandbox wrapper (srt)
+      if: inputs.agent != 'claude'
+      shell: bash
+      env:
+        SRT_VERSION: "0.0.78"
+        AGENT: ${{ inputs.agent }}
+      run: |
+        if [ "${SWENY_SANDBOX:-}" = "off" ]; then
+          echo "::notice title=SWEny sandbox wrapper::SWENY_SANDBOX=off; skipping srt install"
+          exit 0
+        fi
+        SUDO=""
+        if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo -n"; fi
+        if [ "$RUNNER_OS" = "Linux" ]; then
+          missing=""
+          for b in bwrap socat rg; do command -v "$b" >/dev/null 2>&1 || missing="$missing $b"; done
+          if [ -n "$missing" ] && command -v apt-get >/dev/null 2>&1; then
+            { $SUDO apt-get update -qq && $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bubblewrap socat ripgrep; } >/dev/null 2>&1 || true
+          fi
+        elif [ "$RUNNER_OS" = "macOS" ]; then
+          command -v rg >/dev/null 2>&1 || brew install ripgrep >/dev/null 2>&1 || true
+        fi
+        if ! npm install -g --ignore-scripts "@anthropic-ai/sandbox-runtime@${SRT_VERSION}" >/dev/null 2>&1; then
+          echo "::error title=SWEny sandbox wrapper::could not install @anthropic-ai/sandbox-runtime@${SRT_VERSION}. agent: ${AGENT} needs it to sandbox agent commands; set SWENY_SANDBOX=off to run unsandboxed."
+          exit 1
+        fi
+        SETTINGS="${RUNNER_TEMP:-/tmp}/srt-probe.json"
+        echo '{"network":{"allowedDomains":[],"deniedDomains":[]},"filesystem":{"denyRead":[],"allowRead":[],"allowWrite":[],"denyWrite":[]}}' > "$SETTINGS"
+        probe() { srt --settings "$SETTINGS" -- true >/dev/null 2>&1; }
+        if ! probe && [ "$RUNNER_OS" = "Linux" ]; then
+          # Ubuntu 23.10+ restricts unprivileged user namespaces, which bubblewrap needs.
+          $SUDO sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+        fi
+        if ! probe; then
+          echo "::error title=SWEny sandbox wrapper::srt ${SRT_VERSION} is installed but cannot wrap a command on this runner (needs bubblewrap, socat, ripgrep and unprivileged user namespaces). Fix the runner, or set SWENY_SANDBOX=off and harness-policy: warn to run agent commands unsandboxed."
+          srt --settings "$SETTINGS" -- true 2>&1 | head -5 || true
+          exit 1
+        fi
+        echo "srt ${SRT_VERSION} wraps commands on this runner"
+
     - name: Run workflow
+      if: inputs.setup-only != 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -313,7 +365,7 @@ runs:
         sweny workflow run "$WORKFLOW_PATH" "${FLAGS[@]}"
 
     - name: Post PR comment
-      if: ${{ !cancelled() && inputs.pr-comment != 'false' && github.event.pull_request.number != '' }}
+      if: ${{ !cancelled() && inputs.setup-only != 'true' && inputs.pr-comment != 'false' && github.event.pull_request.number != '' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
