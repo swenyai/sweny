@@ -122,7 +122,7 @@ Pass `--stream` to emit raw `ExecutionEvent` objects as newline-delimited JSON t
 sweny triage --stream | studio-consumer
 ```
 
-`--stream` can be combined with the normal progress display — structured events go to stdout while the spinner renders to stderr.
+`--stream` can be combined with the normal progress display — structured events go to stdout while the spinner renders to stderr. Events are redacted the same way as `--json` output (secret values and token shapes become `[redacted]`).
 
 ## Config priority
 

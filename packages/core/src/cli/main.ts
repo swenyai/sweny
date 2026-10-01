@@ -11,7 +11,15 @@ import chalk from "chalk";
 import { execute } from "../executor.js";
 import type { ExecuteOptions } from "../executor.js";
 import { triageWorkflow, implementWorkflow, seedContentWorkflow } from "../workflows/index.js";
-import type { ExecutionEvent, ExecutionTrace, NodeResult, Workflow, McpServerConfig, Observer } from "../types.js";
+import type {
+  ExecutionEvent,
+  ExecutionTrace,
+  NodeResult,
+  Workflow,
+  McpServerConfig,
+  Observer,
+  Skill,
+} from "../types.js";
 import { consoleLogger } from "../types.js";
 import { createHarness } from "../harness/index.js";
 import { bindBuiltinWorkflow } from "./builtin-workflows.js";
@@ -62,6 +70,7 @@ import {
 } from "./resume.js";
 import { runE2eRun, runWithWallClockBudget, DEFAULT_WORKFLOW_TIMEOUT_MS } from "./e2e.js";
 import { createVerboseToolObserver } from "./verbose-observer.js";
+import { createStreamObserver } from "./stream-observer.js";
 import {
   createRunLogger,
   summarizeRun,
@@ -112,15 +121,9 @@ import { runUpgrade, fetchLatestFromNpm } from "./upgrade.js";
 import { maybeNudge, defaultCachePath } from "./version-check.js";
 import { spawnSync } from "node:child_process";
 
-// ── Stream observer (NDJSON) ────────────────────────────────────────
-/**
- * Create an observer that writes NDJSON ExecutionEvents to stdout.
- * Studio and other consumers parse these line-by-line.
- */
-function createStreamObserver(): Observer {
-  return (event: ExecutionEvent) => {
-    process.stdout.write(JSON.stringify(event) + "\n");
-  };
+/** Secret values a run can see, for redacting everything that prints node output. */
+function outputSecrets(skills?: Map<string, Skill>): string[] {
+  return runSecretValues([...(skills?.values() ?? []), ...builtinSkills], process.env);
 }
 
 // Verbose tool-detail observer lives in ./verbose-observer.ts so tests can
@@ -545,7 +548,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
   const observer = composeObservers(
     progressObserver,
     config.verbose ? createVerboseToolObserver() : undefined,
-    config.stream ? createStreamObserver() : undefined,
+    config.stream ? createStreamObserver(outputSecrets(skills)) : undefined,
     createCloudStreamObserver(config, cloudHandle),
   );
 
@@ -571,7 +574,7 @@ triageCmd.action(async (options: Record<string, unknown>) => {
 
     // Output
     if (config.json) {
-      await writeResultJson(results);
+      await writeResultJson(results, outputSecrets(skills));
     } else {
       console.log(formatDagResultHuman(results, durationMs, config));
     }
@@ -778,7 +781,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
   const observer = composeObservers(
     implProgressObserver,
     config.verbose ? createVerboseToolObserver() : undefined,
-    Boolean(options.stream) ? createStreamObserver() : undefined,
+    Boolean(options.stream) ? createStreamObserver(outputSecrets(skills)) : undefined,
     createCloudStreamObserver(config, implCloudHandle),
   );
 
@@ -811,7 +814,7 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     }
 
     if (config.json) {
-      await writeResultJson(results);
+      await writeResultJson(results, outputSecrets(skills));
     }
     if (hasFailed) {
       console.error(chalk.red(`\n  Implement workflow failed\n`));
@@ -1200,7 +1203,7 @@ export async function workflowRunAction(
     wfProgressObserver,
     nodeTimer.observer,
     options.verbose ? createVerboseToolObserver() : undefined,
-    options.stream ? createStreamObserver() : undefined,
+    options.stream ? createStreamObserver(outputSecrets(skills)) : undefined,
     createCloudStreamObserver(config, wfCloudHandle),
   );
 
@@ -1270,7 +1273,7 @@ export async function workflowRunAction(
     }
 
     if (isJson) {
-      await writeResultJson(results);
+      await writeResultJson(results, outputSecrets(skills));
       process.exit(wfHasFailed ? 1 : 0);
       return;
     }
