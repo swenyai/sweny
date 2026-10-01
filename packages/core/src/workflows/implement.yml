@@ -204,9 +204,10 @@ edges:
   # Deterministic routing (#357), equivalent to the old natural-language
   # conditions over declared fields: an open PR (has_open_pr, set together
   # with existing_pr_url) goes to notify; otherwise risk low or medium with a
-  # clear plan goes to implement; anything else (high risk, unclear plan, or
-  # a missing field) takes the default edge to skip. The two expressions are
-  # exclusive (has_open_pr true vs false), so at most one is true.
+  # clear plan goes to implement; anything else (high risk or an unclear plan)
+  # takes the default edge to skip. The two expressions are exclusive
+  # (has_open_pr true vs false), so at most one is true. The three fields are
+  # required: a missing one fails analyze, which halts the run.
   - from: analyze
     to: notify
     when:

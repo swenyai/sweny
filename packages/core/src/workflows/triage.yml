@@ -817,7 +817,8 @@ edges:
   # Deterministic too (#357): fixable_count counts exactly the novel findings
   # the old natural-language condition asked about (fix_complexity simple or
   # moderate AND a fix_approach), so `> 0` is that condition and the default
-  # edge is its complement. A missing count is false: no fix is attempted.
+  # edge is its complement. fixable_count is required: a missing one fails
+  # investigate (output contract), which halts the run before create_issue.
   - from: create_issue
     to: implement
     when:

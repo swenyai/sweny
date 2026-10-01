@@ -24,7 +24,7 @@ const probArb = fc.oneof(
 );
 
 /** An object with own keys only (Object.fromEntries never touches the prototype). */
-const own = (entries: Array<[string, unknown]>) => Object.fromEntries(entries);
+const own = (entries: unknown[][]): Record<string, any> => Object.fromEntries(entries as Array<[string, unknown]>);
 
 describe("decider: parse never returns a label outside the criteria", () => {
   it("holds for arbitrary answers, prototype-named labels included", () => {

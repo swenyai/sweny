@@ -463,11 +463,11 @@ describe("built-in triage routes its migrated edges without a model call (#461)"
     expect(evaluated).toEqual([]);
   });
 
-  it.each<[string, Record<string, unknown>]>([
-    ["fixable_count 0", investigate(2, "high", 0)],
-    ["fixable_count missing", { findings: [], novel_count: 2, highest_severity: "high", recommendation: "r" }],
-  ])("%s: create_issue goes to notify (no fix attempted) with no model call", async (_n, inv) => {
-    const { claude, ran, evaluated } = harness({ investigate: inv, createissue: issue }, "implement");
+  it("fixable_count 0: create_issue goes to notify (no fix attempted) with no model call", async () => {
+    const { claude, ran, evaluated } = harness(
+      { investigate: investigate(2, "high", 0), createissue: issue },
+      "implement",
+    );
     await run(stripped, claude);
     expect(ran.map((r) => (r === "createissue" ? "create_issue" : r))).toEqual([
       "gather",
@@ -475,6 +475,14 @@ describe("built-in triage routes its migrated edges without a model call (#461)"
       "create_issue",
       "notify",
     ]);
+    expect(evaluated).toEqual([]);
+  });
+
+  it("fixable_count missing: investigate breaks its required output, the run halts before any write", async () => {
+    const inv = { findings: [], novel_count: 2, highest_severity: "high", recommendation: "r" };
+    const { claude, ran, evaluated } = harness({ investigate: inv, createissue: issue }, "implement");
+    await run(stripped, claude);
+    expect(ran).toEqual(["gather", "investigate"]);
     expect(evaluated).toEqual([]);
   });
 });
@@ -526,12 +534,18 @@ describe("built-in implement routes analyze without a model call (#357)", () => 
     ["medium risk, clear plan goes to implement", analyze(false, "medium", true), "implement"],
     ["high risk goes to skip", analyze(false, "high", true), "skip"],
     ["an unclear plan goes to skip", analyze(false, "low", false), "skip"],
-    ["missing routing fields go to skip", analyze(undefined, undefined, undefined), "skip"],
   ])("%s", async (_n, data, next) => {
     const { claude, ran, evaluated } = harness(data);
     await run(stripped, claude);
     expect(ran[0]).toBe("analyze");
     expect(ran[1]).toBe(next);
+    expect(evaluated()).toBe(0);
+  });
+
+  it("missing routing fields break analyze's required output: the run halts, nothing is implemented", async () => {
+    const { claude, ran, evaluated } = harness(analyze(undefined, undefined, undefined));
+    await run(stripped, claude);
+    expect(ran).toEqual(["analyze"]);
     expect(evaluated()).toBe(0);
   });
 });

@@ -526,7 +526,7 @@ describe("the decider decides", () => {
       description: "",
       entry: "constructor",
       nodes: {
-        constructor: { name: "C", instruction: "c", skills: [], output: OUTPUT, route_by: "decider" },
+        constructor: { name: "C", instruction: "c", skills: [], output: OUTPUT, route_by: "decider" as const },
         toString: { name: "T", instruction: "t", skills: [] },
         valueOf: { name: "V", instruction: "v", skills: [] },
       },
