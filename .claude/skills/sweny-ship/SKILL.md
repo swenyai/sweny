@@ -59,8 +59,10 @@ Lessons from running many lanes at once:
 
 ```bash
 scripts/verify-release.sh                                   # release run for main head + npm versions
-scripts/verify-release.sh "" --expect '--comment-file' --help-args 'workflow run'   
+scripts/verify-release.sh "" --expect '--comment-file' --help-args 'workflow run'
 ```
+
+It waits until npm serves exactly what the release published, and checks the feature in an isolated install (npx can run a stale global `sweny`).
 
 Failure hints: E404 = NPM_TOKEN expired, E422 = a publishable package.json lacks `repository`, EOTP = token is not an Automation token.
 
