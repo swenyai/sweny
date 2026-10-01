@@ -5,7 +5,7 @@
 
 import { describe, it, expect, afterAll } from "vitest";
 import * as fc from "fast-check";
-import { createHash } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +16,9 @@ import {
   RunJournal,
   buildResumePlan,
   journalDir,
+  loadRunKey,
   readJournal,
+  runKeyFile,
   type JournalRecord,
 } from "../../journal.js";
 import { createWriteStageState } from "../../safe-outputs.js";
@@ -26,6 +28,9 @@ import { params } from "./config.js";
 const root = mkdtempSync(join(tmpdir(), "sweny-journal-prop-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 const file = join(root, "journal.ndjson");
+// Records are authenticated with a per-run key; built journals use this one.
+const KEY = randomBytes(32);
+process.env.SWENY_STATE_DIR = join(root, "state");
 
 // ─── Building valid journals ─────────────────────────────────────
 
@@ -93,19 +98,34 @@ function buildJournal(script: { steps: Step[]; runEnd?: "success" | "failed" | "
       },
     },
   ];
+  // Only sequences the executor can write (checkRecordSequence refuses the rest):
+  // a new visit starts where the last route pointed; a visit is restarted only
+  // after a resume, when it never ended or ended failed without a route.
   const counts: Record<string, number> = {};
-  let prev: { node: string; iteration: number } | undefined;
+  let prev: { node: string; iteration: number; ended: boolean; failed: boolean; routed: boolean } | undefined;
+  let next: string | null = "a";
+  let resumed = false;
+  const checkpointed = new Set<string>();
   for (const s of script.steps) {
-    if (s.resume) raw.push({ type: "run:resume", fields: {} });
-    let visit: { node: string; iteration: number };
-    if (s.restart && prev) visit = prev;
-    else {
-      counts[s.node] = (counts[s.node] ?? 0) + 1;
-      visit = { node: s.node, iteration: counts[s.node] };
+    if (s.resume) {
+      raw.push({ type: "run:resume", fields: {} });
+      resumed = true;
     }
-    prev = visit;
+    const canRestart = resumed && !!prev && (!prev.ended || (prev.failed && !prev.routed));
+    let visit: { node: string; iteration: number };
+    if (s.restart && canRestart) visit = { node: prev!.node, iteration: prev!.iteration };
+    else {
+      if (prev && (!prev.ended || !prev.routed)) continue;
+      if (next === null) continue;
+      counts[next] = (counts[next] ?? 0) + 1;
+      visit = { node: next, iteration: counts[next] };
+    }
+    resumed = false;
+    prev = { ...visit, ended: false, failed: false, routed: false };
     raw.push({ type: "node:start", fields: { ...visit } });
-    if (s.checkpoint) {
+    const key = `${visit.node}#${visit.iteration}`;
+    if (s.checkpoint && !checkpointed.has(key)) {
+      checkpointed.add(key);
       raw.push({
         type: "node:checkpoint",
         fields: { ...visit, result: result(s.status), intents: [], agent_failed: false, attempt: 1 },
@@ -116,11 +136,13 @@ function buildJournal(script: { steps: Step[]; runEnd?: "success" | "failed" | "
         type: "node:end",
         fields: { ...visit, result: result(s.status), write_state: { counts: [], total: 0, seen: [] } },
       });
+      prev.ended = true;
+      prev.failed = s.status === "failed";
       if (s.route !== "none") {
-        raw.push({
-          type: "route",
-          fields: { from: visit.node, to: s.route === "end" ? null : visit.node === "a" ? "b" : "a" },
-        });
+        const to = s.route === "end" ? null : visit.node === "a" ? "b" : "a";
+        raw.push({ type: "route", fields: { from: visit.node, to } });
+        prev.routed = true;
+        next = to;
       }
     }
   }
@@ -128,15 +150,15 @@ function buildJournal(script: { steps: Step[]; runEnd?: "success" | "failed" | "
 
   const lines = raw.map((r, i) => {
     const body = { v: JOURNAL_SCHEMA_VERSION, seq: i + 1, type: r.type, at: "2026-09-30T00:00:00.000Z", ...r.fields };
-    const h = createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 16);
+    const h = createHmac("sha256", KEY).update(JSON.stringify(body)).digest("hex");
     return JSON.stringify({ ...body, h }) + "\n";
   });
   return { lines, records: lines.map((l) => JSON.parse(l) as JournalRecord) };
 }
 
-function readBytes(buf: Buffer, opts?: { repair?: boolean }) {
+function readBytes(buf: Buffer, opts?: { repair?: boolean }, key: Buffer = KEY) {
   writeFileSync(file, buf);
-  return readJournal(file, opts);
+  return readJournal(file, { ...opts, key });
 }
 
 /** The replay invariants, checked against the records the plan was built from. */
@@ -215,7 +237,7 @@ describe("journal: truncation recovers to the last complete record", () => {
         const repaired = readBytes(prefix, { repair: true });
         expect(repaired.records).toEqual(records.slice(0, n));
         expect(statSync(file).size).toBe(validBytes);
-        const again = readJournal(file);
+        const again = readJournal(file, { key: KEY });
         expect(again.truncatedBytes).toBe(0);
         expect(again.records).toEqual(records.slice(0, n));
 
@@ -255,7 +277,8 @@ describe("journal: truncation recovers to the last complete record", () => {
     j.end("failed");
 
     const full = readFileSync(join(journalDir(cwd, runId), JOURNAL_FILE));
-    const whole = readBytes(full);
+    const runKey = loadRunKey(runKeyFile(cwd, runId));
+    const whole = readBytes(full, undefined, runKey);
     expect(whole.truncatedBytes).toBe(0);
     expect(whole.records.map((r) => r.type)).toEqual([
       "run:start",
@@ -270,7 +293,7 @@ describe("journal: truncation recovers to the last complete record", () => {
     let complete = 0;
     for (let cut = 0; cut <= full.length; cut++) {
       if (cut > 0 && full[cut - 1] === 0x0a) complete++;
-      const read = readBytes(full.subarray(0, cut));
+      const read = readBytes(full.subarray(0, cut), undefined, runKey);
       expect(read.records).toHaveLength(complete);
       expect(read.records).toEqual(whole.records.slice(0, complete));
       expect(read.corruptAtLine).toBeUndefined();
@@ -324,7 +347,7 @@ describe("journal: byte corruption is detected, never silently skipped", () => {
           if (repaired.corruptAtLine !== undefined) {
             expect(readFileSync(file).equals(mutated)).toBe(true);
           } else {
-            expect(readJournal(file).truncatedBytes).toBe(0);
+            expect(readJournal(file, { key: KEY }).truncatedBytes).toBe(0);
           }
         },
       ),
