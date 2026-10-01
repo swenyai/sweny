@@ -1307,21 +1307,24 @@ function resolveSkillMcpServers(
   skills: Map<string, Skill>,
   config: Record<string, string> = {},
 ): Record<string, McpServerConfig> {
-  return Object.fromEntries(
-    skillIds.flatMap((id) => {
-      const skill = skills.get(id);
-      const mcp = skill?.mcp;
-      if (!skill || !mcp) return [];
-      const type = mcp.type ?? (mcp.command ? "stdio" : "http");
-      if (type !== "stdio") return [[id, { ...mcp, type }]];
-      const declared: Record<string, string> = {};
-      for (const [key, field] of Object.entries(skill.config ?? {})) {
-        if (field.env && config[key] !== undefined) declared[field.env] = config[key];
-      }
-      const env = { ...declared, ...(mcp.env ?? {}) };
-      return [[id, { ...mcp, type, ...(Object.keys(env).length > 0 ? { env } : {}) }]];
-    }),
-  );
+  const servers: Record<string, McpServerConfig> = {};
+  for (const id of skillIds) {
+    const skill = skills.get(id);
+    const mcp = skill?.mcp;
+    if (!skill || !mcp) continue;
+    const type = mcp.type ?? (mcp.command ? "stdio" : "http");
+    if (type !== "stdio") {
+      servers[id] = { ...mcp, type };
+      continue;
+    }
+    const declared: Record<string, string> = {};
+    for (const [key, field] of Object.entries(skill.config ?? {})) {
+      if (field.env && config[key] !== undefined) declared[field.env] = config[key];
+    }
+    const env = { ...declared, ...(mcp.env ?? {}) };
+    servers[id] = { ...mcp, type, ...(Object.keys(env).length > 0 ? { env } : {}) };
+  }
+  return servers;
 }
 
 function resolveTools(skillIds: string[], skills: Map<string, Skill>): Tool[] {
