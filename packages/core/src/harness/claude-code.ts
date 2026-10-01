@@ -33,6 +33,7 @@ import {
   resolveEnvScope,
   scopeAgentEnv,
   withPushBlocked,
+  mcpWithheld,
   resolveAgentSandbox,
   type AgentAccess,
   type SandboxMode,
@@ -486,13 +487,14 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       ...req,
       readOnly,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
-      strictMcp: readOnly || policy.strict || policy.exclusiveMcp === true,
+      strictMcp: mcpWithheld(readOnly, req.agentAccess) || policy.strict || policy.exclusiveMcp === true,
       sandboxMode: policy.sandbox,
       agentAccess: {
         envVars: req.agentAccess?.envVars ?? [],
         domains: policy.egress,
         withhold: req.agentAccess?.withhold,
         noPush: req.agentAccess?.noPush,
+        noMcp: req.agentAccess?.noMcp,
       },
       stagedWrite: !!req.agentAccess?.noPush && !readOnly,
       strict: policy.strict || this.policyMode === "strict",
@@ -706,7 +708,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     let stream: ReturnType<typeof query> | undefined;
 
     try {
-      const allMcpServers: Record<string, any> = readOnly
+      // Read-only and staged runs: no skill or external MCP server (it may write).
+      const allMcpServers: Record<string, any> = mcpWithheld(!!readOnly, agentAccess)
         ? {}
         : { ...this.defaultMcpServers, ...opts.mcpServers, ...this.mcpServers };
       if (useBridge) {
@@ -743,7 +746,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           // project .mcp.json, plugins). strictMcpConfig limits MCP to the
           // servers passed above, which under readOnly is only sweny-core.
           // A strict policy (#365) makes it exclusive for write nodes too.
-          ...(readOnly || opts.strictMcp ? { strictMcpConfig: true } : {}),
+          ...(mcpWithheld(!!readOnly, agentAccess) || opts.strictMcp ? { strictMcpConfig: true } : {}),
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
           // CC-08: ask the SDK to produce validated structured output when the
           // node declares an output schema. The SDK then returns the parsed

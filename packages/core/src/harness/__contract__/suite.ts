@@ -129,6 +129,7 @@ export const CONTRACT_CASE_NAMES = [
   "20 live usage: onUsage gets cumulative usage while the node runs, and aborting on it stops the agent",
   "21 credentials: skill credentials never reach a read, staged or default write node; agent_env grants one to that node only",
   "22 checkout token: a persisted git credential is unreadable to read-only and staged nodes where enforceable, else degraded or refused",
+  "23 staged MCP: a staged write node loads no injected or skill MCP server, only sweny's own tool channel",
 ] as const;
 
 export interface ContractSuiteOptions {
@@ -894,6 +895,35 @@ export function runContractSuite(
           if (!native) expect(rec.requests.slice(before).every((q) => !q.denyRead?.length)).toBe(true);
         } finally {
           rmSync(root, { recursive: true, force: true });
+        }
+      },
+
+      // 23: a staged run (--stage, safe_outputs.staged, dry run) marks every
+      // node noMcp. An MCP server cannot be classified per tool, so it may
+      // write: none reaches a staged write node. Skill tools still travel in
+      // sweny's own channel, already filtered to reads by the executor.
+      async () => {
+        const injected = { injected: { type: "stdio" as const, command: "injected-write-server" } };
+        const { h } = await fresh();
+        fakes.script(DONE);
+        await h.run(
+          req({
+            tools: [lookupTool],
+            mcpServers: injected,
+            agentAccess: { envVars: [], domains: [], noPush: true, noMcp: true },
+          }),
+        );
+        const loaded = fakes.captured().mcpServersLoaded;
+        expect(loaded).not.toContain("injected");
+        expect(loaded.filter((n) => !n.startsWith("sweny") && n !== AMBIENT_MCP_CANARY)).toEqual([]);
+        expect(loaded.some((n) => n.startsWith("sweny"))).toBe(true);
+        if (h.capabilities.mcp.exclusive !== "none") expect(loaded).not.toContain(AMBIENT_MCP_CANARY);
+
+        // Control: the same write node, not staged, gets the injected server.
+        if (h.capabilities.mcp.inject) {
+          fakes.script(DONE);
+          await h.run(req({ tools: [lookupTool], mcpServers: injected }));
+          expect(fakes.captured().mcpServersLoaded).toContain("injected");
         }
       },
     ];

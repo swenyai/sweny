@@ -6,12 +6,13 @@
  * model prose: only counts, durations, token totals, and cost.
  */
 
-import fs from "node:fs";
+import { workspaceRoot, writeFileNoFollow } from "../safe-file.js";
 import { consoleLogger, type ExecutionTrace, type Logger, type NodeResult, type Workflow } from "../types.js";
 import { summarizeDecisions } from "../decider.js";
 import { toMermaidBlock, type NodeStatus } from "../mermaid.js";
 import { createPaint } from "./style.js";
 import { colorEnabled, glyphs } from "./terminal.js";
+import { trustedEnvValue } from "../startup-env.js";
 
 // ── Receipt ─────────────────────────────────────────────────────
 
@@ -283,10 +284,17 @@ export function writeStepSummary(
   trace?: ExecutionTrace,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  const file = env.GITHUB_STEP_SUMMARY;
+  // The operator's value only: never one a workspace `.env` introduced.
+  const file = trustedEnvValue(env, "GITHUB_STEP_SUMMARY");
   if (!file) return false;
   try {
-    fs.appendFileSync(file, formatStepSummary(workflow, results, summary, trace));
+    // Never through a link, in case the path sits in the agent-writable workspace.
+    writeFileNoFollow(file, formatStepSummary(workflow, results, summary, trace), {
+      ...workspaceRoot(file),
+      append: true,
+      mkdirs: false,
+      mode: 0o644,
+    });
     return true;
   } catch (err) {
     process.stderr.write(

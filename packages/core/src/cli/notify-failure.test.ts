@@ -276,6 +276,8 @@ describe("action.yml notify-on-failure wiring (#474)", () => {
     const step = steps.find((s) => s.name === "Notify on failure")!;
     expect(step.if).toContain("failure()");
     expect(step.if).toContain("inputs.notify-on-failure != ''");
+    // A dry run sends no failure notice (#498).
+    expect(step.if).toContain('!contains(fromJSON(\'["true","1","yes"]\'), inputs.dry-run)');
     expect(steps.indexOf(step)).toBeGreaterThan(steps.findIndex((s) => s.name === "Run workflow"));
     const runStep = steps.find((s) => s.name === "Run workflow")!;
     expect(runStep.run).not.toContain("notify");

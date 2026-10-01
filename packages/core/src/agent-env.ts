@@ -948,6 +948,18 @@ export interface AgentAccess {
    * hooks; only a sandbox stops a deliberate agent from undoing it.
    */
   noPush?: boolean;
+  /**
+   * The run is staged or a dry run: no skill or external MCP server reaches
+   * the node (an MCP server cannot be classified per tool, so it may write).
+   * Only sweny's own tool bridge, already filtered to read tools, remains,
+   * and Claude Code runs with `strictMcpConfig`. Same MCP rule as `readOnly`.
+   */
+  noMcp?: boolean;
+}
+
+/** True when a run request may load no MCP server but sweny's own bridge (read-only or staged). */
+export function mcpWithheld(readOnly: boolean, access: Pick<AgentAccess, "noMcp"> | undefined): boolean {
+  return readOnly || access?.noMcp === true;
 }
 
 /** Hosts reachable by sandboxed commands in every node: source hosting + package registries. */
