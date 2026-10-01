@@ -218,7 +218,7 @@ describe("executor: expression routing (#461)", () => {
     const r1 = await run(branch(), pos.claude);
     expect(pos.ran).toEqual(["a", "b"]);
     expect(pos.evaluateCalls()).toBe(0);
-    expect(r1.trace.edges).toEqual([{ from: "a", to: "b", reason: "a.n > 0" }]);
+    expect(r1.trace.edges).toEqual([{ from: "a", to: "b", reason: "a.n > 0", rung: "expr" }]);
 
     const zero = scripted({ a: { n: 0 } });
     await run(branch(), zero.claude);

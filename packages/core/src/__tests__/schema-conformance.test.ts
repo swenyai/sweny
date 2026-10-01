@@ -1129,6 +1129,36 @@ const fixtures: Fixture[] = [
     },
     expected,
   })),
+  // #357: the decider. Presence enables it; thresholds never below the floors; `mode` was removed.
+  ...(
+    [
+      ["decider with a provider", {}, true],
+      ["decider with thresholds", { min_confidence: 0.9, min_margin: 0.3 }, true],
+      ["decider at the floors", { min_confidence: 0.7, min_margin: 0.1 }, true],
+      ["decider below the confidence floor", { min_confidence: 0.69 }, false],
+      ["decider below the margin floor", { min_margin: 0.05 }, false],
+      ["decider confidence above 1", { min_confidence: 1.1 }, false],
+      ["decider with the removed mode: shadow", { mode: "shadow" }, false],
+      ["decider with the removed mode: off", { mode: "off" }, false],
+      ["decider unknown key", { max_calls: 5 }, false],
+    ] as [string, Record<string, unknown>, boolean][]
+  ).map(([name, extra, expected]): Fixture => ({
+    name: `#357 ${name}`,
+    input: {
+      id: "d",
+      name: "D",
+      entry: "a",
+      nodes: { a: baseNode() },
+      edges: [],
+      decider: { provider: { base_url: "http://localhost:11434", model: "nimble" }, ...extra },
+    },
+    expected,
+  })),
+  {
+    name: "#357 decider without a provider",
+    input: { id: "d", name: "D", entry: "a", nodes: { a: baseNode() }, edges: [], decider: {} },
+    expected: false,
+  },
 ];
 
 describe("Zod ↔ JSON Schema conformance", () => {
