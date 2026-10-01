@@ -3,13 +3,13 @@ title: Agents and policies
 description: Which coding agents SWEny runs on, how each is tested, and which policies each one enforces.
 ---
 
-SWEny runs each node on a coding agent and applies one set of rules to it: scoped env, only the MCP servers SWEny injects, read-only dry runs, output checks, timeouts, untrusted-input fencing, cleanup. An agent is checked against the harness contract suite (15 cases, scripted fakes, no model calls) on every CI run.
+SWEny runs each node on a coding agent and applies one set of rules to it: scoped env, only the MCP servers SWEny injects, read-only dry runs, output checks, timeouts, untrusted-input fencing, cleanup. An agent is checked against the harness contract suite (22 cases, scripted fakes, no model calls) on every CI run.
 
 ## Status
 
 | Agent | Status |
 |-------|--------|
-| Claude Code | Supported. Passes the 15-case contract suite on every CI run, with skill tools in process and over the tool bridge. |
+| Claude Code | Supported. Passes the 22-case contract suite on every CI run, with skill tools in process and over the tool bridge. |
 | Codex | Shipped, contract suite green; not yet run against a live Codex. `--agent codex`, Codex CLI 0.159+. |
 | pi | Experimental, contract suite green. `--agent pi`, pi 0.99.2+. Not run against a live pi yet. |
 | ACP agents (OpenCode, Hermes, goose, Gemini CLI, ...) | Experimental. `--agent "acp:<command>"`. The suite runs against a scripted fake ACP agent only; no real agent is tested. |

@@ -29,3 +29,76 @@ body {
 .react-flow__node {
   color: var(--sw-text, #f1f5f9);
 }
+
+/*
+ * Properties panel follows the theme. The panel is written with Tailwind's
+ * light utilities; these rules map them to the --sw-* tokens (injected in
+ * main.tsx), so it is dark with the canvas and light under
+ * prefers-color-scheme: light. Fallbacks are the light values, so an embed
+ * without the tokens looks as it did before.
+ */
+.sw-panel {
+  background: var(--sw-surface, #ffffff);
+  border-color: var(--sw-border, #e5e7eb);
+  color: var(--sw-text, #0f172a);
+}
+.sw-panel .bg-white {
+  background: var(--sw-surface, #ffffff);
+}
+.sw-panel .bg-gray-50,
+.sw-panel .hover\:bg-gray-50:hover {
+  background: var(--sw-canvas, #f9fafb);
+}
+.sw-panel .bg-gray-100,
+.sw-panel .bg-gray-200,
+.sw-panel .hover\:bg-gray-200:hover {
+  background: var(--sw-border, #e5e7eb);
+  color: var(--sw-text, #0f172a);
+}
+.sw-panel .border-gray-200,
+.sw-panel .border-gray-300 {
+  border-color: var(--sw-border, #d1d5db);
+}
+.sw-panel .text-gray-800,
+.sw-panel .text-gray-700 {
+  color: var(--sw-text, #1f2937);
+}
+.sw-panel .text-gray-600 {
+  color: var(--sw-text-secondary, #4b5563);
+}
+.sw-panel .text-gray-400 {
+  color: var(--sw-text-muted, #9ca3af);
+}
+.sw-panel input,
+.sw-panel textarea,
+.sw-panel select {
+  background: var(--sw-canvas, #ffffff);
+  color: var(--sw-text, #0f172a);
+}
+.sw-panel .bg-blue-50 {
+  background: color-mix(in srgb, var(--sw-primary, #3b82f6) 16%, transparent);
+}
+.sw-panel .border-blue-200 {
+  border-color: color-mix(in srgb, var(--sw-primary, #3b82f6) 40%, transparent);
+}
+.sw-panel .text-blue-600 {
+  color: var(--sw-accent, #2563eb);
+}
+.sw-panel .bg-green-50 {
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+}
+.sw-panel .border-green-200 {
+  border-color: color-mix(in srgb, #22c55e 40%, transparent);
+}
+.sw-panel .text-green-700 {
+  color: color-mix(in srgb, #22c55e 70%, var(--sw-text, #0f172a));
+}
+.sw-panel .bg-red-50 {
+  background: color-mix(in srgb, #ef4444 16%, transparent);
+}
+.sw-panel .border-red-200 {
+  border-color: color-mix(in srgb, #ef4444 40%, transparent);
+}
+.sw-panel .text-red-700 {
+  color: color-mix(in srgb, #ef4444 70%, var(--sw-text, #0f172a));
+}

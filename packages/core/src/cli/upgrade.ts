@@ -190,7 +190,7 @@ export async function runUpgrade(options: UpgradeOptions, deps: UpgradeDeps): Pr
     latest = await deps.fetchLatestVersion(tag);
   } catch (err) {
     stderr.write(
-      chalk.red(`  Error: couldn't reach the npm registry — ${err instanceof Error ? err.message : String(err)}`) +
+      chalk.red(`  Error: couldn't reach the npm registry - ${err instanceof Error ? err.message : String(err)}`) +
         "\n",
     );
     stderr.write(chalk.dim("  Check your network connection and try again.") + "\n");

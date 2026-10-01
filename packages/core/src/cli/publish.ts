@@ -268,7 +268,7 @@ async function publishWorkflow(): Promise<PublishResult | null> {
   }
 
   p.log.success(
-    `Validated: ${chalk.cyan(validation.name)} — ${validation.nodeCount} nodes, ${validation.edgeCount} edges`,
+    `Validated: ${chalk.cyan(validation.name)} - ${validation.nodeCount} nodes, ${validation.edgeCount} edges`,
   );
 
   if (validation.warnings.length > 0) {
@@ -370,7 +370,7 @@ async function selectOutputMode(
 
   const options = [
     ...(hasGh
-      ? [{ value: "pr", label: "Open GitHub PR", hint: "recommended — forks marketplace repo and opens a PR" }]
+      ? [{ value: "pr", label: "Open GitHub PR", hint: "recommended - forks marketplace repo and opens a PR" }]
       : []),
     { value: "save", label: "Save submission file", hint: "saves to ./sweny-publish/" },
   ];

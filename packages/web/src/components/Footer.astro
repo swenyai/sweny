@@ -30,6 +30,68 @@ const repoUrl = "https://github.com/swenyai/sweny";
 <Analytics />
 <SpeedInsights />
 
+<script>
+  // Render fenced ```mermaid blocks with the SWEny brand. Mermaid is loaded
+  // from a pinned CDN build only on pages that have a diagram; the styles come
+  // from the shared theme, so docs diagrams match the CLI, the PR comment and Studio.
+  import { MERMAID_CLASS_DEFS, MERMAID_EDGE_STYLES, PALETTE } from "@sweny-ai/core/theme";
+
+  const MERMAID_URL = "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+
+  /** Add the brand classDefs to a diagram that does not carry its own (plain `sweny workflow diagram` output). */
+  function withBrand(source: string): string {
+    if (/\bclassDef\b/.test(source)) return source;
+    const edges = (source.match(/-->/g) ?? []).length;
+    const lines = [source.trimEnd(), `    classDef default ${MERMAID_CLASS_DEFS.success}`];
+    if (edges > 0) {
+      const all = Array.from({ length: edges }, (_, i) => i).join(",");
+      lines.push(`    linkStyle ${all} ${MERMAID_EDGE_STYLES.taken}`);
+    }
+    return lines.join("\n");
+  }
+
+  async function renderMermaid() {
+    const pres = Array.from(document.querySelectorAll<HTMLElement>('.expressive-code pre[data-language="mermaid"]'));
+    if (pres.length === 0) return;
+    try {
+      const mod = await import(/* @vite-ignore */ MERMAID_URL);
+      const mermaid = mod.default;
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: "base",
+        securityLevel: "strict",
+        themeVariables: {
+          fontFamily: "system-ui, -apple-system, 'Helvetica Neue', sans-serif",
+          lineColor: PALETTE.slate500,
+          primaryColor: PALETTE.blue600,
+          primaryTextColor: PALETTE.white,
+          primaryBorderColor: PALETTE.blue700,
+        },
+      });
+      let n = 0;
+      for (const pre of pres) {
+        const lines = Array.from(pre.querySelectorAll(".ec-line")).map((l) => l.textContent ?? "");
+        const source = lines.length > 0 ? lines.join("\n") : (pre.textContent ?? "");
+        const host = pre.closest(".expressive-code");
+        if (!host) continue;
+        try {
+          const { svg } = await mermaid.render(`sw-mermaid-${n++}`, withBrand(source));
+          const holder = document.createElement("div");
+          holder.className = "sw-mermaid";
+          holder.innerHTML = svg;
+          host.replaceWith(holder);
+        } catch {
+          // Leave the code block in place when a diagram does not parse.
+        }
+      }
+    } catch {
+      // Offline or blocked CDN: the fenced source stays readable.
+    }
+  }
+
+  void renderMermaid();
+</script>
+
 <style>
   .site-footer {
     text-align: center;

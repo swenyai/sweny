@@ -332,7 +332,50 @@ jobs:
       # env (no credentials, no LLM calls) and runs the README quickstart,
       # including `sweny try` (asserts banner, answer block, receipt line, exit 0).
       - name: Run README quickstart
+        env:
+          DEMO_SVG_OUT: demo-actual.svg
         run: sh scripts/quickstart-smoke.sh
+
+      # The freshly recorded demo, whether or not the committed copy matched:
+      # when assets/demo.svg is stale, download this and commit it as assets/demo.svg.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: demo-svg
+          path: demo-actual.svg
+          if-no-files-found: ignore
+
+  # Social cards (og-image, twitter-card, github-social) regenerated from the
+  # brand SVGs and the tagline in core's theme. Generated here, never locally;
+  # download the artifact and commit the PNGs when the tagline or brand changes.
+  brand-assets:
+    name: Brand assets (social cards)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build --workspace=packages/core
+
+      - name: Generate brand PNGs
+        run: node scripts/generate-brand-pngs.mjs
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: social-cards
+          path: |
+            packages/web/public/og-image.png
+            packages/web/public/twitter-card.png
+            packages/web/public/github-social.png
+          if-no-files-found: error
 
   docs-sites:
     name: Docs and specification builds

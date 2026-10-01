@@ -133,17 +133,17 @@ This returns element references like @e1, @e2, @e3.
 Use those refs with: agent-browser click @e5, agent-browser fill @e7 "text", etc.
 
 Available commands:
-- agent-browser open <url> — navigate to URL
-- agent-browser snapshot — get accessibility tree with @refs
-- agent-browser click <ref> — click an element
-- agent-browser fill <ref> <text> — clear input and fill with text
-- agent-browser press <key> — press keyboard key (Enter, Tab, Escape)
-- agent-browser get url — get current page URL
-- agent-browser get text <ref> — get element text content
-- agent-browser screenshot <path> — save screenshot to file
-- agent-browser scroll <direction> <pixels> — scroll page
-- agent-browser scrollintoview <ref> — scroll element into view
-- agent-browser select <ref> <value> — select dropdown option`,
+- agent-browser open <url> - navigate to URL
+- agent-browser snapshot - get accessibility tree with @refs
+- agent-browser click <ref> - click an element
+- agent-browser fill <ref> <text> - clear input and fill with text
+- agent-browser press <key> - press keyboard key (Enter, Tab, Escape)
+- agent-browser get url - get current page URL
+- agent-browser get text <ref> - get element text content
+- agent-browser screenshot <path> - save screenshot to file
+- agent-browser scroll <direction> <pixels> - scroll page
+- agent-browser scrollintoview <ref> - scroll element into view
+- agent-browser select <ref> <value> - select dropdown option`,
     skills: [],
     output: {
       type: "object",
@@ -191,7 +191,7 @@ Use curl to call the Supabase Admin API:
 2. Filter for emails starting with "e2e-" and ending with "@yourapp.test"
 3. Delete each matching user: DELETE {SUPABASE_URL}/auth/v1/admin/users/{user_id}
 
-If no test users are found, that's fine — skip gracefully.
+If no test users are found, that's fine - skip gracefully.
 If the service role key is not available, skip cleanup gracefully.`;
       break;
 
@@ -594,7 +594,7 @@ const CLEANUP_ENV_VARS: Record<string, Array<{ key: string; hint?: string }>> = 
  */
 export function buildE2eEnvTemplate(selections: E2eSelections): string {
   const lines: string[] = [];
-  lines.push("# E2E Testing — SWEny");
+  lines.push("# E2E Testing - SWEny");
   lines.push("# Fill in values, then run: sweny workflow run");
   lines.push("");
 
@@ -751,7 +751,7 @@ export async function runE2eInit(options: E2eInitOptions = {}): Promise<void> {
       });
       if (p.isCancel(overwrite)) cancel();
       if (!overwrite) {
-        p.cancel("Setup cancelled — existing files preserved.");
+        p.cancel("Setup cancelled - existing files preserved.");
         process.exit(0);
       }
     }
@@ -857,7 +857,7 @@ export async function runE2eInit(options: E2eInitOptions = {}): Promise<void> {
       fs.appendFileSync(envPath, "\n" + envContent, "utf-8");
       p.log.success(`Appended E2E vars to ${chalk.cyan(".env")}`);
     } else {
-      p.log.warn(".env already has E2E vars — skipped");
+      p.log.warn(".env already has E2E vars - skipped");
     }
   } else {
     fs.writeFileSync(envPath, envContent, "utf-8");
@@ -1072,9 +1072,9 @@ export async function runE2eRun(options: E2eRunOptions): Promise<void> {
           const elapsed = ((Date.now() - enterTime) / 1000).toFixed(1);
           const status = (event.result.data?.status as string) || event.result.status;
           if (isTTY) {
-            process.stderr.write(`\x1B[1A\x1B[2K  ${icon} ${event.node} — ${status} (${elapsed}s)\n`);
+            process.stderr.write(`\x1B[1A\x1B[2K  ${icon} ${event.node} - ${status} (${elapsed}s)\n`);
           } else {
-            process.stderr.write(`  ${icon} ${event.node} — ${status} (${elapsed}s)\n`);
+            process.stderr.write(`  ${icon} ${event.node} - ${status} (${elapsed}s)\n`);
           }
           break;
         }

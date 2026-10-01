@@ -64,6 +64,22 @@ contains "sweny try" "$OUT" "npx @sweny-ai/core new --template explain-repo"
 [ ! -e .sweny ] || fail "sweny try: wrote .sweny/ (it must write nothing)" "$(ls -R .sweny)"
 pass "sweny try (recorded demo, exit 0, nothing written)"
 
+# 2c. sweny try --record: an animated, self-contained SVG of the demo, and the committed copy must match.
+# CI uploads the fresh recording (DEMO_SVG_OUT) so a stale assets/demo.svg is fixed by committing the artifact.
+run "sweny try --record" 0 sweny try --record "$WORK/demo.svg"
+[ -s "$WORK/demo.svg" ] || fail "sweny try --record: wrote no file" "$(cat "$OUT")"
+contains "sweny try --record" "$WORK/demo.svg" "@keyframes"
+for banned in "<script" "@import" "<image" "href=" "font-face"; do
+  excludes "sweny try --record" "$WORK/demo.svg" "$banned"
+done
+if [ -n "${DEMO_SVG_OUT:-}" ]; then
+  case "$DEMO_SVG_OUT" in /*) cp "$WORK/demo.svg" "$DEMO_SVG_OUT" ;; *) cp "$WORK/demo.svg" "$ROOT/$DEMO_SVG_OUT" ;; esac
+fi
+[ -f "$ROOT/assets/demo.svg" ] || fail "assets/demo.svg is missing: run 'sweny try --record assets/demo.svg' and commit it (CI artifact: demo-svg)"
+cmp -s "$WORK/demo.svg" "$ROOT/assets/demo.svg" ||
+  fail "assets/demo.svg is stale: run 'sweny try --record assets/demo.svg' and commit it (CI artifact: demo-svg)"
+pass "sweny try --record (self-contained, assets/demo.svg is current)"
+
 # 3. sweny new --template explain-repo --yes (no TTY, no prompts)
 run "sweny new" 0 sweny new --template explain-repo --yes </dev/null
 [ -f .sweny.yml ] || fail "sweny new: .sweny.yml missing" "$(cat "$OUT")"

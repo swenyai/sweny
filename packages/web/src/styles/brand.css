@@ -1,0 +1,45 @@
+/*
+ * SWEny brand for Starlight. Every value is a token from
+ * packages/core/src/theme.ts (PALETTE, SURFACE_COLORS); src/__tests__/brand-css.test.ts
+ * fails when this file drifts from them.
+ */
+
+:root {
+  /* Accent: brand blue. Low is the muted tint, high the readable-on-dark text. */
+  --sl-color-accent-low: #1e3a5f; /* PALETTE.blue900 */
+  --sl-color-accent: #3b82f6; /* PALETTE.blue500 */
+  --sl-color-accent-high: #93c5fd; /* PALETTE.blue300 */
+
+  /* Surfaces and text (SURFACE_COLORS.dark). */
+  --sl-color-black: #1e293b; /* background: PALETTE.slate800 */
+  --sl-color-gray-6: #162032; /* surface: PALETTE.surface */
+  --sl-color-gray-5: #334155; /* border: PALETTE.slate700 */
+  --sl-color-gray-3: #94a3b8; /* secondary text: PALETTE.slate400 */
+  --sl-color-white: #f1f5f9; /* text: PALETTE.slate100 */
+}
+
+:root[data-theme="light"] {
+  /* SURFACE_COLORS.light */
+  --sl-color-accent-low: #dbeafe;
+  --sl-color-accent: #2563eb; /* PALETTE.blue600 */
+  --sl-color-accent-high: #1e3a5f; /* PALETTE.blue900 */
+
+  --sl-color-white: #0f172a; /* text: PALETTE.slate900 */
+  --sl-color-gray-3: #64748b; /* secondary text: PALETTE.slate500 */
+  --sl-color-gray-5: #e2e8f0; /* border: PALETTE.slate200 */
+  --sl-color-gray-6: #f8fafc; /* surface: PALETTE.slate50 */
+  --sl-color-black: #ffffff; /* background: PALETTE.white */
+}
+
+/* Mermaid diagrams rendered from fenced mermaid blocks (see Footer.astro). */
+.sw-mermaid {
+  display: flex;
+  justify-content: center;
+  margin-block: 1.5rem;
+  overflow-x: auto;
+}
+
+.sw-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
