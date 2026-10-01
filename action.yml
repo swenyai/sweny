@@ -212,9 +212,13 @@ runs:
     # Agent sandbox deps (#360). SWENY_SANDBOX=auto (default) sandboxes agent
     # shell commands when bubblewrap + socat work and otherwise warns and runs
     # unsandboxed, so this step is best-effort and never fails the job.
+    # GitHub-hosted runners are ephemeral VMs, so the AppArmor relaxation below is
+    # applied there by default; self-hosted runners only get it with strict.
     - name: Install agent sandbox dependencies
       if: runner.os == 'Linux'
       shell: bash
+      env:
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
       run: |
         SUDO=""
         if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo -n"; fi
@@ -228,11 +232,17 @@ runs:
           fi
         fi
         # Ubuntu 23.10+ restricts unprivileged user namespaces via AppArmor,
-        # which bubblewrap needs. Only relax the host kernel setting when the
-        # caller explicitly asked for SWENY_SANDBOX=strict.
-        if command -v bwrap >/dev/null 2>&1 && ! bwrap --ro-bind / / --dev /dev --proc /proc true >/dev/null 2>&1; then
-          if [ "${SWENY_SANDBOX:-}" = "strict" ]; then
+        # which bubblewrap needs. Relax the kernel setting on GitHub-hosted runners
+        # (ephemeral VM) or when the caller asked for SWENY_SANDBOX=strict. Never
+        # under off, and never by default on self-hosted (persistent host).
+        if [ "${SWENY_SANDBOX:-}" != "off" ] && command -v bwrap >/dev/null 2>&1 && ! bwrap --ro-bind / / --dev /dev --proc /proc true >/dev/null 2>&1; then
+          if [ "${SWENY_SANDBOX:-}" = "strict" ] || [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
             $SUDO sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+            if bwrap --ro-bind / / --dev /dev --proc /proc true >/dev/null 2>&1; then
+              echo "::notice title=SWEny agent sandbox::Relaxed kernel.apparmor_restrict_unprivileged_userns; agent commands will be sandboxed."
+            else
+              echo "::warning title=SWEny agent sandbox::bubblewrap still cannot create a sandbox after relaxing kernel.apparmor_restrict_unprivileged_userns; agent commands will run unsandboxed unless SWENY_SANDBOX=strict."
+            fi
           fi
         fi
         exit 0

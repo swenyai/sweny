@@ -85,3 +85,17 @@ describe("agent sandbox wrapper step", () => {
     expect(steps.find((s) => s.name === "Post PR comment")!.if).toContain("inputs.setup-only != 'true'");
   });
 });
+
+describe("agent sandbox dependencies step", () => {
+  const step = steps.find((s) => s.name === "Install agent sandbox dependencies")!;
+
+  it("relaxes AppArmor on GitHub-hosted runners or strict, never under off", () => {
+    expect(step.env.RUNNER_ENVIRONMENT).toBe("${{ runner.environment }}");
+    expect(step.run).toContain('[ "${SWENY_SANDBOX:-}" != "off" ]');
+    expect(step.run).toContain('[ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]');
+    expect(step.run).toContain('[ "${SWENY_SANDBOX:-}" = "strict" ]');
+    expect(step.run).toContain("kernel.apparmor_restrict_unprivileged_userns=0");
+    expect(step.run).toContain("::notice title=SWEny agent sandbox::");
+    expect(step.run).toContain("::warning title=SWEny agent sandbox::bubblewrap still cannot");
+  });
+});
