@@ -8,7 +8,7 @@ exports[`formatCrashComment > crash: receipt only, no DAG, no error text 1`] = `
 
 The run stopped before finishing. See the job log for details.
 
-<sub>Run with [SWEny](https://sweny.ai): \`npx @sweny-ai/core new\`</sub>
+<sub>Run with [SWEny](https://github.com/swenyai/sweny): \`npx @sweny-ai/core new\`</sub>
 "
 `;
 
@@ -45,7 +45,7 @@ graph TB
 
 </details>
 
-<sub>Run with [SWEny](https://sweny.ai): \`npx @sweny-ai/core new\`</sub>
+<sub>Run with [SWEny](https://github.com/swenyai/sweny): \`npx @sweny-ai/core new\`</sub>
 "
 `;
 
@@ -83,7 +83,7 @@ graph TB
 
 </details>
 
-<sub>Run with [SWEny](https://sweny.ai): \`npx @sweny-ai/core new\`</sub>
+<sub>Run with [SWEny](https://github.com/swenyai/sweny): \`npx @sweny-ai/core new\`</sub>
 "
 `;
 
@@ -120,6 +120,6 @@ graph TB
 
 </details>
 
-<sub>Run with [SWEny](https://sweny.ai): \`npx @sweny-ai/core new\`</sub>
+<sub>Run with [SWEny](https://github.com/swenyai/sweny): \`npx @sweny-ai/core new\`</sub>
 "
 `;

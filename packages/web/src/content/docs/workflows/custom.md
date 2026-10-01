@@ -172,7 +172,7 @@ The `output` field accepts any valid JSON Schema. Claude's response is validated
 
 SWEny Studio is a visual DAG editor. Build workflows by dragging nodes, connecting edges, and editing properties in a sidebar panel. Export the result as YAML:
 
-1. Open Studio (`npm run dev:studio` or the hosted version)
+1. Open Studio (`npm run dev -w @sweny-ai/studio` from a repo checkout)
 2. Add nodes and connect them with edges
 3. Set instructions, skills, and output schemas in the properties panel
 4. Export as YAML

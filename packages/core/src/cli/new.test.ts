@@ -1333,7 +1333,7 @@ describe("runNew first-run paths", () => {
     expect(cfg.initialValue).toBe("explain-repo");
     expect(cfg.options[0].value).toBe("explain-repo");
     expect(cfg.options.some((o: { value: string }) => o.value === "__marketplace")).toBe(false);
-    expect(p.log.info).toHaveBeenCalledWith(expect.stringContaining("Marketplace unavailable"));
+    expect(p.log.info).not.toHaveBeenCalledWith(expect.stringContaining("arketplace"));
     expect(fs.existsSync(path.join(cwd, ".sweny", "workflows", "explain-repo.yml"))).toBe(true);
   });
 

@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: Install SWEny and choose how to run it — Claude Code plugin, CLI, GitHub Action, Studio, or Marketplace.
+description: Install SWEny and choose how to run it: Claude Code plugin, CLI, GitHub Action, or Studio.
 ---
 
 SWEny is one tool with multiple surfaces. Install it once, then pick the way that fits your workflow.
@@ -20,7 +20,7 @@ sweny workflow run .sweny/workflows/explain-repo.yml
 
 ## Add your API key
 
-SWEny uses [Claude](https://claude.ai/) as its AI engine. You'll need an Anthropic API key, OAuth token, or authenticated Claude Code instance.
+SWEny runs nodes on Claude Code by default (Codex, pi and ACP agents are covered in [Agents and policies](/getting-started/agents-and-policies/)). For Claude Code you need an Anthropic API key, OAuth token, or an authenticated Claude Code instance.
 
 ```bash
 # .env (gitignored)
@@ -40,7 +40,7 @@ If you use [Claude Code](https://code.claude.com), install the plugin and get 9 
 /plugin install sweny@sweny-official
 ```
 
-Then use `/sweny:triage` to investigate production alerts, `/sweny:implement ENG-123` to fix an issue, `/sweny:e2e-run` to run browser tests, or `/sweny:workflow-create` to build a custom workflow — all without leaving your conversation.
+Then use `/sweny:triage` to investigate production alerts, `/sweny:implement ENG-123` to fix an issue, `/sweny:e2e-run` to run browser tests, or `/sweny:new` to create a workflow, all without leaving your conversation.
 
 **[Full plugin guide](/advanced/mcp-plugin/)** — all skills, MCP tools, hooks, and agent details.
 
@@ -98,18 +98,14 @@ Three secrets. Push the file, trigger it from the Actions tab, and check the sum
 
 ### Studio — visualize and monitor workflows
 
-A visual DAG editor and live execution monitor built on React Flow. Design workflows by dragging nodes, or watch running workflows execute node-by-node in real time.
+A visual DAG editor built on React Flow. Design workflows by dragging nodes. Live mode connects to a WebSocket or SSE event URL you provide and overlays node state as events arrive.
 
 ```bash
-# Stream a CLI run to Studio
-sweny triage --stream
+# From a repo checkout
+npm run dev -w @sweny-ai/studio
 ```
 
 **[Full Studio guide](/studio/)** — editor, embedding, and live mode.
-
-### Marketplace — start from a community workflow
-
-Don't want to write a workflow from scratch? Browse **[marketplace.sweny.ai](https://marketplace.sweny.ai)** for ready-to-run SWEny workflows. Pick one, copy the YAML into `.sweny/workflows/`, customize the steps, and run.
 
 ## What's next?
 

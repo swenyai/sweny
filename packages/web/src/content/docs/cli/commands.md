@@ -12,7 +12,7 @@ Create a new SWEny workflow. Interactive picker offering templates, AI-generated
 ```bash
 sweny new          # interactive picker
 sweny new e2e      # jump straight into the end-to-end browser-testing wizard
-sweny new <id>     # install a published workflow from the marketplace (swenyai/workflows)
+sweny new <id>     # use a built-in template by id
 ```
 
 In a fresh repo, walks you through provider inference, credential collection, and writes `.sweny.yml` + `.env` + `.sweny/workflows/<id>.yml`. In a repo that already has `.sweny.yml`, adds the new workflow non-destructively — existing config is preserved and `.env` is append-only.
@@ -428,7 +428,7 @@ sweny skill list --json
 
 ## sweny publish
 
-Publish a workflow or skill to the SWEny marketplace. Interactive CLI that validates your content and opens a pull request against the marketplace repository.
+Publish a workflow or skill. Interactive CLI that validates your content and opens a pull request against the swenyai/marketplace repository.
 
 ```bash
 sweny publish
@@ -440,7 +440,7 @@ Walks you through:
 2. **Select path** — pick the file (workflow) or directory (skill) to publish
 3. **Validate** — checks schema, frontmatter, and structure
 4. **Metadata** — add tags, category, and description
-5. **Submit** — forks the marketplace repo via `gh`, creates a branch, and opens a PR
+5. **Submit**: forks swenyai/marketplace via `gh`, creates a branch, and opens a PR
 
 Requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated. If `gh` is not available, the command saves validated files locally to `./sweny-publish/` for manual submission.
 
