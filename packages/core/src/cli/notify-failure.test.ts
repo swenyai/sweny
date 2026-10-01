@@ -35,7 +35,10 @@ function record(over: Record<string, unknown> = {}, ageSeconds = 0) {
   return file;
 }
 
-function run(env: Record<string, string>, opts: { list?: unknown; ghFails?: boolean; curlFails?: boolean } = {}) {
+function run(
+  env: Record<string, string>,
+  opts: { list?: unknown; ghFails?: boolean; curlFails?: boolean; cwd?: string } = {},
+) {
   const bin = path.join(dir, "bin");
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(dir, "list.json"), JSON.stringify(opts.list ?? []));
@@ -65,6 +68,7 @@ ${opts.curlFails ? "echo 'curl: (22) The requested URL returned error: 404' >&2;
   fs.utimesSync(marker, t, t);
   return spawnSync("bash", [script], {
     encoding: "utf8",
+    cwd: opts.cwd,
     env: {
       PATH: `${bin}:${process.env.PATH}`,
       WORKFLOW_PATH: ".sweny/workflows/weekly-digest.yml",
@@ -275,6 +279,28 @@ describe("action.yml notify-on-failure wiring (#474)", () => {
     expect(steps.indexOf(step)).toBeGreaterThan(steps.findIndex((s) => s.name === "Run workflow"));
     const runStep = steps.find((s) => s.name === "Run workflow")!;
     expect(runStep.run).not.toContain("notify");
+  });
+
+  it.each(["missing", "existing"])("can notify when the workflow directory is %s", (kind) => {
+    const notify = steps.find((s) => s.name === "Notify on failure")!;
+    const requested = "checkout with spaces";
+    if (kind === "existing") {
+      record();
+      const swenyDir = path.join(dir, requested, ".sweny");
+      fs.mkdirSync(swenyDir, { recursive: true });
+      fs.renameSync(path.join(dir, "runs"), path.join(swenyDir, "runs"));
+    }
+    const render = (value: string) =>
+      value.replaceAll("${{ inputs.working-directory }}", requested).replaceAll("${{ github.workspace }}", dir);
+    const workingDirectory = render(notify["working-directory"] ?? "${{ github.workspace }}");
+    const result = run(
+      { NOTIFY: HOOK, RUNS_DIR: render(notify.env.RUNS_DIR ?? ".sweny/runs") },
+      { cwd: path.resolve(dir, workingDirectory) },
+    );
+    expect(result.status, result.error?.message ?? result.stderr).toBe(0);
+    expect(calls().find((c) => c.startsWith("curl"))).toContain(
+      kind === "existing" ? "reason: node_failed" : "reason: did_not_start",
+    );
   });
 
   it("marks the invocation before auth validation or dependency setup can fail", () => {
