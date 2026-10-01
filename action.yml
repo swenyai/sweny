@@ -296,7 +296,7 @@ runs:
           fi
         fi
         if ! probe; then
-          echo "::error title=SWEny sandbox wrapper::srt ${SRT_VERSION} is installed but cannot wrap a command on this runner (needs bubblewrap, socat, ripgrep and unprivileged user namespaces). Fix the runner, or set SWENY_SANDBOX=off and harness-policy: warn to run agent commands unsandboxed."
+          echo "::error title=SWEny sandbox wrapper::srt ${SRT_VERSION} is installed but cannot wrap a command on this runner (needs bubblewrap, socat, ripgrep and unprivileged user namespaces). On a self-hosted Ubuntu 23.10+ runner, set SWENY_SANDBOX=strict to let sweny relax kernel.apparmor_restrict_unprivileged_userns, fix the runner yourself, or set SWENY_SANDBOX=off and harness-policy: warn to run agent commands unsandboxed."
           srt --settings "$SETTINGS" -- true 2>&1 | head -5 || true
           exit 1
         fi
