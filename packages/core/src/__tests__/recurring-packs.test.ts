@@ -235,6 +235,28 @@ describe("recurring packs: GitHub Action triggers", () => {
     });
   }
 
+  it("pins checkout to the SHA ci.yml uses and drops git credentials (#473, #474)", () => {
+    const ci = readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf-8");
+    const sha = /actions\/checkout@([0-9a-f]{40})/.exec(ci)![1];
+    for (const id of PACK_IDS) {
+      const steps = Object.values(byId[id].jobs as Record<string, any>).flatMap((j) => j.steps as any[]);
+      const checkout = steps.find((s) => typeof s.uses === "string" && s.uses.startsWith("actions/checkout@"));
+      expect(checkout.uses, id).toBe(`actions/checkout@${sha}`);
+      expect(checkout.with["persist-credentials"], id).toBe(false);
+      const run = steps.find((s) => String(s.uses).startsWith("swenyai/sweny@"));
+      expect(run.uses, id).toBe("swenyai/sweny@v5");
+    }
+  });
+
+  it("weekly-digest and dependency-drift alert on failure with one sticky issue (#474)", () => {
+    for (const id of ["weekly-digest", "dependency-drift"]) {
+      const steps = Object.values(byId[id].jobs as Record<string, any>).flatMap((j) => j.steps as any[]);
+      const run = steps.find((s) => String(s.uses).startsWith("swenyai/sweny@"));
+      expect(run.with["notify-on-failure"], id).toBe("issue");
+      expect(byId[id].permissions.issues, `${id} needs issues: write to open the alert`).toBe("write");
+    }
+  });
+
   it("weekly-digest and dependency-drift run on a cron schedule", () => {
     for (const id of ["weekly-digest", "dependency-drift"]) {
       expect(byId[id].on.schedule[0].cron, id).toMatch(/^\S+ \S+ \S+ \S+ \S+$/);

@@ -339,11 +339,45 @@ nodes:
             - github_add_comment
             - github_create_issue
 
+
+  quiet:
+    name: Nothing to Report
+    instruction: |
+      The week had no commits, merged PRs, or issues opened or closed, so there is nothing worth a digest. Do not call any tool and deliver nothing. Return
+      delivered false and one short sentence saying why.
+    permissions: read
+    max_turns: 2
+    output:
+      type: object
+      properties:
+        delivered:
+          type: boolean
+        reason:
+          type: string
+      required: [delivered, reason]
+    eval:
+      - name: quiet_delivers_nothing
+        kind: function
+        rule:
+          no_tool_called:
+            - github_create_issue
+            - github_add_comment
+            - github_create_pr
+            - slack_send_message
+            - notify_webhook
+
+# Quiet weeks (#474): sweny decides on the counts, with no model call. A week
+# with any activity is delivered; an empty one routes to quiet and nothing is
+# sent, so the digest is never noise.
 edges:
   - from: collect
     to: analyze
   - from: analyze
     to: publish
+    when:
+      expr: "analyze.stats.commits > 0 || analyze.stats.prs_merged > 0 || analyze.stats.issues_opened > 0 || analyze.stats.issues_closed > 0"
+  - from: analyze
+    to: quiet
 `;
 
 const DIGEST_TRIGGER = `name: SWEny weekly digest
@@ -354,19 +388,21 @@ on:
 
 permissions:
   contents: read
-  issues: write # only needed for deliver: issue
+  issues: write # deliver: issue, and the failure alert
 
 jobs:
   digest:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: swenyai/sweny@v5
         with:
           workflow: .sweny/workflows/weekly-digest.yml
+          notify-on-failure: issue # one sticky issue, only when a run fails
           claude-oauth-token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           input: '{"repo": "\${{ github.repository }}"}'
           # input: '{"repo": "\${{ github.repository }}", "days": 7, "deliver": "slack"}'
@@ -686,6 +722,35 @@ nodes:
             - path: result
               in: [created, updated, unchanged, none]
 
+
+  quiet:
+    name: Nothing to Report
+    instruction: |
+      Nothing actionable: no advisory at or above the severity floor and no lockfile drift. Do not call any tool and deliver nothing. Return
+      delivered false and one short sentence saying why.
+    permissions: read
+    max_turns: 2
+    output:
+      type: object
+      properties:
+        delivered:
+          type: boolean
+        reason:
+          type: string
+      required: [delivered, reason]
+    eval:
+      - name: quiet_delivers_nothing
+        kind: function
+        rule:
+          no_tool_called:
+            - github_create_issue
+            - github_add_comment
+            - github_create_pr
+            - slack_send_message
+            - notify_webhook
+
+# Quiet weeks (#474): sweny routes on the action, with no model call. Nothing
+# actionable skips the issue step, so a clean week files and posts nothing.
 edges:
   - from: inventory
     to: advisories
@@ -693,6 +758,10 @@ edges:
     to: assess
   - from: assess
     to: file-issue
+    when:
+      expr: "assess.action == 'file'"
+  - from: assess
+    to: quiet
 `;
 
 const DRIFT_TRIGGER = `name: SWEny dependency drift
@@ -710,10 +779,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: swenyai/sweny@v5
         with:
           workflow: .sweny/workflows/dependency-drift.yml
+          notify-on-failure: issue # one sticky issue, only when a run fails
           claude-oauth-token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           input: '{"repo": "\${{ github.repository }}"}'
         env:
@@ -1004,7 +1076,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: swenyai/sweny@v5
         with:
           workflow: .sweny/workflows/pr-risk-review.yml

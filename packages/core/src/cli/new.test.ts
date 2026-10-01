@@ -1306,6 +1306,51 @@ describe("runNew first-run paths", () => {
     expect(fs.readFileSync(path.join(wfDir, "explain-repo.yml"), "utf-8")).toBe("# mine\n");
   });
 
+  it("a pack writes its Actions trigger to .github/workflows/sweny-<pack>.yml (#474)", async () => {
+    const cwd = tmp();
+    await runNew({ template: "weekly-digest", yes: true });
+    const file = path.join(cwd, ".github", "workflows", "sweny-weekly-digest.yml");
+    const pack = WORKFLOW_TEMPLATES.find((t) => t.id === "weekly-digest")!.pack!;
+    expect(fs.readFileSync(file, "utf-8")).toBe(pack.trigger);
+    const wf = parseYaml(fs.readFileSync(file, "utf-8"));
+    expect(wf.permissions.contents).toBe("read");
+    const steps = Object.values(wf.jobs as Record<string, any>).flatMap((j) => j.steps as any[]);
+    expect(steps.find((s) => String(s.uses).startsWith("swenyai/sweny@v5"))).toBeDefined();
+    expect(steps.find((s) => String(s.uses).startsWith("actions/checkout@"))?.with["persist-credentials"]).toBe(false);
+  });
+
+  it("never overwrites an existing trigger file (#474)", async () => {
+    const cwd = tmp();
+    const dir = path.join(cwd, ".github", "workflows");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "sweny-pr-risk-review.yml"), "# mine\n");
+    await runNew({ template: "pr-risk-review", yes: true });
+    expect(fs.readFileSync(path.join(dir, "sweny-pr-risk-review.yml"), "utf-8")).toBe("# mine\n");
+  });
+
+  it("an existing workflow file does not stop the trigger from being written (#474)", async () => {
+    const cwd = tmp();
+    const wfDir = path.join(cwd, ".sweny", "workflows");
+    fs.mkdirSync(wfDir, { recursive: true });
+    fs.writeFileSync(path.join(wfDir, "dependency-drift.yml"), "# mine\n");
+    await runNew({ template: "dependency-drift", yes: true });
+    expect(fs.readFileSync(path.join(wfDir, "dependency-drift.yml"), "utf-8")).toBe("# mine\n");
+    expect(fs.existsSync(path.join(cwd, ".github", "workflows", "sweny-dependency-drift.yml"))).toBe(true);
+  });
+
+  it("--no-ci skips the trigger file (#474)", async () => {
+    const cwd = tmp();
+    await runNew({ template: "weekly-digest", yes: true, ci: false });
+    expect(fs.existsSync(path.join(cwd, ".sweny", "workflows", "weekly-digest.yml"))).toBe(true);
+    expect(fs.existsSync(path.join(cwd, ".github"))).toBe(false);
+  });
+
+  it("a non-pack template writes no trigger (#474)", async () => {
+    const cwd = tmp();
+    await runNew({ template: "explain-repo", yes: true });
+    expect(fs.existsSync(path.join(cwd, ".github"))).toBe(false);
+  });
+
   it("rejects an unknown --template with exit 1", async () => {
     tmp();
     vi.spyOn(process, "exit").mockImplementation((() => {
