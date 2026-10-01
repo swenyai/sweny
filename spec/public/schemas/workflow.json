@@ -441,6 +441,11 @@
       "minimum": 0,
       "description": "Soft cap on expected judge calls per workflow run. Executor warns at load time if exceeded; not a hard runtime cap in v1."
     },
+    "context_mode": {
+      "type": "string",
+      "enum": ["bounded", "full"],
+      "description": "What prior results a node's prompt receives. bounded (default): only nodes it can depend on, and a schema'd node's declared fields instead of its free-text summary. full: every prior node's complete data."
+    },
     "inputs": {
       "type": "object",
       "description": "Declared per-run input contract. Each entry names a parameter the caller may supply via --input. The CLI validates against this declaration, applies defaults for omitted optional fields, and rejects unknown types before the executor runs. Optional; workflows without an inputs block accept any JSON object (back-compat).",

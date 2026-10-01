@@ -437,6 +437,10 @@ Paths resolve against the cross-node context map:
 { input: <runtime input>, [priorNodeId]: <data of prior node>, ... }
 ```
 
+`requires` always reads every prior node's full data, whatever the workflow's
+[`context_mode`](/execution#what-a-node-receives): a gate on a field the
+output schema does not declare still resolves.
+
 The grammar is identical to [eval paths](#path-grammar): dotted segments,
 `[*]` wildcards, optional `all:` / `any:` prefix.
 
@@ -684,6 +688,7 @@ When the judge response cannot be parsed for the `pass_when` token (model return
 A conforming executor:
 
 - **MUST** evaluate every declared evaluator (no fast-fail), so the workflow author sees every problem in one pass.
+- **MAY** run a node's evaluators concurrently, since none depends on another. The reference executor does, so N judges cost one judge's wall time.
 - **MUST** populate `NodeResult.evals` with one [EvalResult](#evalresult-type) per evaluator, in the order they were declared.
 - **MUST** mark the node failed under `eval_policy: all_pass` if any evaluator fails. The node's `error` message is a structured list, one line per failing evaluator: `name (kind): reasoning`.
 - **MUST NOT** run `eval` when the AI model already failed the node. Eval only runs against successful node executions.

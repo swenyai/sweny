@@ -2267,15 +2267,18 @@ describe("route evaluator: schema-strict view of prior data", () => {
     expect(validateView).not.toHaveProperty("internal_notes");
   });
 
-  it("keeps the full prior data visible to downstream node run() (not just routing)", async () => {
-    // Workflows can rely on prose narrative fields for downstream node
-    // prompts even when those fields are not declared in the output
-    // schema. The fix is scoped to routing; run() must keep seeing
-    // everything.
+  it.each<[string, "full" | undefined, boolean]>([
+    ["bounded (default)", undefined, false],
+    ["full", "full", true],
+  ])("downstream node run() sees a schema'd node's prose only in context_mode: full (%s)", async (_m, mode, prose) => {
+    // #337: by default a downstream prompt gets the declared fields, like
+    // routing does; `context_mode: full` keeps the undeclared prose for
+    // workflows that relied on it.
     const workflow: Workflow = {
       id: "downstream-keeps-prose",
       name: "Downstream Keeps Prose",
       description: "",
+      ...(mode ? { context_mode: mode } : {}),
       entry: "first",
       nodes: {
         first: {
@@ -2316,7 +2319,8 @@ describe("route evaluator: schema-strict view of prior data", () => {
 
     const firstView = secondRunContext.first as Record<string, unknown>;
     expect(firstView).toHaveProperty("status", "ok");
-    expect(firstView).toHaveProperty("summary", "free-text narrative for the next step");
+    if (prose) expect(firstView).toHaveProperty("summary", "free-text narrative for the next step");
+    else expect(firstView).not.toHaveProperty("summary");
   });
 
   it("preserves current behavior when the prior node has no output schema", async () => {

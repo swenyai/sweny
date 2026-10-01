@@ -62,39 +62,41 @@ export async function evaluateAll(
 ): Promise<EvalResult[]> {
   if (!evaluators || evaluators.length === 0) return [];
 
+  // A judge with no client is a wiring error: refuse before any model call.
+  const orphanJudge = evaluators.find((e) => e.kind === "judge" && !opts.claude);
+  if (orphanJudge) {
+    throw new Error(`evaluator '${orphanJudge.name}' is kind: judge but no Claude client was provided to evaluateAll`);
+  }
+
+  // Evaluators are independent, so they run concurrently (#337): N judges on
+  // a node cost one round-trip of wall time, not N. Results keep declaration
+  // order. Every evaluator settles before an error surfaces, and the first
+  // rejection in declaration order is rethrown, so the outcome never depends
+  // on which call finishes first.
+  const settled = await Promise.allSettled(evaluators.map((e) => evaluateOne(e, result, opts)));
   const out: EvalResult[] = [];
-  for (const e of evaluators) {
-    if (e.kind === "value") {
-      const verdict = evaluateValueRule(e.rule ?? {}, result.data);
-      out.push({
-        name: e.name,
-        kind: "value",
-        pass: verdict.pass,
-        reasoning: capReasoning(verdict.reasoning),
-      });
-    } else if (e.kind === "function") {
-      const verdict = evaluateFunctionRule(e.rule ?? {}, result.toolCalls, opts.aliases);
-      out.push({
-        name: e.name,
-        kind: "function",
-        pass: verdict.pass,
-        reasoning: capReasoning(verdict.reasoning),
-      });
-    } else if (e.kind === "judge") {
-      if (!opts.claude) {
-        throw new Error(`evaluator '${e.name}' is kind: judge but no Claude client was provided to evaluateAll`);
-      }
-      const model = resolveJudgeModel(e, opts.node, opts.workflow, opts.claude.defaultJudgeModel);
-      const verdict = await evaluateJudge(e, result, opts.claude, { model });
-      out.push({
-        name: e.name,
-        kind: "judge",
-        pass: verdict.pass,
-        reasoning: capReasoning(verdict.reasoning),
-      });
-    }
+  for (const s of settled) {
+    if (s.status === "rejected") throw s.reason;
+    if (s.value) out.push(s.value);
   }
   return out;
+}
+
+async function evaluateOne(e: Evaluator, result: NodeResult, opts: EvaluateAllOptions): Promise<EvalResult | null> {
+  if (e.kind === "value") {
+    const verdict = evaluateValueRule(e.rule ?? {}, result.data);
+    return { name: e.name, kind: "value", pass: verdict.pass, reasoning: capReasoning(verdict.reasoning) };
+  }
+  if (e.kind === "function") {
+    const verdict = evaluateFunctionRule(e.rule ?? {}, result.toolCalls, opts.aliases);
+    return { name: e.name, kind: "function", pass: verdict.pass, reasoning: capReasoning(verdict.reasoning) };
+  }
+  if (e.kind === "judge" && opts.claude) {
+    const model = resolveJudgeModel(e, opts.node, opts.workflow, opts.claude.defaultJudgeModel);
+    const verdict = await evaluateJudge(e, result, opts.claude, { model });
+    return { name: e.name, kind: "judge", pass: verdict.pass, reasoning: capReasoning(verdict.reasoning) };
+  }
+  return null;
 }
 
 export interface AggregateOutcome {
