@@ -505,6 +505,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       harness: this.info(),
       degraded,
       ...(this.lastPolicyFacts ? { policy: this.lastPolicyFacts } : {}),
+      // The state dir deny rules hold for the file tools either way; Bash is held only by the sandbox.
+      contained: this.lastPolicyFacts?.sandboxStarted === true,
     };
   }
 

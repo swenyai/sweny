@@ -207,8 +207,16 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
   const results = new Map<string, NodeResult>();
   const trace: ExecutionTrace = { steps: [], edges: [], sources: {} };
   const at: VisitCursor = { node: null, iteration: 0 };
+  // Resume of a journal an uncontained agent could have edited: the receipt says so.
+  const journalDegraded = () => {
+    const extra = options.journal?.degraded?.() ?? [];
+    if (extra.length === 0) return;
+    for (const [id, r] of results) results.set(id, { ...r, degraded: [...new Set([...(r.degraded ?? []), ...extra])] });
+  };
   try {
-    return await executeRun(workflow, input, options, results, trace, at);
+    const out = await executeRun(workflow, input, options, results, trace, at);
+    journalDegraded();
+    return out;
   } catch (err) {
     // Resume (#363): a journal that cannot record the run stops it. The node
     // fails with the reason; nothing after it runs (no model call, no write).
@@ -223,6 +231,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
     trace.steps.push({ node: at.node, status: "failed", iteration: at.iteration });
     safeObserve(options.observer, { type: "node:exit", node: at.node, result }, logger);
     logger.error(`  ${err.message}`, { node: at.node });
+    journalDegraded();
     safeObserve(options.observer, { type: "workflow:end", results: Object.fromEntries(results) }, logger);
     return { results, trace };
   }
@@ -764,12 +773,20 @@ async function executeRun(
         });
       } catch (err) {
         if (journalFault) throw journalFault;
+        // The attempt ended abnormally (abort, timeout, harness error): whether its agent was
+        // contained is unknown, so the journal says it was not, and spend the throttle held goes in now.
+        journal?.uncontained?.(usageNode, iteration);
+        journal?.flushUsage?.();
         throw err;
       } finally {
         parentSignal?.removeEventListener("abort", onParentAbort);
         attemptBudget?.dispose();
       }
       if (journalFault) throw journalFault;
+      // Key secrecy (and so the journal's spend and write records) holds only for a contained agent.
+      if (result.contained !== true && (result.data as Record<string, unknown> | undefined)?.refused !== true) {
+        journal?.uncontained?.(usageNode, iteration);
+      }
       previous = result;
       // The attempt's final spend: the larger of the result's usage and the last live report, per unit.
       if (journal?.usage) {

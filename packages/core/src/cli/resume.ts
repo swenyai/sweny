@@ -9,8 +9,11 @@
 import path from "node:path";
 import type { Logger, Workflow } from "../types.js";
 import { validateRuntimeInput } from "../inputs.js";
+import { existsSync } from "node:fs";
 import {
   JournalKeyError,
+  JournalLocationError,
+  assertStateOutsideWorkspace,
   JournalLockedError,
   JournalRollbackError,
   JournalVersionError,
@@ -135,6 +138,15 @@ export function formatResumePlan(plan: ResumePlan, mayRepeat: string[]): string[
 export function prepareResume(ref: string, opts: ResumeOptions, deps: PrepareResumeDeps): PrepareResumeResult {
   const cwd = deps.cwd ?? process.cwd();
   const root = deps.stateRoot ?? runStateRoot(deps.env ?? process.env);
+  // A state dir that resolves into the workspace is agent-writable: nothing in it can be trusted.
+  if (existsSync(root)) {
+    try {
+      assertStateOutsideWorkspace(root, cwd);
+    } catch (err) {
+      if (err instanceof JournalLocationError) return { ok: false, lines: [], error: err.message };
+      throw err;
+    }
+  }
   const runId = findJournalRun(ref, cwd, root);
   if (!runId) {
     const legacy = findLegacyJournal(ref, cwd);
@@ -275,6 +287,12 @@ function prepareLocked(
 
   const mayRepeat = mayRepeatWrites(plan, workflow, input);
   lines.push(...formatResumePlan(plan, mayRepeat));
+  if (plan.unsandboxed.length > 0) {
+    lines.push(
+      `warning: an earlier attempt ran ${plan.unsandboxed.join(", ")} without an enforced sandbox, so that agent ` +
+        `could have read the run key and edited this run's journaled spend and write records (journal_unsandboxed)`,
+    );
+  }
   if (opts.plan) return { ok: true, planOnly: true, lines };
   if (mayRepeat.length > 0 && !opts.allowRepeatWrites) {
     return fail(

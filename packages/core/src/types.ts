@@ -735,6 +735,12 @@ export interface NodeResult {
    * Claude Code harness only; absent for harnesses that do not report it.
    */
   policy?: NodePolicyFacts;
+  /**
+   * The agent ran inside an enforced sandbox that keeps it out of the sweny
+   * state dir (run keys and journals). Set by the harness adapters; absent
+   * (treated as not contained) for anything that does not report it.
+   */
+  contained?: boolean;
   /** Safe outputs (#365): what the write stage did with each intent. Absent when the node declares none. */
   outputs?: SafeOutputReceipt[];
   /**

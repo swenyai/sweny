@@ -30,10 +30,14 @@
  * end of the journal cannot be cut away even by something that can write the
  * state dir but not read the key.
  *
- * An unsandboxed agent running as the same OS user can still read and write
- * the state dir; that is why resume also checks the record sequence (see
- * {@link buildResumePlan}) and every replayed route against the workflow's
- * real edges. A resume on another machine needs the same state dir.
+ * All of this holds only for an agent under an enforced sandbox. An
+ * unsandboxed agent running as the same OS user can read the key and rewrite
+ * the state dir. Each such visit is journaled (`agent:unsandboxed`), and a
+ * resume of that run warns and marks the receipt `journal_unsandboxed`.
+ * Resume also checks the record sequence (see {@link buildResumePlan}) and
+ * every replayed route against the workflow's real edges. A state dir whose
+ * real path is inside the workspace is refused. A resume on another machine
+ * needs the same state dir.
  *
  * Records, in run order:
  *   run:start        workflow / instruction / input / tool hashes, harness id, input (redacted)
@@ -45,7 +49,9 @@
  *   output:applied   the write returned (key + the ids it produced)
  *   node:end         final result of the visit and the write-stage counters
  *   route            the edge taken after the visit (null = the run ended)
- *   usage            spend of one agent attempt (cumulative; live while it runs, final when it returns)
+ *   usage            spend of one agent attempt (cumulative; live while it runs, final when it returns;
+ *                    a throttled live report is held and written when its window ends)
+ *   agent:unsandboxed the visit's agent ran without an enforced sandbox
  *   run:end          success | failed | crashed
  *
  * Failure: an append that cannot be written (head or journal) is fatal. The
@@ -298,6 +304,30 @@ function makePrivateDir(dir: string): void {
   fs.chmodSync(dir, 0o700);
 }
 
+/** Thrown when the journal's state dir resolves into the workspace, where an agent could edit it. */
+export class JournalLocationError extends Error {
+  constructor(dir: string, cwd: string) {
+    super(
+      `the run journal's state dir ${dir} resolves inside the workspace ${cwd}, where an agent can edit it. ` +
+        `Set SWENY_STATE_DIR to a dir outside the workspace, or pass --no-journal (the run then cannot be resumed)`,
+    );
+    this.name = "JournalLocationError";
+  }
+}
+
+/**
+ * Refuse a state dir that resolves into the workspace. Real paths are compared
+ * (the dir must exist), so a symlink anywhere in either chain counts as where
+ * it points. Throws {@link JournalLocationError}.
+ */
+export function assertStateOutsideWorkspace(dir: string, cwd: string): void {
+  const real = fs.realpathSync(dir);
+  const ws = fs.realpathSync(cwd);
+  if (real === ws || real.startsWith(ws.endsWith(path.sep) ? ws : ws + path.sep)) {
+    throw new JournalLocationError(real, ws);
+  }
+}
+
 /** Thrown when a journal's key is missing or unreadable: its records cannot be checked. */
 export class JournalKeyError extends Error {
   constructor(file: string, why: string) {
@@ -476,7 +506,12 @@ function parseHolder(raw: string): LockHolder | undefined {
   }
 }
 
-/** Is the process that wrote this lock still running? A reused pid (other start time) is not. */
+/**
+ * Is the process that wrote this lock still running? A reused pid (other
+ * start time) is not. Where the start time is not available (macOS, Windows),
+ * any live process with that pid counts as the holder: a reused pid errs
+ * toward refusing the resume, never toward two processes sharing the run.
+ */
 function holderAlive(h: LockHolder): boolean {
   if (h.pid === process.pid) return Math.abs(h.started - SELF_STARTED) <= START_SLACK_MS;
   if (!pidAlive(h.pid)) return false;
@@ -977,6 +1012,12 @@ export interface ResumePlan {
   receipts: Map<string, OutputRecord>;
   /** Spend every earlier attempt journaled: the run budget starts here on resume. */
   priorSpend: Spend;
+  /**
+   * Nodes whose agent ran without an enforced sandbox in an earlier attempt.
+   * Such an agent could read the run key, so the journal's spend and write
+   * records are only as trustworthy as that agent.
+   */
+  unsandboxed: string[];
 }
 
 const visitKey = (node: string, iteration: number) => `${node}#${iteration}`;
@@ -991,6 +1032,7 @@ const RECORD_TYPES = new Set([
   "node:end",
   "route",
   "usage",
+  "agent:unsandboxed",
   "run:end",
 ]);
 
@@ -1090,6 +1132,9 @@ export function checkRecordSequence(records: JournalRecord[]): void {
         if (!isAmount(r.tokens) || !isAmount(r.cost_usd) || !isPosInt((r.attempt as number) + 1)) {
           bad(r, "has invalid amounts");
         }
+        break;
+      case "agent:unsandboxed":
+        inVisit(r);
         break;
       case "node:end": {
         inVisit(r);
@@ -1301,6 +1346,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
     intents,
     receipts,
     priorSpend: journaledSpend(records),
+    unsandboxed: [...new Set(records.filter((r) => r.type === "agent:unsandboxed").map((r) => String(r.node)))],
   };
 }
 
@@ -1356,10 +1402,54 @@ async function callRead(skill: Skill | undefined, name: string, args: unknown, c
   return tool.handler(args, ctx);
 }
 
+const hasRead = (skill: Skill | undefined, name: string) =>
+  !!skill?.tools.some((t) => t.name === name && t.access === "read");
+
+/**
+ * Look for a GitHub issue or comment by its marker through the listing
+ * endpoints (consistent, unlike search). Undefined when the skill has no
+ * listing tool, so the caller falls back to search.
+ */
+async function listGitHubForMarker(
+  toolName: string,
+  args: Record<string, unknown>,
+  token: string,
+  since: string | undefined,
+  skill: Skill | undefined,
+  ctx: ToolContext,
+): Promise<ProbeResult | undefined> {
+  const hasBody = (i: Record<string, unknown>) => typeof i.body === "string" && (i.body as string).includes(token);
+  if (toolName === "github_add_comment") {
+    if (!hasRead(skill, "github_list_issue_comments")) return undefined;
+    const out = await callRead(
+      skill,
+      "github_list_issue_comments",
+      { repo: args.repo, issue_number: args.issue_number, ...(since ? { since } : {}) },
+      ctx,
+    );
+    if (!Array.isArray(out)) return { state: "unknown", reason: "comment list unavailable" };
+    const hit = (out as Array<Record<string, unknown>>).find(hasBody);
+    return hit ? { state: "applied", output: {} } : { state: "absent" };
+  }
+  if (!hasRead(skill, "github_list_issues")) return undefined;
+  const out = await callRead(skill, "github_list_issues", { repo: args.repo, per_page: 100 }, ctx);
+  if (!Array.isArray(out)) return { state: "unknown", reason: "issue list unavailable" };
+  const items = (out as Array<Record<string, unknown>>).filter((i) => !i.pull_request);
+  const hit = items.find(hasBody);
+  if (hit) return { state: "applied", output: hit };
+  // A miss counts only if the newest-first list reaches back to before the intent.
+  const oldest = items.at(-1)?.created_at;
+  const reachesBack = out.length < 100 || (since !== undefined && typeof oldest === "string" && oldest < since);
+  return reachesBack ? { state: "absent" } : { state: "unknown", reason: "too many issues created since the write" };
+}
+
 /**
  * Was this write applied before the crash? Writes that are idempotent by
  * nature (labels, state changes, a PR for the same head branch) are simply
- * re-applied. Creates and comments are searched for by their marker.
+ * re-applied. Creates and comments are looked up by their marker: GitHub's
+ * listing endpoints first (consistent), search otherwise; Linear comments by
+ * listing, Linear issues by search. A write with no lookup is `unknown`, and a
+ * pending one is not re-sent without `--allow-repeat-writes`.
  */
 async function probeProvider(
   toolName: string,
@@ -1367,6 +1457,7 @@ async function probeProvider(
   key: string,
   skill: Skill | undefined,
   ctx: ToolContext,
+  since?: string,
 ): Promise<ProbeResult> {
   const token = markerToken(key);
   try {
@@ -1378,6 +1469,9 @@ async function probeProvider(
         return { state: "reapply" };
       case "github_create_issue":
       case "github_add_comment": {
+        // Prefer the listing endpoints: unlike search, they see a write the moment it lands.
+        const listed = await listGitHubForMarker(toolName, args, token, since, skill, ctx);
+        if (listed) return listed;
         const scope = toolName === "github_create_issue" ? "in:body is:issue" : "in:comments";
         const out = (await callRead(
           skill,
@@ -1392,7 +1486,8 @@ async function probeProvider(
           toolName === "github_create_issue"
             ? out.items.find((i) => typeof i.body === "string" && (i.body as string).includes(token))
             : out.items.find((i) => Number(i.number) === Number(args.issue_number));
-        if (!hit) return { state: "absent" };
+        // The search index lags writes: a miss is not proof the write never landed.
+        if (!hit) return { state: "unknown", reason: "not in GitHub search, which can lag a just-made write" };
         return { state: "applied", output: toolName === "github_create_issue" ? hit : {} };
       }
       case "linear_create_issue": {
@@ -1480,8 +1575,14 @@ export interface ExecutionJournal {
    * attempt returned, otherwise a live report (the journal may throttle those).
    */
   usage?(node: string, iteration: number, attempt: number, usage: NodeUsage, final: boolean): void;
+  /** Write any live usage the throttle is holding back (before an abort is handled). */
+  flushUsage?(): void;
+  /** The visit's agent ran without an enforced sandbox: recorded so a resume can say so. */
+  uncontained?(node: string, iteration: number): void;
   /** Spend earlier attempts of this run already journaled (resume); the run budget starts from it. */
   priorSpend?(): Spend | undefined;
+  /** Receipt `degraded` entries this journal adds to the run (e.g. `journal_unsandboxed`). */
+  degraded?(): string[];
 }
 
 /** Minimum gap between two live usage records of one attempt. Final reports are always written. */
@@ -1512,6 +1613,8 @@ export interface RunJournalOptions {
   keep?: number;
   /** Where run journals live (default {@link runStateRoot}). Never inside the workspace. */
   stateRoot?: string;
+  /** Throttle window for live usage records (default {@link USAGE_JOURNAL_INTERVAL_MS}). */
+  usageIntervalMs?: number;
 }
 
 export interface ResumeJournalOptions extends RunJournalOptions {
@@ -1613,6 +1716,15 @@ export function lockRun(cwd: string, runId: string, root: string = runStateRoot(
 
 const quietLogger: Logger = { info() {}, warn() {}, error() {}, debug() {} };
 
+interface PendingUsage {
+  node: string;
+  iteration: number;
+  attempt: number;
+  tokens: number;
+  costUsd: number;
+  timer?: ReturnType<typeof setTimeout>;
+}
+
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export class RunJournal implements ExecutionJournal {
@@ -1641,6 +1753,10 @@ export class RunJournal implements ExecutionJournal {
   private lock: RunLock | undefined;
   /** Last live usage record per attempt: time and spend, for throttling. */
   private lastUsage = new Map<string, { at: number; tokens: number; costUsd: number }>();
+  /** Live usage the throttle held back, per attempt: written when its window ends or before the next record. */
+  private pendingUsage = new Map<string, PendingUsage>();
+  /** Visits already recorded as run without an enforced sandbox. */
+  private uncontainedVisits = new Set<string>();
 
   private constructor(opts: RunJournalOptions, resume?: ResumeJournalOptions) {
     this.opts = opts;
@@ -1708,6 +1824,8 @@ export class RunJournal implements ExecutionJournal {
     if (this.failure) throw this.failure;
     if (this.killed) return;
     if (!this.key) return this.fail("no signing key for this run");
+    // Spend the throttle held back goes in before anything that follows it.
+    if (type !== "usage" && this.pendingUsage.size > 0) this.flushUsage();
     const body: Record<string, unknown> = {
       v: JOURNAL_SCHEMA_VERSION,
       seq: this.seq + 1,
@@ -1754,6 +1872,7 @@ export class RunJournal implements ExecutionJournal {
   }
 
   private closeFd(): void {
+    this.clearAllPendingUsage();
     if (this.fd === undefined) return;
     try {
       fs.closeSync(this.fd);
@@ -1809,6 +1928,16 @@ export class RunJournal implements ExecutionJournal {
 
     try {
       makePrivateDir(this.dir);
+      assertStateOutsideWorkspace(this.dir, this.cwd);
+    } catch (err) {
+      if (err instanceof JournalLocationError) return this.fail(err.message);
+      return this.fail(
+        `could not set up the run's journal in ${this.dir}; set SWENY_STATE_DIR to a writable dir, ` +
+          `or pass --no-journal (the run then cannot be resumed)`,
+        err,
+      );
+    }
+    try {
       this.lock = acquireRunLock(this.dir);
       const key = createRunKey(path.join(this.dir, KEY_FILE));
       writeRunMeta(this.dir, key, this.runId, workspaceScope(this.cwd));
@@ -1905,18 +2034,96 @@ export class RunJournal implements ExecutionJournal {
     const costUsd = s.costUsd ?? 0;
     const k = `${visitKey(node, iteration)}|${attempt}`;
     const last = this.lastUsage.get(k);
-    const now = Date.now();
-    if (!final && last) {
-      if (tokens <= last.tokens && costUsd <= last.costUsd) return;
-      if (now - last.at < USAGE_JOURNAL_INTERVAL_MS) return;
+    const pending = this.pendingUsage.get(k);
+    // Reports are cumulative for the attempt: the largest figure seen is the spend.
+    const t = Math.max(tokens, pending?.tokens ?? 0);
+    const c = Math.max(costUsd, pending?.costUsd ?? 0);
+    if (last && t <= last.tokens && c <= last.costUsd) {
+      this.clearPendingUsage(k);
+      return;
     }
-    if (final && last && tokens <= last.tokens && costUsd <= last.costUsd) return;
+    const interval = this.opts.usageIntervalMs ?? USAGE_JOURNAL_INTERVAL_MS;
+    const now = Date.now();
+    if (!final && last && now - last.at < interval) {
+      // Throttled, not dropped: hold the latest figure and write it when the
+      // window ends, or before the next record (node end, write intent), or
+      // when the attempt aborts, whichever comes first.
+      const entry: PendingUsage = pending ?? { node, iteration, attempt, tokens: t, costUsd: c };
+      entry.tokens = t;
+      entry.costUsd = c;
+      if (!entry.timer) {
+        entry.timer = setTimeout(() => this.flushPendingSafely(k), interval - (now - last.at));
+        entry.timer.unref?.();
+      }
+      this.pendingUsage.set(k, entry);
+      return;
+    }
+    this.clearPendingUsage(k);
+    this.writeUsage(k, node, iteration, attempt, t, c, final);
+  }
+
+  private writeUsage(
+    k: string,
+    node: string,
+    iteration: number,
+    attempt: number,
+    tokens: number,
+    costUsd: number,
+    final: boolean,
+  ): void {
+    const last = this.lastUsage.get(k);
     this.lastUsage.set(k, {
-      at: now,
+      at: Date.now(),
       tokens: Math.max(tokens, last?.tokens ?? 0),
       costUsd: Math.max(costUsd, last?.costUsd ?? 0),
     });
     this.append("usage", { node, iteration, attempt, tokens, cost_usd: costUsd, final });
+  }
+
+  private clearPendingUsage(k: string): void {
+    const p = this.pendingUsage.get(k);
+    if (p?.timer) clearTimeout(p.timer);
+    this.pendingUsage.delete(k);
+  }
+
+  private clearAllPendingUsage(): void {
+    for (const k of [...this.pendingUsage.keys()]) this.clearPendingUsage(k);
+  }
+
+  /** Write every live usage figure the throttle is holding. Throws {@link JournalWriteError} like any append. */
+  flushUsage(): void {
+    for (const [k, p] of [...this.pendingUsage]) {
+      this.clearPendingUsage(k);
+      this.writeUsage(k, p.node, p.iteration, p.attempt, p.tokens, p.costUsd, false);
+    }
+  }
+
+  private flushPendingSafely(k: string): void {
+    const p = this.pendingUsage.get(k);
+    if (!p) return;
+    this.clearPendingUsage(k);
+    try {
+      this.writeUsage(k, p.node, p.iteration, p.attempt, p.tokens, p.costUsd, false);
+    } catch {
+      // A failed write is recorded (this.failure): the next append, or the
+      // executor after the attempt, stops the run.
+    }
+  }
+
+  uncontained(node: string, iteration: number): void {
+    const k = visitKey(node, iteration);
+    if (this.uncontainedVisits.has(k)) return;
+    this.uncontainedVisits.add(k);
+    this.append("agent:unsandboxed", { node, iteration });
+  }
+
+  degraded(): string[] {
+    const nodes = this.resume?.plan.unsandboxed ?? [];
+    if (nodes.length === 0) return [];
+    return [
+      `journal_unsandboxed: an earlier attempt ran ${nodes.join(", ")} without an enforced sandbox, so its ` +
+        `journaled spend and write records could have been edited by that agent`,
+    ];
   }
 
   priorSpend(): Spend | undefined {
@@ -1962,7 +2169,10 @@ export class RunJournal implements ExecutionJournal {
         const replayingStage = !!plan?.checkpoints.has(visitKey(node, iteration));
         const pending = plan?.intents.has(key) === true;
         if (pending || replayingStage) {
-          const probe = await probeProvider(tool.name, (args ?? {}) as Record<string, unknown>, key, skill, ctx);
+          // Look back from a little before the intent (clock skew between this host and the provider).
+          const intentAt = Date.parse(String(plan?.intents.get(key)?.at ?? ""));
+          const since = Number.isFinite(intentAt) ? new Date(intentAt - 5 * 60_000).toISOString() : undefined;
+          const probe = await probeProvider(tool.name, (args ?? {}) as Record<string, unknown>, key, skill, ctx, since);
           if (probe.state === "applied") {
             const output = slimOutput(probe.output);
             this.append("output:applied", { node, iteration, key, tool: tool.name, output, recovered: true });

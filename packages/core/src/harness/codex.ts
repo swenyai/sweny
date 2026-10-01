@@ -871,6 +871,8 @@ export class CodexHarness implements AgentHarness {
     let degraded = gate.degraded;
     const tag = (r: NodeResult, extra: string[] = []): HarnessRunResult => ({
       ...r,
+      // Only the process wrapper keeps Codex out of the sweny state dir (its own sandbox allows reads).
+      contained: wrapper !== undefined,
       harness: this.info(),
       degraded: [...degraded, ...extra],
     });

@@ -19,7 +19,7 @@ In `.sweny/runs/` in your working directory:
 - **Final answer** (`<run-id>/output.md`, mode `0600`): the run's answer, the final node's declared output fields or summary, or the failed node's error. Secret-looking values are redacted first (see below). It is deleted with its run directory when its history record is pruned. `--no-history` skips it. In CI it is not printed to the log unless you pass `--show-output` (Action input `show-output: true`); only its path is.
 - **`<run-id>/.gitignore`**: `*`, so an agent's `git add -A` never commits a run directory.
 
-Outside the working directory, in the sweny state dir (`$SWENY_STATE_DIR`, default `$XDG_STATE_HOME/sweny`, else `~/.local/state/sweny`), under `runs/<hash of the working directory path>/<run-id>/` (directories `0700`, files `0600`; agents can neither read nor write it):
+Outside the working directory, in the sweny state dir (`$SWENY_STATE_DIR`, default `$XDG_STATE_HOME/sweny`, else `~/.local/state/sweny`), under `runs/<hash of the working directory path>/<run-id>/` (directories `0700`, files `0600`; an agent running under an enforced sandbox can neither read nor write it, an unsandboxed one can):
 
 - **Run journal** (`journal.ndjson`), so `sweny workflow resume` can continue a killed run: node results, eval verdicts, safe-output requests and receipts, token and cost usage, routing decisions, and the run input. Secret-looking values are redacted; environment variables are never written. The 20 most recent journals per working directory are kept. Turn it off with `--no-journal` or `journal: off` in `.sweny.yml`.
 - **Journal head** (`head.json`): a copy of the record being appended, so a crash mid-append loses nothing.
