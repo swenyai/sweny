@@ -268,7 +268,7 @@ describe("journal: truncation recovers to the last complete record", () => {
         const repaired = readBytes(prefix, { repair: true });
         expect(repaired.records).toEqual(records.slice(0, n));
         expect(statSync(file).size).toBe(whole ? cut + 1 : validBytes);
-        const again = readJournal(file, { key: KEY, head: false });
+        const again = readJournal(file, { key: KEY, runId: RUN, head: false });
         expect(again.truncatedBytes).toBe(0);
         expect(again.records).toEqual(records.slice(0, n));
 
@@ -384,7 +384,7 @@ describe("journal: byte corruption is detected, never silently skipped", () => {
           if (repaired.corruptAtLine !== undefined) {
             expect(readFileSync(file).equals(mutated)).toBe(true);
           } else {
-            expect(readJournal(file, { key: KEY, head: false }).truncatedBytes).toBe(0);
+            expect(readJournal(file, { key: KEY, runId: RUN, head: false }).truncatedBytes).toBe(0);
           }
         },
       ),
@@ -616,8 +616,9 @@ describe("journal: the end cannot be cut, and records cannot move", () => {
       const spend = buildResumePlan(readJournal(real).records).priorSpend;
       expect(spend).toEqual({ tokens: 110, costUsd: 0.5 });
       const lineEnds = [...full.entries()].filter(([, b]) => b === 0x0a).map(([i]) => i + 1);
-      // Cut anywhere from the start of the last line on: the last record is restored from the head.
-      const lastLineStart = lineEnds[lineEnds.length - 2];
+      // Cut anywhere from the end of the second-to-last record on (its newline included or not):
+      // the last record is restored from the head.
+      const lastLineStart = lineEnds[lineEnds.length - 2] - 1;
 
       for (let cut = 0; cut <= full.length; cut++) {
         writeFileSync(real, full.subarray(0, cut));

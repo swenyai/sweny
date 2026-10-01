@@ -14,6 +14,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -221,9 +222,24 @@ async function firstRun(
     journal.end([...results.values()].some((r) => r.status === "failed") ? "failed" : "success");
     return killed;
   } catch (err) {
-    if (err instanceof Kill) return true;
+    if (err instanceof Kill) {
+      processDied(cwd);
+      return true;
+    }
     throw err;
   }
+}
+
+/**
+ * A killed process never releases its lock: it leaves it behind with a pid
+ * that no longer runs. (These specs kill the run in-process, so the lock
+ * would otherwise still name this live process.)
+ */
+function processDied(cwd: string): void {
+  const lock = join(journalDir(cwd, RUN_ID), "lock");
+  if (!existsSync(lock)) return;
+  const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+  writeFileSync(lock, JSON.stringify({ pid: dead, started: 0, nonce: "dead" }));
 }
 
 /** Resume the way `sweny workflow resume` does. */
@@ -236,10 +252,16 @@ async function resumeRun(
 ) {
   const prepared = prepareResume(RUN_ID, opts, { cwd, loadWorkflow: () => workflow });
   if (!prepared.ok || "planOnly" in prepared) return { prepared, results: undefined };
-  const { results } = await execute(workflow, prepared.ctx.input, {
-    ...execOpts(agent, skills, cwd),
-    journal: prepared.ctx.journal,
-  });
+  let results: Map<string, NodeResult>;
+  try {
+    ({ results } = await execute(workflow, prepared.ctx.input, {
+      ...execOpts(agent, skills, cwd),
+      journal: prepared.ctx.journal,
+    }));
+  } catch (err) {
+    if (err instanceof Kill) processDied(cwd);
+    throw err;
+  }
   prepared.ctx.journal.end([...results.values()].some((r) => r.status === "failed") ? "failed" : "success");
   return { prepared, results };
 }
