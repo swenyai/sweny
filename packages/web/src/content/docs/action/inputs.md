@@ -24,11 +24,11 @@ SWEny ships three GitHub Actions, each with its own input surface. This page doc
 | `anthropic-api-key` | Anthropic API key for Claude (pay-per-use billing) | -- |
 | `agent` | Coding agent that runs the nodes: `claude` or `codex` | `claude` |
 | `openai-api-key` | OpenAI API key for `agent: codex` (passed to Codex as `CODEX_API_KEY`) | -- |
-| `codex-version` | Version of `@openai/codex` to install for `agent: codex` (0.159.0 or newer) | `latest` |
+| `codex-version` | Version of `@openai/codex` to install for `agent: codex` . Defaults to the version the Codex capabilities were tested against; a newer one runs with a warning | `0.159.2` |
 | `harness-policy` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and lists it as degraded in the receipt. Empty uses the CLI default (`strict` under GitHub Actions) | -- |
 | `max-tokens` | Run-wide token budget (input plus output). Forwarded as `--max-tokens` only when set; the lowest of this and the workflow's `budget.tokens` wins. The step fails on a CLI too old to enforce it, so a cap is never silently dropped | -- |
 | `max-cost` | Run-wide cost budget in US dollars (harness-reported cost, never estimated). Forwarded as `--max-cost` only when set. See [Spend budgets](/workflows/yaml-reference/#spend-budgets) | -- |
-| `cli-version` | Version of `@sweny-ai/core` to install | `latest` |
+| `cli-version` | Version of `@sweny-ai/core` to install. The floating `v5` tag defaults to `latest`; an immutable `v5.<version>` tag defaults to that exact version | `latest` |
 | `node-version` | Node.js version to install | `24` |
 | `working-directory` | Working directory to run from | `.` |
 | `pr-comment` | On `pull_request` events, post or update one comment on the PR with the run receipt, a status-colored DAG, and per-node status and duration. Metadata only: no prompts, tool inputs, or model output. No-op on every other event. Set to `false` to opt out | `true` |

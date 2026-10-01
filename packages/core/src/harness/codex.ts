@@ -74,6 +74,14 @@ export { CODEX_CAPABILITIES };
 /** Oldest Codex CLI whose flags this adapter uses (`--ignore-user-config`, `--ignore-rules`). */
 export const MIN_CODEX_VERSION = "0.159.0";
 
+/**
+ * The Codex CLI the capability claims in capabilities.ts were read from and the contract suite
+ * was written against (openai/codex rust-v0.159.2). action.yml installs this version by default.
+ * A newer CLI is not refused (it is only a warning, see `preflight`): the claims are about a
+ * version, not a range, so a newer one is unverified rather than known-bad.
+ */
+export const TESTED_CODEX_VERSION = "0.159.2";
+
 /** Same system prompt Claude Code nodes get, sent as Codex developer instructions. */
 const SYSTEM_PROMPT = `You are a step in an automated workflow. Execute the instruction precisely using the tools available to you. Be thorough but concise. When you're done, summarize your findings and results.`;
 
@@ -446,6 +454,15 @@ export class CodexHarness implements AgentHarness {
           return;
         }
         this.version = m[1];
+        // Newer than the tested version: the declared capabilities may no longer hold. Warn once
+        // (the result is cached per instance). Not `degraded`: that is a per-node policy report and
+        // there is no node yet; not a refusal: it would break anyone who chose `latest` on purpose.
+        if (compareVersions(m[1], TESTED_CODEX_VERSION) > 0) {
+          this.logger.warn(
+            `codex ${m[1]} is newer than ${TESTED_CODEX_VERSION}, the version sweny's Codex capabilities were tested against; ` +
+              `flags and event shapes may differ. Pin @openai/codex@${TESTED_CODEX_VERSION} (action input codex-version) for the tested behavior.`,
+          );
+        }
         resolve({ ok: true, version: m[1] });
       });
     });
