@@ -263,7 +263,7 @@ Read-only scope review. No code was changed.
 
 The two scheduled packs set `notify-on-failure: issue`. When a run fails or is refused, the Action opens one issue titled `SWEny run failed: <workflow>` labelled `sweny-failure`, and comments on it for later failures instead of opening more. Nothing is sent on success. It needs `issues: write`, which both triggers already request.
 
-Setup failures are reported as `did_not_start`, even if the checkout contains successful history from an earlier run. Each Action invocation creates its own history marker before auth validation and dependency setup. If no valid marker is available, old history cannot suppress the alert.
+Setup failures are reported as `did_not_start`, even if the checkout contains successful history from an earlier run. Each Action invocation creates its own history marker before auth validation and dependency setup. If no valid marker is available, old history cannot suppress the alert. The notifier runs from the workspace so a missing workflow directory can still be reported.
 
 For Slack, pass an incoming-webhook URL from a secret, or the name of an env var on the step that holds it:
 
