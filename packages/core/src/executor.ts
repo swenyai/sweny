@@ -346,7 +346,7 @@ export async function execute(workflow: Workflow, input: unknown, options: Execu
       }
     }
     const skillInstructions = resolveSkillInstructions(node.skills, skills);
-    const skillMcpServers = resolveSkillMcpServers(node.skills, skills);
+    const skillMcpServers = resolveSkillMcpServers(node.skills, skills, config);
 
     // Runtime guard: if this node declares skills but none resolved, the node
     // cannot do its job (e.g. "create a Linear issue" with no linear skill).
@@ -1296,12 +1296,30 @@ function dryRunNotice(skippedWrites: string[]): string {
   );
 }
 
-/** Only this node's resolved skills contribute external servers. */
-function resolveSkillMcpServers(skillIds: string[], skills: Map<string, Skill>): Record<string, McpServerConfig> {
+/**
+ * Only this node's resolved skills contribute external servers. A stdio
+ * server gets its skill's declared credentials in its own `env` (explicit
+ * server env wins): the agent env no longer carries them, so the server must
+ * not rely on inheriting them from the agent process.
+ */
+function resolveSkillMcpServers(
+  skillIds: string[],
+  skills: Map<string, Skill>,
+  config: Record<string, string> = {},
+): Record<string, McpServerConfig> {
   return Object.fromEntries(
     skillIds.flatMap((id) => {
-      const mcp = skills.get(id)?.mcp;
-      return mcp ? [[id, { ...mcp, type: mcp.type ?? (mcp.command ? "stdio" : "http") }]] : [];
+      const skill = skills.get(id);
+      const mcp = skill?.mcp;
+      if (!skill || !mcp) return [];
+      const type = mcp.type ?? (mcp.command ? "stdio" : "http");
+      if (type !== "stdio") return [[id, { ...mcp, type }]];
+      const declared: Record<string, string> = {};
+      for (const [key, field] of Object.entries(skill.config ?? {})) {
+        if (field.env && config[key] !== undefined) declared[field.env] = config[key];
+      }
+      const env = { ...declared, ...(mcp.env ?? {}) };
+      return [[id, { ...mcp, type, ...(Object.keys(env).length > 0 ? { env } : {}) }]];
     }),
   );
 }
