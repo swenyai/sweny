@@ -71,13 +71,13 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "^2.1.220",
+    "@anthropic-ai/claude-code": "^2.1.283",
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
     "ajv": "^8.20.0",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "fast-check": "^3.23.2",
-    "prettier": "^3.9.6",
+    "prettier": "^3.9.9",
     "vitest": "^4.1.11"
   },
   "publishConfig": {
