@@ -550,6 +550,11 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
         refuse("close needs a pinned issue", at);
         continue;
       }
+      // ...and the repository (or Linear team) must come from the declaration or the run, never from the agent's intent.
+      if (asked === "close" && !pinned) {
+        refuse("close needs a pinned repository", at);
+        continue;
+      }
       state = asked;
     }
     if (via === "github" && issueRef !== undefined && !/^[1-9][0-9]*$/.test(issueRef)) {

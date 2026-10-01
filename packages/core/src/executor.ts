@@ -1214,8 +1214,12 @@ function contextDependencies(workflow: Workflow, nodeId: string, instruction = "
   return deps;
 }
 
-/** The bounded prompt context for one node: `input` plus its dependencies' entries. */
-function buildBoundedContext(
+/**
+ * The bounded prompt context for one node: `input` plus its dependencies' entries.
+ * Exported for the property tests only; not part of the package API (index.ts does not re-export it).
+ * @internal
+ */
+export function buildBoundedContext(
   workflow: Workflow,
   nodeId: string,
   results: Map<string, NodeResult>,
