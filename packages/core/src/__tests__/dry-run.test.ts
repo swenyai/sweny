@@ -300,6 +300,7 @@ describe("ClaudeClient readOnly (#380)", () => {
   let mockQuery: ReturnType<typeof vi.fn>;
   let ClaudeClient: any;
   let READ_ONLY_DISALLOWED_TOOLS: readonly string[];
+  let claudeStateDirDenyRules: () => string[];
 
   function doneStream() {
     return (async function* () {
@@ -318,6 +319,7 @@ describe("ClaudeClient readOnly (#380)", () => {
     const mod = await import("../claude.js");
     ClaudeClient = mod.ClaudeClient;
     READ_ONLY_DISALLOWED_TOOLS = mod.READ_ONLY_DISALLOWED_TOOLS;
+    claudeStateDirDenyRules = () => mod.claudeStateDirDenyRules();
   });
 
   afterEach(() => {
@@ -376,7 +378,8 @@ describe("ClaudeClient readOnly (#380)", () => {
     await client.run({ instruction: "x", context: {}, tools: [readTool] });
     const opts = mockQuery.mock.calls[0][0].options;
     expect(Object.keys(opts.mcpServers).sort()).toEqual(["github", "sweny-core"]);
-    expect(opts.disallowedTools).toBeUndefined();
+    // Only the run journals' state dir is denied to the built-in file tools.
+    expect(opts.disallowedTools).toEqual(claudeStateDirDenyRules());
     expect(opts.strictMcpConfig).toBeUndefined();
   });
 });

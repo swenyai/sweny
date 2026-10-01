@@ -282,7 +282,7 @@ describe("ClaudeCodeHarness", () => {
         policy: policy({ deny: ["shell", "net"], nativeDeny: ["Glob"] }),
       });
       const opts = mockQuery.mock.calls[0][0].options;
-      expect(opts.disallowedTools).toEqual(["Glob", "Bash", "WebFetch", "WebSearch"]);
+      expect(opts.disallowedTools).toEqual(["Glob", "Bash", "WebFetch", "WebSearch", ...mod.claudeStateDirDenyRules()]);
       expect(opts.strictMcpConfig).toBeUndefined();
     });
 
@@ -314,9 +314,9 @@ describe("ClaudeCodeHarness", () => {
       await h.run({ instruction: "x", context: {}, tools: [], policy: policy({ strict: true }) });
       const opts = mockQuery.mock.calls[0][0].options;
       expect(opts.strictMcpConfig).toBe(true);
-      // Still write-capable: its own servers stay, no built-in is denied.
+      // Still write-capable: its own servers stay, no built-in is denied (only the journals' state dir).
       expect(Object.keys(opts.mcpServers)).toEqual(["github"]);
-      expect(opts.disallowedTools).toBeUndefined();
+      expect(opts.disallowedTools).toEqual(mod.claudeStateDirDenyRules());
     });
 
     it("without a policy the legacy fields behave exactly as before", async () => {
@@ -324,8 +324,27 @@ describe("ClaudeCodeHarness", () => {
       const h = new mod.ClaudeCodeHarness({ logger: noopLogger() });
       await h.run({ instruction: "x", context: {}, tools: [], disallowedTools: ["Bash"] });
       const opts = mockQuery.mock.calls[0][0].options;
-      expect(opts.disallowedTools).toEqual(["Bash"]);
+      expect(opts.disallowedTools).toEqual(["Bash", ...mod.claudeStateDirDenyRules()]);
       expect(opts.strictMcpConfig).toBeUndefined();
+    });
+
+    it("every run denies the built-in file tools the run journals' state dir, read and write", async () => {
+      vi.stubEnv("SWENY_STATE_DIR", "/srv/sweny-state");
+      for (const readOnly of [false, true]) {
+        mockQuery.mockReturnValueOnce(resultStream("done"));
+        const h = new mod.ClaudeCodeHarness({ logger: noopLogger() });
+        await h.run({ instruction: "x", context: {}, tools: [], ...(readOnly ? { readOnly } : {}) });
+        const denied: string[] = mockQuery.mock.calls.at(-1)![0].options.disallowedTools;
+        // Absolute (`//`) scoped deny rules: Read covers Read/Grep/Glob, Edit covers Edit/Write/NotebookEdit.
+        for (const rule of [
+          "Read(//srv/sweny-state/runs)",
+          "Read(//srv/sweny-state/runs/**)",
+          "Edit(//srv/sweny-state/runs)",
+          "Edit(//srv/sweny-state/runs/**)",
+        ]) {
+          expect(denied, `${rule} (readOnly: ${readOnly})`).toContain(rule);
+        }
+      }
     });
   });
 
