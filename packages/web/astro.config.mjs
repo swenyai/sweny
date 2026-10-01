@@ -119,6 +119,7 @@ export default defineConfig({
             { label: "Architecture", slug: "advanced/architecture" },
             { label: "Model Gateway (LiteLLM)", slug: "advanced/model-gateway" },
             { label: "Agent Sandbox", slug: "advanced/agent-sandbox" },
+            { label: "Decision Models (Shadow)", slug: "advanced/decision-models" },
             { label: "MCP Servers", slug: "advanced/mcp-servers" },
             { label: "Claude Code Plugin", slug: "advanced/mcp-plugin" },
             { label: "Troubleshooting", slug: "advanced/troubleshooting" },

@@ -20,6 +20,7 @@ export { WORKFLOW_INPUT_TYPES } from "./inputs.js";
 import type { Source as _Source, ResolvedSource as _ResolvedSource } from "./sources.js";
 import type { ToolClass } from "./harness/types.js";
 import type { Budget, BudgetOverrun } from "./budget.js";
+import type { DeciderConfig, DeciderRecord } from "./decider.js";
 
 export type JSONSchema = Record<string, unknown>;
 
@@ -627,6 +628,11 @@ export interface Workflow {
    */
   budget?: Budget;
   /**
+   * Decision model for route choices (#357). `shadow` asks it alongside the
+   * agent and logs agreement; the route is always the agent's. Default: off.
+   */
+  decider?: DeciderConfig;
+  /**
    * What prior results a node's prompt receives (#337). `bounded` (default):
    * only nodes it can depend on (graph ancestors, nodes named by `requires`
    * or its instruction), and a schema'd node's declared fields instead of its
@@ -819,6 +825,8 @@ export interface ExecutionTrace {
   edges: TraceEdge[];
   /** Resolved sources keyed by field path (e.g. "nodes.gather.instruction") */
   sources: Record<string, _ResolvedSource>;
+  /** Shadow-mode decider records, one per route decision (#357). Metadata only. Absent when the decider is off. */
+  decisions?: DeciderRecord[];
 }
 
 /** Result of execute() — final node results + full execution trace */
