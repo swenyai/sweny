@@ -19,7 +19,7 @@
     "test": "vitest run --exclude 'dist/**'"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@sweny-ai/core": "^0.1.0",
     "yaml": "^2.9.0",
     "zod": "^3.25.76"
