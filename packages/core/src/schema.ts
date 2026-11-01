@@ -49,7 +49,7 @@ export { workflowInputsZ };
 
 // ─── Zod Schemas ─────────────────────────────────────────────────
 
-export const jsonSchemaZ = z.record(z.unknown());
+export const jsonSchemaZ = z.record(z.string(), z.unknown());
 
 // .strict() to match the published skill JSON Schema's ConfigField
 // `additionalProperties: false`. Without it Zod silently STRIPPED an unknown
@@ -88,8 +88,8 @@ export const mcpServerConfigZ = z
     command: z.string().optional(),
     args: z.array(z.string()).optional(),
     url: z.string().optional(),
-    headers: z.record(z.string()).optional(),
-    env: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
   })
   .strict()
   .refine((c) => c.command || c.url, {
@@ -114,11 +114,11 @@ export const skillZ = z
     name: z.string(),
     description: z.string(),
     category: skillCategoryZ,
-    config: z.record(configFieldZ).default({}),
+    config: z.record(z.string(), configFieldZ).default({}),
     tools: z.array(toolZ).default([]),
     instruction: z.string().optional(),
     mcp: mcpServerConfigZ.optional(),
-    mcpAliases: z.record(z.array(z.string().min(1)).min(1)).optional(),
+    mcpAliases: z.record(z.string(), z.array(z.string().min(1)).min(1)).optional(),
   })
   // Strict to match the published skill JSON Schema's
   // `additionalProperties: false`. Without this an unknown top-level key was
@@ -462,10 +462,10 @@ export const workflowZ = z.object({
     .regex(/^[1-9]\d*$/, "spec_version must be a positive integer string")
     .optional(),
   workflow_type: workflowTypeZ.optional(),
-  nodes: z.record(nodeZ),
+  nodes: z.record(z.string(), nodeZ),
   edges: z.array(edgeZ),
   entry: z.string().min(1),
-  skills: z.record(skillDefinitionZ).default({}),
+  skills: z.record(z.string(), skillDefinitionZ).default({}),
   rules: z.array(sourceZ).optional(),
   context: z.array(sourceZ).optional(),
   judge_model: z.string().min(1).optional(),

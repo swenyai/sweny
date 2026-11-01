@@ -130,7 +130,7 @@ const workflowInputFieldZ = z
     }
   });
 
-export const workflowInputsZ = z.record(workflowInputFieldZ);
+export const workflowInputsZ = z.record(z.string(), workflowInputFieldZ);
 
 // ─── Validation ─────────────────────────────────────────────────
 
