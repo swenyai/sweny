@@ -71,14 +71,14 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "^2.1.220",
-    "@stryker-mutator/core": "^10.0.0",
-    "@stryker-mutator/vitest-runner": "^10.0.0",
+    "@anthropic-ai/claude-code": "^2.1.312",
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/vitest-runner": "^10.1.1",
     "ajv": "^8.20.0",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "fast-check": "^3.23.2",
-    "prettier": "^3.9.6",
-    "vitest": "^4.1.11"
+    "prettier": "^3.9.10",
+    "vitest": "^4.1.12"
   },
   "publishConfig": {
     "access": "public"
