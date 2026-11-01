@@ -22,6 +22,7 @@ export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
   usage: { tokens: true, costUsd: true, live: true, liveUnits: ["tokens"] },
   cancel: "signal",
   resume: false,
+  nativeNone: true,
 };
 
 /**

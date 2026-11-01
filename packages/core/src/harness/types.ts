@@ -43,6 +43,8 @@ export interface HarnessCapabilities {
   usage: { tokens: boolean; costUsd: boolean; live: boolean; liveUnits?: Array<"tokens" | "costUsd"> };
   cancel: "signal" | "rpc" | "kill";
   resume: boolean;
+  /** The harness can run a node with no built-in tools and no settings sources. Absent means false. */
+  nativeNone?: boolean;
 }
 
 /** What a node is allowed to do, compiled per adapter by the harness. */
@@ -63,6 +65,12 @@ export interface NodePolicy {
    * cannot honor it: reported in `degraded`, refused under `strict`.
    */
   exclusiveMcp?: boolean;
+  /**
+   * The agent gets no built-in tools and loads no settings from disk
+   * (`permissions.native: none`). A harness whose `nativeNone` capability is
+   * not true cannot honor it: reported in `degraded`, refused under `strict`.
+   */
+  nativeNone?: boolean;
   /**
    * Turn budget for the run. Set by adapters whose `turnLimit` is not native,
    * so the gate reports how the budget is kept (watchdog) or that it is not.
