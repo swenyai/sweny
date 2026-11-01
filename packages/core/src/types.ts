@@ -481,6 +481,14 @@ export interface Node {
 export const NODE_ACCESS = ["read", "write"] as const;
 export type NodeAccess = (typeof NODE_ACCESS)[number];
 
+/**
+ * Built-in tools and settings. `default`: today's behavior. `none`: the agent
+ * has no built-in tools at all and loads no settings, CLAUDE.md or skills from
+ * disk; only the tools sweny passes (skill tools) reach the model.
+ */
+export const NODE_NATIVE = ["default", "none"] as const;
+export type NodeNative = (typeof NODE_NATIVE)[number];
+
 /** Portable built-in tool classes, compiled per harness (Claude Code: native tool names). */
 export const TOOL_CLASSES = ["shell", "write", "edit", "net", "subagent"] as const;
 
@@ -491,6 +499,8 @@ export interface NodePermissionsSpec {
   deny?: (typeof TOOL_CLASSES)[number][];
   /** Exclusive MCP, and refuse the node on a harness that cannot enforce the policy. */
   strict?: boolean;
+  /** `none`: no built-in tools and no settings sources. A workflow `none` is a ceiling a node cannot lift. */
+  native?: NodeNative;
 }
 
 /** `read` / `write` shorthand, or the object form. */

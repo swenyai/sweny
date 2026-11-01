@@ -6,12 +6,13 @@
  */
 
 import type { NodePolicy, ToolClass } from "./harness/types.js";
-import type { Node, NodeAccess, NodePermissions, NodePermissionsSpec, Workflow } from "./types.js";
+import type { Node, NodeAccess, NodeNative, NodePermissions, NodePermissionsSpec, Workflow } from "./types.js";
 
 export interface ResolvedPermissions {
   access: NodeAccess;
   deny: ToolClass[];
   strict: boolean;
+  native?: NodeNative;
 }
 
 function spec(p: NodePermissions | undefined): NodePermissionsSpec {
@@ -25,7 +26,7 @@ function spec(p: NodePermissions | undefined): NodePermissionsSpec {
  * access: the node's own, else `read` when it declares `outputs`, else the
  * workflow's, else `write` (today's behavior). A workflow `read` ceiling wins
  * over a node `write` (the loader rejects that combination; this is the
- * runtime backstop). deny: union. strict: either.
+ * runtime backstop). deny: union. strict: either. native: `none` if either says so.
  */
 export function resolveNodePermissions(
   node: Pick<Node, "permissions" | "outputs">,
@@ -36,7 +37,13 @@ export function resolveNodePermissions(
   let access: NodeAccess = own.access ?? (node.outputs && node.outputs.length > 0 ? "read" : (wf.access ?? "write"));
   if (wf.access === "read") access = "read";
   const deny = [...new Set<ToolClass>([...(wf.deny ?? []), ...(own.deny ?? [])])];
-  return { access, deny, strict: wf.strict === true || own.strict === true };
+  const none = wf.native === "none" || own.native === "none";
+  return {
+    access,
+    deny,
+    strict: wf.strict === true || own.strict === true,
+    ...(none ? { native: "none" as const } : {}),
+  };
 }
 
 /** True when a node asks for more than the workflow ceiling allows. */
@@ -61,5 +68,6 @@ export function buildNodePolicy(opts: {
     egress: opts.egress ?? [],
     strict: opts.permissions.strict,
     ...(opts.permissions.strict ? { exclusiveMcp: true } : {}),
+    ...(opts.permissions.native === "none" ? { nativeNone: true } : {}),
   };
 }
