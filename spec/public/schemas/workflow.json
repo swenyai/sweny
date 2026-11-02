@@ -256,6 +256,11 @@
             "strict": {
               "type": "boolean",
               "description": "Exclusive MCP (only the servers sweny injects), and refuse the node on a harness that cannot enforce the policy."
+            },
+            "native": {
+              "type": "string",
+              "enum": ["default", "none"],
+              "description": "'none' gives the agent no built-in tools and loads no settings, CLAUDE.md or skills from disk; only skill tools reach it. On the workflow it is a ceiling a node cannot lift. A harness that cannot honor it degrades, and refuses the node under strict."
             }
           }
         }

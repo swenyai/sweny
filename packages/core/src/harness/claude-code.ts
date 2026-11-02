@@ -488,6 +488,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
       readOnly,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
       strictMcp: mcpWithheld(readOnly, req.agentAccess) || policy.strict || policy.exclusiveMcp === true,
+      nativeNone: policy.nativeNone === true,
       sandboxMode: policy.sandbox,
       agentAccess: {
         envVars: req.agentAccess?.envVars ?? [],
@@ -533,6 +534,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     agentAccess?: AgentAccess;
     /** Exclusive MCP: only the servers passed here load (#365 strict policy). */
     strictMcp?: boolean;
+    /** `permissions.native: none`: SDK `tools: []` and `settingSources: []` on this node's query. */
+    nativeNone?: boolean;
     /** Per-request containment requirement; falls back to the client default. */
     sandboxMode?: SandboxMode;
     /** Live token usage (#449), reported as assistant messages arrive. */
@@ -753,6 +756,10 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
           strictMcpConfig: true,
           settingSources: [],
           ...(disallowedTools && disallowedTools.length > 0 ? { disallowedTools } : {}),
+          // permissions.native: none. `tools: []` removes every built-in tool whatever its
+          // name; `settingSources: []` loads no user, project or local settings, CLAUDE.md or skills
+          // (already the default above since #497; kept so the policy value states its whole contract).
+          ...(opts.nativeNone ? { tools: [], settingSources: [] } : {}),
           // CC-08: ask the SDK to produce validated structured output when the
           // node declares an output schema. The SDK then returns the parsed
           // value on `result.structured_output`, which we prefer over the
