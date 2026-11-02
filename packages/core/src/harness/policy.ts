@@ -121,6 +121,11 @@ export function policyGate(
     }
   }
 
+  // `permissions.native: none`: no built-in tools and no settings sources.
+  if (policy.nativeNone && caps.nativeNone !== true) {
+    unenforced.push("native none: harness cannot run a node with no built-in tools and no settings sources");
+  }
+
   // Exclusive MCP (`permissions.strict`): only the servers sweny passes may
   // load, never the user's own config. A harness that cannot exclude them
   // cannot honor it, so strict refuses the node.

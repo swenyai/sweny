@@ -22,6 +22,7 @@ import {
   EVAL_POLICIES,
   MCP_TRANSPORTS,
   NODE_ACCESS,
+  NODE_NATIVE,
   NODE_ON_FAIL,
   REQUIRES_ON_FAIL,
   ROUTE_BY,
@@ -319,10 +320,11 @@ export const nodePermissionsZ = z.union([
       access: z.enum(NODE_ACCESS).optional(),
       deny: z.array(z.enum(TOOL_CLASSES)).min(1).optional(),
       strict: z.boolean().optional(),
+      native: z.enum(NODE_NATIVE).optional(),
     })
     .strict()
-    .refine((p) => p.access !== undefined || p.deny !== undefined || p.strict !== undefined, {
-      message: "permissions must declare at least one of access, deny, strict",
+    .refine((p) => p.access !== undefined || p.deny !== undefined || p.strict !== undefined || p.native !== undefined, {
+      message: "permissions must declare at least one of access, deny, strict, native",
     }),
 ]);
 
@@ -1122,6 +1124,12 @@ export const workflowJsonSchema = {
               type: "boolean",
               description:
                 "Exclusive MCP (only the servers sweny injects), and refuse the node on a harness that cannot enforce the policy.",
+            },
+            native: {
+              type: "string",
+              enum: [...NODE_NATIVE],
+              description:
+                "'none' gives the agent no built-in tools and loads no settings, CLAUDE.md or skills from disk; only skill tools reach it. On the workflow it is a ceiling a node cannot lift. A harness that cannot honor it degrades, and refuses the node under strict.",
             },
           },
         },
