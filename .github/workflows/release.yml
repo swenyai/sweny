@@ -177,6 +177,8 @@ jobs:
             # Emit now, not after studio/mcp/writeback: tag-action must learn
             # about a core that reached npm even if a later step here fails.
             echo "core_version=$(node -p "require('./packages/core/package.json').version")" >> "$GITHUB_OUTPUT"
+            # Write core's version back now too, so main never lags what npm serves.
+            node scripts/sync-release-versions.mjs sync "$SWENY_RELEASE_MANIFEST"
           fi
 
           # The core the dependents below are published against: this run's
@@ -287,6 +289,14 @@ jobs:
           # later publish step failed before the version writeback.
           PIN="${PUBLISHED_CORE_VERSION:-$(node -p "require('./packages/core/package.json').version")}"
           TAG="v5.${PIN}"
+
+          # Floor: v5 never moves to a lower core than it pins (SemVer precedence, so a
+          # prerelease ranks below its release). An equal core with a new action.yml moves.
+          CUR=$({ git show v5:action.yml 2>/dev/null || true; } | sed -n '/^  cli-version:/,/^  [a-z]/s/^    default: "\([0-9][^"]*\)"$/\1/p' | sed -n 1p)
+          if [ -n "$CUR" ] && [ "$(node scripts/semver-compare.mjs "$PIN" "$CUR")" = "-1" ]; then
+            echo "::notice::v5 pins @sweny-ai/core@${CUR}; not moving it down to ${PIN}"
+            exit 0
+          fi
 
           # npm takes minutes to serve a just-published version: poll every 15s for 15 min.
           # Still not served means nothing to do yet; the next release run converges.
