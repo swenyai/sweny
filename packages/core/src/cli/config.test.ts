@@ -94,7 +94,9 @@ describe("validateInputs: coding agent (honest --agent, #330)", () => {
     );
     const err = errors.find((e) => e.includes(`"${agent}"`));
     expect(err).toBeDefined();
-    expect(err).toMatch(/supported agents are "claude" \(headless Claude Code\) and "codex" \(Codex CLI\)/);
+    expect(err).toMatch(
+      /supported agents are "claude" \(headless Claude Code\), "codex" \(Codex CLI\), "pi" .*"acp:<command>"/,
+    );
   });
 
   it("accepts --agent pi without a key check: pi takes any provider's key, or a local model", () => {

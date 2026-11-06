@@ -62,19 +62,6 @@ npx tsx packages/core/src/cli/main.ts init
 npx tsx packages/core/src/cli/main.ts triage --dry-run
 ```
 
-For quick iteration, step caching replays completed steps on re-run:
-
-```bash
-# First run populates cache (~3 min for investigate)
-npx tsx packages/core/src/cli/main.ts triage --dry-run
-
-# Second run replays from cache (~0s)
-npx tsx packages/core/src/cli/main.ts triage --dry-run
-
-# Force fresh execution
-npx tsx packages/core/src/cli/main.ts triage --dry-run --no-cache
-```
-
 ## Adding a new skill
 
 Built-in skills live in `packages/core/src/skills/`.

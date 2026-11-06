@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { registerImplementCommand, registerTriageCommand } from "../cli/config.js";
-import { SUPPORTED_AGENTS } from "../harness/agents.js";
+import { SUPPORTED_AGENTS, unsupportedAgentError } from "../harness/agents.js";
 
 /**
  * The hosted cloud service is an experiment that is not running and not open
@@ -277,6 +277,15 @@ describe("spec and docs wording is harness-neutral", () => {
       expect(pages.filter((p) => pattern.test(read(p)))).toEqual([]);
     });
   }
+});
+
+describe("unsupportedAgentError lists the agents the docs list", () => {
+  it("names every supported agent id and the acp:<command> form", () => {
+    const message = unsupportedAgentError("gemini");
+    for (const id of SUPPORTED_AGENTS) expect(message).toContain(`"${id}"`);
+    expect(message).toContain('"acp:<command>"');
+    expect(read("README.md")).toContain("acp:<command>");
+  });
 });
 
 describe("supported agents are listed the same way everywhere", () => {
