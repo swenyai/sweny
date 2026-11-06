@@ -47,9 +47,9 @@ Terminal nodes (no outgoing edges) display with a dashed border. Unreachable nod
 
 ## Edge conditions
 
-Edges can be unconditional (always taken) or conditional (Claude evaluates a natural-language `when` clause at runtime). When a node has multiple outbound edges:
+Edges can be unconditional (always taken) or conditional (the coding agent evaluates a natural-language `when` clause at runtime). When a node has multiple outbound edges:
 
-1. Claude evaluates all `when` conditions against the node's output
+1. The agent evaluates all `when` conditions against the node's output
 2. The best matching conditional edge is taken
 3. If no conditional edge matches, an unconditional edge is taken as fallback
 4. If nothing matches, the workflow terminates at that node

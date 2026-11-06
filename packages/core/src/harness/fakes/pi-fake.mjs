@@ -199,7 +199,16 @@ const capture = {
   otherExtensionsLoaded,
 };
 const captureFile = path.join(dir, `capture-${n}.json`);
-const saveCapture = () => fs.writeFileSync(captureFile, JSON.stringify(capture, null, 2));
+// Write to a temp name, then rename. An abort can kill this process inside a
+// save, after the file is opened (truncated) and before the bytes land; the
+// kit then parses a torn capture. A rename is atomic, so the kit sees the
+// previous complete capture or the new one. The temp name does not match the
+// kit's /^capture-\d+\.json$/ filter.
+const saveCapture = () => {
+  const tmp = `${captureFile}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(capture, null, 2));
+  fs.renameSync(tmp, captureFile);
+};
 saveCapture();
 
 // ─── MCP client (callMcp) ────────────────────────────────────────

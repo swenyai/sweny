@@ -24,7 +24,7 @@ Workflows are pure data — fully serializable as JSON or YAML. You can export t
 
 ## Node
 
-A **Node** is a single step in the workflow. It has a human-readable name, a natural-language instruction that tells Claude what to do, and a list of skill IDs that determine which tools Claude can use at this step.
+A **Node** is a single step in the workflow. It has a human-readable name, a natural-language instruction that tells the coding agent what to do, and a list of skill IDs that determine which tools the agent can use at this step.
 
 ```ts
 interface Node {
@@ -35,9 +35,9 @@ interface Node {
 }
 ```
 
-The `instruction` field is the prompt Claude receives. Write it like you would write instructions for a capable engineer — be specific about what to do, what order, and what the output should look like.
+The `instruction` field is the prompt the agent receives. Write it like you would write instructions for a capable engineer — be specific about what to do, what order, and what the output should look like.
 
-The optional `output` field is a JSON Schema that constrains Claude's structured output for this node. Downstream nodes and edge conditions receive this structured data.
+The optional `output` field is a JSON Schema that constrains the agent's structured output for this node. Downstream nodes and edge conditions receive this structured data.
 
 ### Example: the Gather Context node from Triage
 
@@ -57,11 +57,11 @@ gather:
     - linear
 ```
 
-The node lists every compatible skill. The executor only activates skills that are configured in the current environment — if you use Sentry but not Datadog, Claude sees Sentry tools only.
+The node lists every compatible skill. The executor only activates skills that are configured in the current environment — if you use Sentry but not Datadog, the agent sees Sentry tools only.
 
 ## Edge
 
-An **Edge** connects two nodes. Edges can be unconditional (always followed) or conditional — with a natural-language `when` clause that Claude evaluates at runtime based on prior node results.
+An **Edge** connects two nodes. Edges can be unconditional (always followed) or conditional — with a natural-language `when` clause that the coding agent evaluates at runtime based on prior node results.
 
 ```ts
 interface Edge {
@@ -77,7 +77,7 @@ interface Edge {
 |----------|----------|
 | 0 outgoing edges | Node is terminal — workflow ends |
 | 1 unconditional edge | Automatically followed |
-| Multiple or conditional edges | Claude evaluates `when` clauses and picks the matching path |
+| Multiple or conditional edges | The coding agent evaluates `when` clauses and picks the matching path |
 
 ### Example: routing after Root Cause Analysis
 
@@ -91,11 +91,11 @@ edges:
     when: "The issue is a duplicate of an existing ticket, or severity is low"
 ```
 
-Claude reads the output of the `investigate` node and decides which condition matches. This replaces hard-coded if/else routing with flexible, natural-language branching.
+The coding agent reads the output of the `investigate` node and decides which condition matches. This replaces hard-coded if/else routing with flexible, natural-language branching.
 
 ## Skill
 
-A **Skill** is a group of tools that share configuration. Skills connect Claude to external services — GitHub, Sentry, Linear, Slack, and others. You pick which skills are available at each node; Claude only sees the tools it needs.
+A **Skill** is a group of tools that share configuration. Skills connect the agent to external services — GitHub, Sentry, Linear, Slack, and others. You pick which skills are available at each node; the agent only sees the tools it needs.
 
 ```ts
 interface Skill {
@@ -123,7 +123,7 @@ Skills are configured through environment variables. Set `GITHUB_TOKEN` and the 
 | **Notification** | notification | Discord, Teams, email, generic webhooks |
 
 :::note[Skills are tool groups, not integrations]
-A skill is not a monolithic integration. It is a bag of tools that Claude can call. The `github` skill gives Claude 7 tools (`github_search_code`, `github_get_issue`, `github_create_pr`, etc.). Claude decides which tools to use based on the node's instruction.
+A skill is not a monolithic integration. It is a bag of tools that the agent can call. The `github` skill gives the agent 7 tools (`github_search_code`, `github_get_issue`, `github_create_pr`, etc.). The agent decides which tools to use based on the node's instruction.
 :::
 
 ## Execution model
@@ -131,9 +131,9 @@ A skill is not a monolithic integration. It is a bag of tools that Claude can ca
 The executor walks the DAG from `entry` to completion:
 
 1. **Enter node** — the executor gathers tools from the node's skills and builds context from the input plus all prior node results.
-2. **Run Claude** — Claude receives the instruction, context, and tools. It executes the instruction, calling tools as needed.
+2. **Run the agent** — the agent receives the instruction, context, and tools. It executes the instruction, calling tools as needed.
 3. **Exit node** — the executor records the node result (status, data, tool calls made).
-4. **Resolve edge** — the executor checks outgoing edges. If there is one unconditional edge, it follows it. If there are conditional edges, Claude evaluates the `when` clauses and picks the matching path.
+4. **Resolve edge** — the executor checks outgoing edges. If there is one unconditional edge, it follows it. If there are conditional edges, the coding agent evaluates the `when` clauses and picks the matching path.
 5. **Repeat** — until a terminal node (no outgoing edges) is reached.
 
 Every step emits structured `ExecutionEvent` objects — `workflow:start`, `node:enter`, `tool:call`, `tool:result`, `node:exit`, `route`, `workflow:end` — so you can observe, log, and trace the entire run.

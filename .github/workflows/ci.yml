@@ -198,13 +198,24 @@ jobs:
           # Dependency-free extraction: the step's `run: |` block (10-space body) up to the next step.
           awk '/- name: Install agent sandbox dependencies/{f=1} f&&/^      run: \|/{r=1;next} r&&/^$/{print;next} r&&/^        /{sub(/^        /,"");print;next} r{exit}' action.yml > "$RUNNER_TEMP/sandbox-step.sh"
           test -s "$RUNNER_TEMP/sandbox-step.sh"
-          grep -q apparmor_restrict_unprivileged_userns "$RUNNER_TEMP/sandbox-step.sh"
-          RUNNER_ENVIRONMENT=github-hosted SWENY_SANDBOX=auto bash "$RUNNER_TEMP/sandbox-step.sh"
+          grep -q 'SANDBOX_USERNS" relax' "$RUNNER_TEMP/sandbox-step.sh"
+          # A self-hosted runner is never relaxed without strict, and off never is.
+          rc=0; RUNNER_ENVIRONMENT=self-hosted SWENY_SANDBOX=auto bash scripts/sandbox-userns.sh relax || rc=$?; test "$rc" = 3
+          rc=0; RUNNER_ENVIRONMENT=github-hosted SWENY_SANDBOX=off bash scripts/sandbox-userns.sh relax || rc=$?; test "$rc" = 3
+          RUNNER_ENVIRONMENT=github-hosted SWENY_SANDBOX=auto SANDBOX_USERNS="$GITHUB_WORKSPACE/scripts/sandbox-userns.sh" bash "$RUNNER_TEMP/sandbox-step.sh"
           echo "PROBE apparmor_restrict_unprivileged_userns=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo n/a)"
           if out=$(bwrap --ro-bind / / --dev /dev --proc /proc true 2>&1); then
             echo "PROBE RESULT: bwrap works after the Action step (auto sandboxes on hosted runners)"
           else
             echo "PROBE RESULT: bwrap still fails after the Action step: $out"
+            exit 1
+          fi
+          # srt's seccomp helper nests a user namespace inside bwrap; ubuntu-26.04's
+          # bwrap-userns-restrict AppArmor profile denies it unless the Action relaxed it.
+          if out=$(bwrap --ro-bind / / --dev /dev --proc /proc unshare --user --map-root-user true 2>&1); then
+            echo "PROBE RESULT: a nested user namespace works inside bwrap after the Action step"
+          else
+            echo "PROBE RESULT: a nested user namespace still fails inside bwrap after the Action step: $out"
             exit 1
           fi
 
@@ -232,8 +243,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bubblewrap socat ripgrep
-          # ubuntu-24.04 restricts unprivileged user namespaces; bwrap needs them (CI run 36757667416).
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          # The Action's own host relaxation: the userns sysctl (ubuntu-24.04, CI run 36757667416)
+          # and the bwrap-userns-restrict profile (ubuntu-26.04, CI run 42296250678).
+          RUNNER_ENVIRONMENT=github-hosted bash scripts/sandbox-userns.sh relax
+          bash scripts/sandbox-userns.sh probe
           npm install -g --ignore-scripts @anthropic-ai/sandbox-runtime@0.0.78
           echo "PROBE srt: $(command -v srt) $(srt --version)"
 

@@ -598,7 +598,7 @@ function cancel(): never {
  * Flow:
  * 1. Detect git remote (used to infer source-control provider)
  * 2. Pick one of five branches:
- *    - `__marketplace` → browse published workflows at swenyai/workflows, then delegate to `installMarketplaceWorkflow`
+ *    - `__marketplace` → browse published workflows at swenyai/marketplace, then delegate to `installMarketplaceWorkflow`
  *    - A built-in `WORKFLOW_TEMPLATES` entry → write that workflow file
  *    - `__custom` → LLM generates a workflow from a user description
  *    - `__e2e` → delegate to the e2e browser-testing wizard in `./e2e.ts`
@@ -766,7 +766,7 @@ export async function runNew(options?: {
               {
                 value: "__marketplace",
                 label: "Browse marketplace",
-                hint: "install a published workflow from swenyai/workflows",
+                hint: "install a published workflow from swenyai/marketplace",
               },
             ]
           : []),

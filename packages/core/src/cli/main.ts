@@ -90,7 +90,6 @@ import {
   registerImplementCommand,
   parseCliInputs,
   validateInputs,
-  validateWarnings,
   parsePositiveInt,
 } from "./config.js";
 import type { CliConfig } from "./config.js";
@@ -352,11 +351,6 @@ triageCmd.action(async (options: Record<string, unknown>) => {
     console.error(formatValidationErrors(errors));
     console.error(c.subtle("\n  Run sweny triage --help for usage information.\n"));
     process.exit(1);
-  }
-
-  // Non-fatal warnings (e.g. missing service map file)
-  for (const warning of validateWarnings(config)) {
-    console.warn(chalk.yellow(`  \u26A0  ${warning}`));
   }
 
   // Banner
@@ -692,11 +686,6 @@ implementCmd.action(async (issueId: string, options: Record<string, unknown>) =>
     maxImplementTurns: parsePositiveInt(options.maxImplementTurns ?? (fileConfig["max-implement-turns"] as string), 40),
     baseBranch: (options.baseBranch as string) || (fileConfig["base-branch"] as string) || "main",
     repository: (options.repository as string) || process.env.GITHUB_REPOSITORY || "",
-    outputDir:
-      (options.outputDir as string) ||
-      process.env.SWENY_OUTPUT_DIR ||
-      (fileConfig["output-dir"] as string) ||
-      ".sweny/output",
   };
 
   // Validate (parity with triage): surface the curated "Missing: ..." errors

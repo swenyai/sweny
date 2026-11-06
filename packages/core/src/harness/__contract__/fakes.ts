@@ -416,7 +416,7 @@ export function createCodexProcessFake(): CodexProcessFake {
     usageFields: ["inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens"],
     reset() {
       for (const f of fs.readdirSync(dir)) {
-        if (/^(capture|script)-\d+\.json$/.test(f)) fs.rmSync(path.join(dir, f), { force: true });
+        if (/^(capture|script)-\d+\.json(\.\d+\.tmp)?$/.test(f)) fs.rmSync(path.join(dir, f), { force: true });
       }
       fs.rmSync(path.join(dir, "version"), { force: true });
       writeScript([]);
@@ -438,7 +438,8 @@ export function createCodexProcessFake(): CodexProcessFake {
     captured() {
       const all = raw();
       const last = all.at(-1);
-      // No process ran (an abort landed before spawn): nothing is left running.
+      // No capture: no process ran (an abort landed before spawn), or the abort
+      // killed it before its first capture save completed. Nothing is left running.
       if (!last) return { ...emptyCapture(), stopped: true, cancelWired: true };
       return toCapture(last, all.length);
     },
@@ -601,7 +602,7 @@ export function createPiProcessFake(): PiProcessFake {
     usageFields: ["costUsd", "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens"],
     reset() {
       for (const f of fs.readdirSync(dir)) {
-        if (/^(capture|script)-\d+\.json$/.test(f)) fs.rmSync(path.join(dir, f), { force: true });
+        if (/^(capture|script)-\d+\.json(\.\d+\.tmp)?$/.test(f)) fs.rmSync(path.join(dir, f), { force: true });
       }
       fs.rmSync(path.join(dir, "version"), { force: true });
       writeScript([]);
@@ -622,7 +623,8 @@ export function createPiProcessFake(): PiProcessFake {
     captured() {
       const all = raw();
       const last = all.at(-1);
-      // No process ran (an abort landed before spawn): nothing is left running.
+      // No capture: no process ran (an abort landed before spawn), or the abort
+      // killed it before its first capture save completed. Nothing is left running.
       if (!last) return { ...emptyCapture(), stopped: true, cancelWired: true };
       return toCapture(last, all.length);
     },

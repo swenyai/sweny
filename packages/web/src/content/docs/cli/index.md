@@ -35,11 +35,10 @@ The CLI auto-loads `.env` at startup -- no external dotenv tooling required.
 **2. Create a workflow from a description:**
 
 ```bash
-sweny workflow create "analyze our codebase for common security \
-  anti-patterns, compile a report, and create tickets for critical findings"
+sweny new
 ```
 
-SWEny generates a full workflow with nodes, conditional routing, and structured output schemas. It renders an ASCII DAG and prompts you to save, refine, or discard:
+Pick "Describe your own" and describe the task (for example: "analyze our codebase for common security anti-patterns, compile a report, and create tickets for critical findings"). SWEny generates a full workflow with nodes, conditional routing, and structured output schemas. It renders an ASCII DAG and prompts you to save, refine, or discard:
 
 ```
   Save to .sweny/workflows/security_audit.yml? [Y/n/refine]
@@ -163,12 +162,7 @@ base-branch: main
 pr-labels: agent,triage,needs-review
 
 # Paths
-service-map-path: .github/service-map.yml
 log-file: ./logs/errors.json
-
-# Cache
-cache-dir: .sweny/cache
-cache-ttl: 86400
 ```
 
 Secrets (API keys, tokens) are never read from the config file -- always use environment variables or `.env`.
@@ -183,7 +177,6 @@ observability-provider: sentry
 sentry-org: my-org
 sentry-project: my-project
 issue-tracker-provider: linear
-linear-team-id: your-team-uuid
 ```
 
 ```bash

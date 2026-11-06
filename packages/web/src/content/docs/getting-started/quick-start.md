@@ -49,9 +49,9 @@ Then use `/sweny:triage` to investigate production alerts, `/sweny:implement ENG
 The fastest way to get things done. Describe a task, get a workflow, run it.
 
 ```bash
-# Create a workflow from a description
-sweny workflow create "scan the codebase for security anti-patterns \
-  and create tickets for critical findings"
+# Create a workflow from a description: pick "Describe your own", then describe the task:
+# "scan the codebase for security anti-patterns and create tickets for critical findings"
+sweny new
 
 # Refine it
 sweny workflow edit .sweny/workflows/security_scan.yml \

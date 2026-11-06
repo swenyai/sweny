@@ -614,7 +614,7 @@ The `function` kind is also the natural home for any future code-based check (fo
 
 #### `judge`: LLM-as-judge
 
-Calls a small Claude model with the node's data, the node's tool-call trace, and the author's rubric. The judge returns a single verdict word (default `yes` / `no`) plus a short reasoning string. Use when the contract is conditional, semantic, or otherwise outside the reach of a deterministic rule.
+Calls a small, fast model through the node's agent harness with the node's data, the node's tool-call trace, and the author's rubric. The judge returns a single verdict word (default `yes` / `no`) plus a short reasoning string. Use when the contract is conditional, semantic, or otherwise outside the reach of a deterministic rule.
 
 ```yaml
 eval:
@@ -713,11 +713,12 @@ When a path contains `[*]` and resolves successfully:
 
 #### Model selection
 
-Three layers of override, narrowest wins:
+Three layers of override, narrowest wins, then the harness default:
 
 1. Evaluator-level `model` field on a `judge` evaluator.
 2. Node-level `judge_model` field.
-3. Workflow-level `judge_model` field. Default `claude-haiku-4-5`.
+3. Workflow-level `judge_model` field.
+4. The executor's default: a small, fast model chosen by the agent harness (Claude Code uses `claude-haiku-4-5`; an agent with no judge default uses the model it is already configured with).
 
 Judges return a single token verdict, so a small fast model is the right default.
 
@@ -895,7 +896,7 @@ retry:
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | (omitted)                 | Default preamble: a structured list of failing evaluators (`name (kind): reasoning`, one per line) followed by "Fix and try again." |
 | `"static text"`           | Author's text + the structured failing-evaluator list appended.                                                                     |
-| `{ auto: true }`          | Executor calls `claude.ask` with a default reflection prompt; the response becomes preamble.                                        |
+| `{ auto: true }`          | Executor asks the agent harness (`ask`) with a default reflection prompt; the response becomes preamble.                            |
 | `{ reflect: "<prompt>" }` | Same as `auto`, but the author's `reflect` prompt is used as the diagnosis question.                                                |
 
 The preamble is prepended to the node's normal instruction so the LLM sees
@@ -904,7 +905,7 @@ failure as feedback. Older errors are noise.
 
 ### Reflection failure
 
-If `claude.ask` throws or returns empty during autonomous mode, the
+If the reflection `ask` throws or returns empty during autonomous mode, the
 executor falls back to the default static preamble for that attempt and
 logs a warning. Reflection failure never escalates to a workflow failure.
 

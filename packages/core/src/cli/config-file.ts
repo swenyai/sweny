@@ -233,12 +233,7 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # pr-labels: agent,triage,needs-review
 
 # ── Paths ─────────────────────────────────────────────────────────────
-# service-map-path: .github/service-map.yml
 # log-file: ./logs/errors.json           # required when observability-provider is "file"
-
-# ── Cache ─────────────────────────────────────────────────────────────
-# cache-dir: .sweny/cache
-# cache-ttl: 86400
 
 # ── Run reporting ─────────────────────────────────────────────────────
 # Opt-in and not currently available: token minting is not yet exposed, so
@@ -268,7 +263,6 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 # issue-tracker-provider: file
 # source-control-provider: file
 # notification-provider: file
-# output-dir: .sweny/output
 
 # ── Credentials (.env) ───────────────────────────────────────────────
 # Copy the relevant block into your .env file and fill in the values.
@@ -291,8 +285,6 @@ export const STARTER_CONFIG = `# .sweny.yml — SWEny project configuration
 #
 # Linear (issue tracker) — https://linear.app/settings/api
 #   LINEAR_API_KEY=lin_api_...
-#   LINEAR_TEAM_ID=...          # Settings > Workspace > Teams > [team] > copy ID from URL
-#   LINEAR_BUG_LABEL_ID=...     # Settings > Labels > [label] > copy ID from URL
 #
 # Jira (issue tracker) — https://your-org.atlassian.net
 #   JIRA_BASE_URL=https://your-org.atlassian.net

@@ -26,8 +26,16 @@
  *   SWENY_SANDBOX_ALLOWED_DOMAINS  / sandbox-allowed-domains  extra hosts for sandboxed commands
  */
 
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  accessSync,
+  constants as fsConstants,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import type { SandboxSettings } from "@anthropic-ai/claude-agent-sdk";
@@ -1032,7 +1040,7 @@ export type SandboxMode = "off" | "auto" | "strict";
 
 /**
  * Parse the sandbox mode from the explicit `mode` or `SWENY_SANDBOX`.
- * Accepts `off|false|0`, `auto`, `strict|on|true|1` (`on` is an alias for
+ * Accepts `off|false|0|no`, `auto`, `strict|on|true|1` (`on` is an alias for
  * `strict`). Unset or unknown (with a warning) uses the default: `auto` when
  * `CI` is truthy, `off` otherwise. An explicit value always wins.
  */
@@ -1042,7 +1050,7 @@ export function resolveSandboxMode(
   logger?: Pick<Logger, "warn">,
 ): SandboxMode {
   const raw = (mode ?? env.SWENY_SANDBOX ?? "").trim().toLowerCase();
-  if (raw === "off" || raw === "false" || raw === "0") return "off";
+  if (raw === "off" || raw === "false" || raw === "0" || raw === "no") return "off";
   if (raw === "strict" || raw === "on" || raw === "true" || raw === "1") return "strict";
   if (raw === "auto") return "auto";
   const fallback: SandboxMode = truthy(env.CI) ? "auto" : "off";
@@ -1050,24 +1058,128 @@ export function resolveSandboxMode(
   return fallback;
 }
 
-/** Functional bubblewrap check: can it actually create a sandbox on this host? */
-function bwrapWorks(): string | undefined {
+/**
+ * The fix-it hint for a sandbox start that failed on a user namespace. Ubuntu
+ * 23.10+ restricts unprivileged user namespaces (the sysctl), and Ubuntu 26.04
+ * also loads the `bwrap-userns-restrict` AppArmor profile, which denies every
+ * capability to bwrap's children, so the seccomp helper of
+ * @anthropic-ai/sandbox-runtime cannot nest its own user namespace
+ * (`apply-seccomp: write /proc/self/setgroups ... Permission denied`,
+ * anthropics/sandbox-runtime#429). Empty when `stderr` is not a namespace error.
+ */
+export function usernsHint(stderr: string): string {
+  return /user namespace|userns|uid map|uid_map|setgroups|setting up uid|Operation not permitted|Permission denied/i.test(
+    stderr,
+  )
+    ? "; unprivileged user namespaces look restricted (Ubuntu 23.10+: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; " +
+        "Ubuntu 26.04 also: sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict)"
+    : "";
+}
+
+const BWRAP_PROBE = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"];
+
+/**
+ * Where the host probes look for `bwrap` and `unshare`. Never PATH: a probe runs
+ * a real binary, and a directory an agent can write may be on PATH.
+ */
+export const SYSTEM_BIN_DIRS = ["/usr/bin", "/bin", "/usr/local/bin", "/usr/sbin"] as const;
+
+/** The whole environment a probe runs with: no parent variables, no secrets. */
+const PROBE_ENV = { PATH: "/usr/bin:/bin" };
+
+/** Longest probe stderr echoed into a warning. */
+const PROBE_ECHO_MAX = 200;
+
+function isExecutableFile(p: string): boolean {
   try {
-    execFileSync("bwrap", ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "true"], {
-      stdio: ["ignore", "ignore", "pipe"],
-      timeout: 10_000,
-    });
-    return undefined;
-  } catch (err) {
-    const stderr = String((err as { stderr?: unknown }).stderr ?? (err as Error).message ?? "").trim();
-    const userns = /user namespace|uid map|setting up uid|Operation not permitted|Permission denied/i.test(stderr);
+    if (!statSync(p).isFile()) return false;
+    accessSync(p, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Absolute path of `name` in {@link SYSTEM_BIN_DIRS} (first match), never from PATH. */
+export function systemBin(name: string, exists: (p: string) => boolean = isExecutableFile): string | undefined {
+  for (const dir of SYSTEM_BIN_DIRS) {
+    const p = path.posix.join(dir, name);
+    if (exists(p)) return p;
+  }
+  return undefined;
+}
+
+export interface ProbeResult {
+  /** Exit status; null when the process could not start or was killed. */
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  /** Spawn error (ENOENT, timeout). */
+  error?: Error;
+}
+
+/** Run a probe binary (an absolute path) and collect its result. */
+export type ProbeRunner = (file: string, args: string[]) => ProbeResult;
+
+const runProbe: ProbeRunner = (file, args) => {
+  const r = spawnSync(file, args, {
+    env: PROBE_ENV,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+    timeout: 10_000,
+    maxBuffer: 64 * 1024,
+  });
+  return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", error: r.error };
+};
+
+/** One line of a probe's output for a warning: the first line, control characters masked, capped. */
+export function probeLine(text: string): string {
+  const line = text.trim().split(/\r?\n/)[0] ?? "";
+  return line.replace(/[\u0000-\u001f\u007f-\u009f]/g, "?").slice(0, PROBE_ECHO_MAX) || "unknown error";
+}
+
+function probeEcho(r: ProbeResult): string {
+  return probeLine(r.stderr.trim() || r.error?.message || (r.status === null ? "killed" : `exit ${r.status}`));
+}
+
+/**
+ * Functional bubblewrap check: can it actually create a sandbox on this host?
+ * The same runs as the Action's `scripts/sandbox-userns.sh probe`: a plain
+ * `bwrap ... true`, then a user namespace nested inside bwrap, which the SDK
+ * sandbox's seccomp helper needs. On Ubuntu 26.04 the first passes and the
+ * second does not, so a plain probe would report a sandbox that then fails
+ * every command.
+ *
+ * `bwrap` and `unshare` come only from {@link SYSTEM_BIN_DIRS}, run by absolute
+ * path with {@link PROBE_ENV}, and at most one sanitized line of their stderr
+ * reaches the warning. The nested run is skipped (not failed) when there is no
+ * system `unshare` or it has no `--map-root-user` (busybox): an unusable probe
+ * tool is not a restricted host.
+ */
+export function bwrapWorks(
+  run: ProbeRunner = runProbe,
+  findBin: (name: string) => string | undefined = (name) => systemBin(name),
+): string | undefined {
+  const ok = (r: ProbeResult) => r.status === 0 && !r.error;
+  const bwrap = findBin("bwrap");
+  if (!bwrap) {
+    const dirs = SYSTEM_BIN_DIRS.slice(0, -1).join(", ") + " or " + SYSTEM_BIN_DIRS[SYSTEM_BIN_DIRS.length - 1];
+    return `bwrap is not installed in ${dirs} (the sandbox probe does not search PATH)`;
+  }
+  const plain = run(bwrap, [...BWRAP_PROBE, "true"]);
+  if (!ok(plain)) return `bwrap cannot create a sandbox (${probeEcho(plain)})${usernsHint(plain.stderr)}`;
+  const unshare = findBin("unshare");
+  if (!unshare) return undefined;
+  const help = run(unshare, ["--help"]);
+  if (!`${help.stdout}\n${help.stderr}`.includes("--map-root-user")) return undefined;
+  const nested = run(bwrap, [...BWRAP_PROBE, unshare, "--user", "--map-root-user", "true"]);
+  if (!ok(nested)) {
     return (
-      `bwrap cannot create a sandbox (${stderr.split("\n")[0] || "unknown error"})` +
-      (userns
-        ? "; unprivileged user namespaces look restricted (Ubuntu 23.10+: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)"
-        : "")
+      `bwrap cannot nest a user namespace, which the sandbox's seccomp helper needs (${probeEcho(nested)})` +
+      usernsHint("user namespace")
     );
   }
+  return undefined;
 }
 
 /**

@@ -79,7 +79,7 @@ Examples of `when` conditions:
 - `the root cause was identified`
 - `no related issues were found`
 
-Claude evaluates these conditions against the source node's output at runtime to determine routing.
+The coding agent evaluates these conditions against the source node's output at runtime to determine routing.
 
 ## Properties panel
 
@@ -96,8 +96,8 @@ The right panel shows properties for the selected element, or workflow metadata 
 
 - **ID** -- the machine identifier (editable; must be unique, alphanumeric with hyphens and underscores)
 - **Name** -- human-readable node name displayed on the canvas
-- **Instruction** -- what Claude should accomplish at this step. This is the exact text Claude receives, so write it as a direct instruction. Click the expand button for a full-screen editor.
-- **Skills** -- toggle which skills are available at this node. Enabled skills provide their tools to Claude during execution.
+- **Instruction** -- what the coding agent should accomplish at this step. This is the exact text the agent receives, so write it as a direct instruction. Click the expand button for a full-screen editor.
+- **Skills** -- toggle which skills are available at this node. Enabled skills provide their tools to the agent during execution.
 - **Set as entry** -- make this node the workflow entry point
 - **Delete node** -- remove the node and all connected edges
 
@@ -106,7 +106,7 @@ Structured output schemas are supported in the workflow YAML and TypeScript API,
 :::
 
 :::note[Instruction tips]
-Write instructions as direct commands to Claude: "Search for recent errors in Sentry and Datadog. Focus on the last 24 hours. Summarize severity, affected services, and frequency." The instruction is exactly what Claude reads at runtime.
+Write instructions as direct commands to the agent: "Search for recent errors in Sentry and Datadog. Focus on the last 24 hours. Summarize severity, affected services, and frequency." The instruction is exactly what the agent reads at runtime.
 :::
 
 ### Edge properties
