@@ -50,6 +50,7 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
     String(s.name).startsWith("Tag v5"),
   )!;
   const stampScript = fs.readFileSync(path.join(repoRoot, "scripts/stamp-action-version.mjs"), "utf8");
+  const tagSourceScript = fs.readFileSync(path.join(repoRoot, "scripts/verify-tag-source.mjs"), "utf8");
 
   const gitEnv = {
     ...process.env,
@@ -69,7 +70,7 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
   interface Setup {
     /** Commits on main, oldest first; the last is main's tip. `readme` writes README.md, absent removes it. */
     main: Array<{ core: string; readme?: string }>;
-    /** Index into `main` of the commit the run was triggered for. Re-runs keep their old event. Default: the tip. */
+    /** Index into `main` of the commit this run verified (its event; re-runs keep it). Default: the tip. */
     event?: number;
     /** v5 today: main[at] stamped to `pin`, or main[at] itself when `pin` is null (action.yml says latest). */
     v5?: { at: number; pin: string | null };
@@ -89,6 +90,7 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
     fs.mkdirSync(path.join(work, "packages/core"), { recursive: true });
     fs.writeFileSync(path.join(work, "action.yml"), actionText);
     fs.writeFileSync(path.join(work, "scripts/stamp-action-version.mjs"), stampScript);
+    fs.writeFileSync(path.join(work, "scripts/verify-tag-source.mjs"), tagSourceScript);
     // Past, increasing dates so tags on these commits sort before anything the step creates.
     const shas = o.main.map((c, i) => {
       fs.writeFileSync(path.join(work, "packages/core/package.json"), JSON.stringify({ version: c.core }));
@@ -149,7 +151,8 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
       env: {
         ...gitEnv,
         PATH: `${ctx.bin}:${process.env.PATH}`,
-        // Only read by older versions of the step; the reconciling step ignores the event.
+        VERIFIED_SHA: ctx.event,
+        // Read only by older versions of the step.
         BASE_SHA: ctx.event,
         PUBLISHED_CORE_VERSION: opts.published ?? "",
         FAKE_NPM_JSON: JSON.stringify(npm),
@@ -189,7 +192,7 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
     expect(created(ctx)[0]).toContain("--generate-notes --notes-start-tag v5.0.1.199");
   });
 
-  it("a re-run of an old event converges on main's tip, not the event", () => {
+  it("converges on main's tip when it is this run's verified commit plus the version writeback", () => {
     const ctx = setup({
       main: [{ core: "0.1.200" }, { core: "0.1.201" }],
       event: 0,
@@ -201,6 +204,31 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
     expect(git(ctx.origin, ["rev-parse", "v5~1"])).toBe(ctx.tip);
     expect(pinAt(ctx, "v5")).toBe("0.1.201");
     expect(tags(ctx)).toContain("v5.0.1.201");
+  });
+
+  it("does nothing when main has moved past this run's verified commit (a re-run, or a newer push)", () => {
+    const ctx = setup({
+      main: [{ core: "0.1.200" }, { core: "0.1.200", readme: "unverified" }],
+      event: 0,
+      v5: { at: 0, pin: "0.1.200" },
+      tags: ["v5.0.1.200"],
+    });
+    const r = run(ctx, { served: ["0.1.200"], releases: ["v5.0.1.200"] });
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).toContain("main has moved past");
+    expect(v5Sha(ctx)).toBe(ctx.v5Before);
+    expect(created(ctx)).toEqual([]);
+  });
+
+  it("reconciles Releases only for the 10 most recent v5.* tags", () => {
+    const old = Array.from({ length: 12 }, (_, i) => `v5.0.1.${190 + i}`);
+    const ctx = setup({ main: [{ core: "0.1.201" }], v5: { at: 0, pin: "0.1.201" }, tags: old });
+    // Missing: v5.0.1.190 (outside the window) and v5.0.1.201 (inside it).
+    const r = run(ctx, { served: ["0.1.201"], releases: old.slice(1, -1) });
+    expect(r.status, r.out).toBe(0);
+    expect(created(ctx)).toHaveLength(1);
+    expect(created(ctx)[0]).toContain("release create v5.0.1.201");
+    expect(created(ctx)[0]).toContain("--latest=true --generate-notes --notes-start-tag v5.0.1.200");
   });
 
   it("after a revert lands, a re-run of the reverted commit leaves v5 on the reverted-to state", () => {
@@ -306,6 +334,18 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
 
 describe("tag-action job", () => {
   const release = parse(fs.readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8"));
+
+  it("checks out and reconciles from the commit this run's verify job tested", () => {
+    const steps = release.jobs["tag-action"].steps as Array<Record<string, any>>;
+    const checkout = steps.find((st) => String(st.uses).startsWith("actions/checkout@"))!;
+    const tag = steps.find((st) => String(st.name).startsWith("Tag v5"))!;
+    expect(checkout.with.ref).toBe("${{ needs.verify.outputs.sha }}");
+    expect(tag.env.VERIFIED_SHA).toBe("${{ needs.verify.outputs.sha }}");
+  });
+
+  it("has no writeback_sha output left over from the old tag-source step", () => {
+    expect(release.jobs.publish.outputs).not.toHaveProperty("writeback_sha");
+  });
 
   it("serializes tagging runs without cancelling one in flight", () => {
     expect(release.jobs["tag-action"].concurrency).toEqual({ group: "release-tag", "cancel-in-progress": false });
