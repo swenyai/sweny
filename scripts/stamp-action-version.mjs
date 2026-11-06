@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Stamp the `cli-version` default in action.yml to an exact @sweny-ai/core version.
-// Used by the release workflow on the commit behind an immutable v5.<core-version> tag,
-// so re-running that tag always installs the core it was cut with. The floating v5 tag
-// is never stamped and keeps defaulting to "latest".
+// Used by the release workflow on the commit behind the v5 and v5.<core-version> tags, so
+// both install the core their release was tested with. main keeps "latest" for branch refs.
 //
 // usage: node scripts/stamp-action-version.mjs <version> [path/to/action.yml]
 import { readFileSync, writeFileSync } from "node:fs";
