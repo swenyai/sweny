@@ -148,7 +148,7 @@ The `buildAutoMcpServers()` function in `@sweny-ai/core` takes the current provi
 auto-injected servers (from provider config)
   + workspace tool servers (from workspace-tools input)
     + user-supplied servers (from mcp-servers-json input)  ← wins on conflict
-      = final MCP server map passed to Claude Code
+      = final MCP server map passed to the coding agent
 ```
 
-The merged map is passed to the Claude Code SDK's `query()` function as the `mcpServers` option. Claude Code manages the MCP server lifecycle — starting stdio processes, connecting to HTTP endpoints, and routing tool calls.
+The merged map is handed to the node's agent harness, which gives it to the agent in that agent's own format. The agent manages the MCP server lifecycle: starting stdio processes, connecting to HTTP endpoints, and routing tool calls. ACP agents must support stdio servers; HTTP and SSE are optional for them.

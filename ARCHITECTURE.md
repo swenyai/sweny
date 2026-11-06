@@ -14,8 +14,8 @@ The Action and CLI are free and run in **your** environment — your CI runner, 
 | `@sweny-ai/studio` | `packages/studio` | npm | Visual DAG editor and execution monitor |
 | `@sweny-ai/mcp` | `packages/mcp` | npm | MCP server for Claude Code / Desktop |
 | — | `packages/plugin` | no (marketplace) | Claude Code plugin: skills, MCP tools, agent, hooks |
-| `@sweny-ai/action` | `packages/action` | no (private) | GitHub Action entrypoint — bundled into root `dist/` |
 | — | `packages/web` | no (private) | Docs site (Vercel → docs.sweny.ai) |
+| (composite) | `action.yml` (repo root) | no | GitHub Action entrypoint: a composite action that runs `sweny workflow run`. There is no action package and no JS bundle. |
 
 ### Execution Flow
 
@@ -34,9 +34,13 @@ All execution happens locally. The executor has an opt-in reporting path that em
 
 Each node declares `skills`. MCP servers declared on those resolved skills are passed only to that node. Client-level MCP servers (including CLI catalog auto-wiring and explicit user configuration) remain available across the run.
 
-What SWEny does **not** scope: the underlying Claude Code subprocess runs with `permissionMode: "bypassPermissions"`, which keeps the built-in Bash/Read/Write/Edit tools available without permission prompting. This is intentional — SWEny targets CI-style autonomous runs where interactive approval is not an option, and the agent needs these capabilities to do the work. If you need a stricter sandbox, run the Action in a container that constrains the filesystem and network instead of looking for a flag inside SWEny.
+What SWEny does **not** scope: the underlying agent process keeps its built-in shell and file tools available without permission prompting (Claude Code runs with `permissionMode: "bypassPermissions"`). This is intentional — SWEny targets CI-style autonomous runs where interactive approval is not an option, and the agent needs these capabilities to do the work. If you need a stricter sandbox, run the Action in a container that constrains the filesystem and network instead of looking for a flag inside SWEny.
 
-`eval` evaluators are the primary mechanism for making a node's behavior auditable. Each node declares a list of named evaluators with `kind: value | function | judge`. `function` rules (`any_tool_called`, `all_tools_called`, `no_tool_called`) and `value` rules (`output_required`, `output_matches`) are checked deterministically against the recorded tool outcomes and structured output. `judge` evaluators call a small Claude model with a rubric for the conditional and semantic cases the deterministic kinds can't express. See [spec.sweny.ai/nodes/#eval](https://spec.sweny.ai/nodes/#eval).
+`eval` evaluators are the primary mechanism for making a node's behavior auditable. Each node declares a list of named evaluators with `kind: value | function | judge`. `function` rules (`any_tool_called`, `all_tools_called`, `no_tool_called`) and `value` rules (`output_required`, `output_matches`) are checked deterministically against the recorded tool outcomes and structured output. `judge` evaluators call a small, fast model through the node's agent with a rubric for the conditional and semantic cases the deterministic kinds can't express. See [spec.sweny.ai/nodes/#eval](https://spec.sweny.ai/nodes/#eval).
+
+### Agent harnesses
+
+Each node runs on a harness for the agent chosen with `--agent` (Action input `agent`): Claude Code (default), Codex, pi (experimental), or any [ACP](https://agentclientprotocol.com) agent via `acp:<command>` (experimental). The harness is the seam: SWEny's opinions (scoped env, skill credentials kept out of the agent, only the MCP servers SWEny injects, read-only dry runs, `tools.deny`, structured-output checks, turn limits, egress allowlist, timeouts) are enforced natively where the agent supports them, kept by SWEny where it does not (process sandbox, tool bridge, output parsing, watchdog), and otherwise reported as `degraded`; under `--harness-policy strict` (the default under GitHub Actions) a node whose policy the agent cannot enforce is refused. The per-agent table is in the [README](./README.md#agent-harnesses); the declared capabilities are in `packages/core/src/harness/capabilities.ts`.
 
 ### Skills
 
@@ -84,7 +88,7 @@ as a community exception; revisit when Atlassian ships a first-party server).
 Currently http (no exception needed): Datadog, Linear, New Relic, BetterStack,
 PagerDuty.
 
-Users can override any auto-injected server with a pre-installed binary by setting
+Every stdio entry in the catalog launches `<package>@latest`, so the server version is whatever npm serves at run time. That is the trade the exception accepts. Users can override any auto-injected server with a pre-installed (or version-pinned) binary by setting
 `mcp-servers-json` in `.sweny.yml`.
 
 ---

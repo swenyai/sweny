@@ -162,34 +162,19 @@ sweny check
 
 This lists every built-in skill and shows which ones have their credentials configured. Set the missing environment variables for the skills your workflow needs.
 
-## Stale results after code changes
-
-**Symptom:** You changed your workflow or code, but SWEny produces the same results as before.
-
-**Cause:** The executor caches completed node results. If the workflow definition or input hasn't changed enough to invalidate the cache, previous results are reused.
-
-**Fix:**
-
-```bash
-sweny triage --no-cache       # Disable cache for this run
-rm -rf .sweny/cache           # Clear the cache entirely
-```
-
-The default cache TTL is 24 hours (`86400` seconds). For iterative development where you want fresh results every run, use `--no-cache`.
-
-## Claude produces unexpected results
+## The agent produces unexpected results
 
 **Symptom:** The investigation is shallow, the implementation misses the point, or the PR changes the wrong files.
 
 **Fix:**
 
-- Add `additional-instructions` to guide Claude:
+- Add `additional-instructions` to guide the agent:
   ```yaml
   additional-instructions: "Focus on the payment webhook handler. The error is likely in src/webhooks/stripe.ts."
   ```
 - Use `investigation-depth: thorough` for deeper analysis
-- Check that the correct skills are available at the relevant node — Claude can only use tools from the node's declared skills
-- Review the execution events in the GitHub Actions log or Studio to see what tools Claude called and what data it received
+- Check that the correct skills are available at the relevant node — the agent can only use tools from the node's declared skills
+- Review the execution events in the GitHub Actions log or Studio to see what tools the agent called and what data it received
 
 ## Still stuck?
 

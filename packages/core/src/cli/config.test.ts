@@ -34,12 +34,6 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
     observabilityCredentials: { file: {} },
     issueTrackerProvider: "file",
     linearApiKey: "",
-    linearTeamId: "",
-    linearBugLabelId: "",
-    linearTriageLabelId: "",
-    linearStateBacklog: "",
-    linearStateInProgress: "",
-    linearStatePeerReview: "",
     timeRange: "24h",
     severityFocus: "errors",
     serviceFilter: "*",
@@ -54,7 +48,6 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
     noveltyMode: true,
     issueOverride: "",
     additionalInstructions: "",
-    serviceMapPath: ".github/service-map.yml",
     githubToken: "ghp_test",
     botToken: "",
     sourceControlProvider: "github",
@@ -63,7 +56,6 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
     jiraApiToken: "",
     gitlabToken: "",
     gitlabProjectId: "",
-    gitlabBaseUrl: "https://gitlab.com",
     notificationProvider: "console",
     notificationWebhookUrl: "",
     sendgridApiKey: "",
@@ -76,10 +68,6 @@ function baseConfig(overrides: Partial<CliConfig> = {}): CliConfig {
     stream: false,
     verbose: false,
     bell: false,
-    cacheDir: ".sweny/cache",
-    cacheTtl: 86400,
-    noCache: false,
-    outputDir: ".sweny/output",
     mcpServers: {},
     workspaceTools: [],
     rules: [],
@@ -106,7 +94,9 @@ describe("validateInputs: coding agent (honest --agent, #330)", () => {
     );
     const err = errors.find((e) => e.includes(`"${agent}"`));
     expect(err).toBeDefined();
-    expect(err).toMatch(/supported agents are "claude" \(headless Claude Code\) and "codex" \(Codex CLI\)/);
+    expect(err).toMatch(
+      /supported agents are "claude" \(headless Claude Code\), "codex" \(Codex CLI\), "pi" .*"acp:<command>"/,
+    );
   });
 
   it("accepts --agent pi without a key check: pi takes any provider's key, or a local model", () => {
@@ -364,30 +354,6 @@ describe("validateInputs — numeric bounds reject NaN", () => {
   it("rejects Infinity values", () => {
     const errors = validateInputs(baseConfig({ maxInvestigateTurns: Infinity }));
     expect(errors.some((e) => e.includes("max-investigate-turns"))).toBe(true);
-  });
-
-  it("rejects NaN cache-ttl (malformed --cache-ttl / cache-ttl:)", () => {
-    const errors = validateInputs(baseConfig({ cacheTtl: Number.NaN }));
-    expect(errors.some((e) => e.includes("--cache-ttl"))).toBe(true);
-  });
-
-  it("rejects a zero cache-ttl (below the minimum bound)", () => {
-    const errors = validateInputs(baseConfig({ cacheTtl: 0 }));
-    expect(errors.some((e) => e.includes("--cache-ttl"))).toBe(true);
-  });
-
-  it("accepts a sane cache-ttl", () => {
-    const errors = validateInputs(baseConfig({ cacheTtl: 86400 }));
-    expect(errors.some((e) => e.includes("--cache-ttl"))).toBe(false);
-  });
-});
-
-describe("parseCliInputs — cache-ttl parsing rejects junk", () => {
-  it("rejects a non-numeric --cache-ttl via validateInputs", () => {
-    const config = parseCliInputs({ cacheTtl: "abc" }, {});
-    expect(Number.isNaN(config.cacheTtl)).toBe(true);
-    const errors = validateInputs(config);
-    expect(errors.some((e) => e.includes("--cache-ttl"))).toBe(true);
   });
 });
 

@@ -3,9 +3,9 @@ title: How Workflows Work
 description: Understanding SWEny's DAG-based workflow execution model.
 ---
 
-A workflow is a directed acyclic graph (DAG) of nodes connected by edges, with a single entry point. Each node gives Claude an instruction and a set of skills (tools). Edges define the flow between nodes, optionally with natural-language conditions that Claude evaluates at runtime.
+A workflow is a directed acyclic graph (DAG) of nodes connected by edges, with a single entry point. Each node gives a coding agent an instruction and a set of skills (tools). Edges define the flow between nodes, optionally with natural-language conditions that the coding agent evaluates at runtime.
 
-This is SWEny's core abstraction. Instead of writing procedural automation scripts, you declare **what** should happen at each step and **when** to move between steps. Claude handles the execution.
+This is SWEny's core abstraction. Instead of writing procedural automation scripts, you declare **what** should happen at each step and **when** to move between steps. The coding agent handles the execution.
 
 ## Anatomy of a workflow
 
@@ -52,11 +52,11 @@ The executor walks the graph node-by-node, starting at the entry node, until it 
 **Step-by-step:**
 
 1. **Start at the entry node.** The executor looks up `workflow.entry` in the node map.
-2. **Build context.** Claude receives the node's `instruction`, the workflow input, and the accumulated results from all prior nodes.
+2. **Build context.** The agent receives the node's `instruction`, the workflow input, and the accumulated results from all prior nodes.
 3. **Resolve tools.** The executor gathers tools from every skill listed in the node's `skills` array.
-4. **Claude executes.** Claude runs the instruction, calling tools as needed (querying APIs, reading files, creating issues, etc.).
-5. **Collect the result.** Claude returns a `NodeResult` with a status (`success`, `skipped`, or `failed`), arbitrary data, and a record of all tool calls made.
-6. **Route to the next node.** The executor evaluates outgoing edges. If there is a single unconditional edge, it follows it. If there are conditional edges, Claude evaluates the `when` clauses against the current results and picks a path.
+4. **The agent executes.** It runs the instruction, calling tools as needed (querying APIs, reading files, creating issues, etc.).
+5. **Collect the result.** The agent's run produces a `NodeResult` with a status (`success`, `skipped`, or `failed`), arbitrary data, and a record of all tool calls made.
+6. **Route to the next node.** The executor evaluates outgoing edges. If there is a single unconditional edge, it follows it. If there are conditional edges, the coding agent evaluates the `when` clauses against the current results and picks a path.
 7. **Repeat** until reaching a terminal node.
 
 ```typescript
@@ -69,7 +69,7 @@ interface NodeResult {
 
 ## Conditional routing
 
-Edges can have a `when` clause written in natural language. At runtime, Claude evaluates each condition against the current node's result and picks the matching path.
+Edges can have a `when` clause written in natural language. At runtime, the coding agent evaluates each condition against the current node's result and picks the matching path.
 
 ```yaml
 edges:
@@ -81,15 +81,15 @@ edges:
     when: "The issue is a duplicate of an existing ticket, or severity is low"
 ```
 
-The executor presents all outgoing conditions as choices and asks Claude to pick one. If an edge has no `when` clause, it acts as a default/unconditional path.
+The executor presents all outgoing conditions as choices and asks the coding agent to pick one. If an edge has no `when` clause, it acts as a default/unconditional path.
 
 :::note[How routing works internally]
-When a node has multiple outgoing edges, the executor calls `claude.evaluate()` with the conditions as choices and the accumulated context. Claude returns the ID of the chosen target node. If Claude returns an invalid target, the executor falls back to the default edge or the first edge.
+When a node has multiple outgoing edges, the executor asks the node's agent harness to evaluate the conditions as choices against the accumulated context. The agent returns the ID of the chosen target node. The executor never guesses a route. If the evaluation fails or cannot be parsed, it takes the node's default (unconditional) edge when there is one; with no default edge the run stops with a route-evaluation error. If the agent returns a target that is not one of the offered edges, it likewise takes the default edge, or, with no default edge, ends that branch.
 :::
 
 ## Structured output
 
-Nodes can declare an `output` schema (JSON Schema). When present, Claude's response is validated against the schema, producing structured data that downstream nodes and routing conditions can reference.
+Nodes can declare an `output` schema (JSON Schema). When present, the agent's response is validated against the schema, producing structured data that downstream nodes and routing conditions can reference.
 
 ```yaml
 investigate:
