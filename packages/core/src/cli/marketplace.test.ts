@@ -10,7 +10,11 @@ import {
   adaptWorkflowInteractive,
   installMarketplaceWorkflow,
   MARKETPLACE_RAW_BASE,
+  MARKETPLACE_REPO,
+  MARKETPLACE_TREE_URL,
 } from "./marketplace.js";
+import { parse as parseYaml } from "yaml";
+import { validateParsed } from "../loader.js";
 import type { Skill, Workflow } from "../types.js";
 
 vi.mock("@clack/prompts", () => ({
@@ -24,29 +28,58 @@ vi.mock("../workflow-builder.js", () => ({
   refineWorkflow: vi.fn(),
 }));
 
-describe("fetchMarketplaceWorkflow", () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
-  beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      return new Response("id: pr-review\nname: PR Review\n", { status: 200 });
-    });
+/** Mock fetch by URL against the real swenyai/marketplace layout. Unlisted URLs 404. */
+function mockFetchByUrl(routes: Record<string, string | Response>) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+    const hit = routes[String(input)];
+    if (hit === undefined) return new Response("", { status: 404 });
+    return hit instanceof Response ? hit : new Response(hit, { status: 200 });
   });
-  afterEach(() => fetchSpy.mockRestore());
+}
 
-  it("fetches workflow YAML from raw GitHub", async () => {
-    const result = await fetchMarketplaceWorkflow("pr-review");
-    expect(result.id).toBe("pr-review");
-    expect(result.yaml).toContain("id: pr-review");
-    expect(fetchSpy).toHaveBeenCalledWith(`${MARKETPLACE_RAW_BASE}/workflows/pr-review.yml`);
+const officialUrl = (id: string) => `${MARKETPLACE_RAW_BASE}/workflows/official/${id}.yml`;
+const communityUrl = (id: string) => `${MARKETPLACE_RAW_BASE}/workflows/community/${id}.yml`;
+
+describe("marketplace location", () => {
+  it("points at the real swenyai/marketplace repo layout", () => {
+    expect(MARKETPLACE_REPO).toBe("swenyai/marketplace");
+    expect(MARKETPLACE_RAW_BASE).toBe("https://raw.githubusercontent.com/swenyai/marketplace/main");
+    expect(MARKETPLACE_TREE_URL).toBe("https://api.github.com/repos/swenyai/marketplace/git/trees/main?recursive=1");
+  });
+});
+
+describe("fetchMarketplaceWorkflow", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("fetches an official workflow from workflows/official/<id>.yml", async () => {
+    const spy = mockFetchByUrl({ [officialUrl("triage")]: "id: triage\nname: Alert Triage\n" });
+    const result = await fetchMarketplaceWorkflow("triage");
+    expect(result.id).toBe("triage");
+    expect(result.yaml).toContain("id: triage");
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(officialUrl("triage"));
+  });
+
+  it("falls back to workflows/community/<id>.yml when not official", async () => {
+    const spy = mockFetchByUrl({ [communityUrl("pr-review-bot")]: "id: pr-review-bot\n" });
+    const result = await fetchMarketplaceWorkflow("pr-review-bot");
+    expect(result.yaml).toContain("pr-review-bot");
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([officialUrl("pr-review-bot"), communityUrl("pr-review-bot")]);
+  });
+
+  it("rejects ids that could escape the workflows directory without fetching", async () => {
+    const spy = mockFetchByUrl({});
+    await expect(fetchMarketplaceWorkflow("../site/secrets")).rejects.toMatchObject({ kind: "not-found" });
+    await expect(fetchMarketplaceWorkflow("a/b")).rejects.toMatchObject({ kind: "not-found" });
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 
 describe("fetchMarketplaceWorkflow errors", () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
-  afterEach(() => fetchSpy?.mockRestore());
+  afterEach(() => vi.restoreAllMocks());
 
-  it("throws not-found on 404", async () => {
-    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 404 }));
+  it("throws not-found when neither directory has the workflow", async () => {
+    mockFetchByUrl({});
     await expect(fetchMarketplaceWorkflow("missing")).rejects.toMatchObject({
       kind: "not-found",
       message: expect.stringContaining("missing"),
@@ -54,54 +87,163 @@ describe("fetchMarketplaceWorkflow errors", () => {
   });
 
   it("throws rate-limit on 403 with X-RateLimit-Remaining: 0", async () => {
-    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
-      async () =>
-        new Response("", {
-          status: 403,
-          headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1234567890" },
-        }),
-    );
-    await expect(fetchMarketplaceWorkflow("pr-review")).rejects.toMatchObject({
+    mockFetchByUrl({
+      [officialUrl("triage")]: new Response("", {
+        status: 403,
+        headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1234567890" },
+      }),
+    });
+    await expect(fetchMarketplaceWorkflow("triage")).rejects.toMatchObject({
       kind: "rate-limit",
       retryAfter: 1234567890,
     });
   });
 
+  it("throws unknown on a non-404 server error instead of trying the next directory", async () => {
+    const spy = mockFetchByUrl({ [officialUrl("triage")]: new Response("", { status: 500 }) });
+    await expect(fetchMarketplaceWorkflow("triage")).rejects.toMatchObject({ kind: "unknown" });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it("throws network error when fetch rejects", async () => {
-    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       throw new TypeError("fetch failed");
     });
-    await expect(fetchMarketplaceWorkflow("pr-review")).rejects.toMatchObject({
-      kind: "network",
-    });
+    await expect(fetchMarketplaceWorkflow("triage")).rejects.toMatchObject({ kind: "network" });
   });
 });
 
 describe("fetchMarketplaceIndex", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.GITHUB_TOKEN;
+  });
 
-  it("fetches and parses index.json", async () => {
-    const body = JSON.stringify([
-      { id: "pr-review", name: "PR Review", description: "Reviews PRs", skills: ["github"] },
-      { id: "issue-triage", name: "Issue Triage", description: "Triages issues", skills: ["github"] },
-    ]);
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(body, { status: 200 }));
+  // Mirrors the real repo: workflows/{official,community}/*.yml plus unrelated files.
+  const tree = JSON.stringify({
+    truncated: false,
+    tree: [
+      { path: "README.md", type: "blob" },
+      { path: "workflows", type: "tree" },
+      { path: "workflows/community", type: "tree" },
+      { path: "workflows/community/pr-review-bot.yml", type: "blob" },
+      { path: "workflows/community/triage.yml", type: "blob" },
+      { path: "workflows/official", type: "tree" },
+      { path: "workflows/official/triage.yml", type: "blob" },
+      { path: "workflows/official/release-notes.yml", type: "blob" },
+      { path: "workflows/official/broken.yml", type: "blob" },
+      { path: "workflows/official/notes.md", type: "blob" },
+      { path: "site/workflows/ignored.yml", type: "blob" },
+    ],
+  });
+  const triageYaml = `id: triage
+name: Alert Triage
+description: Investigate a production alert
+entry: prepare
+nodes:
+  prepare:
+    name: Prepare
+    instruction: x
+    skills: [github, sentry]
+  fix:
+    name: Fix
+    instruction: y
+    skills: [github, linear]
+`;
+
+  it("builds entries from workflows/official and workflows/community, official first", async () => {
+    mockFetchByUrl({
+      [MARKETPLACE_TREE_URL]: tree,
+      [officialUrl("triage")]: triageYaml,
+      [officialUrl("release-notes")]: "id: release-notes\nname: Release Notes\ndescription: Draft notes\nnodes: {}\n",
+      [officialUrl("broken")]: ": : not yaml [",
+      [communityUrl("pr-review-bot")]: "id: pr-review-bot\nname: PR Review Bot\ndescription: Reviews PRs\n",
+      [communityUrl("triage")]: "id: triage\nname: Community Triage\n",
+    });
 
     const entries = await fetchMarketplaceIndex();
-    expect(entries).toHaveLength(2);
-    expect(entries[0]).toMatchObject({ id: "pr-review", name: "PR Review" });
+    expect(entries.map((e) => e.id)).toEqual(["triage", "release-notes", "pr-review-bot"]);
+    expect(entries[0]).toEqual({
+      id: "triage",
+      name: "Alert Triage",
+      description: "Investigate a production alert",
+      skills: ["github", "sentry", "linear"],
+    });
+    expect(entries[2]).toMatchObject({ name: "PR Review Bot", description: "Reviews PRs", skills: [] });
   });
 
-  it("passes an abort signal when a timeout is requested", async () => {
-    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("[]", { status: 200 }));
+  it("falls back to the id when a workflow has no name", async () => {
+    mockFetchByUrl({
+      [MARKETPLACE_TREE_URL]: JSON.stringify({ tree: [{ path: "workflows/official/x.yml", type: "blob" }] }),
+      [officialUrl("x")]: "id: x\n",
+    });
+    expect(await fetchMarketplaceIndex()).toEqual([{ id: "x", name: "x", description: "", skills: [] }]);
+  });
+
+  it("returns an empty list when the repo has no workflows", async () => {
+    mockFetchByUrl({ [MARKETPLACE_TREE_URL]: JSON.stringify({ tree: [{ path: "README.md", type: "blob" }] }) });
+    expect(await fetchMarketplaceIndex()).toEqual([]);
+  });
+
+  it("passes an abort signal on every request when a timeout is requested", async () => {
+    const spy = mockFetchByUrl({
+      [MARKETPLACE_TREE_URL]: JSON.stringify({ tree: [{ path: "workflows/official/x.yml", type: "blob" }] }),
+      [officialUrl("x")]: "id: x\n",
+    });
     await fetchMarketplaceIndex({ timeoutMs: 3000 });
-    expect((spy.mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+    expect(spy).toHaveBeenCalledTimes(2);
+    for (const call of spy.mock.calls) expect((call[1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("throws not-found when index.json is missing", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 404 }));
+  it("sends GITHUB_TOKEN to the GitHub API only, never to raw.githubusercontent.com", async () => {
+    process.env.GITHUB_TOKEN = "tok";
+    const spy = mockFetchByUrl({
+      [MARKETPLACE_TREE_URL]: JSON.stringify({ tree: [{ path: "workflows/official/x.yml", type: "blob" }] }),
+      [officialUrl("x")]: "id: x\n",
+    });
+    await fetchMarketplaceIndex();
+    const treeCall = spy.mock.calls.find((c) => c[0] === MARKETPLACE_TREE_URL)!;
+    expect((treeCall[1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok" });
+    const rawCall = spy.mock.calls.find((c) => c[0] === officialUrl("x"))!;
+    expect(JSON.stringify(rawCall[1] ?? {})).not.toContain("tok");
+  });
+
+  it("throws not-found when the repo is missing", async () => {
+    mockFetchByUrl({});
     await expect(fetchMarketplaceIndex()).rejects.toMatchObject({ kind: "not-found" });
   });
+
+  it("throws rate-limit when the GitHub API quota is spent", async () => {
+    mockFetchByUrl({
+      [MARKETPLACE_TREE_URL]: new Response("", {
+        status: 403,
+        headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "99" },
+      }),
+    });
+    await expect(fetchMarketplaceIndex()).rejects.toMatchObject({ kind: "rate-limit", retryAfter: 99 });
+  });
+
+  it("throws bad-yaml when the tree listing is malformed", async () => {
+    mockFetchByUrl({ [MARKETPLACE_TREE_URL]: JSON.stringify({ message: "nope" }) });
+    await expect(fetchMarketplaceIndex()).rejects.toMatchObject({ kind: "bad-yaml" });
+  });
+});
+
+// Opt-in contract test against the live swenyai/marketplace repo. This is what
+// would have caught the CLI pointing at a repo that does not exist.
+//   SWENY_LIVE_MARKETPLACE=1 npx vitest run packages/core/src/cli/marketplace.test.ts
+describe.skipIf(!process.env.SWENY_LIVE_MARKETPLACE)("live swenyai/marketplace contract", () => {
+  it("lists workflows and installs one by id", async () => {
+    const entries = await fetchMarketplaceIndex();
+    expect(entries.length).toBeGreaterThan(0);
+    for (const e of entries) {
+      expect(e.id).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
+      expect(e.name).toBeTruthy();
+    }
+    const fetched = await fetchMarketplaceWorkflow(entries[0].id);
+    const validated = validateParsed(parseYaml(fetched.yaml));
+    expect(validated.ok).toBe(true);
+  }, 30_000);
 });
 
 const testSkills: Skill[] = [
