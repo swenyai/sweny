@@ -294,7 +294,7 @@ describe("formatRunDiff: answers", () => {
     );
     const out = formatRunDiff(recA, recB, false, { answers: evil });
     expect(out).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f]/);
-    expect(out).toContain("bad [2Jtitle");
+    expect(out).toContain("+ badtitle");
   });
 
   it("notes nodes that could not be compared", () => {
