@@ -237,7 +237,8 @@ runs:
         # (which Claude Code's sandbox also runs) the nested one. scripts/sandbox-userns.sh
         # probes both and relaxes them only on GitHub-hosted runners (ephemeral VM) or
         # under SWENY_SANDBOX=strict; never under off, never by default on self-hosted.
-        if [ "${SWENY_SANDBOX:-}" != "off" ] && command -v bwrap >/dev/null 2>&1 && ! bash "$SANDBOX_USERNS" probe; then
+        SANDBOX_MODE=$(bash "$SANDBOX_USERNS" mode)
+        if [ "$SANDBOX_MODE" != "off" ] && command -v bwrap >/dev/null 2>&1 && ! bash "$SANDBOX_USERNS" probe; then
           if bash "$SANDBOX_USERNS" relax; then
             if bash "$SANDBOX_USERNS" probe; then
               echo "::notice title=SWEny agent sandbox::Relaxed kernel.apparmor_restrict_unprivileged_userns and unloaded the bwrap-userns-restrict AppArmor profile; agent commands will be sandboxed."
@@ -264,8 +265,8 @@ runs:
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
         SANDBOX_USERNS: ${{ github.action_path }}/scripts/sandbox-userns.sh
       run: |
-        if [ "${SWENY_SANDBOX:-}" = "off" ]; then
-          echo "::notice title=SWEny sandbox wrapper::SWENY_SANDBOX=off; skipping srt install"
+        if [ "$(bash "$SANDBOX_USERNS" mode)" = "off" ]; then
+          echo "::notice title=SWEny sandbox wrapper::SWENY_SANDBOX is off; skipping srt install"
           exit 0
         fi
         SUDO=""

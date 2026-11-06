@@ -50,7 +50,14 @@ import { existsSync, realpathSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
-import { DEFAULT_SANDBOX_DOMAINS, parseList, resolveSandboxMode, usernsHint, type SandboxMode } from "../agent-env.js";
+import {
+  DEFAULT_SANDBOX_DOMAINS,
+  parseList,
+  probeLine,
+  resolveSandboxMode,
+  usernsHint,
+  type SandboxMode,
+} from "../agent-env.js";
 import { runStateRoot } from "../journal.js";
 import { policyGate } from "./policy.js";
 import type { HarnessCapabilities, NodePolicy, PolicyWrappers } from "./types.js";
@@ -352,10 +359,7 @@ async function srtWorks(srtPath: string, env: Record<string, string | undefined>
         { env: { PATH: env.PATH ?? "", HOME: dir }, timeout: 30_000 },
         (err, _stdout, stderr) => {
           if (!err) return resolve(undefined);
-          const first =
-            String(stderr || err.message)
-              .trim()
-              .split("\n")[0] || "unknown error";
+          const first = probeLine(String(stderr || err.message));
           resolve(`srt cannot sandbox on this host (${first})${usernsHint(String(stderr))}`);
         },
       );
