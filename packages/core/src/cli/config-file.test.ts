@@ -138,7 +138,7 @@ describe("loadDotenv parsing", () => {
   });
 
   it("handles CRLF line endings", () => {
-    load("# comment\r\nSWENY_DOTENV_T_CRLF_A=one\r\nSWENY_DOTENV_T_CRLF_B=\"two\"\r\n");
+    load('# comment\r\nSWENY_DOTENV_T_CRLF_A=one\r\nSWENY_DOTENV_T_CRLF_B="two"\r\n');
     expect(process.env.SWENY_DOTENV_T_CRLF_A).toBe("one");
     expect(process.env.SWENY_DOTENV_T_CRLF_B).toBe("two");
   });
