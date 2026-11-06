@@ -24,7 +24,10 @@
 ---
 
 SWEny runs a DAG of coding-agent steps from a YAML file, on your laptop or in any CI. The agent does
-the work. SWEny decides what it can touch, checks what it hands back, and records what it did.
+the work. SWEny decides what it can touch, checks what it hands back, and records what it did. It runs on
+Claude Code, Codex, pi or any [ACP](https://agentclientprotocol.com) agent and applies the same rules to
+each; what an agent cannot enforce itself is reported as degraded, or the node is refused in strict mode
+(see [Supported agents](#supported-agents)).
 
 - **Security.** In CI, the agent sees only the env vars a node's skills need, and its commands run
   sandboxed when the host supports it (both opt-in locally). Inputs reach the model fenced as untrusted
@@ -65,7 +68,16 @@ npm install -g @sweny-ai/core
 sweny try                                 # recorded demo; add --fast to skip the pacing
 ```
 
-Then run it for real. Requires Node 20+ and a Claude login (`claude` signed in) or an `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` (SWEny runs its nodes on the Claude Code agent).
+Then run it for real. Requires Node 20+ and a login or API key for the agent that runs your nodes. Claude Code is the default; pick another with `--agent` (Action input `agent`).
+
+| Agent | Credentials it needs |
+|-------|----------------------|
+| Claude Code (default) | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`, or a Claude Code login (`claude`, then `/login`), or Bedrock / Vertex routing (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`). `SWENY_AUTH=oauth` keeps only the OAuth token. |
+| Codex (`--agent codex`) | `CODEX_API_KEY`, `OPENAI_API_KEY` or `CODEX_ACCESS_TOKEN`, or a `codex login`. |
+| pi (`--agent pi`) | The API key of the model provider pi calls (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, ...). pi's own login is not read. |
+| ACP agent (`--agent "acp:<command>"`) | Whatever that agent needs. SWEny cannot run an interactive login: pass its API key env var through `SWENY_ENV_PASSTHROUGH`. |
+
+For Claude Code and Codex, `sweny check` and `sweny workflow run` stop with the fix when no credential or login is found, before any node runs (pi and ACP agents are only checked for being installed). Skill credentials (`GITHUB_TOKEN` and so on) are separate and only needed by workflows that use those skills.
 
 ```bash
 npm install -g @sweny-ai/core
@@ -113,12 +125,11 @@ sweny upgrade --check  # dry-run: just report the available version
 
 ## What it does
 
-Describe a task in plain English. SWEny builds a DAG of focused AI agents. Each node gets its own MCP tool set scoped by the skills it declares, structured output, and conditional routing. Every tool call is tracked. (The underlying Claude Code agent process keeps its built-in tools available so nodes stay agentic inside their box; see [ARCHITECTURE.md](./ARCHITECTURE.md#what-scoped-tools-means) for the exact capability contract.)
+Describe a task in plain English. SWEny builds a DAG of focused AI agents. Each node gets its own MCP tool set scoped by the skills it declares, structured output, and conditional routing. Every tool call is tracked. (The underlying agent process keeps its built-in tools available so nodes stay agentic inside their box; see [ARCHITECTURE.md](./ARCHITECTURE.md#what-scoped-tools-means) for the exact capability contract.)
+
+Run `sweny new`, pick "Describe your own", and enter: "audit our repo for security issues, scan dependencies, and create Linear tickets for anything critical".
 
 ```
-$ sweny workflow create "audit our repo for security issues, \
-    scan dependencies, and create Linear tickets for anything critical"
-
   GitHub Security Audit
 
   o Scan Recent Commits for Exposed Secrets
@@ -341,7 +352,7 @@ Focused actions for common use cases:
 
 ### Run reporting (optional, not yet available)
 
-SWEny runs locally or in CI with **zero phone-home behavior**. No anonymous telemetry, no pings, nothing.
+SWEny runs locally or in CI with no usage telemetry and no crash reporting. The one request it makes on its own is a version check: an interactive `sweny` command asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai/core` version, at most once a day. It is skipped in CI, in pipes, and with `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1`; `sweny upgrade` also queries the registry when you run it.
 
 The CLI contains an opt-in run reporting path, gated entirely on a `SWENY_CLOUD_TOKEN` project token. Unless you set that variable yourself, every reporting entry point returns before making a request, so a default install sends nothing.
 

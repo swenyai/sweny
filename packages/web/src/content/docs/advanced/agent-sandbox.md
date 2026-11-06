@@ -3,7 +3,7 @@ title: Agent sandbox
 description: What the agent subprocess can see and reach, the sandbox modes, and how to override them.
 ---
 
-Every node runs headless Claude Code over input that may be attacker-controlled: issue bodies, alert payloads, fetched pages, earlier steps' output. SWEny bounds what that agent can see and reach in three ways.
+Every node runs a coding agent (headless Claude Code by default) over input that may be attacker-controlled: issue bodies, alert payloads, fetched pages, earlier steps' output. SWEny bounds what that agent can see and reach in three ways.
 
 ## Scoped environment
 
@@ -89,7 +89,7 @@ MCP servers that SWEny wires for a skill get their credentials explicitly, so th
 
 ## Sandbox
 
-In CI (`CI=true`) the default is `sandbox: auto`: the agent's shell commands run in the Claude Code sandbox whenever the host supports it. Locally the default is `off`, so nothing changes on your laptop (private registries, docker, cargo and go keep working) unless you opt in. When sandboxed:
+In CI (`CI=true`) the default is `sandbox: auto`: the agent's shell commands run sandboxed whenever the host supports it (Claude Code's own sandbox; for pi, ACP agents and other agents without one, SWEny wraps the whole agent process in its process sandbox). Locally the default is `off`, so nothing changes on your laptop (private registries, docker, cargo and go keep working) unless you opt in. When sandboxed:
 
 - Network egress is limited to an allowlist: source hosting and package registries (`github.com`, `api.github.com`, `*.githubusercontent.com`, `registry.npmjs.org`, `pypi.org`, `proxy.golang.org`, `crates.io`, `rubygems.org`, ...), plus the provider hosts of the node's skills (`api.linear.app` for `linear`, `*.sentry.io` for `sentry`, `*.datadoghq.com` for `datadog`, ...), plus your `sandbox-allowed-domains`.
 - Commands cannot opt out of the sandbox.

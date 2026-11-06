@@ -5,41 +5,30 @@ description: Real-world workflows and configurations — from one-liners to comp
 
 ## Create workflows from natural language
 
-The fastest way to get things done. Describe your task and SWEny builds a complete workflow:
+The fastest way to get things done. Run `sweny new`, pick "Describe your own", and describe your task; SWEny builds a complete workflow. Prompts that work well:
 
 ### Content generation with quality gates
 
-```bash
-sweny workflow create "generate SEO blog posts for each topic in our \
-  content calendar, run each through an LLM quality judge that checks \
-  readability, accuracy, and keyword density, loop back for rewrites \
-  if quality fails, then publish passing content"
+```text
+generate SEO blog posts for each topic in our content calendar, run each through an LLM quality judge that checks readability, accuracy, and keyword density, loop back for rewrites if quality fails, then publish passing content
 ```
 
 ### Security audit
 
-```bash
-sweny workflow create "scan recent commits for exposed secrets, review \
-  open PRs for security-sensitive changes, check dependency files for \
-  known vulnerabilities, compile a security posture report, and create \
-  Linear tickets for any critical findings"
+```text
+scan recent commits for exposed secrets, review open PRs for security-sensitive changes, check dependency files for known vulnerabilities, compile a security posture report, and create Linear tickets for any critical findings
 ```
 
 ### Competitive analysis
 
-```bash
-sweny workflow create "research the top 5 competitors in our space, \
-  gather pricing models, key features, and target audience for each, \
-  synthesize a competitive analysis comparing them across dimensions, \
-  and produce an executive brief with strategic recommendations"
+```text
+research the top 5 competitors in our space, gather pricing models, key features, and target audience for each, synthesize a competitive analysis comparing them across dimensions, and produce an executive brief with strategic recommendations
 ```
 
 ### Product launch planning
 
-```bash
-sweny workflow create "research recent product launches for lessons \
-  learned, draft launch copy with a tagline, 3 value props, and a tweet, \
-  create a launch checklist as Linear issues, and compile a launch brief"
+```text
+research recent product launches for lessons learned, draft launch copy with a tagline, 3 value props, and a tweet, create a launch checklist as Linear issues, and compile a launch brief
 ```
 
 ### Refine any workflow with natural language
@@ -90,7 +79,6 @@ log-file: ./sample-errors.json
 issue-tracker-provider: file
 source-control-provider: file
 notification-provider: file
-output-dir: .sweny/output
 ```
 
 ```bash
@@ -140,7 +128,6 @@ observability-provider: sentry
 sentry-org: my-org
 sentry-project: my-project
 issue-tracker-provider: linear
-linear-team-id: your-team-uuid
 ```
 
 ```bash
@@ -162,7 +149,6 @@ sweny triage
 observability-provider: datadog
 source-control-provider: gitlab
 issue-tracker-provider: jira
-gitlab-base-url: https://gitlab.mycompany.com
 ```
 
 ```bash
@@ -172,6 +158,7 @@ DD_API_KEY=your-api-key
 DD_APP_KEY=your-app-key
 GITLAB_TOKEN=glpat-...
 GITLAB_PROJECT_ID=my-group/my-project
+GITLAB_URL=https://gitlab.mycompany.com   # self-hosted GitLab; default https://gitlab.com
 JIRA_BASE_URL=https://mycompany.atlassian.net
 JIRA_EMAIL=bot@mycompany.com
 JIRA_API_TOKEN=your-token
@@ -281,22 +268,16 @@ sweny workflow run my-workflow.yml --dry-run
 
 ## Generate a workflow from a prompt
 
-Describe what you want in plain English and let the LLM build the workflow:
+Describe what you want in plain English and let the LLM build the workflow. Run `sweny new`, pick "Describe your own", and enter:
 
-```bash
-sweny workflow create "check for slow database queries and file tickets"
+```text
+check for slow database queries and file tickets
 ```
 
 The CLI generates the workflow, renders a DAG preview, and asks if you want to save, refine, or discard. Save it and run it:
 
 ```bash
 sweny workflow run .sweny/workflows/check-slow-queries.yml
-```
-
-For non-interactive use (CI, scripts), pass `--json`:
-
-```bash
-sweny workflow create "monitor API latency and alert on regressions" --json > workflow.json
 ```
 
 ## Edit a workflow with natural language
