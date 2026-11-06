@@ -216,40 +216,6 @@ jobs:
             exit 1
           fi
 
-  # TEMP diagnostics for the ubuntu-26.04 srt break; removed before review.
-  userns-diag:
-    name: TEMP userns diag (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, ubuntu-26.04]
-    permissions:
-      contents: read
-    steps:
-      - name: Diagnose
-        run: |
-          set +e
-          . /etc/os-release; echo "$PRETTY_NAME"; uname -r
-          sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bubblewrap socat ripgrep >/dev/null
-          bwrap --version; ls -l "$(command -v bwrap)"
-          dpkg -l apparmor apparmor-profiles bubblewrap 2>/dev/null | tail -4 || true
-          for k in kernel.apparmor_restrict_unprivileged_userns kernel.apparmor_restrict_unprivileged_unconfined kernel.apparmor_restrict_unprivileged_userns_complain kernel.apparmor_restrict_unprivileged_userns_force kernel.unprivileged_userns_clone user.max_user_namespaces; do echo "$k=$(sysctl -n $k 2>&1)"; done
-          ls -la /etc/apparmor.d/ | grep -i -E 'bwrap|userns' || true
-          dpkg -S /etc/apparmor.d/bwrap-userns-restrict /etc/apparmor.d/unprivileged_userns 2>&1 || true
-          sudo grep -E 'bwrap|userns' /sys/kernel/security/apparmor/profiles || true
-          cat /etc/apparmor.d/bwrap-userns-restrict 2>/dev/null | grep -v '^#' | grep -v '^$' || true
-          cat /etc/apparmor.d/unprivileged_userns 2>/dev/null | grep -v '^#' | grep -v '^$' || true
-          npm install -g --ignore-scripts @anthropic-ai/sandbox-runtime@0.0.78 >/dev/null 2>&1
-          echo '{"network":{"allowedDomains":[],"deniedDomains":[]},"filesystem":{"denyRead":[],"allowRead":[],"allowWrite":[],"denyWrite":[]}}' > "$RUNNER_TEMP/s.json"
-          try() { echo "== $1"; srt --settings "$RUNNER_TEMP/s.json" -- echo SRT-OK 2>&1 | tail -3 || true; bwrap --ro-bind / / --dev /dev --proc /proc sh -c 'cat /proc/self/attr/current; grep -E "CapBnd|NoNewPrivs" /proc/self/status' 2>&1 || true; bwrap --ro-bind / / --dev /dev --proc /proc unshare --user --map-root-user echo NESTED-OK 2>&1 | tail -1 || true; }
-          try "stock"
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          try "sysctl userns=0"
-          if [ -e /etc/apparmor.d/bwrap-userns-restrict ]; then sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict && try "sysctl=0 + bwrap-userns-restrict unloaded"; fi
-          sudo dmesg 2>/dev/null | grep -i 'apparmor="DENIED"' | tail -8 || true
-
   # #360 step 2: the harness-agnostic process wrapper (harness/sandbox-wrapper.ts)
   # runs any agent process under @anthropic-ai/sandbox-runtime (srt). This job
   # gives the hosted runner what srt needs, probes that srt wraps an arbitrary
