@@ -24,7 +24,14 @@ set -u
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+# Same as core's .trim().toLowerCase(): strip leading and trailing whitespace across
+# lines (sed would trim each line separately, so "\noff" would not read as off).
+lower() {
+  local v=$1
+  v=${v#"${v%%[![:space:]]*}"}
+  v=${v%"${v##*[![:space:]]}"}
+  printf '%s' "$v" | tr '[:upper:]' '[:lower:]'
+}
 
 mode() {
   local raw ci

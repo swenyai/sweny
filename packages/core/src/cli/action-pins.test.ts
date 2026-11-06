@@ -167,6 +167,11 @@ describe("scripts/sandbox-userns.sh", () => {
       "Auto",
       "",
       "bogus",
+      "\noff",
+      "off\n",
+      "\t0\n",
+      "\r\nno",
+      "\nstrict\n",
     ];
     for (const ci of ["true", ""]) {
       for (const v of values) {
@@ -180,7 +185,7 @@ describe("scripts/sandbox-userns.sh", () => {
   });
 
   it("never relaxes the host when sandboxing is off under any alias", () => {
-    for (const v of ["off", "OFF", "false", "False", "0", "no", "NO", " off "]) {
+    for (const v of ["off", "OFF", "false", "False", "0", "no", "NO", " off ", "\noff", "off\n", "\t0\n"]) {
       expect(relax({ RUNNER_ENVIRONMENT: "github-hosted", SWENY_SANDBOX: v }).status).toBe(3);
     }
   });
