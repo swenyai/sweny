@@ -37,6 +37,10 @@ Also outside the working directory:
 
 Redaction (journal and final answer): string values under secret-looking keys (`token`, `secret`, `password`, `api_key`, ...), known token shapes, and the values of secret-named environment variables and skill credentials are replaced with `[redacted]`.
 
+## The version check
+
+The one request SWEny makes on its own is a version check: an interactive `sweny` command asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai/core` version and prints a one-line footer when you are behind. After a successful check the answer is cached for a day; a failed or timed-out check is not cached, so it is retried on the next command. It is a plain GET for the package's latest version; SWEny adds no identifiers, code or run data to it. It is skipped in CI, when stderr is not a terminal, for `sweny try`, and when `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1` is set. `sweny upgrade` also queries the registry when you run it.
+
 ## What we DO do (only when you opt in)
 
 > **Not currently available.** The hosted reporting service is in active development and there is no way to mint a `SWENY_CLOUD_TOKEN` today. Without a token this code path returns immediately and no request is made. The behavior below is documented because the code ships in the CLI, not because the service is open.

@@ -6,7 +6,7 @@ description: Build your own workflows from natural language, YAML, or Studio.
 The fastest way to build a workflow is to describe it:
 
 ```bash
-sweny workflow create "your task description here"
+sweny new   # pick "Describe your own", then describe the task
 ```
 
 SWEny generates a full DAG with nodes, conditional routing, structured output schemas, and the right skills at each step. Refine it with `sweny workflow edit`, run it with `sweny workflow run`, or hand-edit the YAML.
@@ -15,10 +15,7 @@ This page covers all three approaches: natural language generation, writing YAML
 
 ## Generate a workflow from natural language
 
-```bash
-sweny workflow create "investigate slow API endpoints, group by service, \
-  and create optimization tickets for anything over 2s p99"
-```
+In `sweny new`, pick "Describe your own" and describe the task, for example: "investigate slow API endpoints, group by service, and create optimization tickets for anything over 2s p99".
 
 SWEny renders an ASCII DAG preview and prompts you to save, refine, or discard:
 
@@ -27,12 +24,6 @@ SWEny renders an ASCII DAG preview and prompts you to save, refine, or discard:
 ```
 
 Type a refinement instruction to iterate on the design — add quality gates, notification steps, loop-back conditions, or restructure the DAG. When it looks right, press `Y`.
-
-For non-interactive use (CI, scripting), pass `--json`:
-
-```bash
-sweny workflow create "audit dependencies for vulnerabilities" --json > audit.yml
-```
 
 ## Edit workflows with natural language
 
@@ -84,11 +75,11 @@ sweny workflow validate hello.yml   # check for errors
 sweny workflow run hello.yml        # execute it
 ```
 
-The executor starts at `greet`, gives Claude the instruction plus the `github` skill's tools, then follows the edge to `summarize`, where Claude summarizes the results.
+The executor starts at `greet`, gives the coding agent the instruction plus the `github` skill's tools, then follows the edge to `summarize`, where the agent summarizes the results.
 
 ## Adding conditional edges
 
-Conditional edges route execution based on Claude's analysis. The `when` clause is natural language -- Claude evaluates it against the current node's result at runtime.
+Conditional edges route execution based on the coding agent's analysis. The `when` clause is natural language -- the agent evaluates it against the current node's result at runtime.
 
 ```yaml
 id: review-and-act
@@ -117,15 +108,15 @@ edges:
     when: "The code change has issues that need to be addressed before merging"
 ```
 
-When `analyze` finishes, the executor presents both `when` conditions to Claude along with the node's result. Claude picks the condition that matches.
+When `analyze` finishes, the executor presents both `when` conditions to the coding agent along with the node's result. The agent picks the condition that matches.
 
 :::note[Multiple conditions]
-If a node has multiple outgoing conditional edges, Claude evaluates all of them and picks the best match. You can also include one unconditional edge (no `when` clause) as a default/fallback path.
+If a node has multiple outgoing conditional edges, the agent evaluates all of them and picks the best match. You can also include one unconditional edge (no `when` clause) as a default/fallback path.
 :::
 
 ## Adding structured output
 
-Structured output schemas force Claude to return data in a predictable shape. This is especially useful when downstream nodes or routing conditions need specific fields.
+Structured output schemas force the agent to return data in a predictable shape. This is especially useful when downstream nodes or routing conditions need specific fields.
 
 ```yaml
 id: incident-classifier
@@ -166,7 +157,7 @@ edges:
     when: "Severity is medium or low"
 ```
 
-The `output` field accepts any valid JSON Schema. Claude's response is validated against it before the node completes.
+The `output` field accepts any valid JSON Schema. The agent's response is validated against it before the node completes.
 
 ## Building workflows in Studio
 

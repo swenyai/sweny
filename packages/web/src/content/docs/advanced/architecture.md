@@ -3,7 +3,7 @@ title: Architecture
 description: SWEny's two-layer execution model and design decisions.
 ---
 
-SWEny uses a two-layer execution model that separates **orchestration** (deterministic DAG traversal) from **agency** (Claude reasoning with tools). This split gives you the reliability of a pipeline with the flexibility of an AI agent.
+SWEny uses a two-layer execution model that separates **orchestration** (deterministic DAG traversal) from **agency** (a coding agent reasoning with tools). This split gives you the reliability of a pipeline with the flexibility of an AI agent.
 
 ## Two layers
 
@@ -13,22 +13,22 @@ The orchestration layer is deterministic. A workflow is a directed acyclic graph
 
 1. Gathers the tools from the node's declared skills
 2. Builds context from the input plus all prior node results
-3. Hands instruction, context, and tools to Claude
+3. Hands instruction, context, and tools to the coding agent
 4. Records the result and resolves the next edge
 
 Edge resolution follows simple rules:
 
 - **Zero outbound edges** — terminal node, workflow ends
 - **One unconditional edge** — follow it
-- **Multiple or conditional edges** — Claude evaluates the `when` clauses and picks one
+- **Multiple or conditional edges** — the coding agent evaluates the `when` clauses and picks one
 
 This means you can see exactly which node ran, what tools were called, and how long each step took. The path through the graph is structural, not emergent.
 
-### Agent layer — Claude with tools
+### Agent layer — a coding agent with tools
 
-At each node, Claude operates as a full agent. It receives an instruction (what to accomplish), a set of tools (from the node's skills), and context (results from prior nodes). Claude reasons, calls tools, and produces a result. The executor treats this as a black box — it only cares about the output.
+At each node, a coding agent operates as a full agent. It receives an instruction (what to accomplish), a set of tools (from the node's skills), and context (results from prior nodes). The agent reasons, calls tools, and produces a result. The executor treats this as a black box — it only cares about the output.
 
-Claude runs via headless [Claude Code](https://docs.anthropic.com/en/docs/claude-code) through the `@anthropic-ai/claude-agent-sdk`. This gives Claude access to the file system, terminal, and any MCP servers you configure, not just API tool calls. Headless Claude Code is the only agent backend: `coding-agent-provider` values other than `claude` are rejected. What the agent can see and reach is scoped per node; see [Agent sandbox](/advanced/agent-sandbox/).
+Each node runs on a harness for the agent you pick with `--agent` (or `coding-agent-provider`): headless [Claude Code](https://docs.anthropic.com/en/docs/claude-code) by default (through the `@anthropic-ai/claude-agent-sdk`), the Codex CLI, pi, or any [Agent Client Protocol](https://agentclientprotocol.com) agent (`acp:<command>`). This gives the agent the file system, terminal, and any MCP servers you configure, not just API tool calls. Other values are rejected. SWEny applies the same opinions to every harness (scoped env, read-only dry runs, output checks, timeouts) and reports what an agent cannot enforce itself as degraded or refuses the node under `--harness-policy strict`; see [Agents and policies](/getting-started/agents-and-policies/). What the agent can see and reach is scoped per node; see [Agent sandbox](/advanced/agent-sandbox/).
 
 ## Why this matters
 
@@ -44,9 +44,9 @@ Traditional AI pipelines are either fully scripted (reliable but rigid) or fully
 |---------|------|
 | `@sweny-ai/core` | Engine, skills, CLI, workflows — everything that runs |
 | `@sweny-ai/studio` | Visual DAG editor and execution monitor (React) |
-| `@sweny-ai/action` | GitHub Action wrapper (private, calls `@sweny-ai/core`) |
+| `@sweny-ai/mcp` | MCP server for Claude Code / Desktop |
 
-`@sweny-ai/core` is the only runtime dependency. It exports the executor, all built-in skills, the Claude client, and the CLI.
+`@sweny-ai/core` is the only runtime dependency. It exports the executor, all built-in skills, the agent harnesses, and the CLI. The GitHub Action is the composite `action.yml` at the repo root, which runs `sweny workflow run`.
 
 ## Key design decisions
 
@@ -54,7 +54,7 @@ Traditional AI pipelines are either fully scripted (reliable but rigid) or fully
 
 The v2 architecture used typed provider interfaces — `ObservabilityProvider`, `IssueTrackingProvider`, etc. Each integration implemented a multi-method interface that step code called directly.
 
-Skills are simpler. A skill is a group of tools with shared configuration. Tools are exposed to Claude via MCP, and Claude calls them directly. No step code, no typed interfaces, no dispatch layer. The `github` skill exports tools like `github_search_code` and `github_create_issue` — Claude decides which to call based on the node instruction.
+Skills are simpler. A skill is a group of tools with shared configuration. Tools are exposed to the agent (in process, over a tool bridge, or via MCP, depending on the harness), and the agent calls them directly. No step code, no typed interfaces, no dispatch layer. The `github` skill exports tools like `github_search_code` and `github_create_issue` — the agent decides which to call based on the node instruction.
 
 ### DAG replaces recipe DSL
 
