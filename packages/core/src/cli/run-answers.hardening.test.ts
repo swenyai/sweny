@@ -183,6 +183,7 @@ describe("the public line from forged history on disk", () => {
 
   it("sinceLastRun takes the workflow id from the caller and ignores other workflows' runs", () => {
     const cwd = seedForged();
+    writeRunAnswers(ans(B, { investigate: { findings: [{ title: "Same" }] } }), cwd);
     expect(sinceLastRun(B, "triage", cwd)?.workflow_id).toBe("triage");
     expect(sinceLastRun(B, "implement", cwd)).toBeNull();
   });
