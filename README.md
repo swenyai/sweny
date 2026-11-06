@@ -65,7 +65,7 @@ npm install -g @sweny-ai/core
 sweny try                                 # recorded demo; add --fast to skip the pacing
 ```
 
-Then run it for real. Requires Node 20+ and a Claude login (`claude` signed in) or an `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` (SWEny runs its nodes on the Claude Code agent).
+Then run it for real. Requires Node 22+ and a Claude login (`claude` signed in) or an `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` (SWEny runs its nodes on the Claude Code agent).
 
 ```bash
 npm install -g @sweny-ai/core

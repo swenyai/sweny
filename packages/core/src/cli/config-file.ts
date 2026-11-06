@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { parseEnv } from "node:util";
 import { parse as parseYaml } from "yaml";
 // Imported for its side effect too: the startup env snapshot is taken before loadDotenv runs.
 import { markWorkspaceEnv } from "../startup-env.js";
@@ -36,21 +37,9 @@ export function loadDotenv(cwd: string = process.cwd()): void {
     return; // no .env — silently skip
   }
 
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-
-    const eqIndex = trimmed.indexOf("=");
-    if (eqIndex === -1) continue;
-
-    const key = trimmed.slice(0, eqIndex).trim();
-    let value = trimmed.slice(eqIndex + 1).trim();
-
-    // Strip surrounding quotes
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-
+  // Node's own dotenv parser (util.parseEnv): inline `# comments`, quoted
+  // values, `export KEY=`, escaped and multiline double-quoted values, CRLF.
+  for (const [key, value] of Object.entries(parseEnv(content))) {
     if (process.env[key] !== undefined) continue;
     if (isDotenvDenied(key)) {
       process.stderr.write(`  warning: .env sets ${key}, a runtime/platform variable; ignored\n`);
