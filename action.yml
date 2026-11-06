@@ -45,7 +45,7 @@ inputs:
     default: ""
 
   cli-version:
-    description: "Version of @sweny-ai/core to install (the package that ships the `sweny` CLI). Defaults to latest on the floating v5 tag; an immutable v5.<version> tag defaults to that exact version."
+    description: "Version of @sweny-ai/core to install (the package that ships the `sweny` CLI). On the v5 and v5.<version> tags this defaults to the exact core version that release was tested with; a branch ref such as @main defaults to latest. Set 'latest' to opt in to untested versions."
     required: false
     default: "latest"
 
