@@ -12,8 +12,10 @@ Create a new SWEny workflow. Interactive picker offering templates, AI-generated
 ```bash
 sweny new          # interactive picker
 sweny new e2e      # jump straight into the end-to-end browser-testing wizard
-sweny new <id>     # use a built-in template by id
+sweny new <id>     # use a built-in template by id, or a workflow from the marketplace
 ```
+
+An id that is not a built-in template is installed from [swenyai/marketplace](https://github.com/swenyai/marketplace) (`workflows/official/<id>.yml`, then `workflows/community/<id>.yml`). The interactive picker's "Browse marketplace" entry lists the same workflows, and only appears when GitHub is reachable. Set `GITHUB_TOKEN` to raise GitHub's rate limit.
 
 In a fresh repo, walks you through provider inference, credential collection, and writes `.sweny.yml` + `.env` + `.sweny/workflows/<id>.yml`. In a repo that already has `.sweny.yml`, adds the new workflow non-destructively — existing config is preserved and `.env` is append-only.
 

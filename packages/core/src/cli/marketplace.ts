@@ -1,6 +1,6 @@
 // packages/core/src/cli/marketplace.ts
 /**
- * Marketplace install — fetch workflows from swenyai/workflows and
+ * Marketplace install — fetch workflows from swenyai/marketplace and
  * adapt them to the user's .sweny.yml providers.
  *
  * Pure functions for fetch/mismatch/adapt; file writes delegate to
@@ -26,8 +26,17 @@ import {
   type Credential,
 } from "./new.js";
 
-export const MARKETPLACE_REPO = "swenyai/workflows";
-export const MARKETPLACE_RAW_BASE = `https://raw.githubusercontent.com/${MARKETPLACE_REPO}/main`;
+export const MARKETPLACE_REPO = "swenyai/marketplace";
+export const MARKETPLACE_BRANCH = "main";
+export const MARKETPLACE_RAW_BASE = `https://raw.githubusercontent.com/${MARKETPLACE_REPO}/${MARKETPLACE_BRANCH}`;
+/** One recursive tree call lists every workflow file; the marketplace publishes no index of its own. */
+export const MARKETPLACE_TREE_URL = `https://api.github.com/repos/${MARKETPLACE_REPO}/git/trees/${MARKETPLACE_BRANCH}?recursive=1`;
+/** Directories under `workflows/` in the marketplace repo, in lookup order (official wins on an id clash). */
+export const MARKETPLACE_SOURCES = ["official", "community"] as const;
+type MarketplaceSource = (typeof MARKETPLACE_SOURCES)[number];
+
+const WORKFLOW_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const WORKFLOW_PATH_RE = new RegExp(`^workflows/(${MARKETPLACE_SOURCES.join("|")})/([A-Za-z0-9][A-Za-z0-9_-]*)\\.yml$`);
 
 export interface MarketplaceEntry {
   id: string;
@@ -46,70 +55,104 @@ export interface FetchedWorkflow {
   yaml: string;
 }
 
-export async function fetchMarketplaceWorkflow(id: string): Promise<FetchedWorkflow> {
-  const url = `${MARKETPLACE_RAW_BASE}/workflows/${id}.yml`;
-  let res: Response;
-  try {
-    res = await fetch(url);
-  } catch {
-    const err = new Error(`Could not reach github.com - check your connection`) as FetchError;
-    err.kind = "network";
-    throw err;
-  }
+function fetchError(kind: FetchError["kind"], message: string): FetchError {
+  const err = new Error(message) as FetchError;
+  err.kind = kind;
+  return err;
+}
 
-  if (res.status === 404) {
-    const err = new Error(`Workflow "${id}" not found in ${MARKETPLACE_REPO}.`) as FetchError;
-    err.kind = "not-found";
-    throw err;
-  }
-
+/** Throw a typed FetchError for any non-OK response (404 is left to the caller). */
+function assertOk(res: Response): void {
+  if (res.ok) return;
   if (res.status === 403 && res.headers.get("X-RateLimit-Remaining") === "0") {
+    const err = fetchError("rate-limit", `GitHub rate limit hit. Set GITHUB_TOKEN to raise the limit, or retry later.`);
     const reset = res.headers.get("X-RateLimit-Reset");
-    const err = new Error(`GitHub rate limit hit. Set GITHUB_TOKEN to raise the limit, or retry later.`) as FetchError;
-    err.kind = "rate-limit";
     if (reset) err.retryAfter = parseInt(reset, 10);
     throw err;
   }
-
-  if (!res.ok) {
-    const err = new Error(`Fetch failed with status ${res.status}`) as FetchError;
-    err.kind = "unknown";
-    throw err;
-  }
-
-  return { id, yaml: await res.text() };
+  throw fetchError("unknown", `Fetch failed with status ${res.status}`);
 }
 
-export async function fetchMarketplaceIndex(opts: { timeoutMs?: number } = {}): Promise<MarketplaceEntry[]> {
-  const url = `${MARKETPLACE_RAW_BASE}/index.json`;
-  let res: Response;
+async function httpGet(url: string, init?: RequestInit): Promise<Response> {
   try {
-    res = await fetch(url, opts.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : undefined);
+    return await (init ? fetch(url, init) : fetch(url));
   } catch {
-    const err = new Error(`Could not reach github.com`) as FetchError;
-    err.kind = "network";
-    throw err;
+    throw fetchError("network", `Could not reach github.com - check your connection`);
+  }
+}
+
+/** Fetch `workflows/official/<id>.yml`, then `workflows/community/<id>.yml`, from swenyai/marketplace. */
+export async function fetchMarketplaceWorkflow(id: string): Promise<FetchedWorkflow> {
+  if (!WORKFLOW_ID_RE.test(id)) {
+    throw fetchError("not-found", `Workflow "${id}" not found in ${MARKETPLACE_REPO}.`);
+  }
+  for (const source of MARKETPLACE_SOURCES) {
+    const res = await httpGet(`${MARKETPLACE_RAW_BASE}/workflows/${source}/${id}.yml`);
+    if (res.status === 404) continue;
+    assertOk(res);
+    return { id, yaml: await res.text() };
+  }
+  throw fetchError("not-found", `Workflow "${id}" not found in ${MARKETPLACE_REPO}.`);
+}
+
+/**
+ * Build the browse list from the marketplace repo itself: one GitHub tree call
+ * to list `workflows/{official,community}/*.yml`, then each file's name,
+ * description and skills. Files that fail to fetch or parse are skipped.
+ */
+export async function fetchMarketplaceIndex(opts: { timeoutMs?: number } = {}): Promise<MarketplaceEntry[]> {
+  const signal = opts.timeoutMs ? AbortSignal.timeout(opts.timeoutMs) : undefined;
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
+  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+
+  const treeRes = await httpGet(MARKETPLACE_TREE_URL, { headers, ...(signal ? { signal } : {}) });
+  if (treeRes.status === 404) throw fetchError("not-found", `Marketplace repo ${MARKETPLACE_REPO} not found`);
+  assertOk(treeRes);
+
+  const body = (await treeRes.json()) as { tree?: Array<{ path?: unknown; type?: unknown }> };
+  if (!body || !Array.isArray(body.tree)) {
+    throw fetchError("bad-yaml", `Marketplace tree listing is malformed`);
   }
 
-  if (res.status === 404) {
-    const err = new Error(`Marketplace index not found`) as FetchError;
-    err.kind = "not-found";
-    throw err;
+  const found: Array<{ source: string; id: string }> = [];
+  const seen = new Set<string>();
+  for (const item of body.tree) {
+    if (item.type !== "blob" || typeof item.path !== "string") continue;
+    const m = WORKFLOW_PATH_RE.exec(item.path);
+    if (m) found.push({ source: m[1], id: m[2] });
   }
-  if (!res.ok) {
-    const err = new Error(`Fetch failed with status ${res.status}`) as FetchError;
-    err.kind = "unknown";
-    throw err;
-  }
+  // Official first, then community; the first source to claim an id wins.
+  found.sort(
+    (a, b) =>
+      MARKETPLACE_SOURCES.indexOf(a.source as MarketplaceSource) -
+      MARKETPLACE_SOURCES.indexOf(b.source as MarketplaceSource),
+  );
 
-  const raw = (await res.json()) as unknown;
-  if (!Array.isArray(raw)) {
-    const err = new Error(`Marketplace index is not an array`) as FetchError;
-    err.kind = "bad-yaml";
-    throw err;
-  }
-
-  return raw as MarketplaceEntry[];
+  const entries = await Promise.all(
+    found.map(async ({ source, id }): Promise<MarketplaceEntry | null> => {
+      if (seen.has(id)) return null;
+      seen.add(id);
+      try {
+        const res = await fetch(
+          `${MARKETPLACE_RAW_BASE}/workflows/${source}/${id}.yml`,
+          signal ? { signal } : undefined,
+        );
+        if (!res.ok) return null;
+        const yaml = await res.text();
+        const parsed = parseYaml(yaml) as { name?: unknown; description?: unknown } | null;
+        if (!parsed || typeof parsed !== "object") return null;
+        return {
+          id,
+          name: typeof parsed.name === "string" && parsed.name ? parsed.name : id,
+          description: typeof parsed.description === "string" ? parsed.description : "",
+          skills: extractSkillsFromYaml(yaml),
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return entries.filter((e): e is MarketplaceEntry => e !== null);
 }
 
 export interface ProviderMismatch {
@@ -284,7 +327,7 @@ export interface InstallResult {
 }
 
 /**
- * Fetch a workflow from swenyai/workflows, adapt if provider mismatch is detected
+ * Fetch a workflow from swenyai/marketplace, adapt if provider mismatch is detected
  * AND an agent is available, then write files idempotently.
  *
  * When `overwrite` is false (default) and the workflow file already exists,
