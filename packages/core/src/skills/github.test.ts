@@ -246,7 +246,7 @@ describe("github_create_pr after the sweny-side push", () => {
 
   const refAt = (sha: string) => () =>
     jsonResponse(200, { ref: "refs/heads/x-1-fix", object: { sha, type: "commit" } });
-  const failedPush = (sha: string | undefined = LOCAL) =>
+  const failedPush = (sha: string | null = LOCAL) =>
     vi.fn(async () => ({
       pushed: false,
       attempted: true,
@@ -332,7 +332,7 @@ describe("github_create_pr after the sweny-side push", () => {
     route({ ref: refAt(LOCAL) });
     const result: any = await createPr.handler(
       { repo: "o/r", title: "t", head: "x-1-fix" },
-      ctx({ logger: makeLogger(), pushBranch: failedPush(undefined) }),
+      ctx({ logger: makeLogger(), pushBranch: failedPush(null) }),
     );
     expect(posted()).toBe(false);
     expect(refRead()).toBe(false);
