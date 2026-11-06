@@ -324,9 +324,9 @@ export async function runTry(opts: TryOptions = {}): Promise<number> {
   const answer = resolveFinalOutput(workflow, results);
   if (answer) write(`${formatFinalOutput(answer)}\n\n`);
 
-  // Compact preview of the PR comment: its heading and DAG here, its ticket (the receipt) below.
+  // Compact preview of CI's job summary: heading and DAG here, receipt below.
   const comment = formatRunComment(workflow, results as Map<string, NodeResult>, receipt, { trace, durationsMs });
-  write(`  ${paint.muted("On a pull request, CI posts this heading, this DAG and the receipt below:")}\n\n`);
+  write(`  ${paint.muted("CI puts this heading, this DAG and the receipt below in the job summary:")}\n\n`);
   const tone = receipt.ok ? paint.success : paint.error;
   write(`    ${tone(receipt.ok ? g.success : g.failure)} ${paint.strong(workflow.name)}\n\n`);
   write(

@@ -48,6 +48,8 @@ export interface ToolContext {
    * snapshot by the Node executor. Absent means https://api.github.com.
    */
   githubApiUrl?: string;
+  /** Runtime-owned workflow identity for the single updating PR findings comment. */
+  prComment?: import("./pr-comment.js").PrCommentContext;
 }
 
 /** The sweny-side head-branch push behind `github_create_pr` (#473). Never throws. */

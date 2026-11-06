@@ -405,7 +405,7 @@ export const WORKFLOW_RUN_OPTIONS: ReadonlyArray<readonly [flags: string, descri
   ["--mermaid", "Output a Mermaid diagram with execution state after run"],
   [
     "--comment-file <path>",
-    "Write a PR-comment markdown (run receipt, status-colored DAG, per-node table; metadata only) to <path> so any CI can post it",
+    "Prepare a PR-comment file at <path>; metadata-only billboards leave it empty (receipt and DAG go to the job summary)",
   ],
   ["--input <json>", "JSON string of input data to pass to the workflow"],
   ["--agent <id>", "Coding agent that runs the nodes: claude (default), codex, or pi (experimental)"],

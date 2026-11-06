@@ -20,6 +20,32 @@ function makeLogger(): Logger & { warnings: string[] } {
 }
 
 const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
+const addComment = github.tools.find((t) => t.name === "github_add_comment")!;
+
+describe("workflow PR comments", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("uses runtime workflow context to update one findings surface", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, [{ id: 9, body: "<!-- sweny-run-comment:review -->\nOld finding" }]))
+      .mockResolvedValueOnce(jsonResponse(200, { id: 9 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await addComment.handler({ repo: "o/r", issue_number: 2, body: "New finding" }, ctx({
+      prComment: { workflowId: "review", receiptUrl: "https://github.com/o/r/actions/runs/1" },
+    }));
+    expect(result).toMatchObject({ id: 9, swenyCommentStatus: "updated" });
+    expect(fetchMock.mock.calls[1][0]).toBe("https://api.github.com/repos/o/r/issues/comments/9");
+    expect(fetchMock.mock.calls[1][1].method).toBe("PATCH");
+  });
+
+  it("leaves ordinary issue comments on their existing append path", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(201, { id: 2 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await addComment.handler({ repo: "o/r", issue_number: 2, body: "Issue update" }, ctx());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+  });
+});
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {

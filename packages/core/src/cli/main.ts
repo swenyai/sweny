@@ -1272,8 +1272,10 @@ export async function workflowRunAction(
       // silent
     }
 
-    // PR billboard markdown (metadata only). Written before any early exit so
-    // --json runs and failed runs still get a comment.
+    // Receipt metadata belongs in the job summary, including --json and failed runs.
+    writeStepSummary(workflow, results, summarizeRun(results, wfDurationMs, false, trace), trace);
+
+    // Suppress the metadata-only billboard. Review outputs own the PR findings surface.
     if (options.commentFile) {
       writeRunComment(options.commentFile, workflow, results, summarizeRun(results, wfDurationMs, false, trace), {
         trace,
@@ -1304,10 +1306,9 @@ export async function workflowRunAction(
       // silent
     }
 
-    // Run receipt (metadata only) + optional $GITHUB_STEP_SUMMARY.
+    // Run receipt (metadata only). The job summary was written before early exits.
     runLogger.flush();
     const receipt = summarizeRun(results, wfDurationMs, false, trace);
-    writeStepSummary(workflow, results, receipt, trace);
 
     // The answer, above the receipt: the terminal node's result, or the failed node's error.
     // Also saved to .sweny/runs/<id>/output.md (local only; --no-history skips the file).
@@ -1352,7 +1353,8 @@ export async function workflowRunAction(
     recordHistory(nodeTimer.lastResults, undefined, true);
     const crashSummary = summarizeRun(new Map(), Date.now() - runStart, true);
     await writeReceipt(crashSummary, { workflow: workflow.id, runId, crashed: true, stream: process.stderr });
-    // A crash must not leave a stale success comment behind.
+    writeStepSummary(workflow, new Map(), crashSummary);
+    // A crash records its receipt in the summary without adding a status comment.
     if (options.commentFile) {
       writeRunComment(options.commentFile, workflow, new Map(), crashSummary, { crashed: true, runId });
     }

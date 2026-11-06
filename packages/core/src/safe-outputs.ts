@@ -27,8 +27,11 @@ import type {
   SafeOutputType,
   Skill,
   Tool,
+  ToolContext,
 } from "./types.js";
 import { SAFE_OUTPUT_APPLIERS } from "./types.js";
+import { writePrCommentSummary } from "./pr-comment-summary.js";
+import { isPrCommentTarget } from "./pr-comment.js";
 
 /** Name of the intent-recording tool a node with `outputs` receives. */
 export const EMIT_OUTPUT_TOOL = "emit_output";
@@ -448,6 +451,8 @@ export interface ApplySafeOutputsOptions {
   pushBranch?: BranchPusher;
   /** The operator's GITHUB_API_URL for the github skill (GHES). */
   githubApiUrl?: string;
+  /** The executor's workflow identity, never taken from an output intent. */
+  prComment?: ToolContext["prComment"];
   state: WriteStageState;
   logger: Logger;
   /** The run input, for `number: { input }` pins. */
@@ -516,7 +521,13 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
 
     // Shape and size.
     const body = intent.body ?? "";
-    if ((type === "comment" && !body.trim()) || (type !== "label" && body.length > SAFE_OUTPUT_BODY_MAX)) {
+    const commentNumber =
+      intent.number?.trim().replace(/^#/, "") ??
+      (decl.number !== undefined ? resolvePin(decl.number, o.input) : undefined);
+    const quietComment =
+      type === "comment" && via === "github" && o.prComment &&
+      isPrCommentTarget(o.prComment, target ?? "", Number(commentNumber));
+    if ((type === "comment" && !body.trim() && !quietComment) || (type !== "label" && body.length > SAFE_OUTPUT_BODY_MAX)) {
       refuse(type === "comment" && !body.trim() ? "missing body" : "body too long", at);
       continue;
     }
@@ -704,7 +715,22 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
         ...(o.cwd ? { cwd: o.cwd } : {}),
         ...(o.pushBranch ? { pushBranch: o.pushBranch } : {}),
         ...(o.githubApiUrl ? { githubApiUrl: o.githubApiUrl } : {}),
+        ...(write.type === "comment" && write.via === "github" && o.prComment ? { prComment: o.prComment } : {}),
       });
+      const commentStatus =
+        o.prComment && write.type === "comment" && write.via === "github"
+          ? (output as { swenyCommentStatus?: unknown } | null)?.swenyCommentStatus
+          : undefined;
+      if (
+        o.prComment &&
+        (commentStatus === "empty" || commentStatus === "unchanged" || commentStatus === "created" || commentStatus === "updated")
+      ) {
+        writePrCommentSummary(o.prComment.workflowId, commentStatus, o.env);
+      }
+      if (commentStatus === "empty" || commentStatus === "unchanged") {
+        receipts[index] = { ...receipts[index], status: "skipped", reason: commentStatus };
+        continue;
+      }
       const ref = refOf(output);
       const url = urlOf(output);
       receipts[index] = { ...receipts[index], ...(ref !== undefined ? { ref } : {}), ...(url ? { url } : {}) };

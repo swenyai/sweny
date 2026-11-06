@@ -18,7 +18,7 @@ import {
   type SafeOutputIntent,
 } from "./safe-outputs.js";
 import { validateWorkflow } from "./schema.js";
-import type { SafeOutputDeclaration, SafeOutputType, Skill, Tool, Workflow } from "./types.js";
+import type { SafeOutputDeclaration, SafeOutputType, Skill, Tool, ToolContext, Workflow } from "./types.js";
 
 function mkLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -55,6 +55,33 @@ function fakeGithub() {
 }
 
 const T0 = 1_000_000;
+
+describe("quiet PR comment receipts", () => {
+  it.each(["unchanged", "empty"] as const)("records %s as skipped after policy checks", async (status) => {
+    const handler = vi.fn(async (_input: unknown, _ctx: ToolContext) => ({ id: 9, swenyCommentStatus: status }));
+    const skill = fakeGithub().skill;
+    skill.tools.find((t) => t.name === "github_add_comment")!.handler = handler;
+    const { o } = opts({
+      declarations: [{ type: "comment", number: 2 }],
+      intents: [intent({ type: "comment", body: status === "empty" ? "" : "Finding", number: "2" })],
+      skills: new Map([["github", skill]]),
+      prComment: { workflowId: "review" },
+    });
+    const result = await applySafeOutputs(o);
+    expect(result.receipts[0]).toMatchObject({ type: "comment", status: "skipped", reason: status });
+    expect(handler.mock.calls[0][1]).toMatchObject({ prComment: { workflowId: "review" } });
+  });
+
+  it("does not pass a refused comment to the surface", async () => {
+    const { o, gh } = opts({
+      declarations: [{ type: "comment", number: 2 }],
+      intents: [intent({ type: "comment", body: "Finding", number: "3" })],
+      prComment: { workflowId: "review" },
+    });
+    expect((await applySafeOutputs(o)).receipts[0].status).toBe("refused");
+    expect(gh.calls).toHaveLength(0);
+  });
+});
 
 function intent(over: Partial<SafeOutputIntent>): SafeOutputIntent {
   return { type: "issue", title: "Crash on start", body: "Details", recordedAt: T0, ...over };

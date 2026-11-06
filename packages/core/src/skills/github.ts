@@ -6,6 +6,7 @@
  */
 
 import type { Skill, ToolContext, SkillCategory } from "../types.js";
+import { isPrCommentTarget, upsertPrComment } from "../pr-comment.js";
 
 // #473: the sweny-side head-branch push arrives as `ctx.pushBranch`, bound to
 // the run's checkout by the Node executor (skills/git-push.ts). This module
@@ -273,10 +274,12 @@ export const github: Skill = {
         required: ["repo", "issue_number", "body"],
       },
       handler: async (input: { repo: string; issue_number: number; body: string }, ctx) =>
-        gh(`/repos/${input.repo}/issues/${input.issue_number}/comments`, ctx, {
-          method: "POST",
-          body: JSON.stringify({ body: input.body }),
-        }),
+        ctx.prComment && isPrCommentTarget(ctx.prComment, input.repo, input.issue_number)
+          ? upsertPrComment(input.repo, input.issue_number, input.body, ctx.prComment, (path, init) => gh(path, ctx, init))
+          : gh(`/repos/${input.repo}/issues/${input.issue_number}/comments`, ctx, {
+              method: "POST",
+              body: JSON.stringify({ body: input.body }),
+            }),
     },
     {
       name: "github_create_pr",

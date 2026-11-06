@@ -81,6 +81,27 @@ function begin(j: RunJournal, input: unknown = {}, config: Record<string, string
 }
 
 describe("journal records", () => {
+  it("retains a quiet comment disposition for resume without retaining the findings", async () => {
+    const cwd = tmp();
+    const j = RunJournal.create({ runId: RUN_ID, cwd });
+    begin(j);
+    const skill: Skill = {
+      id: "github", name: "GitHub", description: "", category: "git", config: {},
+      tools: [{
+        name: "github_add_comment", description: "", access: "write", input_schema: {},
+        handler: async () => ({ id: 9, swenyCommentStatus: "unchanged", body: "PRIVATE FINDING" }),
+      }],
+    };
+    await j.wrapWrites("a", 1, new Map([["github", skill]])).get("github")!.tools[0].handler(
+      { repo: "o/r", issue_number: 2, body: "PRIVATE FINDING" },
+      { config: {}, logger: console },
+    );
+    j.end("success");
+    const receipt = readJournal(join(journalDir(cwd, RUN_ID), JOURNAL_FILE)).records.find((r) => r.type === "output:applied");
+    expect(receipt?.output).toEqual({ id: 9, swenyCommentStatus: "unchanged" });
+    expect(JSON.stringify(receipt)).not.toContain("PRIVATE FINDING");
+  });
+
   it("live in the state dir (never the workspace), private, versioned, sequenced, MAC-chained, one per line", () => {
     const cwd = tmp();
     const j = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "w.yml" });

@@ -1,18 +1,19 @@
 /**
- * PR billboard: the markdown a CI runner posts as one sticky comment on a
- * pull request. Leads with the receipt ticket, then the run's DAG. Pure and runner-agnostic; the CLI writes it with
- * `--comment-file`, and any runner (the GitHub Action, GitLab, a script) posts it.
+ * Legacy metadata billboard formatter (also used by the offline demo).
+ * Actual CLI comment-file writes delegate to quiet-comment: routine metadata
+ * stays in the job summary and review outputs own the PR findings comment.
  *
  * METADATA ONLY. Node names, statuses, counts, and durations. Never prompts,
  * tool inputs, node outputs, errors, or model prose.
  */
 
-import { workspaceRoot, writeFileNoFollow } from "../safe-file.js";
 import type { ExecutionTrace, NodeResult, Workflow } from "../types.js";
 import { toMermaidBlock } from "../mermaid.js";
 import { formatReceiptDuration, nodeStates, type RunSummary } from "./run-output.js";
 import { formatTicketText } from "./ticket.js";
 import { glyphs } from "./terminal.js";
+import { prCommentMarker } from "../pr-comment.js";
+import { writeQuietBillboard } from "./quiet-comment.js";
 
 export const RUN_COMMENT_FOOTER = "Run with [SWEny](https://github.com/swenyai/sweny): `npx @sweny-ai/core new`";
 
@@ -31,8 +32,7 @@ function ticketBlock(workflow: Workflow, summary: RunSummary, runId?: string, cr
 
 /** Hidden marker the poster searches for to update the comment in place. */
 export function runCommentMarker(workflowId: string): string {
-  const safe = workflowId.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/-{2,}/g, "-") || "workflow";
-  return `<!-- sweny-run-comment:${safe} -->`;
+  return prCommentMarker(workflowId);
 }
 
 /** Table-cell-safe text: no pipes, newlines, or backticks. */
@@ -97,24 +97,16 @@ export function formatCrashComment(workflow: Workflow, summary: RunSummary, runI
   ].join("\n");
 }
 
-/** Write the comment markdown to `file`. Never throws; returns true only when written. */
+/** Suppress the metadata billboard; review outputs own the findings comment. Never throws. */
 export function writeRunComment(
   file: string,
   workflow: Workflow,
   results: Map<string, NodeResult>,
-  summary: RunSummary,
-  opts: RunCommentOptions & { crashed?: boolean } = {},
+  _summary: RunSummary,
+  _opts: RunCommentOptions & { crashed?: boolean } = {},
 ): boolean {
   try {
-    // The file may sit in the agent-writable workspace: no link on the path is followed.
-    writeFileNoFollow(
-      file,
-      opts.crashed
-        ? formatCrashComment(workflow, summary, opts.runId)
-        : formatRunComment(workflow, results, summary, opts),
-      { ...workspaceRoot(file), mode: 0o644, dirMode: 0o755 },
-    );
-    return true;
+    return writeQuietBillboard(file, workflow.id, results);
   } catch (err) {
     process.stderr.write(
       `  ${glyphs().warning} could not write comment file: ${err instanceof Error ? err.message : err}\n`,

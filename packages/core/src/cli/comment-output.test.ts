@@ -101,7 +101,7 @@ describe("formatRunComment", () => {
   });
 
   it("marker id is comment-safe", () => {
-    expect(runCommentMarker("a--b>c d")).toBe("<!-- sweny-run-comment:a-b_c_d -->");
+    expect(runCommentMarker("a--b>c d")).toBe("<!-- sweny-run-comment:a%2D%2Db%3Ec%20d -->");
   });
 
   it("escapes table-breaking node names", () => {
@@ -118,12 +118,12 @@ describe("formatRunComment", () => {
 });
 
 describe("writeRunComment", () => {
-  it("writes the file, creating parent dirs", () => {
+  it("writes an empty billboard file, creating parent dirs, so the Action stays quiet", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-comment-"));
     const file = path.join(dir, "nested", "c.md");
     const results = new Map<string, NodeResult>([["gather", ok()]]);
     expect(writeRunComment(file, workflow, results, summarizeRun(results, 1))).toBe(true);
-    expect(fs.readFileSync(file, "utf8")).toContain("sweny-run-comment:pr-review");
+    expect(fs.readFileSync(file, "utf8")).toBe("");
   });
   it("never throws", () => {
     const results = new Map<string, NodeResult>([["gather", ok()]]);

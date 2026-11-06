@@ -54,6 +54,8 @@ import { gitCredentialWarning, scanGitCredentials } from "./git-credentials.js";
 // #473: the sweny-side branch push in `github_create_pr` (Node only; skills/ stays browser-safe).
 import { bindBranchPusher } from "./skills/git-push.js";
 import { trustedEnvValue } from "./startup-env.js";
+import { prReceiptUrl } from "./pr-comment.js";
+import { writePrCommentSummary } from "./pr-comment-summary.js";
 import { fenceUntrusted, fenceUntrustedJson } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
 import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
@@ -384,6 +386,25 @@ async function executeRun(
   const pushBranch = bindBranchPusher(resolveCwd, runEnv);
   // GHES: the REST base for the github skill, never a value the workspace .env introduced.
   const githubApiUrl = trustedEnvValue(runEnv, "GITHUB_API_URL") || undefined;
+  const prNumber = Number(
+    trustedEnvValue(runEnv, "PR_NUMBER") || (workflow.workflow_type === "pr_review" ? runInput?.pr_number : undefined),
+  );
+  const prRepo =
+    trustedEnvValue(runEnv, "GITHUB_REPOSITORY") ||
+    (workflow.workflow_type === "pr_review" && typeof runInput?.repo === "string" ? runInput.repo : undefined);
+  const prComment =
+    prRepo && Number.isSafeInteger(prNumber) && prNumber > 0
+      ? {
+          workflowId: workflow.id,
+          repo: prRepo,
+          number: prNumber,
+          receiptUrl: prReceiptUrl(
+            Object.fromEntries(
+              ["GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"].map((key) => [key, trustedEnvValue(runEnv, key)]),
+            ),
+          ),
+        }
+      : undefined;
   const resolvedSources = await resolveSources(sourceMap, {
     cwd: resolveCwd,
     env: options.env ?? process.env,
@@ -642,8 +663,15 @@ async function executeRun(
           staged: stageOutputs,
           pushBranch,
           ...(githubApiUrl ? { githubApiUrl } : {}),
+          ...(prComment ? { prComment } : {}),
         };
         const output = await t.handler(toolInput, toolCtx);
+        if (prComment && t.name === "github_add_comment") {
+          const status = (output as { swenyCommentStatus?: unknown } | null)?.swenyCommentStatus;
+          if (status === "empty" || status === "unchanged" || status === "created" || status === "updated") {
+            writePrCommentSummary(workflow.id, status, runEnv);
+          }
+        }
         safeObserve(observer, { type: "tool:result", node: currentId!, tool: t.name, output }, logger);
         return output;
       },
@@ -1102,6 +1130,7 @@ async function executeRun(
           cwd: resolveCwd,
           pushBranch,
           ...(githubApiUrl ? { githubApiUrl } : {}),
+          ...(prComment ? { prComment } : {}),
           state: writeState,
           logger,
           input: runInput,

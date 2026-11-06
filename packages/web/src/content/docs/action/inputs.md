@@ -32,13 +32,13 @@ SWEny ships three GitHub Actions, each with its own input surface. This page doc
 | `cli-version` | Version of `@sweny-ai/core` to install. The floating `v5` tag defaults to `latest`; an immutable `v5.<version>` tag defaults to that exact version | `latest` |
 | `node-version` | Node.js version to install | `24` |
 | `working-directory` | Working directory to run from | `.` |
-| `pr-comment` | On `pull_request` events, post or update one comment on the PR with the run receipt, a status-colored DAG, and per-node status and duration. Metadata only: no prompts, tool inputs, or model output. No-op on every other event. Set to `false` to opt out | `true` |
+| `pr-comment` | Enable the PR comment output step on `pull_request` events. Metadata-only billboards are suppressed: run details go to the job summary. Review findings use one updating workflow comment (see below). No-op on other events | `true` |
 
 With `agent: claude` you must provide either `claude-oauth-token` or `anthropic-api-key`; with `agent: codex`, `openai-api-key`.
 
 #### PR comment
 
-The comment needs `pull-requests: write` on the job's `GITHUB_TOKEN`. Grant it only when `pr-comment` is enabled:
+Posting review findings needs `pull-requests: write` on the job's `GITHUB_TOKEN`. Jobs that only write a summary do not need this permission:
 
 ```yaml
 permissions:
@@ -46,9 +46,15 @@ permissions:
   pull-requests: write
 ```
 
-The comment is created once and updated in place on later runs (found by a hidden `<!-- sweny-run-comment:<workflow-id> -->` marker). If posting fails (for example a fork PR with a read-only token), the step warns and the job is unaffected. Needs a `@sweny-ai/core` version with `--comment-file`.
+SWEny is quiet by default. The run receipt (cost, tokens, duration and policy) and status-colored DAG go to the **job summary**. The CLI leaves the billboard file empty so the Action's comment step skips it, including when an earlier run left a file there. Crashes and runs with no findings do not add routine status comments.
 
-On other CI systems, run `sweny workflow run <file> --comment-file comment.md` and post the file with your runner's API.
+Review comments requested through the GitHub skill or declared safe outputs update one findings comment per workflow per PR. SWEny finds it by the hidden `<!-- sweny-run-comment:<workflow-id> -->` marker; special characters in the id are percent encoded. The comment contains the findings and one **Run receipt** link to the Actions run. A review workflow run outside the Action can identify its PR with `workflow_type: pr_review` and the `repo` / `pr_number` inputs.
+
+Empty findings make no comment API call. If the normalized findings match the last posted comment, SWEny skips the write even when the receipt URL, journal marker or line endings changed. Both skip reasons appear in the job summary. Existing findings stay in place on an empty run; the receipt records the current run separately.
+
+`pr-comment: false` disables the Action's billboard output step. It does not disable writes a workflow explicitly requests through safe outputs or the GitHub skill. Keep the workflow read-only or remove its comment output to disable those writes. The risk-review pack uses read-only nodes with one declared comment output.
+
+On other CI systems, `--comment-file comment.md` remains accepted but metadata-only runs produce an empty file. Check that the file is nonempty before posting. Use the job's receipt and summary for routine run details.
 
 Pass any additional credentials your workflow needs via `env:` on the step — the CLI auto-loads environment variables.
 

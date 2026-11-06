@@ -1560,7 +1560,7 @@ function slimOutput(o: unknown, depth = 0): unknown {
   if (!o || typeof o !== "object" || Array.isArray(o) || depth > 3) return null;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
-    if (["number", "identifier", "id", "html_url", "url", "success", "reused"].includes(k)) {
+    if (["number", "identifier", "id", "html_url", "url", "success", "reused", "swenyCommentStatus"].includes(k)) {
       if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = v;
     } else if (v && typeof v === "object" && !Array.isArray(v)) {
       const s = slimOutput(v, depth + 1);
