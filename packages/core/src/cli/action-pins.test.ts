@@ -147,9 +147,16 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
   }
 
   type Ctx = ReturnType<typeof setup>;
+  type RunOpts = { served?: string[]; releases?: string[]; published?: string; latest?: string };
 
-  function runScript(ctx: Ctx, run: string, opts: { served?: string[]; releases?: string[]; published?: string }) {
-    const npm = { versions: Object.fromEntries((opts.served ?? []).map((v) => [v, { version: v }])) };
+  function runScript(ctx: Ctx, run: string, opts: RunOpts) {
+    const served = opts.served ?? [];
+    // npm's `latest` dist-tag defaults to the last served version.
+    const latest = opts.latest ?? served[served.length - 1];
+    const npm = {
+      ...(latest ? { "dist-tags": { latest } } : {}),
+      versions: Object.fromEntries(served.map((v) => [v, { version: v }])),
+    };
     const script = path.join(ctx.d, "step.sh");
     fs.writeFileSync(script, run);
     const r = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", script], {
@@ -173,7 +180,7 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
   }
 
   // The tag step, then the Release step, as the job runs them.
-  function run(ctx: Ctx, opts: { served: string[]; releases?: string[]; published?: string }) {
+  function run(ctx: Ctx, opts: RunOpts & { served: string[] }) {
     const tag = runScript(ctx, step.run, opts);
     if (!releaseStep) return tag;
     const rel = runScript(ctx, releaseStep.run, opts);
@@ -411,6 +418,22 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
     expect(git(ctx.origin, ["rev-parse", "v5~1"])).toBe(ctx.tip);
     expect(pinAt(ctx, "v5")).toBe("0.1.201");
     expect(git(ctx.origin, ["show", "v5:action.yml"])).toContain("# action-only change");
+  });
+
+  it("bootstrap: with v5 on cli-version latest, never pins below npm's latest", () => {
+    const ctx = setup({ main: [{ core: "0.1.200" }], v5: { at: 0, pin: null }, tags: ["v5.0.1.201"] });
+    const r = run(ctx, { served: ["0.1.200", "0.1.201"], latest: "0.1.201", releases: ["v5.0.1.201"] });
+    expect(r.status, r.out).toBe(0);
+    expect(v5Sha(ctx)).toBe(ctx.v5Before);
+    expect(pinAt(ctx, "v5")).toBe("latest");
+  });
+
+  it("bootstrap: with v5 on cli-version latest, pins a core at npm's latest", () => {
+    const ctx = setup({ main: [{ core: "0.1.201" }], v5: { at: 0, pin: null }, tags: ["v5.0.1.201"] });
+    const r = run(ctx, { served: ["0.1.200", "0.1.201"], latest: "0.1.201", releases: ["v5.0.1.201"] });
+    expect(r.status, r.out).toBe(0);
+    expect(pinAt(ctx, "v5")).toBe("0.1.201");
+    expect(git(ctx.origin, ["rev-parse", "v5~1"])).toBe(ctx.tip);
   });
 
   it("never creates v5 while npm serves nothing", () => {
