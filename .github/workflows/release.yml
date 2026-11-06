@@ -70,6 +70,22 @@ jobs:
         run: |
           [ "$(git rev-parse HEAD)" = "$VERIFIED_SHA" ] || { echo "::error::publish checkout is not the verified commit $VERIFIED_SHA"; exit 1; }
 
+      - name: Publish only what main still carries
+        id: gate
+        env:
+          VERIFIED_SHA: ${{ needs.verify.outputs.sha }}
+        run: |
+          # main's tip must be this commit, or it plus version-only writebacks. A re-run of
+          # an older commit would otherwise publish its old code under a new version and
+          # write that version back to main.
+          git fetch -q origin main
+          if node scripts/verify-tag-source.mjs "$VERIFIED_SHA" FETCH_HEAD >/dev/null; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main has moved past $VERIFIED_SHA; not publishing (its own release run does)"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -91,6 +107,7 @@ jobs:
 
       - name: Detect changes and publish
         id: release
+        if: steps.gate.outputs.current == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -187,9 +204,10 @@ jobs:
 
       - name: Advance release-latest diff base
         # release-latest is the diff base for change detection on the next run,
-        # so it MUST only move on a successful publish (default if: success()).
-        # If publish failed, the base stays put and the next run still sees the
-        # unpublished changes.
+        # so it MUST only move on a successful publish (an if: without a status
+        # function implies success()). If publish failed or was gated off, the
+        # base stays put and the next run still sees the unpublished changes.
+        if: steps.gate.outputs.current == 'true'
         run: |
           # Point at the source that was built/published, not the newer main
           # used for version writeback. Concurrent merges still need publishing.
@@ -230,6 +248,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
         with:
           ref: ${{ needs.verify.outputs.sha }}
           fetch-depth: 0
@@ -238,14 +257,14 @@ jobs:
       - name: Tag v5 and immutable v5.<core-version> on a commit pinned to the tested core
         env:
           VERIFIED_SHA: ${{ needs.verify.outputs.sha }}
-          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+          PUBLISHED_CORE_VERSION: ${{ needs.publish.outputs.core_version }}
         run: |
           # Desired-state reconciliation: converge to one state computed from origin/main
-          # and npm, never from this run's outputs:
-          #   v5             main's tip with action.yml's cli-version stamped to main's
-          #                  core version, once npm serves exactly that version
+          # and npm:
+          #   v5             main's tip with action.yml's cli-version stamped to the core
+          #                  this run published (else main's core version), once npm
+          #                  serves exactly that version
           #   v5.<version>   created at v5 when missing, never moved
-          #   GitHub Release one per recent v5.* tag (they replace CHANGELOG.md)
           # The composite action.yml needs no build. main keeps "latest" for branch refs.
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -256,13 +275,17 @@ jobs:
           # job tested, or it plus the publish job's version-only writeback (checked by the
           # verified tree's own script, before any of the tip's code runs). If main has
           # moved on, that commit's release run (same concurrency group) converges.
+          # Forging a version-only commit to pass this needs push rights to main, which
+          # branch protection gates.
           [ "$(git rev-parse HEAD)" = "$VERIFIED_SHA" ] || { echo "::error::checkout is not $VERIFIED_SHA"; exit 1; }
           if ! node scripts/verify-tag-source.mjs "$VERIFIED_SHA" FETCH_HEAD; then
             echo "::notice::main has moved past $VERIFIED_SHA; its own release run will reconcile v5"
             exit 0
           fi
           git checkout -q --detach FETCH_HEAD
-          PIN=$(node -p "require('./packages/core/package.json').version")
+          # The core this run published wins over main's version, which is stale when a
+          # later publish step failed before the version writeback.
+          PIN="${PUBLISHED_CORE_VERSION:-$(node -p "require('./packages/core/package.json').version")}"
           TAG="v5.${PIN}"
 
           # npm takes minutes to serve a just-published version: poll every 15s for 15 min.
@@ -273,7 +296,7 @@ jobs:
             sleep 15
           done
           if [ "$served" != "$PIN" ]; then
-            echo "::notice::@sweny-ai/core@${PIN} (main's core) is not served by npm yet; leaving v5 for the next release run"
+            echo "::notice::@sweny-ai/core@${PIN} is not served by npm yet; leaving v5 for the next release run"
             exit 0
           fi
 
@@ -292,22 +315,31 @@ jobs:
             echo "Pushed $TAG"
           fi
 
-          # One Release per v5.* tag, oldest first so each one's notes start at the tag
-          # before it. Creating a missing one is also how a failed create is repaired.
-          # Bounded to the 10 most recent tags (by creation): repairs recent failures
-          # without backfilling the v5.* tags cut before Releases existed.
+      - name: Reconcile GitHub Releases for recent v5.* tags
+        # Its own step so it runs whatever the tag step did, early exits included.
+        if: always() && steps.checkout.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+        run: |
+          # One Release per v5.* tag (they replace CHANGELOG.md), oldest first so each
+          # one's notes start at the tag before it. Creating a missing one is also how a
+          # failed create is repaired. Bounded to the 10 most recent tags (by creation):
+          # repairs recent failures without backfilling the tags cut before Releases existed.
+          git fetch -q --force --tags origin
           RELEASED=$(gh release list --limit 100 --json tagName --jq '.[].tagName')
+          TAGS=$(git tag -l 'v5.*' --sort=creatordate | tail -n 11)
+          NEWEST=$(printf '%s\n' "$TAGS" | tail -n 1)
           TOTAL=$(git tag -l 'v5.*' | wc -l)
           SKIP=$((TOTAL > 10 ? 1 : 0)) # the 11th newest only seeds the notes range
           PREV=""
           n=0
-          for t in $(git tag -l 'v5.*' --sort=creatordate | tail -n 11); do
+          for t in $TAGS; do
             n=$((n + 1))
             if [ "$n" -gt "$SKIP" ] && ! grep -qxF "$t" <<<"$RELEASED"; then
               NOTES=(--notes "First tracked v5 release.")
               if [ -n "$PREV" ]; then NOTES=(--generate-notes --notes-start-tag "$PREV"); fi
               LATEST=false
-              if [ "$t" = "$TAG" ]; then LATEST=true; fi
+              if [ "$t" = "$NEWEST" ]; then LATEST=true; fi
               gh release create "$t" --verify-tag --title "$t" --latest="$LATEST" "${NOTES[@]}"
             fi
             PREV="$t"
