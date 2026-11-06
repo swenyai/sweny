@@ -1050,24 +1050,70 @@ export function resolveSandboxMode(
   return fallback;
 }
 
-/** Functional bubblewrap check: can it actually create a sandbox on this host? */
-function bwrapWorks(): string | undefined {
+/**
+ * The fix-it hint for a sandbox start that failed on a user namespace. Ubuntu
+ * 23.10+ restricts unprivileged user namespaces (the sysctl), and Ubuntu 26.04
+ * also loads the `bwrap-userns-restrict` AppArmor profile, which denies every
+ * capability to bwrap's children, so the seccomp helper of
+ * @anthropic-ai/sandbox-runtime cannot nest its own user namespace
+ * (`apply-seccomp: write /proc/self/setgroups ... Permission denied`,
+ * anthropics/sandbox-runtime#429). Empty when `stderr` is not a namespace error.
+ */
+export function usernsHint(stderr: string): string {
+  return /user namespace|userns|uid map|uid_map|setgroups|setting up uid|Operation not permitted|Permission denied/i.test(
+    stderr,
+  )
+    ? "; unprivileged user namespaces look restricted (Ubuntu 23.10+: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; " +
+        "Ubuntu 26.04 also: sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict)"
+    : "";
+}
+
+const BWRAP_PROBE = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"];
+
+/** Run a probe command; throws (with `stderr`) when it fails. */
+export type ProbeRunner = (file: string, args: string[]) => void;
+
+const runProbe: ProbeRunner = (file, args) => {
+  execFileSync(file, args, { stdio: ["ignore", "ignore", "pipe"], timeout: 10_000 });
+};
+
+function probeError(err: unknown): string {
+  return String((err as { stderr?: unknown }).stderr || (err as Error).message || "").trim();
+}
+
+/**
+ * Functional bubblewrap check: can it actually create a sandbox on this host?
+ * Two runs, the same as the Action's `scripts/sandbox-userns.sh probe`: a
+ * plain `bwrap ... true`, then a user namespace nested inside bwrap, which the
+ * SDK sandbox's seccomp helper needs. On Ubuntu 26.04 the first passes and
+ * the second does not, so a plain probe would report a sandbox that then
+ * fails every command. The nested run is skipped when `unshare` is not on PATH.
+ */
+export function bwrapWorks(
+  run: ProbeRunner = runProbe,
+  hasUnshare: () => boolean = () =>
+    (process.env.PATH ?? "")
+      .split(path.delimiter)
+      .filter(Boolean)
+      .some((d) => existsSync(path.join(d, "unshare"))),
+): string | undefined {
   try {
-    execFileSync("bwrap", ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "true"], {
-      stdio: ["ignore", "ignore", "pipe"],
-      timeout: 10_000,
-    });
-    return undefined;
+    run("bwrap", [...BWRAP_PROBE, "true"]);
   } catch (err) {
-    const stderr = String((err as { stderr?: unknown }).stderr ?? (err as Error).message ?? "").trim();
-    const userns = /user namespace|uid map|setting up uid|Operation not permitted|Permission denied/i.test(stderr);
+    const stderr = probeError(err);
+    return `bwrap cannot create a sandbox (${stderr.split("\n")[0] || "unknown error"})${usernsHint(stderr)}`;
+  }
+  if (!hasUnshare()) return undefined;
+  try {
+    run("bwrap", [...BWRAP_PROBE, "unshare", "--user", "--map-root-user", "true"]);
+  } catch (err) {
+    const stderr = probeError(err);
     return (
-      `bwrap cannot create a sandbox (${stderr.split("\n")[0] || "unknown error"})` +
-      (userns
-        ? "; unprivileged user namespaces look restricted (Ubuntu 23.10+: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0)"
-        : "")
+      `bwrap cannot nest a user namespace, which the sandbox's seccomp helper needs (${stderr.split("\n")[0] || "unknown error"})` +
+      usernsHint("user namespace")
     );
   }
+  return undefined;
 }
 
 /**

@@ -219,6 +219,7 @@ runs:
       shell: bash
       env:
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        SANDBOX_USERNS: ${{ github.action_path }}/scripts/sandbox-userns.sh
       run: |
         SUDO=""
         if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo -n"; fi
@@ -231,25 +232,14 @@ runs:
             echo "::notice title=SWEny agent sandbox::apt-get not found; install bubblewrap and socat to sandbox agent commands."
           fi
         fi
-        # Ubuntu 23.10+ restricts unprivileged user namespaces via AppArmor,
-        # which bubblewrap needs. Ubuntu 26.04 also loads the bwrap-userns-restrict
-        # profile, which runs bwrap's children under unpriv_bwrap with every
-        # capability denied, so the sandbox's seccomp helper cannot nest its user
-        # namespace (apply-seccomp: write /proc/self/setgroups ... Permission denied).
-        # bwrap_ok checks both. Relax them on GitHub-hosted runners (ephemeral VM)
-        # or when the caller asked for SWENY_SANDBOX=strict. Never under off, and
-        # never by default on self-hosted (persistent host).
-        bwrap_ok() {
-          bwrap --ro-bind / / --dev /dev --proc /proc true >/dev/null 2>&1 || return 1
-          ! command -v unshare >/dev/null 2>&1 || bwrap --ro-bind / / --dev /dev --proc /proc unshare --user --map-root-user true >/dev/null 2>&1
-        }
-        if [ "${SWENY_SANDBOX:-}" != "off" ] && command -v bwrap >/dev/null 2>&1 && ! bwrap_ok; then
-          if [ "${SWENY_SANDBOX:-}" = "strict" ] || [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
-            $SUDO sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
-            if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then
-              $SUDO apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict >/dev/null 2>&1 || true
-            fi
-            if bwrap_ok; then
+        # Ubuntu 23.10+ restricts the unprivileged user namespaces bubblewrap needs, and
+        # Ubuntu 26.04's bwrap-userns-restrict AppArmor profile denies srt's seccomp helper
+        # (which Claude Code's sandbox also runs) the nested one. scripts/sandbox-userns.sh
+        # probes both and relaxes them only on GitHub-hosted runners (ephemeral VM) or
+        # under SWENY_SANDBOX=strict; never under off, never by default on self-hosted.
+        if [ "${SWENY_SANDBOX:-}" != "off" ] && command -v bwrap >/dev/null 2>&1 && ! bash "$SANDBOX_USERNS" probe; then
+          if bash "$SANDBOX_USERNS" relax; then
+            if bash "$SANDBOX_USERNS" probe; then
               echo "::notice title=SWEny agent sandbox::Relaxed kernel.apparmor_restrict_unprivileged_userns and unloaded the bwrap-userns-restrict AppArmor profile; agent commands will be sandboxed."
             else
               echo "::warning title=SWEny agent sandbox::bubblewrap still cannot create a sandbox after relaxing kernel.apparmor_restrict_unprivileged_userns and the bwrap-userns-restrict AppArmor profile; agent commands will run unsandboxed unless SWENY_SANDBOX=strict."
@@ -263,7 +253,8 @@ runs:
     # working srt refuses the first Codex node. Install the pinned srt (same pin as the
     # ci.yml sandbox-wrapper job; a test keeps them equal), ripgrep and, if the probe
     # needs it, the AppArmor relaxation, then prove srt can wrap a command. Claude-only
-    # runs skip this step.
+    # runs skip this step. The bwrap-userns-restrict unload in scripts/sandbox-userns.sh
+    # works around anthropics/sandbox-runtime#429; drop it when a fixed srt is pinned.
     - name: Install and probe the agent sandbox wrapper (srt)
       if: inputs.agent != 'claude'
       shell: bash
@@ -271,6 +262,7 @@ runs:
         SRT_VERSION: "0.0.78"
         AGENT: ${{ inputs.agent }}
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        SANDBOX_USERNS: ${{ github.action_path }}/scripts/sandbox-userns.sh
       run: |
         if [ "${SWENY_SANDBOX:-}" = "off" ]; then
           echo "::notice title=SWEny sandbox wrapper::SWENY_SANDBOX=off; skipping srt install"
@@ -295,15 +287,8 @@ runs:
         echo '{"network":{"allowedDomains":[],"deniedDomains":[]},"filesystem":{"denyRead":[],"allowRead":[],"allowWrite":[],"denyWrite":[]}}' > "$SETTINGS"
         probe() { srt --settings "$SETTINGS" -- true >/dev/null 2>&1; }
         if ! probe && [ "$RUNNER_OS" = "Linux" ]; then
-          # Ubuntu 23.10+ restricts unprivileged user namespaces, which bubblewrap needs, and
-          # Ubuntu 26.04's bwrap-userns-restrict profile denies srt's seccomp helper the
-          # capability it needs inside bwrap. Same rule as the dependencies step:
-          # GitHub-hosted (ephemeral VM) or strict only.
-          if [ "${SWENY_SANDBOX:-}" = "strict" ] || [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
-            $SUDO sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
-            if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then
-              $SUDO apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict >/dev/null 2>&1 || true
-            fi
+          # Same relaxation and gating as the dependencies step (scripts/sandbox-userns.sh).
+          if bash "$SANDBOX_USERNS" relax; then
             if probe; then
               echo "::notice title=SWEny agent sandbox::Relaxed kernel.apparmor_restrict_unprivileged_userns and unloaded the bwrap-userns-restrict AppArmor profile; agent commands will be sandboxed."
             else
