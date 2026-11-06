@@ -37,7 +37,7 @@
     ]
   },
   "overrides": {
-    "svgo": "^4.0.1",
+    "svgo": "^4.1.0",
     "fast-xml-parser": ">=5.5.7",
     "h3": "^1.15.6",
     "picomatch": "^4.0.4",
