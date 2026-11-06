@@ -25,8 +25,7 @@
     "mermaid": "11.17.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "sharp": "^0.35.4",
-    "zod": "^4.0.0"
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "vitest": "^4.1.12"
