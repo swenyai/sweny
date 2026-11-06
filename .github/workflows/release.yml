@@ -155,6 +155,9 @@ jobs:
           if [ "$CHANGED_CORE" = true ]; then
             bump_and_publish packages/core "@sweny-ai/core"
             PUBLISHED=true
+            # Emit now, not after studio/mcp/writeback: tag-action must learn
+            # about a core that reached npm even if a later step here fails.
+            echo "core_version=$(node -p "require('./packages/core/package.json').version")" >> "$GITHUB_OUTPUT"
           fi
 
           # The core the dependents below are published against: this run's
@@ -183,8 +186,6 @@ jobs:
             if [ -s "$WRITEBACK_FILE" ]; then
               echo "writeback_sha=$(cat "$WRITEBACK_FILE")" >> "$GITHUB_OUTPUT"
             fi
-            CORE_PUBLISHED=$(node -p "require(process.argv[1])['packages/core']?.published ?? ''" "$SWENY_RELEASE_MANIFEST")
-            echo "core_version=$CORE_PUBLISHED" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Advance release-latest diff base
@@ -266,69 +267,84 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
         run: |
           # The root action.yml is a composite action, no JS bundle to build.
-          # Both tags point at a commit (on no branch) on top of the verified
-          # commit, never newer main, whose action.yml defaults cli-version to
-          # the exact core this release tested. A swenyai/sweny@v5 run then
-          # installs a known core instead of whatever npm `latest` is that day.
-          # main keeps "latest" for branch refs.
+          # v5 and v5.<core-version> point at a commit (on no branch) on top of
+          # the verified commit, never newer main, whose action.yml defaults
+          # cli-version to an exact core. A swenyai/sweny@v5 run then installs
+          # a known core instead of whatever npm `latest` is that day. main
+          # keeps "latest" for branch refs. v5 never moves backwards: not to an
+          # older commit, not to a lower core.
           [ "$(git rev-parse HEAD)" = "$BASE_SHA" ] || { echo "::error::checkout is not $BASE_SHA"; exit 1; }
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           REGISTRY="https://registry.npmjs.org/@sweny-ai%2fcore"
 
-          # npm takes minutes to serve a just-published version. Poll the registry for this
-          # exact version (15s, up to 15 min). A tag that pins a version npm does not serve
-          # would break every consumer of it.
+          # served VERSION TRIES: npm takes minutes to serve a just-published version, so
+          # poll every 15s. A tag that pins a version npm does not serve breaks every consumer.
           served() {
-            local got=""
-            for _ in $(seq 1 60); do
+            local i got
+            for i in $(seq 1 "$2"); do
               got=$(curl -fsS "$REGISTRY" | jq -r --arg v "$1" '.versions[$v].version // empty' 2>/dev/null || true)
               [ "$got" = "$1" ] && return 0
-              sleep 15
+              if [ "$i" -lt "$2" ]; then sleep 15; fi
             done
             return 1
           }
+          # The exact core a stamped action.yml pins; empty for "latest".
+          pin_of() {
+            git show "$1:action.yml" | sed -n '/^  cli-version:/,/^  [a-z]/s/^    default: "\([0-9][^"]*\)"$/\1/p' | sed -n 1p
+          }
 
+          HAVE_V5=false
+          CUR_PIN=""
+          if git rev-parse -q --verify refs/tags/v5 >/dev/null; then
+            HAVE_V5=true
+            CUR_PIN=$(pin_of v5 || true)
+            # A stamped v5 sits one commit above the main commit it was cut from.
+            CUR_BASE=$(git rev-parse "v5^{commit}")
+            if [ -n "$CUR_PIN" ]; then CUR_BASE=$(git rev-parse "v5~1"); fi
+            if ! git merge-base --is-ancestor "$CUR_BASE" "$BASE_SHA"; then
+              echo "::warning::v5 is already cut from a newer commit than $BASE_SHA (a re-run of an older release); leaving it"
+              exit 0
+            fi
+          fi
+
+          # This run's core publish, else the tree's core, never below what v5 pins
+          # (a re-run whose publish found nothing, or a tree behind a lost writeback).
           CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
-          VERSIONED_TAG="v5.${CORE_VERSION}"
-          PIN="$CORE_VERSION"
-          CUT_TAG=true
-          POLL=true
-          if [ -n "$PUBLISHED_CORE_VERSION" ] && [ "$PUBLISHED_CORE_VERSION" != "$CORE_VERSION" ]; then
-            # publish built the verified commit, so the published version is the tested code.
-            echo "::warning::published core $PUBLISHED_CORE_VERSION is not in the verified tree ($CORE_VERSION); not cutting an immutable tag"
-            PIN="$PUBLISHED_CORE_VERSION"
-            CUT_TAG=false
-          elif git rev-parse -q --verify "refs/tags/$VERSIONED_TAG" >/dev/null; then
-            # Core is unchanged (or its publish was skipped/failed). The tag exists, so npm serves it.
-            echo "$VERSIONED_TAG already exists, leaving it untouched"
-            CUT_TAG=false
-            POLL=false
+          PIN="${PUBLISHED_CORE_VERSION:-$CORE_VERSION}"
+          if [ -n "$CUR_PIN" ]; then PIN=$(printf '%s\n%s\n' "$PIN" "$CUR_PIN" | sort -V | tail -1); fi
+          VERSIONED_TAG="v5.${PIN}"
+
+          # v5's current pin and an existing v5.<version> are already served. Poll for a
+          # fresh publish; check anything else once. Never fall back to an untested core.
+          if [ "$PIN" != "$CUR_PIN" ] && ! git rev-parse -q --verify "refs/tags/$VERSIONED_TAG" >/dev/null; then
+            TRIES=1
+            if [ "$PIN" = "$PUBLISHED_CORE_VERSION" ]; then TRIES=60; fi
+            served "$PIN" "$TRIES" || { echo "::error::@sweny-ai/core@${PIN} is not served by npm; v5 left where it was"; exit 1; }
           fi
-          if [ "$POLL" = true ] && ! served "$PIN"; then
-            LATEST=$(curl -fsS "$REGISTRY" | jq -r '."dist-tags".latest // empty' 2>/dev/null || true)
-            echo "::warning::@sweny-ai/core@${PIN} not served by npm after 15 min; pinning v5 to npm latest (${LATEST:-none}) and not cutting $VERSIONED_TAG"
-            PIN="$LATEST"
-            CUT_TAG=false
-          fi
-          [ -n "$PIN" ] || { echo "::error::no @sweny-ai/core version to pin; v5 left where it was"; exit 1; }
 
           node scripts/stamp-action-version.mjs "$PIN"
           git add action.yml
           git commit -q -m "chore(action): pin cli-version default to ${PIN}"
-          STAMPED=$(git rev-parse HEAD)
-          git tag -f v5 "$STAMPED"
-          git push origin v5 --force
-          echo "Moved v5 to $STAMPED (cli-version pinned to ${PIN})"
+          if [ "$HAVE_V5" = true ] && [ "$(git rev-parse "HEAD^{tree}")" = "$(git rev-parse "v5^{tree}")" ]; then
+            echo "v5 already runs this action.yml with core ${PIN}; leaving it"
+          else
+            git tag -f v5 HEAD
+            git push origin v5 --force
+            echo "Moved v5 to $(git rev-parse HEAD) (cli-version pinned to ${PIN})"
+          fi
 
-          if [ "$CUT_TAG" = true ]; then
-            PREV=$(git tag -l 'v5.*' --sort=-v:refname | sed -n 1p)
-            git tag "$VERSIONED_TAG" "$STAMPED"
+          if ! git rev-parse -q --verify "refs/tags/$VERSIONED_TAG" >/dev/null; then
+            git tag "$VERSIONED_TAG" "v5^{commit}"
             git push origin "$VERSIONED_TAG"
-            echo "Pushed $VERSIONED_TAG (cli-version pinned to ${PIN})"
-            # Release notes replace CHANGELOG.md: the pull requests merged since the previous tag.
+            echo "Pushed $VERSIONED_TAG"
+          fi
+
+          # Release notes replace CHANGELOG.md: the pull requests merged since the previous
+          # tag. Created whenever missing, so a re-run retries one that failed.
+          if ! gh release view "$VERSIONED_TAG" >/dev/null 2>&1; then
+            PREV=$(git tag -l 'v5.*' --sort=-v:refname | awk -v t="$VERSIONED_TAG" 'f && !d { print; d = 1 } $0 == t { f = 1 }')
             NOTES=(--generate-notes)
             if [ -n "$PREV" ]; then NOTES+=(--notes-start-tag "$PREV"); fi
-            gh release create "$VERSIONED_TAG" --verify-tag --latest --title "$VERSIONED_TAG" "${NOTES[@]}" \
-              || echo "::warning::could not create the GitHub Release for $VERSIONED_TAG"
+            gh release create "$VERSIONED_TAG" --verify-tag --latest --title "$VERSIONED_TAG" "${NOTES[@]}"
           fi
