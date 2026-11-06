@@ -43,7 +43,13 @@ const workflow = {
       output: {
         type: "object",
         properties: {
-          findings: { type: "array", items: { type: "object" } },
+          findings: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { title: { type: "string" }, root_cause: { type: "string" }, api_key: { type: "string" } },
+            },
+          },
           novel_count: { type: "number" },
         },
       },
@@ -360,21 +366,22 @@ describe("since last run", () => {
       "2026-11-06T11:00:00.000Z",
       answers({ n: { items: [{ title: "B" }, { title: "C" }] } }, idB),
     );
-    const s = sinceLastRun(idB.run_id, cwd);
+    const s = sinceLastRun(idB.run_id, "triage", cwd);
     expect(s).toEqual({
       workflow_id: "triage",
       previous_run_id: idA.run_id,
       counts: { added: 1, resolved: 1, changed: 0, unchanged: 1 },
+      not_compared: 0,
     });
   });
 
   it("is null for the first run, when the previous run has no answers, or when the run is unknown", () => {
     const cwd = tmp();
     seed(cwd, idA.run_id, "triage", "2026-11-06T10:00:00.000Z", answers({ n: { x: 1 } }));
-    expect(sinceLastRun(idA.run_id, cwd)).toBeNull();
+    expect(sinceLastRun(idA.run_id, "triage", cwd)).toBeNull();
     seed(cwd, idB.run_id, "triage", "2026-11-06T11:00:00.000Z");
-    expect(sinceLastRun(idB.run_id, cwd)).toBeNull();
-    expect(sinceLastRun("20260101-000000-ffffff", cwd)).toBeNull();
+    expect(sinceLastRun(idB.run_id, "triage", cwd)).toBeNull();
+    expect(sinceLastRun("20260101-000000-ffffff", "triage", cwd)).toBeNull();
   });
 
   it("recordRunAnswers writes the file and returns the comparison; never throws", () => {
@@ -396,7 +403,7 @@ describe("since last run", () => {
     ).toBeNull();
   });
 
-  const base = { workflow_id: "triage", previous_run_id: idA.run_id };
+  const base = { workflow_id: "triage", previous_run_id: idA.run_id, not_compared: 0 };
 
   it("formats the line from the nonzero counts, and says so when nothing moved", () => {
     expect(formatSinceLast({ ...base, counts: { added: 2, resolved: 1, changed: 0, unchanged: 4 } })).toBe(
@@ -410,7 +417,7 @@ describe("since last run", () => {
     );
   });
 
-  it("markdown form wraps the command in backticks; a workflow id with a quote stays shell-safe", () => {
+  it("markdown form wraps the command in backticks; an id that is not plain drops the flag", () => {
     const md = formatSinceLastMarkdown({ ...base, counts: { added: 2, resolved: 1, changed: 0, unchanged: 0 } });
     expect(md).toBe("Since last run: 2 added, 1 resolved. Compare: `sweny runs diff --workflow triage`");
     const odd = formatSinceLastMarkdown({
@@ -418,6 +425,6 @@ describe("since last run", () => {
       workflow_id: "a b'c",
       counts: { added: 1, resolved: 0, changed: 0, unchanged: 0 },
     });
-    expect(odd).toContain("--workflow 'a b'\\''c'");
+    expect(odd).toBe("Since last run: 1 added. Compare: `sweny runs diff`");
   });
 });

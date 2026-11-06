@@ -257,17 +257,17 @@ describe("failed nodes are surfaced, never read as 'no changes'", () => {
     const since = recordRunAnswers({ runId: B, workflow: wf(), results }, cwd);
     expect(since?.not_compared).toBe(1);
     expect(formatSinceLast(since!)).toBe(
-      "since last run: no changes, 1 not compared (failed or no output) (sweny runs diff --workflow triage)",
+      "since last run: no changes, 1 not compared: failed or no output (sweny runs diff --workflow triage)",
     );
     expect(formatSinceLastMarkdown(since!)).toBe(
-      "Since last run: no changes, 1 not compared (failed or no output). Compare: `sweny runs diff --workflow triage`",
+      "Since last run: no changes, 1 not compared: failed or no output. Compare: `sweny runs diff --workflow triage`",
     );
   });
 
   it("with changes and not-compared nodes both are listed", () => {
     const line = formatSinceLast({ workflow_id: "triage", previous_run_id: A, counts, not_compared: 2 });
     expect(line).toBe(
-      "since last run: 1 added, 1 resolved, 2 not compared (failed or no output) (sweny runs diff --workflow triage)",
+      "since last run: 1 added, 1 resolved, 2 not compared: failed or no output (sweny runs diff --workflow triage)",
     );
   });
 });

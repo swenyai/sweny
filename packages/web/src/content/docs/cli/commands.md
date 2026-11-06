@@ -458,7 +458,7 @@ The diff leads with the answers: what each node's declared outputs gained, lost 
 
 Color follows the usual rules: off under `NO_COLOR`, when output is not a terminal, and under `TERM=dumb`. `SWENY_ASCII=1` swaps the glyphs (`→`, `·`, `✓`) for ASCII.
 
-**What is compared.** `workflow run` saves each successful node's declared output fields (the node's `output` schema; with no schema, a string `summary`) to `.sweny/runs/<run-id>/answers.json`. The file is local only, redacted like `output.md`, and ignored by git. A node that failed or was skipped saves nothing, so it is reported as `not compared` and never as "everything resolved". `--no-history` and `history: off` skip the file.
+**What is compared.** `workflow run` saves each successful node's declared output fields to `.sweny/runs/<run-id>/answers.json`: only the paths the node's `output` schema declares, nested ones included (`findings[].title` keeps `title` and nothing else); with no schema, a string `summary`. The file is local only, redacted like `output.md` (keys as well as values), and ignored by git. Strings over 2000 characters are cut in the file, but a change past the cut is still reported as changed. A node that failed or was skipped saves nothing, so it is reported as `not compared` and never as "everything resolved". `--no-history` and `history: off` skip the file.
 
 **What counts as the same finding.** A list field (all objects, or all plain values) is compared item by item:
 
@@ -509,7 +509,7 @@ After a run that has an earlier run of the same workflow, `workflow run` prints 
 since last run: 1 added, 1 resolved (sweny runs diff --workflow triage)
 ```
 
-It carries counts only, never the text of an answer. In GitHub Actions the history is empty on every run unless you keep `.sweny/runs` between runs: see [keep run history between runs](/action/scheduling/#keep-run-history-between-runs).
+It carries counts only, never the text of an answer, and the workflow id in the command is the current run's own. If a node could not be compared (it failed, was skipped, or had no output in one of the runs) the line says `N not compared` instead of reading as no changes. History is never trusted for what gets printed: records whose id does not match their file name, or that repeat another run's id, are ignored. In GitHub Actions the history is empty on every run unless you keep `.sweny/runs` between runs: see [keep run history between runs](/action/scheduling/#keep-run-history-between-runs).
 
 ## End-to-end browser testing
 

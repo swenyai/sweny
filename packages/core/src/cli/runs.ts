@@ -184,6 +184,8 @@ function lineDelta(a: string, b: string): { added: number; removed: number } {
 
 /** `before -> after`, or `+X -Y lines` when either side is a long or multi-line string. */
 function valueChange(before: unknown, after: unknown, g: GlyphSet): string {
+  // Stored text is cut at ANSWER_STRING_MAX; the change is past the cut (found by digest).
+  if (typeof before === "string" && before === after) return "changed past the stored excerpt";
   const long = (v: unknown) => typeof v === "string" && (v.includes("\n") || v.length > VALUE_MAX);
   if (typeof before === "string" && typeof after === "string" && (long(before) || long(after))) {
     const d = lineDelta(before, after);
