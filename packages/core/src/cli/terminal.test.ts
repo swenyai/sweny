@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { colorEnabled, richOutput, supportsUnicode, terminalColumns, toAsciiDrawing } from "./terminal.js";
+import {
+  colorEnabled,
+  richOutput,
+  sanitizeTerminal,
+  supportsUnicode,
+  terminalColumns,
+  toAsciiDrawing,
+} from "./terminal.js";
 import { createNodeProgress } from "./progress.js";
 import { createPaint } from "./style.js";
 
@@ -78,5 +85,34 @@ describe("createNodeProgress", () => {
     p.exit("gather", "failed", "3s");
     expect(out).toBe("\r\x1B[2K  | gather\r\x1B[2K  x gather    3s\n");
     p.stop();
+  });
+});
+
+describe("sanitizeTerminal", () => {
+  it("removes CSI, OSC (hyperlink, title), DCS and lone ESC sequences whole, 7-bit and 8-bit", () => {
+    expect(sanitizeTerminal("a\x1b[2Jb\x1b[31;1mc\x1b[0m")).toBe("abc");
+    expect(sanitizeTerminal("x\x1b]8;;https://evil.example\x07link\x1b]8;;\x07y")).toBe("xlinky");
+    expect(sanitizeTerminal("x\x1b]8;;https://evil.example\x1b\\link\x1b]8;;\x1b\\y")).toBe("xlinky");
+    expect(sanitizeTerminal("t\x1b]0;new title\x07u")).toBe("tu");
+    expect(sanitizeTerminal("p\x1bPq#0;2;0;0;0\x1b\\q")).toBe("pq");
+    expect(sanitizeTerminal("a\x9b2Jb\x9d0;t\x9cc")).toBe("abc");
+    expect(sanitizeTerminal("a\x1bcb\x1b7c")).toBe("abc");
+    expect(sanitizeTerminal("dangling\x1b")).toBe("dangling");
+    expect(sanitizeTerminal("open\x1b[31")).toBe("open");
+  });
+
+  it("drops other control characters, bidi overrides and turns line breaks into one space", () => {
+    expect(sanitizeTerminal("a\x00b\x08c\x7fd\x85e")).toBe("abcde");
+    expect(sanitizeTerminal("one\r\ntwo\tthree\u2028four")).toBe("one two three four");
+    expect(sanitizeTerminal("evil\u202egnp.exe")).toBe("evilgnp.exe");
+  });
+
+  it("keeps printable Unicode and caps the length", () => {
+    expect(sanitizeTerminal("héllo wörld ✓ 日本語 🚀")).toBe("héllo wörld ✓ 日本語 🚀");
+    expect(sanitizeTerminal("x".repeat(300))).toHaveLength(200);
+    expect(sanitizeTerminal("x".repeat(300)).endsWith("...")).toBe(true);
+    expect(sanitizeTerminal("abcdefghij", 6)).toBe("abc...");
+    expect(sanitizeTerminal(undefined)).toBe("");
+    expect(sanitizeTerminal(42)).toBe("42");
   });
 });

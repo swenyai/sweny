@@ -7,7 +7,7 @@
  */
 
 import type { Command } from "commander";
-import { findRun, listRuns, type RunNodeRecord, type RunRecord } from "./run-history.js";
+import { findRun, listRuns, type RunNodeRecord, type RunRecord, type RunStatus } from "./run-history.js";
 import {
   compareAnswers,
   readRunAnswers,
@@ -21,7 +21,7 @@ import {
 } from "./run-answers.js";
 import { formatCost, formatReceiptDuration, formatTokenCount } from "./run-output.js";
 import { createPaint } from "./style.js";
-import { colorEnabled, glyphsFor, supportsUnicode } from "./terminal.js";
+import { colorEnabled, glyphsFor, sanitizeTerminal, supportsUnicode } from "./terminal.js";
 import type { GlyphSet } from "../theme.js";
 
 // ── Small formatters ────────────────────────────────────────────
@@ -35,6 +35,10 @@ export function formatAge(startedAt: string, nowMs: number = Date.now()): string
   if (h < 48) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
 }
+
+/** Own keys only: a status of `constructor` from a forged record must not find Object.prototype. */
+const icon = (icons: Record<string, string>, status: string): string =>
+  Object.hasOwn(icons, status) ? icons[status] : "?";
 
 const iconsFor = (g: GlyphSet): Record<string, string> => ({
   success: g.success,
@@ -59,22 +63,65 @@ function pad(s: string, w: number, right = false): string {
   return right ? s.padStart(w) : s.padEnd(w);
 }
 
+// ── History records are untrusted ───────────────────────────────
+
+const finite = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const finiteOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/**
+ * A copy of a history record that is safe to print. `.sweny/runs/` is writable by an agent, so every
+ * string read from a record goes through {@link sanitizeTerminal} (control sequences stripped, length
+ * capped) and every number is coerced to a finite number. Only for display: matching and `--json`
+ * use the record as read.
+ */
+export function printableRun(r: RunRecord): RunRecord {
+  const t = (v: unknown, max = 64) => sanitizeTerminal(v, max);
+  return {
+    ...r,
+    run_id: t(r.run_id),
+    workflow_id: t(r.workflow_id),
+    workflow_hash: t(r.workflow_hash),
+    started_at: t(r.started_at),
+    status: t(r.status, 16) as RunStatus,
+    duration_ms: finite(r.duration_ms),
+    nodes: r.nodes.map((n) => ({
+      id: t(n.id),
+      status: t(n.status, 16) as RunNodeRecord["status"],
+      duration_ms: finite(n.duration_ms),
+      tool_calls: finite(n.tool_calls),
+      tokens: finiteOrNull(n.tokens),
+      cost_usd: finiteOrNull(n.cost_usd),
+      retries: finite(n.retries),
+    })),
+    routes: r.routes.map((e) => ({ from: t(e.from), to: t(e.to) })),
+    totals: {
+      nodes_total: finite(r.totals.nodes_total),
+      nodes_ok: finite(r.totals.nodes_ok),
+      nodes_skipped: finite(r.totals.nodes_skipped),
+      tool_calls: finite(r.totals.tool_calls),
+      tokens: finiteOrNull(r.totals.tokens),
+      cost_usd: finiteOrNull(r.totals.cost_usd),
+    },
+  };
+}
+
 // ── sweny runs ──────────────────────────────────────────────────
 
 export function formatRunsTable(
-  runs: RunRecord[],
+  records: RunRecord[],
   color: boolean,
   nowMs: number = Date.now(),
   unicode: boolean = true,
 ): string {
   const ICON = iconsFor(glyphsFor(unicode));
+  const runs = records.map(printableRun);
   if (runs.length === 0) return "  No runs recorded yet. Run `sweny workflow run <file>` to start a history.\n";
   const rows = runs.map((r) => ({
     status: r.status,
     cells: [
       r.run_id,
       r.workflow_id,
-      `${ICON[r.status] ?? "?"} ${r.status}`,
+      `${icon(ICON, r.status)} ${r.status}`,
       formatReceiptDuration(r.duration_ms),
       tokensText(r.totals?.tokens ?? null),
       costText(r.totals?.cost_usd ?? null),
@@ -148,13 +195,8 @@ const MAX_ITEMS_SHOWN = 10;
 const MAX_FIELDS_SHOWN = 3;
 const VALUE_MAX = 56;
 
-/** One printable line: control characters (an answer is untrusted text) and runs of whitespace become one space. */
-function oneLine(s: string): string {
-  return s
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+/** One printable line (an answer is untrusted text): see {@link sanitizeTerminal}. */
+const oneLine = (s: string): string => sanitizeTerminal(s, 10_000);
 
 function clip(s: string, max: number, g: GlyphSet): string {
   return s.length > max ? s.slice(0, max - 1) + g.ellipsis : s;
@@ -289,13 +331,15 @@ export interface RunDiffOptions {
   unicode?: boolean;
 }
 
-export function formatRunDiff(a: RunRecord, b: RunRecord, color: boolean, opts: RunDiffOptions = {}): string {
+export function formatRunDiff(rawA: RunRecord, rawB: RunRecord, color: boolean, opts: RunDiffOptions = {}): string {
+  const a = printableRun(rawA);
+  const b = printableRun(rawB);
   const g = glyphsFor(opts.unicode ?? true);
   const ICON = iconsFor(g);
   const dim = createPaint(color).muted;
   const out: string[] = [];
   const hdr = (tag: string, r: RunRecord) =>
-    `  ${tag}  ${r.run_id}  ${r.workflow_id}  ${paint(`${ICON[r.status] ?? "?"} ${r.status}`, r.status, color)}  ${formatReceiptDuration(r.duration_ms)}`;
+    `  ${tag}  ${r.run_id}  ${r.workflow_id}  ${paint(`${icon(ICON, r.status)} ${r.status}`, r.status, color)}  ${formatReceiptDuration(r.duration_ms)}`;
   out.push(hdr("a", a), hdr("b", b), "");
 
   if (opts.answers?.available) out.push(...formatAnswersSection(opts.answers, color, g), "");
@@ -309,8 +353,8 @@ export function formatRunDiff(a: RunRecord, b: RunRecord, color: boolean, opts: 
   if (a.workflow_id !== b.workflow_id) out.push(`  id         ${a.workflow_id} ${g.arrow} ${b.workflow_id}`);
   out.push(
     a.status === b.status
-      ? `  status     ${ICON[b.status]} ${b.status} (same)`
-      : `  status     ${ICON[a.status]} ${a.status} ${g.arrow} ${paint(`${ICON[b.status]} ${b.status}`, b.status, color)}`,
+      ? `  status     ${icon(ICON, b.status)} ${b.status} (same)`
+      : `  status     ${icon(ICON, a.status)} ${a.status} ${g.arrow} ${paint(`${icon(ICON, b.status)} ${b.status}`, b.status, color)}`,
   );
   const tot = [
     metric("duration  ", a.duration_ms, b.duration_ms, formatReceiptDuration, deltaDuration, g.arrow),
@@ -328,14 +372,14 @@ export function formatRunDiff(a: RunRecord, b: RunRecord, color: boolean, opts: 
     const na = aNodes.get(id);
     const nb = bNodes.get(id);
     if (na && !nb) {
-      out.push(`    ${pad(id, w)}  ${dim("removed")} (was ${ICON[na.status]} ${na.status})`);
+      out.push(`    ${pad(id, w)}  ${dim("removed")} (was ${icon(ICON, na.status)} ${na.status})`);
     } else if (!na && nb) {
-      out.push(`    ${pad(id, w)}  ${paint(`added ${ICON[nb.status]} ${nb.status}`, nb.status, color)}`);
+      out.push(`    ${pad(id, w)}  ${paint(`added ${icon(ICON, nb.status)} ${nb.status}`, nb.status, color)}`);
     } else if (na && nb) {
       const st =
         na.status === nb.status
-          ? ICON[nb.status]
-          : `${ICON[na.status]} ${g.arrow} ${paint(ICON[nb.status], nb.status, color)}`;
+          ? icon(ICON, nb.status)
+          : `${icon(ICON, na.status)} ${g.arrow} ${paint(icon(ICON, nb.status), nb.status, color)}`;
       const ch = nodeChanges(na, nb, g.arrow);
       out.push(`    ${pad(id, w)}  ${st}  ${ch.length ? ch.join("   ") : dim("no change")}`);
     }
@@ -365,8 +409,8 @@ export function pickRunsForDiff(
   if (refs.length === 2) {
     const a = findRun(runs, refs[0]);
     const b = findRun(runs, refs[1]);
-    if (!a) return { error: `No run matches "${refs[0]}". Run \`sweny runs\` to list ids.` };
-    if (!b) return { error: `No run matches "${refs[1]}". Run \`sweny runs\` to list ids.` };
+    if (!a) return { error: `No run matches "${sanitizeTerminal(refs[0], 64)}". Run \`sweny runs\` to list ids.` };
+    if (!b) return { error: `No run matches "${sanitizeTerminal(refs[1], 64)}". Run \`sweny runs\` to list ids.` };
     return { a, b };
   }
   // No --workflow: the newest workflow that has at least two runs to compare.
@@ -377,7 +421,7 @@ export function pickRunsForDiff(
   if (same.length < 2) {
     return {
       error: wf
-        ? `Need two runs of "${wf}" to diff; found ${same.length}. Run it again, then \`sweny runs diff\`.`
+        ? `Need two runs of "${sanitizeTerminal(wf, 64)}" to diff; found ${same.length}. Run it again, then \`sweny runs diff\`.`
         : "No runs recorded yet. Run `sweny workflow run <file>` twice, then `sweny runs diff`.",
     };
   }

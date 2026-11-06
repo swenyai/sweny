@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { formatAge, formatRunDiff, formatRunsTable, pickRunsForDiff, runRunsDiff } from "./runs.js";
+import { formatAge, formatRunDiff, formatRunsTable, pickRunsForDiff, printableRun, runRunsDiff } from "./runs.js";
 import { writeRunRecord, type RunRecord } from "./run-history.js";
 import { RUN_ANSWERS_SCHEMA_VERSION, compareAnswers, writeRunAnswers, type RunAnswers } from "./run-answers.js";
 import { colorEnabled } from "./terminal.js";
@@ -445,5 +445,66 @@ describe("runRunsDiff", () => {
     const nc = io(cwd, { isTTY: true, env: { NO_COLOR: "1" } });
     runRunsDiff([], {}, nc.io);
     expect(nc.out.join("")).not.toMatch(/\x1b\[/);
+  });
+});
+
+describe("forged history records never reach the terminal as control sequences", () => {
+  const CLEAR = "\x1b[2J";
+  const LINK = "\x1b]8;;https://evil.example/x\x07click\x1b]8;;\x07";
+  const forged = (): RunRecord =>
+    run({
+      run_id: "20260930-110000-aaaaaa",
+      workflow_id: `triage${CLEAR}${LINK}\nINJECTED`,
+      status: `\x1b[31mfailed${CLEAR}` as unknown as RunRecord["status"],
+      duration_ms: "\x1b[2J" as unknown as number,
+      nodes: [
+        {
+          id: `gather${LINK}\x9b2J`,
+          status: "constructor" as unknown as "success",
+          duration_ms: 1,
+          tool_calls: 1,
+          tokens: "\x1b[2J" as unknown as number,
+          cost_usd: null,
+          retries: 0,
+        },
+      ],
+      routes: [{ from: `a${CLEAR}`, to: `b${LINK}` }],
+      totals: { nodes_total: 1, nodes_ok: 0, nodes_skipped: 0, tool_calls: 1, tokens: null, cost_usd: null },
+    });
+  // eslint-disable-next-line no-control-regex
+  const CONTROL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/;
+
+  it("the runs table prints the clean text and no control character or payload", () => {
+    for (const color of [false, true]) {
+      const out = formatRunsTable([forged()], color, NOW).replace(/\x1b\[[0-9;]*m/g, "");
+      expect(out).not.toMatch(CONTROL);
+      expect(out).not.toContain("[2J");
+      expect(out).not.toContain("evil.example");
+      expect(out).toContain("triageclick INJECTED");
+    }
+  });
+
+  it("the diff header, status, ids, nodes and routes are clean; an unknown status shows ?", () => {
+    const out = formatRunDiff(forged(), run(), false, { answers: compareAnswers(null, null) });
+    expect(out).not.toMatch(CONTROL);
+    expect(out).not.toContain("[2J");
+    expect(out).not.toContain("evil.example");
+    expect(out).toContain("gatherclick");
+    expect(out).not.toContain("function");
+    expect(out).toMatch(/\? constructor/);
+  });
+
+  it("printableRun caps long strings and coerces non-numbers", () => {
+    const p = printableRun(run({ workflow_id: "w".repeat(500), duration_ms: "x" as unknown as number }));
+    expect(p.workflow_id.length).toBe(64);
+    expect(p.workflow_id.endsWith("...")).toBe(true);
+    expect(p.duration_ms).toBe(0);
+  });
+
+  it("pickRunsForDiff errors echo only sanitized text", () => {
+    const e = pickRunsForDiff([run()], [], `x${CLEAR}${LINK}`);
+    expect(e).toEqual({ error: expect.not.stringMatching(CONTROL) });
+    const f = pickRunsForDiff([run()], [`y${CLEAR}`, "20260930-110000-aaaaaa"]);
+    expect(f).toEqual({ error: expect.not.stringMatching(CONTROL) });
   });
 });
