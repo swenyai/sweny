@@ -63,7 +63,16 @@ export type BranchPusher = (opts: {
    */
   remoteSha?: string;
   token?: string;
-}) => Promise<{ pushed: boolean; attempted: boolean; reason?: string }>;
+}) => Promise<{
+  pushed: boolean;
+  attempted: boolean;
+  reason?: string;
+  /**
+   * The local commit the push tried to publish. Set when a push was attempted
+   * and failed, so the caller can check what the remote head holds (#544).
+   */
+  sha?: string;
+}>;
 
 /**
  * Side-effect class of a tool. `"read"` only reads. `"write"` can change
