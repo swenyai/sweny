@@ -41,9 +41,9 @@ describe("release verification checkout", () => {
 
 // Runs the real tag-action step script against a throwaway repo and bare
 // origin. npm is faked through `curl` (the step reads the registry with curl),
-// `gh` only records its arguments, and `sleep` is a no-op so the npm poll
-// finishes at once.
-// Each case makes a few repos and polls a fake registry 60 times; give it room on a busy runner.
+// `gh` records its arguments and answers `release view` from FAKE_GH_RELEASES,
+// and `sleep` is a no-op so the npm poll finishes at once.
+// Each case makes a few repos and may poll a fake registry 60 times; give it room on a busy runner.
 describe("release tag-action", { timeout: 30_000 }, () => {
   const release = parse(fs.readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8"));
   const step = (release.jobs["tag-action"].steps as Array<Record<string, any>>).find((s) =>
@@ -66,7 +66,20 @@ describe("release tag-action", { timeout: 30_000 }, () => {
     return r.stdout.trim();
   };
 
-  function setup(coreVersion: string, existingTags: string[] = []) {
+  interface Setup {
+    /** Core version in the verified tree's packages/core/package.json. */
+    core: string;
+    /**
+     * Where v5 already is. `pin: null` is an unstamped v5 (action.yml says latest).
+     * `at`: on the verified commit, on its parent (an earlier release), or on a
+     * child (a newer release, so this run is a re-run of an older one).
+     */
+    v5?: { pin: string | null; at: "base" | "parent" | "child" };
+    /** v5.<version> tags that already exist. */
+    tags?: string[];
+  }
+
+  function setup(o: Setup) {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-tag-action-"));
     const origin = path.join(d, "origin.git");
     const work = path.join(d, "work");
@@ -77,28 +90,66 @@ describe("release tag-action", { timeout: 30_000 }, () => {
     fs.mkdirSync(path.join(work, "packages/core"), { recursive: true });
     fs.writeFileSync(path.join(work, "action.yml"), actionText);
     fs.writeFileSync(path.join(work, "scripts/stamp-action-version.mjs"), stampScript);
-    fs.writeFileSync(path.join(work, "packages/core/package.json"), JSON.stringify({ version: coreVersion }));
+    fs.writeFileSync(path.join(work, "packages/core/package.json"), JSON.stringify({ version: o.core }));
     git(work, "add", "-A");
-    git(work, "commit", "-q", "-m", "base");
+    git(work, "commit", "-q", "-m", "c0");
     git(work, "remote", "add", "origin", origin);
-    git(work, "push", "-q", "origin", "main");
-    for (const t of existingTags) {
-      git(work, "tag", t);
+    const c0 = git(work, "rev-parse", "HEAD");
+    let base = c0;
+    let v5From = c0;
+    const at = o.v5?.at;
+    if (at === "parent" || at === "child") {
+      fs.writeFileSync(path.join(work, "README.md"), "next\n");
+      git(work, "add", "-A");
+      git(work, "commit", "-q", "-m", "c1");
+      const c1 = git(work, "rev-parse", "HEAD");
+      if (at === "parent") base = c1;
+      else v5From = c1;
+    }
+    git(work, "push", "-q", "origin", `${base}:refs/heads/main`);
+    if (o.v5) {
+      git(work, "checkout", "-q", "--detach", v5From);
+      if (o.v5.pin !== null) {
+        const r = spawnSync(process.execPath, ["scripts/stamp-action-version.mjs", o.v5.pin], { cwd: work });
+        if (r.status !== 0) throw new Error("stamp failed");
+        git(work, "commit", "-q", "-am", `stamp ${o.v5.pin}`);
+      }
+      git(work, "tag", "v5");
+      git(work, "push", "-q", "origin", "v5");
+    }
+    git(work, "checkout", "-q", "--detach", base);
+    for (const t of o.tags ?? []) {
+      git(work, "tag", t, base);
       git(work, "push", "-q", "origin", t);
     }
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, "curl"), '#!/bin/sh\nprintf "%s" "$FAKE_NPM_JSON"\n', { mode: 0o755 });
     fs.writeFileSync(path.join(bin, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-    fs.writeFileSync(path.join(bin, "gh"), '#!/bin/sh\necho "$*" >> "$GH_LOG"\n', { mode: 0o755 });
-    return { d, origin, work, bin, base: git(work, "rev-parse", "HEAD"), ghLog: path.join(d, "gh.log") };
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      [
+        "#!/bin/sh",
+        'echo "$*" >> "$GH_LOG"',
+        'if [ "$1 $2" = "release view" ]; then',
+        '  case " $FAKE_GH_RELEASES " in *" $3 "*) exit 0 ;; esac',
+        "  exit 1",
+        "fi",
+        "exit 0",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    return { d, origin, work, bin, base, ghLog: path.join(d, "gh.log"), v5Before: o.v5 ? v5Sha(origin) : "" };
   }
 
+  type Ctx = ReturnType<typeof setup>;
+
   function run(
-    ctx: ReturnType<typeof setup>,
-    opts: { published?: string; served: string[]; latest: string },
+    ctx: Ctx,
+    opts: { published?: string; served: string[]; releases?: string[] },
   ): { status: number | null; out: string } {
     const npm = {
-      "dist-tags": { latest: opts.latest },
+      "dist-tags": { latest: opts.served[opts.served.length - 1] ?? "" },
       versions: Object.fromEntries(opts.served.map((v) => [v, { version: v }])),
     };
     const script = path.join(ctx.d, "step.sh");
@@ -112,6 +163,7 @@ describe("release tag-action", { timeout: 30_000 }, () => {
         BASE_SHA: ctx.base,
         PUBLISHED_CORE_VERSION: opts.published ?? "",
         FAKE_NPM_JSON: JSON.stringify(npm),
+        FAKE_GH_RELEASES: (opts.releases ?? []).join(" "),
         GH_LOG: ctx.ghLog,
         GH_TOKEN: "x",
       },
@@ -119,61 +171,104 @@ describe("release tag-action", { timeout: 30_000 }, () => {
     return { status: r.status, out: r.stdout + r.stderr };
   }
 
-  const cliDefaultAt = (ctx: ReturnType<typeof setup>, ref: string) =>
+  function v5Sha(origin: string) {
+    return git(origin, "rev-parse", "v5^{commit}");
+  }
+  const pinAt = (ctx: Ctx, ref: string) =>
     parse(git(ctx.origin, "show", `${ref}:action.yml`)).inputs["cli-version"].default;
-  const ghCalls = (ctx: ReturnType<typeof setup>) =>
-    fs.existsSync(ctx.ghLog) ? fs.readFileSync(ctx.ghLog, "utf8") : "";
+  const created = (ctx: Ctx) =>
+    (fs.existsSync(ctx.ghLog) ? fs.readFileSync(ctx.ghLog, "utf8") : "")
+      .split("\n")
+      .filter((l) => l.startsWith("release create"));
+  const tags = (ctx: Ctx) => git(ctx.origin, "tag", "-l", "v5.*").split("\n").filter(Boolean);
 
-  it("on a core release, points v5 and v5.<version> at one commit pinned to that version, with a GitHub Release", () => {
-    const ctx = setup("0.1.200", ["v5.0.1.199"]);
-    const r = run(ctx, { published: "0.1.200", served: ["0.1.199", "0.1.200"], latest: "0.1.200" });
+  it("on a core release, points v5 and v5.<version> at one commit pinned to it and creates the GitHub Release", () => {
+    const ctx = setup({ core: "0.1.200", v5: { pin: "0.1.199", at: "parent" }, tags: ["v5.0.1.199"] });
+    const r = run(ctx, { published: "0.1.200", served: ["0.1.199", "0.1.200"], releases: ["v5.0.1.199"] });
     expect(r.status, r.out).toBe(0);
-    const v5 = git(ctx.origin, "rev-parse", "v5^{commit}");
+    const v5 = v5Sha(ctx.origin);
     expect(git(ctx.origin, "rev-parse", "v5.0.1.200^{commit}")).toBe(v5);
-    expect(git(ctx.origin, "rev-parse", `${v5}^`)).toBe(ctx.base);
-    expect(cliDefaultAt(ctx, "v5")).toBe("0.1.200");
+    expect(git(ctx.origin, "rev-parse", `${v5}~1`)).toBe(ctx.base);
+    expect(pinAt(ctx, "v5")).toBe("0.1.200");
     // main is untouched: the stamp lives on no branch.
     expect(git(ctx.origin, "rev-parse", "main")).toBe(ctx.base);
-    const gh = ghCalls(ctx);
-    expect(gh).toContain("release create v5.0.1.200");
-    expect(gh).toContain("--generate-notes");
-    expect(gh).toContain("--notes-start-tag v5.0.1.199");
+    expect(created(ctx)).toHaveLength(1);
+    expect(created(ctx)[0]).toContain("release create v5.0.1.200");
+    expect(created(ctx)[0]).toContain("--generate-notes --notes-start-tag v5.0.1.199");
   });
 
-  it("on an action-only change, moves v5 to a new commit pinned to the current core and leaves v5.<version> alone", () => {
-    const ctx = setup("0.1.200", ["v5.0.1.200"]);
-    const before = git(ctx.origin, "rev-parse", "v5.0.1.200^{commit}");
-    const r = run(ctx, { served: ["0.1.200"], latest: "0.1.200" });
+  it("on an action-only change, restamps v5 at the core it already pins and leaves v5.<version> alone", () => {
+    const ctx = setup({ core: "0.1.200", v5: { pin: "0.1.200", at: "parent" }, tags: ["v5.0.1.200"] });
+    const tagBefore = git(ctx.origin, "rev-parse", "v5.0.1.200^{commit}");
+    const r = run(ctx, { served: ["0.1.200"], releases: ["v5.0.1.200"] });
     expect(r.status, r.out).toBe(0);
-    expect(git(ctx.origin, "rev-parse", "v5.0.1.200^{commit}")).toBe(before);
     expect(git(ctx.origin, "rev-parse", "v5~1")).toBe(ctx.base);
-    expect(cliDefaultAt(ctx, "v5")).toBe("0.1.200");
-    expect(ghCalls(ctx)).toBe("");
+    expect(pinAt(ctx, "v5")).toBe("0.1.200");
+    expect(git(ctx.origin, "rev-parse", "v5.0.1.200^{commit}")).toBe(tagBefore);
+    expect(created(ctx)).toEqual([]);
   });
 
-  it("when npm never serves the tree's core, pins v5 to npm's latest and cuts no immutable tag", () => {
-    const ctx = setup("0.1.201");
-    const r = run(ctx, { published: "0.1.201", served: ["0.1.200"], latest: "0.1.200" });
+  it("a re-run with empty publish outputs never pins v5 below what it pins (the tree still says the pre-bump core)", () => {
+    // 0.1.201 was published from this commit; main's package.json still says 0.1.200.
+    const ctx = setup({ core: "0.1.200", v5: { pin: "0.1.201", at: "base" }, tags: ["v5.0.1.200", "v5.0.1.201"] });
+    const r = run(ctx, { served: ["0.1.200", "0.1.201"], releases: ["v5.0.1.200", "v5.0.1.201"] });
     expect(r.status, r.out).toBe(0);
+    expect(pinAt(ctx, "v5")).toBe("0.1.201");
+    expect(v5Sha(ctx.origin)).toBe(ctx.v5Before);
+    expect(created(ctx)).toEqual([]);
+  });
+
+  it("a partial publish failure (core out, writeback lost) still pins and tags the published core", () => {
+    const ctx = setup({ core: "0.1.200", v5: { pin: "0.1.200", at: "parent" }, tags: ["v5.0.1.200"] });
+    const r = run(ctx, { published: "0.1.201", served: ["0.1.200", "0.1.201"], releases: ["v5.0.1.200"] });
+    expect(r.status, r.out).toBe(0);
+    expect(pinAt(ctx, "v5")).toBe("0.1.201");
+    expect(git(ctx.origin, "rev-parse", "v5.0.1.201^{commit}")).toBe(v5Sha(ctx.origin));
+    expect(created(ctx)[0]).toContain("release create v5.0.1.201");
+  });
+
+  it("when npm never serves the published core, fails and leaves v5 where it was", () => {
+    const ctx = setup({ core: "0.1.201", v5: { pin: "0.1.200", at: "parent" }, tags: ["v5.0.1.200"] });
+    const r = run(ctx, { published: "0.1.201", served: ["0.1.200"], releases: ["v5.0.1.200"] });
+    expect(r.status).not.toBe(0);
     expect(r.out).toContain("not served by npm");
-    expect(cliDefaultAt(ctx, "v5")).toBe("0.1.200");
-    expect(git(ctx.origin, "tag", "-l", "v5.*")).toBe("");
-    expect(ghCalls(ctx)).toBe("");
+    expect(v5Sha(ctx.origin)).toBe(ctx.v5Before);
+    expect(tags(ctx)).toEqual(["v5.0.1.200"]);
+    expect(created(ctx)).toEqual([]);
   });
 
-  it("when the published core is not in the verified tree, pins v5 to the published version and cuts no immutable tag", () => {
-    const ctx = setup("0.1.200", ["v5.0.1.200"]);
-    const r = run(ctx, { published: "0.1.201", served: ["0.1.200", "0.1.201"], latest: "0.1.201" });
+  it("a re-run creates the GitHub Release a previous run failed to create", () => {
+    const ctx = setup({ core: "0.1.200", v5: { pin: "0.1.200", at: "base" }, tags: ["v5.0.1.199", "v5.0.1.200"] });
+    const r = run(ctx, { published: "0.1.200", served: ["0.1.200"], releases: ["v5.0.1.199"] });
     expect(r.status, r.out).toBe(0);
-    expect(cliDefaultAt(ctx, "v5")).toBe("0.1.201");
-    expect(git(ctx.origin, "tag", "-l", "v5.*")).toBe("v5.0.1.200");
+    expect(v5Sha(ctx.origin)).toBe(ctx.v5Before);
+    expect(created(ctx)).toHaveLength(1);
+    expect(created(ctx)[0]).toContain("release create v5.0.1.200");
+    expect(created(ctx)[0]).toContain("--notes-start-tag v5.0.1.199");
   });
 
-  it("never leaves v5 on latest: with no version to pin it fails and leaves v5 where it was", () => {
-    const ctx = setup("0.1.201");
-    const r = run(ctx, { served: [], latest: "" });
+  it("a re-run of an older release leaves a newer v5 alone", () => {
+    const ctx = setup({ core: "0.1.200", v5: { pin: "0.1.201", at: "child" }, tags: ["v5.0.1.200"] });
+    const r = run(ctx, { published: "0.1.200", served: ["0.1.200", "0.1.201"], releases: ["v5.0.1.200"] });
+    expect(r.status, r.out).toBe(0);
+    expect(v5Sha(ctx.origin)).toBe(ctx.v5Before);
+    expect(created(ctx)).toEqual([]);
+  });
+
+  it("the first run after an unstamped v5 pins it to the tree's core and backfills that tag's Release", () => {
+    const ctx = setup({ core: "0.1.200", v5: { pin: null, at: "parent" }, tags: ["v5.0.1.200"] });
+    const r = run(ctx, { served: ["0.1.200"] });
+    expect(r.status, r.out).toBe(0);
+    expect(pinAt(ctx, "v5")).toBe("0.1.200");
+    expect(created(ctx)[0]).toContain("release create v5.0.1.200");
+  });
+
+  it("never pins v5 to an unserved core: with nothing on npm it fails and cuts nothing", () => {
+    const ctx = setup({ core: "0.1.201" });
+    const r = run(ctx, { served: [] });
     expect(r.status).not.toBe(0);
     expect(git(ctx.origin, "tag", "-l", "v5")).toBe("");
+    expect(tags(ctx)).toEqual([]);
   });
 });
 
@@ -218,6 +313,15 @@ describe("release publish pins @sweny-ai/core exactly in dependent packages", ()
     const pinned = JSON.parse(fs.readFileSync(path.join(withCore, "package.json"), "utf8"));
     expect(pinned.dependencies).toEqual({ "@sweny-ai/core": "0.1.200", yaml: "^2.0.0" });
     expect(fs.readFileSync(path.join(without, "package.json"), "utf8")).toBe(plain);
+  });
+
+  it("emits core_version right after core publishes, before anything later in the job can fail", () => {
+    const emits = publishRun.match(/core_version=/g) ?? [];
+    expect(emits).toHaveLength(1);
+    const at = publishRun.indexOf("core_version=");
+    expect(at).toBeGreaterThan(publishRun.indexOf('bump_and_publish packages/core "@sweny-ai/core"'));
+    expect(at).toBeLessThan(publishRun.indexOf('bump_and_publish packages/studio "@sweny-ai/studio"'));
+    expect(at).toBeLessThan(publishRun.indexOf("sync-release-versions.mjs sync"));
   });
 
   it("pins every non-core package before npm publish, to the core version settled after core publishes", () => {
