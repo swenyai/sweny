@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parse } from "yaml";
+import { resolveSandboxMode } from "../agent-env.js";
 import { TESTED_CODEX_VERSION } from "../harness/codex.js";
 
 const repoRoot = path.resolve(__dirname, "../../../..");
@@ -103,7 +104,7 @@ describe("agent sandbox dependencies step", () => {
   it("probes and relaxes through the shared script, never under off", () => {
     expect(step.env.RUNNER_ENVIRONMENT).toBe("${{ runner.environment }}");
     expect(step.env.SANDBOX_USERNS).toBe(SANDBOX_USERNS);
-    expect(step.run).toContain('[ "${SWENY_SANDBOX:-}" != "off" ]');
+    expect(step.run).toContain('[ "$SANDBOX_MODE" != "off" ]');
     expect(step.run).toContain('! bash "$SANDBOX_USERNS" probe');
     expect(step.run).toContain('bash "$SANDBOX_USERNS" relax');
     expect(step.run).not.toContain("sysctl");
@@ -135,6 +136,56 @@ describe("scripts/sandbox-userns.sh", () => {
     expect(relax({ RUNNER_ENVIRONMENT: "self-hosted" }).status).toBe(3);
     expect(relax({ RUNNER_ENVIRONMENT: "github-hosted", SWENY_SANDBOX: "off" }).status).toBe(3);
     expect(relax({ RUNNER_ENVIRONMENT: "self-hosted", SWENY_SANDBOX: "off" }).status).toBe(3);
+  });
+
+  it("reads SWENY_SANDBOX exactly as core does, for every alias", () => {
+    const mode = (env: Record<string, string>) =>
+      spawnSync("bash", [script, "mode"], {
+        env: { PATH: process.env.PATH ?? "", ...env },
+        encoding: "utf8",
+      }).stdout.trim();
+    const values = [
+      "off",
+      "OFF",
+      " Off ",
+      "false",
+      "FALSE",
+      "0",
+      "no",
+      "No",
+      "strict",
+      "STRICT",
+      "on",
+      "true",
+      "1",
+      "auto",
+      "Auto",
+      "",
+      "bogus",
+    ];
+    for (const ci of ["true", ""]) {
+      for (const v of values) {
+        const env = { SWENY_SANDBOX: v, CI: ci };
+        expect(`${JSON.stringify(v)} CI=${ci}: ${mode(env)}`).toBe(
+          `${JSON.stringify(v)} CI=${ci}: ${resolveSandboxMode(env)}`,
+        );
+      }
+    }
+    expect(mode({ CI: "true" })).toBe(resolveSandboxMode({ CI: "true" }));
+  });
+
+  it("never relaxes the host when sandboxing is off under any alias", () => {
+    for (const v of ["off", "OFF", "false", "False", "0", "no", "NO", " off "]) {
+      expect(relax({ RUNNER_ENVIRONMENT: "github-hosted", SWENY_SANDBOX: v }).status).toBe(3);
+    }
+  });
+
+  it("the Action steps read the mode from the script, not the raw variable", () => {
+    for (const name of ["Install agent sandbox dependencies", "Install and probe the agent sandbox wrapper (srt)"]) {
+      const run = steps.find((s) => s.name === name)!.run as string;
+      expect(run).toContain('bash "$SANDBOX_USERNS" mode');
+      expect(run).not.toMatch(/\$\{SWENY_SANDBOX:-\}" (!=|=) "off"/);
+    }
   });
 
   it("is what CI's sandbox jobs run, not a copy", () => {

@@ -13,7 +13,9 @@ import {
   resolveAgentSandbox,
   checkSandboxSupport,
   bwrapWorks,
+  systemBin,
   usernsHint,
+  type ProbeResult,
   DEFAULT_SANDBOX_DOMAINS,
   resolveEnvScope,
   formatWithheldWarning,
@@ -176,41 +178,36 @@ describe("checkSandboxSupport", () => {
 });
 
 describe("bwrapWorks", () => {
-  const plain = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "true"];
-  const nested = [
-    "--ro-bind",
-    "/",
-    "/",
-    "--dev",
-    "/dev",
-    "--proc",
-    "/proc",
-    "unshare",
-    "--user",
-    "--map-root-user",
-    "true",
-  ];
-  const fail = (stderr: string) => Object.assign(new Error("Command failed"), { stderr: Buffer.from(stderr) });
+  const BASE = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"];
+  const ok = (stdout = ""): ProbeResult => ({ status: 0, stdout, stderr: "" });
+  const bad = (stderr: string): ProbeResult => ({ status: 1, stdout: "", stderr });
+  const UTIL_LINUX_HELP =
+    "Usage:\n unshare [options] [<program> [<argument>...]]\n -r, --map-root-user  map the current user to root\n";
+  const bins = (names: Record<string, string>) => (name: string) => names[name];
+  const both = bins({ bwrap: "/usr/bin/bwrap", unshare: "/usr/bin/unshare" });
 
-  it("runs a plain bwrap, then a user namespace nested inside it", () => {
+  it("runs bwrap, checks unshare supports --map-root-user, then nests it by absolute path", () => {
     const calls: string[][] = [];
-    expect(
-      bwrapWorks(
-        (file, args) => void calls.push([file, ...args]),
-        () => true,
-      ),
-    ).toBeUndefined();
+    const run = (file: string, args: string[]) => {
+      calls.push([file, ...args]);
+      return args[0] === "--help" ? ok(UTIL_LINUX_HELP) : ok();
+    };
+    expect(bwrapWorks(run, both)).toBeUndefined();
     expect(calls).toEqual([
-      ["bwrap", ...plain],
-      ["bwrap", ...nested],
+      ["/usr/bin/bwrap", ...BASE, "true"],
+      ["/usr/bin/unshare", "--help"],
+      ["/usr/bin/bwrap", ...BASE, "/usr/bin/unshare", "--user", "--map-root-user", "true"],
     ]);
   });
 
   it("Ubuntu 26.04: plain bwrap works but the nested user namespace is denied", () => {
-    const run = (_file: string, args: string[]) => {
-      if (args.includes("unshare")) throw fail("unshare: write failed /proc/self/uid_map: Operation not permitted\n");
-    };
-    const reason = bwrapWorks(run, () => true);
+    const run = (_file: string, args: string[]) =>
+      args[0] === "--help"
+        ? ok(UTIL_LINUX_HELP)
+        : args.includes("--map-root-user")
+          ? bad("unshare: write failed /proc/self/uid_map: Operation not permitted\n")
+          : ok();
+    const reason = bwrapWorks(run, both);
     expect(reason).toMatch(
       /^bwrap cannot nest a user namespace, which the sandbox's seccomp helper needs \(unshare: write failed \/proc\/self\/uid_map: Operation not permitted\)/,
     );
@@ -218,30 +215,66 @@ describe("bwrapWorks", () => {
     expect(reason).toContain("kernel.apparmor_restrict_unprivileged_userns=0");
   });
 
-  it("a plain bwrap failure is reported first and skips the nested run", () => {
+  it("a plain bwrap failure is reported first and skips the rest", () => {
     const calls: string[][] = [];
-    const reason = bwrapWorks(
-      (file, args) => {
-        calls.push(args);
-        throw fail("bwrap: setting up uid map: Permission denied\nmore");
-      },
-      () => true,
-    );
+    const reason = bwrapWorks((file, args) => {
+      calls.push(args);
+      return bad("bwrap: setting up uid map: Permission denied\nmore");
+    }, both);
     expect(calls).toHaveLength(1);
     expect(reason).toMatch(
       /^bwrap cannot create a sandbox \(bwrap: setting up uid map: Permission denied\); unprivileged/,
     );
   });
 
-  it("skips the nested run when unshare is not on PATH", () => {
+  it("skips the nested run when unshare is not in a system directory", () => {
     const calls: string[][] = [];
-    expect(
-      bwrapWorks(
-        (_f, args) => void calls.push(args),
-        () => false,
-      ),
-    ).toBeUndefined();
-    expect(calls).toEqual([plain]);
+    const run = (_f: string, args: string[]) => (calls.push(args), ok());
+    expect(bwrapWorks(run, bins({ bwrap: "/usr/bin/bwrap" }))).toBeUndefined();
+    expect(calls).toEqual([[...BASE, "true"]]);
+  });
+
+  it("skips the nested run when unshare has no --map-root-user (busybox), instead of disabling the sandbox", () => {
+    const calls: string[][] = [];
+    const run = (_f: string, args: string[]) => {
+      calls.push(args);
+      return args[0] === "--help"
+        ? {
+            status: 0,
+            stdout: "",
+            stderr:
+              "BusyBox v1.36.1 multi-call binary.\n\nUsage: unshare [OPTIONS] [PROG ARGS]\n\t-U\tUnshare user namespace\n",
+          }
+        : ok();
+    };
+    expect(bwrapWorks(run, both)).toBeUndefined();
+    expect(calls.some((a) => a.includes("--map-root-user"))).toBe(false);
+  });
+
+  it("only looks for bwrap in system directories, never PATH", () => {
+    const run = () => ok();
+    expect(bwrapWorks(run, bins({}))).toMatch(
+      /^bwrap is not installed in \/usr\/bin, \/bin, \/usr\/local\/bin or \/usr\/sbin/,
+    );
+  });
+
+  it("echoes one sanitized, capped line of the probe's stderr", () => {
+    const long = "x".repeat(500);
+    const reason = bwrapWorks(() => bad(`bwrap: \u001b[31mred\u0007 ${long}\nsecond line`), both)!;
+    expect(reason).not.toContain("second line");
+    expect(reason).not.toMatch(/[\u0000-\u001f\u007f]/);
+    const echoed = /\((.*?)\)/.exec(reason)![1];
+    expect(echoed.length).toBeLessThanOrEqual(200);
+    expect(echoed.startsWith("bwrap: ?[31mred? x")).toBe(true);
+  });
+});
+
+describe("systemBin", () => {
+  it("resolves only from /usr/bin, /bin, /usr/local/bin and /usr/sbin, in that order", () => {
+    const seen: string[] = [];
+    expect(systemBin("bwrap", (p) => (seen.push(p), p === "/usr/local/bin/bwrap"))).toBe("/usr/local/bin/bwrap");
+    expect(seen).toEqual(["/usr/bin/bwrap", "/bin/bwrap", "/usr/local/bin/bwrap"]);
+    expect(systemBin("bwrap", () => false)).toBeUndefined();
   });
 });
 
