@@ -4,7 +4,8 @@
  *
  * METADATA ONLY. A record holds ids, statuses, durations, counts, token and
  * cost totals, and routing edges. It never holds prompts, node outputs, tool
- * inputs/outputs, error text, or environment values.
+ * inputs/outputs, error text, or environment values. What a run answered is
+ * kept apart, in `<run-id>/answers.json` (run-answers.ts).
  *
  * `schema_version` is the compatibility contract: a future resume journal
  * builds on this format, so readers skip records with a version they do not

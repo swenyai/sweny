@@ -354,6 +354,36 @@ describe("step summary", () => {
   });
 });
 
+describe("step summary: since last run", () => {
+  const results = new Map<string, NodeResult>([["a", ok()]]);
+  const summary = summarizeRun(results, 1000);
+
+  it("adds the line under the receipt when history exists", () => {
+    const line = "Since last run: 2 added, 1 resolved. Compare: `sweny runs diff --workflow demo`";
+    const md = formatStepSummary(workflow, results, summary, undefined, line);
+    const lines = md.split("\n");
+    const at = lines.indexOf(line);
+    expect(at).toBeGreaterThan(0);
+    expect(lines[at - 2]).toBe(`\`${formatReceipt(summary)}\``);
+    expect(md.indexOf(line)).toBeLessThan(md.indexOf("graph TB"));
+  });
+
+  it("is absent on a first run", () => {
+    expect(formatStepSummary(workflow, results, summary)).not.toContain("Since last run");
+    expect(formatStepSummary(workflow, results, summary, undefined, null)).not.toContain("Since last run");
+  });
+
+  it("writeStepSummary forwards it to the file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-since-"));
+    const file = path.join(dir, "summary.md");
+    fs.writeFileSync(file, "");
+    const line = "Since last run: no changes. Compare: `sweny runs diff --workflow demo`";
+    expect(writeStepSummary(workflow, results, summary, undefined, { GITHUB_STEP_SUMMARY: file }, line)).toBe(true);
+    expect(fs.readFileSync(file, "utf8")).toContain(line);
+    fs.rmSync(dir, { recursive: true });
+  });
+});
+
 describe("run logger: verbose vs default", () => {
   const strip = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, "");
 

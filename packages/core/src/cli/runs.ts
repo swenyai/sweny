@@ -1,14 +1,28 @@
 /**
  * `sweny runs` and `sweny runs diff`: read-only views over `.sweny/runs/`.
- * Metadata only. Color only when `color` is true (TTY).
+ * `runs` lists metadata. `runs diff` compares the metadata of two runs and,
+ * first, what changed in their answers (run-answers.ts). Color only when
+ * `color` is true (TTY and no NO_COLOR); the glyph set follows `unicode`.
+ * The diff always ends on one plain line with the answer counts.
  */
 
 import type { Command } from "commander";
 import { findRun, listRuns, type RunNodeRecord, type RunRecord } from "./run-history.js";
+import {
+  compareAnswers,
+  readRunAnswers,
+  type AnswerDiff,
+  type AnswerEntry,
+  type AnswersComparison,
+  type CollectionEntry,
+  type DiffCounts,
+  type DiffItem,
+  type FieldChange,
+} from "./run-answers.js";
 import { formatCost, formatReceiptDuration, formatTokenCount } from "./run-output.js";
 import { createPaint } from "./style.js";
-import { colorEnabled } from "./terminal.js";
-import { GLYPHS } from "../theme.js";
+import { colorEnabled, glyphsFor, supportsUnicode } from "./terminal.js";
+import type { GlyphSet } from "../theme.js";
 
 // ── Small formatters ────────────────────────────────────────────
 
@@ -22,8 +36,12 @@ export function formatAge(startedAt: string, nowMs: number = Date.now()): string
   return `${Math.floor(h / 24)}d ago`;
 }
 
-const G = GLYPHS.unicode;
-const ICON: Record<string, string> = { success: G.success, failed: G.failure, crashed: G.failure, skipped: G.skipped };
+const iconsFor = (g: GlyphSet): Record<string, string> => ({
+  success: g.success,
+  failed: g.failure,
+  crashed: g.failure,
+  skipped: g.skipped,
+});
 
 /** Status text in its role color: success, error, or muted for skipped. */
 function paint(text: string, status: string, color: boolean): string {
@@ -43,7 +61,13 @@ function pad(s: string, w: number, right = false): string {
 
 // ── sweny runs ──────────────────────────────────────────────────
 
-export function formatRunsTable(runs: RunRecord[], color: boolean, nowMs: number = Date.now()): string {
+export function formatRunsTable(
+  runs: RunRecord[],
+  color: boolean,
+  nowMs: number = Date.now(),
+  unicode: boolean = true,
+): string {
+  const ICON = iconsFor(glyphsFor(unicode));
   if (runs.length === 0) return "  No runs recorded yet. Run `sweny workflow run <file>` to start a history.\n";
   const rows = runs.map((r) => ({
     status: r.status,
@@ -98,47 +122,198 @@ function metric(
   b: number | null,
   show: (n: number) => string,
   delta: (a: number, b: number) => string,
+  arrow: string = "→",
 ): string | null {
   if (a === b) return null;
-  if (a === null || b === null) return `${label} ${a === null ? "-" : show(a)} → ${b === null ? "-" : show(b)}`;
-  return `${label} ${show(a)} → ${show(b)} (${delta(a, b)})`;
+  if (a === null || b === null) return `${label} ${a === null ? "-" : show(a)} ${arrow} ${b === null ? "-" : show(b)}`;
+  return `${label} ${show(a)} ${arrow} ${show(b)} (${delta(a, b)})`;
 }
 
-function nodeChanges(a: RunNodeRecord, b: RunNodeRecord): string[] {
+function nodeChanges(a: RunNodeRecord, b: RunNodeRecord, arrow: string): string[] {
   return [
-    metric("duration", a.duration_ms, b.duration_ms, fmtDur, deltaDuration),
-    metric("tokens", a.tokens, b.tokens, formatTokenCount, deltaTokens),
-    metric("cost", a.cost_usd, b.cost_usd, formatCost, deltaCost),
-    metric("tools", a.tool_calls, b.tool_calls, String, deltaCount),
-    metric("retries", a.retries, b.retries, String, deltaCount),
+    metric("duration", a.duration_ms, b.duration_ms, fmtDur, deltaDuration, arrow),
+    metric("tokens", a.tokens, b.tokens, formatTokenCount, deltaTokens, arrow),
+    metric("cost", a.cost_usd, b.cost_usd, formatCost, deltaCost, arrow),
+    metric("tools", a.tool_calls, b.tool_calls, String, deltaCount, arrow),
+    metric("retries", a.retries, b.retries, String, deltaCount, arrow),
   ].filter((x): x is string => x !== null);
 }
 
-const routeKey = (r: { from: string; to: string }) => `${r.from} → ${r.to}`;
+const routeKey = (r: { from: string; to: string }) => `${r.from}\u0000${r.to}`;
 
-export function formatRunDiff(a: RunRecord, b: RunRecord, color: boolean): string {
+// ── Answers section ─────────────────────────────────────────────
+
+/** Items listed per kind (added, resolved, changed) in one list before "... and N more". The JSON keeps all. */
+const MAX_ITEMS_SHOWN = 10;
+const MAX_FIELDS_SHOWN = 3;
+const VALUE_MAX = 56;
+
+/** One printable line: control characters (an answer is untrusted text) and runs of whitespace become one space. */
+function oneLine(s: string): string {
+  return s
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function clip(s: string, max: number, g: GlyphSet): string {
+  return s.length > max ? s.slice(0, max - 1) + g.ellipsis : s;
+}
+
+function showValue(v: unknown, g: GlyphSet): string {
+  if (v === undefined) return "(none)";
+  const text =
+    typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : JSON.stringify(v);
+  return clip(oneLine(text), VALUE_MAX, g);
+}
+
+/** Lines in `b` not in `a` (added) and in `a` not in `b` (removed), as multisets. */
+function lineDelta(a: string, b: string): { added: number; removed: number } {
+  const left = new Map<string, number>();
+  for (const l of a.split("\n")) left.set(l, (left.get(l) ?? 0) + 1);
+  let added = 0;
+  for (const l of b.split("\n")) {
+    const n = left.get(l) ?? 0;
+    if (n > 0) left.set(l, n - 1);
+    else added++;
+  }
+  let removed = 0;
+  for (const n of left.values()) removed += n;
+  return { added, removed };
+}
+
+/** `before -> after`, or `+X -Y lines` when either side is a long or multi-line string. */
+function valueChange(before: unknown, after: unknown, g: GlyphSet): string {
+  const long = (v: unknown) => typeof v === "string" && (v.includes("\n") || v.length > VALUE_MAX);
+  if (typeof before === "string" && typeof after === "string" && (long(before) || long(after))) {
+    const d = lineDelta(before, after);
+    return `+${d.added} -${d.removed} lines`;
+  }
+  return `${showValue(before, g)} ${g.arrow} ${showValue(after, g)}`;
+}
+
+const isChangedEntry = (e: AnswerEntry): boolean =>
+  e.kind === "collection" ? e.added.length + e.resolved.length + e.changed.length > 0 : e.status !== "unchanged";
+
+function countsHead(e: CollectionEntry, g: GlyphSet): string {
+  return [
+    e.added.length ? `${e.added.length} added` : "",
+    e.resolved.length ? `${e.resolved.length} resolved` : "",
+    e.changed.length ? `${e.changed.length} changed` : "",
+    e.unchanged ? `${e.unchanged} unchanged` : "",
+  ]
+    .filter(Boolean)
+    .join(` ${g.sep} `);
+}
+
+/**
+ * The answers block. Marker colors keep the palette's meanings: `+` a new item
+ * is `warning` (look at this), `-` a resolved one is `success`, `~` a changed
+ * one is `info`; counts and unchanged nodes are `muted`.
+ */
+function formatAnswersSection(cmp: AnswerDiff, color: boolean, g: GlyphSet): string[] {
+  const p = createPaint(color);
+  const out: string[] = ["  answers"];
+  const items = (marker: string, paintMarker: (s: string) => string, list: DiffItem[], word: string) => {
+    for (const it of list.slice(0, MAX_ITEMS_SHOWN)) {
+      out.push(`        ${paintMarker(marker)} ${clip(oneLine(it.label), 72, g)}`);
+    }
+    if (list.length > MAX_ITEMS_SHOWN) {
+      out.push(p.muted(`        ${g.ellipsis} and ${list.length - MAX_ITEMS_SHOWN} more ${word}`));
+    }
+  };
+  const fields = (list: FieldChange[]) => {
+    if (list.length === 0) return;
+    const w = Math.max(...list.map((f) => f.field.length));
+    for (const f of list.slice(0, MAX_FIELDS_SHOWN)) {
+      out.push(`            ${pad(f.field, w)}  ${valueChange(f.before, f.after, g)}`);
+    }
+    if (list.length > MAX_FIELDS_SHOWN)
+      out.push(p.muted(`            ${g.ellipsis} and ${list.length - MAX_FIELDS_SHOWN} more fields`));
+  };
+
+  const nodes = [...new Set(cmp.entries.map((e) => e.node))];
+  for (const node of nodes) {
+    const changed = cmp.entries.filter((e) => e.node === node && isChangedEntry(e));
+    if (changed.length === 0) {
+      out.push(`    ${node}  ${p.muted("unchanged")}`);
+      continue;
+    }
+    out.push(`    ${node}`);
+    const w = Math.max(...changed.map((e) => e.field.length));
+    for (const e of changed) {
+      if (e.kind === "collection") {
+        out.push(`      ${pad(e.field, w)}  ${p.muted(countsHead(e, g))}`);
+        items("+", p.warning, e.added, "added");
+        items("-", p.success, e.resolved, "resolved");
+        for (const c of e.changed.slice(0, MAX_ITEMS_SHOWN)) {
+          out.push(`        ${p.info("~")} ${clip(oneLine(c.label), 72, g)}`);
+          fields(c.fields);
+        }
+        if (e.changed.length > MAX_ITEMS_SHOWN) {
+          out.push(p.muted(`        ${g.ellipsis} and ${e.changed.length - MAX_ITEMS_SHOWN} more changed`));
+        }
+      } else if (e.status === "added") {
+        out.push(`      ${pad(e.field, w)}  ${p.warning("added")} ${showValue(e.after, g)}`);
+      } else if (e.status === "resolved") {
+        out.push(`      ${pad(e.field, w)}  ${p.success("resolved")} ${p.muted(`(was ${showValue(e.before, g)})`)}`);
+      } else {
+        out.push(`      ${pad(e.field, w)}  ${valueChange(e.before, e.after, g)}`);
+      }
+    }
+  }
+  for (const n of cmp.not_compared) {
+    out.push(`    ${n.node}  ${p.muted(`not compared (answer in ${n.only_in} only)`)}`);
+  }
+  if (nodes.length === 0 && cmp.not_compared.length === 0) out.push(p.muted("    no declared outputs to compare"));
+  return out;
+}
+
+const countsLine = (c: DiffCounts): string =>
+  `${c.added} added, ${c.resolved} resolved, ${c.changed} changed, ${c.unchanged} unchanged`;
+
+/** The last line of the diff: plain text, no color, no glyphs, so a log or a grep always has the answer. */
+function answersFinalLine(cmp: AnswersComparison, a: RunRecord, b: RunRecord): string {
+  if (cmp.available) return `  answers: ${countsLine(cmp.counts)}`;
+  if (cmp.reason === "different_workflows") return "  answers: not compared (different workflows)";
+  const ids = cmp.missing.map((m) => (m === "a" ? a.run_id : b.run_id)).join(" and ");
+  return `  answers: not recorded for ${ids} (runs made with --no-history, or by an older sweny, have none)`;
+}
+
+export interface RunDiffOptions {
+  /** Answer comparison for the pair; when set the diff leads with it and ends on its summary line. */
+  answers?: AnswersComparison;
+  /** Unicode glyphs (default) or the ASCII set. */
+  unicode?: boolean;
+}
+
+export function formatRunDiff(a: RunRecord, b: RunRecord, color: boolean, opts: RunDiffOptions = {}): string {
+  const g = glyphsFor(opts.unicode ?? true);
+  const ICON = iconsFor(g);
   const dim = createPaint(color).muted;
   const out: string[] = [];
   const hdr = (tag: string, r: RunRecord) =>
     `  ${tag}  ${r.run_id}  ${r.workflow_id}  ${paint(`${ICON[r.status] ?? "?"} ${r.status}`, r.status, color)}  ${formatReceiptDuration(r.duration_ms)}`;
   out.push(hdr("a", a), hdr("b", b), "");
 
+  if (opts.answers?.available) out.push(...formatAnswersSection(opts.answers, color, g), "");
+
   const short = (h: string) => h.slice(0, 7);
   out.push(
     a.workflow_hash === b.workflow_hash
       ? `  workflow   unchanged (${short(a.workflow_hash)})`
-      : `  workflow   changed ${short(a.workflow_hash)} → ${short(b.workflow_hash)}`,
+      : `  workflow   changed ${short(a.workflow_hash)} ${g.arrow} ${short(b.workflow_hash)}`,
   );
-  if (a.workflow_id !== b.workflow_id) out.push(`  id         ${a.workflow_id} → ${b.workflow_id}`);
+  if (a.workflow_id !== b.workflow_id) out.push(`  id         ${a.workflow_id} ${g.arrow} ${b.workflow_id}`);
   out.push(
     a.status === b.status
       ? `  status     ${ICON[b.status]} ${b.status} (same)`
-      : `  status     ${ICON[a.status]} ${a.status} → ${paint(`${ICON[b.status]} ${b.status}`, b.status, color)}`,
+      : `  status     ${ICON[a.status]} ${a.status} ${g.arrow} ${paint(`${ICON[b.status]} ${b.status}`, b.status, color)}`,
   );
   const tot = [
-    metric("duration  ", a.duration_ms, b.duration_ms, formatReceiptDuration, deltaDuration),
-    metric("tokens    ", a.totals.tokens, b.totals.tokens, formatTokenCount, deltaTokens),
-    metric("cost      ", a.totals.cost_usd, b.totals.cost_usd, formatCost, deltaCost),
+    metric("duration  ", a.duration_ms, b.duration_ms, formatReceiptDuration, deltaDuration, g.arrow),
+    metric("tokens    ", a.totals.tokens, b.totals.tokens, formatTokenCount, deltaTokens, g.arrow),
+    metric("cost      ", a.totals.cost_usd, b.totals.cost_usd, formatCost, deltaCost, g.arrow),
   ];
   for (const t of tot) if (t) out.push(`  ${t}`);
 
@@ -156,21 +331,25 @@ export function formatRunDiff(a: RunRecord, b: RunRecord, color: boolean): strin
       out.push(`    ${pad(id, w)}  ${paint(`added ${ICON[nb.status]} ${nb.status}`, nb.status, color)}`);
     } else if (na && nb) {
       const st =
-        na.status === nb.status ? ICON[nb.status] : `${ICON[na.status]} → ${paint(ICON[nb.status], nb.status, color)}`;
-      const ch = nodeChanges(na, nb);
+        na.status === nb.status
+          ? ICON[nb.status]
+          : `${ICON[na.status]} ${g.arrow} ${paint(ICON[nb.status], nb.status, color)}`;
+      const ch = nodeChanges(na, nb, g.arrow);
       out.push(`    ${pad(id, w)}  ${st}  ${ch.length ? ch.join("   ") : dim("no change")}`);
     }
   }
 
   out.push("", "  routes");
+  const show = (key: string) => key.split("\u0000").join(` ${g.arrow} `);
   const ar = new Set(a.routes.map(routeKey));
   const br = new Set(b.routes.map(routeKey));
   const onlyA = [...ar].filter((r) => !br.has(r));
   const onlyB = [...br].filter((r) => !ar.has(r));
   if (onlyA.length === 0 && onlyB.length === 0) out.push("    identical");
-  for (const r of onlyA) out.push(`    - ${r}  ${dim("(only in a)")}`);
-  for (const r of onlyB) out.push(`    + ${r}  ${dim("(only in b)")}`);
+  for (const r of onlyA) out.push(`    - ${show(r)}  ${dim("(only in a)")}`);
+  for (const r of onlyB) out.push(`    + ${show(r)}  ${dim("(only in b)")}`);
 
+  if (opts.answers) out.push("", answersFinalLine(opts.answers, a, b));
   return out.join("\n") + "\n";
 }
 
@@ -194,9 +373,50 @@ export function pickRunsForDiff(
   const wf = workflowId ?? runs.find((r) => (counts.get(r.workflow_id) ?? 0) >= 2)?.workflow_id ?? runs[0]?.workflow_id;
   const same = wf ? runs.filter((r) => r.workflow_id === wf) : [];
   if (same.length < 2) {
-    return { error: wf ? `Need two runs of "${wf}" to diff; found ${same.length}.` : "No runs recorded yet." };
+    return {
+      error: wf
+        ? `Need two runs of "${wf}" to diff; found ${same.length}. Run it again, then \`sweny runs diff\`.`
+        : "No runs recorded yet. Run `sweny workflow run <file>` twice, then `sweny runs diff`.",
+    };
   }
   return { a: same[1], b: same[0] };
+}
+
+// ── sweny runs diff: command body ───────────────────────────────
+
+type OutStream = { isTTY?: boolean; write(chunk: string): unknown };
+
+export interface RunsDiffIo {
+  cwd?: string;
+  env?: Record<string, string | undefined>;
+  stdout: OutStream;
+  stderr: OutStream;
+}
+
+/**
+ * Body of `sweny runs diff`. Returns the exit code (0 diffed, 1 nothing to diff).
+ *
+ * `--json` prints `{ schema_version: 1, a: RunRecord, b: RunRecord, answers }` and never ANSI.
+ * `answers` is `{ available: true, counts, entries, not_compared }` or
+ * `{ available: false, reason: "different_workflows" | "missing_answers", missing? }`.
+ */
+export function runRunsDiff(refs: string[], opts: { workflow?: string; json?: boolean }, io: RunsDiffIo): number {
+  const env = io.env ?? process.env;
+  const picked = pickRunsForDiff(listRuns(io.cwd), refs, opts.workflow);
+  if ("error" in picked) {
+    io.stderr.write(createPaint(colorEnabled(io.stderr, env)).error(`  ${picked.error}`) + "\n");
+    return 1;
+  }
+  const { a, b } = picked;
+  const answers = compareAnswers(readRunAnswers(a.run_id, io.cwd), readRunAnswers(b.run_id, io.cwd));
+  if (opts.json) {
+    io.stdout.write(JSON.stringify({ schema_version: 1, a, b, answers }, null, 2) + "\n");
+    return 0;
+  }
+  io.stdout.write(
+    "\n" + formatRunDiff(a, b, colorEnabled(io.stdout, env), { answers, unicode: supportsUnicode(env) }) + "\n",
+  );
+  return 0;
 }
 
 // ── Command wiring ──────────────────────────────────────────────
@@ -222,23 +442,22 @@ export function registerRunsCommand(program: Command): Command {
         process.stdout.write(JSON.stringify(runs, null, 2) + "\n");
         return;
       }
-      process.stdout.write("\n" + formatRunsTable(runs, colorEnabled(process.stdout)) + "\n");
+      process.stdout.write(
+        "\n" + formatRunsTable(runs, colorEnabled(process.stdout), Date.now(), supportsUnicode()) + "\n",
+      );
     });
 
   runsCmd
     .command("diff [a] [b]")
-    .description("Compare two runs (default: the last two runs of the same workflow)")
+    .description(
+      "Compare two runs: what changed in the answers, then how they ran (default: the last two of a workflow)",
+    )
     .option("--workflow <id>", "Workflow to pick the default pair from")
-    .action((a: string | undefined, b: string | undefined, opts: { workflow?: string }) => {
+    .option("--json", "Output { schema_version, a, b, answers } as JSON")
+    .action((a: string | undefined, b: string | undefined, opts: { workflow?: string; json?: boolean }) => {
       const refs = [a, b].filter((x): x is string => x !== undefined);
-      const runs = listRuns();
-      const picked = pickRunsForDiff(runs, refs, opts.workflow);
-      if ("error" in picked) {
-        console.error(createPaint(colorEnabled(process.stderr)).error(`  ${picked.error}`));
-        process.exitCode = 1;
-        return;
-      }
-      process.stdout.write("\n" + formatRunDiff(picked.a, picked.b, colorEnabled(process.stdout)) + "\n");
+      const code = runRunsDiff(refs, opts, { stdout: process.stdout, stderr: process.stderr });
+      if (code !== 0) process.exitCode = code;
     });
 
   return runsCmd;
