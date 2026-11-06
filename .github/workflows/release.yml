@@ -292,8 +292,15 @@ jobs:
 
           # Floor: v5 never moves to a lower core than it pins (SemVer precedence, so a
           # prerelease ranks below its release). An equal core with a new action.yml moves.
+          REGISTRY="https://registry.npmjs.org/@sweny-ai%2fcore"
           CUR=$({ git show v5:action.yml 2>/dev/null || true; } | sed -n '/^  cli-version:/,/^  [a-z]/s/^    default: "\([0-9][^"]*\)"$/\1/p' | sed -n 1p)
-          if [ -n "$CUR" ] && [ "$(node scripts/semver-compare.mjs "$PIN" "$CUR")" = "-1" ]; then
+          if [ -z "$CUR" ]; then
+            # Bootstrap: v5 pins no exact core yet (cli-version "latest", or no v5), so the
+            # floor is npm's latest. Unreadable means unknown: leave v5.
+            CUR=$(curl -fsS "$REGISTRY" | jq -r '."dist-tags".latest // empty' 2>/dev/null || true)
+            [ -n "$CUR" ] || { echo "::notice::could not read npm's latest @sweny-ai/core; leaving v5"; exit 0; }
+          fi
+          if [ "$(node scripts/semver-compare.mjs "$PIN" "$CUR")" = "-1" ]; then
             echo "::notice::v5 pins @sweny-ai/core@${CUR}; not moving it down to ${PIN}"
             exit 0
           fi
@@ -301,7 +308,7 @@ jobs:
           # npm takes minutes to serve a just-published version: poll every 15s for 15 min.
           # Still not served means nothing to do yet; the next release run converges.
           for i in $(seq 1 60); do
-            served=$(curl -fsS "https://registry.npmjs.org/@sweny-ai%2fcore" | jq -r --arg v "$PIN" '.versions[$v].version // empty' 2>/dev/null || true)
+            served=$(curl -fsS "$REGISTRY" | jq -r --arg v "$PIN" '.versions[$v].version // empty' 2>/dev/null || true)
             if [ "$served" = "$PIN" ] || [ "$i" = 60 ]; then break; fi
             sleep 15
           done
