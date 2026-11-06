@@ -1,5 +1,4 @@
 import { execSync } from "node:child_process";
-import * as fs from "node:fs";
 import type { Command } from "commander";
 import type { McpServerConfig } from "../types.js";
 import type { FileConfig } from "./config-file.js";
@@ -30,12 +29,6 @@ export interface CliConfig {
   // Issue tracker
   issueTrackerProvider: string;
   linearApiKey: string;
-  linearTeamId: string;
-  linearBugLabelId: string;
-  linearTriageLabelId: string;
-  linearStateBacklog: string;
-  linearStateInProgress: string;
-  linearStatePeerReview: string;
 
   // Investigation params
   timeRange: string;
@@ -56,7 +49,6 @@ export interface CliConfig {
   noveltyMode: boolean;
   issueOverride: string;
   additionalInstructions: string;
-  serviceMapPath: string;
   githubToken: string;
   botToken: string;
 
@@ -74,7 +66,6 @@ export interface CliConfig {
   // GitLab credentials
   gitlabToken: string;
   gitlabProjectId: string;
-  gitlabBaseUrl: string;
 
   // Notification
   notificationProvider: string;
@@ -97,14 +88,6 @@ export interface CliConfig {
    */
   verbose: boolean;
   bell: boolean;
-
-  // Cache
-  cacheDir: string;
-  cacheTtl: number;
-  noCache: boolean;
-
-  // Output (file providers)
-  outputDir: string;
 
   // MCP servers for agent tool access
   mcpServers: Record<string, McpServerConfig>;
@@ -155,8 +138,8 @@ export function registerTriageCommand(program: Command): Command {
     .option("--severity-focus <focus>", "Severity level focus (default: errors)")
     .option("--service-filter <filter>", "Service filter pattern (default: *)")
     .option("--investigation-depth <depth>", "Investigation depth (default: standard)")
-    .option("--max-investigate-turns <n>", "Max Claude turns for investigation (default: 50)")
-    .option("--max-implement-turns <n>", "Max Claude turns for implementation (default: 30)")
+    .option("--max-investigate-turns <n>", "Max coding agent turns for investigation (default: 50)")
+    .option("--max-implement-turns <n>", "Max coding agent turns for implementation (default: 30)")
     .option("--base-branch <branch>", "Base branch for PRs (default: main)")
     .option("--pr-labels <labels>", "Comma-separated PR labels (default: agent,triage,needs-review)")
     .option("--dry-run", "Analyze only, do not create issues or PRs", false)
@@ -172,19 +155,12 @@ export function registerTriageCommand(program: Command): Command {
     )
     .option("--no-novelty-mode", "Disable novelty mode (allow +1 on existing issues)")
     .option("--issue-override <issue>", "Work on a specific existing issue")
-    .option("--additional-instructions <text>", "Extra instructions for the Claude agent")
-    .option("--service-map-path <path>", "Path to service map YAML (default: .github/service-map.yml)")
+    .option("--additional-instructions <text>", "Extra instructions for the coding agent")
     .option("--repository <owner/repo>", "Repository (auto-detected from git remote)")
-    .option("--linear-team-id <id>", "Linear team ID")
-    .option("--linear-bug-label-id <id>", "Linear bug label ID")
-    .option("--linear-triage-label-id <id>", "Linear triage label ID")
     .option(
       "--issue-labels <labels>",
       "Comma-separated extra labels applied to every agent-created issue (e.g. agent UUID for Linear, 'agent' for GitHub Issues)",
     )
-    .option("--linear-state-backlog <name>", "Linear backlog state name")
-    .option("--linear-state-in-progress <name>", "Linear in-progress state name")
-    .option("--linear-state-peer-review <name>", "Linear peer-review state name")
     .option("--log-file <path>", "Path to JSON log file (use with --observability-provider file)")
     .option("--dd-site <site>", "Datadog site (default: datadoghq.com)")
     .option("--sentry-org <org>", "Sentry organization slug")
@@ -204,7 +180,6 @@ export function registerTriageCommand(program: Command): Command {
     .option("--axiom-org-id <id>", "Axiom org ID (required for multi-org Axiom accounts)")
     .option("--betterstack-source-id <id>", "Better Stack log source ID (used to auto-discover ClickHouse table)")
     .option("--betterstack-table-name <name>", 'Better Stack ClickHouse table name, e.g. "t273774.my_source"')
-    .option("--gitlab-base-url <url>", "GitLab base URL (default: https://gitlab.com)")
     .option("--json", "Output results as JSON", false)
     .option("--stream", "Stream NDJSON events to stdout (for Studio / automation)", false)
     .option(
@@ -213,10 +188,6 @@ export function registerTriageCommand(program: Command): Command {
       false,
     )
     .option("--bell", "Ring terminal bell on completion", false)
-    .option("--cache-dir <path>", "Step cache directory (default: .sweny/cache)")
-    .option("--cache-ttl <seconds>", "Cache TTL in seconds, 1 to 31536000 (default: 86400)")
-    .option("--no-cache", "Disable step cache")
-    .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
     .option(
       "--workspace-tools <tools>",
       "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday)",
@@ -267,7 +238,7 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     anthropicApiKey: env.ANTHROPIC_API_KEY || "",
     anthropicAuthToken: env.ANTHROPIC_AUTH_TOKEN || "",
     claudeOauthToken: env.CLAUDE_CODE_OAUTH_TOKEN || "",
-    // Non-secret config: env or .sweny config file (mirrors gitlabBaseUrl)
+    // Non-secret config: env or .sweny config file
     anthropicBaseUrl: env.ANTHROPIC_BASE_URL || f("anthropic-base-url") || "",
     swenyAuth: normalizeSwenyAuth(env.SWENY_AUTH || f("sweny-auth")),
     openaiApiKey: env.OPENAI_API_KEY || "",
@@ -279,17 +250,6 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
 
     issueTrackerProvider: (options.issueTrackerProvider as string) || f("issue-tracker-provider") || "github-issues",
     linearApiKey: env.LINEAR_API_KEY || "",
-    linearTeamId: (options.linearTeamId as string) || env.LINEAR_TEAM_ID || f("linear-team-id") || "",
-    linearBugLabelId: (options.linearBugLabelId as string) || env.LINEAR_BUG_LABEL_ID || f("linear-bug-label-id") || "",
-    linearTriageLabelId:
-      (options.linearTriageLabelId as string) || env.LINEAR_TRIAGE_LABEL_ID || f("linear-triage-label-id") || "",
-
-    linearStateBacklog:
-      (options.linearStateBacklog as string) || env.LINEAR_STATE_BACKLOG || f("linear-state-backlog") || "",
-    linearStateInProgress:
-      (options.linearStateInProgress as string) || env.LINEAR_STATE_IN_PROGRESS || f("linear-state-in-progress") || "",
-    linearStatePeerReview:
-      (options.linearStatePeerReview as string) || env.LINEAR_STATE_PEER_REVIEW || f("linear-state-peer-review") || "",
 
     timeRange: (options.timeRange as string) || f("time-range") || "24h",
     severityFocus: (options.severityFocus as string) || f("severity-focus") || "errors",
@@ -314,7 +274,6 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     issueOverride: (options.issueOverride as string) || "",
     additionalInstructions: (options.additionalInstructions as string) || "",
 
-    serviceMapPath: (options.serviceMapPath as string) || f("service-map-path") || ".github/service-map.yml",
     githubToken: env.GITHUB_TOKEN || "",
     botToken: env.BOT_TOKEN || "",
 
@@ -338,8 +297,6 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
 
     gitlabToken: env.GITLAB_TOKEN || "",
     gitlabProjectId: env.GITLAB_PROJECT_ID || "",
-    gitlabBaseUrl:
-      (options.gitlabBaseUrl as string) || env.GITLAB_BASE_URL || f("gitlab-base-url") || "https://gitlab.com",
 
     notificationProvider: (options.notificationProvider as string) || f("notification-provider") || "console",
     // Secrets: env only
@@ -357,12 +314,6 @@ export function parseCliInputs(options: Record<string, unknown>, fileConfig: Fil
     stream: Boolean(options.stream),
     verbose: Boolean(options.verbose),
     bell: Boolean(options.bell),
-
-    cacheDir: (options.cacheDir as string) || env.SWENY_CACHE_DIR || f("cache-dir") || ".sweny/cache",
-    cacheTtl: parsePositiveInt(options.cacheTtl ?? f("cache-ttl"), 86400),
-    noCache: options.cache === false,
-
-    outputDir: (options.outputDir as string) || env.SWENY_OUTPUT_DIR || f("output-dir") || ".sweny/output",
 
     mcpServers: parseMcpServers(env.SWENY_MCP_SERVERS || f("mcp-servers-json") || ""),
 
@@ -567,10 +518,6 @@ export function validateInputs(config: CliConfig): string[] {
     case "linear":
       if (!config.linearApiKey)
         errors.push("Missing: LINEAR_API_KEY - find API keys at https://linear.app/settings/api");
-      if (!config.linearTeamId)
-        errors.push(
-          "Missing: LINEAR_TEAM_ID - find it in Linear > Settings > Workspace > Teams > [your team] > copy the ID from the URL",
-        );
       break;
     case "jira":
       if (!config.jiraBaseUrl)
@@ -662,9 +609,6 @@ export function validateInputs(config: CliConfig): string[] {
   // bounds check let junk through).
   validateIntegerBound(errors, "--max-investigate-turns", config.maxInvestigateTurns, 1, 500);
   validateIntegerBound(errors, "--max-implement-turns", config.maxImplementTurns, 1, 500);
-  // cacheTtl is parsed with parsePositiveInt (junk → NaN); bound it so a
-  // malformed --cache-ttl / cache-ttl: surfaces a field error instead of NaN.
-  validateIntegerBound(errors, "--cache-ttl", config.cacheTtl, 1, 31_536_000);
 
   return errors;
 }
@@ -705,12 +649,10 @@ export function normalizeSwenyAuth(raw: unknown): "auto" | "api-key" | "oauth" {
  * `0` and breaking downstream invariants.
  *
  * Why zero is rejected: every current caller (max-investigate-turns,
- * max-implement-turns, cache-ttl) uses the result as a positive count or
- * timeout. There is no "zero means disabled" semantics anywhere — a
- * cache-ttl of 0 wouldn't disable cache, it would expire entries
- * immediately, which is broken. If a future flag wants "0 = disabled",
- * use a sibling helper (parseNonNegativeInt) rather than weakening this
- * one's contract.
+ * max-implement-turns) uses the result as a positive turn count. There is
+ * no "zero means disabled" semantics anywhere. If a future flag wants
+ * "0 = disabled", use a sibling helper (parseNonNegativeInt) rather than
+ * weakening this one's contract.
  */
 export function parsePositiveInt(raw: unknown, fallback: number): number {
   if (raw === undefined || raw === null || raw === "") return fallback;
@@ -726,26 +668,6 @@ export function parsePositiveInt(raw: unknown, fallback: number): number {
   if (!Number.isFinite(parsed)) return Number.NaN;
   const truncated = Math.trunc(parsed);
   return truncated >= 1 ? truncated : Number.NaN;
-}
-
-const DEFAULT_SERVICE_MAP_PATH = ".github/service-map.yml";
-
-/**
- * Returns non-fatal warnings about the configuration.
- * These are surfaced before the spinner starts but do not abort the run.
- */
-export function validateWarnings(config: Pick<CliConfig, "serviceMapPath">): string[] {
-  const warnings: string[] = [];
-
-  // Warn when an explicitly configured serviceMapPath doesn't exist on disk.
-  // We skip the default path to avoid noise for users who never set it up.
-  if (config.serviceMapPath && config.serviceMapPath !== DEFAULT_SERVICE_MAP_PATH) {
-    if (!fs.existsSync(config.serviceMapPath)) {
-      warnings.push(`Service map file not found: "${config.serviceMapPath}". Cross-repo routing will be disabled.`);
-    }
-  }
-
-  return warnings;
 }
 
 function parseObservabilityCredentials(
@@ -896,10 +818,6 @@ export function registerImplementCommand(program: Command): Command {
     .option("--max-implement-turns <n>", "Max coding agent turns (default: 40)")
     .option("--base-branch <branch>", "Base branch for PRs (default: main)")
     .option("--repository <owner/repo>", "Repository (auto-detected from git remote)")
-    .option("--linear-team-id <id>", "Linear team ID")
-    .option("--linear-state-in-progress <name>", "Linear in-progress state name")
-    .option("--linear-state-peer-review <name>", "Linear peer-review state name")
-    .option("--output-dir <path>", "Output directory for file providers (default: .sweny/output)")
     .option(
       "--workspace-tools <tools>",
       "Comma-separated workspace tool integrations to enable (slack, notion, pagerduty, monday)",

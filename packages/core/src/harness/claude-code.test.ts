@@ -394,8 +394,9 @@ describe("ClaudeCodeHarness", () => {
 
     it("ids without an adapter keep an honest error", () => {
       expect(() => index.createHarness("gemini")).toThrow(
-        'Unsupported coding agent "gemini": supported agents are "claude" (headless Claude Code) ' +
-          'and "codex" (Codex CLI), or "pi" (pi coding agent, experimental). Remove --agent / coding-agent-provider or set it to one of them.',
+        'Unsupported coding agent "gemini": supported agents are "claude" (headless Claude Code), ' +
+          '"codex" (Codex CLI), "pi" (pi coding agent, experimental), or "acp:<command>" (any Agent Client Protocol agent, ' +
+          'experimental, for example "acp:opencode acp"). Remove --agent / coding-agent-provider or set it to one of them.',
       );
     });
 

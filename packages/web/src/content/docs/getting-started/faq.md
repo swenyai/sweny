@@ -49,7 +49,7 @@ Most users start with **triage**. See [Action Setup](/action/) for configuration
 Yes. The fastest way is to describe what you want:
 
 ```bash
-sweny workflow create "your task description here"
+sweny new   # pick "Describe your own", then describe the task
 ```
 
 SWEny generates a full workflow DAG from natural language — with nodes, conditional routing, structured output schemas, and the right skills at each step. Refine it with `sweny workflow edit`, or hand-edit the YAML.
@@ -73,14 +73,14 @@ See [Skills Overview](/skills/) for the full catalog and configuration details.
 
 When using the **GitHub Action or CLI**, SWEny runs entirely within your infrastructure:
 
-- **GitHub Action** — runs on GitHub Actions runners. Your code stays in the runner. API calls go only to your configured providers (Sentry, Datadog, Linear, etc.) and to Anthropic (for Claude).
+- **GitHub Action** — runs on GitHub Actions runners. Your code stays in the runner. API calls go only to your configured providers (Sentry, Datadog, Linear, etc.) and to your coding agent's model provider (Anthropic for Claude Code, OpenAI for Codex, and so on).
 - **CLI** — runs on your local machine. Same boundaries apply.
 
-The Action and CLI are standalone open-source tools with no phone-home behavior. Nothing is sent to SWEny servers.
+The Action and CLI are standalone open-source tools with no usage telemetry and no crash reporting. They make one request of their own: an interactive `sweny` command checks the npm registry for a newer version (cached for a day after a successful check; off in CI, when stderr is not a terminal, and with `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1`). The opt-in run reporting path sends nothing unless you set `SWENY_CLOUD_TOKEN`. See [PRIVACY.md](https://github.com/swenyai/sweny/blob/main/PRIVACY.md).
 
 ## Can I use a different LLM?
 
-SWEny runs nodes on headless Claude Code by default, on the Codex CLI with `--agent codex` (Action input `agent: codex`), or experimentally on pi with `--agent pi`. Any other value (for example `gemini`) is rejected with an error instead of silently running a different agent. What each agent enforces natively, and what SWEny reports as degraded or refuses under `--harness-policy strict`, is in the harness table in the [README](https://github.com/swenyai/sweny#agent-harnesses).
+SWEny runs nodes on headless Claude Code by default, on the Codex CLI with `--agent codex` (Action input `agent: codex`), or experimentally on pi with `--agent pi` or on any [Agent Client Protocol](https://agentclientprotocol.com) agent with `--agent "acp:<command>"` (for example `acp:opencode acp`). Any other value (for example `gemini`) is rejected with an error instead of silently running a different agent. What each agent enforces natively, and what SWEny reports as degraded or refuses under `--harness-policy strict`, is in the harness table in the [README](https://github.com/swenyai/sweny#agent-harnesses).
 
 To route nodes to other models, point Claude Code at an Anthropic-compatible gateway. See [Model gateway (LiteLLM)](/advanced/model-gateway/).
 

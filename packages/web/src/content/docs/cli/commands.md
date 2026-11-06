@@ -73,7 +73,7 @@ sweny triage [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude`, `codex` or `pi` (experimental); other values are rejected (alias: `--coding-agent-provider`) | `claude` |
+| `--agent <provider>` | Coding agent: `claude`, `codex`, `pi` (experimental) or `acp:<command>` for any ACP agent (experimental); other values are rejected (alias: `--coding-agent-provider`) | `claude` |
 | `--observability-provider <provider>` | Observability platform | `datadog` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `github-issues`, `linear`, `jira`, `file` | `github-issues` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
@@ -87,8 +87,8 @@ sweny triage [options]
 | `--severity-focus <focus>` | Severity level focus | `errors` |
 | `--service-filter <filter>` | Service filter glob pattern | `*` |
 | `--investigation-depth <depth>` | Investigation depth: `quick`, `standard`, `thorough` | `standard` |
-| `--max-investigate-turns <n>` | Max Claude turns for investigation (1-500) | `50` |
-| `--max-implement-turns <n>` | Max Claude turns for implementation (1-500) | `30` |
+| `--max-investigate-turns <n>` | Max coding agent turns for investigation (1-500) | `50` |
+| `--max-implement-turns <n>` | Max coding agent turns for implementation (1-500) | `30` |
 
 ### PR and branch options
 
@@ -109,7 +109,6 @@ sweny triage [options]
 | `--no-novelty-mode` | Allow +1 on existing issues instead of skipping duplicates | -- |
 | `--issue-override <issue>` | Work on a specific existing issue instead of scanning for new ones | -- |
 | `--additional-instructions <text>` | Extra instructions passed to the coding agent | -- |
-| `--service-map-path <path>` | Path to service map YAML | `.github/service-map.yml` |
 
 ### Output options
 
@@ -119,29 +118,10 @@ sweny triage [options]
 | `--stream` | Stream NDJSON `ExecutionEvent` objects to stdout (for Studio / automation) | `false` |
 | `--bell` | Ring terminal bell on completion | `false` |
 
-### Cache options
-
-The executor caches each completed node's result. If a workflow crashes mid-execution and is restarted, previously completed nodes are loaded from cache instead of re-executed. This saves time and API costs during development and crash recovery.
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--cache-dir <path>` | Step cache directory | `.sweny/cache` |
-| `--cache-ttl <seconds>` | Cache TTL in seconds (0 = infinite) | `86400` |
-| `--no-cache` | Disable step cache entirely | -- |
-| `--output-dir <path>` | Output directory for file providers | `.sweny/output` |
-
-Disable caching with `--no-cache` when debugging or when input data has changed but the workflow definition hasn't.
-
 ### Provider-specific options
 
 | Option | Description |
 |--------|-------------|
-| `--linear-team-id <id>` | Linear team ID |
-| `--linear-bug-label-id <id>` | Linear bug label ID |
-| `--linear-triage-label-id <id>` | Linear triage label ID |
-| `--linear-state-backlog <name>` | Linear backlog state name |
-| `--linear-state-in-progress <name>` | Linear in-progress state name |
-| `--linear-state-peer-review <name>` | Linear peer-review state name |
 | `--log-file <path>` | Path to JSON log file (for `--observability-provider file`) |
 | `--dd-site <site>` | Datadog site (default: `datadoghq.com`) |
 | `--sentry-org <org>` | Sentry organization slug |
@@ -161,7 +141,6 @@ Disable caching with `--no-cache` when debugging or when input data has changed 
 | `--axiom-org-id <id>` | Axiom org ID |
 | `--betterstack-source-id <id>` | Better Stack log source ID |
 | `--betterstack-table-name <name>` | Better Stack ClickHouse table name |
-| `--gitlab-base-url <url>` | GitLab base URL (default: `https://gitlab.com`) |
 | `--workspace-tools <tools>` | Comma-separated workspace tool integrations: `slack`, `notion`, `pagerduty`, `monday` |
 
 ## sweny implement
@@ -176,7 +155,7 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--agent <provider>` | Coding agent: `claude`, `codex` or `pi` (experimental); other values are rejected (alias: `--coding-agent-provider`) | `claude` |
+| `--agent <provider>` | Coding agent: `claude`, `codex`, `pi` (experimental) or `acp:<command>` for any ACP agent (experimental); other values are rejected (alias: `--coding-agent-provider`) | `claude` |
 | `--issue-tracker-provider <provider>` | Issue tracker: `linear`, `jira`, `github-issues`, `file` | `linear` |
 | `--source-control-provider <provider>` | Source control: `github`, `gitlab`, `file` | `github` |
 | `--dry-run` | Analyze and plan only. Runs with read-only tools (no code edits, no PR, and no shell (on Codex, a shell confined to its OS read-only sandbox: no writes, no network)). See [Dry run](/workflows/#dry-run). | `false` |
@@ -187,10 +166,6 @@ The `<issueId>` argument is the issue identifier from your tracker (e.g. `ENG-12
 | `--review-mode <mode>` | PR merge: `auto` or `review` | `review` |
 | `--additional-instructions <text>` | Extra instructions for the coding agent | -- |
 | `--stream` | Stream NDJSON events to stdout (for Studio / automation) | `false` |
-| `--linear-team-id <id>` | Linear team ID | -- |
-| `--linear-state-in-progress <name>` | Linear in-progress state name | -- |
-| `--linear-state-peer-review <name>` | Linear peer-review state name | -- |
-| `--output-dir <path>` | Output directory for file providers | `.sweny/output` |
 | `--workspace-tools <tools>` | Comma-separated workspace tool integrations | -- |
 
 ### No push under --stage and --dry-run
@@ -270,7 +245,7 @@ sweny workflow run [options]          # batch-run all .sweny/e2e/*.yml
 | `--max-tokens <n>` | Run-wide token budget (input plus output) for a single workflow file. The lowest of this and the workflow's `budget.tokens` wins. A crossing stops the agent, fails the node and halts the run. See [Spend budgets](/workflows/yaml-reference/#spend-budgets) | none |
 | `--max-cost <usd>` | Run-wide cost budget in US dollars, from harness-reported cost (never estimated). The lowest of this and the workflow's `budget.cost_usd` wins | none |
 | `-y, --yes` | Skip the batch confirmation prompt (use in CI) | `false` |
-| `--agent <id>` | Coding agent that runs the nodes: `claude`, `codex` or `pi` (experimental) | `claude` |
+| `--agent <id>` | Coding agent that runs the nodes: `claude`, `codex`, `pi` (experimental) or `acp:<command>` for any ACP agent (experimental) | `claude` |
 | `--harness-policy <mode>` | `strict` refuses a node whose policy the agent cannot enforce; `warn` runs it and reports it as degraded. Env: `SWENY_HARNESS_POLICY` | `strict` under GitHub Actions, else `warn` |
 | `--no-decider` | Skip the decision model for this run: the agent decides the routes of `route_by: decider` nodes. See [Decision models](/advanced/decision-models/) | decider on when configured |
 | `--no-journal` | Do not write the run journal (kept in the sweny state dir, see [Resume a run](/cli/resume/#the-journal)). The run cannot be resumed. Or set `journal: off` in `.sweny.yml` | journal on |
@@ -352,6 +327,8 @@ sweny workflow export triage > my-triage.yml
 ```
 
 ### sweny workflow create
+
+**Deprecated.** Use [`sweny new`](#sweny-new) and pick "Describe your own"; this command prints a deprecation warning.
 
 Generate a new workflow from a natural language description.
 
@@ -520,7 +497,7 @@ sweny upgrade --force
 › sweny 0.1.66 is available (you have 0.1.65). Run `sweny upgrade`
 ```
 
-The check is cached for 24 hours and skipped in CI, piped invocations, and when `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1` is set.
+The check asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai/core` version and sends nothing else. After a successful check the answer is cached for 24 hours; a failed or timed-out check is not cached, so it is retried on the next command. It is skipped in CI, when stderr is not a terminal, for `sweny try`, and when `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1` is set.
 
 **Homebrew installs** are detected but not driven automatically — the command prints `brew upgrade sweny` for you to run.
 

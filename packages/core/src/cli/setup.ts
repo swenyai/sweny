@@ -212,25 +212,17 @@ export async function setupLinear(apiKey: string, teamId: string): Promise<void>
   const bugId = bugLabel.id;
 
   // ── Print config snippet ─────────────────────────────────────────────────
-  const triageId = workTypeIds["triage"] ?? byName.get("triage")?.id ?? "";
-
   console.log(`
 ${chalk.bold("  Done.")} ${created.length} created, ${skipped.length} already existed.
 
 ${chalk.bold("  Add these to your .sweny.yml:")}
 
 ${chalk.cyan(`  issue-tracker-provider: linear
-  linear-team-id: ${teamId}
-  linear-triage-label-id: ${triageId}
-  linear-bug-label-id: ${bugId}
   issue-labels: ${agentLabel.id}`)}
 
 ${chalk.bold("  Or as environment variables / GitHub Actions secrets:")}
 
-${chalk.cyan(`  LINEAR_TEAM_ID=${teamId}
-  LINEAR_TRIAGE_LABEL_ID=${triageId}
-  LINEAR_BUG_LABEL_ID=${bugId}
-  SWENY_ISSUE_LABELS=${agentLabel.id}`)}
+${chalk.cyan(`  SWENY_ISSUE_LABELS=${agentLabel.id}`)}
 
 ${chalk.dim("  Full label inventory:")}
 ${chalk.dim(`  agent               ${agentLabel.id}`)}

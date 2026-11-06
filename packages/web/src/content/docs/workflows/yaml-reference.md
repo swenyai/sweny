@@ -26,7 +26,7 @@ Each key in the `nodes` object is a node ID (an arbitrary string you choose). Th
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `name` | string | Yes | -- | Display name for this node. |
-| `instruction` | string | Yes | -- | Natural language instruction telling Claude what to do at this step. |
+| `instruction` | string | Yes | -- | Natural language instruction telling the coding agent what to do at this step. |
 | `skills` | string[] | No | `[]` | Skill IDs whose tools should be available at this node. |
 | `output` | object | No | -- | JSON Schema for structured output validation. |
 | `eval` | array | No | -- | Named evaluators run after the LLM finishes. See [Eval reference on spec.sweny.ai](https://spec.sweny.ai/nodes/#eval). |
@@ -99,7 +99,7 @@ Full field reference: [spec.sweny.ai/nodes/#safe-outputs](https://spec.sweny.ai/
 
 ### Instructions
 
-The `instruction` field is the core of each node. Write it as you would write a prompt for Claude -- clear, specific, and focused on a single task. Claude receives the instruction along with the workflow input and all prior node results as context.
+The `instruction` field is the core of each node. Write it as you would write a prompt for a coding agent -- clear, specific, and focused on a single task. The agent receives the instruction along with the workflow input and all prior node results as context.
 
 Good instructions:
 - Focus on one task per node
@@ -109,7 +109,7 @@ Good instructions:
 
 ### Skills
 
-The `skills` array lists skill IDs that should be available at this node. Each skill provides a set of tools that Claude can call.
+The `skills` array lists skill IDs that should be available at this node. Each skill provides a set of tools that the agent can call.
 
 Available skill IDs:
 
@@ -129,7 +129,7 @@ A node can list skills that may not be configured. At execution time, the execut
 
 ### Output schema
 
-The `output` field accepts a JSON Schema object. When present, Claude's response is validated against this schema, and the resulting structured data is available to downstream nodes and routing conditions.
+The `output` field accepts a JSON Schema object. When present, the agent's response is validated against this schema, and the resulting structured data is available to downstream nodes and routing conditions.
 
 ```yaml
 output:
@@ -158,7 +158,7 @@ Each entry in the `edges` array is an edge object:
 |-------|------|----------|-------------|
 | `from` | string | Yes | Source node ID. |
 | `to` | string | Yes | Target node ID. |
-| `when` | string | No | Natural language condition. Claude evaluates this at runtime. |
+| `when` | string | No | Natural language condition. The coding agent evaluates this at runtime. |
 
 ### Unconditional edges
 
@@ -172,11 +172,11 @@ edges:
     to: report
 ```
 
-If a node has exactly one outgoing edge and that edge is unconditional, the executor follows it without invoking Claude for a routing decision.
+If a node has exactly one outgoing edge and that edge is unconditional, the executor follows it without asking the agent for a routing decision.
 
 ### Conditional edges
 
-An edge with a `when` clause is conditional. The `when` value is natural language that Claude evaluates against the current node's result:
+An edge with a `when` clause is conditional. The `when` value is natural language that the coding agent evaluates against the current node's result:
 
 ```yaml
 edges:
@@ -188,7 +188,7 @@ edges:
     when: "The issue requires infrastructure changes or human review"
 ```
 
-When a node has multiple outgoing conditional edges, the executor presents all conditions as choices and asks Claude to pick the one that matches. If one edge is unconditional among conditional siblings, it acts as the default/fallback path.
+When a node has multiple outgoing conditional edges, the executor presents all conditions as choices and asks the coding agent to pick the one that matches. If one edge is unconditional among conditional siblings, it acts as the default/fallback path.
 
 ### Terminal nodes
 
@@ -315,8 +315,8 @@ name: My Workflow
 | `sweny workflow run <file> --json` | Output results as JSON on stdout. |
 | `sweny workflow export triage` | Print the built-in triage workflow as YAML. |
 | `sweny workflow export implement` | Print the built-in implement workflow as YAML. |
-| `sweny workflow create <description>` | Generate a workflow from a natural-language description. |
-| `sweny workflow create <description> --json` | Generate and output as JSON (non-interactive). |
+| `sweny workflow create <description>` | Deprecated: use `sweny new` and pick "Describe your own". |
+| `sweny workflow create <description> --json` | Deprecated: generate and output as JSON (non-interactive). |
 | `sweny workflow edit <file> [instruction]` | Edit a workflow file with natural-language instructions. |
 | `sweny workflow list` | List all available skills. |
 | `sweny workflow list --json` | List skills as JSON array. |

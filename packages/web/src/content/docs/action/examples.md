@@ -11,7 +11,7 @@ Triage and implement examples use [`swenyai/triage@v1`](https://github.com/sweny
 
 ## Custom workflow (generic runner)
 
-Run any workflow YAML built with `sweny workflow create`. This is the generic `swenyai/sweny@v5` action.
+Run any workflow YAML built with `sweny new`. This is the generic `swenyai/sweny@v5` action.
 
 ```yaml
 name: Weekly Competitive Scan

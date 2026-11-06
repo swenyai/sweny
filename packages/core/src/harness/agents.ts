@@ -25,7 +25,8 @@ export function isSupportedAgent(id: string): id is SupportedAgent | AcpAgentId 
 /** The error for an agent id with no adapter. */
 export function unsupportedAgentError(id: string): string {
   return (
-    `Unsupported coding agent "${id}": supported agents are "claude" (headless Claude Code) ` +
-    `and "codex" (Codex CLI), or "pi" (pi coding agent, experimental). Remove --agent / coding-agent-provider or set it to one of them.`
+    `Unsupported coding agent "${id}": supported agents are "claude" (headless Claude Code), ` +
+    `"codex" (Codex CLI), "pi" (pi coding agent, experimental), or "acp:<command>" (any Agent Client Protocol agent, ` +
+    `experimental, for example "acp:opencode acp"). Remove --agent / coding-agent-provider or set it to one of them.`
   );
 }

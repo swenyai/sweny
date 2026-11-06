@@ -11,7 +11,7 @@ SWEny ships three GitHub Actions. Pick the one that matches your use case:
 | [`swenyai/e2e@v1`](https://github.com/swenyai/e2e) | Agentic E2E browser tests — AI drives a real browser, uploads screenshots | [swenyai/e2e](https://github.com/swenyai/e2e) |
 | [`swenyai/sweny@v5`](https://github.com/swenyai/sweny) | Generic runner — execute any SWEny workflow YAML | this repo |
 
-The **triage** and **e2e** actions are preset wrappers that auto-wire credentials, install dependencies, and expose a focused input surface. The **generic runner** takes any workflow YAML you build with `sweny workflow create`.
+The **triage** and **e2e** actions are preset wrappers that auto-wire credentials, install dependencies, and expose a focused input surface. The **generic runner** takes any workflow YAML you build with `sweny new`.
 
 ## Prerequisites
 
@@ -56,7 +56,7 @@ Three secrets and you are running. SWEny uses **GitHub Issues** by default -- no
 
 ## Custom workflow setup
 
-Run any workflow YAML built with `sweny workflow create`:
+Run any workflow YAML built with `sweny new`:
 
 ```yaml
 name: Weekly Competitive Scan
