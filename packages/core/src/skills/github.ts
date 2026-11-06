@@ -6,6 +6,7 @@
  */
 
 import type { BranchPusher, Skill, ToolContext, SkillCategory, ToolRefusal } from "../types.js";
+import { PR_COMMENT_SKIP_REASON, isRunPullRequest, prCommentSummaryLine, upsertPrComment } from "../pr-comment.js";
 
 // #473: the sweny-side head-branch push arrives as `ctx.pushBranch`, bound to
 // the run's checkout by the Node executor (skills/git-push.ts). This module
@@ -309,11 +310,29 @@ export const github: Skill = {
         },
         required: ["repo", "issue_number", "body"],
       },
-      handler: async (input: { repo: string; issue_number: number; body: string }, ctx) =>
-        gh(`/repos/${input.repo}/issues/${input.issue_number}/comments`, ctx, {
+      handler: async (input: { repo: string; issue_number: number; body: string }, ctx) => {
+        // #536: on the run's own PR (identified by the runtime, not the input), one
+        // marked comment per workflow, updated in place; nothing written when the
+        // findings are empty or unchanged. Every other target appends as before.
+        if (ctx.run && isRunPullRequest(ctx.run, input.repo, Number(input.issue_number))) {
+          const result = await upsertPrComment(
+            { repo: input.repo, number: Number(input.issue_number), body: String(input.body ?? "") },
+            ctx.run,
+            (path, init) => gh(path, ctx, init),
+          );
+          ctx.summary?.(prCommentSummaryLine(ctx.run, result.outcome));
+          const skipped = PR_COMMENT_SKIP_REASON[result.outcome];
+          return {
+            ...(result.id !== undefined ? { id: result.id } : {}),
+            ...(result.html_url ? { html_url: result.html_url } : {}),
+            ...(skipped ? { skipped } : {}),
+          };
+        }
+        return gh(`/repos/${input.repo}/issues/${input.issue_number}/comments`, ctx, {
           method: "POST",
           body: JSON.stringify({ body: input.body }),
-        }),
+        });
+      },
     },
     {
       name: "github_create_pr",

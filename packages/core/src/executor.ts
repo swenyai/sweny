@@ -54,6 +54,7 @@ import { gitCredentialWarning, scanGitCredentials } from "./git-credentials.js";
 // #473: the sweny-side branch push in `github_create_pr` (Node only; skills/ stays browser-safe).
 import { bindBranchPusher } from "./skills/git-push.js";
 import { trustedEnvValue } from "./startup-env.js";
+import { toolRunContext } from "./run-context.js";
 import { fenceUntrusted, fenceUntrustedJson } from "./untrusted.js";
 import { asClaude } from "./harness/compat.js";
 import { budgetGate, isToolClass, policyGate, resolveHarnessPolicy } from "./harness/policy.js";
@@ -384,6 +385,8 @@ async function executeRun(
   const pushBranch = bindBranchPusher(resolveCwd, runEnv);
   // GHES: the REST base for the github skill, never a value the workspace .env introduced.
   const githubApiUrl = trustedEnvValue(runEnv, "GITHUB_API_URL") || undefined;
+  // The run's identity and job-summary writer, the same for every tool, from the operator's env.
+  const runToolContext = toolRunContext(workflow.id, runEnv);
   const resolvedSources = await resolveSources(sourceMap, {
     cwd: resolveCwd,
     env: options.env ?? process.env,
@@ -642,6 +645,7 @@ async function executeRun(
           staged: stageOutputs,
           pushBranch,
           ...(githubApiUrl ? { githubApiUrl } : {}),
+          ...runToolContext,
         };
         const output = await t.handler(toolInput, toolCtx);
         safeObserve(observer, { type: "tool:result", node: currentId!, tool: t.name, output }, logger);
@@ -1102,6 +1106,7 @@ async function executeRun(
           cwd: resolveCwd,
           pushBranch,
           ...(githubApiUrl ? { githubApiUrl } : {}),
+          ...runToolContext,
           state: writeState,
           logger,
           input: runInput,

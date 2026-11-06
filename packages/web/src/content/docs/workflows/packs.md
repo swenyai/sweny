@@ -199,7 +199,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write # the review comment and the run billboard
+  pull-requests: write # the updating review findings comment
 
 concurrency:
   group: sweny-pr-risk-${{ github.event.pull_request.number }}
@@ -230,7 +230,9 @@ jobs:
 - `assess`: value gates on the risk level and that every reason has evidence, and the pack's only judge gate: every reason must cite a path or fact from the measured scope.
 - `post-comment`: function gate that the comment was requested, value gate on the result. SWEny posts it after the step.
 
-The Action's own sticky billboard (`pr-comment`, on by default) still posts the run receipt and DAG. The risk comment is separate and carries the findings. By default, only `opened`, `reopened`, and `ready_for_review` trigger it, so a busy PR does not collect a comment per push. A review describes the scope at the time it ran; later commits can make it stale.
+The review is one comment on the PR, updated in place on later runs: the findings plus one link to the run's receipt. Cost, tokens, duration and the DAG go to the Action's job summary, not the thread. A run whose findings match the last post writes nothing, and the job summary says so. See [PR comment](/action/inputs/#pr-comment).
+
+By default, only `opened`, `reopened`, and `ready_for_review` trigger a review. A review describes the scope at the time it ran; later commits can make it stale.
 
 To refresh the review when new commits are pushed, add `synchronize` to the event list in your generated `.github/workflows/sweny-pr-risk-review.yml`:
 
@@ -240,7 +242,7 @@ on:
     types: [opened, reopened, ready_for_review, synchronize]
 ```
 
-This starts a new model run for each push and posts a separate risk comment for each completed review. It does not replace the previous findings. Keep the existing concurrency group to cancel superseded runs and the same-repo guard to skip forks. Edit an installed trigger directly; this option does not require regenerating the pack.
+This starts a new model run for each push. New findings update the same comment; identical findings leave it untouched. Keep the existing concurrency group to cancel superseded runs and the same-repo guard to skip forks. Edit an installed trigger directly; this option does not require regenerating the pack.
 
 ### Sample output
 

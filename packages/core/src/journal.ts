@@ -1581,7 +1581,7 @@ async function probeProvider(
   }
 }
 
-/** The ids a write produced, nothing else (refs and URLs for receipts). */
+/** The ids a write produced and a skip reason, nothing else (refs, URLs and skips for receipts). */
 function slimOutput(o: unknown, depth = 0): unknown {
   if (!o || typeof o !== "object" || Array.isArray(o) || depth > 3) return null;
   const out: Record<string, unknown> = {};
@@ -1592,7 +1592,7 @@ function slimOutput(o: unknown, depth = 0): unknown {
     if ((o as Record<string, unknown>).transient === true) out.transient = true;
   }
   for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
-    if (["number", "identifier", "id", "html_url", "url", "success", "reused"].includes(k)) {
+    if (["number", "identifier", "id", "html_url", "url", "success", "reused", "skipped"].includes(k)) {
       if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = v;
     } else if (v && typeof v === "object" && !Array.isArray(v)) {
       const s = slimOutput(v, depth + 1);

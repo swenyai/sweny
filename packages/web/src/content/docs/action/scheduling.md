@@ -330,7 +330,7 @@ How it works:
 - SWEny keeps the newest 200 runs and deletes older ones. GitHub evicts caches unused for 7 days; a weekly schedule stays warm.
 - The cached directory holds each run's record, `output.md` and `answers.json`. They are redacted, but anything that can read your repository's caches can read them. Skip the cache for a workflow whose answers should not be visible to every repo collaborator, or run it with `--no-history`.
 
-Then, in the step summary and PR comment: `Since last run: 2 added, 1 resolved`. Locally, or in a later job that restores the same cache, run `sweny runs diff` for the full comparison. See [`sweny runs`](/cli/commands/#sweny-runs).
+Then, in the step summary: `Since last run: 2 added, 1 resolved`. Locally, or in a later job that restores the same cache, run `sweny runs diff` for the full comparison. See [`sweny runs`](/cli/commands/#sweny-runs).
 
 ## Best practices
 

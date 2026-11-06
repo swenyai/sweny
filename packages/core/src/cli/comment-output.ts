@@ -1,19 +1,22 @@
 /**
- * PR billboard: the markdown a CI runner posts as one sticky comment on a
- * pull request. Leads with the receipt ticket, then the run's DAG. Pure and runner-agnostic; the CLI writes it with
- * `--comment-file`, and any runner (the GitHub Action, GitLab, a script) posts it.
+ * PR billboard. Quiet by default (#536): `--comment-file` now writes an empty
+ * file, so the Action's poster (scripts/post-run-comment.sh skips an empty
+ * file) adds nothing to the PR. The receipt and DAG go to the job summary, and
+ * findings go in the workflow's one updating comment (pr-comment.ts). The
+ * formatters below remain for the offline demo (`sweny try`).
  *
  * METADATA ONLY. Node names, statuses, counts, and durations. Never prompts,
  * tool inputs, node outputs, errors, or model prose. The optional "since last
  * run" line carries counts of added and resolved answers, never their text.
  */
 
-import { workspaceRoot, writeFileNoFollow } from "../safe-file.js";
 import type { ExecutionTrace, NodeResult, Workflow } from "../types.js";
 import { toMermaidBlock } from "../mermaid.js";
 import { formatReceiptDuration, nodeStates, type RunSummary } from "./run-output.js";
 import { formatTicketText } from "./ticket.js";
 import { glyphs } from "./terminal.js";
+import { workspaceRoot, writeFileNoFollow } from "../safe-file.js";
+import { prCommentMarker } from "../pr-comment.js";
 
 export const RUN_COMMENT_FOOTER = "Run with [SWEny](https://github.com/swenyai/sweny): `npx @sweny-ai/core new`";
 
@@ -32,11 +35,8 @@ function ticketBlock(workflow: Workflow, summary: RunSummary, runId?: string, cr
   return ["```text", formatTicketText({ summary, workflow: workflow.id, runId, crashed }), "```"].join("\n");
 }
 
-/** Hidden marker the poster searches for to update the comment in place. */
-export function runCommentMarker(workflowId: string): string {
-  const safe = workflowId.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/-{2,}/g, "-") || "workflow";
-  return `<!-- sweny-run-comment:${safe} -->`;
-}
+/** Hidden marker the poster searches for to update the comment in place (the findings comment's marker too). */
+export const runCommentMarker = prCommentMarker;
 
 /** Table-cell-safe text: no pipes, newlines, or backticks. */
 function cell(text: string): string {
@@ -101,23 +101,14 @@ export function formatCrashComment(workflow: Workflow, summary: RunSummary, runI
   ].join("\n");
 }
 
-/** Write the comment markdown to `file`. Never throws; returns true only when written. */
-export function writeRunComment(
-  file: string,
-  workflow: Workflow,
-  results: Map<string, NodeResult>,
-  summary: RunSummary,
-  opts: RunCommentOptions & { crashed?: boolean } = {},
-): boolean {
+/**
+ * Write an empty comment file: no metadata-only comment on the PR. Truncates a
+ * file an earlier step left there. Never throws; returns true only when written.
+ */
+export function writeRunComment(file: string): boolean {
   try {
     // The file may sit in the agent-writable workspace: no link on the path is followed.
-    writeFileNoFollow(
-      file,
-      opts.crashed
-        ? formatCrashComment(workflow, summary, opts.runId)
-        : formatRunComment(workflow, results, summary, opts),
-      { ...workspaceRoot(file), mode: 0o644, dirMode: 0o755 },
-    );
+    writeFileNoFollow(file, "", { ...workspaceRoot(file), mode: 0o644, dirMode: 0o755 });
     return true;
   } catch (err) {
     process.stderr.write(

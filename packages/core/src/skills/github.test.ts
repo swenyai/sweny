@@ -20,6 +20,75 @@ function makeLogger(): Logger & { warnings: string[] } {
 }
 
 const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
+const addComment = github.tools.find((t) => t.name === "github_add_comment")!;
+
+describe("github_add_comment on the run's own PR (#536)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const run = {
+    workflowId: "review",
+    repo: "o/r",
+    pullRequest: 2,
+    receiptUrl: "https://github.com/o/r/actions/runs/1",
+  };
+
+  it("updates the workflow's one marked comment in place and says so in the job summary", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, [{ id: 9, body: "<!-- sweny-run-comment:review -->\nOld finding" }]))
+      .mockResolvedValueOnce(jsonResponse(200, { id: 9, html_url: "https://github.com/o/r/pull/2#c9" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const summary = vi.fn();
+    const result = await addComment.handler(
+      { repo: "o/r", issue_number: 2, body: "New finding" },
+      ctx({ run, summary }),
+    );
+    expect(result).toEqual({ id: 9, html_url: "https://github.com/o/r/pull/2#c9" });
+    expect(fetchMock.mock.calls[1][0]).toBe("https://api.github.com/repos/o/r/issues/comments/9");
+    expect(fetchMock.mock.calls[1][1].method).toBe("PATCH");
+    expect(summary).toHaveBeenCalledWith("**SWEny review** on PR #2: updated the findings comment in place.");
+  });
+
+  it("returns skipped and writes nothing when the findings are unchanged", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, [{ id: 9, body: "<!-- sweny-run-comment:review -->\nSame finding" }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const summary = vi.fn();
+    const result = await addComment.handler(
+      { repo: "o/r", issue_number: 2, body: "Same finding" },
+      ctx({ run, summary }),
+    );
+    expect(result).toEqual({ id: 9, skipped: "findings unchanged since the last post" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(summary.mock.calls[0][0]).toContain("findings unchanged since the last post");
+  });
+
+  it("returns skipped with no API call when the findings are empty", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const summary = vi.fn();
+    expect(await addComment.handler({ repo: "o/r", issue_number: 2, body: "  " }, ctx({ run, summary }))).toEqual({
+      skipped: "no findings",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(summary.mock.calls[0][0]).toContain("no findings");
+  });
+
+  it("appends as before on any other issue, repo, or a run with no PR", async () => {
+    for (const [input, c] of [
+      [{ repo: "o/r", issue_number: 5, body: "Issue update" }, ctx({ run })],
+      [{ repo: "other/r", issue_number: 2, body: "Elsewhere" }, ctx({ run })],
+      [{ repo: "o/r", issue_number: 2, body: "Local run" }, ctx()],
+    ] as const) {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(201, { id: 2 }));
+      vi.stubGlobal("fetch", fetchMock);
+      await addComment.handler(input, c);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body).body).toBe(input.body);
+    }
+  });
+});
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {

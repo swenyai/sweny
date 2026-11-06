@@ -1214,6 +1214,8 @@ export async function workflowRunAction(
   // --max-steps overrides the executor's own DEFAULT_MAX_STEPS when set.
   const wfTimeoutMs = budget.timeoutMs;
   const wfMaxSteps = budget.maxSteps;
+  // The job summary is written once: by the finished run, else by the crash path.
+  let stepSummaryWritten = false;
 
   try {
     const { results, trace } = await runWithWallClockBudget(
@@ -1273,16 +1275,19 @@ export async function workflowRunAction(
       // silent
     }
 
-    // PR billboard markdown (metadata only). Written before any early exit so
-    // --json runs and failed runs still get a comment.
-    if (options.commentFile) {
-      writeRunComment(options.commentFile, workflow, results, summarizeRun(results, wfDurationMs, false, trace), {
-        trace,
-        durationsMs: Object.fromEntries(nodeTimer.durations),
-        runId,
-        sinceLast: sinceLast ? formatSinceLastMarkdown(sinceLast) : null,
-      });
-    }
+    // Receipt metadata belongs in the job summary, including --json and failed runs.
+    stepSummaryWritten = true;
+    writeStepSummary(
+      workflow,
+      results,
+      summarizeRun(results, wfDurationMs, false, trace),
+      trace,
+      process.env,
+      sinceLast ? formatSinceLastMarkdown(sinceLast) : null,
+    );
+
+    // Quiet by default (#536): an empty comment file, so no metadata-only PR comment.
+    if (options.commentFile) writeRunComment(options.commentFile);
 
     if (isJson) {
       await writeResultJson(results, outputSecrets(skills));
@@ -1306,17 +1311,9 @@ export async function workflowRunAction(
       // silent
     }
 
-    // Run receipt (metadata only) + optional $GITHUB_STEP_SUMMARY.
+    // Run receipt (metadata only). The job summary was written before early exits.
     runLogger.flush();
     const receipt = summarizeRun(results, wfDurationMs, false, trace);
-    writeStepSummary(
-      workflow,
-      results,
-      receipt,
-      trace,
-      process.env,
-      sinceLast ? formatSinceLastMarkdown(sinceLast) : null,
-    );
 
     // The answer, above the receipt: the terminal node's result, or the failed node's error.
     // Also saved to .sweny/runs/<id>/output.md (local only; --no-history skips the file).
@@ -1363,10 +1360,9 @@ export async function workflowRunAction(
     recordHistory(nodeTimer.lastResults, undefined, true);
     const crashSummary = summarizeRun(new Map(), Date.now() - runStart, true);
     await writeReceipt(crashSummary, { workflow: workflow.id, runId, crashed: true, stream: process.stderr });
-    // A crash must not leave a stale success comment behind.
-    if (options.commentFile) {
-      writeRunComment(options.commentFile, workflow, new Map(), crashSummary, { crashed: true, runId });
-    }
+    // A crash records its receipt in the job summary; the PR gets no status comment.
+    if (!stepSummaryWritten) writeStepSummary(workflow, new Map(), crashSummary);
+    if (options.commentFile) writeRunComment(options.commentFile);
     // Finalize the cloud run as failed (covers thrown errors, incl.
     // RouteEvaluationError). Without this a crashed workflow run stays
     // "running" in cloud forever.
