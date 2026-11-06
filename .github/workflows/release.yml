@@ -56,8 +56,6 @@ jobs:
       id-token: write
       issues: write
     outputs:
-      # Commit the version-only writeback pushed to main, if any.
-      writeback_sha: ${{ steps.release.outputs.writeback_sha }}
       # @sweny-ai/core version this run published, if it published core.
       core_version: ${{ steps.release.outputs.core_version }}
     steps:
@@ -184,12 +182,7 @@ jobs:
           fi
 
           if [ "$PUBLISHED" = true ]; then
-            WRITEBACK_FILE="$RUNNER_TEMP/writeback-sha"
-            rm -f "$WRITEBACK_FILE"
-            node scripts/sync-release-versions.mjs sync "$SWENY_RELEASE_MANIFEST" "$WRITEBACK_FILE"
-            if [ -s "$WRITEBACK_FILE" ]; then
-              echo "writeback_sha=$(cat "$WRITEBACK_FILE")" >> "$GITHUB_OUTPUT"
-            fi
+            node scripts/sync-release-versions.mjs sync "$SWENY_RELEASE_MANIFEST"
           fi
 
       - name: Advance release-latest diff base
@@ -238,24 +231,36 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.verify.outputs.sha }}
           fetch-depth: 0
           token: ${{ secrets.GH_PAT || github.token }}
 
       - name: Tag v5 and immutable v5.<core-version> on a commit pinned to the tested core
         env:
+          VERIFIED_SHA: ${{ needs.verify.outputs.sha }}
           GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
         run: |
-          # Desired-state reconciliation. Whatever event or re-run started this job, it
-          # converges to one state computed from origin/main and npm, never from this run:
+          # Desired-state reconciliation: converge to one state computed from origin/main
+          # and npm, never from this run's outputs:
           #   v5             main's tip with action.yml's cli-version stamped to main's
           #                  core version, once npm serves exactly that version
           #   v5.<version>   created at v5 when missing, never moved
-          #   GitHub Release one per v5.* tag (they replace CHANGELOG.md)
+          #   GitHub Release one per recent v5.* tag (they replace CHANGELOG.md)
           # The composite action.yml needs no build. main keeps "latest" for branch refs.
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch -q --force --tags origin
           git fetch -q origin main
+
+          # Only verified code reaches v5: main's tip must be the commit this run's verify
+          # job tested, or it plus the publish job's version-only writeback (checked by the
+          # verified tree's own script, before any of the tip's code runs). If main has
+          # moved on, that commit's release run (same concurrency group) converges.
+          [ "$(git rev-parse HEAD)" = "$VERIFIED_SHA" ] || { echo "::error::checkout is not $VERIFIED_SHA"; exit 1; }
+          if ! node scripts/verify-tag-source.mjs "$VERIFIED_SHA" FETCH_HEAD; then
+            echo "::notice::main has moved past $VERIFIED_SHA; its own release run will reconcile v5"
+            exit 0
+          fi
           git checkout -q --detach FETCH_HEAD
           PIN=$(node -p "require('./packages/core/package.json').version")
           TAG="v5.${PIN}"
@@ -288,11 +293,17 @@ jobs:
           fi
 
           # One Release per v5.* tag, oldest first so each one's notes start at the tag
-          # before it. Creating every missing one is also how a failed create is repaired.
-          RELEASED=$(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+          # before it. Creating a missing one is also how a failed create is repaired.
+          # Bounded to the 10 most recent tags (by creation): repairs recent failures
+          # without backfilling the v5.* tags cut before Releases existed.
+          RELEASED=$(gh release list --limit 100 --json tagName --jq '.[].tagName')
+          TOTAL=$(git tag -l 'v5.*' | wc -l)
+          SKIP=$((TOTAL > 10 ? 1 : 0)) # the 11th newest only seeds the notes range
           PREV=""
-          for t in $(git tag -l 'v5.*' --sort=creatordate); do
-            if ! grep -qxF "$t" <<<"$RELEASED"; then
+          n=0
+          for t in $(git tag -l 'v5.*' --sort=creatordate | tail -n 11); do
+            n=$((n + 1))
+            if [ "$n" -gt "$SKIP" ] && ! grep -qxF "$t" <<<"$RELEASED"; then
               NOTES=(--notes "First tracked v5 release.")
               if [ -n "$PREV" ]; then NOTES=(--generate-notes --notes-start-tag "$PREV"); fi
               LATEST=false
