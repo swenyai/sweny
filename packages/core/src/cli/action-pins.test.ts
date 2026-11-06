@@ -46,9 +46,11 @@ describe("release verification checkout", () => {
 // Each case makes a few repos and may poll a fake registry 60 times; give it room on a busy runner.
 describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }, () => {
   const release = parse(fs.readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8"));
-  const step = (release.jobs["tag-action"].steps as Array<Record<string, any>>).find((s) =>
-    String(s.name).startsWith("Tag v5"),
-  )!;
+  const tagSteps = release.jobs["tag-action"].steps as Array<Record<string, any>>;
+  const step = tagSteps.find((s) => String(s.name).startsWith("Tag v5"))!;
+  // Runs after the tag step whatever it did (`if: always()` in the job).
+  const releaseStep = tagSteps.find((s) => String(s.name).startsWith("Reconcile GitHub Releases"));
+  const gateStep = (release.jobs.publish.steps as Array<Record<string, any>>).find((s) => s.id === "gate");
   const stampScript = fs.readFileSync(path.join(repoRoot, "scripts/stamp-action-version.mjs"), "utf8");
   const tagSourceScript = fs.readFileSync(path.join(repoRoot, "scripts/verify-tag-source.mjs"), "utf8");
 
@@ -141,10 +143,10 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
 
   type Ctx = ReturnType<typeof setup>;
 
-  function run(ctx: Ctx, opts: { served: string[]; releases?: string[]; published?: string }) {
-    const npm = { versions: Object.fromEntries(opts.served.map((v) => [v, { version: v }])) };
+  function runScript(ctx: Ctx, run: string, opts: { served?: string[]; releases?: string[]; published?: string }) {
+    const npm = { versions: Object.fromEntries((opts.served ?? []).map((v) => [v, { version: v }])) };
     const script = path.join(ctx.d, "step.sh");
-    fs.writeFileSync(script, step.run);
+    fs.writeFileSync(script, run);
     const r = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", script], {
       cwd: ctx.work,
       encoding: "utf8",
@@ -159,9 +161,18 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
         FAKE_GH_RELEASES: (opts.releases ?? []).join(" "),
         GH_LOG: ctx.ghLog,
         GH_TOKEN: "x",
+        GITHUB_OUTPUT: path.join(ctx.d, "github-output"),
       },
     });
     return { status: r.status, out: r.stdout + r.stderr };
+  }
+
+  // The tag step, then the Release step, as the job runs them.
+  function run(ctx: Ctx, opts: { served: string[]; releases?: string[]; published?: string }) {
+    const tag = runScript(ctx, step.run, opts);
+    if (!releaseStep) return tag;
+    const rel = runScript(ctx, releaseStep.run, opts);
+    return { status: tag.status || rel.status, out: tag.out + rel.out };
   }
 
   const v5Sha = (ctx: Ctx) => git(ctx.origin, ["rev-parse", "v5^{commit}"]);
@@ -229,6 +240,47 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
     expect(created(ctx)).toHaveLength(1);
     expect(created(ctx)[0]).toContain("release create v5.0.1.201");
     expect(created(ctx)[0]).toContain("--latest=true --generate-notes --notes-start-tag v5.0.1.200");
+  });
+
+  it("repairs a missing Release in the window even when the tag step exits early", () => {
+    const ctx = setup({
+      main: [{ core: "0.1.200" }, { core: "0.1.200", readme: "unverified" }],
+      event: 0,
+      v5: { at: 0, pin: "0.1.200" },
+      tags: ["v5.0.1.199", "v5.0.1.200"],
+    });
+    const r = run(ctx, { served: ["0.1.200"], releases: ["v5.0.1.199"] });
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).toContain("main has moved past");
+    expect(v5Sha(ctx)).toBe(ctx.v5Before);
+    expect(created(ctx)).toHaveLength(1);
+    expect(created(ctx)[0]).toContain("release create v5.0.1.200");
+  });
+
+  it("pins the core this run published, not main's stale version, when a later publish step failed", () => {
+    // core 0.1.201 reached npm, studio failed before the writeback: main still says 0.1.200.
+    const ctx = setup({ main: [{ core: "0.1.200" }], v5: { at: 0, pin: "0.1.200" }, tags: ["v5.0.1.200"] });
+    const r = run(ctx, { served: ["0.1.200", "0.1.201"], releases: ["v5.0.1.200"], published: "0.1.201" });
+    expect(r.status, r.out).toBe(0);
+    expect(pinAt(ctx, "v5")).toBe("0.1.201");
+    expect(git(ctx.origin, ["rev-parse", "v5.0.1.201^{commit}"])).toBe(v5Sha(ctx));
+  });
+
+  it("publish gate: a re-run of a commit main has moved past publishes nothing", () => {
+    const ctx = setup({ main: [{ core: "0.1.200" }, { core: "0.1.200", readme: "newer" }], event: 0 });
+    expect(gateStep, "publish job has a gate step").toBeDefined();
+    const r = runScript(ctx, gateStep!.run, {});
+    expect(r.status, r.out).toBe(0);
+    expect(fs.readFileSync(path.join(ctx.d, "github-output"), "utf8")).toContain("current=false");
+  });
+
+  it("publish gate: main's tip, or it plus a version-only writeback, publishes", () => {
+    for (const event of [0, 1]) {
+      const ctx = setup({ main: [{ core: "0.1.200" }, { core: "0.1.201" }], event });
+      const r = runScript(ctx, gateStep!.run, {});
+      expect(r.status, r.out).toBe(0);
+      expect(fs.readFileSync(path.join(ctx.d, "github-output"), "utf8")).toContain("current=true");
+    }
   });
 
   it("after a revert lands, a re-run of the reverted commit leaves v5 on the reverted-to state", () => {
@@ -341,6 +393,23 @@ describe("tag-action job", () => {
     const tag = steps.find((st) => String(st.name).startsWith("Tag v5"))!;
     expect(checkout.with.ref).toBe("${{ needs.verify.outputs.sha }}");
     expect(tag.env.VERIFIED_SHA).toBe("${{ needs.verify.outputs.sha }}");
+  });
+
+  it("publishes and moves the release-latest diff base only past the gate", () => {
+    const steps = release.jobs.publish.steps as Array<Record<string, any>>;
+    for (const name of ["Detect changes and publish", "Advance release-latest diff base"]) {
+      expect(steps.find((st) => st.name === name)!.if).toBe("steps.gate.outputs.current == 'true'");
+    }
+    const gate = steps.findIndex((st) => st.id === "gate");
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(steps.findIndex((st) => st.name === "Detect changes and publish"));
+  });
+
+  it("repairs Releases in its own step that runs whatever the tag step did", () => {
+    const steps = release.jobs["tag-action"].steps as Array<Record<string, any>>;
+    const rel = steps.find((st) => String(st.name).startsWith("Reconcile GitHub Releases"))!;
+    expect(rel.if).toBe("always() && steps.checkout.outcome == 'success'");
+    expect(steps.indexOf(rel)).toBeGreaterThan(steps.findIndex((st) => String(st.name).startsWith("Tag v5")));
   });
 
   it("has no writeback_sha output left over from the old tag-source step", () => {
