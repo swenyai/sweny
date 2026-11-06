@@ -282,6 +282,31 @@ describe("detectSandboxWrapper", () => {
     expect(d.reason).toMatch(/SWENY_SRT_PATH/);
   });
 
+  it.skipIf(process.platform === "win32")(
+    "Ubuntu 26.04: srt's apply-seccomp refusal gets the sysctl and bwrap-userns-restrict hint",
+    async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), "sweny-fake-srt-"));
+      try {
+        const srt = path.join(dir, "srt");
+        await writeFile(
+          srt,
+          "#!/bin/sh\necho 'apply-seccomp: write /proc/self/setgroups (nested userns is capability-restricted; caller must provide CAP_SYS_ADMIN): Permission denied' >&2\nexit 1\n",
+        );
+        await chmod(srt, 0o755);
+        const d = await detectSandboxWrapper({
+          platform: "linux",
+          env: { PATH: process.env.PATH, SWENY_SRT_PATH: srt },
+        });
+        expect(d.wrapper).toBeUndefined();
+        expect(d.reason).toMatch(/^srt cannot sandbox on this host \(apply-seccomp: write \/proc\/self\/setgroups/);
+        expect(d.reason).toContain("sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0");
+        expect(d.reason).toContain("sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("a failing functional probe is the reason", async () => {
     const d = await detectSandboxWrapper({
       platform: "linux",
