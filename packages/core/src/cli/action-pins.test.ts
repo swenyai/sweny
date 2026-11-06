@@ -53,6 +53,8 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
   const gateStep = (release.jobs.publish.steps as Array<Record<string, any>>).find((s) => s.id === "gate");
   const stampScript = fs.readFileSync(path.join(repoRoot, "scripts/stamp-action-version.mjs"), "utf8");
   const tagSourceScript = fs.readFileSync(path.join(repoRoot, "scripts/verify-tag-source.mjs"), "utf8");
+  const semverPath = path.join(repoRoot, "scripts/semver-compare.mjs");
+  const semverScript = fs.existsSync(semverPath) ? fs.readFileSync(semverPath, "utf8") : null;
 
   const gitEnv = {
     ...process.env,
@@ -71,7 +73,7 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
 
   interface Setup {
     /** Commits on main, oldest first; the last is main's tip. `readme` writes README.md, absent removes it. */
-    main: Array<{ core: string; readme?: string }>;
+    main: Array<{ core: string; readme?: string; action?: string }>;
     /** Index into `main` of the commit this run verified (its event; re-runs keep it). Default: the tip. */
     event?: number;
     /** v5 today: main[at] stamped to `pin`, or main[at] itself when `pin` is null (action.yml says latest). */
@@ -93,8 +95,11 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
     fs.writeFileSync(path.join(work, "action.yml"), actionText);
     fs.writeFileSync(path.join(work, "scripts/stamp-action-version.mjs"), stampScript);
     fs.writeFileSync(path.join(work, "scripts/verify-tag-source.mjs"), tagSourceScript);
+    if (semverScript) fs.writeFileSync(path.join(work, "scripts/semver-compare.mjs"), semverScript);
     // Past, increasing dates so tags on these commits sort before anything the step creates.
     const shas = o.main.map((c, i) => {
+      // `action` appends a line to action.yml: an action-only change.
+      fs.writeFileSync(path.join(work, "action.yml"), actionText + (c.action ?? ""));
       fs.writeFileSync(path.join(work, "packages/core/package.json"), JSON.stringify({ version: c.core }));
       if (c.readme === undefined) fs.rmSync(path.join(work, "README.md"), { force: true });
       else fs.writeFileSync(path.join(work, "README.md"), c.readme);
@@ -376,6 +381,38 @@ describe("release tag-action reconciles v5 to main and npm", { timeout: 30_000 }
     expect(tags(ctx)).toEqual(["v5.0.1.201-rc.1"]);
   });
 
+  it("never moves v5 below the core it pins: a re-run whose publish emitted nothing", () => {
+    // C declared 0.1.200, its release published 0.1.201 and moved v5 there before the
+    // writeback landed; a full re-run of C publishes nothing and main still says 0.1.200.
+    const ctx = setup({ main: [{ core: "0.1.200" }], v5: { at: 0, pin: "0.1.201" }, tags: ["v5.0.1.201"] });
+    const r = run(ctx, { served: ["0.1.200", "0.1.201"], releases: ["v5.0.1.201"] });
+    expect(r.status, r.out).toBe(0);
+    expect(v5Sha(ctx)).toBe(ctx.v5Before);
+    expect(pinAt(ctx, "v5")).toBe("0.1.201");
+    expect(tags(ctx)).toEqual(["v5.0.1.201"]);
+  });
+
+  it("never moves v5 to a prerelease of the stable core it pins", () => {
+    const ctx = setup({ main: [{ core: "0.1.201-rc.1" }], v5: { at: 0, pin: "0.1.201" }, tags: ["v5.0.1.201"] });
+    const r = run(ctx, { served: ["0.1.201-rc.1", "0.1.201"], releases: ["v5.0.1.201"] });
+    expect(r.status, r.out).toBe(0);
+    expect(v5Sha(ctx)).toBe(ctx.v5Before);
+    expect(pinAt(ctx, "v5")).toBe("0.1.201");
+  });
+
+  it("moves v5 for an action-only change at the same core version", () => {
+    const ctx = setup({
+      main: [{ core: "0.1.201" }, { core: "0.1.201", action: "# action-only change\n" }],
+      v5: { at: 0, pin: "0.1.201" },
+      tags: ["v5.0.1.201"],
+    });
+    const r = run(ctx, { served: ["0.1.201"], releases: ["v5.0.1.201"] });
+    expect(r.status, r.out).toBe(0);
+    expect(git(ctx.origin, ["rev-parse", "v5~1"])).toBe(ctx.tip);
+    expect(pinAt(ctx, "v5")).toBe("0.1.201");
+    expect(git(ctx.origin, ["show", "v5:action.yml"])).toContain("# action-only change");
+  });
+
   it("never creates v5 while npm serves nothing", () => {
     const ctx = setup({ main: [{ core: "0.1.201" }] });
     const r = run(ctx, { served: [] });
@@ -462,6 +499,12 @@ describe("release publish pins @sweny-ai/core exactly in dependent packages", ()
     const pinned = JSON.parse(fs.readFileSync(path.join(withCore, "package.json"), "utf8"));
     expect(pinned.dependencies).toEqual({ "@sweny-ai/core": "0.1.200", yaml: "^2.0.0" });
     expect(fs.readFileSync(path.join(without, "package.json"), "utf8")).toBe(plain);
+  });
+
+  it("writes core's version back to main right after core publishes, before studio and mcp", () => {
+    const sync = publishRun.indexOf("sync-release-versions.mjs sync");
+    expect(sync).toBeGreaterThan(publishRun.indexOf('bump_and_publish packages/core "@sweny-ai/core"'));
+    expect(sync).toBeLessThan(publishRun.indexOf('bump_and_publish packages/studio "@sweny-ai/studio"'));
   });
 
   it("emits core_version right after core publishes, before anything later in the job can fail", () => {
