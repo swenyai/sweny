@@ -84,7 +84,7 @@ edges:
 The executor presents all outgoing conditions as choices and asks the coding agent to pick one. If an edge has no `when` clause, it acts as a default/unconditional path.
 
 :::note[How routing works internally]
-When a node has multiple outgoing edges, the executor asks the node's agent harness to evaluate the conditions as choices against the accumulated context. The agent returns the ID of the chosen target node. If it returns an invalid target, the executor falls back to the default edge or the first edge.
+When a node has multiple outgoing edges, the executor asks the node's agent harness to evaluate the conditions as choices against the accumulated context. The agent returns the ID of the chosen target node. The executor never guesses a route. If the evaluation fails or cannot be parsed, it takes the node's default (unconditional) edge when there is one; with no default edge the run stops with a route-evaluation error. If the agent returns a target that is not one of the offered edges, it likewise takes the default edge, or, with no default edge, ends that branch.
 :::
 
 ## Structured output

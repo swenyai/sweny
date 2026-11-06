@@ -76,7 +76,7 @@ When using the **GitHub Action or CLI**, SWEny runs entirely within your infrast
 - **GitHub Action** — runs on GitHub Actions runners. Your code stays in the runner. API calls go only to your configured providers (Sentry, Datadog, Linear, etc.) and to your coding agent's model provider (Anthropic for Claude Code, OpenAI for Codex, and so on).
 - **CLI** — runs on your local machine. Same boundaries apply.
 
-The Action and CLI are standalone open-source tools with no usage telemetry and no crash reporting. They make one request of their own: an interactive `sweny` command checks the npm registry for a newer version, at most once a day (off in CI, in pipes, and with `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1`). The opt-in run reporting path sends nothing unless you set `SWENY_CLOUD_TOKEN`. See [PRIVACY.md](https://github.com/swenyai/sweny/blob/main/PRIVACY.md).
+The Action and CLI are standalone open-source tools with no usage telemetry and no crash reporting. They make one request of their own: an interactive `sweny` command checks the npm registry for a newer version (cached for a day after a successful check; off in CI, when stderr is not a terminal, and with `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1`). The opt-in run reporting path sends nothing unless you set `SWENY_CLOUD_TOKEN`. See [PRIVACY.md](https://github.com/swenyai/sweny/blob/main/PRIVACY.md).
 
 ## Can I use a different LLM?
 

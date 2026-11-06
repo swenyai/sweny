@@ -497,7 +497,7 @@ sweny upgrade --force
 › sweny 0.1.66 is available (you have 0.1.65). Run `sweny upgrade`
 ```
 
-The check asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai/core` version, at most once every 24 hours, and sends nothing else. It is skipped in CI, piped invocations, `sweny try`, and when `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1` is set.
+The check asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai/core` version and sends nothing else. After a successful check the answer is cached for 24 hours; a failed or timed-out check is not cached, so it is retried on the next command. It is skipped in CI, when stderr is not a terminal, for `sweny try`, and when `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1` is set.
 
 **Homebrew installs** are detected but not driven automatically — the command prints `brew upgrade sweny` for you to run.
 

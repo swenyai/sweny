@@ -246,10 +246,23 @@ describe("ARCHITECTURE.md matches the repo", () => {
     expect(arch).not.toMatch(/bundled into root/i);
   });
 
-  it("names every stdio MCP server the catalog launches through npx", () => {
+  it("lists every catalog MCP server under its transport, and says stdio servers run @latest", () => {
     const catalog = read("packages/core/src/mcp-catalog.ts");
-    const packages = [...catalog.matchAll(/args: \["-y", "(@[^"@]+\/[^"@]+)@latest"\]/g)].map((m) => m[1]);
-    expect(packages.length).toBeGreaterThan(0);
+    const entries = [...catalog.matchAll(/\bid: "(\w+)",[\s\S]*?transport: "(stdio|http)"/g)].map((m) => ({
+      id: m[1],
+      transport: m[2],
+    }));
+    expect(entries.filter((e) => e.transport === "stdio").length).toBeGreaterThan(0);
+    expect(entries.filter((e) => e.transport === "http").length).toBeGreaterThan(0);
+    // "Currently stdio (via ...): ..." and "Currently http (...): ..." paragraphs.
+    const flat = (t: string) => t.toLowerCase().replace(/[^a-z]/g, "");
+    const stdioDoc = flat(arch.slice(arch.indexOf("Currently stdio"), arch.indexOf("Currently http")));
+    const httpDoc = flat(arch.slice(arch.indexOf("Currently http"), arch.indexOf("Users can override")));
+    for (const { id, transport } of entries) {
+      expect(transport === "stdio" ? stdioDoc : httpDoc, `${id} (${transport}) missing from ARCHITECTURE.md`).toContain(
+        id,
+      );
+    }
     expect(arch).toMatch(/@latest/);
   });
 });

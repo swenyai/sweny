@@ -39,7 +39,7 @@ Redaction (journal and final answer): string values under secret-looking keys (`
 
 ## The version check
 
-The one request SWEny makes on its own is a version check: an interactive `sweny` command asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai/core` version, at most once a day, and prints a one-line footer when you are behind. It is a plain GET for the package's latest version; SWEny adds no identifiers, code or run data to it. It is skipped in CI, in pipes, for `sweny try`, and when `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1` is set. `sweny upgrade` also queries the registry when you run it.
+The one request SWEny makes on its own is a version check: an interactive `sweny` command asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai/core` version and prints a one-line footer when you are behind. After a successful check the answer is cached for a day; a failed or timed-out check is not cached, so it is retried on the next command. It is a plain GET for the package's latest version; SWEny adds no identifiers, code or run data to it. It is skipped in CI, when stderr is not a terminal, for `sweny try`, and when `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1` is set. `sweny upgrade` also queries the registry when you run it.
 
 ## What we DO do (only when you opt in)
 

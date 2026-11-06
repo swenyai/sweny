@@ -352,7 +352,7 @@ Focused actions for common use cases:
 
 ### Run reporting (optional, not yet available)
 
-SWEny runs locally or in CI with no usage telemetry and no crash reporting. The one request it makes on its own is a version check: an interactive `sweny` command asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai/core` version, at most once a day. It is skipped in CI, in pipes, and with `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1`; `sweny upgrade` also queries the registry when you run it.
+SWEny runs locally or in CI with no usage telemetry and no crash reporting. The one request it makes on its own is a version check: an interactive `sweny` command asks the npm registry (`registry.npmjs.org`) for the latest `@sweny-ai/core` version. After a successful check the answer is cached for a day; a failed or timed-out check is not cached, so it is retried on the next command. It is skipped in CI and when stderr is not a terminal, and with `SWENY_NO_UPDATE_CHECK=1` or `SWENY_OFFLINE=1`; `sweny upgrade` also queries the registry when you run it.
 
 The CLI contains an opt-in run reporting path, gated entirely on a `SWENY_CLOUD_TOKEN` project token. Unless you set that variable yourself, every reporting entry point returns before making a request, so a default install sends nothing.
 

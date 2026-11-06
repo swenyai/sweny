@@ -158,7 +158,8 @@ DD_API_KEY=your-api-key
 DD_APP_KEY=your-app-key
 GITLAB_TOKEN=glpat-...
 GITLAB_PROJECT_ID=my-group/my-project
-GITLAB_URL=https://gitlab.mycompany.com   # self-hosted GitLab; default https://gitlab.com
+# self-hosted GitLab (default https://gitlab.com)
+GITLAB_URL=https://gitlab.mycompany.com
 JIRA_BASE_URL=https://mycompany.atlassian.net
 JIRA_EMAIL=bot@mycompany.com
 JIRA_API_TOKEN=your-token
