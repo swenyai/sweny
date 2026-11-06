@@ -126,9 +126,14 @@ describe("scripts/sandbox-userns.sh", () => {
     expect(text).toContain("https://github.com/anthropics/sandbox-runtime/issues/429");
   });
 
-  it("probes a user namespace nested inside bwrap", () => {
-    expect(text).toContain("bwrap --ro-bind / / --dev /dev --proc /proc true");
-    expect(text).toContain("bwrap --ro-bind / / --dev /dev --proc /proc unshare --user --map-root-user true");
+  it("probes a user namespace nested inside bwrap, with system binaries and an empty env", () => {
+    expect(text).toContain('run_clean "$bwrap" --ro-bind / / --dev /dev --proc /proc true');
+    expect(text).toContain('run_clean "$unshare" --help 2>&1 | grep -q -- --map-root-user || return 0');
+    expect(text).toContain(
+      'run_clean "$bwrap" --ro-bind / / --dev /dev --proc /proc "$unshare" --user --map-root-user true',
+    );
+    expect(text).toContain('run_clean() { /usr/bin/env -i PATH=/usr/bin:/bin "$@"; }');
+    expect(text).toContain("for d in /usr/bin /bin /usr/local/bin /usr/sbin; do");
   });
 
   it("relaxes nothing on self-hosted without strict, or under off", () => {
