@@ -289,6 +289,49 @@ jobs:
 
 This creates a clean handoff: triage runs daily, finds issues, and creates tickets. When you are ready to fix one, add the `sweny-implement` label and SWEny writes the PR.
 
+## Keep run history between runs
+
+A runner starts clean every time, so `.sweny/runs/` is empty and `sweny runs diff` and the "since last run" line in the step summary have nothing to compare. The Action does not keep anything between runs on its own. History lives in the workspace at `<working-directory>/.sweny/runs`, not in the run journal's state dir; caching that one directory is enough.
+
+```yaml
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: .sweny/runs
+          key: sweny-runs-${{ github.workflow }}-${{ github.run_id }}
+          restore-keys: |
+            sweny-runs-${{ github.workflow }}-
+
+      - uses: swenyai/sweny@v5
+        with:
+          workflow: .sweny/workflows/competitive-scan.yml
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() }}
+        with:
+          path: .sweny/runs
+          key: sweny-runs-${{ github.workflow }}-${{ github.run_id }}
+```
+
+How it works:
+
+- The key is new on every run, so every run saves. `restore-keys` restores the newest earlier cache for the same workflow, so the run starts with the previous history and adds its own record.
+- The `cache/restore` and `cache/save` pair (instead of one `actions/cache` step) saves after a failed workflow too, so a failure is in the history.
+- Set `path` to `<working-directory>/.sweny/runs` if you pass `working-directory`. Put the restore after checkout so the checkout does not clean it away.
+- GitHub scopes caches by branch. A pull request restores from its base branch when it has none of its own, so the first PR run compares with the last run on the default branch.
+- SWEny keeps the newest 200 runs and deletes older ones. GitHub evicts caches unused for 7 days; a weekly schedule stays warm.
+- The cached directory holds each run's record, `output.md` and `answers.json`. They are redacted, but anything that can read your repository's caches can read them. Skip the cache for a workflow whose answers should not be visible to every repo collaborator, or run it with `--no-history`.
+
+Then, in the step summary and PR comment: `Since last run: 2 added, 1 resolved`. Locally, or in a later job that restores the same cache, run `sweny runs diff` for the full comparison. See [`sweny runs`](/cli/commands/#sweny-runs).
+
 ## Best practices
 
 - **Start with daily cron** and `dry-run: true`. Review the results for a week before enabling issue creation and PRs.

@@ -408,6 +408,109 @@ sweny workflow list [options]
 
 Prints each configured skill's ID, category, and description. For the full picture (built-in plus custom, configured plus unconfigured), use [`sweny skill list`](#sweny-skill-list) instead.
 
+## sweny runs
+
+Every `sweny workflow run` leaves a record in `.sweny/runs/`. Two commands read it back; neither calls an agent or the network.
+
+```bash
+sweny runs                      # recent runs, newest first
+sweny runs diff                 # what changed since the run before, for the newest workflow with two runs
+sweny runs diff <a> <b>         # two specific runs (a run id prefix is enough when it is unique)
+sweny runs diff --workflow triage
+```
+
+| Option | Applies to | Description | Default |
+|--------|-----------|-------------|---------|
+| `--workflow <id>` | `runs`, `runs diff` | Only runs of this workflow; for `diff`, the pair is its last two runs | all workflows |
+| `--limit <n>` | `runs` | Max runs to show | `20` |
+| `--json` | `runs`, `runs diff` | Machine-readable output, no color | `false` |
+
+### sweny runs diff
+
+The diff leads with the answers: what each node's declared outputs gained, lost or changed between the older run (`a`) and the newer one (`b`). How the runs ran (status, duration, tokens, cost, retries, routes) follows. The last line is always plain text with the counts.
+
+```text
+  a  20261106-100412-3fa9c1  triage  ✓ success  2m10s
+  b  20261107-100455-b71d02  triage  ✓ success  2m31s
+
+  answers
+    investigate
+      findings     1 added · 1 resolved · 1 changed · 1 unchanged
+        + Race in token refresh
+        - Stale cache key
+        ~ Null deref in checkout
+            severity  medium → high
+      novel_count  2 → 3
+
+  workflow   unchanged (3f2a9c1)
+  status     ✓ success (same)
+  duration   2m10s → 2m31s (+21s)
+
+  nodes
+    investigate  ✓  duration 1m40s → 2m02s (+22s)
+    report       ✓  no change
+
+  routes
+    identical
+
+  answers: 1 added, 1 resolved, 3 changed, 1 unchanged
+```
+
+Color follows the usual rules: off under `NO_COLOR`, when output is not a terminal, and under `TERM=dumb`. `SWENY_ASCII=1` swaps the glyphs (`→`, `·`, `✓`) for ASCII.
+
+**What is compared.** `workflow run` saves each successful node's declared output fields (the node's `output` schema; with no schema, a string `summary`) to `.sweny/runs/<run-id>/answers.json`. The file is local only, redacted like `output.md`, and ignored by git. A node that failed or was skipped saves nothing, so it is reported as `not compared` and never as "everything resolved". `--no-history` and `history: off` skip the file.
+
+**What counts as the same finding.** A list field (all objects, or all plain values) is compared item by item:
+
+1. An object is identified by the first of `id`, `key`, `fingerprint`, `title`, `name` that holds a non-empty string or a number, trimmed, lowercased and with whitespace collapsed. `Null deref in checkout` and ` null  deref in CHECKOUT ` are the same finding.
+2. An object with none of those fields is identified by its whole content. Any edit to it reads as one resolved and one added.
+3. A plain string, number or boolean is identified by its normalized value.
+4. Two items in one list with the same identity pair up in order.
+
+A matched pair is `unchanged` when its content is identical and `changed` otherwise, listing the fields that differ. An item only in `b` is `added`; only in `a` is `resolved`. Any other field (a count, a string, an object) is one value: `added`, `resolved`, `changed` or `unchanged`. Long or multi-line strings show as `+2 -1 lines`. If the model rewords a finding's title between runs it reads as resolved plus added; put a stable `id` or `fingerprint` in the node's output schema when you need exact matching.
+
+When two runs are of different workflows, or a run has no saved answers, the answers are not compared and the last line says why. `sweny runs diff` exits `1` when there is nothing to diff (no runs, or fewer than two of the workflow).
+
+### JSON shape
+
+`sweny runs diff --json` prints one object. The shape is stable; fields are only ever added.
+
+```json
+{
+  "schema_version": 1,
+  "a": { "run_id": "...", "workflow_id": "...", "status": "success", "...": "the run record, as in `sweny runs --json`" },
+  "b": { "...": "..." },
+  "answers": {
+    "available": true,
+    "counts": { "added": 1, "resolved": 1, "changed": 3, "unchanged": 1 },
+    "entries": [
+      {
+        "node": "investigate", "field": "findings", "kind": "collection",
+        "added":    [{ "id": "race in token refresh", "label": "Race in token refresh", "value": { "title": "...", "severity": "high" } }],
+        "resolved": [{ "id": "stale cache key", "label": "Stale cache key", "value": { "...": "..." } }],
+        "changed":  [{ "id": "null deref in checkout", "label": "Null deref in checkout",
+                       "fields": [{ "field": "severity", "before": "medium", "after": "high" }] }],
+        "unchanged": 1
+      },
+      { "node": "investigate", "field": "novel_count", "kind": "value", "status": "changed", "before": 2, "after": 3 }
+    ],
+    "not_compared": [{ "node": "report", "only_in": "a" }]
+  }
+}
+```
+
+When the answers cannot be compared, `answers` is `{ "available": false, "reason": "different_workflows" }` or `{ "available": false, "reason": "missing_answers", "missing": ["a"] }`. A value entry's `status` is `added`, `resolved`, `changed` or `unchanged`; `before` and `after` are present when they apply.
+
+### Since the last run
+
+After a run that has an earlier run of the same workflow, `workflow run` prints one dim line under the receipt, adds it to the GitHub step summary and to the PR comment, and links the command:
+
+```text
+since last run: 1 added, 1 resolved (sweny runs diff --workflow triage)
+```
+
+It carries counts only, never the text of an answer. In GitHub Actions the history is empty on every run unless you keep `.sweny/runs` between runs: see [keep run history between runs](/action/scheduling/#keep-run-history-between-runs).
+
 ## End-to-end browser testing
 
 E2E testing has no dedicated namespace — it uses the two commands above:
