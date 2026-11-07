@@ -938,26 +938,36 @@ describe("github_create_pr pushes the head before it requests the PR", () => {
     expect(pusher.mock.calls[0][0]).not.toHaveProperty("defaultBranch");
   });
 
-  it("a failed push warns and still requests the PR", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async (url) =>
-        String(url).includes("/branches/")
-          ? new Response("Branch not found", { status: 404 })
-          : new Response(JSON.stringify({ number: 8 }), { status: 201 }),
+  it("a failed push warns and requests the PR only when the remote head is the local commit (#544)", async () => {
+    const local = "c".repeat(40);
+    for (const remote of [local, "d".repeat(40)]) {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (url) =>
+          String(url).includes("/branches/")
+            ? new Response("Branch not found", { status: 404 })
+            : String(url).includes("/git/ref/heads/")
+              ? new Response(JSON.stringify({ ref: "refs/heads/x-1-fix", object: { sha: remote } }), { status: 200 })
+              : new Response(JSON.stringify({ number: 8, head: { sha: local } }), { status: 201 }),
+        );
+      const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
+      const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+      const out = (await createPr.handler(
+        { repo: "o/r", title: "t", head: "x-1-fix" },
+        {
+          config: { GITHUB_TOKEN: TOKEN },
+          logger,
+          pushBranch: async () => ({ pushed: false, attempted: true, reason: "git push failed: 403", sha: local }),
+        },
+      )) as Record<string, unknown>;
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("git push failed: 403"));
+      const posted = fetchSpy.mock.calls.some(
+        ([url, init]) => String(url) === "https://api.github.com/repos/o/r/pulls" && init?.method === "POST",
       );
-    const createPr = github.tools.find((t) => t.name === "github_create_pr")!;
-    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-    await createPr.handler(
-      { repo: "o/r", title: "t", head: "x-1-fix" },
-      {
-        config: { GITHUB_TOKEN: TOKEN },
-        logger,
-        pushBranch: async () => ({ pushed: false, attempted: true, reason: "git push failed: 403" }),
-      },
-    );
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("git push failed: 403"));
-    expect(fetchSpy).toHaveBeenCalled();
+      expect(posted).toBe(remote === local);
+      expect(out.refused).toBe(remote === local ? undefined : true);
+      fetchSpy.mockRestore();
+    }
   });
 
   it("without a pusher (browser build) it only calls the API", async () => {
