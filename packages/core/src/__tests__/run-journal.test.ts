@@ -11,7 +11,7 @@
  * runs again unless its result never reached the journal, and no write is
  * applied twice.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   appendFileSync,
   existsSync,
@@ -25,7 +25,6 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
 import { execute } from "../executor.js";
 import { createSkillMap } from "../skills/index.js";
 import {
@@ -42,11 +41,31 @@ import { prepareResume, type ResumeOptions } from "../cli/resume.js";
 import { createWriteStageState } from "../safe-outputs.js";
 import type { Claude, NodeResult, NodeUsage, Skill, ToolContext, Workflow } from "../types.js";
 
+// Every spec writes real journals: the journal fsyncs each append and each
+// atomic replace (that is what makes a crash boundary real), so the only work
+// here that is not plain CPU is file I/O on a shared runner. Measured in CI
+// (hosted ubuntu-26.04, Node 22 and 24): the whole file, 41 to 46 specs, takes
+// 1.2 to 1.8s on a quiet runner (about 40ms a spec) and 3.4 to 4.9s on a loaded
+// one. One spec has stalled past the 5s default ("crash before a node starts",
+// Node 24, file total 6.6s), the other 34 in that run finished in ~1.5s total,
+// so it is a stall, not a slow spec. Budget: 30s = 16x the quiet cost of the
+// entire file (so far above any single spec) and 6x the stall seen. A real
+// regression (a quadratic read, an unbounded retry) is far past it.
+vi.setConfig({ testTimeout: 30_000 });
+
 // Run keys go to a scratch state dir, never the real ~/.local/state.
 process.env.SWENY_STATE_DIR = mkdtempSync(join(tmpdir(), "sweny-state-"));
 
 const RUN_ID = "20260930-120000-abc123";
 const silent = { info() {}, warn() {}, error() {}, debug() {} };
+
+/**
+ * A pid that no process has: above Linux's pid_max (2^22) and macOS's (99999),
+ * so `kill(pid, 0)` is ESRCH and the lock reads as stale. Stands in for a
+ * killed run's pid without spawning a real child process (a synchronous node
+ * start per kill, on a loaded runner, was the only non-journal cost in these specs).
+ */
+const DEAD_PID = 2 ** 31 - 1;
 
 class Kill extends Error {
   constructor(at: string) {
@@ -257,8 +276,7 @@ async function firstRun(
 function processDied(cwd: string): void {
   const lock = join(journalDir(cwd, RUN_ID), "lock");
   if (!existsSync(lock)) return;
-  const dead = spawnSync(process.execPath, ["-e", ""]).pid;
-  writeFileSync(lock, JSON.stringify({ pid: dead, started: 0, nonce: "dead" }));
+  writeFileSync(lock, JSON.stringify({ pid: DEAD_PID, started: 0, nonce: "dead" }));
 }
 
 /** Resume the way `sweny workflow resume` does. */
@@ -887,8 +905,7 @@ describe("one resume at a time", () => {
     const agent = fakeAgent();
     await firstRun(cwd, chain(), agent, [], killAt("node:start", "c"));
     // A crashed process leaves its lock behind: a pid that no longer runs.
-    const dead = spawnSync(process.execPath, ["-e", ""]).pid;
-    writeFileSync(join(journalDir(cwd, RUN_ID), "lock"), JSON.stringify({ pid: dead, started: 0, nonce: "x" }));
+    writeFileSync(join(journalDir(cwd, RUN_ID), "lock"), JSON.stringify({ pid: DEAD_PID, started: 0, nonce: "x" }));
     let inner: ReturnType<typeof prepareResume> | undefined;
     const outer = prepareResume(
       RUN_ID,
