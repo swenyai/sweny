@@ -266,11 +266,13 @@ function formatAnswersSection(cmp: AnswerDiff, color: boolean, g: GlyphSet): str
       out.push(p.muted(`        ${g.ellipsis} and ${list.length - MAX_ITEMS_SHOWN} more ${word}`));
     }
   };
+  // Node, field and nested field names are keys of agent-writable files: terminal text, not trusted.
+  const key = (s: string) => sanitizeTerminal(s, 64);
   const fields = (list: FieldChange[]) => {
     if (list.length === 0) return;
-    const w = Math.max(...list.map((f) => f.field.length));
+    const w = Math.max(...list.map((f) => key(f.field).length));
     for (const f of list.slice(0, MAX_FIELDS_SHOWN)) {
-      out.push(`            ${pad(f.field, w)}  ${valueChange(f.before, f.after, g)}`);
+      out.push(`            ${pad(key(f.field), w)}  ${valueChange(f.before, f.after, g)}`);
     }
     if (list.length > MAX_FIELDS_SHOWN)
       out.push(p.muted(`            ${g.ellipsis} and ${list.length - MAX_FIELDS_SHOWN} more fields`));
@@ -280,14 +282,14 @@ function formatAnswersSection(cmp: AnswerDiff, color: boolean, g: GlyphSet): str
   for (const node of nodes) {
     const changed = cmp.entries.filter((e) => e.node === node && isChangedEntry(e));
     if (changed.length === 0) {
-      out.push(`    ${node}  ${p.muted("unchanged")}`);
+      out.push(`    ${key(node)}  ${p.muted("unchanged")}`);
       continue;
     }
-    out.push(`    ${node}`);
-    const w = Math.max(...changed.map((e) => e.field.length));
+    out.push(`    ${key(node)}`);
+    const w = Math.max(...changed.map((e) => key(e.field).length));
     for (const e of changed) {
       if (e.kind === "collection") {
-        out.push(`      ${pad(e.field, w)}  ${p.muted(countsHead(e, g))}`);
+        out.push(`      ${pad(key(e.field), w)}  ${p.muted(countsHead(e, g))}`);
         items("+", p.warning, e.added, "added");
         items("-", p.success, e.resolved, "resolved");
         for (const c of e.changed.slice(0, MAX_ITEMS_SHOWN)) {
@@ -298,16 +300,18 @@ function formatAnswersSection(cmp: AnswerDiff, color: boolean, g: GlyphSet): str
           out.push(p.muted(`        ${g.ellipsis} and ${e.changed.length - MAX_ITEMS_SHOWN} more changed`));
         }
       } else if (e.status === "added") {
-        out.push(`      ${pad(e.field, w)}  ${p.warning("added")} ${showValue(e.after, g)}`);
+        out.push(`      ${pad(key(e.field), w)}  ${p.warning("added")} ${showValue(e.after, g)}`);
       } else if (e.status === "resolved") {
-        out.push(`      ${pad(e.field, w)}  ${p.success("resolved")} ${p.muted(`(was ${showValue(e.before, g)})`)}`);
+        out.push(
+          `      ${pad(key(e.field), w)}  ${p.success("resolved")} ${p.muted(`(was ${showValue(e.before, g)})`)}`,
+        );
       } else {
-        out.push(`      ${pad(e.field, w)}  ${valueChange(e.before, e.after, g)}`);
+        out.push(`      ${pad(key(e.field), w)}  ${valueChange(e.before, e.after, g)}`);
       }
     }
   }
   for (const n of cmp.not_compared) {
-    out.push(`    ${n.node}  ${p.muted(`not compared (answer in ${n.only_in} only)`)}`);
+    out.push(`    ${key(n.node)}  ${p.muted(`not compared (answer in ${n.only_in} only)`)}`);
   }
   if (nodes.length === 0 && cmp.not_compared.length === 0) out.push(p.muted("    no declared outputs to compare"));
   return out;
