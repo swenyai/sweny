@@ -171,7 +171,8 @@ export function applyExecutionEvent(event: ExecutionEvent, nodeDataMap: Map<stri
       break;
     }
 
-    case "node:exit": {
+    case "node:exit":
+    case "node:amended": {
       const data = nodeDataMap.get(event.node);
       if (data) {
         // NodeResult.status is already one of "success" | "failed" | "skipped";

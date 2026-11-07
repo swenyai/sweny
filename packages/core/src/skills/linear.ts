@@ -76,11 +76,13 @@ export const linear: Skill = {
         },
         required: ["query"],
       },
-      handler: async (input: { query: string; limit?: number }, ctx) =>
+      // `withDescription` is not in the schema: only the run journal's resume
+      // probe sets it, to match a write's marker. Agent results stay as they were.
+      handler: async (input: { query: string; limit?: number; withDescription?: boolean }, ctx) =>
         linearGql(
           `query($query: String!, $first: Int) {
             searchIssues(term: $query, first: $first) {
-              nodes { id identifier title state { name } priority url }
+              nodes { id identifier title ${input.withDescription === true ? "description " : ""}state { name } priority url }
             }
           }`,
           { query: input.query, first: input.limit ?? 10 },

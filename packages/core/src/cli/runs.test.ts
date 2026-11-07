@@ -508,3 +508,31 @@ describe("forged history records never reach the terminal as control sequences",
     expect(f).toEqual({ error: expect.not.stringMatching(CONTROL) });
   });
 });
+
+describe("spend split in runs diff", () => {
+  it("shows which kind moved the totals", () => {
+    // `a` has no split (node-only, or written before it): its totals are all node spend.
+    const a = run();
+    const b = run({
+      run_id: "20260930-120000-dddddd",
+      totals: { ...run().totals, cost_usd: 0.3 },
+      spend: {
+        node: { tokens: 12_200, cost_usd: 0.18, calls: 2 },
+        judge: { tokens: 4_000, cost_usd: 0.12, calls: 3 },
+      },
+    });
+    const out = formatRunDiff(a, b, false);
+    expect(out).toMatch(/judge\s+- → \$0\.12/);
+    expect(out).not.toMatch(/^\s+node\b/m);
+  });
+
+  it("a forged spend record prints only known kinds and finite numbers", () => {
+    const forged = run({
+      spend: {
+        judge: { tokens: "x", cost_usd: Infinity, calls: 1 },
+        evil: { tokens: 1 },
+      } as unknown as RunRecord["spend"],
+    });
+    expect(printableRun(forged).spend).toEqual({ judge: { tokens: 0, cost_usd: 0, calls: 1 } });
+  });
+});

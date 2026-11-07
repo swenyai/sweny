@@ -66,7 +66,7 @@ import type {
 import { CODEX_CAPABILITIES } from "./capabilities.js";
 import { policyGate, resolveHarnessPolicy, type HarnessPolicyMode } from "./policy.js";
 import { gitCredentialPolicy } from "../git-credentials.js";
-import { buildNodePrompt } from "./prompts.js";
+import { buildNodePrompt, reportCompletionUsage } from "./prompts.js";
 import { makeAbort } from "./abort.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
@@ -1200,6 +1200,8 @@ export class CodexHarness implements AgentHarness {
       // Classification calls use no tools; any tool call is over budget.
       maxToolCalls: 0,
     });
+    // A completion that failed was still billed: report before the outcome.
+    reportCompletionUsage(req.onUsage, out.usage, this.logger);
     if (out.spawnError) return failClosed(`codex could not start: ${out.spawnError}`);
     if (out.abortReason === "timeout") return failClosed(`timed out after ${req.timeoutMs}ms`);
     if (out.abortReason === "signal") return failClosed("aborted");

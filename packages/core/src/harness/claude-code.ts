@@ -56,7 +56,13 @@ import type {
 import { gitCredentialGap, policyGate, type HarnessPolicyMode } from "./policy.js";
 import { gitCredentialPolicy } from "../git-credentials.js";
 import { CLAUDE_CODE_CAPABILITIES } from "./capabilities.js";
-import { ask as coreAsk, evaluate as coreEvaluate, buildEvaluatePrompt, buildNodePrompt } from "./prompts.js";
+import {
+  ask as coreAsk,
+  evaluate as coreEvaluate,
+  buildEvaluatePrompt,
+  buildNodePrompt,
+  reportCompletionUsage,
+} from "./prompts.js";
 import { jsonSchemaToZodShape, toolErrorToMcpResult, toolOutputToMcpResult } from "./tool-bridge/protocol.js";
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
@@ -1026,6 +1032,8 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
         if (message.type === "result") {
           const resultMsg = message as SDKResultMessage;
           sawResult = true;
+          // A completion that failed was still billed: report before the outcome.
+          if (req.onUsage) reportCompletionUsage(req.onUsage, extractUsage(resultMsg), this.logger);
           if (resultMsg.subtype === "success" && "result" in resultMsg) {
             response = resultMsg.result;
           } else {
@@ -1081,6 +1089,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
+    onUsage?: (usage: NodeUsage) => void;
   }): Promise<string | null> {
     return coreEvaluate(this, opts, this.logger);
   }
@@ -1094,6 +1103,7 @@ export class ClaudeCodeHarness implements Claude, AgentHarness {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
+    onUsage?: (usage: NodeUsage) => void;
   }): Promise<string> {
     return coreAsk(this, opts);
   }

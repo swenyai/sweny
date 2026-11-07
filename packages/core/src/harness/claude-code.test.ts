@@ -99,6 +99,25 @@ describe("ClaudeCodeHarness", () => {
     );
   });
 
+  it("complete() reports the result's usage through onUsage, failed or not", async () => {
+    const h = new mod.ClaudeCodeHarness({ logger: noopLogger() });
+    const seen: unknown[] = [];
+    const usage = { total_cost_usd: 0.02, usage: { input_tokens: 30, output_tokens: 5 } };
+    mockQuery.mockReturnValueOnce(
+      (async function* () {
+        yield { type: "result", subtype: "success", result: "ok", ...usage };
+      })(),
+    );
+    expect(await h.complete({ prompt: "p", onUsage: (u) => seen.push(u) })).toBe("ok");
+    mockQuery.mockReturnValueOnce(
+      (async function* () {
+        yield { type: "result", subtype: "error_max_turns", ...usage };
+      })(),
+    );
+    expect(await h.complete({ prompt: "p", onUsage: (u) => seen.push(u) })).toBeNull();
+    expect(seen).toEqual(Array(2).fill(expect.objectContaining({ costUsd: 0.02, inputTokens: 30, outputTokens: 5 })));
+  });
+
   it("complete() returns null on a non-success result and logs per purpose", async () => {
     const logger = noopLogger();
     const h = new mod.ClaudeCodeHarness({ logger });

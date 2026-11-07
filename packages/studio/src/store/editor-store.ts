@@ -101,6 +101,9 @@ export const useEditorStore = create<EditorState>()(
               s.currentNodeId = null;
               s.completedNodes[event.node] = event.result;
             }
+            if (event.type === "node:amended") {
+              s.completedNodes[event.node] = event.result;
+            }
             if (event.type === "workflow:end") {
               s.currentNodeId = null;
               const results = event.results;

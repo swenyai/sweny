@@ -12,6 +12,7 @@ import {
   formatBudgetAmount,
   formatCost,
   formatRouteCounts,
+  formatSpendSplit,
   formatReceiptDuration,
   formatTokenCount,
   policyParts,
@@ -94,8 +95,12 @@ export function stampWords(summary: RunSummary): { words: string[]; strong: bool
   return { words, strong };
 }
 
+const NBSP = "\u00a0";
+
 /** Field rows, label then value, metadata only. */
 function ticketFields(s: RunSummary): Array<[label: string, value: string]> {
+  // A no-break space keeps each kind with its amount when the row wraps (put back after wrapping).
+  const spend = formatSpendSplit(s.spend, NBSP);
   const failed = Math.max(0, s.nodesTotal - s.nodesOk - s.nodesSkipped);
   const nodes = [
     `${s.nodesOk}/${s.nodesTotal}`,
@@ -109,6 +114,7 @@ function ticketFields(s: RunSummary): Array<[label: string, value: string]> {
     ["duration", formatReceiptDuration(s.durationMs)],
     ...(s.tokens !== undefined ? [["tokens", formatTokenCount(s.tokens)] as [string, string]] : []),
     ...(s.costUsd !== undefined ? [["cost", formatCost(s.costUsd)] as [string, string]] : []),
+    ...(spend ? [["spend", spend] as [string, string]] : []),
     ...(s.harness !== undefined && s.harness !== "claude-code" ? [["harness", s.harness] as [string, string]] : []),
     ...(s.degraded && s.degraded.length > 0 ? [["degraded", s.degraded.join(", ")] as [string, string]] : []),
     ...(s.routes && s.routes.total > 0 ? [["routes", formatRouteCounts(s.routes)] as [string, string]] : []),
@@ -200,7 +206,8 @@ export function renderTicket(data: TicketData, opts: TicketRenderOptions = {}): 
 
   // Fields, aligned: label column then value column; long values wrap under the value.
   for (const [label, value] of ticketFields(s)) {
-    wrap(value, valueWidth).forEach((part, i) => {
+    wrap(value, valueWidth).forEach((raw, i) => {
+      const part = raw.replaceAll(NBSP, " ");
       const lab = (i === 0 ? label : "").padEnd(LABEL_WIDTH);
       lines.push(row(lab + part, paint.muted(lab) + part));
     });

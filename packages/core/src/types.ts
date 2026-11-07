@@ -19,7 +19,7 @@ export { WORKFLOW_INPUT_TYPES } from "./inputs.js";
 
 import type { Source as _Source, ResolvedSource as _ResolvedSource } from "./sources.js";
 import type { ToolClass } from "./harness/types.js";
-import type { Budget, BudgetOverrun } from "./budget.js";
+import type { Budget, BudgetOverrun, SpendBreakdown } from "./budget.js";
 import type { DeciderConfig, DeciderRecord } from "./decider.js";
 
 export type JSONSchema = Record<string, unknown>;
@@ -966,6 +966,12 @@ export type ExecutionEvent =
   | { type: "tool:call"; node: string; tool: string; input: unknown }
   | { type: "tool:result"; node: string; tool: string; output: unknown }
   | { type: "node:exit"; node: string; result: NodeResult }
+  /**
+   * A finished node's result changed after its `node:exit` (a budget stop at
+   * the route that followed it). Not a second exit: consumers that keep each
+   * node's final result replace it; timers and step printers ignore it.
+   */
+  | { type: "node:amended"; node: string; result: NodeResult }
   | { type: "node:progress"; node: string; message: string }
   | { type: "node:retry"; node: string; attempt: number; reason: string; preamble: string }
   /**
@@ -1036,6 +1042,13 @@ export interface ExecutionTrace {
    * URL, an open breaker or a spent call cap. Absent when nothing turned it off.
    */
   deciderOff?: string;
+  /**
+   * Model spend by kind: agent `node` runs and the executor's own `judge`,
+   * `route`, `reflect` (retry reflection) and `screen` completions. Absent
+   * unless one of those own completions reported usage. The run budget is
+   * over the sum. `node` covers every attempt of every visit.
+   */
+  spend?: SpendBreakdown;
 }
 
 /** Result of execute() — final node results + full execution trace */
@@ -1133,6 +1146,14 @@ export interface Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
+    /**
+     * Called once with the completion's total usage, when the harness reports
+     * it, before the outcome is known (a failed completion was still billed).
+     * Unlike `run`'s `onUsage`, which streams cumulative reports while a node
+     * runs, this is one report per completion. The executor counts it against
+     * the run budget. A hook that throws never changes the result.
+     */
+    onUsage?: (usage: NodeUsage) => void;
   }): Promise<string | null>;
 
   /**
@@ -1151,6 +1172,14 @@ export interface Claude {
     timeoutMs?: number;
     /** Caller-supplied abort signal. Aborting it interrupts the query. */
     signal?: AbortSignal;
+    /**
+     * Called once with the completion's total usage, when the harness reports
+     * it, before the outcome is known (a failed completion was still billed).
+     * Unlike `run`'s `onUsage`, which streams cumulative reports while a node
+     * runs, this is one report per completion. The executor counts it against
+     * the run budget. A hook that throws never changes the result.
+     */
+    onUsage?: (usage: NodeUsage) => void;
   }): Promise<string>;
 }
 

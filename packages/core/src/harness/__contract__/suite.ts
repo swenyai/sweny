@@ -9,7 +9,7 @@
  *
  * Each case passes, or is skipped only where the adapter's declared
  * `capabilities` say the opinion is not native (the skip must match the
- * declaration). Twenty-two cases, one `it` each, so a report reads "22 passed".
+ * declaration). Twenty-four cases, one `it` each, so a report reads "24 passed".
  * Cases 16 to 18 (#365) prove the node policy reaches the agent, which safe
  * outputs depend on. Case 19 (#442) proves a staged run cannot push through
  * the env it hands the agent. Case 20 (#449) proves live usage reaches
@@ -18,7 +18,9 @@
  * grants one with `agent_env`. Case 22 (#473) proves a git credential the
  * checkout persisted is unreadable to read-only and staged nodes wherever the
  * harness (natively or through the process wrapper) can enforce it, and is
- * reported, or refused under strict, where it cannot.
+ * reported, or refused under strict, where it cannot. Case 24 proves a
+ * completion's usage reaches `complete()`'s `onUsage` once, failed or not, and
+ * that a hook that throws never changes the completion's result.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -130,6 +132,7 @@ export const CONTRACT_CASE_NAMES = [
   "21 credentials: skill credentials never reach a read, staged or default write node; agent_env grants one to that node only",
   "22 checkout token: a persisted git credential is unreadable to read-only and staged nodes where enforceable, else degraded or refused",
   "23 staged MCP: a staged write node loads no injected or skill MCP server, only sweny's own tool channel",
+  "24 completion usage: complete() reports usage once, before failure checks, and a throwing hook never changes the result",
 ] as const;
 
 export interface ContractSuiteOptions {
@@ -925,6 +928,74 @@ export function runContractSuite(
           await h.run(req({ tools: [lookupTool], mcpServers: injected }));
           expect(fakes.captured().mcpServersLoaded).toContain("injected");
         }
+      },
+
+      // 24: judge, route, reflection and screen completions are metered
+      // through complete()'s onUsage. It is called once with the completion's
+      // usage, also when the completion failed (it was still billed), and a
+      // hook that throws is the caller's problem: the answer stands, and no
+      // second (paid) completion follows.
+      async (skip) => {
+        const { h } = await fresh();
+        const caps = h.capabilities.usage;
+        if (!caps.tokens && !caps.costUsd) return skip("usage is not captured");
+        const carried = new Set<keyof FakeUsage>(fakes.usageFields ?? (Object.keys(FULL_USAGE) as (keyof FakeUsage)[]));
+        const expected = Object.fromEntries(
+          Object.entries(PARTIAL_USAGE).filter(([k]) => carried.has(k as keyof FakeUsage)),
+        ) as FakeUsage;
+        if (!caps.costUsd) delete expected.costUsd;
+
+        const seen: NodeUsage[] = [];
+        fakes.script([{ kind: "final", text: "b", usage: PARTIAL_USAGE }]);
+        expect(await h.complete({ prompt: "p", onUsage: (u) => seen.push(u) })).toBe("b");
+        expect(seen).toHaveLength(1);
+        expect(seen[0]).toMatchObject(expected);
+
+        // A failed completion was still billed: one report, and still a
+        // failure. Wire formats differ in where a failure can carry usage, so
+        // each adapter must report on at least one of these, never twice.
+        let billedFailures = 0;
+        for (const failing of [
+          [{ kind: "final", text: "boom", ok: false, usage: PARTIAL_USAGE }],
+          [
+            { kind: "final", text: "b", usage: PARTIAL_USAGE },
+            { kind: "exit", code: 1 },
+          ],
+          [
+            { kind: "usage", usage: PARTIAL_USAGE },
+            { kind: "final", text: "boom", ok: false, usage: PARTIAL_USAGE },
+          ],
+        ] as FakeScript[]) {
+          seen.length = 0;
+          fakes.script(failing);
+          const r = await h.complete({ prompt: "p", onUsage: (u) => seen.push(u) });
+          expect(seen.length).toBeLessThanOrEqual(1);
+          if (r === null && seen.length === 1) {
+            expect(seen[0]).toMatchObject(expected);
+            billedFailures++;
+          }
+        }
+        expect(billedFailures, "no failed completion reported its usage").toBeGreaterThan(0);
+
+        // A throwing hook changes nothing: same answer, one hook call, one agent start.
+        let hookCalls = 0;
+        const throwing = () => {
+          hookCalls++;
+          throw new Error("hook down");
+        };
+        fakes.script([{ kind: "final", text: "b", usage: PARTIAL_USAGE }]);
+        expect(await h.complete({ prompt: "p", onUsage: throwing })).toBe("b");
+        expect(hookCalls).toBe(1);
+
+        const choices = [
+          { id: "a", description: "A" },
+          { id: "b", description: "B" },
+        ];
+        fakes.script([{ kind: "final", text: "b", usage: PARTIAL_USAGE }]);
+        const before = fakes.captured().invocations;
+        expect(await coreEvaluate(h, { question: "Which?", context: {}, choices, onUsage: throwing })).toBe("b");
+        expect(fakes.captured().invocations).toBe(before + 1);
+        expect(hookCalls).toBe(2);
       },
     ];
 
