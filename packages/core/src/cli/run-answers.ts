@@ -53,13 +53,53 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 const has = (o: object, k: string): boolean => Object.hasOwn(o, k);
 const sha = (s: string): string => crypto.createHash("sha256").update(s).digest("hex");
 
+/** The JSON Schema types a schema declares: `type`, else implied by `properties` / `items`. */
+function declaredTypes(sch: Record<string, unknown>): string[] | undefined {
+  if (typeof sch.type === "string") return [sch.type];
+  if (Array.isArray(sch.type)) return sch.type.filter((t): t is string => typeof t === "string");
+  if (isObj(sch.properties)) return ["object"];
+  if (isObj(sch.items)) return ["array"];
+  return undefined;
+}
+
+function typeMatches(value: unknown, types: string[]): boolean {
+  return types.some((t) => {
+    switch (t) {
+      case "string":
+        return typeof value === "string";
+      case "number":
+        return typeof value === "number" && Number.isFinite(value);
+      case "integer":
+        return typeof value === "number" && Number.isInteger(value);
+      case "boolean":
+        return typeof value === "boolean";
+      case "null":
+        return value === null;
+      case "object":
+        return isObj(value);
+      case "array":
+        return Array.isArray(value);
+      default:
+        return false;
+    }
+  });
+}
+
 /**
- * Keep only what the schema declares, deep: `findings[].title` keeps `title` and nothing else. An
- * object with no declared properties is dropped (nothing in it was declared); scalars are kept.
- * Undefined means "drop".
+ * Keep only what the schema declares, deep, and only values whose shape matches it: `findings[].title`
+ * keeps `title` and nothing else, a string where an object is declared is dropped, as is a value of
+ * the wrong `type` or outside an `enum`. An object with no declared properties is dropped (nothing in
+ * it was declared). Undefined means "drop".
  */
 function pick(value: unknown, schema: unknown): unknown {
   const sch = isObj(schema) ? schema : undefined;
+  if (sch) {
+    const types = declaredTypes(sch);
+    if (types && !typeMatches(value, types)) return undefined;
+    if (Array.isArray(sch.enum) && !isObj(value) && !Array.isArray(value) && !sch.enum.includes(value)) {
+      return undefined;
+    }
+  }
   if (Array.isArray(value)) {
     const items = sch && isObj(sch.items) ? sch.items : undefined;
     return value.map((v) => pick(v, items)).filter((v) => v !== undefined);
@@ -77,17 +117,19 @@ function pick(value: unknown, schema: unknown): unknown {
   return value;
 }
 
-/** Secrets in keys too (`redact` scrubs values and keeps keys). */
+/**
+ * Secrets in keys too (`redact` scrubs values and keeps keys). A key that redaction changes, or that
+ * already looks like a redacted name, becomes `[redacted-<sha256 of the key, 16 hex>]`: injective (no
+ * two keys share a name, and no plain key can equal a generated one) and stable (the same key gets
+ * the same name in every run, whatever else is present), so a diff still lines them up.
+ */
 function redactKeys(value: unknown, secrets: string[]): unknown {
   if (Array.isArray(value)) return value.map((v) => redactKeys(v, secrets));
   if (!isObj(value)) return value;
-  const seen = new Map<string, number>();
   return Object.fromEntries(
     Object.entries(value).map(([k, v]) => {
-      let name = redact(k, secrets).value as string;
-      const n = (seen.get(name) ?? 0) + 1;
-      seen.set(name, n);
-      if (n > 1) name = `${name}#${n}`;
+      const scrubbed = redact(k, secrets).value as string;
+      const name = scrubbed !== k || k.startsWith("[redacted") ? `[redacted-${sha(k).slice(0, 16)}]` : k;
       return [name, redactKeys(v, secrets)] as const;
     }),
   );
@@ -139,7 +181,12 @@ export function buildRunAnswers(i: BuildRunAnswersInput): RunAnswers {
     let fields: unknown;
     if (isObj(props) && Object.keys(props).length > 0) {
       fields = pick(data, schema);
-    } else if (typeof data.summary === "string" && data.summary.trim() !== "") {
+    } else if (
+      typeof data.summary === "string" &&
+      data.summary.trim() !== "" &&
+      !(isObj(schema) && (schema as Record<string, unknown>).additionalProperties === false)
+    ) {
+      // The free-form summary, unless the node's schema closes the object to its declared fields.
       fields = { summary: data.summary };
     }
     if (!isObj(fields) || Object.keys(fields).length === 0) continue;
