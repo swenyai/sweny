@@ -104,7 +104,7 @@ describe("writeWhatNext", () => {
   });
 
   it("is silent in CI and does not use up the marker", () => {
-    for (const ci of [{ CI: "true" }, { CI: "1" }, { GITHUB_ACTIONS: "true" }]) {
+    for (const ci of [{ CI: "true" }, { CI: "1" }, { GITHUB_ACTIONS: "true" }] as Record<string, string>[]) {
       const env = envFor(ci);
       expect(inCi(env)).toBe(true);
       expect(writeWhatNext({ stream: stream(), ok: true, env, cwd: work })).toBe(false);
