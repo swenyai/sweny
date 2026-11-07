@@ -8,7 +8,7 @@
   "description": "Skill library, DAG workflow orchestration, and E2E browser testing powered by Claude",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "exports": {
     ".": "./dist/index.js",

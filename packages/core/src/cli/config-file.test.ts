@@ -78,3 +78,93 @@ describe("loadDotenv denylist", () => {
     }
   });
 });
+
+// loadDotenv parses with Node's util.parseEnv, so a .env file behaves the way
+// it does in every other tool.
+describe("loadDotenv parsing", () => {
+  const dirs: string[] = [];
+  const keys = [
+    "SWENY_DOTENV_T_URL",
+    "SWENY_DOTENV_T_HASH",
+    "SWENY_DOTENV_T_SINGLE",
+    "SWENY_DOTENV_T_EXPORT",
+    "SWENY_DOTENV_T_MULTI",
+    "SWENY_DOTENV_T_ESCAPED",
+    "SWENY_DOTENV_T_CRLF_A",
+    "SWENY_DOTENV_T_CRLF_B",
+    "SWENY_DOTENV_T_WINS",
+    "SWENY_DOTENV_T_EMPTY",
+  ];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+    for (const k of keys) {
+      delete process.env[k];
+      unmarkWorkspaceEnv(k);
+    }
+    vi.restoreAllMocks();
+  });
+
+  function load(content: string): void {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sweny-dotenv-"));
+    dirs.push(dir);
+    fs.writeFileSync(path.join(dir, ".env"), content);
+    loadDotenv(dir);
+  }
+
+  it("drops an inline comment after an unquoted value", () => {
+    load("SWENY_DOTENV_T_URL=https://gitlab.example.com   # self-hosted\n");
+    expect(process.env.SWENY_DOTENV_T_URL).toBe("https://gitlab.example.com");
+  });
+
+  it("keeps # inside quoted values", () => {
+    load(`SWENY_DOTENV_T_HASH="pa#ss word" # note\nSWENY_DOTENV_T_SINGLE='a # b'\n`);
+    expect(process.env.SWENY_DOTENV_T_HASH).toBe("pa#ss word");
+    expect(process.env.SWENY_DOTENV_T_SINGLE).toBe("a # b");
+  });
+
+  it("accepts an export prefix", () => {
+    load("export SWENY_DOTENV_T_EXPORT=exported\n");
+    expect(process.env.SWENY_DOTENV_T_EXPORT).toBe("exported");
+  });
+
+  it("reads multiline double-quoted values", () => {
+    load('SWENY_DOTENV_T_MULTI="line one\nline two"\n');
+    expect(process.env.SWENY_DOTENV_T_MULTI).toBe("line one\nline two");
+  });
+
+  it("expands \\n inside double quotes", () => {
+    load('SWENY_DOTENV_T_ESCAPED="a\\nb"\n');
+    expect(process.env.SWENY_DOTENV_T_ESCAPED).toBe("a\nb");
+  });
+
+  it("handles CRLF line endings", () => {
+    load('# comment\r\nSWENY_DOTENV_T_CRLF_A=one\r\nSWENY_DOTENV_T_CRLF_B="two"\r\n');
+    expect(process.env.SWENY_DOTENV_T_CRLF_A).toBe("one");
+    expect(process.env.SWENY_DOTENV_T_CRLF_B).toBe("two");
+  });
+
+  it("sets an empty value", () => {
+    load("SWENY_DOTENV_T_EMPTY=\n");
+    expect(process.env.SWENY_DOTENV_T_EMPTY).toBe("");
+  });
+
+  it("lets an existing env var win", () => {
+    process.env.SWENY_DOTENV_T_WINS = "real";
+    load("SWENY_DOTENV_T_WINS=from-file\n");
+    expect(process.env.SWENY_DOTENV_T_WINS).toBe("real");
+  });
+
+  it("still refuses a denied key with the warning, in a CRLF file with comments", () => {
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const was = process.env.GITHUB_ENV;
+    delete process.env.GITHUB_ENV;
+    try {
+      load("GITHUB_ENV=/tmp/evil # hi\r\nSWENY_DOTENV_T_URL=ok\r\n");
+      expect(process.env.GITHUB_ENV).toBeUndefined();
+      expect(err.mock.calls.join("")).toContain(".env sets GITHUB_ENV");
+      expect(process.env.SWENY_DOTENV_T_URL).toBe("ok");
+    } finally {
+      if (was !== undefined) process.env.GITHUB_ENV = was;
+    }
+  });
+});
