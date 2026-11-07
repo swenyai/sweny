@@ -18,7 +18,8 @@ import {
   type SafeOutputIntent,
 } from "./safe-outputs.js";
 import { validateWorkflow } from "./schema.js";
-import type { SafeOutputDeclaration, SafeOutputType, Skill, Tool, Workflow } from "./types.js";
+import { markWorkspaceEnv, unmarkWorkspaceEnv } from "./startup-env.js";
+import type { SafeOutputDeclaration, SafeOutputType, Skill, Tool, ToolContext, Workflow } from "./types.js";
 
 function mkLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -55,6 +56,116 @@ function fakeGithub() {
 }
 
 const T0 = 1_000_000;
+
+describe("the run's repo pin", () => {
+  it("never comes from a GITHUB_REPOSITORY the workspace .env introduced", async () => {
+    markWorkspaceEnv("GITHUB_REPOSITORY");
+    try {
+      const { o, gh } = opts({ env: { GITHUB_REPOSITORY: "attacker/x" } });
+      const { receipts } = await applySafeOutputs(o);
+      expect(receipts[0].target).not.toBe("attacker/x");
+      expect(gh.calls.some((c) => c.input.repo === "attacker/x")).toBe(false);
+    } finally {
+      unmarkWorkspaceEnv("GITHUB_REPOSITORY");
+    }
+  });
+
+  it("is the operator's GITHUB_REPOSITORY otherwise", async () => {
+    const { o } = opts({ env: { GITHUB_REPOSITORY: "acme/api" } });
+    expect((await applySafeOutputs(o)).receipts[0]).toMatchObject({ status: "applied", target: "acme/api" });
+  });
+});
+
+describe("skipped writes and the job summary (#536)", () => {
+  it("records a tool's { skipped } output as a skipped receipt", async () => {
+    const handler = vi.fn(async (_input: unknown, _ctx: ToolContext) => ({
+      id: 9,
+      skipped: "findings unchanged since the last post",
+    }));
+    const skill = fakeGithub().skill;
+    skill.tools.find((t) => t.name === "github_add_comment")!.handler = handler;
+    const { o } = opts({
+      declarations: [{ type: "comment", number: 2 }],
+      intents: [intent({ type: "comment", body: "Finding", number: "2" })],
+      skills: new Map([["github", skill]]),
+    });
+    const result = await applySafeOutputs(o);
+    expect(result.receipts[0]).toMatchObject({
+      type: "comment",
+      status: "skipped",
+      reason: "findings unchanged since the last post",
+    });
+    expect(result.error).toBe(undefined);
+  });
+
+  it("a refusal wins over a skip in the same output", async () => {
+    const skill = fakeGithub().skill;
+    skill.tools.find((t) => t.name === "github_add_comment")!.handler = async () => ({
+      refused: true,
+      reason: "the tool refused the write",
+      skipped: "no findings",
+    });
+    const { o } = opts({
+      declarations: [{ type: "comment", number: 2 }],
+      intents: [intent({ type: "comment", body: "Finding", number: "2" })],
+      skills: new Map([["github", skill]]),
+    });
+    const result = await applySafeOutputs(o);
+    expect(result.receipts[0]).toMatchObject({ status: "refused", reason: "the tool refused the write" });
+    expect(result.error).toMatch(/was refused/);
+  });
+
+  it("hands the run identity and summary writer to every write handler", async () => {
+    const run = { workflowId: "review", repo: "acme/api", pullRequest: 2 };
+    const summary = vi.fn();
+    const seen: ToolContext[] = [];
+    const skill = fakeGithub().skill;
+    for (const t of skill.tools) {
+      const inner = t.handler;
+      t.handler = async (input, c) => {
+        seen.push(c);
+        return inner(input, c);
+      };
+    }
+    const { o } = opts({
+      declarations: [{ type: "comment", number: 2 }, { type: "issue" }],
+      intents: [intent({ type: "comment", body: "Finding", number: "2" }), intent({})],
+      skills: new Map([["github", skill]]),
+      run,
+      summary,
+    });
+    await applySafeOutputs(o);
+    expect(seen).toHaveLength(2);
+    for (const c of seen) {
+      expect(c.run).toBe(run);
+      expect(c.summary).toBe(summary);
+    }
+  });
+
+  it("skips a blank comment as no findings, says so in the summary, and calls no skill", async () => {
+    const summary = vi.fn();
+    const { o, gh } = opts({
+      declarations: [{ type: "comment", number: 2 }],
+      intents: [intent({ type: "comment", body: " \n ", number: "2" })],
+      summary,
+    });
+    expect((await applySafeOutputs(o)).receipts).toEqual([
+      { type: "comment", status: "skipped", reason: "no findings", via: "github", target: "acme/api" },
+    ]);
+    expect(gh.calls).toHaveLength(0);
+    expect(summary).toHaveBeenCalledWith("**SWEny** node `report`: comment skipped, no findings.");
+  });
+
+  it("still refuses a comment outside its pin before any skill sees it", async () => {
+    const { o, gh } = opts({
+      declarations: [{ type: "comment", number: 2 }],
+      intents: [intent({ type: "comment", body: "Finding", number: "3" })],
+      run: { workflowId: "review", repo: "acme/api", pullRequest: 3 },
+    });
+    expect((await applySafeOutputs(o)).receipts[0].status).toBe("refused");
+    expect(gh.calls).toHaveLength(0);
+  });
+});
 
 function intent(over: Partial<SafeOutputIntent>): SafeOutputIntent {
   return { type: "issue", title: "Crash on start", body: "Details", recordedAt: T0, ...over };

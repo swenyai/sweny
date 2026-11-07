@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import chalk from "chalk";
 import { GLYPHS, PALETTE, ROLE_COLORS, SPINNER_FRAMES, SURFACE_COLORS } from "../theme.js";
-import { loadTryFixture, runTry, type TryFixture } from "./try.js";
+import { loadTryFixture, runTry, SUMMARY_PREVIEW_LEAD, type TryFixture } from "./try.js";
 
 /** Terminal width the demo is rendered at (the ticket and DAG are designed for 80). */
 export const RECORD_COLUMNS = 80;
@@ -327,12 +327,12 @@ export function renderRecordingSvg(lines: string[], fixture: TryFixture): string
 const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
 
 /**
- * The PR-comment preview (heading plus DAG) sits between the answer and the
+ * The job summary preview (heading plus DAG) sits between the answer and the
  * ticket. The recording drops it to stay a README-sized hero: tagline, nodes,
  * answer, ticket.
  */
 export function dropCommentPreview(lines: string[]): string[] {
-  const from = lines.findIndex((l) => stripAnsi(l).includes("On a pull request, CI posts"));
+  const from = lines.findIndex((l) => stripAnsi(l).includes(SUMMARY_PREVIEW_LEAD));
   const to = lines.findIndex((l, i) => i > from && stripAnsi(l).startsWith("  \u256D"));
   if (from < 0 || to < 0) return lines;
   return [...lines.slice(0, from), ...lines.slice(to)];

@@ -20,6 +20,7 @@ export type {
   SkillCategory,
   Tool,
   ToolContext,
+  ToolRunContext,
   ConfigField,
   JSONSchema,
   Workflow,

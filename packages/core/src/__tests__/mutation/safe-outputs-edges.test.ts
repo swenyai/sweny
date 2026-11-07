@@ -475,13 +475,13 @@ describe("write stage: target", () => {
 });
 
 describe("write stage: shape and size", () => {
-  it("a comment needs a non-blank body", async () => {
+  it("a blank comment is skipped as no findings, not written (#536)", async () => {
     for (const body of [undefined, "", "  \n "]) {
       const r = await receiptsOf({
         declarations: [{ type: "comment" }],
         intents: [intent({ type: "comment", number: "5", body })],
       });
-      expect(r).toStrictEqual([refused("comment", "missing body", at)]);
+      expect(r).toStrictEqual([{ type: "comment", status: "skipped", reason: "no findings", ...at }]);
     }
   });
 

@@ -446,7 +446,7 @@ describe("workflow run help text", () => {
         "--stream  Stream NDJSON events to stdout (for Studio / automation)",
         "--verbose  Show raw log lines and each tool call's input and output inline (human-readable, truncated). Use --stream for full untruncated NDJSON.",
         "--mermaid  Output a Mermaid diagram with execution state after run",
-        "--comment-file <path>  Write a PR-comment markdown (run receipt, status-colored DAG, per-node table; metadata only) to <path> so any CI can post it",
+        "--comment-file <path>  Write an empty PR-comment file at <path> (kept for the Action; the receipt and DAG go to the job summary)",
         "--input <json>  JSON string of input data to pass to the workflow",
         "--agent <id>  Coding agent that runs the nodes: claude (default), codex, or pi (experimental)",
         "--harness-policy <mode>  strict: refuse a node whose policy the agent cannot enforce; warn: run it and report what was not enforced (default: strict under GitHub Actions, warn elsewhere; env SWENY_HARNESS_POLICY)",

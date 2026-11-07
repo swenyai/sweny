@@ -32,13 +32,13 @@ SWEny ships three GitHub Actions, each with its own input surface. This page doc
 | `cli-version` | Version of `@sweny-ai/core` to install. `@v5` and `@v5.<version>` install the exact version their release was tested with; pin `@v5.<version>` to freeze both the Action and the CLI. Set `latest` to opt in to untested versions | the tested version |
 | `node-version` | Node.js version to install | `24` |
 | `working-directory` | Working directory to run from | `.` |
-| `pr-comment` | On `pull_request` events, post or update one comment on the PR with the run receipt, a status-colored DAG, and per-node status and duration. Metadata only: no prompts, tool inputs, or model output. No-op on every other event. Set to `false` to opt out | `true` |
+| `pr-comment` | Run the Action's PR comment step on `pull_request` events. Since #536 the CLI gives it nothing to post: the run receipt and DAG go to the job summary, and findings a workflow posts use one updating comment (see below). No-op on other events | `true` |
 
 With `agent: claude` you must provide either `claude-oauth-token` or `anthropic-api-key`; with `agent: codex`, `openai-api-key`.
 
 #### PR comment
 
-The comment needs `pull-requests: write` on the job's `GITHUB_TOKEN`. Grant it only when `pr-comment` is enabled:
+A workflow that posts findings on the PR needs `pull-requests: write` on the job's `GITHUB_TOKEN`. A job that only writes the job summary does not:
 
 ```yaml
 permissions:
@@ -46,9 +46,24 @@ permissions:
   pull-requests: write
 ```
 
-The comment is created once and updated in place on later runs (found by a hidden `<!-- sweny-run-comment:<workflow-id> -->` marker). If posting fails (for example a fork PR with a read-only token), the step warns and the job is unaffected. Needs a `@sweny-ai/core` version with `--comment-file`.
+SWEny is quiet by default. The run receipt (cost, tokens, duration, policy) and the status-colored DAG go to the **job summary**, never to the PR thread. That includes `--json` runs and crashed runs.
 
-On other CI systems, run `sweny workflow run <file> --comment-file comment.md` and post the file with your runner's API.
+When a workflow comments on the pull request it runs for (a `comment` safe output or the GitHub skill's `github_add_comment`), SWEny keeps **one comment per workflow per PR** and edits it in place:
+
+- It finds the comment by the hidden first line `<!-- sweny-run-comment:<workflow-id> -->` (the id percent-encoded), and only among comments written by the account the skill's `GITHUB_TOKEN` posts as: the token's user for a PAT, `github-actions[bot]` for the job's `github.token`, or your app's bot. A marked comment from anyone else is ignored.
+- The sticky billboard older versions posted was written with the job's `github.token`, so it becomes the findings comment only when the skill's `GITHUB_TOKEN` is also `github.token`. With a PAT or an app token, SWEny starts a new comment and the old billboard stays as it was.
+- If SWEny cannot tell which account the token posts as, the job summary says so. It then skips the write when a bot already left this workflow's marked comment, rather than post a duplicate.
+- The comment holds the findings and one **Run receipt** link to the Actions run.
+- Empty findings post nothing.
+- Findings unchanged since the last post are not written again. The comparison strips SWEny's markers and the receipt link, and ignores line endings, trailing whitespace and runs of blank lines.
+- Each run adds one line to the job summary saying what it did: posted, updated, or skipped and why.
+- If one run writes to the comment twice (two nodes each post a comment on the PR), the last write wins.
+
+The PR is the one the runner names (`PR_NUMBER`, which the Action sets, or `GITHUB_REF` on a `pull_request` event) in the run's own repository (`GITHUB_REPOSITORY`). Nothing in the workflow input or the agent's request can point the updating comment at another PR or repository. Only that comment is pinned this way: a comment on any other issue or PR is posted as a new comment, as before, wherever the workflow's own rules allow.
+
+`pr-comment: false` skips the Action's comment step. It does not stop comments a workflow asks for itself; to stop those, remove the workflow's comment output or make it read-only.
+
+On other CI systems, `--comment-file comment.md` is still accepted and writes an empty file. Read run details from the job summary.
 
 Pass any additional credentials your workflow needs via `env:` on the step — the CLI auto-loads environment variables.
 

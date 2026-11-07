@@ -48,6 +48,39 @@ export interface ToolContext {
    * snapshot by the Node executor. Absent means https://api.github.com.
    */
   githubApiUrl?: string;
+  /**
+   * The run's own identity, read by the Node executor from the operator's
+   * environment (never from tool input or a workspace `.env`). The same for
+   * every skill; a skill decides what, if anything, to do with it.
+   */
+  run?: ToolRunContext;
+  /**
+   * Append a markdown line to the job summary (`$GITHUB_STEP_SUMMARY`). Set by
+   * the Node executor only when the operator set that file. Never throws.
+   * Callers pass only fixed text and the run's own typed values, never agent text.
+   */
+  summary?: (markdown: string) => void;
+}
+
+/** See {@link ToolContext.run}. */
+export interface ToolRunContext {
+  /** The workflow's id. */
+  workflowId: string;
+  /** The repository the run belongs to (`owner/repo`), from the CI runner. */
+  repo?: string;
+  /** The pull request the run is for, from the CI runner. */
+  pullRequest?: number;
+  /** This run's page on the CI system (https only). */
+  receiptUrl?: string;
+}
+
+/**
+ * A write tool that decided nothing needed writing returns `{ skipped: reason }`
+ * (a short fixed phrase). The safe outputs stage records the write as skipped.
+ */
+export function skippedReason(output: unknown): string | undefined {
+  const r = (output as { skipped?: unknown } | null)?.skipped;
+  return typeof r === "string" && r.trim() ? r.trim().slice(0, 120) : undefined;
 }
 
 /** The sweny-side head-branch push behind `github_create_pr` (#473). Never throws. */
