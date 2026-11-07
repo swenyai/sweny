@@ -410,8 +410,7 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
   if (!isSafeBranch(head))
     return { pushed: false, attempted: false, reason: `head "${head}" is not a plain branch name` };
   if (head === base) return { pushed: false, attempted: false, reason: "head is the base branch" };
-  if (!defaultBranch) return { pushed: false, attempted: false, reason: "the repo's default branch is unknown" };
-  if (head === defaultBranch || head === "main" || head === "master") {
+  if ((defaultBranch && head === defaultBranch) || head === "main" || head === "master") {
     return { pushed: false, attempted: false, reason: `head ${head} is the default branch` };
   }
 
@@ -467,6 +466,8 @@ export async function pushHeadBranch(opts: PushHeadOptions): Promise<PushHeadRes
       return skip(`the remote state of ${head} is unknown`);
     }
     if (!token) return skip("no GITHUB_TOKEN");
+    // An API flake on the default branch still reports the local commit (#558).
+    if (!defaultBranch) return skip("the repo's default branch is unknown");
     const fetchUrls = await read(["remote", "get-url", "--all", "origin"]);
     const pushUrls = await read(["remote", "get-url", "--push", "--all", "origin"]);
     if (fetchUrls.code !== 0 || pushUrls.code !== 0) {

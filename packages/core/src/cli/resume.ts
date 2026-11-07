@@ -110,7 +110,7 @@ export function formatResumePlan(plan: ResumePlan, mayRepeat: string[]): string[
     (iteration > 1 ? `${node} (#${iteration})` : node).padEnd(width + 5);
   for (const v of plan.visits) {
     if (v.action === "replay") {
-      const parts = [v.status];
+      const parts: string[] = [String(v.status)];
       if (v.applied > 0) parts.push(`${v.applied} write(s) not re-sent`);
       // A replayed visit runs no write stage: its transient refusals stand too.
       const refused = v.refused + v.transient;

@@ -345,8 +345,15 @@ describe.skipIf(!posix)("pushHeadBranch against an agent-written checkout (real 
     const f = make();
     const g = realGit({ [PUSH]: `file://${f.remote}` });
     const r = await pushHeadBranch({ ...opts(f), defaultBranch: undefined, git: g.git });
-    expect(r).toMatchObject({ pushed: false, attempted: false, reason: "the repo's default branch is unknown" });
-    expect(g.calls).toEqual([]);
+    // #558: the local commit is still read, so the PR can be bound to it.
+    expect(r).toEqual({
+      pushed: false,
+      attempted: false,
+      reason: "the repo's default branch is unknown",
+      sha: f.sha,
+    });
+    expect(g.pushes()).toEqual([]);
+    expect(f.refs(f.remote)).toBe("");
   });
 
   it("the checkout's origin/HEAD is not consulted: a planted one neither blocks nor steers", async () => {
