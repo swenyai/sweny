@@ -47,6 +47,8 @@
  *                    write intents, written before the write stage runs
  *   output:intent    a write is about to be applied (idempotency key + tool)
  *   output:applied   the write returned (key + the ids it produced)
+ *   output:refused   the write's handler returned a refusal (#544): key, its
+ *                    fixed-wording reason and any ids it names; never applied
  *   node:end         final result of the visit and the write-stage counters
  *   route            the edge taken after the visit (null = the run ended), and the rung that chose it
  *   usage            spend of one agent attempt (cumulative; one per model turn that raised it, written
@@ -84,6 +86,15 @@
  * key with a receipt is not re-applied, and a key with an intent but no receipt
  * (the process died between the API call and the receipt) is looked up on the
  * provider by a marker embedded in the body before anything is re-sent.
+ *
+ * A handler that returns a refusal (`ToolRefusal`) gets `output:refused`
+ * instead of `output:applied`. On resume that refusal is replayed as is: the
+ * handler is not called and the provider is not searched (a marked write the
+ * refusal named would otherwise be taken for an applied one). The one
+ * exception is a refusal marked `transient` that names nothing it produced:
+ * nothing was written, so it goes through the unconfirmed-intent path above
+ * (provider lookup, then a first send). `--allow-repeat-writes` does not
+ * override a refusal: its outcome is known, not unconfirmed.
  */
 
 import crypto from "node:crypto";
@@ -91,6 +102,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Logger, NodeResult, NodeUsage, RouteRung, Skill, Tool, ToolContext, Workflow } from "./types.js";
+import { isToolRefusal } from "./types.js";
 import type { SafeOutputIntent, WriteStageState } from "./safe-outputs.js";
 import { resolveNodePermissions } from "./node-policy.js";
 import { CURRENT_SPEC_VERSION } from "./migrations.js";
@@ -326,6 +338,61 @@ export function assertStateOutsideWorkspace(dir: string, cwd: string): void {
   const ws = fs.realpathSync(cwd);
   if (real === ws || real.startsWith(ws.endsWith(path.sep) ? ws : ws + path.sep)) {
     throw new JournalLocationError(real, ws);
+  }
+}
+
+/** True when `dir` (which may not exist yet) would resolve inside `cwd`: its nearest existing ancestor's real path decides. */
+function resolvesInside(dir: string, cwd: string): boolean {
+  const ws = realOr(cwd);
+  let existing = path.resolve(dir);
+  const rest: string[] = [];
+  while (!fs.existsSync(existing) && path.dirname(existing) !== existing) {
+    rest.unshift(path.basename(existing));
+    existing = path.dirname(existing);
+  }
+  const real = path.join(realOr(existing), ...rest);
+  return real === ws || real.startsWith(ws.endsWith(path.sep) ? ws : ws + path.sep);
+}
+
+/**
+ * A 32-byte random key private to this user and workspace, for MACs that must stay the same from run to
+ * run (a run's journal key is per run, so it cannot serve). Stored hex, mode 0600, at
+ * `<state dir>/keys/<workspace-hash>.<purpose>.key`, read and created without following a link. Null
+ * when the state dir cannot be trusted (inside the workspace, where an agent can read it) or used;
+ * callers then fall back to a key that lives only in the process. Never written anywhere an agent reads.
+ */
+export function workspaceSecretKey(
+  cwd: string,
+  purpose: string,
+  env: Record<string, string | undefined> = process.env,
+): Buffer | null {
+  try {
+    const dir = path.join(swenyStateDir(env), "keys");
+    if (resolvesInside(dir, cwd)) return null;
+    makePrivateDir(dir);
+    if (resolvesInside(dir, cwd)) return null;
+    const file = path.join(dir, `${workspaceScope(cwd)}.${purpose.replace(/[^A-Za-z0-9_-]/g, "_")}.key`);
+    const read = (): Buffer | null => {
+      const text = readNoFollow(file).toString("utf8").trim();
+      if (!/^[0-9a-f]{64}$/.test(text)) return null;
+      if (process.platform !== "win32" && (fs.lstatSync(file).mode & 0o077) !== 0) return null;
+      return Buffer.from(text, "hex");
+    };
+    try {
+      return read();
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") return null;
+    }
+    const key = crypto.randomBytes(32);
+    try {
+      writeNew(file, key.toString("hex") + "\n");
+      return key;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") return null;
+      return read(); // another run created it first
+    }
+  } catch {
+    return null;
   }
 }
 
@@ -995,6 +1062,8 @@ export interface PlannedVisit {
   rung?: RouteRung;
   /** Writes the checkpointed write stage already applied (receipts in the journal). */
   applied: number;
+  /** Writes whose handler refused (#544): the refusal is replayed, not re-sent. */
+  refused: number;
   /** Writes with an intent but no receipt: checked on the provider before anything is re-sent. */
   unconfirmed: number;
 }
@@ -1017,6 +1086,8 @@ export interface ResumePlan {
   ends: Map<string, EndRecord>;
   intents: Map<string, OutputRecord>;
   receipts: Map<string, OutputRecord>;
+  /** Writes whose handler refused (`output:refused`, #544): replayed on resume, never taken for applied. */
+  refusals: Map<string, OutputRecord>;
   /** Spend every earlier attempt journaled: the run budget starts here on resume. */
   priorSpend: Spend;
   /**
@@ -1038,6 +1109,7 @@ const RECORD_TYPES = new Set([
   "node:checkpoint",
   "output:intent",
   "output:applied",
+  "output:refused",
   "node:end",
   "route",
   "usage",
@@ -1136,6 +1208,7 @@ export function checkRecordSequence(records: JournalRecord[]): void {
       }
       case "output:intent":
       case "output:applied":
+      case "output:refused":
         inVisit(r);
         if (!checkpointed.has(visitKey(r.node as string, r.iteration as number))) {
           bad(r, "records a write before the visit's checkpoint");
@@ -1252,6 +1325,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
   const byKey = new Map<string, Visit>();
   const intents = new Map<string, OutputRecord>();
   const receipts = new Map<string, OutputRecord>();
+  const refusals = new Map<string, OutputRecord>();
   let attempts = 1;
   let lastStatus: string | undefined;
   let deciderCounters: DeciderCounters | undefined;
@@ -1304,6 +1378,9 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
       case "output:applied":
         receipts.set(r.key as string, r as OutputRecord);
         break;
+      case "output:refused":
+        refusals.set(r.key as string, r as OutputRecord);
+        break;
       case "run:end":
         lastStatus = r.status as string;
         break;
@@ -1322,7 +1399,8 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
     const keys = (rec: Map<string, OutputRecord>) =>
       [...rec.values()].filter((o) => o.node === v.node && o.iteration === v.iteration).map((o) => o.key);
     const applied = keys(receipts).length;
-    const unconfirmed = keys(intents).filter((k) => !receipts.has(k)).length;
+    const refused = keys(refusals).filter((k) => !receipts.has(k)).length;
+    const unconfirmed = keys(intents).filter((k) => !receipts.has(k) && !refusals.has(k)).length;
     if (complete && !resumed) {
       visits.push({
         node: v.node,
@@ -1332,6 +1410,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
         next: v.next,
         ...(v.rung ? { rung: v.rung } : {}),
         applied,
+        refused,
         unconfirmed,
       });
       writeState = v.end!.write_state;
@@ -1343,6 +1422,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
       iteration: v.iteration,
       action: v.checkpoint ? "write-stage" : "rerun",
       applied,
+      refused,
       unconfirmed,
     });
     break;
@@ -1373,6 +1453,7 @@ export function buildResumePlan(records: JournalRecord[]): ResumePlan {
     ends,
     intents,
     receipts,
+    refusals,
     priorSpend: journaledSpend(records),
     unsandboxed: [...new Set(records.filter((r) => r.type === "agent:unsandboxed").map((r) => String(r.node)))],
     ...(start.decider
@@ -1559,6 +1640,12 @@ async function probeProvider(
 function slimOutput(o: unknown, depth = 0): unknown {
   if (!o || typeof o !== "object" || Array.isArray(o) || depth > 3) return null;
   const out: Record<string, unknown> = {};
+  // A refusal keeps what it is and its fixed-wording reason (#544); never `detail`.
+  if (depth === 0 && (o as Record<string, unknown>).refused === true) {
+    out.refused = true;
+    if (isToolRefusal(o)) out.reason = o.reason;
+    if ((o as Record<string, unknown>).transient === true) out.transient = true;
+  }
   for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
     if (["number", "identifier", "id", "html_url", "url", "success", "reused"].includes(k)) {
       if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = v;
@@ -2146,6 +2233,12 @@ export class RunJournal implements ExecutionJournal {
           this.logger.info(`  run journal: ${tool.name} already applied before the crash; not re-sent`, { node });
           return receipt.output ?? null;
         }
+        const refusal = plan?.refusals.get(key);
+        if (refusal && !retriesRefusal(refusal.output)) {
+          this.logger.info(`  run journal: ${tool.name} was refused in an earlier attempt; not re-sent`, { node });
+          const prior = refusal.output && typeof refusal.output === "object" ? refusal.output : {};
+          return { reason: "the tool refused the write", ...prior, refused: true };
+        }
         const replayingStage = !!plan?.checkpoints.has(visitKey(node, iteration));
         const pending = plan?.intents.has(key) === true;
         if (pending || replayingStage) {
@@ -2169,11 +2262,29 @@ export class RunJournal implements ExecutionJournal {
         // A write the journal cannot record is never sent: append throws first.
         this.append("output:intent", { node, iteration, key, tool: tool.name });
         const output = await tool.handler(withMarker(tool.name, args, key), ctx);
-        this.append("output:applied", { node, iteration, key, tool: tool.name, output: slimOutput(output) });
+        const refused = !!output && typeof output === "object" && (output as { refused?: unknown }).refused === true;
+        this.append(refused ? "output:refused" : "output:applied", {
+          node,
+          iteration,
+          key,
+          tool: tool.name,
+          output: slimOutput(output),
+        });
         return output;
       },
     };
   }
+}
+
+/**
+ * Whether a journaled refusal is tried again on resume (#544): only a
+ * transient one that names nothing it produced. Anything else stands.
+ */
+function retriesRefusal(output: unknown): boolean {
+  if (!output || typeof output !== "object") return false;
+  const o = output as Record<string, unknown>;
+  // Anything besides the refusal itself is something the write produced.
+  return o.transient === true && Object.keys(o).every((k) => k === "refused" || k === "reason" || k === "transient");
 }
 
 /** What a node result needs to continue a run. Tool call inputs and outputs are dropped. */

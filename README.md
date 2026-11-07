@@ -68,7 +68,7 @@ npm install -g @sweny-ai/core
 sweny try                                 # recorded demo; add --fast to skip the pacing
 ```
 
-Then run it for real. Requires Node 20+ and a login or API key for the agent that runs your nodes. Claude Code is the default; pick another with `--agent` (Action input `agent`).
+Then run it for real. Requires Node 22+ and a login or API key for the agent that runs your nodes. Claude Code is the default; pick another with `--agent` (Action input `agent`).
 
 | Agent | Credentials it needs |
 |-------|----------------------|

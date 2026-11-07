@@ -17,7 +17,7 @@ The Slack skill lets Claude send messages to your Slack workspace. It supports t
 
 | Tool | Description |
 |------|-------------|
-| `slack_send_message` | Send a message to a Slack channel via webhook or API |
+| `slack_send_message` | Send a message to Slack (webhook channel, or a named channel with a bot token) |
 | `slack_send_thread_reply` | Reply to an existing message thread (requires bot token) |
 
 ## Setup
@@ -34,7 +34,7 @@ You can configure Slack with either an incoming webhook or a bot token. Both wor
 export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/T.../B.../..."
 ```
 
-With a webhook, `slack_send_message` posts to the webhook's configured channel. The `channel` parameter is ignored.
+With a webhook, `slack_send_message` posts to the webhook's configured channel. Passing a `channel` with only a webhook configured is an error: nothing is sent, because a webhook cannot target another channel. Set `SLACK_BOT_TOKEN` to target a channel.
 
 ### Option 2: Bot token (more capable)
 
@@ -51,15 +51,15 @@ export SLACK_BOT_TOKEN="xoxb-..."
 With a bot token, Claude can target any channel the bot has been invited to and reply to existing threads.
 
 :::note[Both configured?]
-If both `SLACK_WEBHOOK_URL` and `SLACK_BOT_TOKEN` are set, the skill prefers the bot token API when a `channel` parameter is provided. It falls back to the webhook when no channel is specified. This lets you use the bot for targeted messages and the webhook as a default.
+If both `SLACK_WEBHOOK_URL` and `SLACK_BOT_TOKEN` are set, the skill prefers the bot token API when a `channel` parameter is provided. It uses the webhook when no channel is specified. This lets you use the bot for targeted messages and the webhook as a default.
 :::
 
 ### Bot token capabilities
 
 | Capability | Webhook | Bot token |
 |------------|---------|-----------|
-| Send to configured channel | Yes | Yes |
-| Send to any channel | No | Yes |
+| Send to the webhook's own channel (no `channel` given) | Yes | n/a |
+| Send to a named channel | No (errors) | Yes |
 | Thread replies | No | Yes |
 | Block Kit formatting | Yes | Yes |
 

@@ -5,7 +5,7 @@
  * ~800 lines → ~120 lines
  */
 
-import type { Skill, ToolContext, SkillCategory } from "../types.js";
+import type { BranchPusher, Skill, ToolContext, SkillCategory, ToolRefusal } from "../types.js";
 
 // #473: the sweny-side head-branch push arrives as `ctx.pushBranch`, bound to
 // the run's checkout by the Node executor (skills/git-push.ts). This module
@@ -64,14 +64,14 @@ async function gh(path: string, ctx: ToolContext, init?: RequestInit): Promise<u
  * remotely is pushed with an empty lease (it must still not exist). One that
  * exists is pushed only when it is unprotected and already has an open PR from
  * this repo into `base`, leased on the sha the API returned. Any API failure
- * means no push.
+ * means no push. A skip carries the remote head sha when the API returned one.
  */
 export async function headPushLease(
   repo: string,
   head: string,
   base: string,
   ctx: ToolContext,
-): Promise<{ remoteSha: string } | { skip: string }> {
+): Promise<{ remoteSha: string } | { skip: string; remoteSha?: string }> {
   const branch = head.replace(/^refs\/heads\//, "");
   const target = base.replace(/^refs\/heads\//, "");
   const seg = branch.split("/").map(encodeURIComponent).join("/");
@@ -86,7 +86,7 @@ export async function headPushLease(
   if (typeof sha !== "string" || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(sha)) {
     return { skip: `cannot check head ${branch} on ${repo}: no branch sha in the API answer` };
   }
-  if (info.protected !== false) return { skip: `head ${branch} exists on ${repo} and is protected` };
+  if (info.protected !== false) return { skip: `head ${branch} exists on ${repo} and is protected`, remoteSha: sha };
   const owner = repo.split("/")[0];
   let open: unknown;
   try {
@@ -97,12 +97,49 @@ export async function headPushLease(
   } catch (err) {
     return {
       skip: `cannot check open PRs for ${branch} on ${repo}: ${err instanceof Error ? err.message : String(err)}`,
+      remoteSha: sha,
     };
   }
   if (!Array.isArray(open) || open.length === 0) {
-    return { skip: `head ${branch} already exists on ${repo} with no open PR into ${target}` };
+    return { skip: `head ${branch} already exists on ${repo} with no open PR into ${target}`, remoteSha: sha };
   }
   return { remoteSha: sha };
+}
+
+const SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+
+// Fixed-wording refusal reasons for `github_create_pr` (#544). Receipts and PR
+// comments carry these; shas and upstream errors go in the result's `detail`.
+const REFUSE_NO_LOCAL = "the head push failed and the pusher did not report the local commit";
+const REFUSE_UNREADABLE = "the head push failed and the remote head could not be read";
+const REFUSE_MISMATCH = "the head push failed and the remote head is not the commit this run produced";
+const REFUSE_PR_MISMATCH = "the PR was opened but its head is not the commit this run produced";
+const REFUSE_PR_UNVERIFIED = "the PR was opened but its head commit could not be verified";
+
+/**
+ * The sha the remote `head` branch points at, read through the API (#544), or
+ * an error. A missing branch is `{ sha: null }`; anything unreadable is an error,
+ * so the caller fails closed.
+ */
+async function remoteHeadSha(
+  repo: string,
+  head: string,
+  ctx: ToolContext,
+): Promise<{ sha: string | null } | { error: string }> {
+  const branch = head.replace(/^refs\/heads\//, "");
+  const seg = branch.split("/").map(encodeURIComponent).join("/");
+  let ref: { ref?: unknown; object?: { sha?: unknown } };
+  try {
+    ref = (await gh(`/repos/${repo}/git/ref/heads/${seg}`, ctx)) as typeof ref;
+  } catch (err) {
+    if (err instanceof GitHubApiError && err.status === 404) return { sha: null };
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  const sha = ref?.object?.sha;
+  if (ref?.ref !== `refs/heads/${branch}` || typeof sha !== "string" || !SHA.test(sha)) {
+    return { error: "no matching ref in the API answer" };
+  }
+  return { sha };
 }
 
 function isAlreadyExistsError(err: unknown): err is GitHubApiError {
@@ -304,6 +341,10 @@ export const github: Skill = {
       ) => {
         let pr: { number?: number; html_url?: string } & Record<string, unknown>;
         let reused = false;
+        // The remote head this run saw, for the result (#544).
+        let observedHead: string | undefined;
+        // Set after sweny's own push failed: the PR's head must be this commit (#544).
+        let mustHead: string | undefined;
         // #473: push the head branch from sweny with this skill's token, so the
         // recommended `persist-credentials: false` checkout still ships the
         // branch and the agent never holds a write token. Skipped unless the
@@ -319,7 +360,7 @@ export const github: Skill = {
             // The pusher refuses without it; the PR request below reports the API error.
           }
           const lease = await headPushLease(input.repo, input.head, input.base ?? "main", ctx);
-          const push =
+          const push: Awaited<ReturnType<BranchPusher>> =
             "skip" in lease
               ? { pushed: false, attempted: false, reason: lease.skip }
               : await ctx.pushBranch({
@@ -330,10 +371,48 @@ export const github: Skill = {
                   remoteSha: lease.remoteSha,
                   token: ctx.config.GITHUB_TOKEN,
                 });
+          if (lease.remoteSha) observedHead = lease.remoteSha;
           if ("skip" in lease) ctx.logger?.warn?.(`  github_create_pr: not pushing: ${lease.skip}`);
           else if (push.pushed) ctx.logger?.info?.(`  github_create_pr: pushed ${input.head} to ${input.repo}`);
-          else if (push.attempted) ctx.logger?.warn?.(`  github_create_pr: ${push.reason}; requesting the PR anyway`);
-          else ctx.logger?.debug?.(`  github_create_pr: no sweny-side push (${push.reason})`);
+          else if (push.attempted) {
+            // #544: a push sweny ran and that failed. The PR would publish
+            // whatever the remote branch holds, so open it only when that is
+            // the commit this run would have pushed. Anything else, or a
+            // remote head that cannot be read, refuses.
+            const local = typeof push.sha === "string" && SHA.test(push.sha) ? push.sha : null;
+            const remote = local ? await remoteHeadSha(input.repo, input.head, ctx) : undefined;
+            const remoteSha = remote && "sha" in remote ? remote.sha : null;
+            if (!local || !remoteSha || remoteSha !== local) {
+              const [reason, why] = !local
+                ? [REFUSE_NO_LOCAL, "the pusher did not report the local commit"]
+                : remote && "error" in remote
+                  ? [REFUSE_UNREADABLE, `cannot read the remote head of ${input.head}: ${remote.error}`]
+                  : remoteSha
+                    ? [
+                        REFUSE_MISMATCH,
+                        `the remote head of ${input.head} is ${remoteSha}, not the local commit ${local}`,
+                      ]
+                    : [REFUSE_MISMATCH, `${input.head} does not exist on ${input.repo}; the local commit is ${local}`];
+              const detail = `sweny's push failed (${push.reason}) and ${why}`;
+              ctx.logger?.warn?.(`  github_create_pr: refusing to open the PR: ${detail}`);
+              const refusal: ToolRefusal & Record<string, unknown> = {
+                refused: true,
+                reason,
+                detail,
+                // A ref read that failed may succeed later; nothing was written.
+                ...(reason === REFUSE_UNREADABLE ? { transient: true } : {}),
+                head: input.head,
+                local_sha: local,
+                remote_sha: remoteSha,
+              };
+              return refusal;
+            }
+            observedHead = remoteSha;
+            mustHead = local;
+            ctx.logger?.warn?.(
+              `  github_create_pr: ${push.reason}; the remote head is already the local commit ${local}, requesting the PR`,
+            );
+          } else ctx.logger?.debug?.(`  github_create_pr: no sweny-side push (${push.reason})`);
         }
         try {
           pr = (await gh(`/repos/${input.repo}/pulls`, ctx, {
@@ -370,6 +449,29 @@ export const github: Skill = {
           pr = existing as { number?: number };
           reused = true;
         }
+        // #544: the remote could move between the ref read and the request. The
+        // PR exists now; it is not closed (that would be another write nobody
+        // asked for), but the result refuses to vouch for it.
+        const prHead = (pr.head as { sha?: unknown } | undefined)?.sha;
+        const prHeadSha = typeof prHead === "string" && SHA.test(prHead) ? prHead : null;
+        if (mustHead && prHeadSha !== mustHead) {
+          const detail = prHeadSha
+            ? `the PR's head is ${prHeadSha}, not the local commit ${mustHead}`
+            : `GitHub did not report the PR's head commit; the local commit is ${mustHead}`;
+          ctx.logger?.warn?.(`  github_create_pr: ${pr.html_url ?? `#${pr.number}`} is not verified: ${detail}`);
+          const refusal: ToolRefusal & Record<string, unknown> = {
+            refused: true,
+            reason: prHeadSha ? REFUSE_PR_MISMATCH : REFUSE_PR_UNVERIFIED,
+            detail,
+            ...(pr.number !== undefined ? { number: pr.number } : {}),
+            ...(pr.html_url ? { html_url: pr.html_url } : {}),
+            ...(reused ? { reused: true } : {}),
+            head: input.head,
+            local_sha: mustHead,
+            remote_sha: prHeadSha,
+          };
+          return refusal;
+        }
         try {
           if (pr.number && !reused) {
             await gh(`/repos/${input.repo}/issues/${pr.number}/labels`, ctx, {
@@ -386,7 +488,10 @@ export const github: Skill = {
           const msg = err instanceof Error ? err.message : String(err);
           ctx.logger?.warn?.(`  github_create_pr: label POST failed for ${pr.html_url ?? `#${pr.number}`} — ${msg}`);
         }
-        return reused ? { ...pr, reused: true } : pr;
+        // The head the PR was opened from: GitHub's answer, else the remote head this run read.
+        const headSha = prHeadSha ?? observedHead;
+        const out = headSha ? { ...pr, head_sha: headSha } : pr;
+        return reused ? { ...out, reused: true } : out;
       },
     },
     {

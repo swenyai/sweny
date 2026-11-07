@@ -63,7 +63,16 @@ export type BranchPusher = (opts: {
    */
   remoteSha?: string;
   token?: string;
-}) => Promise<{ pushed: boolean; attempted: boolean; reason?: string }>;
+}) => Promise<{
+  pushed: boolean;
+  attempted: boolean;
+  reason?: string;
+  /**
+   * The local commit the push tried to publish. Set when a push was attempted
+   * and failed, so the caller can check what the remote head holds (#544).
+   */
+  sha?: string;
+}>;
 
 /**
  * Side-effect class of a tool. `"read"` only reads. `"write"` can change
@@ -84,6 +93,38 @@ export interface Tool {
    */
   access?: ToolAccess;
   handler: (input: any, ctx: ToolContext) => Promise<unknown>;
+}
+
+/**
+ * A write handler's structured refusal: it declined the write, or could not
+ * vouch for what it wrote, and says why. Returned, not thrown, so the caller
+ * keeps the details. `refused: true` is the same flag a refused node result
+ * carries (`data: { error, refused: true }`). The write stage records it as
+ * refused, never applied (#544).
+ *
+ * `reason` is fixed wording chosen by the handler, never model, agent or
+ * remote text: receipts and PR comments carry it. Specifics (shas, branch
+ * names, upstream errors) go in `detail` and other fields, which only the
+ * tool result carries. A refusal may still name what exists (`number`,
+ * `html_url`) when the write happened but could not be verified.
+ */
+export interface ToolRefusal {
+  refused: true;
+  reason: string;
+  detail?: string;
+  /**
+   * The refusal may not hold on a later try (an upstream read failed) and
+   * nothing was written. Only such a refusal is tried again when a run is
+   * resumed; any other refusal is final for the run.
+   */
+  transient?: boolean;
+}
+
+/** Whether a tool handler's output is a {@link ToolRefusal}. */
+export function isToolRefusal(output: unknown): output is ToolRefusal {
+  if (!output || typeof output !== "object" || Array.isArray(output)) return false;
+  const o = output as Record<string, unknown>;
+  return o.refused === true && typeof o.reason === "string" && o.reason.length > 0;
 }
 
 /** Config field declaration — skills say what they need */
