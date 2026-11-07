@@ -463,6 +463,20 @@ export interface ApplySafeOutputsOptions {
    * passed every deterministic check). Anything but `ALLOW` is a veto.
    */
   screen?: (writes: Record<string, unknown>[]) => Promise<string | null>;
+  /**
+   * Resume: reconcile one write (its skill, tool and arguments) with the
+   * journal and, for an outstanding intent, the provider's read-only probes,
+   * before the screen. `applied`: recorded or found on the provider; it is not
+   * screened and keeps its receipt even when the screen vetoes the rest.
+   * `unknown`: the probe could not tell; it is not screened or vetoed, and the
+   * write handler reports the uncertainty. `absent`: screened as usual.
+   */
+  reconcile?: (
+    skill: Skill,
+    tool: string,
+    args: unknown,
+    ctx: ToolContext,
+  ) => Promise<"applied" | "unknown" | "absent">;
   now?: () => number;
 }
 
@@ -684,26 +698,53 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
     return { receipts };
   }
 
-  // Model screen: veto only. It sees only what passed every deterministic check.
+  const toolCtx: ToolContext = {
+    config: o.config,
+    logger: o.logger,
+    ...(o.cwd ? { cwd: o.cwd } : {}),
+    ...(o.pushBranch ? { pushBranch: o.pushBranch } : {}),
+    ...(o.githubApiUrl ? { githubApiUrl: o.githubApiUrl } : {}),
+    ...(o.run ? { run: o.run } : {}),
+    ...(o.summary ? { summary: o.summary } : {}),
+  };
+
+  // Model screen: veto only. It sees only what passed every deterministic
+  // check and is not already applied: on a resume, outstanding writes are
+  // reconciled with the journal and the provider first, so a write that
+  // landed before the crash keeps its receipt, and one whose probe could not
+  // tell is reported as uncertain by its handler, never as vetoed.
+  let toApply = accepted;
   if (o.policy?.screen) {
-    let verdict: string | null = null;
-    try {
-      verdict = o.screen ? await o.screen(accepted.map(({ write }) => ({ ...write }))) : null;
-    } catch {
-      verdict = null;
+    const state = new Map<number, "applied" | "unknown" | "absent">();
+    for (const a of accepted) {
+      const applier = APPLIERS[a.write.via]![a.write.type]!;
+      const skill = o.skills.get(a.write.via);
+      state.set(
+        a.index,
+        o.reconcile && skill ? await o.reconcile(skill, applier.tool, applier.build(a.write), toolCtx) : "absent",
+      );
     }
-    const allow = (verdict ?? "").trim().replace(/\.$/, "").toUpperCase() === "ALLOW";
-    if (!allow) {
-      o.logger.warn(`  safe outputs: screen vetoed ${accepted.length} write(s)`, { node: o.nodeId });
-      for (const { index } of accepted) {
-        receipts[index] = { ...receipts[index], status: "vetoed", reason: "screen vetoed" };
+    const pending = accepted.filter((a) => state.get(a.index) === "absent");
+    if (pending.length > 0) {
+      let verdict: string | null = null;
+      try {
+        verdict = o.screen ? await o.screen(pending.map(({ write }) => ({ ...write }))) : null;
+      } catch {
+        verdict = null;
       }
-      return { receipts };
+      const allow = (verdict ?? "").trim().replace(/\.$/, "").toUpperCase() === "ALLOW";
+      if (!allow) {
+        o.logger.warn(`  safe outputs: screen vetoed ${pending.length} write(s)`, { node: o.nodeId });
+        for (const { index } of pending) {
+          receipts[index] = { ...receipts[index], status: "vetoed", reason: "screen vetoed" };
+        }
+        toApply = accepted.filter((a) => state.get(a.index) !== "absent");
+      }
     }
   }
 
-  for (let n = 0; n < accepted.length; n++) {
-    const { index, write } = accepted[n];
+  for (let n = 0; n < toApply.length; n++) {
+    const { index, write } = toApply[n];
     const applier = APPLIERS[write.via]![write.type]!;
     const skill = o.skills.get(write.via);
     const tool = skill?.tools.find((t) => t.name === applier.tool);
@@ -712,15 +753,7 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
       continue;
     }
     try {
-      const output = await tool.handler(applier.build(write), {
-        config: o.config,
-        logger: o.logger,
-        ...(o.cwd ? { cwd: o.cwd } : {}),
-        ...(o.pushBranch ? { pushBranch: o.pushBranch } : {}),
-        ...(o.githubApiUrl ? { githubApiUrl: o.githubApiUrl } : {}),
-        ...(o.run ? { run: o.run } : {}),
-        ...(o.summary ? { summary: o.summary } : {}),
-      });
+      const output = await tool.handler(applier.build(write), toolCtx);
       const ref = refOf(output);
       const url = urlOf(output);
       const produced = { ...(ref !== undefined ? { ref } : {}), ...(url ? { url } : {}) };
@@ -732,7 +765,7 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
         // reason still counts as one.
         const reason = refusalReason(output);
         receipts[index] = { ...receipts[index], ...produced, status: "refused", reason };
-        for (const rest of accepted.slice(n + 1)) {
+        for (const rest of toApply.slice(n + 1)) {
           receipts[rest.index] = { ...receipts[rest.index], status: "skipped", reason: "an earlier write was refused" };
         }
         return { receipts, error: `safe output ${write.type} via ${write.via} was refused: ${reason}` };
@@ -751,7 +784,7 @@ export async function applySafeOutputs(o: ApplySafeOutputsOptions): Promise<Appl
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       receipts[index] = { ...receipts[index], status: "failed", reason: "apply failed" };
-      for (const rest of accepted.slice(n + 1)) {
+      for (const rest of toApply.slice(n + 1)) {
         receipts[rest.index] = { ...receipts[rest.index], status: "skipped", reason: "an earlier write failed" };
       }
       return { receipts, error: `safe output ${write.type} via ${write.via} failed: ${msg}` };

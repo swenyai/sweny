@@ -7,7 +7,15 @@
  */
 
 import type { Command } from "commander";
-import { findRun, listRuns, type RunNodeRecord, type RunRecord, type RunStatus } from "./run-history.js";
+import {
+  findRun,
+  listRuns,
+  type RunKindSpend,
+  type RunNodeRecord,
+  type RunRecord,
+  type RunStatus,
+} from "./run-history.js";
+import { SPEND_KINDS } from "../budget.js";
 import {
   compareAnswers,
   readRunAnswers,
@@ -102,7 +110,25 @@ export function printableRun(r: RunRecord): RunRecord {
       tokens: finiteOrNull(r.totals.tokens),
       cost_usd: finiteOrNull(r.totals.cost_usd),
     },
+    ...(r.spend && typeof r.spend === "object" ? { spend: printableSpend(r.spend) } : {}),
   };
+}
+
+/** The record's split, or its totals as all node spend when it has none. */
+function splitOf(r: RunRecord): NonNullable<RunRecord["spend"]> {
+  if (r.spend) return r.spend;
+  return { node: { tokens: r.totals.tokens ?? 0, cost_usd: r.totals.cost_usd ?? 0, calls: 0 } };
+}
+
+/** Only the known kinds, own keys, finite numbers. */
+function printableSpend(spend: NonNullable<RunRecord["spend"]>): NonNullable<RunRecord["spend"]> {
+  const out: NonNullable<RunRecord["spend"]> = {};
+  for (const k of SPEND_KINDS) {
+    const v: Partial<RunKindSpend> | undefined = Object.hasOwn(spend, k) ? spend[k] : undefined;
+    if (v && typeof v === "object")
+      out[k] = { tokens: finite(v.tokens), cost_usd: finite(v.cost_usd), calls: finite(v.calls) };
+  }
+  return out;
 }
 
 // ── sweny runs ──────────────────────────────────────────────────
@@ -366,6 +392,23 @@ export function formatRunDiff(rawA: RunRecord, rawB: RunRecord, color: boolean, 
     metric("cost      ", a.totals.cost_usd, b.totals.cost_usd, formatCost, deltaCost, g.arrow),
   ];
   for (const t of tot) if (t) out.push(`  ${t}`);
+  // Spend by kind, when either run has the split: what moved the totals. A
+  // record without one (node-only, or written before the split) is all node spend.
+  if (a.spend || b.spend) {
+    const sa = splitOf(a);
+    const sb = splitOf(b);
+    const byCost = SPEND_KINDS.some((k) => (sa[k]?.cost_usd ?? 0) > 0 || (sb[k]?.cost_usd ?? 0) > 0);
+    for (const k of SPEND_KINDS) {
+      const va = sa[k];
+      const vb = sb[k];
+      if (!va && !vb) continue;
+      const label = `  ${pad(k, 10)}`;
+      const line = byCost
+        ? metric(label, va ? va.cost_usd : null, vb ? vb.cost_usd : null, formatCost, deltaCost, g.arrow)
+        : metric(label, va ? va.tokens : null, vb ? vb.tokens : null, formatTokenCount, deltaTokens, g.arrow);
+      if (line) out.push(`  ${line}`);
+    }
+  }
 
   out.push("", "  nodes");
   const aNodes = new Map(a.nodes.map((n) => [n.id, n]));

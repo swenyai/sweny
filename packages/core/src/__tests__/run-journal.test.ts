@@ -31,6 +31,7 @@ import {
   JOURNAL_FILE,
   JournalMismatchError,
   RunJournal,
+  checkRecordSequence,
   journalDir,
   markerToken,
   readJournal,
@@ -593,6 +594,371 @@ describe("resume keeps the run's spend", () => {
     const b = results!.get("b")!;
     expect(b.status).toBe("failed");
     expect(b.budget).toEqual({ scope: "run", unit: "tokens", limit: 100, spent: 110 });
+  });
+});
+
+describe("resume keeps the executor's own spend (judge, route, ...)", () => {
+  const t = (n: number): NodeUsage => ({ inputTokens: n, outputTokens: 0 });
+
+  it("130 spent (10 node + 120 judge), resume spends 40 more: a 150 run budget stops at 170", async () => {
+    const cwd = tmp();
+    const base = chain({ budget: { tokens: 150 } });
+    const wf: Workflow = {
+      ...base,
+      nodes: {
+        ...base.nodes,
+        a: { ...base.nodes.a, eval: [{ name: "j", kind: "judge", rubric: "is it good?", pass_when: "yes" }] },
+      },
+    };
+    const agent = fakeAgent({ usage: (node) => t(node === "a" ? 10 : 40) });
+    agent.claude.ask = async (opts) => {
+      opts.onUsage?.(t(120));
+      return "VERDICT: yes\nREASONING: ok";
+    };
+    expect(await firstRun(cwd, wf, agent, [], killAt("node:start", "b"))).toBe(true);
+    const meters = readJournal(journalFile(cwd)).records.filter((r) => r.type === "meter");
+    expect(meters).toEqual([expect.objectContaining({ kind: "judge", node: "a", iteration: 1, tokens: 120 })]);
+
+    const { prepared, results } = await resumeRun(cwd, wf, agent);
+    expect(prepared.ok && "ctx" in prepared && prepared.ctx.plan.priorSpend).toEqual({
+      tokens: 130,
+      costUsd: 0,
+      byKind: { node: { tokens: 10, costUsd: 0 }, judge: { tokens: 120, costUsd: 0 } },
+    });
+    expect(agent.calls).toEqual(["a", "b"]);
+    const b = results!.get("b")!;
+    expect(b.status).toBe("failed");
+    expect(b.budget).toEqual({ scope: "run", unit: "tokens", limit: 150, spent: 170 });
+  });
+
+  it("a route meter record sits after node:end and the journal still passes the integrity check", async () => {
+    const cwd = tmp();
+    const wf = chain({
+      budget: { tokens: 1000 },
+      edges: [
+        { from: "a", to: "b", when: "go on" },
+        { from: "a", to: "c", when: "stop" },
+        { from: "b", to: "c" },
+        { from: "c", to: "d" },
+      ],
+    });
+    const agent = fakeAgent({ usage: () => t(10) });
+    agent.claude.evaluate = async (opts) => {
+      opts.onUsage?.(t(7));
+      return "b";
+    };
+    expect(await firstRun(cwd, wf, agent, [], killAt("node:start", "b"))).toBe(true);
+    const types = readJournal(journalFile(cwd)).records.map((r) =>
+      r.type === "meter" ? `meter:${String(r.kind)}` : r.type,
+    );
+    const end = types.indexOf("node:end");
+    expect(types.slice(end, end + 3)).toEqual(["node:end", "meter:route", "route"]);
+
+    const { prepared, results } = await resumeRun(cwd, wf, agent);
+    expect(prepared.ok).toBe(true);
+    expect(prepared.ok && "ctx" in prepared && prepared.ctx.plan.priorSpend.byKind?.route).toEqual({
+      tokens: 7,
+      costUsd: 0,
+    });
+    expect(results!.get("d")!.status).toBe("success");
+  });
+
+  it("the sequence check refuses a route meter inside the visit, and a reused call id", () => {
+    const head = [
+      { seq: 1, type: "run:start", run_id: "r", workflow_entry: "a" },
+      { seq: 2, type: "node:start", node: "a", iteration: 1 },
+    ] as unknown as JournalRecord[];
+    const meter = (seq: number, kind: string, call: string) =>
+      ({ seq, type: "meter", kind, call, node: "a", iteration: 1, tokens: 5, cost_usd: 0 }) as unknown as JournalRecord;
+    expect(() => checkRecordSequence([...head, meter(3, "route", "c1")])).toThrow(/outside a finished, unrouted visit/);
+    expect(() => checkRecordSequence([...head, meter(3, "judge", "c1"), meter(4, "judge", "c1")])).toThrow(/call id/);
+    expect(() => checkRecordSequence([...head, meter(3, "node", "c1")])).toThrow(/unknown kind/);
+    expect(() => checkRecordSequence([...head, meter(3, "judge", "c1"), meter(4, "screen", "c2")])).not.toThrow();
+  });
+});
+
+describe("budget stops and resume (round 2)", () => {
+  const t = (n: number): NodeUsage => ({ inputTokens: n, outputTokens: 0 });
+  const routed = () =>
+    chain({
+      edges: [
+        { from: "a", to: "b", when: "go on" },
+        { from: "a", to: "d", when: "stop" },
+        { from: "b", to: "c" },
+        { from: "c", to: "d" },
+      ],
+    });
+  async function runCapped(
+    cwd: string,
+    wf: Workflow,
+    agent: ReturnType<typeof fakeAgent>,
+    cap: number,
+    faults?: JournalFaults,
+  ) {
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml", faults });
+    try {
+      const out = await execute(wf, {}, { ...execOpts(agent, [], cwd), journal, budget: { tokens: cap } });
+      journal.end("failed");
+      return out;
+    } catch (err) {
+      if (err instanceof Kill) {
+        processDied(cwd);
+        return undefined;
+      }
+      throw err;
+    }
+  }
+  async function resumeCapped(
+    cwd: string,
+    wf: Workflow,
+    agent: ReturnType<typeof fakeAgent>,
+    cap: number,
+    skills: Skill[] = [],
+  ) {
+    const prepared = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => wf });
+    if (!prepared.ok || "planOnly" in prepared) throw new Error("resume refused");
+    const out = await execute(wf, prepared.ctx.input, {
+      ...execOpts(agent, skills, cwd),
+      journal: prepared.ctx.journal,
+      budget: { tokens: cap },
+    });
+    prepared.ctx.journal.end("success");
+    return out;
+  }
+
+  it("a budget stop at a route writes no route record: a resume with a larger cap routes on", async () => {
+    const cwd = tmp();
+    const wf = routed();
+    const agent = fakeAgent({ usage: (node) => t(node === "a" ? 50 : 1) });
+    let routes = 0;
+    agent.claude.evaluate = async () => {
+      routes++;
+      return "b";
+    };
+    const first = await runCapped(cwd, wf, agent, 50);
+    expect(first!.results.get("a")!.budget).toMatchObject({ scope: "run", spent: 50 });
+    expect(routes).toBe(0);
+    expect(readJournal(journalFile(cwd)).records.some((r) => r.type === "route")).toBe(false);
+
+    const { results } = await resumeCapped(cwd, wf, agent, 1000);
+    expect(routes).toBe(1);
+    expect(agent.calls).toEqual(["a", "b", "c", "d"]);
+    expect([...results.values()].every((r) => r.status === "success")).toBe(true);
+  });
+
+  it("replay routing after a crash is gated too: a spent run budget makes no second route call", async () => {
+    const cwd = tmp();
+    const wf = routed();
+    const agent = fakeAgent({ usage: () => t(10) });
+    let routes = 0;
+    agent.claude.evaluate = async (opts) => {
+      routes++;
+      opts.onUsage?.(t(30));
+      return "b";
+    };
+    // The route call crosses (10 + 30 against 25); the process dies before the route record.
+    await runCapped(cwd, wf, agent, 25, killAt("route"));
+    expect(routes).toBe(1);
+
+    const { results } = await resumeCapped(cwd, wf, agent, 25);
+    expect(routes).toBe(1);
+    expect(agent.calls).toEqual(["a"]);
+    expect(results.get("a")!.budget).toMatchObject({ scope: "run", limit: 25, spent: 40 });
+    expect(results.has("b")).toBe(false);
+  });
+
+  const screenedReporting = (over: Partial<Workflow["nodes"][string]> = {}): Workflow => {
+    const wf = reporting();
+    return {
+      ...wf,
+      safe_outputs: { screen: true },
+      nodes: { ...wf.nodes, report: { ...wf.nodes.report, ...over } },
+    };
+  };
+
+  it("checkpoint resume keeps a write already applied, and does not screen it again", async () => {
+    // Cap 50: report's agent 40 + screen 10, the issue is filed, then the process dies before node:end.
+    const cwd = tmp();
+    const gh = fakeProvider();
+    const wf = screenedReporting();
+    const agent = fakeAgent({ emit: { report: [ISSUE] }, usage: (node) => (node === "report" ? t(40) : undefined) });
+    let screens = 0;
+    agent.claude.ask = async (opts) => {
+      screens++;
+      opts.onUsage?.(t(10));
+      return "ALLOW";
+    };
+    const journal = RunJournal.create({
+      runId: RUN_ID,
+      cwd,
+      workflowFile: "wf.yml",
+      faults: killAt("node:end", "report"),
+    });
+    await expect(
+      execute(wf, {}, { ...execOpts(agent, [gh.skill], cwd), journal, budget: { tokens: 50 } }),
+    ).rejects.toBeInstanceOf(Kill);
+    processDied(cwd);
+    expect(gh.issues).toHaveLength(1);
+
+    const { results } = await resumeCapped(cwd, wf, agent, 50, [gh.skill]);
+    expect(screens).toBe(1);
+    expect(gh.issues).toHaveLength(1);
+    expect(results.get("report")!.outputs).toEqual([
+      expect.objectContaining({
+        type: "issue",
+        status: "applied",
+        ref: 1,
+        url: "https://github.test/acme/api/issues/1",
+      }),
+    ]);
+  });
+
+  it("checkpoint resume restores the visit's node budget: an exhausted visit screens nothing more", async () => {
+    // Node limit 50: agent 10, screen 60 -> failed at 70, write vetoed.
+    const cwd = tmp();
+    const gh = fakeProvider();
+    const wf = screenedReporting({ budget: { tokens: 50 } });
+    const agent = fakeAgent({ emit: { report: [ISSUE] }, usage: (node) => (node === "report" ? t(10) : undefined) });
+    let screens = 0;
+    agent.claude.ask = async (opts) => {
+      screens++;
+      opts.onUsage?.(t(screens === 1 ? 60 : 10));
+      return "ALLOW";
+    };
+    expect(await firstRun(cwd, wf, agent, [gh.skill])).toBe(false);
+    expect(gh.issues).toHaveLength(0);
+
+    const { results } = await resumeRun(cwd, wf, agent, [gh.skill]);
+    expect(screens).toBe(1);
+    expect(gh.issues).toHaveLength(0);
+    const report = results!.get("report")!;
+    expect(report.status).toBe("failed");
+    expect(report.budget).toMatchObject({ scope: "node", limit: 50 });
+    expect(report.outputs?.[0]).toMatchObject({ status: "vetoed" });
+  });
+});
+
+describe("budget and resume (round 3)", () => {
+  const t = (n: number): NodeUsage => ({ inputTokens: n, outputTokens: 0 });
+
+  it("a visit re-run after a mid-agent crash keeps its node spend: 30 live, killed, 30 again crosses a 50 limit", async () => {
+    const cwd = tmp();
+    const base = chain();
+    const wf: Workflow = { ...base, nodes: { ...base.nodes, b: { ...base.nodes.b, budget: { tokens: 50 } } } };
+    const agent = fakeAgent({
+      live: (node) => (node === "b" ? t(30) : undefined),
+      usage: (node) => (node === "b" ? t(30) : undefined),
+      kill: (node, nth) => node === "b" && nth === 1,
+    });
+    expect(await firstRun(cwd, wf, agent)).toBe(true);
+
+    const { results } = await resumeRun(cwd, wf, agent);
+    expect(agent.count("b")).toBe(2);
+    const b = results!.get("b")!;
+    expect(b.status).toBe("failed");
+    expect(b.budget).toMatchObject({ scope: "node", limit: 50, spent: 60 });
+    expect(results!.has("c")).toBe(false);
+  });
+
+  const screenedReporting = (): Workflow => ({ ...reporting(), safe_outputs: { screen: true } });
+  const reportingAgent = () => {
+    const agent = fakeAgent({ emit: { report: [ISSUE] }, usage: (node) => (node === "report" ? t(40) : undefined) });
+    agent.claude.ask = async (opts) => {
+      opts.onUsage?.(t(10));
+      return "ALLOW";
+    };
+    return agent;
+  };
+  async function crashBeforeReceipt(
+    cwd: string,
+    wf: Workflow,
+    agent: ReturnType<typeof fakeAgent>,
+    gh: ReturnType<typeof fakeProvider>,
+  ) {
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml", faults: killAt("output:applied") });
+    try {
+      await execute(wf, {}, { ...execOpts(agent, [gh.skill], cwd), journal, budget: { tokens: 50 } });
+    } catch (err) {
+      if (!(err instanceof Kill)) throw err;
+    }
+    // The kill lands inside the write handler: the journal is dead, as a killed process leaves it.
+    expect(journal.active).toBe(false);
+    processDied(cwd);
+  }
+  async function resume50(
+    cwd: string,
+    wf: Workflow,
+    agent: ReturnType<typeof fakeAgent>,
+    gh: ReturnType<typeof fakeProvider>,
+  ) {
+    const prepared = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => wf });
+    if (!prepared.ok || "planOnly" in prepared) throw new Error("resume refused");
+    const out = await execute(wf, prepared.ctx.input, {
+      ...execOpts(agent, [gh.skill], cwd),
+      journal: prepared.ctx.journal,
+      budget: { tokens: 50 },
+    });
+    prepared.ctx.journal.end("failed");
+    return out;
+  }
+
+  it("a write that landed before its receipt was saved is found on the provider before the screen, not vetoed", async () => {
+    const cwd = tmp();
+    const gh = fakeProvider();
+    const wf = screenedReporting();
+    const agent = reportingAgent();
+    await crashBeforeReceipt(cwd, wf, agent, gh);
+    expect(gh.issues).toHaveLength(1);
+
+    const { results } = await resume50(cwd, wf, agent, gh);
+    expect(gh.issues).toHaveLength(1);
+    expect(gh.searches()).toBeGreaterThan(0);
+    expect(results.get("report")!.outputs).toEqual([
+      expect.objectContaining({ status: "applied", ref: 1, url: "https://github.test/acme/api/issues/1" }),
+    ]);
+  });
+
+  it("reconcile and the write handler share one provider probe per write", async () => {
+    // The process dies before the intent is recorded: the stage replays, the probe finds nothing, the write is sent.
+    const cwd = tmp();
+    const gh = fakeProvider();
+    const wf = screenedReporting();
+    const agent = reportingAgent();
+    const journal = RunJournal.create({ runId: RUN_ID, cwd, workflowFile: "wf.yml", faults: killAt("output:intent") });
+    try {
+      await execute(wf, {}, { ...execOpts(agent, [gh.skill], cwd), journal, budget: { tokens: 1000 } });
+    } catch (err) {
+      if (!(err instanceof Kill)) throw err;
+    }
+    expect(journal.active).toBe(false);
+    processDied(cwd);
+    expect(gh.issues).toHaveLength(0);
+
+    const prepared = prepareResume(RUN_ID, {}, { cwd, loadWorkflow: () => wf });
+    if (!prepared.ok || "planOnly" in prepared) throw new Error("resume refused");
+    const { results } = await execute(wf, prepared.ctx.input, {
+      ...execOpts(agent, [gh.skill], cwd),
+      journal: prepared.ctx.journal,
+      budget: { tokens: 1000 },
+    });
+    prepared.ctx.journal.end("success");
+    expect(gh.searches()).toBe(1);
+    expect(gh.issues).toHaveLength(1);
+    expect(results.get("report")!.outputs![0]).toMatchObject({ status: "applied", ref: 1 });
+  });
+
+  it("when the probe cannot run, the write stays uncertain: never reported vetoed", async () => {
+    const cwd = tmp();
+    const gh = fakeProvider({ searchFails: true });
+    const wf = screenedReporting();
+    const agent = reportingAgent();
+    await crashBeforeReceipt(cwd, wf, agent, gh);
+
+    const { results } = await resume50(cwd, wf, agent, gh);
+    expect(gh.issues).toHaveLength(1);
+    const out = results.get("report")!.outputs![0];
+    expect(out.status).not.toBe("vetoed");
+    expect(String(results.get("report")!.data.error)).toMatch(/cannot confirm/);
   });
 });
 

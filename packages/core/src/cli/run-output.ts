@@ -12,6 +12,7 @@ import { toMermaidBlock, type NodeStatus } from "../mermaid.js";
 import { createPaint } from "./style.js";
 import { colorEnabled, glyphs } from "./terminal.js";
 import { trustedEnvValue } from "../startup-env.js";
+import { SPEND_KINDS, type SpendKind } from "../budget.js";
 
 // ── Receipt ─────────────────────────────────────────────────────
 
@@ -39,8 +40,22 @@ export interface RunSummary {
    * knows none of it.
    */
   policy?: RunPolicy;
+  /**
+   * Spend by kind (`node`, `judge`, `route`, `reflect`, `screen`), when the executor's own
+   * completions reported usage. `tokens` and `costUsd` above are then the sum over every kind
+   * (every attempt and visit), not over the node results. Absent otherwise.
+   */
+  spend?: ExecutionTrace["spend"];
   /** The spend budget a node crossed (#449). Absent when none was. */
-  budget?: { node: string; scope: "node" | "run"; unit: "tokens" | "cost_usd"; limit: number; spent: number };
+  budget?: {
+    node: string;
+    scope: "node" | "run";
+    unit: "tokens" | "cost_usd";
+    limit: number;
+    spent: number;
+    /** The executor completion that crossed it (judge, route, ...); absent for a node run. */
+    kind?: SpendKind;
+  };
   /**
    * Who decided the run's conditional routes (#357), counts only: a `when`
    * expression, the decision model, or the agent. The decider and expression
@@ -125,6 +140,18 @@ export function summarizeRun(
 
   if (staged > 0 || applied > 0) policy.outputs = { staged, applied };
 
+  // The executor's own completions (judge, route, ...) are on no node result,
+  // and a node result holds only its last attempt. With the split present the
+  // totals are its sum, so they reconcile with it on one basis.
+  const split = Object.values(trace?.spend ?? {});
+  const extra = Object.keys(trace?.spend ?? {}).some((k) => k !== "node");
+  if (extra) {
+    const t = split.reduce((n, k) => n + (isNum(k.tokens) ? k.tokens : 0), 0);
+    const c = split.reduce((n, k) => n + (isNum(k.costUsd) ? k.costUsd : 0), 0);
+    if (t > 0 || tokens !== undefined) tokens = t;
+    if (c > 0 || costUsd !== undefined) costUsd = Math.round(c * 1e10) / 1e10;
+  }
+
   return {
     ok: !failed,
     nodesOk,
@@ -138,6 +165,7 @@ export function summarizeRun(
     ...(degraded.size > 0 ? { degraded: [...degraded] } : {}),
     ...(Object.keys(policy).length > 0 ? { policy } : {}),
     ...(budget ? { budget } : {}),
+    ...(extra ? { spend: trace!.spend } : {}),
     ...(trace && countRoutes(trace).total > 0 ? { routes: countRoutes(trace) } : {}),
     ...(trace?.deciderOff ? { deciderOff: trace.deciderOff } : {}),
   };
@@ -215,9 +243,34 @@ export function formatBudgetAmount(b: NonNullable<RunSummary["budget"]>): string
   return `${unit} ${amount(b.spent)} of ${amount(b.limit)}`;
 }
 
-/** `budget exceeded: tokens 52k of 50k (run, at node gather)`. */
+/** `budget exceeded: tokens 52k of 50k (run, at node gather)`, plus `, judge` when an executor call crossed it. */
 export function formatBudgetOverrun(b: NonNullable<RunSummary["budget"]>): string {
-  return `budget exceeded: ${formatBudgetAmount(b)} (${b.scope}, at node ${b.node})`;
+  return `budget exceeded: ${formatBudgetAmount(b)} (${b.scope}, at node ${b.node}${b.kind ? `, ${b.kind}` : ""})`;
+}
+
+/**
+ * `node $0.15, judge $0.03, route <$0.01`: spend by kind in a fixed order
+ * (node, judge, route, reflect, screen), only the kinds present. In tokens
+ * when no kind reported a cost. Undefined when there is no split to show.
+ */
+export function formatSpendSplit(spend: RunSummary["spend"], sep = " "): string | undefined {
+  const kinds = SPEND_KINDS.flatMap((k) => (spend?.[k] ? [[k, spend[k]] as const] : []));
+  if (kinds.length === 0) return undefined;
+  const byCost = kinds.some(([, v]) => v.costUsd > 0);
+  return kinds.map(([k, v]) => `${k}${sep}${byCost ? formatCost(v.costUsd) : formatTokenCount(v.tokens)}`).join(", ");
+}
+
+/**
+ * `12k tokens (judge 2k)`: the executor's own kinds in brackets, on the token
+ * segment, or on the cost (`$0.18 (judge $0.03)`) when no tokens were reported.
+ */
+function ownSpendBracket(spend: RunSummary["spend"], unit: "tokens" | "costUsd"): string {
+  const own = SPEND_KINDS.flatMap((k) => {
+    const v = spend?.[k];
+    if (k === "node" || !v || !(v[unit] > 0)) return [];
+    return [`${k} ${unit === "tokens" ? formatTokenCount(v.tokens) : formatCost(v.costUsd)}`];
+  });
+  return own.length === 0 ? "" : ` (${own.join(", ")})`;
 }
 
 /** `5 (3 decider, 1 expr, 1 agent)`: zero rungs are left out. */
@@ -239,8 +292,10 @@ export function formatReceipt(s: RunSummary): string {
     ...(s.nodesSkipped > 0 ? [`${s.nodesSkipped} skipped`] : []),
     `${s.toolCalls} tool ${s.toolCalls === 1 ? "call" : "calls"}`,
     formatReceiptDuration(s.durationMs),
-    ...(s.tokens !== undefined ? [`${formatTokenCount(s.tokens)} tokens`] : []),
-    ...(s.costUsd !== undefined ? [formatCost(s.costUsd)] : []),
+    ...(s.tokens !== undefined ? [`${formatTokenCount(s.tokens)} tokens${ownSpendBracket(s.spend, "tokens")}`] : []),
+    ...(s.costUsd !== undefined
+      ? [`${formatCost(s.costUsd)}${s.tokens === undefined ? ownSpendBracket(s.spend, "costUsd") : ""}`]
+      : []),
     ...(s.harness !== undefined && s.harness !== "claude-code" ? [s.harness] : []),
     ...(s.degraded && s.degraded.length > 0 ? [`degraded: ${s.degraded.join(", ")}`] : []),
     ...(formatPolicySegment(s.policy) ? [formatPolicySegment(s.policy)!] : []),

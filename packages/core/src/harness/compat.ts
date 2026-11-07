@@ -39,6 +39,7 @@ export function claudeCompat(claude: Claude): AgentHarness {
         model: req.model,
         timeoutMs: req.timeoutMs,
         signal: req.signal,
+        ...(req.onUsage ? { onUsage: req.onUsage } : {}),
       });
     },
   };

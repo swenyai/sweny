@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { NodeResult } from "../types.js";
-import { formatReceipt, summarizeRun } from "./run-output.js";
+import { formatReceipt, formatSpendSplit, summarizeRun } from "./run-output.js";
 import { createPaint } from "./style.js";
 import {
   STAMP_DELAY_MS,
@@ -327,5 +327,95 @@ describe("writeReceipt", () => {
     const full = renderTicket(success);
     const up = full.lines.length - full.stampRow;
     expect(s.read().slice(first.length)).toBe(`\x1B[${up}A\r\x1B[2K  ${full.lines[full.stampRow]}\x1B[${up}B\r\n`);
+  });
+});
+
+describe("spend split (judge, route, ... metered)", () => {
+  const trace = {
+    steps: [],
+    edges: [],
+    sources: {},
+    spend: {
+      node: { tokens: 10_000, costUsd: 0.15, calls: 2 },
+      judge: { tokens: 2_000, costUsd: 0.03, calls: 1 },
+      route: { tokens: 300, costUsd: 0.004, calls: 1 },
+    },
+  };
+  const split = summarizeRun(new Map([["a", node(0, 10_000, 0.15)]]), 1000, false, trace);
+
+  it("one spend row after cost, kinds in a fixed order, only those present", () => {
+    const lines = renderTicket({ workflow: "w", summary: split }, { unicode: false }).lines.map(visible);
+    const at = (label: string) => lines.findIndex((l) => new RegExp(`\\b${label}\\b`).test(l));
+    expect(at("spend")).toBe(at("cost") + 1);
+    expect(lines[at("spend")]).toContain("node $0.15, judge $0.03");
+    expect(formatSpendSplit(split.spend)).toBe("node $0.15, judge $0.03, route <$0.01");
+  });
+
+  it("the receipt names the executor's own tokens beside the total", () => {
+    expect(formatReceipt(split)).toContain("12k tokens (judge 2k, route 300)");
+  });
+
+  it("tokens when no kind reported a cost; no row and no brackets without a split", () => {
+    const tokensOnly = summarizeRun(new Map([["a", node(0, 1_000, 0, { usage: { inputTokens: 1_000 } })]]), 1, false, {
+      ...trace,
+      spend: { node: { tokens: 1_000, costUsd: 0, calls: 1 }, judge: { tokens: 500, costUsd: 0, calls: 1 } },
+    });
+    const lines = renderTicket({ workflow: "w", summary: tokensOnly }, { unicode: false }).lines.map(visible);
+    expect(lines.find((l) => /\bspend\b/.test(l))).toContain("node 1k, judge 500");
+    const plain = renderTicket(success, { unicode: false }).lines.map(visible);
+    expect(plain.some((l) => /\bspend\b/.test(l))).toBe(false);
+    expect(formatReceipt(success.summary)).not.toContain("(");
+  });
+});
+
+describe("spend row wrapping and the overrun kind", () => {
+  it("at 80 columns no ticket line ends in a bare kind name", () => {
+    const spend = {
+      node: { tokens: 1, costUsd: 12.34, calls: 9 },
+      judge: { tokens: 1, costUsd: 1.23, calls: 9 },
+      route: { tokens: 1, costUsd: 0.45, calls: 9 },
+      reflect: { tokens: 1, costUsd: 0.67, calls: 9 },
+      screen: { tokens: 1, costUsd: 0.89, calls: 9 },
+    };
+    const summary = summarizeRun(new Map([["a", node(0, 1_000, 12.34)]]), 1, false, {
+      steps: [],
+      edges: [],
+      sources: {},
+      spend,
+    });
+    for (const unicode of [true, false]) {
+      const lines = renderTicket({ workflow: "w", summary }, { columns: 80, unicode }).lines.map(visible);
+      for (const l of lines) expect(l).not.toMatch(/\b(node|judge|route|reflect|screen)\s*\S?\s*$/);
+      expect(lines.join("\n")).not.toContain("\u00a0");
+    }
+  });
+
+  it("the receipt brackets the cost when no tokens were reported, and names the kind that crossed", () => {
+    const s = summarizeRun(
+      new Map<string, NodeResult>([
+        [
+          "gather",
+          {
+            status: "failed",
+            data: {},
+            toolCalls: [],
+            usage: { costUsd: 0.15 },
+            budget: { scope: "run", unit: "cost_usd", limit: 0.15, spent: 0.18, kind: "judge" },
+          },
+        ],
+      ]),
+      1000,
+      false,
+      {
+        steps: [],
+        edges: [],
+        sources: {},
+        spend: { node: { tokens: 0, costUsd: 0.15, calls: 1 }, judge: { tokens: 0, costUsd: 0.03, calls: 1 } },
+      },
+    );
+    const line = formatReceipt(s);
+    expect(line).toContain("$0.18 (judge $0.03)");
+    expect(line).not.toContain("tokens");
+    expect(line).toContain("(run, at node gather, judge)");
   });
 });

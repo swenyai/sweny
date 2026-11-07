@@ -17,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExecutionEvent, ExecutionTrace, NodeResult, RouteRung, Workflow } from "../types.js";
 import { summarizeRun } from "./run-output.js";
+import { SPEND_KINDS, type SpendKind } from "../budget.js";
 import { openNoFollow } from "../safe-file.js";
 
 export const RUN_HISTORY_SCHEMA_VERSION = 1;
@@ -63,6 +64,18 @@ export interface RunRecord {
   harness?: { id: string; version: string };
   /** Opinions the harness could not honor natively on some node, deduped. Absent when none. */
   degraded?: string[];
+  /**
+   * Spend by kind (node, judge, route, reflect, screen), present when the
+   * executor's own completions reported usage. `totals` is then its sum, so a
+   * jump in `totals` that no node explains shows here.
+   */
+  spend?: Partial<Record<SpendKind, RunKindSpend>>;
+}
+
+export interface RunKindSpend {
+  tokens: number;
+  cost_usd: number;
+  calls: number;
 }
 
 // ── Hash + ids ──────────────────────────────────────────────────
@@ -124,7 +137,11 @@ export function createNodeTimer(now: () => number = Date.now): NodeTimer {
       if (event.type === "node:enter") entered.set(event.node, now());
       else if (event.type === "node:exit") {
         const start = entered.get(event.node);
+        // Cleared on exit: a repeated exit can never count the same visit twice.
+        entered.delete(event.node);
         if (start !== undefined) durations.set(event.node, (durations.get(event.node) ?? 0) + (now() - start));
+        lastResults.set(event.node, event.result);
+      } else if (event.type === "node:amended") {
         lastResults.set(event.node, event.result);
       }
     },
@@ -193,7 +210,17 @@ export function buildRunRecord(i: BuildRunRecordInput): RunRecord {
     },
     ...(harness ? { harness: { id: harness.id, version: harness.version } } : {}),
     ...(degraded.length > 0 ? { degraded } : {}),
+    ...(summary.spend ? { spend: recordSpend(summary.spend) } : {}),
   };
+}
+
+function recordSpend(spend: NonNullable<ExecutionTrace["spend"]>): Partial<Record<SpendKind, RunKindSpend>> {
+  const out: Partial<Record<SpendKind, RunKindSpend>> = {};
+  for (const k of SPEND_KINDS) {
+    const v = spend[k];
+    if (v) out[k] = { tokens: v.tokens, cost_usd: v.costUsd, calls: v.calls };
+  }
+  return out;
 }
 
 // ── Write, prune, read ──────────────────────────────────────────

@@ -82,7 +82,7 @@ import type {
 import { ACP_CAPABILITIES } from "./capabilities.js";
 import { policyGate, resolveHarnessPolicy, TOOL_CLASSES, type HarnessPolicyMode } from "./policy.js";
 import { gitCredentialPolicy } from "../git-credentials.js";
-import { buildNodePrompt } from "./prompts.js";
+import { buildNodePrompt, reportCompletionUsage } from "./prompts.js";
 import { makeAbort } from "./abort.js";
 import { parseToolResultContent, schemaMismatches, summarizeToolError, tryParseJSON } from "./parse.js";
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
@@ -1125,6 +1125,8 @@ export class AcpHarness implements AgentHarness {
       await prep.cleanup();
     }
     if (conv.agentVersion) this.agentVersion = conv.agentVersion;
+    // A completion that failed was still billed: report before the outcome.
+    if (conv.costUsd !== undefined) reportCompletionUsage(req.onUsage, { costUsd: conv.costUsd }, this.logger);
     if (conv.spawnError) return failClosed(`the ACP agent could not start: ${conv.spawnError}`);
     if (conv.abortReason === "timeout") return failClosed(`timed out after ${req.timeoutMs}ms`);
     if (conv.abortReason === "signal") return failClosed("aborted");

@@ -115,8 +115,17 @@ export { systemOneProvider } from "./decider.js";
 export type { DeciderConfig, DeciderOperatorConfig } from "./decider.js";
 
 // Least-privilege nodes and safe outputs (#365)
-export { BudgetGuard, describeOverrun, minLimits, toLimits } from "./budget.js";
-export type { Budget, BudgetOverrun, BudgetUnit, SpendLimits } from "./budget.js";
+export { BudgetGuard, SPEND_KINDS, describeOverrun, minLimits, toLimits } from "./budget.js";
+export type {
+  Budget,
+  BudgetOverrun,
+  BudgetUnit,
+  KindSpend,
+  SeedSpend,
+  SpendBreakdown,
+  SpendKind,
+  SpendLimits,
+} from "./budget.js";
 export { resolveNodePermissions, buildNodePolicy } from "./node-policy.js";
 export type { ResolvedPermissions } from "./node-policy.js";
 export { applySafeOutputs, createEmitOutputTool, resolveActor, EMIT_OUTPUT_TOOL } from "./safe-outputs.js";
@@ -132,10 +141,12 @@ export {
   CodexHarness,
   PiHarness,
   SUPPORTED_AGENTS,
+  reportCompletionUsage,
 } from "./harness/index.js";
 export type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessCompleteRequest,
   HarnessId,
   HarnessInfo,
   HarnessRunRequest,

@@ -90,17 +90,18 @@ A dry run is still useful: analysis nodes run with their read tools (log queries
 
 A conforming executor MUST emit the following events during execution. Events are delivered to an observer callback. If the observer throws, the executor MUST NOT crash — observer errors are silently swallowed.
 
-| Event Type         | Payload                                           | Emitted When                                                                       |
-| ------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `workflow:start`   | `{ workflow: string }`                            | Before the first node executes.                                                    |
-| `sources:resolved` | `{ sources: Record<string, ResolvedSource> }`     | Once, after the Source resolution phase completes, before the first node executes. |
-| `node:enter`       | `{ node: string, instruction: string }`           | Before a node begins execution.                                                    |
-| `tool:call`        | `{ node: string, tool: string, input: unknown }`  | Before a tool is invoked.                                                          |
-| `tool:result`      | `{ node: string, tool: string, output: unknown }` | After a tool returns.                                                              |
-| `node:progress`    | `{ node: string, message: string }`               | During node execution (streaming status).                                          |
-| `node:exit`        | `{ node: string, result: NodeResult }`            | After a node completes.                                                            |
-| `route`            | `{ from: string, to: string, reason: string }`    | After an edge is selected for routing.                                             |
-| `workflow:end`     | `{ results: Record<string, NodeResult> }`         | After all execution is complete.                                                   |
+| Event Type         | Payload                                           | Emitted When                                                                                                                                   |
+| ------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflow:start`   | `{ workflow: string }`                            | Before the first node executes.                                                                                                                |
+| `sources:resolved` | `{ sources: Record<string, ResolvedSource> }`     | Once, after the Source resolution phase completes, before the first node executes.                                                             |
+| `node:enter`       | `{ node: string, instruction: string }`           | Before a node begins execution.                                                                                                                |
+| `tool:call`        | `{ node: string, tool: string, input: unknown }`  | Before a tool is invoked.                                                                                                                      |
+| `tool:result`      | `{ node: string, tool: string, output: unknown }` | After a tool returns.                                                                                                                          |
+| `node:progress`    | `{ node: string, message: string }`               | During node execution (streaming status).                                                                                                      |
+| `node:exit`        | `{ node: string, result: NodeResult }`            | After a node completes.                                                                                                                        |
+| `node:amended`     | `{ node: string, result: NodeResult }`            | When a finished node's result changes after its `node:exit` (a budget stop at its route). Replaces the node's final result; not a second exit. |
+| `route`            | `{ from: string, to: string, reason: string }`    | After an edge is selected for routing.                                                                                                         |
+| `workflow:end`     | `{ results: Record<string, NodeResult> }`         | After all execution is complete.                                                                                                               |
 
 ### Event Ordering
 
