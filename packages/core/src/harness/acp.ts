@@ -46,7 +46,6 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import * as fs from "node:fs";
 import * as path from "node:path";
 import type { JSONSchema, Logger, McpServerConfig, NodeResult, NodeUsage, ToolCall, ToolContext } from "../types.js";
 import { consoleLogger } from "../types.js";
@@ -66,7 +65,9 @@ import {
 import type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessCheck,
   HarnessCompleteRequest,
+  HarnessDiagnoseOptions,
   HarnessId,
   HarnessInfo,
   HarnessRunRequest,
@@ -91,6 +92,7 @@ import {
 import { TOKEN_ENV } from "./tool-bridge/protocol.js";
 import { translateDenyNames } from "./codex.js";
 import { RPC_ERROR, RpcError, RpcPeer, splitCommandLine } from "./acp-rpc.js";
+import { resolveOnPath } from "./diagnose.js";
 
 export { ACP_CAPABILITIES };
 
@@ -252,23 +254,6 @@ export function toAcpMcpServers(
   return { list, unsupported };
 }
 
-function resolveOnPath(command: string, env: Record<string, string | undefined>): string | undefined {
-  const ok = (p: string) => {
-    try {
-      fs.accessSync(p, fs.constants.X_OK);
-      return fs.statSync(p).isFile();
-    } catch {
-      return false;
-    }
-  };
-  if (command.includes(path.sep) || command.includes("/")) return ok(command) ? command : undefined;
-  for (const dir of (env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
-    const p = path.join(dir, command);
-    if (ok(p)) return p;
-  }
-  return undefined;
-}
-
 // ─── Process registry (crash cleanup) ────────────────────────────
 
 const liveChildren = new Set<ChildProcess>();
@@ -411,15 +396,35 @@ export class AcpHarness implements AgentHarness {
    * first run (`agentInfo.version`).
    */
   async preflight(): Promise<{ ok: true; version: string } | { ok: false; reason: string }> {
-    const found = resolveOnPath(this.agent.command, process.env);
-    if (!found) {
-      const example = [this.agent.command, ...this.agent.args].join(" ");
-      return {
-        ok: false,
-        reason: `ACP agent command "${this.agent.command}" was not found on PATH (or is not executable). Install the agent and check that \`${example}\` starts an ACP server.`,
-      };
-    }
+    if (!resolveOnPath(this.agent.command, process.env)) return { ok: false, reason: this.notFoundReason() };
     return { ok: true, version: this.agentVersion };
+  }
+
+  private notFoundReason(): string {
+    const example = [this.agent.command, ...this.agent.args].join(" ");
+    return `ACP agent command "${this.agent.command}" was not found on PATH (or is not executable). Install the agent and check that \`${example}\` starts an ACP server.`;
+  }
+
+  /**
+   * `sweny check` (#532): the command is on PATH, and the operator-named auth
+   * vars are set. The agent is not started (same reason as `preflight`), so
+   * its version and its own login are reported on the first run.
+   */
+  async diagnose(opts: HarnessDiagnoseOptions = {}): Promise<HarnessCheck[]> {
+    const env = opts.env ?? process.env;
+    const found = resolveOnPath(this.agent.command, env);
+    const cli: HarnessCheck = found
+      ? { name: `Agent CLI (${this.id})`, status: "ok", detail: `${found} (the agent reports its version when a run starts)` }
+      : { name: `Agent CLI (${this.id})`, status: "fail", detail: this.notFoundReason() };
+    const authName = `Agent auth (${this.id})`;
+    const missing = this.authVars.filter((v) => !env[v]?.trim());
+    const auth: HarnessCheck =
+      this.authVars.length === 0
+        ? { name: authName, status: "skip", detail: "ACP agents handle their own login; the agent reports a missing one on the first run" }
+        : missing.length > 0
+          ? { name: authName, status: "fail", detail: `Missing: ${missing.join(", ")}` }
+          : { name: authName, status: "ok", detail: `set: ${this.authVars.join(", ")}` };
+    return [cli, auth];
   }
 
   /**

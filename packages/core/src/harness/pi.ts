@@ -56,7 +56,9 @@ import {
 import type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessCheck,
   HarnessCompleteRequest,
+  HarnessDiagnoseOptions,
   HarnessInfo,
   HarnessRunRequest,
   HarnessRunResult,
@@ -69,6 +71,7 @@ import { gitCredentialPolicy } from "../git-credentials.js";
 import { buildNodePrompt } from "./prompts.js";
 import { makeAbort } from "./abort.js";
 import { parseToolResultContent, summarizeToolError, tryParseJSON } from "./parse.js";
+import { cliCheck } from "./diagnose.js";
 import { startToolBridge, type ToolBridge } from "./tool-bridge/server.js";
 import {
   defaultSandboxWrapper,
@@ -528,6 +531,46 @@ export class PiHarness implements AgentHarness {
       });
     });
     return this.preflightResult;
+  }
+
+  /**
+   * `sweny check` (#532): the CLI and its version, and the provider credential
+   * a run would hand pi ({@link resolvePiProvider}), or the custom
+   * `models.json`. pi runs without its stored `auth.json`, so env is the only
+   * source. No upstream probe: pi talks to any provider, and none has one
+   * cheap, provider-neutral check.
+   */
+  async diagnose(opts: HarnessDiagnoseOptions = {}): Promise<HarnessCheck[]> {
+    const env = opts.env ?? process.env;
+    const cli = cliCheck("Agent CLI (pi)", this.piCommand.command, env, await this.preflight());
+    return [cli, this.authCheck(env)];
+  }
+
+  private authCheck(env: Record<string, string | undefined>): HarnessCheck {
+    const name = "Agent auth (pi)";
+    const res = resolvePiProvider(env, this.model, this.provider);
+    if (res.error) return { name, status: "fail", detail: res.error };
+    const set = res.vars.filter((v) => env[v]?.trim());
+    const provider = res.provider ? `provider ${res.provider}` : "provider";
+    if (set.length > 0) return { name, status: "ok", detail: `${provider} via ${set.join(", ")}` };
+    if (this.modelsFile) {
+      return fs.existsSync(this.modelsFile)
+        ? { name, status: "ok", detail: `custom models from ${this.modelsFile} (SWENY_PI_MODELS_JSON)` }
+        : { name, status: "fail", detail: `SWENY_PI_MODELS_JSON points to a missing file: ${this.modelsFile}` };
+    }
+    if (res.provider && res.vars.length > 0) {
+      return { name, status: "fail", detail: `Missing: ${res.vars.join(" or ")} for pi ${provider}` };
+    }
+    if (res.provider) {
+      return { name, status: "skip", detail: `${provider}: sweny does not know its credential; pi reports a missing one` };
+    }
+    return {
+      name,
+      status: "fail",
+      detail:
+        "Missing: a model provider credential for pi, such as ANTHROPIC_API_KEY or OPENAI_API_KEY " +
+        "(pi runs without its stored auth.json), or SWENY_PI_MODELS_JSON for a custom provider",
+    };
   }
 
   /** Which provider's credential this call gets ({@link resolvePiProvider}). */

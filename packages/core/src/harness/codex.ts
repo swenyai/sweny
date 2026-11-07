@@ -36,6 +36,7 @@ import {
   checkSandboxSupport,
   finishAgentEnv,
   heldCredentials,
+  hasCodexLogin,
   parseList,
   reportWithheldEnv,
   resolveCodexAuthEnv,
@@ -50,7 +51,9 @@ import {
 import type {
   AgentHarness,
   HarnessCapabilities,
+  HarnessCheck,
   HarnessCompleteRequest,
+  HarnessDiagnoseOptions,
   HarnessInfo,
   HarnessRunRequest,
   HarnessRunResult,
@@ -73,6 +76,7 @@ import {
 } from "./sandbox-wrapper.js";
 import { TOKEN_ENV } from "./tool-bridge/protocol.js";
 import { codexAuth, type AuthProbe } from "./auth.js";
+import { CHECK_TIMEOUT_MS, checkOpenAI, cliCheck, runCli } from "./diagnose.js";
 
 export { CODEX_CAPABILITIES };
 
@@ -472,6 +476,74 @@ export class CodexHarness implements AgentHarness {
       });
     });
     return this.preflightResult;
+  }
+
+  /**
+   * `sweny check` (#532): the CLI and its version, a credential, the CLI's own
+   * `codex login status`, and an upstream probe when an API key is set
+   * (`GET /models`: read-only, no model call). A ChatGPT login has no cheap
+   * upstream probe, so that line is skipped.
+   */
+  async diagnose(opts: HarnessDiagnoseOptions = {}): Promise<HarnessCheck[]> {
+    const env = opts.env ?? process.env;
+    const timeoutMs = opts.timeoutMs ?? CHECK_TIMEOUT_MS;
+    const pre = await this.checkCli();
+    const newer =
+      pre.ok && compareVersions(pre.version, TESTED_CODEX_VERSION) > 0
+        ? `(newer than ${TESTED_CODEX_VERSION}, the version sweny is tested against)`
+        : undefined;
+    const checks: HarnessCheck[] = [cliCheck("Agent CLI (codex)", this.codexCommand.command, env, pre, newer)];
+
+    const auth = codexAuth(env, opts.hasLogin ?? (() => hasCodexLogin(env)));
+    checks.push(
+      auth.ok
+        ? { name: "Agent auth (codex)", status: "ok", detail: `via ${auth.via}` }
+        : { name: "Agent auth (codex)", status: "fail", detail: auth.reason },
+    );
+
+    if (pre.ok) checks.push(await this.loginStatus(env, timeoutMs, auth.ok ? auth.via : undefined));
+
+    const keyVar = ["CODEX_API_KEY", "OPENAI_API_KEY"].find((k) => env[k]?.trim());
+    if (keyVar) {
+      checks.push(await checkOpenAI(env[keyVar]!.trim(), keyVar, env.OPENAI_BASE_URL || undefined, timeoutMs));
+    } else if (auth.ok) {
+      checks.push({
+        name: "OpenAI API (codex agent)",
+        status: "skip",
+        detail: `auth via ${auth.via}, skipping upstream API check`,
+      });
+    }
+    return checks;
+  }
+
+  /**
+   * `codex login status`: exit 0 when a login is stored, 1 when not
+   * (codex-rs/cli/src/login.rs). Its output can carry a masked key, so it is
+   * classified, never printed.
+   */
+  private async loginStatus(
+    env: Record<string, string | undefined>,
+    timeoutMs: number,
+    via: string | undefined,
+  ): Promise<HarnessCheck> {
+    const name = "Agent login (codex)";
+    const { command, args } = this.codexCommand;
+    const r = await runCli(command, [...args, "login", "status"], { env, timeoutMs });
+    const out = `${r.stdout}\n${r.stderr}`;
+    if (r.code === 0) {
+      const how = /ChatGPT/i.test(out) ? "with ChatGPT" : /API key/i.test(out) ? "with an API key" : "";
+      return { name, status: "ok", detail: `logged in${how ? ` ${how}` : ""} (codex login status)` };
+    }
+    if (r.code === null) return { name, status: "fail", detail: `codex login status did not finish: ${r.error}` };
+    // Not logged in. Fine when an env credential carries auth instead.
+    if (via && via !== "codex login") {
+      return { name, status: "skip", detail: `no stored login; Codex authenticates with ${via}` };
+    }
+    return {
+      name,
+      status: "fail",
+      detail: "codex login status: not logged in. Run `codex login`, or set CODEX_API_KEY or OPENAI_API_KEY",
+    };
   }
 
   /**
